@@ -65,6 +65,7 @@ impl CliAgentStrategy for CodexStrategy {
                 quote_toml(&cwd.to_string_lossy())
             ));
         }
+        append_managed_mcp_args(&mut args);
         args.push("-c".into());
         args.push(format!(
             "features.code_mode.direct_only_tool_namespaces=[{}]",
@@ -132,6 +133,83 @@ pub(crate) fn quote_toml(s: &str) -> String {
         })
         .collect();
     format!("\"{escaped}\"")
+}
+
+fn append_managed_mcp_args(args: &mut Vec<String>) {
+    for (name, server) in crate::managed_mcp::load() {
+        let prefix = format!("mcp_servers.{}", quote_toml(&name));
+        match server.transport {
+            vmux_core::profile::tools::McpTransport::Stdio => {
+                if let Some(command) = server.command {
+                    push_config_override(
+                        args,
+                        format!("{prefix}.command={}", quote_toml(&command)),
+                    );
+                }
+                if !server.args.is_empty() {
+                    push_config_override(
+                        args,
+                        format!("{prefix}.args={}", toml_array(&server.args)),
+                    );
+                }
+                if !server.env.is_empty() {
+                    push_config_override(
+                        args,
+                        format!("{prefix}.env={}", toml_inline_table(&server.env)),
+                    );
+                }
+                if let Some(cwd) = server.cwd {
+                    push_config_override(args, format!("{prefix}.cwd={}", quote_toml(&cwd)));
+                }
+            }
+            vmux_core::profile::tools::McpTransport::Http
+            | vmux_core::profile::tools::McpTransport::Sse => {
+                if let Some(url) = server.url {
+                    push_config_override(args, format!("{prefix}.url={}", quote_toml(&url)));
+                }
+                if !server.headers.is_empty() {
+                    push_config_override(
+                        args,
+                        format!(
+                            "{prefix}.http_headers={}",
+                            toml_inline_table(&server.headers)
+                        ),
+                    );
+                }
+                if !server.header_env.is_empty() {
+                    push_config_override(
+                        args,
+                        format!(
+                            "{prefix}.env_http_headers={}",
+                            toml_inline_table(&server.header_env)
+                        ),
+                    );
+                }
+                if let Some(variable) = server.bearer_token_env_var {
+                    push_config_override(
+                        args,
+                        format!("{prefix}.bearer_token_env_var={}", quote_toml(&variable)),
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn push_config_override(args: &mut Vec<String>, value: String) {
+    args.push("-c".to_string());
+    args.push(value);
+}
+
+fn toml_inline_table(values: &std::collections::BTreeMap<String, String>) -> String {
+    format!(
+        "{{{}}}",
+        values
+            .iter()
+            .map(|(key, value)| format!("{}={}", quote_toml(key), quote_toml(value)))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 pub(crate) fn toml_array(items: &[String]) -> String {

@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Pakakas
+tools-search = Téangan pakét, agén, MCP, pakakas basa jeung berkas konfigurasi…
+tools-open = Buka pakakas
+tools-fold = Tilep pakakas
+tools-unfold = Legakeun pakakas
+tools-scanning = Nyeken pakakas lokal…
+tools-no-installed = Teu aya pakakas nu dipasang
+tools-empty = Teu aya pakakas nu cocog
+tools-empty-detail = Pasang pakét atawa tambahkeun pakét berkas konfigurasi gaya Stow.
+tools-apply = Larapkeun
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula jeung aplikasi nu dipasang disingkronkeun sacara otomatis.
+tools-open-brewfile = Buka Brewfile
+tools-managed = dikokolakeun
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Pakét npm
+tools-provider-acp-agents = Agén ACP
+tools-provider-language-tools = Pakakas basa
+tools-provider-mcp-servers = Pangladén MCP
+tools-provider-dotfiles = Berkas konfigurasi
+tools-status-available = Aya
+tools-status-missing = Leungit
+tools-status-conflict = Bentrok
+tools-forget = Poho
+tools-manage = Kokola
+tools-link = Sambungkeun
+tools-unlink = Pegatkeun
+tools-import = Impor
+tools-update-count = { $count ->
+    [one] 1 pamutahiran
+   *[other] { $count } pamutahiran
+}
+tools-conflict-count = { $count ->
+    [one] 1 bentrok
+   *[other] { $count } bentrok
+}
+tools-result-applied = Pakakas geus dilarapkeun
+tools-result-imported = Pakakas geus diimpor
+tools-result-installed = { $name } geus dipasang
+tools-result-updated = { $name } geus dimutahirkeun
+tools-result-uninstalled = { $name } geus dicabut
+tools-result-forgotten = { $name } geus dipopohokeun
+tools-result-managed = { $name } ayeuna dikokolakeun
+tools-result-linked = { $name } geus disambungkeun
+tools-result-unlinked = { $name } geus dipegatkeun
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Singkronkeun setélan, alat, dotfiles, sareng Pangaweruh sareng Git.
+vault-sync = Singkronkeun
+vault-create = Nyiptakeun
+vault-connect = Nyambung
+vault-private = gudang swasta
+vault-public-warning = Repositori umum ngalaan Pangaweruh sareng konfigurasi anjeun.
+vault-choose-repository = Pilih gudang…
+vault-empty = kosong
+vault-clean = Paling énggal
+vault-not-connected = Teu nyambung
+vault-change-count = Parobahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Mimiti
 start-tagline = Hiji prompt. Naon waé, réngsé.
 

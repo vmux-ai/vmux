@@ -15,6 +15,7 @@ use vmux_core::event::extension::{
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
+use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolCategory, ToolItem, ToolStatus, ToolsSnapshot};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
     ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger,
@@ -23,7 +24,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::PageIconView;
+use vmux_ui::icon::{PageIconView, builtin_icon};
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
@@ -92,6 +93,14 @@ pub fn Page() -> Element {
         use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
             knowledge_state_received.set(true);
             knowledge_state.set(data);
+        });
+
+    let mut tools_state = use_signal(ToolsSnapshot::default);
+    let mut tools_state_received = use_signal(|| false);
+    let _tools_listener =
+        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
+            tools_state_received.set(true);
+            tools_state.set(data);
         });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
@@ -232,6 +241,8 @@ pub fn Page() -> Element {
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
                             knowledge_loaded: knowledge_state_received(),
+                            tools: tools_state(),
+                            tools_loaded: tools_state_received(),
                             pane_tree_error: pane_tree_error.clone(),
                         }
                         if let Some(phase) = update_phase() {
@@ -816,6 +827,8 @@ fn SideSheetView(
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_loaded: bool,
+    tools: ToolsSnapshot,
+    tools_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
     let active_page = panes
@@ -869,7 +882,9 @@ fn SideSheetView(
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
+                VaultCard { pane_id, vault: tools.vault.clone(), loaded: tools_loaded }
                 KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
+                ToolsCard { pane_id, tools, loaded: tools_loaded }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
@@ -1163,6 +1178,247 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
             }
         }
     }
+}
+
+fn open_tools(pane_id: u64) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_tools".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path: String::new(),
+    });
+}
+
+fn open_vault(pane_id: u64) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_vault".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path: String::new(),
+    });
+}
+
+#[component]
+fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool) -> Element {
+    let detail = if !loaded {
+        translate("common-loading")
+    } else if !vault.initialized || vault.remote.is_empty() {
+        translate("vault-not-connected")
+    } else if vault.dirty > 0 {
+        translate_with(
+            "vault-change-count",
+            &[("count", TranslationValue::Number(vault.dirty as i64))],
+        )
+    } else {
+        translate("vault-clean")
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            title: translate("vault-open"),
+            class: "glass mb-2 flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-glass-hover",
+            onclick: move |_| open_vault(pane_id),
+            div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-300 ring-1 ring-inset ring-violet-500/20",
+                Icon { class: "h-4 w-4",
+                    path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
+                    path { d: "m9 12 2 2 4-4" }
+                }
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "text-ui font-semibold text-foreground", {translate("vault-title")} }
+                div { class: "truncate text-[10px] text-foreground/65", "{detail}" }
+            }
+            if loaded && vault.initialized && !vault.remote.is_empty() {
+                span { class: if vault.dirty > 0 {
+                        "size-1.5 rounded-full bg-amber-500"
+                    } else {
+                        "size-1.5 rounded-full bg-emerald-500"
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
+    let mut folded = use_signal(|| false);
+    let tools_title = translate("tools-title");
+    let fold_title = if folded() {
+        translate("tools-unfold")
+    } else {
+        translate("tools-fold")
+    };
+    rsx! {
+        div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            div { class: "flex items-center transition-colors hover:bg-glass-hover",
+                button {
+                    r#type: "button",
+                    title: translate("tools-open"),
+                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
+                    onclick: move |_| open_tools(pane_id),
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        {builtin_icon(vmux_core::BuiltinIcon::Hammer, "h-4 w-4")}
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "flex items-baseline gap-1.5",
+                            span { class: "text-ui font-semibold text-foreground", "{tools_title}" }
+                            if loaded {
+                                span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{tools.installed}" }
+                            }
+                        }
+                        div { class: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground/65",
+                            if loaded {
+                                span { class: "whitespace-nowrap", {translate("common-installed")} }
+                                if tools.updates > 0 {
+                                    span { class: "flex whitespace-nowrap items-center gap-1",
+                                        span { class: "size-1.5 rounded-full bg-amber-500" }
+                                        {translate_with(
+                                            "tools-update-count",
+                                            &[("count", TranslationValue::Number(tools.updates as i64))],
+                                        )}
+                                    }
+                                }
+                                if tools.conflicts > 0 {
+                                    span { class: "flex whitespace-nowrap items-center gap-1",
+                                        span { class: "size-1.5 rounded-full bg-rose-500" }
+                                        {translate_with(
+                                            "tools-conflict-count",
+                                            &[("count", TranslationValue::Number(tools.conflicts as i64))],
+                                        )}
+                                    }
+                                }
+                            } else {
+                                {translate("tools-scanning")}
+                            }
+                        }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    aria_label: "{fold_title}",
+                    title: "{fold_title}",
+                    class: if folded() {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    },
+                    onclick: move |_| folded.set(!folded()),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                    }
+                }
+            }
+            div { class: if folded() {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "border-t border-foreground/10 p-1.5",
+                        if !loaded {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("tools-scanning")} }
+                        } else if tools.categories.iter().all(|category| category.items.is_empty()) {
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("tools-no-installed")} }
+                        } else {
+                            div { class: "flex flex-col gap-0.5",
+                                for category in tools.categories.iter().filter(|category| !category.items.is_empty()) {
+                                    ToolCategoryRow { key: "{category.provider.id()}", category: category.clone(), pane_id }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
+    let mut expanded = use_signal(|| false);
+    let updates = category
+        .items
+        .iter()
+        .filter(|item| item.status == ToolStatus::Outdated)
+        .count();
+    let conflicts = category
+        .items
+        .iter()
+        .filter(|item| item.status == ToolStatus::Conflict)
+        .count();
+    rsx! {
+        div { class: "flex flex-col gap-0.5",
+            button {
+                r#type: "button",
+                class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                onclick: move |_| expanded.set(!expanded()),
+                Icon { class: "h-3 w-3 shrink-0",
+                    path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                }
+                span { class: "min-w-0 flex-1 truncate text-ui font-medium", {tools_provider_title(category.provider)} }
+                if updates > 0 {
+                    span { class: "flex items-center gap-1 whitespace-nowrap text-[9px] text-muted-foreground",
+                        span { class: "size-1 rounded-full bg-amber-500" }
+                        "{updates}"
+                    }
+                }
+                if conflicts > 0 {
+                    span { class: "flex items-center gap-1 whitespace-nowrap text-[9px] text-muted-foreground",
+                        span { class: "size-1 rounded-full bg-rose-500" }
+                        "{conflicts}"
+                    }
+                }
+                span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{category.items.len()}" }
+            }
+            if expanded() {
+                div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
+                    for item in category.items.iter() {
+                        ToolItemRow { key: "{item.id}", item: item.clone(), pane_id }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
+    let status_class = match item.status {
+        ToolStatus::Installed => "bg-emerald-400",
+        ToolStatus::Outdated => "bg-amber-400",
+        ToolStatus::Conflict | ToolStatus::Failed => "bg-ansi-1",
+        ToolStatus::Missing => "bg-muted-foreground/40",
+        ToolStatus::Available => "bg-cyan-400/60",
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            title: tools_provider_title(item.provider),
+            class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+            onclick: move |_| open_tools(pane_id),
+            span { class: "size-1.5 shrink-0 rounded-full {status_class}" }
+            span { class: "min-w-0 flex-1 truncate text-ui", "{item.name}" }
+            if item.managed {
+                span { class: "text-[9px] text-cyan-300/80", {translate("tools-managed")} }
+            }
+            if let Some(version) = item.version.as_ref() {
+                span { class: "max-w-20 truncate text-[9px] text-muted-foreground/60", "{version}" }
+            }
+        }
+    }
+}
+
+fn tools_provider_title(provider: vmux_core::tools::ToolProvider) -> String {
+    translate(match provider {
+        vmux_core::tools::ToolProvider::HomebrewFormula => "tools-provider-homebrew-formulae",
+        vmux_core::tools::ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
+        vmux_core::tools::ToolProvider::Npm => "tools-provider-npm",
+        vmux_core::tools::ToolProvider::Acp => "tools-provider-acp-agents",
+        vmux_core::tools::ToolProvider::Lsp => "tools-provider-language-tools",
+        vmux_core::tools::ToolProvider::Mcp => "tools-provider-mcp-servers",
+        vmux_core::tools::ToolProvider::Dotfiles => "tools-provider-dotfiles",
+    })
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the

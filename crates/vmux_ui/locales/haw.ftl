@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } mea
    *[other] { $count } mea
 }
+
+tools-title = Nā mea hana
+tools-search = Huli i nā pūʻolo, nā ʻelele, MCP, nā mea hana ʻōlelo a me nā waihona hoʻonohonoho…
+tools-open = E wehe i nā mea hana
+tools-fold = E pelu i nā mea hana
+tools-unfold = E wehe aʻe i nā mea hana
+tools-scanning = Ke nānā nei i nā mea hana kūloko…
+tools-no-installed = ʻAʻohe mea hana i hoʻouka ʻia
+tools-empty = ʻAʻohe mea hana kūpono
+tools-empty-detail = E hoʻouka i pūʻolo a i ʻole e hoʻohui i pūʻolo waihona hoʻonohonoho ʻano Stow.
+tools-apply = Hoʻohana
+tools-homebrew = Homebrew
+tools-homebrew-sync = Hoʻopili ʻakomi ʻia nā kumumanaʻo a me nā polokalamu i hoʻouka ʻia.
+tools-open-brewfile = E wehe i ka Brewfile
+tools-managed = mālama ʻia
+tools-provider-homebrew-formulae = Nā kumumanaʻo Homebrew
+tools-provider-homebrew-casks = Nā polokalamu Homebrew
+tools-provider-npm = Nā pūʻolo npm
+tools-provider-acp-agents = Nā ʻelele ACP
+tools-provider-language-tools = Nā mea hana ʻōlelo
+tools-provider-mcp-servers = Nā kikowaena MCP
+tools-provider-dotfiles = Nā waihona hoʻonohonoho
+tools-status-available = Loaʻa
+tools-status-missing = Nalo
+tools-status-conflict = Kūʻē
+tools-forget = Poina
+tools-manage = Hoʻoponopono
+tools-link = Hoʻohui
+tools-unlink = Wehe i ka hoʻohui
+tools-import = Hoʻokomo mai
+tools-update-count = { $count ->
+    [one] 1 hōʻano hou
+   *[other] { $count } hōʻano hou
+}
+tools-conflict-count = { $count ->
+    [one] 1 kūʻē
+   *[other] { $count } kūʻē
+}
+tools-result-applied = Ua hoʻohana ʻia nā mea hana
+tools-result-imported = Ua hoʻokomo ʻia nā mea hana
+tools-result-installed = Ua hoʻouka ʻia { $name }
+tools-result-updated = Ua hōʻano hou ʻia { $name }
+tools-result-uninstalled = Ua wehe ʻia { $name }
+tools-result-forgotten = Ua poina ʻia { $name }
+tools-result-managed = Ke mālama ʻia nei { $name }
+tools-result-linked = Ua hoʻohui ʻia { $name }
+tools-result-unlinked = Ua wehe ʻia ka hoʻohui o { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Hoʻonohonoho i nā hoʻonohonoho, nā mea hana, nā dotfiles, a me ka ʻike me Git.
+vault-sync = Hoʻopili
+vault-create = Hana
+vault-connect = Hoʻohui
+vault-private = Waihona pilikino
+vault-public-warning = Hōʻike nā waihona lehulehu i kāu ʻike a me ka hoʻonohonoho.
+vault-choose-repository = E koho i kahi waihona…
+vault-empty = nele
+vault-clean = ʻikepili hou āpau
+vault-not-connected = ʻAʻole pili
+vault-change-count = Nā hoʻololi: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Hoʻomaka
 start-tagline = Hoʻokahi prompt. Pau nā mea a pau.
 

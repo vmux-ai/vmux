@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } elemento
    *[other] { $count } elementos
 }
+
+tools-title = Herramientas
+tools-search = Buscar paquetes, agentes, MCP, herramientas de lenguaje y archivos de configuración…
+tools-open = Abrir Herramientas
+tools-fold = Plegar herramientas
+tools-unfold = Desplegar herramientas
+tools-scanning = Analizando herramientas locales…
+tools-no-installed = No hay herramientas instaladas
+tools-empty = No hay herramientas coincidentes
+tools-empty-detail = Instala un paquete o añade un paquete de archivos de configuración al estilo Stow.
+tools-apply = Aplicar
+tools-homebrew = Homebrew
+tools-homebrew-sync = Las fórmulas y aplicaciones instaladas se sincronizan automáticamente.
+tools-open-brewfile = Abrir Brewfile
+tools-managed = gestionado
+tools-provider-homebrew-formulae = Fórmulas de Homebrew
+tools-provider-homebrew-casks = Aplicaciones de Homebrew
+tools-provider-npm = Paquetes npm
+tools-provider-acp-agents = Agentes ACP
+tools-provider-language-tools = Herramientas de lenguaje
+tools-provider-mcp-servers = Servidores MCP
+tools-provider-dotfiles = Archivos de configuración
+tools-status-available = Disponible
+tools-status-missing = Falta
+tools-status-conflict = Conflicto
+tools-forget = Olvidar
+tools-manage = Gestionar
+tools-link = Vincular
+tools-unlink = Desvincular
+tools-import = Importar
+tools-update-count = { $count ->
+    [one] 1 actualización
+   *[other] { $count } actualizaciones
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflicto
+   *[other] { $count } conflictos
+}
+tools-result-applied = Herramientas aplicadas
+tools-result-imported = Herramientas importadas
+tools-result-installed = { $name } instalado
+tools-result-updated = { $name } actualizado
+tools-result-uninstalled = { $name } desinstalado
+tools-result-forgotten = { $name } olvidado
+tools-result-managed = { $name } ahora está gestionado
+tools-result-linked = { $name } vinculado
+tools-result-unlinked = { $name } desvinculado
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sincronice configuraciones, herramientas, archivos de puntos y conocimientos con Git.
+vault-sync = Sincronizar
+vault-create = Crear
+vault-connect = Conectar
+vault-private = repositorio privado
+vault-public-warning = Los repositorios públicos exponen su conocimiento y configuración.
+vault-choose-repository = Elija un repositorio…
+vault-empty = vacío
+vault-clean = A hoy
+vault-not-connected = No conectado
+vault-change-count = Cambios: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Inicio
 start-tagline = Un prompt. Cualquier cosa, hecha.
 

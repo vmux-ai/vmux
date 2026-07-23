@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } mục
    *[other] { $count } mục
 }
+
+tools-title = Công cụ
+tools-search = Tìm gói, tác nhân, MCP, công cụ ngôn ngữ và tệp cấu hình…
+tools-open = Mở Công cụ
+tools-fold = Thu gọn công cụ
+tools-unfold = Mở rộng công cụ
+tools-scanning = Đang quét công cụ cục bộ…
+tools-no-installed = Chưa cài công cụ nào
+tools-empty = Không có công cụ phù hợp
+tools-empty-detail = Cài một gói hoặc thêm gói tệp cấu hình theo kiểu Stow.
+tools-apply = Áp dụng
+tools-homebrew = Homebrew
+tools-homebrew-sync = Các công thức và ứng dụng đã cài sẽ tự động đồng bộ.
+tools-open-brewfile = Mở Brewfile
+tools-managed = được quản lý
+tools-provider-homebrew-formulae = Công thức Homebrew
+tools-provider-homebrew-casks = Ứng dụng Homebrew
+tools-provider-npm = Gói npm
+tools-provider-acp-agents = Tác nhân ACP
+tools-provider-language-tools = Công cụ ngôn ngữ
+tools-provider-mcp-servers = Máy chủ MCP
+tools-provider-dotfiles = Tệp cấu hình
+tools-status-available = Có sẵn
+tools-status-missing = Thiếu
+tools-status-conflict = Xung đột
+tools-forget = Quên
+tools-manage = Quản lý
+tools-link = Liên kết
+tools-unlink = Hủy liên kết
+tools-import = Nhập
+tools-update-count = { $count ->
+    [one] 1 bản cập nhật
+   *[other] { $count } bản cập nhật
+}
+tools-conflict-count = { $count ->
+    [one] 1 xung đột
+   *[other] { $count } xung đột
+}
+tools-result-applied = Đã áp dụng công cụ
+tools-result-imported = Đã nhập công cụ
+tools-result-installed = Đã cài { $name }
+tools-result-updated = Đã cập nhật { $name }
+tools-result-uninstalled = Đã gỡ cài đặt { $name }
+tools-result-forgotten = Đã quên { $name }
+tools-result-managed = { $name } hiện được quản lý
+tools-result-linked = Đã liên kết { $name }
+tools-result-unlinked = Đã hủy liên kết { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Đồng bộ hóa cài đặt, công cụ, tệp dotfile và Kiến thức với Git.
+vault-sync = Đồng bộ hóa
+vault-create = Tạo nên
+vault-connect = Kết nối
+vault-private = Kho lưu trữ riêng
+vault-public-warning = Các kho lưu trữ công khai tiết lộ Kiến thức và cấu hình của bạn.
+vault-choose-repository = Chọn một kho lưu trữ…
+vault-empty = trống
+vault-clean = Cập nhật
+vault-not-connected = Không được kết nối
+vault-change-count = Thay đổi: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Bắt đầu
 start-tagline = Một prompt. Xong mọi việc.
 

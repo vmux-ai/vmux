@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } nì
    *[other] { $count } nithean
 }
+
+tools-title = Innealan
+tools-search = Lorg pacaidean, àidseantan, MCP, innealan cànain agus faidhlichean rèiteachaidh…
+tools-open = Fosgail na h-innealan
+tools-fold = Paisg na h-innealan
+tools-unfold = Leudaich na h-innealan
+tools-scanning = A’ sganadh innealan ionadail…
+tools-no-installed = Chan eil inneal air a stàladh
+tools-empty = Chan eil inneal co-ionnan ann
+tools-empty-detail = Stàlaich pacaid no cuir pacaid fhaidhlichean rèiteachaidh ann an stoidhle Stow ris.
+tools-apply = Cuir an sàs
+tools-homebrew = Homebrew
+tools-homebrew-sync = Sioncronaichidh foirmlean agus aplacaidean stàlaichte gu fèin-obrachail.
+tools-open-brewfile = Fosgail Brewfile
+tools-managed = air a stiùireadh
+tools-provider-homebrew-formulae = Foirmlean Homebrew
+tools-provider-homebrew-casks = Aplacaidean Homebrew
+tools-provider-npm = Pacaidean npm
+tools-provider-acp-agents = Àidseantan ACP
+tools-provider-language-tools = Innealan cànain
+tools-provider-mcp-servers = Frithealaichean MCP
+tools-provider-dotfiles = Faidhlichean rèiteachaidh
+tools-status-available = Ri fhaighinn
+tools-status-missing = A dhìth
+tools-status-conflict = Còmhstri
+tools-forget = Dìochuimhnich
+tools-manage = Stiùirich
+tools-link = Ceangail
+tools-unlink = Dì-cheangail
+tools-import = Ion-phortaich
+tools-update-count = { $count ->
+    [one] 1 ùrachadh
+   *[other] { $count } ùrachaidhean
+}
+tools-conflict-count = { $count ->
+    [one] 1 chòmhstri
+   *[other] { $count } còmhstrithean
+}
+tools-result-applied = Innealan air an cur an sàs
+tools-result-imported = Innealan air an ion-phortadh
+tools-result-installed = { $name } air a stàladh
+tools-result-updated = { $name } air ùrachadh
+tools-result-uninstalled = { $name } air a dhì-stàladh
+tools-result-forgotten = { $name } air a dhìochuimhneachadh
+tools-result-managed = Tha { $name } ga stiùireadh a-nis
+tools-result-linked = { $name } air a cheangal
+tools-result-unlinked = { $name } air a dhì-cheangal
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sioncronaich roghainnean, innealan, dotfiles, agus Eòlas le Git.
+vault-sync = Sioncronaich
+vault-create = Cruthaich
+vault-connect = Ceangail
+vault-private = Taigh-tasgaidh prìobhaideach
+vault-public-warning = Bidh stòran poblach a’ nochdadh d’ eòlas agus do rèiteachadh.
+vault-choose-repository = Tagh stòr…
+vault-empty = falamh
+vault-clean = Làn-fhiosrach
+vault-not-connected = Gun cheangal
+vault-change-count = Atharrachaidhean: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tòisich
 start-tagline = Aon phrompt. Rud sam bith, dèanta.
 

@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ставка
    *[other] { $count } ставки
 }
+
+tools-title = Алатки
+tools-search = Пребарај пакети, агенти, MCP, јазични алатки и конфигурациски датотеки…
+tools-open = Отвори ги алатките
+tools-fold = Собери ги алатките
+tools-unfold = Прошири ги алатките
+tools-scanning = Скенирање локални алатки…
+tools-no-installed = Нема инсталирани алатки
+tools-empty = Нема соодветни алатки
+tools-empty-detail = Инсталирајте пакет или додајте пакет со конфигурациски датотеки во стилот на Stow.
+tools-apply = Примени
+tools-homebrew = Homebrew
+tools-homebrew-sync = Инсталираните формули и апликации автоматски се синхронизираат.
+tools-open-brewfile = Отвори го Brewfile
+tools-managed = управувано
+tools-provider-homebrew-formulae = Формули на Homebrew
+tools-provider-homebrew-casks = Апликации на Homebrew
+tools-provider-npm = Пакети на npm
+tools-provider-acp-agents = Агенти на ACP
+tools-provider-language-tools = Јазични алатки
+tools-provider-mcp-servers = Сервери на MCP
+tools-provider-dotfiles = Конфигурациски датотеки
+tools-status-available = Достапно
+tools-status-missing = Недостасува
+tools-status-conflict = Конфликт
+tools-forget = Заборави
+tools-manage = Управувај
+tools-link = Поврзи
+tools-unlink = Прекини врска
+tools-import = Увези
+tools-update-count = { $count ->
+    [one] 1 ажурирање
+   *[other] { $count } ажурирања
+}
+tools-conflict-count = { $count ->
+    [one] 1 конфликт
+   *[other] { $count } конфликти
+}
+tools-result-applied = Алатките се применети
+tools-result-imported = Алатките се увезени
+tools-result-installed = { $name } е инсталиран
+tools-result-updated = { $name } е ажуриран
+tools-result-uninstalled = { $name } е деинсталиран
+tools-result-forgotten = { $name } е заборавен
+tools-result-managed = { $name } сега се управува
+tools-result-linked = { $name } е поврзан
+tools-result-unlinked = Врската со { $name } е прекината
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Синхронизирајте ги поставките, алатките, точките и знаењето со Git.
+vault-sync = Синхронизирај
+vault-create = Креирај
+vault-connect = Поврзете се
+vault-private = Приватно складиште
+vault-public-warning = Јавните складишта го изложуваат вашето знаење и конфигурација.
+vault-choose-repository = Изберете складиште…
+vault-empty = празен
+vault-clean = Ажурирано
+vault-not-connected = Не е поврзано
+vault-change-count = Промени: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Почеток
 start-tagline = Едно упатство. Сè е завршено.
 

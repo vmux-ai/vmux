@@ -113,11 +113,9 @@ impl RegistryAgent {
     }
 }
 
-/// `~/.vmux/agents/` — cached registry + installed agents.
+/// Runtime store for the cached registry and installed agents.
 pub fn agents_dir() -> PathBuf {
-    #[allow(deprecated)]
-    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".vmux").join("agents")
+    vmux_core::profile::agents_dir()
 }
 
 /// Path of the cached registry document.

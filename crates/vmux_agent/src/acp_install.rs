@@ -1,4 +1,4 @@
-//! Installing ACP agents from the registry into the vmux-managed store (`~/.vmux/agents`),
+//! Installing ACP agents from the registry into the vmux-managed runtime store,
 //! reusing the Mason download/extract/receipt primitives from `vmux_editor`. This module covers
 //! the `binary` distribution (native executable, no runtime); the `npx` (managed Node) and `uvx`
 //! (managed uv) paths land in later steps.
@@ -25,7 +25,7 @@ pub struct ResolvedAgent {
 const NODE_VERSION: &str = "22.11.0";
 const UV_VERSION: &str = "0.5.11";
 
-/// The vmux-managed agent store root (`~/.vmux/agents`).
+/// The vmux-managed agent store root.
 fn store_root() -> PathBuf {
     acp_registry::agents_dir()
 }

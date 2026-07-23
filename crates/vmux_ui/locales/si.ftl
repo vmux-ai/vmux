@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] අයිතම { $count }
    *[other] අයිතම { $count }
 }
+
+tools-title = මෙවලම්
+tools-search = පැකේජ, නියෝජිත, MCP, භාෂා මෙවලම් සහ වින්‍යාස ගොනු සොයන්න…
+tools-open = මෙවලම් විවෘත කරන්න
+tools-fold = මෙවලම් හකුළන්න
+tools-unfold = මෙවලම් දිගහරින්න
+tools-scanning = ස්ථානීය මෙවලම් පරිලෝකනය වෙමින්…
+tools-no-installed = ස්ථාපිත මෙවලම් නැත
+tools-empty = ගැළපෙන මෙවලම් නැත
+tools-empty-detail = පැකේජයක් ස්ථාපනය කරන්න හෝ Stow ආකාරයේ වින්‍යාස ගොනු පැකේජයක් එක් කරන්න.
+tools-apply = යොදන්න
+tools-homebrew = Homebrew
+tools-homebrew-sync = ස්ථාපිත සූත්‍ර සහ යෙදුම් ස්වයංක්‍රීයව සමමුහුර්ත වේ.
+tools-open-brewfile = Brewfile විවෘත කරන්න
+tools-managed = කළමනාකරණය කෙරේ
+tools-provider-homebrew-formulae = Homebrew සූත්‍ර
+tools-provider-homebrew-casks = Homebrew යෙදුම්
+tools-provider-npm = npm පැකේජ
+tools-provider-acp-agents = ACP නියෝජිත
+tools-provider-language-tools = භාෂා මෙවලම්
+tools-provider-mcp-servers = MCP සේවාදායක
+tools-provider-dotfiles = වින්‍යාස ගොනු
+tools-status-available = පවතී
+tools-status-missing = අස්ථානගතයි
+tools-status-conflict = ගැටුම
+tools-forget = අමතක කරන්න
+tools-manage = කළමනාකරණය කරන්න
+tools-link = සම්බන්ධ කරන්න
+tools-unlink = සම්බන්ධතාව ඉවත් කරන්න
+tools-import = ආයාත කරන්න
+tools-update-count = { $count ->
+    [one] යාවත්කාලීන 1
+   *[other] යාවත්කාලීන { $count }
+}
+tools-conflict-count = { $count ->
+    [one] ගැටුම් 1
+   *[other] ගැටුම් { $count }
+}
+tools-result-applied = මෙවලම් යොදන ලදී
+tools-result-imported = මෙවලම් ආයාත කරන ලදී
+tools-result-installed = { $name } ස්ථාපනය කරන ලදී
+tools-result-updated = { $name } යාවත්කාලීන කරන ලදී
+tools-result-uninstalled = { $name } අස්ථාපනය කරන ලදී
+tools-result-forgotten = { $name } අමතක කරන ලදී
+tools-result-managed = { $name } දැන් කළමනාකරණය කෙරේ
+tools-result-linked = { $name } සම්බන්ධ කරන ලදී
+tools-result-unlinked = { $name } සම්බන්ධතාව ඉවත් කරන ලදී
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Git සමඟින් සැකසීම්, මෙවලම්, dotfiles සහ දැනුම සමමුහුර්ත කරන්න.
+vault-sync = සමමුහුර්ත කරන්න
+vault-create = නිර්මාණය කරන්න
+vault-connect = සම්බන්ධ කරන්න
+vault-private = පුද්ගලික ගබඩාව
+vault-public-warning = පොදු ගබඩාවන් ඔබේ දැනුම සහ වින්‍යාසය හෙළි කරයි.
+vault-choose-repository = ගබඩාවක් තෝරන්න...
+vault-empty = හිස්
+vault-clean = යාවත්කාලීනව
+vault-not-connected = සම්බන්ධ වී නැත
+vault-change-count = වෙනස්කම්: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ආරම්භය
 start-tagline = එක් prompt එකක්. ඕනෑම දෙයක්, කරලා ඉවරයි.
 

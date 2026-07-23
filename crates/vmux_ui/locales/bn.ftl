@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count }টি আইটেম
    *[other] { $count }টি আইটেম
 }
+
+tools-title = সরঞ্জাম
+tools-search = প্যাকেজ, এজেন্ট, MCP, ভাষার সরঞ্জাম ও কনফিগারেশন ফাইল খুঁজুন…
+tools-open = সরঞ্জাম খুলুন
+tools-fold = সরঞ্জাম গুটিয়ে নিন
+tools-unfold = সরঞ্জাম প্রসারিত করুন
+tools-scanning = স্থানীয় সরঞ্জাম স্ক্যান করা হচ্ছে…
+tools-no-installed = কোনো সরঞ্জাম ইনস্টল করা নেই
+tools-empty = মিলে যাওয়া কোনো সরঞ্জাম নেই
+tools-empty-detail = একটি প্যাকেজ ইনস্টল করুন অথবা Stow-ধাঁচের কনফিগারেশন ফাইল প্যাকেজ যোগ করুন।
+tools-apply = প্রয়োগ করুন
+tools-homebrew = Homebrew
+tools-homebrew-sync = ইনস্টল করা ফর্মুলা ও অ্যাপ্লিকেশন প্যাকেজ স্বয়ংক্রিয়ভাবে সিঙ্ক হয়।
+tools-open-brewfile = Brewfile খুলুন
+tools-managed = পরিচালিত
+tools-provider-homebrew-formulae = Homebrew ফর্মুলা
+tools-provider-homebrew-casks = Homebrew অ্যাপ্লিকেশন প্যাকেজ
+tools-provider-npm = npm প্যাকেজ
+tools-provider-acp-agents = ACP এজেন্ট
+tools-provider-language-tools = ভাষার সরঞ্জাম
+tools-provider-mcp-servers = MCP সার্ভার
+tools-provider-dotfiles = কনফিগারেশন ফাইল
+tools-status-available = উপলভ্য
+tools-status-missing = অনুপস্থিত
+tools-status-conflict = দ্বন্দ্ব
+tools-forget = ভুলে যান
+tools-manage = পরিচালনা করুন
+tools-link = লিঙ্ক করুন
+tools-unlink = লিঙ্ক সরান
+tools-import = আমদানি করুন
+tools-update-count = { $count ->
+    [one] ১টি আপডেট
+   *[other] { $count }টি আপডেট
+}
+tools-conflict-count = { $count ->
+    [one] ১টি দ্বন্দ্ব
+   *[other] { $count }টি দ্বন্দ্ব
+}
+tools-result-applied = সরঞ্জাম প্রয়োগ করা হয়েছে
+tools-result-imported = সরঞ্জাম আমদানি করা হয়েছে
+tools-result-installed = { $name } ইনস্টল করা হয়েছে
+tools-result-updated = { $name } আপডেট করা হয়েছে
+tools-result-uninstalled = { $name } আনইনস্টল করা হয়েছে
+tools-result-forgotten = { $name } ভুলে যাওয়া হয়েছে
+tools-result-managed = { $name } এখন পরিচালিত
+tools-result-linked = { $name } লিঙ্ক করা হয়েছে
+tools-result-unlinked = { $name }-এর লিঙ্ক সরানো হয়েছে
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = সিঙ্ক সেটিংস, টুলস, ডটফাইলস এবং নলেজ গিটের সাথে।
+vault-sync = সিঙ্ক
+vault-create = তৈরি করুন
+vault-connect = সংযোগ করুন
+vault-private = ব্যক্তিগত সংগ্রহস্থল
+vault-public-warning = পাবলিক রিপোজিটরিগুলি আপনার জ্ঞান এবং কনফিগারেশন প্রকাশ করে।
+vault-choose-repository = একটি সংগ্রহস্থল চয়ন করুন...
+vault-empty = খালি
+vault-clean = আপ টু ডেট
+vault-not-connected = সংযুক্ত নয়
+vault-change-count = পরিবর্তন: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = শুরু
 start-tagline = এক প্রম্পটে—যেকোনো কাজ সম্পন্ন।
 

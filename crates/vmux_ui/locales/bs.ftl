@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } stavka
    *[other] { $count } stavki
 }
+
+tools-title = Alati
+tools-search = Pretraži pakete, agente, MCP, jezičke alate i konfiguracijske datoteke…
+tools-open = Otvori alate
+tools-fold = Sažmi alate
+tools-unfold = Proširi alate
+tools-scanning = Skeniranje lokalnih alata…
+tools-no-installed = Nema instaliranih alata
+tools-empty = Nema odgovarajućih alata
+tools-empty-detail = Instalirajte paket ili dodajte paket konfiguracijskih datoteka u stilu Stow.
+tools-apply = Primijeni
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalirane formule i aplikacije automatski se sinhronizuju.
+tools-open-brewfile = Otvori Brewfile
+tools-managed = upravljano
+tools-provider-homebrew-formulae = Homebrew formule
+tools-provider-homebrew-casks = Homebrew aplikacije
+tools-provider-npm = npm paketi
+tools-provider-acp-agents = ACP agenti
+tools-provider-language-tools = Jezički alati
+tools-provider-mcp-servers = MCP serveri
+tools-provider-dotfiles = Konfiguracijske datoteke
+tools-status-available = Dostupno
+tools-status-missing = Nedostaje
+tools-status-conflict = Sukob
+tools-forget = Zaboravi
+tools-manage = Upravljaj
+tools-link = Poveži
+tools-unlink = Prekini vezu
+tools-import = Uvezi
+tools-update-count = { $count ->
+    [one] 1 ažuriranje
+   *[other] { $count } ažuriranja
+}
+tools-conflict-count = { $count ->
+    [one] 1 sukob
+   *[other] { $count } sukoba
+}
+tools-result-applied = Alati su primijenjeni
+tools-result-imported = Alati su uvezeni
+tools-result-installed = { $name } je instaliran
+tools-result-updated = { $name } je ažuriran
+tools-result-uninstalled = { $name } je deinstaliran
+tools-result-forgotten = { $name } je zaboravljen
+tools-result-managed = { $name } je sada pod upravljanjem
+tools-result-linked = { $name } je povezan
+tools-result-unlinked = Veza s { $name } je prekinuta
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sinhronizirajte postavke, alate, dotfile i znanje sa Gitom.
+vault-sync = Sync
+vault-create = Kreiraj
+vault-connect = Povežite se
+vault-private = Privatno spremište
+vault-public-warning = Javna spremišta otkrivaju vaše znanje i konfiguraciju.
+vault-choose-repository = Odaberite spremište…
+vault-empty = prazan
+vault-clean = Ažurno
+vault-not-connected = Nije povezan
+vault-change-count = Promjene: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Jedna uputa. Sve završeno.
 

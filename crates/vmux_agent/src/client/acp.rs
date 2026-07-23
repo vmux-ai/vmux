@@ -882,6 +882,7 @@ fn drain_acp_installs(
                         mcp_command: mcp.as_ref().map(|m| m.command.clone()),
                         mcp_args: mcp.map(|m| m.args).unwrap_or_default(),
                         resume_acp_session_id: session.resume.clone(),
+                        managed_mcp_servers: crate::managed_mcp::acp_servers(),
                     });
                 }
             }

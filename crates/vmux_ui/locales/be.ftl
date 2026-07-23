@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } элемент
    *[other] { $count } элементаў
 }
+
+tools-title = Інструменты
+tools-search = Пошук пакетаў, агентаў, MCP, моўных інструментаў і файлаў канфігурацыі…
+tools-open = Адкрыць інструменты
+tools-fold = Згарнуць інструменты
+tools-unfold = Разгарнуць інструменты
+tools-scanning = Сканаванне лакальных інструментаў…
+tools-no-installed = Няма ўсталяваных інструментаў
+tools-empty = Няма адпаведных інструментаў
+tools-empty-detail = Усталюйце пакет або дадайце пакет файлаў канфігурацыі ў стылі Stow.
+tools-apply = Ужыць
+tools-homebrew = Homebrew
+tools-homebrew-sync = Усталяваныя формулы і праграмы сінхранізуюцца аўтаматычна.
+tools-open-brewfile = Адкрыць Brewfile
+tools-managed = кіруецца
+tools-provider-homebrew-formulae = Формулы Homebrew
+tools-provider-homebrew-casks = Праграмы Homebrew
+tools-provider-npm = Пакеты npm
+tools-provider-acp-agents = Агенты ACP
+tools-provider-language-tools = Моўныя інструменты
+tools-provider-mcp-servers = Серверы MCP
+tools-provider-dotfiles = Файлы канфігурацыі
+tools-status-available = Даступна
+tools-status-missing = Адсутнічае
+tools-status-conflict = Канфлікт
+tools-forget = Забыць
+tools-manage = Кіраваць
+tools-link = Звязаць
+tools-unlink = Адвязаць
+tools-import = Імпартаваць
+tools-update-count = { $count ->
+    [one] 1 абнаўленне
+   *[other] { $count } абнаўленняў
+}
+tools-conflict-count = { $count ->
+    [one] 1 канфлікт
+   *[other] { $count } канфліктаў
+}
+tools-result-applied = Інструменты ўжыты
+tools-result-imported = Інструменты імпартаваны
+tools-result-installed = { $name } усталяваны
+tools-result-updated = { $name } абноўлены
+tools-result-uninstalled = { $name } выдалены
+tools-result-forgotten = { $name } забыты
+tools-result-managed = { $name } цяпер кіруецца
+tools-result-linked = { $name } звязаны
+tools-result-unlinked = { $name } адвязаны
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Сінхранізуйце налады, інструменты, dot-файлы і веды з Git.
+vault-sync = Сінхранізацыя
+vault-create = Ствараць
+vault-connect = Злучыцца
+vault-private = Прыватнае сховішча
+vault-public-warning = Публічныя сховішчы раскрываюць вашы веды і канфігурацыю.
+vault-choose-repository = Выберыце сховішча…
+vault-empty = пусты
+vault-clean = Актуальна
+vault-not-connected = Не падключана
+vault-change-count = Змены: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Пачатак
 start-tagline = Адзін промпт — і ўсё гатова.
 

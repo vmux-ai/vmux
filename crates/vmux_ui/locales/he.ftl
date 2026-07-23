@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] פריט אחד
    *[other] { $count } פריטים
 }
+
+tools-title = כלים
+tools-search = חיפוש חבילות, סוכנים, MCP, כלי שפה וקובצי תצורה…
+tools-open = פתיחת כלים
+tools-fold = כיווץ הכלים
+tools-unfold = הרחבת הכלים
+tools-scanning = סריקת כלים מקומיים…
+tools-no-installed = אין כלים מותקנים
+tools-empty = אין כלים תואמים
+tools-empty-detail = התקינו חבילה או הוסיפו חבילת קובצי תצורה בסגנון Stow.
+tools-apply = החלה
+tools-homebrew = Homebrew
+tools-homebrew-sync = נוסחאות ויישומים מותקנים מסתנכרנים אוטומטית.
+tools-open-brewfile = פתיחת Brewfile
+tools-managed = מנוהל
+tools-provider-homebrew-formulae = נוסחאות Homebrew
+tools-provider-homebrew-casks = יישומי Homebrew
+tools-provider-npm = חבילות npm
+tools-provider-acp-agents = סוכני ACP
+tools-provider-language-tools = כלי שפה
+tools-provider-mcp-servers = שרתי MCP
+tools-provider-dotfiles = קובצי תצורה
+tools-status-available = זמין
+tools-status-missing = חסר
+tools-status-conflict = התנגשות
+tools-forget = שכחה
+tools-manage = ניהול
+tools-link = קישור
+tools-unlink = ביטול קישור
+tools-import = ייבוא
+tools-update-count = { $count ->
+    [one] עדכון אחד
+   *[other] { $count } עדכונים
+}
+tools-conflict-count = { $count ->
+    [one] התנגשות אחת
+   *[other] { $count } התנגשויות
+}
+tools-result-applied = הכלים הוחלו
+tools-result-imported = הכלים יובאו
+tools-result-installed = { $name } הותקן
+tools-result-updated = { $name } עודכן
+tools-result-uninstalled = { $name } הוסר
+tools-result-forgotten = { $name } נשכח
+tools-result-managed = { $name } מנוהל כעת
+tools-result-linked = { $name } קושר
+tools-result-unlinked = הקישור של { $name } בוטל
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = סנכרון הגדרות, כלים, dotfiles ו- Knowledge עם Git.
+vault-sync = סנכרון
+vault-create = לִיצוֹר
+vault-connect = לְחַבֵּר
+vault-private = מאגר פרטי
+vault-public-warning = מאגרים ציבוריים חושפים את הידע והתצורה שלך.
+vault-choose-repository = בחר מאגר...
+vault-empty = רֵיק
+vault-clean = מעודכן
+vault-not-connected = לא מחובר
+vault-change-count = שינויים: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = התחלה
 start-tagline = הנחיה אחת. כל משימה, סגורה.
 

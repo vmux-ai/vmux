@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } элемент
    *[other] { $count } элемент
 }
+
+tools-title = Кораллар
+tools-search = Пакетлар, агентлар, MCP, тел кораллары һәм көйләү файлларын эзләү…
+tools-open = Коралларны ачу
+tools-fold = Коралларны җыю
+tools-unfold = Коралларны җәю
+tools-scanning = Җирле кораллар тикшерелә…
+tools-no-installed = Урнаштырылган кораллар юк
+tools-empty = Туры килгән кораллар юк
+tools-empty-detail = Пакет урнаштырыгыз яки Stow рәвешендәге көйләү файллары пакетын өстәгез.
+tools-apply = Куллану
+tools-homebrew = Homebrew
+tools-homebrew-sync = Урнаштырылган формулалар һәм кушымталар автоматик рәвештә синхронлаша.
+tools-open-brewfile = Brewfile ачу
+tools-managed = идарә ителә
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew кушымталары
+tools-provider-npm = npm пакетлары
+tools-provider-acp-agents = ACP агентлары
+tools-provider-language-tools = Тел кораллары
+tools-provider-mcp-servers = MCP серверлары
+tools-provider-dotfiles = Көйләү файллары
+tools-status-available = Кулланырга мөмкин
+tools-status-missing = Юк
+tools-status-conflict = Каршылык
+tools-forget = Онытырга
+tools-manage = Идарә итәргә
+tools-link = Бәйләргә
+tools-unlink = Бәйләнешне өзәргә
+tools-import = Импортларга
+tools-update-count = { $count ->
+    [one] 1 яңарту
+   *[other] { $count } яңарту
+}
+tools-conflict-count = { $count ->
+    [one] 1 каршылык
+   *[other] { $count } каршылык
+}
+tools-result-applied = Кораллар кулланылды
+tools-result-imported = Кораллар импортланды
+tools-result-installed = { $name } урнаштырылды
+tools-result-updated = { $name } яңартылды
+tools-result-uninstalled = { $name } бетерелде
+tools-result-forgotten = { $name } онытылды
+tools-result-managed = { $name } хәзер идарә ителә
+tools-result-linked = { $name } бәйләнде
+tools-result-unlinked = { $name } бәйләнеше өзелде
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Git белән көйләүләрне, коралларны, нокталарны һәм Белемне синхронлагыз.
+vault-sync = Синхронизация
+vault-create = Ярат
+vault-connect = Бәйләнегез
+vault-private = Шәхси саклагыч
+vault-public-warning = Иҗтимагый складлар сезнең Белемегезне һәм конфигурациягезне фаш итәләр.
+vault-choose-repository = Резервуарны сайлагыз ...
+vault-empty = буш
+vault-clean = Бүгенге көнгә кадәр
+vault-not-connected = Бәйләнмәгән
+vault-change-count = Esзгәрешләр: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Башлау
 start-tagline = Бер prompt. Теләсә нәрсә — әзер.
 

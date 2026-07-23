@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } зүйл
    *[other] { $count } зүйл
 }
+
+tools-title = Хэрэгслүүд
+tools-search = Багц, агент, MCP, хэлний хэрэгсэл болон тохиргооны файл хайх…
+tools-open = Хэрэгслүүдийг нээх
+tools-fold = Хэрэгслүүдийг хураах
+tools-unfold = Хэрэгслүүдийг дэлгэх
+tools-scanning = Дотоод хэрэгслүүдийг шалгаж байна…
+tools-no-installed = Суулгасан хэрэгсэл алга
+tools-empty = Тохирох хэрэгсэл алга
+tools-empty-detail = Багц суулгах эсвэл Stow загварын тохиргооны файлын багц нэмнэ үү.
+tools-apply = Хэрэглэх
+tools-homebrew = Homebrew
+tools-homebrew-sync = Суулгасан томьёо болон аппууд автоматаар синк хийнэ.
+tools-open-brewfile = Brewfile нээх
+tools-managed = удирдлагатай
+tools-provider-homebrew-formulae = Homebrew томьёонууд
+tools-provider-homebrew-casks = Homebrew аппууд
+tools-provider-npm = npm багцууд
+tools-provider-acp-agents = ACP агентууд
+tools-provider-language-tools = Хэлний хэрэгслүүд
+tools-provider-mcp-servers = MCP серверүүд
+tools-provider-dotfiles = Тохиргооны файлууд
+tools-status-available = Боломжтой
+tools-status-missing = Алга
+tools-status-conflict = Зөрчил
+tools-forget = Мартах
+tools-manage = Удирдах
+tools-link = Холбох
+tools-unlink = Холбоосыг салгах
+tools-import = Импортлох
+tools-update-count = { $count ->
+    [one] 1 шинэчлэл
+   *[other] { $count } шинэчлэл
+}
+tools-conflict-count = { $count ->
+    [one] 1 зөрчил
+   *[other] { $count } зөрчил
+}
+tools-result-applied = Хэрэгслүүдийг хэрэглэв
+tools-result-imported = Хэрэгслүүдийг импортлов
+tools-result-installed = { $name } суулгагдлаа
+tools-result-updated = { $name } шинэчлэгдлээ
+tools-result-uninstalled = { $name } устгагдлаа
+tools-result-forgotten = { $name } мартагдлаа
+tools-result-managed = { $name } одоо удирдлагатай
+tools-result-linked = { $name } холбогдлоо
+tools-result-unlinked = { $name }-ийн холбоос салгагдлаа
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Тохиргоо, хэрэгсэл, цэгийн файлууд болон мэдлэгийг Git-тэй синк хийнэ үү.
+vault-sync = Синк хийх
+vault-create = Үүсгэх
+vault-connect = Холбох
+vault-private = Хувийн хадгалах газар
+vault-public-warning = Нийтийн агуулах нь таны мэдлэг, тохиргоог илчилдэг.
+vault-choose-repository = Хадгалах газрыг сонгох...
+vault-empty = хоосон
+vault-clean = Шинэчлэгдсэн
+vault-not-connected = Холбогдоогүй байна
+vault-change-count = Өөрчлөлтүүд: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Эхлэх
 start-tagline = Нэг prompt. Юу ч байсан, хийчихнэ.
 

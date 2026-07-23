@@ -554,7 +554,7 @@ fn screenshot_definition() -> ToolDefinition {
 (use it to verify your own UI changes). Captures the whole window exactly as it appears on screen - all \
 visible panes (browser, terminal, editor) and layout chrome. Optionally pass `pane` (a pane:<id> or \
 stack:<id> from read_layout) to crop to just that region. The full-resolution image is saved under \
-~/.vmux/recording/ and a downscaled copy is returned inline. macOS only; the first call may prompt for \
+the active vmux profile's recording directory and a downscaled copy is returned inline. macOS only; the first call may prompt for \
 Screen Recording permission - grant it in System Settings > Privacy & Security > Screen Recording, then \
 call again."
             .into(),
@@ -648,7 +648,7 @@ fn record_stop_definition() -> ToolDefinition {
     ToolDefinition {
         name: "record_stop".into(),
         description: "Stop the active recording and write the file(s). Returns the mp4 path, duration, \
-and size (plus the GIF path if one was requested). By default saves to ~/.vmux/profiles/<profile>/recording/; pass `dir` \
+and size (plus the GIF path if one was requested). By default saves to the active vmux profile's recording directory; pass `dir` \
 (absolute) and `name` (basename, no extension) to save elsewhere - e.g. dir=<repo>/docs/recording, \
 name=<feature> to drop a demo straight into the repo."
             .into(),
@@ -656,7 +656,7 @@ name=<feature> to drop a demo straight into the repo."
             "type": "object",
             "additionalProperties": false,
             "properties": {
-                "dir": {"type": "string", "description": "Absolute output directory (default ~/.vmux/profiles/<profile>/recording)."},
+                "dir": {"type": "string", "description": "Absolute output directory (default: active vmux profile recording directory)."},
                 "name": {"type": "string", "description": "Output basename without extension (default vmux-<timestamp>)."}
             }
         }),

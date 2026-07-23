@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Ark
+tools-search = Sykje nei pakketten, aginten, MCP, taalark en konfiguraasjebestannen…
+tools-open = Ark iepenje
+tools-fold = Ark ynklappe
+tools-unfold = Ark útklappe
+tools-scanning = Lokale ark wurdt skand…
+tools-no-installed = Gjin ark ynstallearre
+tools-empty = Gjin oerienkommende ark
+tools-empty-detail = Ynstallearje in pakket of foegje in pakket mei konfiguraasjebestannen yn Stow-styl ta.
+tools-apply = Tapasse
+tools-homebrew = Homebrew
+tools-homebrew-sync = Ynstallearre formules en tapassingen wurde automatysk syngronisearre.
+tools-open-brewfile = Brewfile iepenje
+tools-managed = beheard
+tools-provider-homebrew-formulae = Homebrew-formules
+tools-provider-homebrew-casks = Homebrew-tapassingen
+tools-provider-npm = npm-pakketten
+tools-provider-acp-agents = ACP-aginten
+tools-provider-language-tools = Taalark
+tools-provider-mcp-servers = MCP-tsjinners
+tools-provider-dotfiles = Konfiguraasjebestannen
+tools-status-available = Beskikber
+tools-status-missing = Untbrekt
+tools-status-conflict = Konflikt
+tools-forget = Ferjitte
+tools-manage = Beheare
+tools-link = Keppelje
+tools-unlink = Untkeppelje
+tools-import = Ymportearje
+tools-update-count = { $count ->
+    [one] 1 fernijing
+   *[other] { $count } fernijingen
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikten
+}
+tools-result-applied = Ark tapast
+tools-result-imported = Ark ymportearre
+tools-result-installed = { $name } ynstallearre
+tools-result-updated = { $name } fernijd
+tools-result-uninstalled = { $name } de-ynstallearre
+tools-result-forgotten = { $name } fergetten
+tools-result-managed = { $name } wurdt no beheard
+tools-result-linked = { $name } keppele
+tools-result-unlinked = { $name } ûntkeppele
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Syngronisearje ynstellings, ark, dotfiles en kennis mei Git.
+vault-sync = Syngronisearje
+vault-create = Meitsje
+vault-connect = Ferbine
+vault-private = Private repository
+vault-public-warning = Iepenbiere repositories bleatstelle jo Kennis en konfiguraasje.
+vault-choose-repository = Kies in repository ...
+vault-empty = leech
+vault-clean = Aktueel
+vault-not-connected = Net ferbûn
+vault-change-count = Feroarings: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Ien prompt. Alles dien.
 

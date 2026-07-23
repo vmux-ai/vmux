@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } આઇટમ
    *[other] { $count } આઇટમ
 }
+
+tools-title = સાધનો
+tools-search = પૅકેજ, એજન્ટ, MCP, ભાષા સાધનો અને રૂપરેખાંકન ફાઇલો શોધો…
+tools-open = સાધનો ખોલો
+tools-fold = સાધનો સંકોચો
+tools-unfold = સાધનો વિસ્તારો
+tools-scanning = સ્થાનિક સાધનો સ્કૅન થઈ રહ્યાં છે…
+tools-no-installed = કોઈ સાધન ઇન્સ્ટૉલ કરેલું નથી
+tools-empty = મેળ ખાતું કોઈ સાધન નથી
+tools-empty-detail = પૅકેજ ઇન્સ્ટૉલ કરો અથવા Stow-શૈલીનું રૂપરેખાંકન ફાઇલ પૅકેજ ઉમેરો.
+tools-apply = લાગુ કરો
+tools-homebrew = Homebrew
+tools-homebrew-sync = ઇન્સ્ટૉલ કરેલા ફૉર્મ્યુલા અને ઍપ્લિકેશન આપમેળે સમન્વયિત થાય છે.
+tools-open-brewfile = Brewfile ખોલો
+tools-managed = સંચાલિત
+tools-provider-homebrew-formulae = Homebrew ફૉર્મ્યુલા
+tools-provider-homebrew-casks = Homebrew ઍપ્લિકેશન
+tools-provider-npm = npm પૅકેજ
+tools-provider-acp-agents = ACP એજન્ટ
+tools-provider-language-tools = ભાષા સાધનો
+tools-provider-mcp-servers = MCP સર્વર
+tools-provider-dotfiles = રૂપરેખાંકન ફાઇલો
+tools-status-available = ઉપલબ્ધ
+tools-status-missing = ગેરહાજર
+tools-status-conflict = વિરોધાભાસ
+tools-forget = ભૂલી જાઓ
+tools-manage = સંચાલિત કરો
+tools-link = જોડો
+tools-unlink = જોડાણ દૂર કરો
+tools-import = આયાત કરો
+tools-update-count = { $count ->
+    [one] 1 સુધારો
+   *[other] { $count } સુધારા
+}
+tools-conflict-count = { $count ->
+    [one] 1 વિરોધાભાસ
+   *[other] { $count } વિરોધાભાસ
+}
+tools-result-applied = સાધનો લાગુ કરાયા
+tools-result-imported = સાધનો આયાત કરાયા
+tools-result-installed = { $name } ઇન્સ્ટૉલ થયું
+tools-result-updated = { $name } સુધારાયું
+tools-result-uninstalled = { $name } અનઇન્સ્ટૉલ થયું
+tools-result-forgotten = { $name } ભૂલી જવાયું
+tools-result-managed = { $name } હવે સંચાલિત છે
+tools-result-linked = { $name } જોડાયું
+tools-result-unlinked = { $name }નું જોડાણ દૂર થયું
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Git સાથે સેટિંગ, ટૂલ્સ, ડોટફાઈલ્સ અને નોલેજ સિંક કરો.
+vault-sync = સમન્વય
+vault-create = બનાવો
+vault-connect = કનેક્ટ કરો
+vault-private = ખાનગી ભંડાર
+vault-public-warning = સાર્વજનિક ભંડાર તમારા જ્ઞાન અને ગોઠવણીને ઉજાગર કરે છે.
+vault-choose-repository = એક ભંડાર પસંદ કરો...
+vault-empty = ખાલી
+vault-clean = અપ ટુ ડેટ
+vault-not-connected = જોડાયેલ નથી
+vault-change-count = ફેરફારો: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = શરૂ કરો
 start-tagline = એક prompt. કંઈ પણ, તૈયાર.
 

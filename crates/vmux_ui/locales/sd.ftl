@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } شئي
    *[other] { $count } شيون
 }
+
+tools-title = اوزار
+tools-search = پيڪيج، ايجنٽ، MCP، ٻوليءَ جا اوزار ۽ ترتيب جون فائلون ڳوليو…
+tools-open = اوزار کوليو
+tools-fold = اوزار سميٽو
+tools-unfold = اوزار پکيڙيو
+tools-scanning = مقامي اوزار جاچيا پيا وڃن…
+tools-no-installed = ڪوبه اوزار انسٽال ٿيل ناهي
+tools-empty = ڪوبه ملندڙ اوزار ناهي
+tools-empty-detail = پيڪيج انسٽال ڪريو يا Stow طرز جو ترتيب فائلن جو پيڪيج شامل ڪريو.
+tools-apply = لاڳو ڪريو
+tools-homebrew = Homebrew
+tools-homebrew-sync = انسٽال ٿيل فارمولا ۽ ايپليڪيشنون پاڻمرادو هم وقت ٿين ٿيون.
+tools-open-brewfile = Brewfile کوليو
+tools-managed = منظم ٿيل
+tools-provider-homebrew-formulae = Homebrew فارمولا
+tools-provider-homebrew-casks = Homebrew ايپليڪيشنون
+tools-provider-npm = npm پيڪيج
+tools-provider-acp-agents = ACP ايجنٽ
+tools-provider-language-tools = ٻوليءَ جا اوزار
+tools-provider-mcp-servers = MCP سرور
+tools-provider-dotfiles = ترتيب جون فائلون
+tools-status-available = موجود
+tools-status-missing = گم
+tools-status-conflict = ٽڪراءُ
+tools-forget = وساريو
+tools-manage = منظم ڪريو
+tools-link = ڳنڍيو
+tools-unlink = ڳانڍاپو هٽايو
+tools-import = درآمد ڪريو
+tools-update-count = { $count ->
+    [one] 1 تازه‌ڪاري
+   *[other] { $count } تازه‌ڪاريون
+}
+tools-conflict-count = { $count ->
+    [one] 1 ٽڪراءُ
+   *[other] { $count } ٽڪراءَ
+}
+tools-result-applied = اوزار لاڳو ڪيا ويا
+tools-result-imported = اوزار درآمد ڪيا ويا
+tools-result-installed = { $name } انسٽال ٿيو
+tools-result-updated = { $name } تازه ٿيو
+tools-result-uninstalled = { $name } هٽايو ويو
+tools-result-forgotten = { $name } وساريو ويو
+tools-result-managed = { $name } هاڻي منظم آهي
+tools-result-linked = { $name } ڳنڍيو ويو
+tools-result-unlinked = { $name } جو ڳانڍاپو هٽايو ويو
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Git سان سيٽنگون، اوزار، ڊاٽ فائلون، ۽ علم هم وقت سازي ڪريو.
+vault-sync = هم وقت سازي
+vault-create = ٺاهيو
+vault-connect = ڳنڍڻ
+vault-private = خانگي ذخيرو
+vault-public-warning = عوامي ذخيرا توهان جي ڄاڻ ۽ ترتيب کي ظاهر ڪن ٿا.
+vault-choose-repository = هڪ مخزن چونڊيو...
+vault-empty = خالي
+vault-clean = تازه ترين
+vault-not-connected = ڳنڍيل ناهي
+vault-change-count = تبديليون: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع
 start-tagline = هڪ پرامپٽ. هر ڪم، پورو.
 

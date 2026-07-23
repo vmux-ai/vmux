@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } položka
    *[other] { $count } položek
 }
+
+tools-title = Nástroje
+tools-search = Hledat balíčky, agenty, MCP, jazykové nástroje a konfigurační soubory…
+tools-open = Otevřít nástroje
+tools-fold = Sbalit nástroje
+tools-unfold = Rozbalit nástroje
+tools-scanning = Prohledávají se místní nástroje…
+tools-no-installed = Nejsou nainstalované žádné nástroje
+tools-empty = Žádné odpovídající nástroje
+tools-empty-detail = Nainstalujte balíček nebo přidejte balíček konfiguračních souborů ve stylu Stow.
+tools-apply = Použít
+tools-homebrew = Homebrew
+tools-homebrew-sync = Nainstalované formule a aplikace se synchronizují automaticky.
+tools-open-brewfile = Otevřít Brewfile
+tools-managed = spravováno
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplikace Homebrew
+tools-provider-npm = Balíčky npm
+tools-provider-acp-agents = Agenti ACP
+tools-provider-language-tools = Jazykové nástroje
+tools-provider-mcp-servers = Servery MCP
+tools-provider-dotfiles = Konfigurační soubory
+tools-status-available = Dostupné
+tools-status-missing = Chybí
+tools-status-conflict = Konflikt
+tools-forget = Zapomenout
+tools-manage = Spravovat
+tools-link = Propojit
+tools-unlink = Odpojit
+tools-import = Importovat
+tools-update-count = { $count ->
+    [one] 1 aktualizace
+   *[other] { $count } aktualizací
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konfliktů
+}
+tools-result-applied = Nástroje byly použity
+tools-result-imported = Nástroje byly importovány
+tools-result-installed = { $name } byl nainstalován
+tools-result-updated = { $name } byl aktualizován
+tools-result-uninstalled = { $name } byl odinstalován
+tools-result-forgotten = { $name } byl zapomenut
+tools-result-managed = { $name } je nyní spravován
+tools-result-linked = { $name } byl propojen
+tools-result-unlinked = { $name } byl odpojen
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Synchronizujte nastavení, nástroje, dotfiles a znalosti s Git.
+vault-sync = Synchronizovat
+vault-create = Vytvořit
+vault-connect = Připojit
+vault-private = Soukromé úložiště
+vault-public-warning = Veřejná úložiště odhalují vaše znalosti a konfiguraci.
+vault-choose-repository = Vyberte úložiště…
+vault-empty = prázdný
+vault-clean = Aktuální
+vault-not-connected = Nepřipojeno
+vault-change-count = Změny: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Jeden prompt. Hotovo může být cokoli.
 

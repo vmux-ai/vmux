@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } مورد
    *[other] { $count } مورد
 }
+
+tools-title = ابزارها
+tools-search = جست‌وجوی بسته‌ها، عامل‌ها، MCP، ابزارهای زبان و پرونده‌های پیکربندی…
+tools-open = باز کردن ابزارها
+tools-fold = جمع کردن ابزارها
+tools-unfold = باز کردن ابزارها
+tools-scanning = در حال بررسی ابزارهای محلی…
+tools-no-installed = هیچ ابزاری نصب نشده است
+tools-empty = هیچ ابزار منطبقی وجود ندارد
+tools-empty-detail = یک بسته نصب کنید یا بسته‌ای از پرونده‌های پیکربندی به سبک Stow بیفزایید.
+tools-apply = اعمال
+tools-homebrew = Homebrew
+tools-homebrew-sync = فرمول‌ها و برنامه‌های نصب‌شده به‌طور خودکار همگام می‌شوند.
+tools-open-brewfile = باز کردن Brewfile
+tools-managed = مدیریت‌شده
+tools-provider-homebrew-formulae = فرمول‌های Homebrew
+tools-provider-homebrew-casks = برنامه‌های Homebrew
+tools-provider-npm = بسته‌های npm
+tools-provider-acp-agents = عامل‌های ACP
+tools-provider-language-tools = ابزارهای زبان
+tools-provider-mcp-servers = سرورهای MCP
+tools-provider-dotfiles = پرونده‌های پیکربندی
+tools-status-available = در دسترس
+tools-status-missing = موجود نیست
+tools-status-conflict = تداخل
+tools-forget = فراموش کردن
+tools-manage = مدیریت
+tools-link = پیوند دادن
+tools-unlink = برداشتن پیوند
+tools-import = وارد کردن
+tools-update-count = { $count ->
+    [one] ۱ به‌روزرسانی
+   *[other] { $count } به‌روزرسانی
+}
+tools-conflict-count = { $count ->
+    [one] ۱ تداخل
+   *[other] { $count } تداخل
+}
+tools-result-applied = ابزارها اعمال شدند
+tools-result-imported = ابزارها وارد شدند
+tools-result-installed = { $name } نصب شد
+tools-result-updated = { $name } به‌روزرسانی شد
+tools-result-uninstalled = { $name } حذف شد
+tools-result-forgotten = { $name } فراموش شد
+tools-result-managed = { $name } اکنون مدیریت می‌شود
+tools-result-linked = { $name } پیوند داده شد
+tools-result-unlinked = پیوند { $name } برداشته شد
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = تنظیمات، ابزارها، dotfiles و Knowledge را با Git همگام کنید.
+vault-sync = همگام سازی
+vault-create = ایجاد کنید
+vault-connect = اتصال
+vault-private = مخزن خصوصی
+vault-public-warning = مخازن عمومی دانش و پیکربندی شما را آشکار می کنند.
+vault-choose-repository = انتخاب یک مخزن…
+vault-empty = خالی
+vault-clean = به روز
+vault-not-connected = متصل نیست
+vault-change-count = تغییرات: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع
 start-tagline = یک پرامپت. هر کاری، انجام می‌شود.
 

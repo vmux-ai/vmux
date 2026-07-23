@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } artikull
    *[other] { $count } artikuj
 }
+
+tools-title = Mjete
+tools-search = Kërko paketa, agjentë, MCP, mjete gjuhësore dhe skedarë konfigurimi…
+tools-open = Hap Mjetet
+tools-fold = Palos mjetet
+tools-unfold = Shpalos mjetet
+tools-scanning = Po skanohen mjetet vendore…
+tools-no-installed = Nuk ka mjete të instaluara
+tools-empty = Nuk ka mjete që përputhen
+tools-empty-detail = Instaloni një paketë ose shtoni një paketë skedarësh konfigurimi në stilin Stow.
+tools-apply = Zbato
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulat dhe aplikacionet e instaluara sinkronizohen automatikisht.
+tools-open-brewfile = Hap Brewfile
+tools-managed = i menaxhuar
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikacione Homebrew
+tools-provider-npm = Paketa npm
+tools-provider-acp-agents = Agjentë ACP
+tools-provider-language-tools = Mjete gjuhësore
+tools-provider-mcp-servers = Serverë MCP
+tools-provider-dotfiles = Skedarë konfigurimi
+tools-status-available = I disponueshëm
+tools-status-missing = Mungon
+tools-status-conflict = Konflikt
+tools-forget = Harro
+tools-manage = Menaxho
+tools-link = Lidh
+tools-unlink = Shkëput
+tools-import = Importo
+tools-update-count = { $count ->
+    [one] 1 përditësim
+   *[other] { $count } përditësime
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikte
+}
+tools-result-applied = Mjetet u zbatuan
+tools-result-imported = Mjetet u importuan
+tools-result-installed = { $name } u instalua
+tools-result-updated = { $name } u përditësua
+tools-result-uninstalled = { $name } u çinstalua
+tools-result-forgotten = { $name } u harrua
+tools-result-managed = { $name } tani menaxhohet
+tools-result-linked = { $name } u lidh
+tools-result-unlinked = { $name } u shkëput
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sinkronizoni cilësimet, veglat, skedarët me pika dhe njohuritë me Git.
+vault-sync = Sinkronizimi
+vault-create = Krijo
+vault-connect = Lidheni
+vault-private = Depo private
+vault-public-warning = Depot publike ekspozojnë njohuritë dhe konfigurimin tuaj.
+vault-choose-repository = Zgjidhni një depo…
+vault-empty = bosh
+vault-clean = Të përditësuar
+vault-not-connected = Nuk është i lidhur
+vault-change-count = Ndryshimet: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Fillo
 start-tagline = Një prompt. Çdo gjë, e kryer.
 

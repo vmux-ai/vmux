@@ -1,7 +1,7 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentAttachment, ClientMessage, ProcessId, ServiceMessage, compose_agent_prompt,
-    validate_agent_command,
+    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    ServiceMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
 use std::collections::HashMap;
@@ -37,6 +37,41 @@ type PendingCommands = Arc<
         >,
     >,
 >;
+
+fn to_acp_mcp_server(
+    server: ManagedMcpServer,
+) -> Option<agent_client_protocol::schema::v1::McpServer> {
+    use agent_client_protocol::schema::v1::{
+        EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
+    };
+
+    let headers = server
+        .headers
+        .into_iter()
+        .map(|(name, value)| HttpHeader::new(name, value))
+        .collect();
+    match server.transport {
+        ManagedMcpTransport::Stdio => server.command.map(|command| {
+            McpServer::Stdio(
+                McpServerStdio::new(server.name, command)
+                    .args(server.args)
+                    .env(
+                        server
+                            .env
+                            .into_iter()
+                            .map(|(name, value)| EnvVariable::new(name, value))
+                            .collect(),
+                    ),
+            )
+        }),
+        ManagedMcpTransport::Http => server
+            .url
+            .map(|url| McpServer::Http(McpServerHttp::new(server.name, url).headers(headers))),
+        ManagedMcpTransport::Sse => server
+            .url
+            .map(|url| McpServer::Sse(McpServerSse::new(server.name, url).headers(headers))),
+    }
+}
 
 fn page_agent_prompt(text: String, attachments: &[AgentAttachment]) -> String {
     if attachments.is_empty() {
@@ -937,8 +972,9 @@ async fn handle_client(
                 mcp_command,
                 mcp_args,
                 resume_acp_session_id,
+                managed_mcp_servers,
             } => {
-                let mcp_servers = mcp_command
+                let mut mcp_servers = mcp_command
                     .map(|cmd| {
                         vec![agent_client_protocol::schema::v1::McpServer::Stdio(
                             agent_client_protocol::schema::v1::McpServerStdio::new(
@@ -949,6 +985,11 @@ async fn handle_client(
                         )]
                     })
                     .unwrap_or_default();
+                mcp_servers.extend(
+                    managed_mcp_servers
+                        .into_iter()
+                        .filter_map(to_acp_mcp_server),
+                );
                 acp_manager.lock().await.spawn(
                     sid.clone(),
                     agent_id,

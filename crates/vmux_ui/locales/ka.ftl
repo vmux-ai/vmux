@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ელემენტი
    *[other] { $count } ელემენტი
 }
+
+tools-title = ხელსაწყოები
+tools-search = პაკეტების, აგენტების, MCP-ის, ენის ხელსაწყოებისა და კონფიგურაციის ფაილების ძიება…
+tools-open = ხელსაწყოების გახსნა
+tools-fold = ხელსაწყოების აკეცვა
+tools-unfold = ხელსაწყოების გაშლა
+tools-scanning = ადგილობრივი ხელსაწყოების სკანირება…
+tools-no-installed = დაინსტალირებული ხელსაწყოები არ არის
+tools-empty = შესაბამისი ხელსაწყოები არ არის
+tools-empty-detail = დააინსტალირეთ პაკეტი ან დაამატეთ Stow-ის სტილის კონფიგურაციის ფაილების პაკეტი.
+tools-apply = გამოყენება
+tools-homebrew = Homebrew
+tools-homebrew-sync = დაინსტალირებული ფორმულები და პროგრამები ავტომატურად სინქრონდება.
+tools-open-brewfile = Brewfile-ის გახსნა
+tools-managed = მართული
+tools-provider-homebrew-formulae = Homebrew-ის ფორმულები
+tools-provider-homebrew-casks = Homebrew-ის პროგრამები
+tools-provider-npm = npm-ის პაკეტები
+tools-provider-acp-agents = ACP-ის აგენტები
+tools-provider-language-tools = ენის ხელსაწყოები
+tools-provider-mcp-servers = MCP-ის სერვერები
+tools-provider-dotfiles = კონფიგურაციის ფაილები
+tools-status-available = ხელმისაწვდომია
+tools-status-missing = აკლია
+tools-status-conflict = კონფლიქტი
+tools-forget = დავიწყება
+tools-manage = მართვა
+tools-link = დაკავშირება
+tools-unlink = კავშირის გაუქმება
+tools-import = იმპორტი
+tools-update-count = { $count ->
+    [one] 1 განახლება
+   *[other] { $count } განახლება
+}
+tools-conflict-count = { $count ->
+    [one] 1 კონფლიქტი
+   *[other] { $count } კონფლიქტი
+}
+tools-result-applied = ხელსაწყოები გამოყენებულია
+tools-result-imported = ხელსაწყოები იმპორტირებულია
+tools-result-installed = { $name } დაინსტალირდა
+tools-result-updated = { $name } განახლდა
+tools-result-uninstalled = { $name } წაიშალა
+tools-result-forgotten = { $name } დავიწყებულია
+tools-result-managed = { $name } ახლა იმართება
+tools-result-linked = { $name } დაკავშირებულია
+tools-result-unlinked = { $name }-თან კავშირი გაუქმებულია
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = პარამეტრების, ხელსაწყოების, dotfiles და Knowledge სინქრონიზაცია Git-თან.
+vault-sync = სინქრონიზაცია
+vault-create = შექმნა
+vault-connect = დაკავშირება
+vault-private = პირადი საცავი
+vault-public-warning = საჯარო საცავი ავლენს თქვენს ცოდნას და კონფიგურაციას.
+vault-choose-repository = აირჩიეთ საცავი…
+vault-empty = ცარიელი
+vault-clean = განახლებული
+vault-not-connected = არ არის დაკავშირებული
+vault-change-count = ცვლილებები: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = დაწყება
 start-tagline = ერთი პრომპტი. ყველაფერი მზად.
 

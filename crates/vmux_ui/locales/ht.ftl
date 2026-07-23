@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } atik
    *[other] { $count } atik
 }
+
+tools-title = Zouti
+tools-search = Chèche pakè, ajan, MCP, zouti lang ak fichye konfigirasyon…
+tools-open = Louvri Zouti
+tools-fold = Pliye zouti yo
+tools-unfold = Depliye zouti yo
+tools-scanning = Ap analize zouti lokal yo…
+tools-no-installed = Pa gen zouti ki enstale
+tools-empty = Pa gen zouti ki koresponn
+tools-empty-detail = Enstale yon pakè oswa ajoute yon pakè fichye konfigirasyon nan estil Stow.
+tools-apply = Aplike
+tools-homebrew = Homebrew
+tools-homebrew-sync = Fòmil ak aplikasyon ki enstale yo senkronize otomatikman.
+tools-open-brewfile = Louvri Brewfile
+tools-managed = jere
+tools-provider-homebrew-formulae = Fòmil Homebrew
+tools-provider-homebrew-casks = Aplikasyon Homebrew
+tools-provider-npm = Pakè npm
+tools-provider-acp-agents = Ajan ACP
+tools-provider-language-tools = Zouti lang
+tools-provider-mcp-servers = Sèvè MCP
+tools-provider-dotfiles = Fichye konfigirasyon
+tools-status-available = Disponib
+tools-status-missing = Manke
+tools-status-conflict = Konfli
+tools-forget = Bliye
+tools-manage = Jere
+tools-link = Lye
+tools-unlink = Delye
+tools-import = Enpòte
+tools-update-count = { $count ->
+    [one] 1 mizajou
+   *[other] { $count } mizajou
+}
+tools-conflict-count = { $count ->
+    [one] 1 konfli
+   *[other] { $count } konfli
+}
+tools-result-applied = Zouti yo aplike
+tools-result-imported = Zouti yo enpòte
+tools-result-installed = { $name } enstale
+tools-result-updated = { $name } mete ajou
+tools-result-uninstalled = { $name } dezenstale
+tools-result-forgotten = { $name } bliye
+tools-result-managed = { $name } jere kounye a
+tools-result-linked = { $name } lye
+tools-result-unlinked = { $name } delye
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Anviwònman senkronize, zouti, fichye pwen, ak Konesans ak Git.
+vault-sync = Senkronize
+vault-create = Kreye
+vault-connect = Konekte
+vault-private = Depo prive
+vault-public-warning = Repozitwa piblik yo ekspoze Konesans ou ak konfigirasyon ou.
+vault-choose-repository = Chwazi yon depo...
+vault-empty = vid
+vault-clean = Jiska dat
+vault-not-connected = Pa konekte
+vault-change-count = Chanjman: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Kòmanse
 start-tagline = Yon sèl enstriksyon. Tout bagay fèt.
 

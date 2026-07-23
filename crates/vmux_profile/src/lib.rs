@@ -1,5 +1,10 @@
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod tools;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod vault;
+
 pub const fn build_profile() -> &'static str {
     env!("VMUX_BUILD_PROFILE")
 }
@@ -49,10 +54,7 @@ fn capitalize_first(s: &str) -> String {
 }
 
 fn display_name_path() -> PathBuf {
-    config_dir()
-        .join("profiles")
-        .join(active_profile_name())
-        .join("display_name")
+    profile_dir().join("display_name")
 }
 
 fn display_name_from(configured: Option<&str>, id: &str, is_test: bool) -> String {
@@ -107,6 +109,14 @@ pub fn shared_data_dir() -> PathBuf {
     }
 }
 
+pub fn application_data_dir() -> PathBuf {
+    let data = shared_data_dir();
+    match build_profile() {
+        "release" | "local" => data,
+        _ => data.parent().map(PathBuf::from).unwrap_or(data),
+    }
+}
+
 /// User config directory: `~/.vmux`. Holds `settings.ron` (and per-build
 /// overrides), separate from the profile-isolated [`shared_data_dir`].
 pub fn config_dir() -> PathBuf {
@@ -116,15 +126,15 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
-/// Default output directory for screenshots and screen recordings:
-/// `~/.vmux/profiles/<profile>/recording`. Overridable via the
+/// Default output directory for screenshots and screen recordings below the
+/// active runtime profile. Overridable via the
 /// `recording.output_dir` setting.
-fn recording_dir_for(config: &std::path::Path, profile: &str) -> PathBuf {
-    config.join("profiles").join(profile).join("recording")
+fn recording_dir_for(data: &std::path::Path, profile: &str) -> PathBuf {
+    data.join("profiles").join(profile).join("recording")
 }
 
 pub fn recording_dir() -> PathBuf {
-    recording_dir_for(&config_dir(), &active_profile_name())
+    recording_dir_for(&shared_data_dir(), &active_profile_name())
 }
 
 /// Per-build config subdir, or `None` for the shared (release) settings.
@@ -221,13 +231,29 @@ pub fn store_dir() -> PathBuf {
     dir
 }
 
-fn spaces_root_for(home: &std::path::Path, _profile: &str) -> PathBuf {
-    home.join(".vmux").join("spaces")
+fn managed_dir(name: &str) -> PathBuf {
+    application_data_dir().join(name)
+}
+
+pub fn agents_dir() -> PathBuf {
+    managed_dir("agents")
+}
+
+pub fn extensions_dir() -> PathBuf {
+    managed_dir("extensions")
+}
+
+pub fn lsp_dir() -> PathBuf {
+    managed_dir("lsp")
+}
+
+fn spaces_root_for(data: &std::path::Path, _profile: &str) -> PathBuf {
+    data.join("spaces")
 }
 
 #[cfg(test)]
-fn space_dir_path(home: &std::path::Path, profile: &str, space_id: &str) -> PathBuf {
-    spaces_root_for(home, profile).join(space_id)
+fn space_dir_path(data: &std::path::Path, profile: &str, space_id: &str) -> PathBuf {
+    spaces_root_for(data, profile).join(space_id)
 }
 
 fn home_dir() -> PathBuf {
@@ -255,8 +281,8 @@ fn collect_subdirs(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn prune_empty_legacy_space_dirs_in(home: &std::path::Path) {
-    let root = spaces_root_for(home, "personal");
+fn prune_empty_legacy_space_dirs_in(data: &std::path::Path) {
+    let root = spaces_root_for(data, "personal");
     if root
         .symlink_metadata()
         .is_ok_and(|metadata| metadata.file_type().is_symlink())
@@ -276,36 +302,78 @@ fn prune_empty_legacy_space_dirs_in(home: &std::path::Path) {
 }
 
 fn migrate_dir(legacy: &std::path::Path, target: &std::path::Path) {
-    if !legacy.exists() || target.exists() {
+    let Ok(legacy_metadata) = legacy.symlink_metadata() else {
+        return;
+    };
+    if target.symlink_metadata().is_err() {
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::rename(legacy, target);
         return;
     }
-    if let Some(parent) = target.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if !legacy_metadata.file_type().is_dir()
+        || !target
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.file_type().is_dir())
+    {
+        return;
     }
-    let _ = std::fs::rename(legacy, target);
+    let Ok(entries) = std::fs::read_dir(legacy) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        migrate_dir(&entry.path(), &target.join(entry.file_name()));
+    }
+    let _ = std::fs::remove_dir(legacy);
 }
 
-fn migrate_legacy_personal_layout_in(home: &std::path::Path) {
+fn migrate_legacy_personal_layout_in(
+    home: &std::path::Path,
+    data: &std::path::Path,
+    managed_data: &std::path::Path,
+) {
     let config = home.join(".vmux");
     migrate_dir(
         &config.join("profiles").join("personal").join("spaces"),
-        &spaces_root_for(home, "personal"),
+        &spaces_root_for(data, "personal"),
     );
+    migrate_dir(&config.join("spaces"), &spaces_root_for(data, "personal"));
     migrate_dir(
         &config.join("recording"),
-        &recording_dir_for(&config, "personal"),
+        &recording_dir_for(data, "personal"),
     );
+    for name in ["agents", "extensions", "lsp"] {
+        migrate_dir(&config.join(name), &managed_data.join(name));
+    }
+    if let Ok(profiles) = std::fs::read_dir(config.join("profiles")) {
+        for profile in profiles.flatten() {
+            if profile
+                .file_type()
+                .is_ok_and(|file_type| file_type.is_dir())
+            {
+                migrate_dir(
+                    &profile.path(),
+                    &data.join("profiles").join(profile.file_name()),
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(config.join("profiles"));
 }
 
-/// Relocate legacy profile data and remove empty directories from the retired
-/// filesystem-backed spaces layout. Skipped for test sessions.
+/// Relocate generated profile and managed-package data out of the Vault and
+/// remove empty directories from the retired filesystem-backed spaces layout.
+/// Skipped for test sessions.
 pub fn migrate_legacy_personal_layout() {
     if is_test_session() {
         return;
     }
     let home = home_dir();
-    migrate_legacy_personal_layout_in(&home);
-    prune_empty_legacy_space_dirs_in(&home);
+    let data = shared_data_dir();
+    let managed_data = application_data_dir();
+    migrate_legacy_personal_layout_in(&home, &data, &managed_data);
+    prune_empty_legacy_space_dirs_in(&data);
 }
 
 #[cfg(test)]
@@ -315,16 +383,16 @@ mod tests {
     #[test]
     fn recording_dir_is_nested_under_profile() {
         assert_eq!(
-            recording_dir_for(std::path::Path::new("/home/u/.vmux"), "personal"),
-            PathBuf::from("/home/u/.vmux/profiles/personal/recording")
+            recording_dir_for(std::path::Path::new("/data/Vmux"), "personal"),
+            PathBuf::from("/data/Vmux/profiles/personal/recording")
         );
     }
 
     #[test]
     fn recording_dir_test_profile_is_nested() {
         assert_eq!(
-            recording_dir_for(std::path::Path::new("/home/u/.vmux"), "test"),
-            PathBuf::from("/home/u/.vmux/profiles/test/recording")
+            recording_dir_for(std::path::Path::new("/data/Vmux"), "test"),
+            PathBuf::from("/data/Vmux/profiles/test/recording")
         );
     }
 
@@ -379,14 +447,14 @@ mod tests {
 
     #[test]
     fn spaces_root_is_profile_agnostic() {
-        let home = std::path::Path::new("/home/u");
+        let data = std::path::Path::new("/data/Vmux");
         assert_eq!(
-            spaces_root_for(home, "personal"),
-            PathBuf::from("/home/u/.vmux/spaces")
+            spaces_root_for(data, "personal"),
+            PathBuf::from("/data/Vmux/spaces")
         );
         assert_eq!(
-            spaces_root_for(home, "gregor"),
-            PathBuf::from("/home/u/.vmux/spaces")
+            spaces_root_for(data, "gregor"),
+            PathBuf::from("/data/Vmux/spaces")
         );
     }
 
@@ -449,16 +517,30 @@ mod tests {
     }
 
     #[test]
+    fn managed_data_uses_build_agnostic_application_support_root() {
+        let shared = shared_data_dir();
+        let managed = application_data_dir();
+        assert!(shared.starts_with(&managed));
+        if matches!(build_profile(), "release" | "local") {
+            assert_eq!(shared, managed);
+        } else {
+            assert_eq!(shared.parent(), Some(managed.as_path()));
+        }
+    }
+
+    #[test]
     fn space_dir_is_under_vmux_spaces() {
         assert_eq!(
-            space_dir_path(std::path::Path::new("/home/u"), "personal", "work"),
-            PathBuf::from("/home/u/.vmux/spaces/work")
+            space_dir_path(std::path::Path::new("/data/Vmux"), "personal", "work"),
+            PathBuf::from("/data/Vmux/spaces/work")
         );
     }
 
     #[test]
     fn migrate_relocates_nested_spaces_and_recording() {
         let home = std::env::temp_dir().join(format!("vmux-migrate-{}", std::process::id()));
+        let managed_data = home.join("data/Vmux");
+        let data = managed_data.join("dev");
         let _ = std::fs::remove_dir_all(&home);
         let nested_space = home
             .join(".vmux")
@@ -471,11 +553,17 @@ mod tests {
         let legacy_rec = home.join(".vmux").join("recording");
         std::fs::create_dir_all(&legacy_rec).unwrap();
         std::fs::write(legacy_rec.join("a.mp4"), b"y").unwrap();
+        let agents = home.join(".vmux/agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        std::fs::write(agents.join("registry.json"), b"{}").unwrap();
+        let gregor = home.join(".vmux/profiles/gregor/recording");
+        std::fs::create_dir_all(&gregor).unwrap();
+        std::fs::write(gregor.join("b.mp4"), b"z").unwrap();
 
-        migrate_legacy_personal_layout_in(&home);
+        migrate_legacy_personal_layout_in(&home, &data, &managed_data);
 
         assert!(
-            space_dir_path(&home, "personal", "space-1")
+            space_dir_path(&data, "personal", "space-1")
                 .join("space.ron")
                 .exists()
         );
@@ -488,17 +576,17 @@ mod tests {
                 .exists()
         );
         assert!(!legacy_rec.exists());
-        assert!(
-            recording_dir_for(&home.join(".vmux"), "personal")
-                .join("a.mp4")
-                .exists()
-        );
+        assert!(recording_dir_for(&data, "personal").join("a.mp4").exists());
+        assert!(managed_data.join("agents/registry.json").exists());
+        assert!(data.join("profiles/gregor/recording/b.mp4").exists());
+        assert!(!home.join(".vmux/profiles").exists());
         let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
     fn migrate_keeps_existing_agnostic_spaces() {
         let home = std::env::temp_dir().join(format!("vmux-migrate-noop-{}", std::process::id()));
+        let data = home.join("data/Vmux");
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(
             home.join(".vmux")
@@ -507,11 +595,11 @@ mod tests {
                 .join("spaces"),
         )
         .unwrap();
-        let target = spaces_root_for(&home, "personal");
+        let target = spaces_root_for(&data, "personal");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("keep.txt"), b"keep").unwrap();
 
-        migrate_legacy_personal_layout_in(&home);
+        migrate_legacy_personal_layout_in(&home, &data, &data);
 
         assert!(target.join("keep.txt").exists());
         let _ = std::fs::remove_dir_all(&home);
@@ -520,22 +608,23 @@ mod tests {
     #[test]
     fn cleanup_removes_empty_legacy_space_dirs_and_preserves_files() {
         let home = std::env::temp_dir().join(format!("vmux-prune-{}", std::process::id()));
+        let data = home.join("data/Vmux");
         let _ = std::fs::remove_dir_all(&home);
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "org/empty")).unwrap();
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "solo")).unwrap();
-        std::fs::create_dir_all(space_dir_path(&home, "personal", "keep")).unwrap();
+        std::fs::create_dir_all(space_dir_path(&data, "personal", "org/empty")).unwrap();
+        std::fs::create_dir_all(space_dir_path(&data, "personal", "solo")).unwrap();
+        std::fs::create_dir_all(space_dir_path(&data, "personal", "keep")).unwrap();
         std::fs::write(
-            space_dir_path(&home, "personal", "keep").join("f.txt"),
+            space_dir_path(&data, "personal", "keep").join("f.txt"),
             b"x",
         )
         .unwrap();
 
-        prune_empty_legacy_space_dirs_in(&home);
+        prune_empty_legacy_space_dirs_in(&data);
 
-        assert!(!space_dir_path(&home, "personal", "org/empty").exists());
-        assert!(!space_dir_path(&home, "personal", "org").exists());
-        assert!(!space_dir_path(&home, "personal", "solo").exists());
-        assert!(space_dir_path(&home, "personal", "keep").is_dir());
+        assert!(!space_dir_path(&data, "personal", "org/empty").exists());
+        assert!(!space_dir_path(&data, "personal", "org").exists());
+        assert!(!space_dir_path(&data, "personal", "solo").exists());
+        assert!(space_dir_path(&data, "personal", "keep").is_dir());
         let _ = std::fs::remove_dir_all(&home);
     }
     #[test]

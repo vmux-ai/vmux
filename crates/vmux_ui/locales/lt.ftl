@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } elementas
    *[other] { $count } elementai
 }
+
+tools-title = Įrankiai
+tools-search = Ieškoti paketų, agentų, MCP, kalbos įrankių ir konfigūracijos failų…
+tools-open = Atverti įrankius
+tools-fold = Suskleisti įrankius
+tools-unfold = Išskleisti įrankius
+tools-scanning = Tikrinami vietiniai įrankiai…
+tools-no-installed = Nėra įdiegtų įrankių
+tools-empty = Nėra atitinkančių įrankių
+tools-empty-detail = Įdiekite paketą arba pridėkite Stow stiliaus konfigūracijos failų paketą.
+tools-apply = Taikyti
+tools-homebrew = Homebrew
+tools-homebrew-sync = Įdiegtos formulės ir programos sinchronizuojamos automatiškai.
+tools-open-brewfile = Atverti Brewfile
+tools-managed = valdomas
+tools-provider-homebrew-formulae = Homebrew formulės
+tools-provider-homebrew-casks = Homebrew programos
+tools-provider-npm = npm paketai
+tools-provider-acp-agents = ACP agentai
+tools-provider-language-tools = Kalbos įrankiai
+tools-provider-mcp-servers = MCP serveriai
+tools-provider-dotfiles = Konfigūracijos failai
+tools-status-available = Pasiekiamas
+tools-status-missing = Trūksta
+tools-status-conflict = Konfliktas
+tools-forget = Pamiršti
+tools-manage = Valdyti
+tools-link = Susieti
+tools-unlink = Atsieti
+tools-import = Importuoti
+tools-update-count = { $count ->
+    [one] 1 naujinimas
+   *[other] { $count } naujinimų
+}
+tools-conflict-count = { $count ->
+    [one] 1 konfliktas
+   *[other] { $count } konfliktų
+}
+tools-result-applied = Įrankiai pritaikyti
+tools-result-imported = Įrankiai importuoti
+tools-result-installed = { $name } įdiegtas
+tools-result-updated = { $name } atnaujintas
+tools-result-uninstalled = { $name } pašalintas
+tools-result-forgotten = { $name } pamirštas
+tools-result-managed = { $name } dabar valdomas
+tools-result-linked = { $name } susietas
+tools-result-unlinked = { $name } atsietas
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sinchronizuokite nustatymus, įrankius, taškinius failus ir žinias su „Git“.
+vault-sync = Sinchronizuoti
+vault-create = Sukurti
+vault-connect = Prisijunkite
+vault-private = Privati ​​saugykla
+vault-public-warning = Viešosios saugyklos atskleidžia jūsų žinias ir konfigūraciją.
+vault-choose-repository = Pasirinkite saugyklą…
+vault-empty = tuščias
+vault-clean = Naujausia
+vault-not-connected = Neprisijungęs
+vault-change-count = Pakeitimai: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Pradžia
 start-tagline = Viena užklausa. Viskas atlikta.
 

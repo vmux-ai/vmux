@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Mga himan
+tools-search = Pangitaa ang mga pakete, ahente, MCP, himan sa pinulongan ug mga file sa kumpigurasyon…
+tools-open = Ablihi ang mga himan
+tools-fold = Piloa ang mga himan
+tools-unfold = Buklara ang mga himan
+tools-scanning = Gi-scan ang lokal nga mga himan…
+tools-no-installed = Walay naka-install nga himan
+tools-empty = Walay katugbang nga himan
+tools-empty-detail = Pag-install og pakete o pagdugang og pakete sa mga file sa kumpigurasyon nga estilo sa Stow.
+tools-apply = Ipadapat
+tools-homebrew = Homebrew
+tools-homebrew-sync = Awtomatikong ma-synchronize ang naka-install nga mga pormula ug aplikasyon.
+tools-open-brewfile = Ablihi ang Brewfile
+tools-managed = gidumala
+tools-provider-homebrew-formulae = Mga pormula sa Homebrew
+tools-provider-homebrew-casks = Mga aplikasyon sa Homebrew
+tools-provider-npm = Mga pakete sa npm
+tools-provider-acp-agents = Mga ahente sa ACP
+tools-provider-language-tools = Mga himan sa pinulongan
+tools-provider-mcp-servers = Mga server sa MCP
+tools-provider-dotfiles = Mga file sa kumpigurasyon
+tools-status-available = Anaa
+tools-status-missing = Wala
+tools-status-conflict = Panagsumpaki
+tools-forget = Kalimti
+tools-manage = Dumala
+tools-link = I-link
+tools-unlink = Tangtanga ang link
+tools-import = I-import
+tools-update-count = { $count ->
+    [one] 1 ka update
+   *[other] { $count } ka update
+}
+tools-conflict-count = { $count ->
+    [one] 1 ka panagsumpaki
+   *[other] { $count } ka panagsumpaki
+}
+tools-result-applied = Gipadapat ang mga himan
+tools-result-imported = Gi-import ang mga himan
+tools-result-installed = Gi-install ang { $name }
+tools-result-updated = Gi-update ang { $name }
+tools-result-uninstalled = Gi-uninstall ang { $name }
+tools-result-forgotten = Gikalimtan ang { $name }
+tools-result-managed = Gidumala na ang { $name }
+tools-result-linked = Gi-link ang { $name }
+tools-result-unlinked = Gitangtang ang link sa { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = I-sync ang mga setting, himan, dotfile, ug Kahibalo gamit ang Git.
+vault-sync = Pag-sync
+vault-create = Paghimo
+vault-connect = Sumpaysumpaya
+vault-private = Pribado nga repositoryo
+vault-public-warning = Ang mga publikong repositoryo nagbutyag sa imong Kahibalo ug configuration.
+vault-choose-repository = Pagpili og repository…
+vault-empty = walay sulod
+vault-clean = Hangtod karon
+vault-not-connected = Dili konektado
+vault-change-count = Mga kausaban: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Sugod
 start-tagline = Usa ka prompt. Bisan unsa, mahuman.
 

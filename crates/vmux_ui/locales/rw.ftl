@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] ikintu { $count }
    *[other] ibintu { $count }
 }
+
+tools-title = Ibikoresho
+tools-search = Shakisha amapaki, abakozi, MCP, ibikoresho by’indimi n’amadosiye y’imiterere…
+tools-open = Fungura ibikoresho
+tools-fold = Hina ibikoresho
+tools-unfold = Rambura ibikoresho
+tools-scanning = Gusuzuma ibikoresho byo kuri mudasobwa…
+tools-no-installed = Nta bikoresho byashyizwemo
+tools-empty = Nta bikoresho bihuye
+tools-empty-detail = Shyiramo ipaki cyangwa wongereho ipaki y’amadosiye y’imiterere imeze nka Stow.
+tools-apply = Koresha
+tools-homebrew = Homebrew
+tools-homebrew-sync = Amabwiriza na porogaramu byashyizwemo bihuza byikora.
+tools-open-brewfile = Fungura Brewfile
+tools-managed = gicungwa
+tools-provider-homebrew-formulae = Amabwiriza ya Homebrew
+tools-provider-homebrew-casks = Porogaramu za Homebrew
+tools-provider-npm = Amapaki ya npm
+tools-provider-acp-agents = Abakozi ba ACP
+tools-provider-language-tools = Ibikoresho by’indimi
+tools-provider-mcp-servers = Seriveri za MCP
+tools-provider-dotfiles = Amadosiye y’imiterere
+tools-status-available = Kirahari
+tools-status-missing = Kirabuze
+tools-status-conflict = Ukudahuza
+tools-forget = Ibagiwe
+tools-manage = Gucunga
+tools-link = Huza
+tools-unlink = Tandukanya
+tools-import = Zana
+tools-update-count = { $count ->
+    [one] Ivugurura 1
+   *[other] Amavugurura { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ukudahuza 1
+   *[other] Ukudahuza { $count }
+}
+tools-result-applied = Ibikoresho byakoreshejwe
+tools-result-imported = Ibikoresho byazanywe
+tools-result-installed = { $name } yashyizwemo
+tools-result-updated = { $name } yavuguruwe
+tools-result-uninstalled = { $name } yakuweho
+tools-result-forgotten = { $name } yibagiranye
+tools-result-managed = { $name } ubu iracungwa
+tools-result-linked = { $name } yahujwe
+tools-result-unlinked = { $name } yatandukanyijwe
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Guhuza igenamiterere, ibikoresho, utudomo, nubumenyi hamwe na Git.
+vault-sync = Guhuza
+vault-create = Kurema
+vault-connect = Ihuze
+vault-private = Ububiko bwite
+vault-public-warning = Ububiko rusange bugaragaza Ubumenyi bwawe niboneza.
+vault-choose-repository = Hitamo ububiko…
+vault-empty = ubusa
+vault-clean = Kugeza ubu
+vault-not-connected = Ntabwo bihujwe
+vault-change-count = Impinduka: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tangira
 start-tagline = Prompt imwe. Ibyo ushaka, birakorwa.
 

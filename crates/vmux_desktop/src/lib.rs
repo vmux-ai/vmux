@@ -46,6 +46,7 @@ mod recording;
 mod relaunch;
 #[cfg(feature = "screenshots")]
 mod screenshot;
+mod tools;
 
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod splash;
@@ -150,6 +151,7 @@ impl Plugin for VmuxPlugin {
                 vmux_team::TeamPlugin,
                 vmux_history::HistoryPlugin,
                 vmux_knowledge::KnowledgePlugin,
+                tools::ToolsPlugin,
                 vmux_agent::AgentChatPagePlugin,
                 vmux_agent::AgentsManagerPlugin,
                 vmux_agent::AgentSetupPlugin,

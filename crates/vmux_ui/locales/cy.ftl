@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } eitem
    *[other] { $count } eitem
 }
+
+tools-title = Offer
+tools-search = Chwilio pecynnau, asiantau, MCP, offer iaith a ffeiliau ffurfweddu…
+tools-open = Agor Offer
+tools-fold = Plygu’r offer
+tools-unfold = Dadblygu’r offer
+tools-scanning = Wrthi’n sganio offer lleol…
+tools-no-installed = Dim offer wedi’u gosod
+tools-empty = Dim offer sy’n cyfateb
+tools-empty-detail = Gosodwch becyn neu ychwanegwch becyn ffeiliau ffurfweddu arddull Stow.
+tools-apply = Gweithredu
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mae fformiwlâu a rhaglenni sydd wedi’u gosod yn cysoni’n awtomatig.
+tools-open-brewfile = Agor Brewfile
+tools-managed = dan reolaeth
+tools-provider-homebrew-formulae = Fformiwlâu Homebrew
+tools-provider-homebrew-casks = Rhaglenni Homebrew
+tools-provider-npm = Pecynnau npm
+tools-provider-acp-agents = Asiantau ACP
+tools-provider-language-tools = Offer iaith
+tools-provider-mcp-servers = Gweinyddion MCP
+tools-provider-dotfiles = Ffeiliau ffurfweddu
+tools-status-available = Ar gael
+tools-status-missing = Ar goll
+tools-status-conflict = Gwrthdaro
+tools-forget = Anghofio
+tools-manage = Rheoli
+tools-link = Cysylltu
+tools-unlink = Datgysylltu
+tools-import = Mewnforio
+tools-update-count = { $count ->
+    [one] 1 diweddariad
+   *[other] { $count } diweddariad
+}
+tools-conflict-count = { $count ->
+    [one] 1 gwrthdaro
+   *[other] { $count } gwrthdaro
+}
+tools-result-applied = Offer wedi’u gweithredu
+tools-result-imported = Offer wedi’u mewnforio
+tools-result-installed = Mae { $name } wedi’i osod
+tools-result-updated = Mae { $name } wedi’i ddiweddaru
+tools-result-uninstalled = Mae { $name } wedi’i ddadosod
+tools-result-forgotten = Mae { $name } wedi’i anghofio
+tools-result-managed = Mae { $name } bellach dan reolaeth
+tools-result-linked = Mae { $name } wedi’i gysylltu
+tools-result-unlinked = Mae { $name } wedi’i ddatgysylltu
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Gosodiadau cysoni, offer, dotfiles, a Gwybodaeth gyda Git.
+vault-sync = Cysoni
+vault-create = Creu
+vault-connect = Cyswllt
+vault-private = Ystorfa breifat
+vault-public-warning = Mae cadwrfeydd cyhoeddus yn datgelu eich Gwybodaeth a'ch ffurfwedd.
+vault-choose-repository = Dewiswch ystorfa…
+vault-empty = gwag
+vault-clean = Yn gyfoes
+vault-not-connected = Heb ei gysylltu
+vault-change-count = Newidiadau: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Cychwyn
 start-tagline = Un prompt. Popeth wedi’i wneud.
 

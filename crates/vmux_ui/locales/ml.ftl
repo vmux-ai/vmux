@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ഇനം
    *[other] { $count } ഇനങ്ങൾ
 }
+
+tools-title = ഉപകരണങ്ങൾ
+tools-search = പാക്കേജുകൾ, ഏജന്റുകൾ, MCP, ഭാഷാ ഉപകരണങ്ങൾ, ക്രമീകരണ ഫയലുകൾ എന്നിവ തിരയുക…
+tools-open = ഉപകരണങ്ങൾ തുറക്കുക
+tools-fold = ഉപകരണങ്ങൾ മടക്കുക
+tools-unfold = ഉപകരണങ്ങൾ വികസിപ്പിക്കുക
+tools-scanning = പ്രാദേശിക ഉപകരണങ്ങൾ സ്കാൻ ചെയ്യുന്നു…
+tools-no-installed = ഇൻസ്റ്റാൾ ചെയ്ത ഉപകരണങ്ങളൊന്നുമില്ല
+tools-empty = പൊരുത്തപ്പെടുന്ന ഉപകരണങ്ങളൊന്നുമില്ല
+tools-empty-detail = ഒരു പാക്കേജ് ഇൻസ്റ്റാൾ ചെയ്യുക അല്ലെങ്കിൽ Stow രീതിയിലുള്ള ക്രമീകരണ ഫയൽ പാക്കേജ് ചേർക്കുക.
+tools-apply = പ്രയോഗിക്കുക
+tools-homebrew = Homebrew
+tools-homebrew-sync = ഇൻസ്റ്റാൾ ചെയ്ത ഫോർമുലകളും ആപ്പുകളും സ്വയമേവ സമന്വയിപ്പിക്കും.
+tools-open-brewfile = Brewfile തുറക്കുക
+tools-managed = നിയന്ത്രിക്കുന്നത്
+tools-provider-homebrew-formulae = Homebrew ഫോർമുലകൾ
+tools-provider-homebrew-casks = Homebrew ആപ്പുകൾ
+tools-provider-npm = npm പാക്കേജുകൾ
+tools-provider-acp-agents = ACP ഏജന്റുകൾ
+tools-provider-language-tools = ഭാഷാ ഉപകരണങ്ങൾ
+tools-provider-mcp-servers = MCP സെർവറുകൾ
+tools-provider-dotfiles = ക്രമീകരണ ഫയലുകൾ
+tools-status-available = ലഭ്യം
+tools-status-missing = കാണാനില്ല
+tools-status-conflict = വൈരുദ്ധ്യം
+tools-forget = മറക്കുക
+tools-manage = നിയന്ത്രിക്കുക
+tools-link = ബന്ധിപ്പിക്കുക
+tools-unlink = ബന്ധം നീക്കുക
+tools-import = ഇറക്കുമതി ചെയ്യുക
+tools-update-count = { $count ->
+    [one] 1 പുതുക്കൽ
+   *[other] { $count } പുതുക്കലുകൾ
+}
+tools-conflict-count = { $count ->
+    [one] 1 വൈരുദ്ധ്യം
+   *[other] { $count } വൈരുദ്ധ്യങ്ങൾ
+}
+tools-result-applied = ഉപകരണങ്ങൾ പ്രയോഗിച്ചു
+tools-result-imported = ഉപകരണങ്ങൾ ഇറക്കുമതി ചെയ്തു
+tools-result-installed = { $name } ഇൻസ്റ്റാൾ ചെയ്തു
+tools-result-updated = { $name } പുതുക്കി
+tools-result-uninstalled = { $name } അൺഇൻസ്റ്റാൾ ചെയ്തു
+tools-result-forgotten = { $name } മറന്നു
+tools-result-managed = { $name } ഇപ്പോൾ നിയന്ത്രിക്കുന്നു
+tools-result-linked = { $name } ബന്ധിപ്പിച്ചു
+tools-result-unlinked = { $name }-ന്റെ ബന്ധം നീക്കി
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = ക്രമീകരണങ്ങൾ, ഉപകരണങ്ങൾ, ഡോട്ട്ഫയലുകൾ, അറിവ് എന്നിവ Git-മായി സമന്വയിപ്പിക്കുക.
+vault-sync = സമന്വയിപ്പിക്കുക
+vault-create = സൃഷ്ടിക്കുക
+vault-connect = ബന്ധിപ്പിക്കുക
+vault-private = സ്വകാര്യ ശേഖരം
+vault-public-warning = പൊതു സംഭരണികൾ നിങ്ങളുടെ അറിവും കോൺഫിഗറേഷനും വെളിപ്പെടുത്തുന്നു.
+vault-choose-repository = ഒരു ശേഖരം തിരഞ്ഞെടുക്കുക...
+vault-empty = ശൂന്യം
+vault-clean = കാലികമാണ്
+vault-not-connected = ബന്ധിപ്പിച്ചിട്ടില്ല
+vault-change-count = മാറ്റങ്ങൾ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = തുടങ്ങുക
 start-tagline = ഒരു prompt. എന്തും പൂർത്തിയാക്കാം.
 

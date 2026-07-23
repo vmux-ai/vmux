@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elemente
 }
+
+tools-title = Instrumente
+tools-search = Caută pachete, agenți, MCP, instrumente lingvistice și fișiere de configurare…
+tools-open = Deschide Instrumente
+tools-fold = Restrânge instrumentele
+tools-unfold = Extinde instrumentele
+tools-scanning = Se scanează instrumentele locale…
+tools-no-installed = Niciun instrument instalat
+tools-empty = Niciun instrument corespunzător
+tools-empty-detail = Instalează un pachet sau adaugă un pachet de fișiere de configurare în stil Stow.
+tools-apply = Aplică
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulele și aplicațiile instalate se sincronizează automat.
+tools-open-brewfile = Deschide Brewfile
+tools-managed = gestionat
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplicații Homebrew
+tools-provider-npm = Pachete npm
+tools-provider-acp-agents = Agenți ACP
+tools-provider-language-tools = Instrumente lingvistice
+tools-provider-mcp-servers = Servere MCP
+tools-provider-dotfiles = Fișiere de configurare
+tools-status-available = Disponibil
+tools-status-missing = Lipsește
+tools-status-conflict = Neconcordanță
+tools-forget = Uită
+tools-manage = Gestionează
+tools-link = Leagă
+tools-unlink = Dezleagă
+tools-import = Importă
+tools-update-count = { $count ->
+    [one] 1 actualizare
+   *[other] { $count } actualizări
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicte
+}
+tools-result-applied = Instrumente aplicate
+tools-result-imported = Instrumente importate
+tools-result-installed = { $name } instalat
+tools-result-updated = { $name } actualizat
+tools-result-uninstalled = { $name } dezinstalat
+tools-result-forgotten = { $name } uitat
+tools-result-managed = { $name } este acum gestionat
+tools-result-linked = { $name } legat
+tools-result-unlinked = { $name } dezlegat
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sincronizați setările, instrumentele, fișierele de puncte și cunoștințele cu Git.
+vault-sync = Sincronizare
+vault-create = Crea
+vault-connect = Conectați-vă
+vault-private = Depozit privat
+vault-public-warning = Arhivele publice vă expun cunoștințele și configurația.
+vault-choose-repository = Alegeți un depozit...
+vault-empty = gol
+vault-clean = La zi
+vault-not-connected = Nu este conectat
+vault-change-count = Schimbări: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Un singur prompt. Orice, rezolvat.
 

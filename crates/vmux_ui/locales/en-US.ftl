@@ -31,6 +31,69 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Tools
+tools-search = Search packages, agents, MCP, language tools, dotfiles…
+tools-open = Open Tools
+tools-fold = Fold tools
+tools-unfold = Unfold tools
+tools-scanning = Scanning local tools…
+tools-no-installed = No installed tools
+tools-empty = No matching tools
+tools-empty-detail = Install a package or add a Stow-style dotfile package.
+tools-apply = Apply
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installed formulae and casks sync automatically.
+tools-open-brewfile = Open Brewfile
+tools-managed = managed
+tools-provider-homebrew-formulae = Homebrew Formulae
+tools-provider-homebrew-casks = Homebrew Casks
+tools-provider-npm = npm Packages
+tools-provider-acp-agents = ACP Agents
+tools-provider-language-tools = Language Tools
+tools-provider-mcp-servers = MCP Servers
+tools-provider-dotfiles = Dotfiles
+tools-status-available = Available
+tools-status-missing = Missing
+tools-status-conflict = Conflict
+tools-forget = Forget
+tools-manage = Manage
+tools-link = Link
+tools-unlink = Unlink
+tools-import = Import
+tools-update-count = { $count ->
+    [one] 1 update
+   *[other] { $count } updates
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicts
+}
+tools-result-applied = Tools applied
+tools-result-imported = Tools imported
+tools-result-installed = { $name } installed
+tools-result-updated = { $name } updated
+tools-result-uninstalled = { $name } uninstalled
+tools-result-forgotten = { $name } forgotten
+tools-result-managed = { $name } is now managed
+tools-result-linked = { $name } linked
+tools-result-unlinked = { $name } unlinked
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sync settings, tools, dotfiles, and Knowledge with Git.
+vault-sync = Sync
+vault-create = Create
+vault-connect = Connect
+vault-private = Private repository
+vault-public-warning = Public repositories expose your Knowledge and configuration.
+vault-choose-repository = Choose a repository…
+vault-empty = empty
+vault-clean = Up to date
+vault-not-connected = Not connected
+vault-change-count = Changes: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
 start-title = Start
 start-tagline = One prompt. Anything, done.
 

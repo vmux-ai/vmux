@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } รายการ
    *[other] { $count } รายการ
 }
+
+tools-title = เครื่องมือ
+tools-search = ค้นหาแพ็กเกจ เอเจนต์ MCP เครื่องมือภาษา และไฟล์กำหนดค่า…
+tools-open = เปิดเครื่องมือ
+tools-fold = ย่อเครื่องมือ
+tools-unfold = ขยายเครื่องมือ
+tools-scanning = กำลังสแกนเครื่องมือในเครื่อง…
+tools-no-installed = ไม่มีเครื่องมือที่ติดตั้งไว้
+tools-empty = ไม่มีเครื่องมือที่ตรงกัน
+tools-empty-detail = ติดตั้งแพ็กเกจหรือเพิ่มแพ็กเกจไฟล์กำหนดค่าแบบ Stow
+tools-apply = นำไปใช้
+tools-homebrew = Homebrew
+tools-homebrew-sync = สูตรและแอปพลิเคชันที่ติดตั้งไว้จะซิงค์โดยอัตโนมัติ
+tools-open-brewfile = เปิด Brewfile
+tools-managed = จัดการอยู่
+tools-provider-homebrew-formulae = สูตร Homebrew
+tools-provider-homebrew-casks = แอปพลิเคชัน Homebrew
+tools-provider-npm = แพ็กเกจ npm
+tools-provider-acp-agents = เอเจนต์ ACP
+tools-provider-language-tools = เครื่องมือภาษา
+tools-provider-mcp-servers = เซิร์ฟเวอร์ MCP
+tools-provider-dotfiles = ไฟล์กำหนดค่า
+tools-status-available = พร้อมใช้
+tools-status-missing = ไม่มี
+tools-status-conflict = ขัดแย้ง
+tools-forget = ลืม
+tools-manage = จัดการ
+tools-link = เชื่อมโยง
+tools-unlink = ยกเลิกการเชื่อมโยง
+tools-import = นำเข้า
+tools-update-count = { $count ->
+    [one] อัปเดต 1 รายการ
+   *[other] อัปเดต { $count } รายการ
+}
+tools-conflict-count = { $count ->
+    [one] ข้อขัดแย้ง 1 รายการ
+   *[other] ข้อขัดแย้ง { $count } รายการ
+}
+tools-result-applied = นำเครื่องมือไปใช้แล้ว
+tools-result-imported = นำเข้าเครื่องมือแล้ว
+tools-result-installed = ติดตั้ง { $name } แล้ว
+tools-result-updated = อัปเดต { $name } แล้ว
+tools-result-uninstalled = ถอนการติดตั้ง { $name } แล้ว
+tools-result-forgotten = ลืม { $name } แล้ว
+tools-result-managed = ขณะนี้กำลังจัดการ { $name }
+tools-result-linked = เชื่อมโยง { $name } แล้ว
+tools-result-unlinked = ยกเลิกการเชื่อมโยง { $name } แล้ว
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = ซิงค์การตั้งค่า เครื่องมือ dotfiles และความรู้กับ Git
+vault-sync = ซิงค์
+vault-create = สร้าง
+vault-connect = เชื่อมต่อ
+vault-private = พื้นที่เก็บข้อมูลส่วนตัว
+vault-public-warning = ที่เก็บข้อมูลสาธารณะเปิดเผยความรู้และการกำหนดค่าของคุณ
+vault-choose-repository = เลือกพื้นที่เก็บข้อมูล...
+vault-empty = ว่างเปล่า
+vault-clean = ถึงวันที่
+vault-not-connected = ไม่ได้เชื่อมต่อ
+vault-change-count = การเปลี่ยนแปลง: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = เริ่มต้น
 start-tagline = พรอมป์เดียว ทำได้ทุกอย่าง
 

@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ଆଇଟମ୍
    *[other] { $count } ଆଇଟମ୍
 }
+
+tools-title = ଉପକରଣ
+tools-search = ପ୍ୟାକେଜ୍, ଏଜେଣ୍ଟ, MCP, ଭାଷା ଉପକରଣ ଏବଂ ବିନ୍ୟାସ ଫାଇଲ୍ ଖୋଜନ୍ତୁ…
+tools-open = ଉପକରଣ ଖୋଲନ୍ତୁ
+tools-fold = ଉପକରଣ ସଙ୍କୁଚିତ କରନ୍ତୁ
+tools-unfold = ଉପକରଣ ବିସ୍ତାର କରନ୍ତୁ
+tools-scanning = ସ୍ଥାନୀୟ ଉପକରଣ ସ୍କାନ୍ ହେଉଛି…
+tools-no-installed = କୌଣସି ଉପକରଣ ସଂସ୍ଥାପିତ ନାହିଁ
+tools-empty = କୌଣସି ମେଳ ଖାଉଥିବା ଉପକରଣ ନାହିଁ
+tools-empty-detail = ଏକ ପ୍ୟାକେଜ୍ ସଂସ୍ଥାପନ କରନ୍ତୁ କିମ୍ବା Stow-ଶୈଳୀର ବିନ୍ୟାସ ଫାଇଲ୍ ପ୍ୟାକେଜ୍ ଯୋଡ଼ନ୍ତୁ।
+tools-apply = ପ୍ରୟୋଗ କରନ୍ତୁ
+tools-homebrew = Homebrew
+tools-homebrew-sync = ସଂସ୍ଥାପିତ ସୂତ୍ର ଏବଂ ଅନୁପ୍ରୟୋଗଗୁଡ଼ିକ ସ୍ୱୟଂଚାଳିତ ଭାବେ ସମନ୍ୱୟ ହୁଏ।
+tools-open-brewfile = Brewfile ଖୋଲନ୍ତୁ
+tools-managed = ପରିଚାଳିତ
+tools-provider-homebrew-formulae = Homebrew ସୂତ୍ର
+tools-provider-homebrew-casks = Homebrew ଅନୁପ୍ରୟୋଗ
+tools-provider-npm = npm ପ୍ୟାକେଜ୍
+tools-provider-acp-agents = ACP ଏଜେଣ୍ଟ
+tools-provider-language-tools = ଭାଷା ଉପକରଣ
+tools-provider-mcp-servers = MCP ସର୍ଭର
+tools-provider-dotfiles = ବିନ୍ୟାସ ଫାଇଲ୍
+tools-status-available = ଉପଲବ୍ଧ
+tools-status-missing = ଅନୁପସ୍ଥିତ
+tools-status-conflict = ବିରୋଧ
+tools-forget = ଭୁଲିଯାଆନ୍ତୁ
+tools-manage = ପରିଚାଳନା କରନ୍ତୁ
+tools-link = ସଂଯୋଗ କରନ୍ତୁ
+tools-unlink = ସଂଯୋଗ ହଟାନ୍ତୁ
+tools-import = ଆମଦାନୀ କରନ୍ତୁ
+tools-update-count = { $count ->
+    [one] 1 ଅଦ୍ୟତନ
+   *[other] { $count } ଅଦ୍ୟତନ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ବିରୋଧ
+   *[other] { $count } ବିରୋଧ
+}
+tools-result-applied = ଉପକରଣ ପ୍ରୟୋଗ କରାଗଲା
+tools-result-imported = ଉପକରଣ ଆମଦାନୀ କରାଗଲା
+tools-result-installed = { $name } ସଂସ୍ଥାପିତ ହେଲା
+tools-result-updated = { $name } ଅଦ୍ୟତନ ହେଲା
+tools-result-uninstalled = { $name } ଅସଂସ୍ଥାପିତ ହେଲା
+tools-result-forgotten = { $name } ଭୁଲି ଦିଆଗଲା
+tools-result-managed = { $name } ଏବେ ପରିଚାଳିତ
+tools-result-linked = { $name } ସଂଯୁକ୍ତ ହେଲା
+tools-result-unlinked = { $name }ର ସଂଯୋଗ ହଟାଗଲା
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Git ସହିତ ସେଟିଂସମୂହ, ଉପକରଣ, ଡଟ୍ଫାଇଲ୍ ଏବଂ ଜ୍ଞାନ ସିଙ୍କ କରନ୍ତୁ |
+vault-sync = ସିଙ୍କ୍ କରନ୍ତୁ |
+vault-create = ସୃଷ୍ଟି କରନ୍ତୁ |
+vault-connect = ସଂଯୋଗ କରନ୍ତୁ |
+vault-private = ବ୍ୟକ୍ତିଗତ ସଂଗ୍ରହାଳୟ
+vault-public-warning = ସାର୍ବଜନୀନ ସଂଗ୍ରହାଳୟଗୁଡ଼ିକ ତୁମର ଜ୍ଞାନ ଏବଂ ବିନ୍ୟାସକୁ ପ୍ରକାଶ କରେ |
+vault-choose-repository = ଏକ ସଂଗ୍ରହାଳୟ ବାଛନ୍ତୁ…
+vault-empty = ଖାଲି
+vault-clean = ଅଦ୍ୟାବଧି
+vault-not-connected = ସଂଯୁକ୍ତ ନୁହେଁ |
+vault-change-count = ପରିବର୍ତ୍ତନ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ଆରମ୍ଭ
 start-tagline = ଗୋଟିଏ ପ୍ରମ୍ପ୍ଟ। ଯେକୌଣସି କାମ, ସରିଗଲା।
 

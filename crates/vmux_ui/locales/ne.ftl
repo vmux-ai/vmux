@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } वस्तु
    *[other] { $count } वस्तुहरू
 }
+
+tools-title = उपकरणहरू
+tools-search = प्याकेज, एजेन्ट, MCP, भाषा उपकरण र कन्फिगरेसन फाइलहरू खोज्नुहोस्…
+tools-open = उपकरणहरू खोल्नुहोस्
+tools-fold = उपकरणहरू खुम्च्याउनुहोस्
+tools-unfold = उपकरणहरू फैलाउनुहोस्
+tools-scanning = स्थानीय उपकरणहरू स्क्यान गरिँदै छ…
+tools-no-installed = कुनै उपकरण स्थापना गरिएको छैन
+tools-empty = मिल्दो उपकरण छैन
+tools-empty-detail = प्याकेज स्थापना गर्नुहोस् वा Stow-शैलीको कन्फिगरेसन फाइल प्याकेज थप्नुहोस्।
+tools-apply = लागू गर्नुहोस्
+tools-homebrew = Homebrew
+tools-homebrew-sync = स्थापना गरिएका सूत्र र अनुप्रयोगहरू स्वतः सिङ्क हुन्छन्।
+tools-open-brewfile = Brewfile खोल्नुहोस्
+tools-managed = व्यवस्थित
+tools-provider-homebrew-formulae = Homebrew सूत्रहरू
+tools-provider-homebrew-casks = Homebrew अनुप्रयोगहरू
+tools-provider-npm = npm प्याकेजहरू
+tools-provider-acp-agents = ACP एजेन्टहरू
+tools-provider-language-tools = भाषा उपकरणहरू
+tools-provider-mcp-servers = MCP सर्भरहरू
+tools-provider-dotfiles = कन्फिगरेसन फाइलहरू
+tools-status-available = उपलब्ध
+tools-status-missing = हराइरहेको
+tools-status-conflict = द्वन्द्व
+tools-forget = बिर्सनुहोस्
+tools-manage = व्यवस्थापन गर्नुहोस्
+tools-link = लिङ्क गर्नुहोस्
+tools-unlink = लिङ्क हटाउनुहोस्
+tools-import = आयात गर्नुहोस्
+tools-update-count = { $count ->
+    [one] १ अद्यावधिक
+   *[other] { $count } अद्यावधिक
+}
+tools-conflict-count = { $count ->
+    [one] १ द्वन्द्व
+   *[other] { $count } द्वन्द्व
+}
+tools-result-applied = उपकरणहरू लागू गरिए
+tools-result-imported = उपकरणहरू आयात गरिए
+tools-result-installed = { $name } स्थापना गरियो
+tools-result-updated = { $name } अद्यावधिक गरियो
+tools-result-uninstalled = { $name } हटाइयो
+tools-result-forgotten = { $name } बिर्सियो
+tools-result-managed = { $name } अब व्यवस्थित छ
+tools-result-linked = { $name } लिङ्क गरियो
+tools-result-unlinked = { $name } को लिङ्क हटाइयो
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = सेटिङहरू, उपकरणहरू, डटफाइलहरू, र Git सँग ज्ञान सिंक गर्नुहोस्।
+vault-sync = सिंक
+vault-create = सिर्जना गर्नुहोस्
+vault-connect = जडान गर्नुहोस्
+vault-private = निजी भण्डार
+vault-public-warning = सार्वजनिक भण्डारहरूले तपाईंको ज्ञान र कन्फिगरेसनलाई उजागर गर्दछ।
+vault-choose-repository = एउटा भण्डार छान्नुहोस्...
+vault-empty = खाली
+vault-clean = अप टु डेट
+vault-not-connected = जोडिएको छैन
+vault-change-count = परिवर्तनहरू: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = सुरु गर्नुहोस्
 start-tagline = एउटै Prompt। जे पनि, पूरा।
 

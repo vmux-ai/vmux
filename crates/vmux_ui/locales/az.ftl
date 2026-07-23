@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } element
 }
+
+tools-title = Alətlər
+tools-search = Paketlər, agentlər, MCP, dil alətləri və konfiqurasiya fayllarında axtar…
+tools-open = Alətləri aç
+tools-fold = Alətləri yığ
+tools-unfold = Alətləri genişləndir
+tools-scanning = Yerli alətlər yoxlanılır…
+tools-no-installed = Quraşdırılmış alət yoxdur
+tools-empty = Uyğun alət yoxdur
+tools-empty-detail = Paket quraşdırın və ya Stow üslublu konfiqurasiya faylları paketi əlavə edin.
+tools-apply = Tətbiq et
+tools-homebrew = Homebrew
+tools-homebrew-sync = Quraşdırılmış formulalar və tətbiq paketləri avtomatik sinxronlaşdırılır.
+tools-open-brewfile = Brewfile-ı aç
+tools-managed = idarə olunan
+tools-provider-homebrew-formulae = Homebrew formulaları
+tools-provider-homebrew-casks = Homebrew tətbiq paketləri
+tools-provider-npm = npm paketləri
+tools-provider-acp-agents = ACP agentləri
+tools-provider-language-tools = Dil alətləri
+tools-provider-mcp-servers = MCP serverləri
+tools-provider-dotfiles = Konfiqurasiya faylları
+tools-status-available = Mövcuddur
+tools-status-missing = Çatışmır
+tools-status-conflict = Ziddiyyət
+tools-forget = Unut
+tools-manage = İdarə et
+tools-link = Əlaqələndir
+tools-unlink = Əlaqəni kəs
+tools-import = İdxal et
+tools-update-count = { $count ->
+    [one] 1 yeniləmə
+   *[other] { $count } yeniləmə
+}
+tools-conflict-count = { $count ->
+    [one] 1 ziddiyyət
+   *[other] { $count } ziddiyyət
+}
+tools-result-applied = Alətlər tətbiq edildi
+tools-result-imported = Alətlər idxal edildi
+tools-result-installed = { $name } quraşdırıldı
+tools-result-updated = { $name } yeniləndi
+tools-result-uninstalled = { $name } silindi
+tools-result-forgotten = { $name } unuduldu
+tools-result-managed = { $name } artıq idarə olunur
+tools-result-linked = { $name } əlaqələndirildi
+tools-result-unlinked = { $name } əlaqədən çıxarıldı
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Parametrləri, alətləri, nöqtə fayllarını və Biliyi Git ilə sinxronlaşdırın.
+vault-sync = Sinxronizasiya
+vault-create = Yaradın
+vault-connect = Qoşun
+vault-private = Şəxsi depo
+vault-public-warning = İctimai depolar Bilik və konfiqurasiyanızı ifşa edir.
+vault-choose-repository = Repozitor seçin...
+vault-empty = boş
+vault-clean = Bu günə qədər
+vault-not-connected = Qoşulmayıb
+vault-change-count = Dəyişikliklər: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Başlanğıc
 start-tagline = Bir prompt. Hər şey hazır.
 

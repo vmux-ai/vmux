@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ihe
    *[other] { $count } ihe
 }
+
+tools-title = Ngwaọrụ
+tools-search = Chọọ ngwugwu, ndị nnọchi anya, MCP, ngwaọrụ asụsụ na faịlụ nhazi…
+tools-open = Mepee ngwaọrụ
+tools-fold = Kpachie ngwaọrụ
+tools-unfold = Gbasaa ngwaọrụ
+tools-scanning = Na-enyocha ngwaọrụ mpaghara…
+tools-no-installed = Enweghị ngwaọrụ arụnyere
+tools-empty = Enweghị ngwaọrụ dabara
+tools-empty-detail = Wụnye ngwugwu ma ọ bụ tinye ngwugwu faịlụ nhazi ụdị Stow.
+tools-apply = Tinye
+tools-homebrew = Homebrew
+tools-homebrew-sync = Usoro na ngwa arụnyere na-emekọrịta onwe ha na-akpaghị aka.
+tools-open-brewfile = Mepee Brewfile
+tools-managed = a na-achịkwa
+tools-provider-homebrew-formulae = Usoro Homebrew
+tools-provider-homebrew-casks = Ngwa Homebrew
+tools-provider-npm = Ngwugwu npm
+tools-provider-acp-agents = Ndị nnọchi anya ACP
+tools-provider-language-tools = Ngwaọrụ asụsụ
+tools-provider-mcp-servers = Sava MCP
+tools-provider-dotfiles = Faịlụ nhazi
+tools-status-available = Dị
+tools-status-missing = Adịghị
+tools-status-conflict = Esemokwu
+tools-forget = Chefuo
+tools-manage = Jikwaa
+tools-link = Jikọọ
+tools-unlink = Kwụpụ
+tools-import = Bubata
+tools-update-count = { $count ->
+    [one] Mmelite 1
+   *[other] Mmelite { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Esemokwu 1
+   *[other] Esemokwu { $count }
+}
+tools-result-applied = Etinyela ngwaọrụ
+tools-result-imported = Ebutela ngwaọrụ
+tools-result-installed = Awụnyela { $name }
+tools-result-updated = Emelitela { $name }
+tools-result-uninstalled = Ewepụla { $name }
+tools-result-forgotten = Echefuola { $name }
+tools-result-managed = A na-achịkwa { $name } ugbu a
+tools-result-linked = Ejikọọla { $name }
+tools-result-unlinked = Ekwupụla { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Ntọala mmekọrịta, ngwaọrụ, dotfiles na Ọmụma na Git.
+vault-sync = Mmekọrịta
+vault-create = Mepụta
+vault-connect = Jikọọ
+vault-private = Ebe nchekwa nkeonwe
+vault-public-warning = Ebe nchekwa ọha na-ekpughe ihe ọmụma na nhazi gị.
+vault-choose-repository = Họrọ ebe nchekwa…
+vault-empty = efu
+vault-clean = Kwalitere ruo ugbu a
+vault-not-connected = Ejikọtaghị ya
+vault-change-count = Mgbanwe: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Malite
 start-tagline = Otu prompt. Ihe ọ bụla, emechaala.
 

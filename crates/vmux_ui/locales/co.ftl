@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } elementu
    *[other] { $count } elementi
 }
+
+tools-title = Strumenti
+tools-search = Cerca pacchetti, agenti, MCP, strumenti linguistichi è fugliali di cunfigurazione…
+tools-open = Apri i strumenti
+tools-fold = Piegà i strumenti
+tools-unfold = Spiegà i strumenti
+tools-scanning = Analisi di i strumenti lucali…
+tools-no-installed = Nisunu strumentu installatu
+tools-empty = Nisunu strumentu currispundente
+tools-empty-detail = Installa un pacchettu o aghjusta un pacchettu di fugliali di cunfigurazione in stile Stow.
+tools-apply = Applica
+tools-homebrew = Homebrew
+tools-homebrew-sync = E formule è l’applicazioni installate si sincronizanu automaticamente.
+tools-open-brewfile = Apri u Brewfile
+tools-managed = gestitu
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Applicazioni Homebrew
+tools-provider-npm = Pacchetti npm
+tools-provider-acp-agents = Agenti ACP
+tools-provider-language-tools = Strumenti linguistichi
+tools-provider-mcp-servers = Servitori MCP
+tools-provider-dotfiles = Fugliali di cunfigurazione
+tools-status-available = Dispunibule
+tools-status-missing = Mancante
+tools-status-conflict = Cunflittu
+tools-forget = Scurdà
+tools-manage = Gestisce
+tools-link = Leghje
+tools-unlink = Slega
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 aghjurnamentu
+   *[other] { $count } aghjurnamenti
+}
+tools-conflict-count = { $count ->
+    [one] 1 cunflittu
+   *[other] { $count } cunflitti
+}
+tools-result-applied = Strumenti applicati
+tools-result-imported = Strumenti impurtati
+tools-result-installed = { $name } installatu
+tools-result-updated = { $name } aghjurnatu
+tools-result-uninstalled = { $name } disinstallatu
+tools-result-forgotten = { $name } scurdatu
+tools-result-managed = { $name } hè avà gestitu
+tools-result-linked = { $name } ligatu
+tools-result-unlinked = { $name } slegatu
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sincronizza paràmetri, arnesi, dotfiles è Cunniscenza cù Git.
+vault-sync = Sincronizza
+vault-create = Crià
+vault-connect = Cunnette
+vault-private = Repositoriu privatu
+vault-public-warning = I repositori publichi espone a vostra Cunniscenza è a cunfigurazione.
+vault-choose-repository = Sceglite un repository...
+vault-empty = viotu
+vault-clean = Attualizatu
+vault-not-connected = Micca cunnessu
+vault-change-count = Cambiamenti: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Principiu
 start-tagline = Un prompt. Tuttu fattu.
 

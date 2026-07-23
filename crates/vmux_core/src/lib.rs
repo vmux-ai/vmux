@@ -9,6 +9,8 @@ pub mod knowledge;
 pub mod media;
 pub mod process_id;
 pub mod scroll;
+pub mod tools;
+pub mod vault;
 pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;

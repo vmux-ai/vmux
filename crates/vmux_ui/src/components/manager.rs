@@ -75,7 +75,7 @@ pub fn ManagerHeader(
         header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
             div { class: "flex items-center gap-3",
                 h1 { class: "text-base font-semibold tracking-tight", "{title}" }
-                span { class: "rounded-full bg-foreground/[0.06] px-2 py-0.5 text-xs text-muted-foreground", "{count}" }
+                span { class: "text-xs tabular-nums text-muted-foreground/70", "{count}" }
                 div { class: "flex-1" }
                 {actions}
             }

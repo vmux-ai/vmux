@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } ਆਈਟਮ
    *[other] { $count } ਆਈਟਮਾਂ
 }
+
+tools-title = ਔਜ਼ਾਰ
+tools-search = ਪੈਕੇਜ, ਏਜੰਟ, MCP, ਭਾਸ਼ਾ ਔਜ਼ਾਰ ਅਤੇ ਸੰਰਚਨਾ ਫ਼ਾਈਲਾਂ ਖੋਜੋ…
+tools-open = ਔਜ਼ਾਰ ਖੋਲ੍ਹੋ
+tools-fold = ਔਜ਼ਾਰ ਸਮੇਟੋ
+tools-unfold = ਔਜ਼ਾਰ ਫੈਲਾਓ
+tools-scanning = ਸਥਾਨਕ ਔਜ਼ਾਰ ਸਕੈਨ ਕੀਤੇ ਜਾ ਰਹੇ ਹਨ…
+tools-no-installed = ਕੋਈ ਔਜ਼ਾਰ ਸਥਾਪਤ ਨਹੀਂ ਹੈ
+tools-empty = ਕੋਈ ਮਿਲਦਾ ਔਜ਼ਾਰ ਨਹੀਂ ਹੈ
+tools-empty-detail = ਪੈਕੇਜ ਸਥਾਪਤ ਕਰੋ ਜਾਂ Stow-ਸ਼ੈਲੀ ਦਾ ਸੰਰਚਨਾ ਫ਼ਾਈਲ ਪੈਕੇਜ ਜੋੜੋ।
+tools-apply = ਲਾਗੂ ਕਰੋ
+tools-homebrew = Homebrew
+tools-homebrew-sync = ਸਥਾਪਤ ਫ਼ਾਰਮੂਲੇ ਅਤੇ ਐਪਲੀਕੇਸ਼ਨ ਆਪਣੇ ਆਪ ਸਮਕਾਲੀ ਹੁੰਦੇ ਹਨ।
+tools-open-brewfile = Brewfile ਖੋਲ੍ਹੋ
+tools-managed = ਪ੍ਰਬੰਧਿਤ
+tools-provider-homebrew-formulae = Homebrew ਫ਼ਾਰਮੂਲੇ
+tools-provider-homebrew-casks = Homebrew ਐਪਲੀਕੇਸ਼ਨ
+tools-provider-npm = npm ਪੈਕੇਜ
+tools-provider-acp-agents = ACP ਏਜੰਟ
+tools-provider-language-tools = ਭਾਸ਼ਾ ਔਜ਼ਾਰ
+tools-provider-mcp-servers = MCP ਸਰਵਰ
+tools-provider-dotfiles = ਸੰਰਚਨਾ ਫ਼ਾਈਲਾਂ
+tools-status-available = ਉਪਲਬਧ
+tools-status-missing = ਗੁੰਮ
+tools-status-conflict = ਟਕਰਾਅ
+tools-forget = ਭੁੱਲੋ
+tools-manage = ਪ੍ਰਬੰਧਿਤ ਕਰੋ
+tools-link = ਜੋੜੋ
+tools-unlink = ਜੋੜ ਹਟਾਓ
+tools-import = ਆਯਾਤ ਕਰੋ
+tools-update-count = { $count ->
+    [one] 1 ਅੱਪਡੇਟ
+   *[other] { $count } ਅੱਪਡੇਟ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ਟਕਰਾਅ
+   *[other] { $count } ਟਕਰਾਅ
+}
+tools-result-applied = ਔਜ਼ਾਰ ਲਾਗੂ ਕੀਤੇ ਗਏ
+tools-result-imported = ਔਜ਼ਾਰ ਆਯਾਤ ਕੀਤੇ ਗਏ
+tools-result-installed = { $name } ਸਥਾਪਤ ਕੀਤਾ ਗਿਆ
+tools-result-updated = { $name } ਅੱਪਡੇਟ ਕੀਤਾ ਗਿਆ
+tools-result-uninstalled = { $name } ਅਣਸਥਾਪਤ ਕੀਤਾ ਗਿਆ
+tools-result-forgotten = { $name } ਭੁਲਾ ਦਿੱਤਾ ਗਿਆ
+tools-result-managed = { $name } ਹੁਣ ਪ੍ਰਬੰਧਿਤ ਹੈ
+tools-result-linked = { $name } ਜੋੜਿਆ ਗਿਆ
+tools-result-unlinked = { $name } ਦਾ ਜੋੜ ਹਟਾਇਆ ਗਿਆ
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = ਗਿੱਟ ਨਾਲ ਸੈਟਿੰਗਾਂ, ਟੂਲ, ਡਾਟਫਾਈਲਾਂ ਅਤੇ ਗਿਆਨ ਨੂੰ ਸਿੰਕ ਕਰੋ।
+vault-sync = ਸਿੰਕ
+vault-create = ਬਣਾਓ
+vault-connect = ਜੁੜੋ
+vault-private = ਨਿੱਜੀ ਭੰਡਾਰ
+vault-public-warning = ਪਬਲਿਕ ਰਿਪੋਜ਼ਟਰੀਆਂ ਤੁਹਾਡੇ ਗਿਆਨ ਅਤੇ ਸੰਰਚਨਾ ਨੂੰ ਉਜਾਗਰ ਕਰਦੀਆਂ ਹਨ।
+vault-choose-repository = ਇੱਕ ਰਿਪੋਜ਼ਟਰੀ ਚੁਣੋ...
+vault-empty = ਖਾਲੀ
+vault-clean = ਆਧੁਨਿਕ
+vault-not-connected = ਕਨੈਕਟ ਨਹੀਂ ਹੈ
+vault-change-count = ਤਬਦੀਲੀਆਂ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ਸ਼ੁਰੂ ਕਰੋ
 start-tagline = ਇੱਕ ਪ੍ਰੌਂਪਟ। ਹਰ ਕੰਮ ਮੁਕੰਮਲ।
 

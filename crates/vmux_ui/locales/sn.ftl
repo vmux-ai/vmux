@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] chinhu { $count }
    *[other] zvinhu { $count }
 }
+
+tools-title = Zvishandiso
+tools-search = Tsvaga mapakeji, vamiriri, MCP, zvishandiso zvemutauro nemafaira ekugadzirisa…
+tools-open = Vhura zvishandiso
+tools-fold = Peta zvishandiso
+tools-unfold = Tambanudza zvishandiso
+tools-scanning = Kuongorora zvishandiso zvemuno…
+tools-no-installed = Hapana zvishandiso zvakaiswa
+tools-empty = Hapana zvishandiso zvinoenderana
+tools-empty-detail = Isa pakeji kana wedzera pakeji yemafaira ekugadzirisa yerudzi rweStow.
+tools-apply = Shandisa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mafomura nemaapplication akaiswa anowiriraniswa otomatiki.
+tools-open-brewfile = Vhura Brewfile
+tools-managed = chinotarisirwa
+tools-provider-homebrew-formulae = Mafomura eHomebrew
+tools-provider-homebrew-casks = Maapplication eHomebrew
+tools-provider-npm = Mapakeji enpm
+tools-provider-acp-agents = Vamiriri veACP
+tools-provider-language-tools = Zvishandiso zvemutauro
+tools-provider-mcp-servers = Maseva eMCP
+tools-provider-dotfiles = Mafaira ekugadzirisa
+tools-status-available = Chiripo
+tools-status-missing = Chisipo
+tools-status-conflict = Kusawirirana
+tools-forget = Kanganwa
+tools-manage = Tarisa
+tools-link = Batanidza
+tools-unlink = Bvisa chinongedzo
+tools-import = Pinza
+tools-update-count = { $count ->
+    [one] Gadziriso 1
+   *[other] Gadziriso { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Kusawirirana 1
+   *[other] Kusawirirana { $count }
+}
+tools-result-applied = Zvishandiso zvashandiswa
+tools-result-imported = Zvishandiso zvapinzwa
+tools-result-installed = { $name } yaiswa
+tools-result-updated = { $name } yagadziridzwa
+tools-result-uninstalled = { $name } yabviswa
+tools-result-forgotten = { $name } yakanganwikwa
+tools-result-managed = { $name } yava kutarisirwa
+tools-result-linked = { $name } yabatanidzwa
+tools-result-unlinked = Chinongedzo che{ $name } chabviswa
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Kubatanidza marongero, maturusi, dotfiles, uye Ruzivo neGit.
+vault-sync = Sync
+vault-create = Create
+vault-connect = Connect
+vault-private = Private repository
+vault-public-warning = Matura eruzhinji anofumura Zivo yako nekugadzirisa.
+vault-choose-repository = Sarudza repository…
+vault-empty = empty
+vault-clean = Kusvika pari zvino
+vault-not-connected = Haina kubatana
+vault-change-count = Kuchinja: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tanga
 start-tagline = Murayiro mumwe. Zvese zvaitwa.
 

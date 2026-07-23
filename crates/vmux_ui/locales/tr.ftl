@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } öğe
    *[other] { $count } öğe
 }
+
+tools-title = Araçlar
+tools-search = Paketleri, aracıları, MCP'yi, dil araçlarını ve yapılandırma dosyalarını ara…
+tools-open = Araçları aç
+tools-fold = Araçları daralt
+tools-unfold = Araçları genişlet
+tools-scanning = Yerel araçlar taranıyor…
+tools-no-installed = Yüklü araç yok
+tools-empty = Eşleşen araç yok
+tools-empty-detail = Bir paket yükleyin veya Stow tarzı bir yapılandırma dosyaları paketi ekleyin.
+tools-apply = Uygula
+tools-homebrew = Homebrew
+tools-homebrew-sync = Yüklü formüller ve uygulamalar otomatik olarak eşitlenir.
+tools-open-brewfile = Brewfile'ı aç
+tools-managed = yönetiliyor
+tools-provider-homebrew-formulae = Homebrew formülleri
+tools-provider-homebrew-casks = Homebrew uygulamaları
+tools-provider-npm = npm paketleri
+tools-provider-acp-agents = ACP aracıları
+tools-provider-language-tools = Dil araçları
+tools-provider-mcp-servers = MCP sunucuları
+tools-provider-dotfiles = Yapılandırma dosyaları
+tools-status-available = Kullanılabilir
+tools-status-missing = Eksik
+tools-status-conflict = Çakışma
+tools-forget = Unut
+tools-manage = Yönet
+tools-link = Bağla
+tools-unlink = Bağlantıyı kaldır
+tools-import = İçe aktar
+tools-update-count = { $count ->
+    [one] 1 güncelleme
+   *[other] { $count } güncelleme
+}
+tools-conflict-count = { $count ->
+    [one] 1 çakışma
+   *[other] { $count } çakışma
+}
+tools-result-applied = Araçlar uygulandı
+tools-result-imported = Araçlar içe aktarıldı
+tools-result-installed = { $name } yüklendi
+tools-result-updated = { $name } güncellendi
+tools-result-uninstalled = { $name } kaldırıldı
+tools-result-forgotten = { $name } unutuldu
+tools-result-managed = { $name } artık yönetiliyor
+tools-result-linked = { $name } bağlandı
+tools-result-unlinked = { $name } bağlantısı kaldırıldı
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Ayarları, araçları, nokta dosyalarını ve Bilgiyi Git ile senkronize edin.
+vault-sync = Senkronizasyon
+vault-create = Yaratmak
+vault-connect = Bağlamak
+vault-private = Özel depo
+vault-public-warning = Halka açık depolar Bilginizi ve yapılandırmanızı açığa çıkarır.
+vault-choose-repository = Bir depo seçin…
+vault-empty = boş
+vault-clean = Güncel
+vault-not-connected = Bağlı değil
+vault-change-count = Değişiklikler: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Başlat
 start-tagline = Tek prompt. Her şey hazır.
 

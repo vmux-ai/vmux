@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } στοιχείο
    *[other] { $count } στοιχεία
 }
+
+tools-title = Εργαλεία
+tools-search = Αναζήτηση πακέτων, πρακτόρων, MCP, γλωσσικών εργαλείων και αρχείων ρυθμίσεων…
+tools-open = Άνοιγμα εργαλείων
+tools-fold = Σύμπτυξη εργαλείων
+tools-unfold = Ανάπτυξη εργαλείων
+tools-scanning = Σάρωση τοπικών εργαλείων…
+tools-no-installed = Δεν υπάρχουν εγκατεστημένα εργαλεία
+tools-empty = Δεν υπάρχουν εργαλεία που να ταιριάζουν
+tools-empty-detail = Εγκαταστήστε ένα πακέτο ή προσθέστε ένα πακέτο αρχείων ρυθμίσεων τύπου Stow.
+tools-apply = Εφαρμογή
+tools-homebrew = Homebrew
+tools-homebrew-sync = Οι εγκατεστημένες φόρμουλες και εφαρμογές συγχρονίζονται αυτόματα.
+tools-open-brewfile = Άνοιγμα Brewfile
+tools-managed = διαχειριζόμενο
+tools-provider-homebrew-formulae = Φόρμουλες Homebrew
+tools-provider-homebrew-casks = Εφαρμογές Homebrew
+tools-provider-npm = Πακέτα npm
+tools-provider-acp-agents = Πράκτορες ACP
+tools-provider-language-tools = Γλωσσικά εργαλεία
+tools-provider-mcp-servers = Διακομιστές MCP
+tools-provider-dotfiles = Αρχεία ρυθμίσεων
+tools-status-available = Διαθέσιμο
+tools-status-missing = Λείπει
+tools-status-conflict = Διένεξη
+tools-forget = Παράβλεψη
+tools-manage = Διαχείριση
+tools-link = Σύνδεση
+tools-unlink = Αποσύνδεση
+tools-import = Εισαγωγή
+tools-update-count = { $count ->
+    [one] 1 ενημέρωση
+   *[other] { $count } ενημερώσεις
+}
+tools-conflict-count = { $count ->
+    [one] 1 διένεξη
+   *[other] { $count } διενέξεις
+}
+tools-result-applied = Τα εργαλεία εφαρμόστηκαν
+tools-result-imported = Τα εργαλεία εισήχθησαν
+tools-result-installed = Το { $name } εγκαταστάθηκε
+tools-result-updated = Το { $name } ενημερώθηκε
+tools-result-uninstalled = Το { $name } απεγκαταστάθηκε
+tools-result-forgotten = Το { $name } παραβλέφθηκε
+tools-result-managed = Το { $name } είναι πλέον διαχειριζόμενο
+tools-result-linked = Το { $name } συνδέθηκε
+tools-result-unlinked = Το { $name } αποσυνδέθηκε
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Συγχρονίστε ρυθμίσεις, εργαλεία, dotfiles και Knowledge με το Git.
+vault-sync = Συγχρονισμός
+vault-create = Δημιουργώ
+vault-connect = Συνδέω
+vault-private = Ιδιωτικό αποθετήριο
+vault-public-warning = Τα δημόσια αποθετήρια εκθέτουν τη Γνώση και τη διαμόρφωσή σας.
+vault-choose-repository = Επιλέξτε ένα αποθετήριο…
+vault-empty = αδειάζω
+vault-clean = Σύγχρονος
+vault-not-connected = Δεν είναι συνδεδεμένο
+vault-change-count = Αλλαγές: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Έναρξη
 start-tagline = Μία οδηγία. Όλα έτοιμα.
 

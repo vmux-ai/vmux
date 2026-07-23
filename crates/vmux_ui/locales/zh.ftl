@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } 项
    *[other] { $count } 项
 }
+
+tools-title = 工具
+tools-search = 搜索软件包、代理、MCP、语言工具和配置文件…
+tools-open = 打开工具
+tools-fold = 收起工具
+tools-unfold = 展开工具
+tools-scanning = 正在扫描本地工具…
+tools-no-installed = 没有已安装的工具
+tools-empty = 没有匹配的工具
+tools-empty-detail = 安装软件包或添加 Stow 风格的配置文件包。
+tools-apply = 应用
+tools-homebrew = Homebrew
+tools-homebrew-sync = 已安装的配方和应用会自动同步。
+tools-open-brewfile = 打开 Brewfile
+tools-managed = 已管理
+tools-provider-homebrew-formulae = Homebrew 配方
+tools-provider-homebrew-casks = Homebrew 应用
+tools-provider-npm = npm 软件包
+tools-provider-acp-agents = ACP 代理
+tools-provider-language-tools = 语言工具
+tools-provider-mcp-servers = MCP 服务器
+tools-provider-dotfiles = 配置文件
+tools-status-available = 可用
+tools-status-missing = 缺失
+tools-status-conflict = 冲突
+tools-forget = 移除记录
+tools-manage = 管理
+tools-link = 链接
+tools-unlink = 取消链接
+tools-import = 导入
+tools-update-count = { $count ->
+    [one] 1 项更新
+   *[other] { $count } 项更新
+}
+tools-conflict-count = { $count ->
+    [one] 1 项冲突
+   *[other] { $count } 项冲突
+}
+tools-result-applied = 已应用工具
+tools-result-imported = 已导入工具
+tools-result-installed = 已安装 { $name }
+tools-result-updated = 已更新 { $name }
+tools-result-uninstalled = 已卸载 { $name }
+tools-result-forgotten = 已移除 { $name } 的记录
+tools-result-managed = { $name } 现已纳入管理
+tools-result-linked = 已链接 { $name }
+tools-result-unlinked = 已取消链接 { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = 使用 Git 同步设置、工具、点文件和知识。
+vault-sync = 同步
+vault-create = 创造
+vault-connect = 连接
+vault-private = 私有仓库
+vault-public-warning = 公共存储库公开您的知识和配置。
+vault-choose-repository = 选择一个存储库...
+vault-empty = 空的
+vault-clean = 最新
+vault-not-connected = 未连接
+vault-change-count = 变化: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = 开始
 start-tagline = 一句提示，万事搞定。
 

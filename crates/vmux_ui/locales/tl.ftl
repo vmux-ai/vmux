@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Mga kagamitan
+tools-search = Maghanap ng mga pakete, ahente, MCP, kagamitang pangwika at talaksan ng pagsasaayos…
+tools-open = Buksan ang mga kagamitan
+tools-fold = Itiklop ang mga kagamitan
+tools-unfold = Iladlad ang mga kagamitan
+tools-scanning = Sinusuri ang mga lokal na kagamitan…
+tools-no-installed = Walang nakatalagang kagamitan
+tools-empty = Walang tumutugmang kagamitan
+tools-empty-detail = Maglagay ng pakete o magdagdag ng Stow-style na pakete ng mga talaksan ng pagsasaayos.
+tools-apply = Ilapat
+tools-homebrew = Homebrew
+tools-homebrew-sync = Awtomatikong pinagtutugma ang mga nakatalagang pormula at aplikasyon.
+tools-open-brewfile = Buksan ang Brewfile
+tools-managed = pinamamahalaan
+tools-provider-homebrew-formulae = Mga pormula ng Homebrew
+tools-provider-homebrew-casks = Mga aplikasyon ng Homebrew
+tools-provider-npm = Mga pakete ng npm
+tools-provider-acp-agents = Mga ahente ng ACP
+tools-provider-language-tools = Mga kagamitang pangwika
+tools-provider-mcp-servers = Mga tagapagsilbi ng MCP
+tools-provider-dotfiles = Mga talaksan ng pagsasaayos
+tools-status-available = Magagamit
+tools-status-missing = Nawawala
+tools-status-conflict = Salungatan
+tools-forget = Kalimutan
+tools-manage = Pamahalaan
+tools-link = Iugnay
+tools-unlink = Alisin ang ugnay
+tools-import = Ipasok
+tools-update-count = { $count ->
+    [one] 1 pagbabago
+   *[other] { $count } pagbabago
+}
+tools-conflict-count = { $count ->
+    [one] 1 salungatan
+   *[other] { $count } salungatan
+}
+tools-result-applied = Nailapat ang mga kagamitan
+tools-result-imported = Naipasok ang mga kagamitan
+tools-result-installed = Nailagay ang { $name }
+tools-result-updated = Nabago ang { $name }
+tools-result-uninstalled = Inalis ang { $name }
+tools-result-forgotten = Kinalimutan ang { $name }
+tools-result-managed = Pinamamahalaan na ang { $name }
+tools-result-linked = Iniugnay ang { $name }
+tools-result-unlinked = Inalis ang ugnay ng { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = I-sync ang mga setting, tool, dotfile, at Kaalaman sa Git.
+vault-sync = I-sync
+vault-create = Lumikha
+vault-connect = Kumonekta
+vault-private = Pribadong imbakan
+vault-public-warning = Inilalantad ng mga pampublikong repositoryo ang iyong Kaalaman at pagsasaayos.
+vault-choose-repository = Pumili ng repositoryo...
+vault-empty = walang laman
+vault-clean = Napapanahon
+vault-not-connected = Hindi konektado
+vault-change-count = Mga pagbabago: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Simula
 start-tagline = Isang prompt. Kahit ano, tapos.
 

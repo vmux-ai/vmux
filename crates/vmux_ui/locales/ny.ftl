@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] chinthu { $count }
    *[other] zinthu { $count }
 }
+
+tools-title = Zida
+tools-search = Sakani mapaketi, othandizira, MCP, zida za zilankhulo ndi mafayilo a kasinthidwe…
+tools-open = Tsegulani zida
+tools-fold = Pindani zida
+tools-unfold = Tambasulani zida
+tools-scanning = Kusanthula zida zapafupi…
+tools-no-installed = Palibe zida zoyikidwa
+tools-empty = Palibe zida zogwirizana
+tools-empty-detail = Ikani paketi kapena onjezani paketi ya mafayilo a kasinthidwe ya mtundu wa Stow.
+tools-apply = Gwiritsani ntchito
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mafomula ndi mapulogalamu omwe ayikidwa amalumikizana okha.
+tools-open-brewfile = Tsegulani Brewfile
+tools-managed = yoyendetsedwa
+tools-provider-homebrew-formulae = Mafomula a Homebrew
+tools-provider-homebrew-casks = Mapulogalamu a Homebrew
+tools-provider-npm = Mapaketi a npm
+tools-provider-acp-agents = Othandizira a ACP
+tools-provider-language-tools = Zida za zilankhulo
+tools-provider-mcp-servers = Ma seva a MCP
+tools-provider-dotfiles = Mafayilo a kasinthidwe
+tools-status-available = Zilipo
+tools-status-missing = Zikusowa
+tools-status-conflict = Kusagwirizana
+tools-forget = Iwalani
+tools-manage = Yendetsani
+tools-link = Lumikizani
+tools-unlink = Chotsani ulalo
+tools-import = Lowetsani
+tools-update-count = { $count ->
+    [one] Kusintha 1
+   *[other] Zosintha { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Kusagwirizana 1
+   *[other] Kusagwirizana { $count }
+}
+tools-result-applied = Zida zagwiritsidwa ntchito
+tools-result-imported = Zida zalowetsedwa
+tools-result-installed = { $name } yayikidwa
+tools-result-updated = { $name } yasinthidwa
+tools-result-uninstalled = { $name } yachotsedwa
+tools-result-forgotten = { $name } yaiwalidwa
+tools-result-managed = { $name } tsopano ikuyendetsedwa
+tools-result-linked = { $name } yalumikizidwa
+tools-result-unlinked = Ulalo wa { $name } wachotsedwa
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Gwirizanitsani zosintha, zida, ma dotfiles, ndi Knowledge ndi Git.
+vault-sync = Kulunzanitsa
+vault-create = Pangani
+vault-connect = Lumikizani
+vault-private = Malo achinsinsi
+vault-public-warning = Malo osungira anthu amawulula Chidziwitso chanu ndi kasinthidwe.
+vault-choose-repository = Sankhani nkhokwe…
+vault-empty = opanda kanthu
+vault-clean = Zaposachedwa
+vault-not-connected = Osalumikizidwa
+vault-change-count = Zosintha: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Yambani
 start-tagline = Lamulo limodzi. Chilichonse chitheka.
 

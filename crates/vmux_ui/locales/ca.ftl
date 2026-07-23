@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elements
 }
+
+tools-title = Eines
+tools-search = Cerca paquets, agents, MCP, eines de llenguatge i fitxers de configuració…
+tools-open = Obre les eines
+tools-fold = Plega les eines
+tools-unfold = Desplega les eines
+tools-scanning = S’estan analitzant les eines locals…
+tools-no-installed = No hi ha eines instal·lades
+tools-empty = No hi ha eines coincidents
+tools-empty-detail = Instal·la un paquet o afegeix un paquet de fitxers de configuració a l’estil Stow.
+tools-apply = Aplica
+tools-homebrew = Homebrew
+tools-homebrew-sync = Les fórmules i aplicacions instal·lades se sincronitzen automàticament.
+tools-open-brewfile = Obre el Brewfile
+tools-managed = gestionat
+tools-provider-homebrew-formulae = Fórmules de Homebrew
+tools-provider-homebrew-casks = Aplicacions de Homebrew
+tools-provider-npm = Paquets npm
+tools-provider-acp-agents = Agents ACP
+tools-provider-language-tools = Eines de llenguatge
+tools-provider-mcp-servers = Servidors MCP
+tools-provider-dotfiles = Fitxers de configuració
+tools-status-available = Disponible
+tools-status-missing = Falta
+tools-status-conflict = Conflicte
+tools-forget = Oblida
+tools-manage = Gestiona
+tools-link = Enllaça
+tools-unlink = Desenllaça
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 actualització
+   *[other] { $count } actualitzacions
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflicte
+   *[other] { $count } conflictes
+}
+tools-result-applied = S’han aplicat les eines
+tools-result-imported = S’han importat les eines
+tools-result-installed = S’ha instal·lat { $name }
+tools-result-updated = S’ha actualitzat { $name }
+tools-result-uninstalled = S’ha desinstal·lat { $name }
+tools-result-forgotten = S’ha oblidat { $name }
+tools-result-managed = Ara es gestiona { $name }
+tools-result-linked = S’ha enllaçat { $name }
+tools-result-unlinked = S’ha desenllaçat { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sincronitza la configuració, les eines, els fitxers de punts i el coneixement amb Git.
+vault-sync = Sincronització
+vault-create = Crear
+vault-connect = Connecta't
+vault-private = Repositori privat
+vault-public-warning = Els repositoris públics exposen el vostre coneixement i configuració.
+vault-choose-repository = Trieu un repositori...
+vault-empty = buit
+vault-clean = Actualitzat
+vault-not-connected = No connectat
+vault-change-count = Canvis: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Inici
 start-tagline = Una sola instrucció. Tot fet.
 

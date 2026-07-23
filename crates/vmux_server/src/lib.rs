@@ -118,6 +118,8 @@ web_pages! {
     render_agents: "agents" => vmux_agent::agents_page::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
+    render_tools: "tools" => vmux_layout::tools_page::Page,
+    render_vault: "vault" => vmux_layout::vault_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,
     render_start: "start" => StartAgentPage,
 }

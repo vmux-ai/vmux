@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } into
    *[other] { $count } izinto
 }
+
+tools-title = Amathuluzi
+tools-search = Sesha amaphakheji, ama-ejenti, MCP, amathuluzi olimi namafayela okumisa…
+tools-open = Vula amathuluzi
+tools-fold = Songa amathuluzi
+tools-unfold = Nweba amathuluzi
+tools-scanning = Kuskenwa amathuluzi endawo…
+tools-no-installed = Awekho amathuluzi afakiwe
+tools-empty = Awekho amathuluzi afanayo
+tools-empty-detail = Faka iphakheji noma engeza iphakheji yamafayela okumisa yesitayela seStow.
+tools-apply = Sebenzisa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Amafomula nezinhlelo ezifakiwe zivumelaniswa ngokuzenzakalelayo.
+tools-open-brewfile = Vula Brewfile
+tools-managed = kulawulwa
+tools-provider-homebrew-formulae = Amafomula eHomebrew
+tools-provider-homebrew-casks = Izinhlelo zeHomebrew
+tools-provider-npm = Amaphakheji enpm
+tools-provider-acp-agents = Ama-ejenti eACP
+tools-provider-language-tools = Amathuluzi olimi
+tools-provider-mcp-servers = Amaseva eMCP
+tools-provider-dotfiles = Amafayela okumisa
+tools-status-available = Kuyatholakala
+tools-status-missing = Akukho
+tools-status-conflict = Ukungqubuzana
+tools-forget = Khohlwa
+tools-manage = Phatha
+tools-link = Xhumanisa
+tools-unlink = Nqamula
+tools-import = Ngenisa
+tools-update-count = { $count ->
+    [one] Isibuyekezo esi-1
+   *[other] Izibuyekezo ezi-{ $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ukungqubuzana oku-1
+   *[other] Ukungqubuzana oku-{ $count }
+}
+tools-result-applied = Amathuluzi asetshenzisiwe
+tools-result-imported = Amathuluzi angenisiwe
+tools-result-installed = { $name } ifakiwe
+tools-result-updated = { $name } ibuyekeziwe
+tools-result-uninstalled = { $name } ikhishiwe
+tools-result-forgotten = { $name } ikhohliwe
+tools-result-managed = { $name } manje iyalawulwa
+tools-result-linked = { $name } ixhunyanisiwe
+tools-result-unlinked = { $name } inqanyuliwe
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Vumelanisa izilungiselelo, amathuluzi, amachashazi, kanye nolwazi nge-Git.
+vault-sync = Vumelanisa
+vault-create = Dala
+vault-connect = Xhuma
+vault-private = Inqolobane yangasese
+vault-public-warning = Amakhosombe asesidlangalaleni aveza Ulwazi lwakho nokucushwa.
+vault-choose-repository = Khetha indawo yokugcina...
+vault-empty = ayinalutho
+vault-clean = Kusesikhathini
+vault-not-connected = Ayixhunyiwe
+vault-change-count = Izinguquko: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Qala
 start-tagline = Umyalo owodwa. Konke kuyenzeka.
 

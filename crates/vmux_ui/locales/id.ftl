@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Alat
+tools-search = Cari paket, agen, MCP, alat bahasa, dan berkas konfigurasi…
+tools-open = Buka Alat
+tools-fold = Ciutkan alat
+tools-unfold = Bentangkan alat
+tools-scanning = Memindai alat lokal…
+tools-no-installed = Tidak ada alat terpasang
+tools-empty = Tidak ada alat yang cocok
+tools-empty-detail = Pasang paket atau tambahkan paket berkas konfigurasi bergaya Stow.
+tools-apply = Terapkan
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula dan aplikasi yang terpasang disinkronkan secara otomatis.
+tools-open-brewfile = Buka Brewfile
+tools-managed = dikelola
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Paket npm
+tools-provider-acp-agents = Agen ACP
+tools-provider-language-tools = Alat bahasa
+tools-provider-mcp-servers = Server MCP
+tools-provider-dotfiles = Berkas konfigurasi
+tools-status-available = Tersedia
+tools-status-missing = Tidak ada
+tools-status-conflict = Konflik
+tools-forget = Lupakan
+tools-manage = Kelola
+tools-link = Tautkan
+tools-unlink = Lepas tautan
+tools-import = Impor
+tools-update-count = { $count ->
+    [one] 1 pembaruan
+   *[other] { $count } pembaruan
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflik
+}
+tools-result-applied = Alat diterapkan
+tools-result-imported = Alat diimpor
+tools-result-installed = { $name } dipasang
+tools-result-updated = { $name } diperbarui
+tools-result-uninstalled = { $name } dihapus
+tools-result-forgotten = { $name } dilupakan
+tools-result-managed = { $name } kini dikelola
+tools-result-linked = { $name } ditautkan
+tools-result-unlinked = Tautan { $name } dilepas
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sinkronkan pengaturan, alat, dotfile, dan Pengetahuan dengan Git.
+vault-sync = Sinkronisasi
+vault-create = Membuat
+vault-connect = Menghubungkan
+vault-private = Repositori pribadi
+vault-public-warning = Repositori publik memaparkan Pengetahuan dan konfigurasi Anda.
+vault-choose-repository = Pilih repositori…
+vault-empty = kosong
+vault-clean = Terkini
+vault-not-connected = Tidak terhubung
+vault-change-count = Perubahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Mulai
 start-tagline = Satu prompt. Apa pun beres.
 

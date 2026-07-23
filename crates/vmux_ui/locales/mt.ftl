@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } oġġett
    *[other] { $count } oġġetti
 }
+
+tools-title = Għodod
+tools-search = Fittex pakketti, aġenti, MCP, għodod tal-lingwa u fajls tal-konfigurazzjoni…
+tools-open = Iftaħ l-għodod
+tools-fold = Agħlaq l-għodod
+tools-unfold = Espandi l-għodod
+tools-scanning = Qed jiġu skennjati l-għodod lokali…
+tools-no-installed = M’hemmx għodod installati
+tools-empty = M’hemmx għodod li jaqblu
+tools-empty-detail = Installa pakkett jew żid pakkett ta’ fajls tal-konfigurazzjoni bi stil Stow.
+tools-apply = Applika
+tools-homebrew = Homebrew
+tools-homebrew-sync = Il-formuli u l-applikazzjonijiet installati jissinkronizzaw awtomatikament.
+tools-open-brewfile = Iftaħ Brewfile
+tools-managed = immaniġġjat
+tools-provider-homebrew-formulae = Formuli Homebrew
+tools-provider-homebrew-casks = Applikazzjonijiet Homebrew
+tools-provider-npm = Pakketti npm
+tools-provider-acp-agents = Aġenti ACP
+tools-provider-language-tools = Għodod tal-lingwa
+tools-provider-mcp-servers = Servers MCP
+tools-provider-dotfiles = Fajls tal-konfigurazzjoni
+tools-status-available = Disponibbli
+tools-status-missing = Nieqes
+tools-status-conflict = Kunflitt
+tools-forget = Nesa
+tools-manage = Immaniġġja
+tools-link = Illinkja
+tools-unlink = Neħħi l-link
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] Aġġornament 1
+   *[other] { $count } aġġornamenti
+}
+tools-conflict-count = { $count ->
+    [one] Kunflitt 1
+   *[other] { $count } kunflitti
+}
+tools-result-applied = L-għodod ġew applikati
+tools-result-imported = L-għodod ġew importati
+tools-result-installed = { $name } ġie installat
+tools-result-updated = { $name } ġie aġġornat
+tools-result-uninstalled = { $name } tneħħa
+tools-result-forgotten = { $name } intesa
+tools-result-managed = { $name } issa huwa mmaniġġjat
+tools-result-linked = { $name } ġie llinkjat
+tools-result-unlinked = Il-link ta’ { $name } tneħħa
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Issinkronizza s-settings, l-għodod, il-dotfiles, u l-Għarfien ma’ Git.
+vault-sync = Sinkronizzazzjoni
+vault-create = Oħloq
+vault-connect = Qabbad
+vault-private = Repożitorju privat
+vault-public-warning = Repożitorji pubbliċi jesponu l-Għarfien u l-konfigurazzjoni tiegħek.
+vault-choose-repository = Agħżel repożitorju...
+vault-empty = vojta
+vault-clean = Aġġornata
+vault-not-connected = Mhux konnessi
+vault-change-count = Bidliet: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Ibda
 start-tagline = Prompt wieħed. Kollox, lest.
 

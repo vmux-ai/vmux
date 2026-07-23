@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } vienums
    *[other] { $count } vienumi
 }
+
+tools-title = Rīki
+tools-search = Meklēt pakotnes, aģentus, MCP, valodu rīkus un konfigurācijas failus…
+tools-open = Atvērt rīkus
+tools-fold = Sakļaut rīkus
+tools-unfold = Izvērst rīkus
+tools-scanning = Vietējo rīku skenēšana…
+tools-no-installed = Nav instalētu rīku
+tools-empty = Nav atbilstošu rīku
+tools-empty-detail = Instalējiet pakotni vai pievienojiet Stow stila konfigurācijas failu pakotni.
+tools-apply = Lietot
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalētās formulas un lietotnes tiek sinhronizētas automātiski.
+tools-open-brewfile = Atvērt Brewfile
+tools-managed = pārvaldīts
+tools-provider-homebrew-formulae = Homebrew formulas
+tools-provider-homebrew-casks = Homebrew lietotnes
+tools-provider-npm = npm pakotnes
+tools-provider-acp-agents = ACP aģenti
+tools-provider-language-tools = Valodu rīki
+tools-provider-mcp-servers = MCP serveri
+tools-provider-dotfiles = Konfigurācijas faili
+tools-status-available = Pieejams
+tools-status-missing = Trūkst
+tools-status-conflict = Konflikts
+tools-forget = Aizmirst
+tools-manage = Pārvaldīt
+tools-link = Saistīt
+tools-unlink = Atsaistīt
+tools-import = Importēt
+tools-update-count = { $count ->
+    [one] 1 atjauninājums
+   *[other] { $count } atjauninājumi
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikts
+   *[other] { $count } konflikti
+}
+tools-result-applied = Rīki lietoti
+tools-result-imported = Rīki importēti
+tools-result-installed = { $name } instalēts
+tools-result-updated = { $name } atjaunināts
+tools-result-uninstalled = { $name } atinstalēts
+tools-result-forgotten = { $name } aizmirsts
+tools-result-managed = { $name } tagad tiek pārvaldīts
+tools-result-linked = { $name } saistīts
+tools-result-unlinked = { $name } atsaistīts
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Sinhronizējiet iestatījumus, rīkus, punktu failus un zināšanas ar Git.
+vault-sync = Sinhronizēt
+vault-create = Izveidot
+vault-connect = Savienot
+vault-private = Privātā krātuve
+vault-public-warning = Publiskās krātuves atklāj jūsu zināšanas un konfigurāciju.
+vault-choose-repository = Izvēlieties repozitoriju…
+vault-empty = tukšs
+vault-clean = Aktuāli
+vault-not-connected = Nav savienots
+vault-change-count = Izmaiņas: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Sākums
 start-tagline = Viens prompts. Viss izdarīts.
 

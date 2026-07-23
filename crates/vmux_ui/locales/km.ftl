@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] ធាតុ { $count }
    *[other] ធាតុ { $count }
 }
+
+tools-title = ឧបករណ៍
+tools-search = ស្វែងរកកញ្ចប់ ភ្នាក់ងារ MCP ឧបករណ៍ភាសា និងឯកសារកំណត់រចនាសម្ព័ន្ធ…
+tools-open = បើកឧបករណ៍
+tools-fold = បង្រួមឧបករណ៍
+tools-unfold = ពង្រីកឧបករណ៍
+tools-scanning = កំពុងស្កេនឧបករណ៍ក្នុងម៉ាស៊ីន…
+tools-no-installed = មិនមានឧបករណ៍ដែលបានដំឡើង
+tools-empty = មិនមានឧបករណ៍ដែលត្រូវគ្នា
+tools-empty-detail = ដំឡើងកញ្ចប់ ឬបន្ថែមកញ្ចប់ឯកសារកំណត់រចនាសម្ព័ន្ធបែប Stow។
+tools-apply = អនុវត្ត
+tools-homebrew = Homebrew
+tools-homebrew-sync = រូបមន្ត និងកម្មវិធីដែលបានដំឡើងត្រូវបានធ្វើសមកាលកម្មដោយស្វ័យប្រវត្តិ។
+tools-open-brewfile = បើក Brewfile
+tools-managed = បានគ្រប់គ្រង
+tools-provider-homebrew-formulae = រូបមន្ត Homebrew
+tools-provider-homebrew-casks = កម្មវិធី Homebrew
+tools-provider-npm = កញ្ចប់ npm
+tools-provider-acp-agents = ភ្នាក់ងារ ACP
+tools-provider-language-tools = ឧបករណ៍ភាសា
+tools-provider-mcp-servers = ម៉ាស៊ីនបម្រើ MCP
+tools-provider-dotfiles = ឯកសារកំណត់រចនាសម្ព័ន្ធ
+tools-status-available = មាន
+tools-status-missing = បាត់
+tools-status-conflict = ជម្លោះ
+tools-forget = បំភ្លេច
+tools-manage = គ្រប់គ្រង
+tools-link = ភ្ជាប់
+tools-unlink = ផ្ដាច់
+tools-import = នាំចូល
+tools-update-count = { $count ->
+    [one] បច្ចុប្បន្នភាព 1
+   *[other] បច្ចុប្បន្នភាព { $count }
+}
+tools-conflict-count = { $count ->
+    [one] ជម្លោះ 1
+   *[other] ជម្លោះ { $count }
+}
+tools-result-applied = បានអនុវត្តឧបករណ៍
+tools-result-imported = បាននាំចូលឧបករណ៍
+tools-result-installed = បានដំឡើង { $name }
+tools-result-updated = បានធ្វើបច្ចុប្បន្នភាព { $name }
+tools-result-uninstalled = បានលុប { $name }
+tools-result-forgotten = បានបំភ្លេច { $name }
+tools-result-managed = ឥឡូវនេះ { $name } ត្រូវបានគ្រប់គ្រង
+tools-result-linked = បានភ្ជាប់ { $name }
+tools-result-unlinked = បានផ្ដាច់ { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = ការ​កំណត់​សមកាលកម្ម ឧបករណ៍ ឯកសារ dotfiles និង​ចំណេះដឹង​ជាមួយ Git ។
+vault-sync = ធ្វើសមកាលកម្ម
+vault-create = បង្កើត
+vault-connect = ភ្ជាប់
+vault-private = ឃ្លាំងឯកជន
+vault-public-warning = ឃ្លាំងសាធារណៈបង្ហាញចំណេះដឹង និងការកំណត់រចនាសម្ព័ន្ធរបស់អ្នក។
+vault-choose-repository = ជ្រើសរើសឃ្លាំង…
+vault-empty = ទទេ
+vault-clean = ទាន់សម័យ
+vault-not-connected = មិនបានភ្ជាប់
+vault-change-count = ការផ្លាស់ប្តូរ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ចាប់ផ្ដើម
 start-tagline = ពាក្យបញ្ជាតែមួយ។ ធ្វើអ្វីក៏រួចរាល់។
 

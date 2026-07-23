@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Piranti
+tools-search = Telusuri paket, agen, MCP, piranti basa lan berkas konfigurasi…
+tools-open = Bukak Piranti
+tools-fold = Ciutaké piranti
+tools-unfold = Jembarake piranti
+tools-scanning = Mindhai piranti lokal…
+tools-no-installed = Ora ana piranti sing dipasang
+tools-empty = Ora ana piranti sing cocog
+tools-empty-detail = Pasang paket utawa tambahaké paket berkas konfigurasi gaya Stow.
+tools-apply = Terapaké
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula lan aplikasi sing dipasang diselarasaké kanthi otomatis.
+tools-open-brewfile = Bukak Brewfile
+tools-managed = dikelola
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Paket npm
+tools-provider-acp-agents = Agen ACP
+tools-provider-language-tools = Piranti basa
+tools-provider-mcp-servers = Server MCP
+tools-provider-dotfiles = Berkas konfigurasi
+tools-status-available = Kasedhiya
+tools-status-missing = Ora ana
+tools-status-conflict = Konflik
+tools-forget = Lalèkaké
+tools-manage = Kelola
+tools-link = Sambungaké
+tools-unlink = Pedhot sambungan
+tools-import = Impor
+tools-update-count = { $count ->
+    [one] 1 nganyari
+   *[other] { $count } nganyari
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflik
+}
+tools-result-applied = Piranti wis diterapaké
+tools-result-imported = Piranti wis diimpor
+tools-result-installed = { $name } wis dipasang
+tools-result-updated = { $name } wis dianyari
+tools-result-uninstalled = { $name } wis dibusak
+tools-result-forgotten = { $name } wis dilalèkaké
+tools-result-managed = { $name } saiki dikelola
+tools-result-linked = { $name } wis disambungaké
+tools-result-unlinked = { $name } wis dipedhot
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Nyelarasake setelan, alat, dotfiles, lan Kawruh karo Git.
+vault-sync = Sinkronisasi
+vault-create = Nggawe
+vault-connect = Nyambung
+vault-private = Repositori pribadi
+vault-public-warning = Repositori umum mbukak Kawruh lan konfigurasi sampeyan.
+vault-choose-repository = Pilih repositori…
+vault-empty = kosong
+vault-clean = Nganti saiki
+vault-not-connected = Ora nyambung
+vault-change-count = Owah-owahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Miwiti
 start-tagline = Siji prompt. Apa waé, rampung.
 

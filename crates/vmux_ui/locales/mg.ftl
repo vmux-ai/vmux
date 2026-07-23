@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] singa { $count }
    *[other] singa { $count }
 }
+
+tools-title = Fitaovana
+tools-search = Mitadiava fonosana, mpandraharaha, MCP, fitaovan-teny ary rakitra fikirakirana…
+tools-open = Sokafy ny fitaovana
+tools-fold = Aforeto ny fitaovana
+tools-unfold = Velaro ny fitaovana
+tools-scanning = Mikaroka fitaovana eo an-toerana…
+tools-no-installed = Tsy misy fitaovana napetraka
+tools-empty = Tsy misy fitaovana mifanaraka
+tools-empty-detail = Mametraha fonosana na manampia fonosana rakitra fikirakirana amin’ny endrika Stow.
+tools-apply = Ampiharo
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mifandrindra ho azy ny raikipohy sy ny fampiharana napetraka.
+tools-open-brewfile = Sokafy ny Brewfile
+tools-managed = tantanana
+tools-provider-homebrew-formulae = Raikipohy Homebrew
+tools-provider-homebrew-casks = Fampiharana Homebrew
+tools-provider-npm = Fonosana npm
+tools-provider-acp-agents = Mpandraharaha ACP
+tools-provider-language-tools = Fitaovan-teny
+tools-provider-mcp-servers = Mpizara MCP
+tools-provider-dotfiles = Rakitra fikirakirana
+tools-status-available = Misy
+tools-status-missing = Tsy hita
+tools-status-conflict = Fifanoherana
+tools-forget = Hadinoina
+tools-manage = Tantano
+tools-link = Ampifandraiso
+tools-unlink = Tapaho ny rohy
+tools-import = Ampidiro
+tools-update-count = { $count ->
+    [one] Fanavaozana 1
+   *[other] Fanavaozana { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Fifanoherana 1
+   *[other] Fifanoherana { $count }
+}
+tools-result-applied = Nampiharina ny fitaovana
+tools-result-imported = Nampidirina ny fitaovana
+tools-result-installed = Napetraka i { $name }
+tools-result-updated = Nohavaozina i { $name }
+tools-result-uninstalled = Nesorina i { $name }
+tools-result-forgotten = Hadino i { $name }
+tools-result-managed = Tantanana izao i { $name }
+tools-result-linked = Nampifandraisina i { $name }
+tools-result-unlinked = Tapaka ny rohin’i { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Ampifanaraho amin'ny Git ny fika, fitaovana, dotfiles ary fahalalana.
+vault-sync = mifandrindra
+vault-create = MANANGANA
+vault-connect = Connect
+vault-private = Repository manokana
+vault-public-warning = Ampahafantarin'ny repository ho an'ny daholobe ny Fahalalanao sy ny fikirakiranao.
+vault-choose-repository = Misafidiana tahiry iray…
+vault-empty = foana
+vault-clean = Manaraka toetr'andro
+vault-not-connected = Tsy mifandray
+vault-change-count = FIOVANA: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Fanombohana
 start-tagline = Prompt iray. Vita izay rehetra ilaina.
 

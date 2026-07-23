@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } آئٹم
    *[other] { $count } آئٹمز
 }
+
+tools-title = اوزار
+tools-search = پیکج، ایجنٹ، MCP، زبان کے اوزار اور ترتیب کی فائلیں تلاش کریں…
+tools-open = اوزار کھولیں
+tools-fold = اوزار سمیٹیں
+tools-unfold = اوزار پھیلائیں
+tools-scanning = مقامی اوزار اسکین کیے جا رہے ہیں…
+tools-no-installed = کوئی اوزار نصب نہیں
+tools-empty = کوئی مماثل اوزار نہیں
+tools-empty-detail = کوئی پیکج نصب کریں یا Stow طرز کا ترتیب فائلوں کا پیکج شامل کریں۔
+tools-apply = لاگو کریں
+tools-homebrew = Homebrew
+tools-homebrew-sync = نصب شدہ فارمولے اور ایپلی کیشنز خودکار طور پر ہم وقت ہو جاتے ہیں۔
+tools-open-brewfile = Brewfile کھولیں
+tools-managed = زیر انتظام
+tools-provider-homebrew-formulae = Homebrew فارمولے
+tools-provider-homebrew-casks = Homebrew ایپلی کیشنز
+tools-provider-npm = npm پیکج
+tools-provider-acp-agents = ACP ایجنٹ
+tools-provider-language-tools = زبان کے اوزار
+tools-provider-mcp-servers = MCP سرور
+tools-provider-dotfiles = ترتیب کی فائلیں
+tools-status-available = دستیاب
+tools-status-missing = غائب
+tools-status-conflict = تصادم
+tools-forget = بھولیں
+tools-manage = انتظام کریں
+tools-link = منسلک کریں
+tools-unlink = ربط ہٹائیں
+tools-import = درآمد کریں
+tools-update-count = { $count ->
+    [one] 1 تازہ کاری
+   *[other] { $count } تازہ کاریاں
+}
+tools-conflict-count = { $count ->
+    [one] 1 تصادم
+   *[other] { $count } تصادم
+}
+tools-result-applied = اوزار لاگو ہو گئے
+tools-result-imported = اوزار درآمد ہو گئے
+tools-result-installed = { $name } نصب ہو گیا
+tools-result-updated = { $name } تازہ ہو گیا
+tools-result-uninstalled = { $name } ہٹا دیا گیا
+tools-result-forgotten = { $name } بھلا دیا گیا
+tools-result-managed = { $name } اب زیر انتظام ہے
+tools-result-linked = { $name } منسلک ہو گیا
+tools-result-unlinked = { $name } کا ربط ہٹا دیا گیا
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = سیٹنگز، ٹولز، ڈاٹ فائلز اور نالج کو Git کے ساتھ سنک کریں۔
+vault-sync = مطابقت پذیری
+vault-create = بنائیں
+vault-connect = جڑیں۔
+vault-private = نجی ذخیرہ
+vault-public-warning = عوامی ذخیرے آپ کے علم اور ترتیب کو بے نقاب کرتے ہیں۔
+vault-choose-repository = ایک ذخیرہ منتخب کریں…
+vault-empty = خالی
+vault-clean = تازہ ترین
+vault-not-connected = منسلک نہیں
+vault-change-count = تبدیلیاں: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع کریں
 start-tagline = ایک پرامپٹ۔ ہر کام مکمل۔
 

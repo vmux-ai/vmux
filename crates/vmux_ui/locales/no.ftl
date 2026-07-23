@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementer
 }
+
+tools-title = Verktøy
+tools-search = Søk etter pakker, agenter, MCP, språkverktøy og konfigurasjonsfiler…
+tools-open = Åpne verktøy
+tools-fold = Fold sammen verktøy
+tools-unfold = Fold ut verktøy
+tools-scanning = Skanner lokale verktøy…
+tools-no-installed = Ingen installerte verktøy
+tools-empty = Ingen samsvarende verktøy
+tools-empty-detail = Installer en pakke, eller legg til en konfigurasjonsfilpakke i Stow-stil.
+tools-apply = Bruk
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installerte formler og programmer synkroniseres automatisk.
+tools-open-brewfile = Åpne Brewfile
+tools-managed = administrert
+tools-provider-homebrew-formulae = Homebrew-formler
+tools-provider-homebrew-casks = Homebrew-programmer
+tools-provider-npm = npm-pakker
+tools-provider-acp-agents = ACP-agenter
+tools-provider-language-tools = Språkverktøy
+tools-provider-mcp-servers = MCP-servere
+tools-provider-dotfiles = Konfigurasjonsfiler
+tools-status-available = Tilgjengelig
+tools-status-missing = Mangler
+tools-status-conflict = Konflikt
+tools-forget = Glem
+tools-manage = Administrer
+tools-link = Koble
+tools-unlink = Koble fra
+tools-import = Importer
+tools-update-count = { $count ->
+    [one] 1 oppdatering
+   *[other] { $count } oppdateringer
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikter
+}
+tools-result-applied = Verktøy brukt
+tools-result-imported = Verktøy importert
+tools-result-installed = { $name } installert
+tools-result-updated = { $name } oppdatert
+tools-result-uninstalled = { $name } avinstallert
+tools-result-forgotten = { $name } glemt
+tools-result-managed = { $name } administreres nå
+tools-result-linked = { $name } koblet
+tools-result-unlinked = { $name } koblet fra
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Synkroniser innstillinger, verktøy, punktfiler og kunnskap med Git.
+vault-sync = Synkroniser
+vault-create = Skape
+vault-connect = Koble til
+vault-private = Privat depot
+vault-public-warning = Offentlige depoter avslører din kunnskap og konfigurasjon.
+vault-choose-repository = Velg et depot...
+vault-empty = tømme
+vault-clean = Oppdatert
+vault-not-connected = Ikke tilkoblet
+vault-change-count = Endringer: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Én prompt. Hva som helst, ferdig.
 

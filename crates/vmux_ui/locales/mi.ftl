@@ -19,6 +19,70 @@ common-items = { $count ->
     [one] { $count } tūemi
    *[other] { $count } tūemi
 }
+
+tools-title = Ngā utauta
+tools-search = Rapua ngā mōkihi, ngā māngai, MCP, ngā utauta reo me ngā kōnae whirihora…
+tools-open = Huakina ngā utauta
+tools-fold = Whakapikoa ngā utauta
+tools-unfold = Whakawhānuitia ngā utauta
+tools-scanning = E matawai ana i ngā utauta paetata…
+tools-no-installed = Kāore he utauta kua tāutatia
+tools-empty = Kāore he utauta e hāngai ana
+tools-empty-detail = Tāutahia he mōkihi, tāpirihia rānei he mōkihi kōnae whirihora āhua Stow.
+tools-apply = Hoatu
+tools-homebrew = Homebrew
+tools-homebrew-sync = Ka tukutahi aunoa ngā tātai me ngā taupānga kua tāutatia.
+tools-open-brewfile = Huakina te Brewfile
+tools-managed = whakahaeretia
+tools-provider-homebrew-formulae = Ngā tātai Homebrew
+tools-provider-homebrew-casks = Ngā taupānga Homebrew
+tools-provider-npm = Ngā mōkihi npm
+tools-provider-acp-agents = Ngā māngai ACP
+tools-provider-language-tools = Ngā utauta reo
+tools-provider-mcp-servers = Ngā tūmau MCP
+tools-provider-dotfiles = Ngā kōnae whirihora
+tools-status-available = Kei te wātea
+tools-status-missing = Kei te ngaro
+tools-status-conflict = Papā
+tools-forget = Wareware
+tools-manage = Whakahaere
+tools-link = Hono
+tools-unlink = Momotu
+tools-import = Kawemai
+tools-update-count = { $count ->
+    [one] 1 whakahou
+   *[other] { $count } whakahou
+}
+tools-conflict-count = { $count ->
+    [one] 1 papā
+   *[other] { $count } papā
+}
+tools-result-applied = Kua hoatu ngā utauta
+tools-result-imported = Kua kawemai ngā utauta
+tools-result-installed = Kua tāutahia a { $name }
+tools-result-updated = Kua whakahoutia a { $name }
+tools-result-uninstalled = Kua tango a { $name }
+tools-result-forgotten = Kua warewaretia a { $name }
+tools-result-managed = Kei te whakahaeretia a { $name } ināianei
+tools-result-linked = Kua honoa a { $name }
+tools-result-unlinked = Kua momotuhia a { $name }
+vault-title = Vault
+vault-open = { common-open } Vault
+vault-description = Tukutahi tautuhinga, taputapu, dotfiles, me te Matauranga ki a Git.
+vault-sync = Tukutahi
+vault-create = Waihanga
+vault-connect = Tūhono
+vault-private = Whare putunga motuhake
+vault-public-warning = Ko nga whare pupuri a te iwi e whakaatu ana i to Matauranga me to whirihoranga.
+vault-choose-repository = Kōwhiria he putunga...
+vault-empty = takoto kau
+vault-clean = Ko nga mea hou
+vault-not-connected = Kaore i hono
+vault-change-count = Huringa: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tīmata
 start-tagline = Kotahi te tohutohu. Ka oti te katoa.
 
