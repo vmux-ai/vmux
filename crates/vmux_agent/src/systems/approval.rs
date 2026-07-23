@@ -36,7 +36,7 @@ impl AgentApprovalStore {
 
     fn policy_for(&self, agent: &str, cwd: &Path) -> AgentApprovalPolicy {
         let agent = canonical_agent_id(agent);
-        let auto = repository_key(cwd)
+        let auto = approval_scope_key(cwd)
             .and_then(|repository| {
                 self.grants
                     .by_agent
@@ -51,7 +51,7 @@ impl AgentApprovalStore {
     }
 
     fn remember(&mut self, agent: &str, cwd: &Path, tool: &str) {
-        let Some(repository) = repository_key(cwd) else {
+        let Some(scope) = approval_scope_key(cwd) else {
             return;
         };
         let inserted = self
@@ -59,7 +59,7 @@ impl AgentApprovalStore {
             .by_agent
             .entry(canonical_agent_id(agent))
             .or_default()
-            .entry(repository)
+            .entry(scope)
             .or_default()
             .insert(approval_tool_key(tool));
         if inserted && let Err(error) = self.save() {
@@ -79,9 +79,10 @@ impl AgentApprovalStore {
     }
 }
 
-fn repository_key(cwd: &Path) -> Option<String> {
+fn approval_scope_key(cwd: &Path) -> Option<String> {
     vmux_git::worktree::common_dir_of(cwd)
         .ok()
+        .or_else(|| std::fs::canonicalize(cwd).ok())
         .map(|path| path.to_string_lossy().into_owned())
 }
 
@@ -298,6 +299,22 @@ mod tests {
             !loaded
                 .policy_for("codex", directory.path())
                 .allows("mcp.vmux.open_file")
+        );
+    }
+
+    #[test]
+    fn approval_grants_persist_by_working_directory_outside_repository() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("approvals.json");
+        let mut store = AgentApprovalStore::load_from(path.clone());
+        store.remember("codex", directory.path(), "execute command");
+
+        let loaded = AgentApprovalStore::load_from(path);
+
+        assert!(
+            loaded
+                .policy_for("codex-acp", directory.path())
+                .allows("execute_command")
         );
     }
 }

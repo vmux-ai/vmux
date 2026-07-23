@@ -20,8 +20,8 @@ use agent_client_protocol::schema::v1::{
     SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory,
     SessionConfigSelectOptions, SessionId, SessionNotification, SessionUpdate,
     SetSessionConfigOptionRequest, TerminalExitStatus, TerminalId, TerminalOutputRequest,
-    TerminalOutputResponse, TextContent, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
-    WriteTextFileRequest, WriteTextFileResponse,
+    TerminalOutputResponse, TextContent, ToolKind, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 use agent_client_protocol::{Client, Responder};
 use base64::Engine;
@@ -40,6 +40,7 @@ use crate::protocol::{
 const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
+const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -122,6 +123,7 @@ pub struct AcpShared {
     pub anchor: ProcessId,
     pub stream_tx: broadcast::Sender<ServiceMessage>,
     pub projector: Mutex<AcpProjector>,
+    projector_updates: watch::Sender<u64>,
     pub pending_perms: Mutex<HashMap<String, oneshot::Sender<ApprovalDecision>>>,
     /// ACP-native terminals keyed by their ACP `terminalId` (the vmux `ProcessId` string).
     pub terminals: Mutex<HashMap<String, AcpTerminal>>,
@@ -155,6 +157,7 @@ impl AcpShared {
             anchor,
             stream_tx,
             projector: Mutex::new(AcpProjector::new()),
+            projector_updates: watch::channel(0).0,
             pending_perms: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
             manager,
@@ -321,6 +324,9 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
     }
     let mut projector = shared.projector.lock().unwrap();
     let intents = projector.apply(update);
+    shared
+        .projector_updates
+        .send_modify(|revision| *revision += 1);
     if shared.history_replay.load(Ordering::SeqCst) {
         for intent in &intents {
             if let Intent::WorkspaceChanged {
@@ -442,7 +448,7 @@ fn model_info(config_options: &[SessionConfigOption]) -> Option<AcpModelInfoStat
 fn approval_details(
     request: &RequestPermissionRequest,
     projector: &AcpProjector,
-) -> (String, String) {
+) -> Option<(String, String)> {
     let call_id = request.tool_call.tool_call_id.to_string();
     let (projected_name, projected_args) =
         projector.tool_call_details(&call_id).unwrap_or_default();
@@ -454,17 +460,68 @@ fn approval_details(
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(str::to_string)
-        .or_else(|| (!projected_name.is_empty()).then_some(projected_name))
-        .unwrap_or_else(|| "tool call".to_string());
-    let args_json = request
+        .or_else(|| (!projected_name.is_empty()).then_some(projected_name))?;
+    let args_json = request_approval_args(request)
+        .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
+        .unwrap_or_else(|| "{}".to_string());
+    Some((name, args_json))
+}
+
+fn request_approval_args(request: &RequestPermissionRequest) -> Option<String> {
+    request
         .tool_call
         .fields
         .raw_input
         .as_ref()
+        .or_else(|| request.meta.as_ref()?.get("codex")?.get("params"))
         .map(serde_json::Value::to_string)
-        .or_else(|| (!projected_args.is_empty()).then_some(projected_args))
-        .unwrap_or_else(|| "{}".to_string());
-    (name, args_json)
+}
+
+fn tool_kind_approval_name(kind: Option<ToolKind>) -> Option<&'static str> {
+    match kind? {
+        ToolKind::Read => Some("Read data"),
+        ToolKind::Edit => Some("Edit files"),
+        ToolKind::Delete => Some("Delete files"),
+        ToolKind::Move => Some("Move files"),
+        ToolKind::Search => Some("Search"),
+        ToolKind::Execute => Some("Execute command"),
+        ToolKind::Think => Some("Think"),
+        ToolKind::Fetch => Some("Fetch data"),
+        ToolKind::SwitchMode => Some("Switch mode"),
+        _ => None,
+    }
+}
+
+fn approval_details_from_kind(request: &RequestPermissionRequest) -> Option<(String, String)> {
+    Some((
+        tool_kind_approval_name(request.tool_call.fields.kind)?.to_string(),
+        request_approval_args(request)?,
+    ))
+}
+
+async fn resolve_approval_details(
+    request: &RequestPermissionRequest,
+    shared: &AcpShared,
+) -> Option<(String, String)> {
+    let deadline = tokio::time::Instant::now() + APPROVAL_DETAILS_WAIT;
+    let mut updates = shared.projector_updates.subscribe();
+    loop {
+        if let Some(details) = {
+            let projector = shared.projector.lock().unwrap();
+            approval_details(request, &projector)
+        } {
+            return Some(details);
+        }
+        if let Some(details) = approval_details_from_kind(request) {
+            return Some(details);
+        }
+        if tokio::time::timeout_at(deadline, updates.changed())
+            .await
+            .is_err()
+        {
+            return None;
+        }
+    }
 }
 
 fn attachment_uri(path: &str) -> String {
@@ -620,9 +677,17 @@ pub async fn run(
                         responder: Responder<RequestPermissionResponse>,
                         _cx| {
                 let call_id = req.tool_call.tool_call_id.to_string();
-                let (name, args_json) = {
-                    let projector = perm_shared.projector.lock().unwrap();
-                    approval_details(&req, &projector)
+                let Some((name, args_json)) = resolve_approval_details(&req, &perm_shared).await
+                else {
+                    tracing::warn!(
+                        target: "acp",
+                        sid = %perm_shared.sid,
+                        call_id = %call_id,
+                        "ACP permission request omitted tool identity; cancelling"
+                    );
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
+                    ));
                 };
                 if is_conversation_title_tool(&name) {
                     let outcome =
@@ -2022,10 +2087,10 @@ mod tests {
 
         assert_eq!(
             approval_details(&request, &projector),
-            (
+            Some((
                 "vmux.run".to_string(),
                 r#"{"command":"echo hi","focus":true}"#.to_string(),
-            )
+            ))
         );
     }
 
@@ -2048,7 +2113,85 @@ mod tests {
 
         assert_eq!(
             approval_details(&request, &projector),
-            ("new".to_string(), r#"{"command":"new"}"#.to_string(),)
+            Some(("new".to_string(), r#"{"command":"new"}"#.to_string(),))
+        );
+    }
+
+    #[test]
+    fn approval_details_reject_missing_tool_identity() {
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new(),
+            ),
+            Vec::new(),
+        );
+
+        assert_eq!(approval_details(&request, &AcpProjector::new()), None);
+    }
+
+    #[test]
+    fn approval_details_use_kind_when_request_has_arguments_but_no_title() {
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new()
+                    .kind(ToolKind::Execute)
+                    .raw_input(serde_json::json!({"command": "echo hi"})),
+            ),
+            Vec::new(),
+        );
+
+        assert_eq!(
+            approval_details_from_kind(&request),
+            Some((
+                "Execute command".to_string(),
+                r#"{"command":"echo hi"}"#.to_string(),
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn approval_details_wait_for_preceding_tool_call_projection() {
+        let (stream_tx, _) = broadcast::channel(2);
+        let shared = Arc::new(AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        ));
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "call-1",
+                ToolCallUpdateFields::new(),
+            ),
+            Vec::new(),
+        );
+        let waiting = {
+            let shared = Arc::clone(&shared);
+            tokio::spawn(async move { resolve_approval_details(&request, &shared).await })
+        };
+
+        tokio::task::yield_now().await;
+        project_session_update(
+            &shared,
+            SessionUpdate::ToolCall(
+                ToolCall::new("call-1", "vmux.run")
+                    .raw_input(serde_json::json!({"command": "echo hi"})),
+            ),
+        );
+
+        assert_eq!(
+            waiting.await.unwrap(),
+            Some((
+                "vmux.run".to_string(),
+                r#"{"command":"echo hi"}"#.to_string(),
+            ))
         );
     }
 
