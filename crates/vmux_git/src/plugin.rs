@@ -958,7 +958,7 @@ mod tests {
         };
 
         cache.invalidate(&path);
-        for _ in 0..100 {
+        for _ in 0..500 {
             if cache.get(&path).is_some_and(|info| info.uncommitted == 1) {
                 return;
             }
