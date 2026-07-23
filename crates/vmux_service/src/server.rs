@@ -7,7 +7,7 @@ use crate::{read_message, write_message};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tokio::sync::{Mutex, broadcast, mpsc};
@@ -19,7 +19,7 @@ pub(crate) fn init_started_at() {
     SERVICE_STARTED.get_or_init(Instant::now);
 }
 
-const MAX_WAKE_EVENTS_PER_TICK: usize = 1024;
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(16);
 type InputWriters = Arc<Mutex<HashMap<ProcessId, PtyInputWriter>>>;
 type PendingQueries = Arc<
     Mutex<
@@ -120,16 +120,12 @@ pub async fn run_server(listener: UnixListener) {
     let poll_mgr = Arc::clone(&manager);
     let poll_input_writers = Arc::clone(&input_writers);
     let poll_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_millis(16));
+        let mut interval = tokio::time::interval(PROCESS_POLL_INTERVAL);
         interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
         loop {
-            tokio::select! {
-                _ = interval.tick() => {}
-                Some(_) = wake_rx.recv() => {
-                    drain_pending_wakes(&mut wake_rx);
-                }
-            }
+            interval.tick().await;
+            drain_pending_wakes(&mut wake_rx);
 
             let reaped = {
                 let mut mgr = poll_mgr.lock().await;
@@ -209,11 +205,7 @@ pub async fn run_server(listener: UnixListener) {
 }
 
 fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
-    for _ in 0..MAX_WAKE_EVENTS_PER_TICK {
-        if wake_rx.try_recv().is_err() {
-            break;
-        }
-    }
+    while wake_rx.try_recv().is_ok() {}
 }
 
 fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (String, bool) {
@@ -1069,9 +1061,9 @@ mod tests {
     }
 
     #[test]
-    fn wake_drain_leaves_excess_events_for_later_ticks() {
+    fn wake_drain_coalesces_all_pending_output() {
         let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
-        for _ in 0..=MAX_WAKE_EVENTS_PER_TICK {
+        for _ in 0..1024 {
             wake_tx
                 .send(ProcessId::new())
                 .expect("wake event should queue");
@@ -1079,7 +1071,7 @@ mod tests {
 
         drain_pending_wakes(&mut wake_rx);
 
-        assert!(wake_rx.try_recv().is_ok());
+        assert!(wake_rx.try_recv().is_err());
     }
 
     #[tokio::test]

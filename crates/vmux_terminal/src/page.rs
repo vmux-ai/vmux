@@ -23,6 +23,12 @@ const CONTAINER_ID: &str = "term-container";
 /// ID for the hidden measurement span used to compute character dimensions.
 const MEASURE_ID: &str = "term-measure";
 
+#[derive(Clone, PartialEq)]
+struct TerminalRowState {
+    line: TermLine,
+    cursor: Option<TermCursor>,
+}
+
 fn localized_terminal_title(title: &str) -> String {
     if title == "Terminal" {
         translate("command-terminal")
@@ -42,7 +48,7 @@ fn localized_terminal_title(title: &str) -> String {
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
-    let mut rows = use_signal(std::collections::BTreeMap::<u32, Signal<TermLine>>::new);
+    let mut rows = use_signal(std::collections::BTreeMap::<u32, Signal<TerminalRowState>>::new);
     let mut first_row = use_signal(|| 0u32);
     let mut raw_title = use_signal(String::new);
     let mut total_rows = use_signal(|| 0u32);
@@ -68,8 +74,12 @@ pub fn Page() -> Element {
     let _listener =
         use_bin_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
             let first = patch.first_row;
-            first_row.set(first);
-            total_rows.set(patch.total_rows);
+            if *first_row.peek() != first {
+                first_row.set(first);
+            }
+            if *total_rows.peek() != patch.total_rows {
+                total_rows.set(patch.total_rows);
+            }
             if *alt.peek() != patch.alt {
                 alt.set(patch.alt);
             }
@@ -87,21 +97,82 @@ pub fn Page() -> Element {
                 vmux_core::scroll::OVERSCAN_CAP,
             );
             let keep_hi = first + patch.rows as u32 + overscan * 2 + 2;
-            rows.with_mut(|map| {
-                if patch.full {
-                    map.clear();
-                }
+            let previous_cursor = cursor.peek().clone();
+            let next_cursor = patch.cursor.clone();
+            let cursor_for_row =
+                |doc_row| (next_cursor.row == doc_row).then_some(next_cursor.clone());
+            if patch.full {
+                let next = patch
+                    .changed_lines
+                    .iter()
+                    .filter(|(doc_row, _)| *doc_row >= first && *doc_row <= keep_hi)
+                    .map(|(doc_row, line)| {
+                        (
+                            *doc_row,
+                            Signal::new(TerminalRowState {
+                                line: line.clone(),
+                                cursor: cursor_for_row(*doc_row),
+                            }),
+                        )
+                    })
+                    .collect();
+                rows.set(next);
+            } else {
+                let mut missing = Vec::new();
                 for (doc_row, line) in &patch.changed_lines {
-                    if let Some(mut existing) = map.get(doc_row).copied() {
-                        if *existing.peek() != *line {
-                            existing.set(line.clone());
+                    let state = TerminalRowState {
+                        line: line.clone(),
+                        cursor: cursor_for_row(*doc_row),
+                    };
+                    if let Some(mut existing) = rows.peek().get(doc_row).copied() {
+                        if *existing.peek() != state {
+                            existing.set(state);
                         }
                     } else {
-                        map.insert(*doc_row, Signal::new(line.clone()));
+                        missing.push((*doc_row, state));
                     }
                 }
-                map.retain(|k, _| *k >= first && *k <= keep_hi);
-            });
+
+                let line_changed = |doc_row| {
+                    patch
+                        .changed_lines
+                        .iter()
+                        .any(|(changed_row, _)| *changed_row == doc_row)
+                };
+                if previous_cursor.as_ref().map(|cursor| cursor.row) != Some(next_cursor.row)
+                    && let Some(old_row) = previous_cursor.as_ref().map(|cursor| cursor.row)
+                    && !line_changed(old_row)
+                    && let Some(mut state) = rows.peek().get(&old_row).copied()
+                    && state.peek().cursor.is_some()
+                {
+                    let line = state.peek().line.clone();
+                    state.set(TerminalRowState { line, cursor: None });
+                }
+                if !line_changed(next_cursor.row)
+                    && let Some(mut state) = rows.peek().get(&next_cursor.row).copied()
+                {
+                    let current = state.peek().clone();
+                    if current.cursor.as_ref() != Some(&next_cursor) {
+                        state.set(TerminalRowState {
+                            line: current.line,
+                            cursor: Some(next_cursor.clone()),
+                        });
+                    }
+                }
+
+                let prune = rows
+                    .peek()
+                    .keys()
+                    .any(|doc_row| *doc_row < first || *doc_row > keep_hi);
+                if !missing.is_empty() || prune {
+                    rows.with_mut(|map| {
+                        for (doc_row, state) in missing {
+                            map.insert(doc_row, Signal::new(state));
+                        }
+                        map.retain(|doc_row, _| *doc_row >= first && *doc_row <= keep_hi);
+                    });
+                }
+            }
 
             if *selection.peek() != patch.selection {
                 selection.set(patch.selection);
@@ -465,23 +536,19 @@ pub fn Page() -> Element {
                     style: "height:{spacer_h}px;",
                     {
                         let base_rows = rows();
-                        let cur = cursor();
                         rsx! {
-                            for (doc_row, line) in base_rows.iter() {
+                            for (doc_row, row) in base_rows.iter() {
                                 {
                                     let top = *doc_row as f64 * ch;
-                                    let row_cursor =
-                                        cur.as_ref().filter(|c| c.row == *doc_row).cloned();
                                     rsx! {
                                         div {
                                             key: "{doc_row}",
                                             style: "position:absolute;left:0;right:0;top:{top}px;",
                                             TerminalRow {
                                                 row_idx: *doc_row as usize,
-                                                line: *line,
+                                                row: *row,
                                                 selection,
                                                 cols,
-                                                cursor: row_cursor,
                                             }
                                         }
                                     }
@@ -514,12 +581,12 @@ const _TW_SAFELIST: &[&str] = &[
 #[component]
 fn TerminalRow(
     row_idx: usize,
-    line: Signal<TermLine>,
+    row: Signal<TerminalRowState>,
     selection: Signal<Option<TermSelectionRange>>,
     cols: Signal<u16>,
-    cursor: Option<TermCursor>,
 ) -> Element {
-    let line = line();
+    let state = row();
+    let line = &state.line;
     let selected_cols = row_selection_cols(&selection(), row_idx, cols());
 
     rsx! {
@@ -536,7 +603,7 @@ fn TerminalRow(
                 }
             }
             for (span_idx, span) in line.spans.iter().enumerate() {
-                {render_span(span, span_idx, cursor.as_ref(), "block")}
+                {render_span(span, span_idx, state.cursor.as_ref(), "block")}
             }
             if let Some((sel_start, sel_end)) = selected_cols {
                 div {

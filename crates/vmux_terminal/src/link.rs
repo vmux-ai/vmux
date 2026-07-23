@@ -14,6 +14,8 @@ const TRAILING_TRIM: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}', '"
 /// Punctuation trimmed from the start of a detected token.
 const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
 
+const MAX_LINKS_PER_LINE: usize = 16;
+
 /// Annotate `line` with the links found in its visible text.
 ///
 /// `cwd` is the terminal's working directory, used to resolve relative file
@@ -22,24 +24,30 @@ const LEADING_TRIM: &[char] = &['(', '[', '{', '<', '"', '\''];
 pub fn annotate_links(line: &mut TermLine, cwd: Option<&Path>) {
     line.links.clear();
 
-    // Reconstruct the row text and, per char, its starting column and width,
-    // honoring wide characters via each span's starting column.
-    let mut text = String::new();
-    let mut cols: Vec<(u16, u16)> = Vec::new();
+    let mut text = String::with_capacity(line.spans.iter().map(|span| span.text.len()).sum());
     for span in &line.spans {
-        let mut col = span.col;
-        for ch in span.text.chars() {
-            let w = UnicodeWidthChar::width(ch).unwrap_or(0).max(1) as u16;
-            text.push(ch);
-            cols.push((col, w));
-            col = col.saturating_add(w);
-        }
+        text.push_str(&span.text);
     }
     if text.is_empty() {
         return;
     }
 
-    for (char_start, char_end, url) in detect_links_in_text(&text, cwd) {
+    let detected = detect_links_in_text(&text, cwd);
+    if detected.is_empty() {
+        return;
+    }
+
+    let mut cols: Vec<(u16, u16)> = Vec::with_capacity(text.chars().count());
+    for span in &line.spans {
+        let mut col = span.col;
+        for ch in span.text.chars() {
+            let width = UnicodeWidthChar::width(ch).unwrap_or(0).max(1) as u16;
+            cols.push((col, width));
+            col = col.saturating_add(width);
+        }
+    }
+
+    for (char_start, char_end, url) in detected.into_iter().take(MAX_LINKS_PER_LINE) {
         let Some(&(start_col, _)) = cols.get(char_start) else {
             continue;
         };
@@ -96,10 +104,17 @@ fn resolve_target(token: &str, cwd: Option<&Path>) -> Option<String> {
     if is_data_uri(token) || token.contains("://") {
         return Some(token.to_string());
     }
-    if looks_like_path(token) {
+    if looks_like_path(token) && path_token_has_name(token) {
         return resolve_path(token, cwd);
     }
     None
+}
+
+fn path_token_has_name(token: &str) -> bool {
+    !token.contains('\\')
+        && token
+            .chars()
+            .any(|ch| ch.is_alphanumeric() || matches!(ch, '_' | '-'))
 }
 
 /// Resolve a file path token to a `file://` URL, expanding `~/` and resolving
@@ -168,6 +183,15 @@ mod tests {
         annotate_links(&mut l, None);
         assert_eq!(l.links.len(), 1);
         assert_eq!(l.links[0].url, "file:///Users/me/main.rs");
+    }
+
+    #[test]
+    fn ignores_ascii_art_path_punctuation() {
+        let mut line = line_of(r"/ \/ /\\ \\// |/\\| ////");
+
+        annotate_links(&mut line, None);
+
+        assert!(line.links.is_empty());
     }
 
     #[test]

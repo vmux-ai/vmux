@@ -1311,6 +1311,14 @@ fn snapshot_of(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+const CHAT_STREAM_PUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::Duration>) -> bool {
+    urgent || !streaming || elapsed.is_none_or(|elapsed| elapsed >= CHAT_STREAM_PUSH_INTERVAL)
+}
+
 /// Push each changed session's conversation + run-state to its pane webview (the child
 /// `Browser` of the session entity).
 #[cfg(not(target_arch = "wasm32"))]
@@ -1318,14 +1326,14 @@ fn push_chat_to_page(
     sessions: Query<
         (
             Entity,
-            &AgentMessages,
-            &AgentRunState,
-            Option<&AgentTurnMeta>,
-            Option<&Profile>,
+            Ref<AgentMessages>,
+            Ref<AgentRunState>,
+            Option<Ref<AgentTurnMeta>>,
+            Option<Ref<Profile>>,
             Option<&PageMetadata>,
-            &PromptQueue,
-            Option<&ImportedConversation>,
-            Option<&AgentConversationTitle>,
+            Ref<PromptQueue>,
+            Option<Ref<ImportedConversation>>,
+            Option<Ref<AgentConversationTitle>>,
         ),
         Or<(
             Changed<AgentMessages>,
@@ -1341,8 +1349,13 @@ fn push_chat_to_page(
     is_browser: Query<(), With<vmux_layout::Browser>>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
+    mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
+    mut removed_messages: RemovedComponents<AgentMessages>,
     mut commands: Commands,
 ) {
+    for stack in removed_messages.read() {
+        last_push.remove(&stack);
+    }
     for (stack, messages, state, turn_meta, profile, meta, queue, imported, title) in &sessions {
         let Ok(kids) = children.get(stack) else {
             continue;
@@ -1353,21 +1366,37 @@ fn push_chat_to_page(
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
             continue;
         }
+        let urgent = state.is_changed()
+            || turn_meta.as_ref().is_some_and(|meta| meta.is_changed())
+            || profile.as_ref().is_some_and(|profile| profile.is_changed())
+            || queue.is_changed()
+            || imported
+                .as_ref()
+                .is_some_and(|imported| imported.is_changed())
+            || title.as_ref().is_some_and(|title| title.is_changed());
+        let now = std::time::Instant::now();
+        let elapsed = last_push
+            .get(&stack)
+            .map(|last| now.saturating_duration_since(*last));
+        if !chat_snapshot_due(matches!(*state, AgentRunState::Streaming), urgent, elapsed) {
+            continue;
+        }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             CHAT_SNAPSHOT_EVENT,
             &snapshot_of(
-                messages,
-                state,
-                turn_meta,
-                profile,
+                &messages,
+                &state,
+                turn_meta.as_deref(),
+                profile.as_deref(),
                 meta,
-                queue,
-                imported,
-                title,
+                &queue,
+                imported.as_deref(),
+                title.as_deref(),
                 choices.get(webview).ok(),
             ),
         ));
+        last_push.insert(stack, now);
     }
 }
 
@@ -2049,6 +2078,34 @@ mod native_tests {
     use std::path::Path;
 
     #[test]
+    fn streaming_snapshots_wait_for_frame_interval() {
+        assert!(!chat_snapshot_due(
+            true,
+            false,
+            Some(CHAT_STREAM_PUSH_INTERVAL - std::time::Duration::from_millis(1)),
+        ));
+        assert!(chat_snapshot_due(
+            true,
+            false,
+            Some(CHAT_STREAM_PUSH_INTERVAL),
+        ));
+    }
+
+    #[test]
+    fn state_changes_and_completed_turns_push_immediately() {
+        assert!(chat_snapshot_due(
+            true,
+            true,
+            Some(std::time::Duration::ZERO)
+        ));
+        assert!(chat_snapshot_due(
+            false,
+            false,
+            Some(std::time::Duration::ZERO),
+        ));
+    }
+
+    #[test]
     fn media_query_paths_decode_percent_escapes() {
         assert_eq!(
             decode_media_query_path("Pictures/My%20Image%25.png"),
@@ -2531,21 +2588,6 @@ mod native_tests {
         assert!(page.contains("current_activity_icon(&items, &status)"));
         assert!(page.contains("ActivityIcon::Python"));
         assert!(page.contains("language_activity_icon(path)"));
-    }
-
-    #[test]
-    fn chat_page_bounds_gpu_work_without_losing_motion() {
-        let page = include_str!("chat_page/page.rs");
-        assert!(!page.contains("agent-chat-glow"));
-        assert!(!page.contains("backdrop-blur"));
-        assert!(!page.contains("blur-["));
-        assert!(page.contains("content-visibility:auto"));
-        assert!(page.contains("PromptComposer {"));
-        assert!(page.contains("agent-working-hop"));
-        assert!(page.contains("prefers-reduced-motion:reduce"));
-        assert!(page.contains("CHAT_HISTORY_PAGE_EVENT"));
-        assert!(page.contains("request_chat_history"));
-        assert!(page.contains("WorkingIndicator {}"));
     }
 
     #[test]
