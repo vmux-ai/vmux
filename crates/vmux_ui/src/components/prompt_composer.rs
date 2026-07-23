@@ -34,81 +34,8 @@ pub enum PromptComposerAction {
 }
 
 #[component]
-fn PromptComposerInput(
-    value: String,
-    value_revision: u64,
-    preview: String,
-    completion: String,
-    show_examples: bool,
-    placeholder: String,
-    accent_bg: String,
-    on_input: EventHandler<String>,
-    on_keydown: EventHandler<KeyboardEvent>,
-    on_paste: EventHandler<()>,
-) -> Element {
-    let initial_value = value.clone();
-    let mut input_value = use_signal(move || initial_value);
-
-    use_effect(use_reactive(
-        (&value, &value_revision),
-        move |(value, _)| {
-            if input_value.peek().as_str() != value {
-                input_value.set(value);
-            }
-        },
-    ));
-
-    let rendered_value = input_value();
-
-    rsx! {
-        div { class: "relative min-w-32 overflow-hidden",
-            if rendered_value.is_empty() {
-                div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1 py-1",
-                    if !preview.is_empty() {
-                        div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{preview}" }
-                    } else if show_examples {
-                        PromptGhost {
-                            accent_bg,
-                            terminal: false,
-                        }
-                    } else {
-                        div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
-                            span { class: "min-w-0 truncate", "{placeholder}" }
-                        }
-                    }
-                }
-            }
-            if !completion.is_empty() {
-                div {
-                    class: "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1 py-2 text-[15px] leading-6",
-                    span { class: "text-transparent", "{rendered_value}" }
-                    span { class: "text-muted-foreground/40", "{completion}" }
-                }
-            }
-            textarea {
-                id: PROMPT_INPUT_ID,
-                class: "vmux-prompt-input relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
-                style: "field-sizing:content;",
-                autofocus: true,
-                rows: "1",
-                placeholder: "{placeholder}",
-                value: "{rendered_value}",
-                oninput: move |event| {
-                    let value = event.value();
-                    input_value.set(value.clone());
-                    on_input.call(value);
-                },
-                onpaste: move |_| on_paste.call(()),
-                onkeydown: move |event| on_keydown.call(event),
-            }
-        }
-    }
-}
-
-#[component]
 pub fn PromptComposer(
     value: String,
-    #[props(default)] value_revision: u64,
     #[props(default)] preview: String,
     #[props(default)] completion: String,
     #[props(default)] attachments: Vec<PromptComposerAttachment>,
@@ -128,6 +55,10 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
+    use_effect(use_reactive((&value,), move |_| {
+        resize_prompt_textarea(PROMPT_INPUT_ID);
+    }));
+
     let action_class = if action_enabled {
         match action {
             PromptComposerAction::Send => format!(
@@ -188,17 +119,41 @@ pub fn PromptComposer(
                     }
                         }
                     }
-                    PromptComposerInput {
-                        value,
-                        value_revision,
-                        preview,
-                        completion,
-                        show_examples,
-                        placeholder: placeholder.clone(),
-                        accent_bg,
-                        on_input,
-                        on_keydown,
-                        on_paste,
+                    div { class: "relative min-w-32 overflow-hidden",
+                        if value.is_empty() {
+                            div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1 py-1",
+                                if !preview.is_empty() {
+                                    div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{preview}" }
+                                } else if show_examples {
+                                    PromptGhost {
+                                        accent_bg,
+                                        terminal: false,
+                                    }
+                                } else {
+                                    div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
+                                        span { class: "min-w-0 truncate", "{placeholder}" }
+                                    }
+                                }
+                            }
+                        }
+                        if !completion.is_empty() {
+                            div {
+                                class: "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1 py-2 text-[15px] leading-6",
+                                span { class: "text-transparent", "{value}" }
+                                span { class: "text-muted-foreground/40", "{completion}" }
+                            }
+                        }
+                        textarea {
+                            id: PROMPT_INPUT_ID,
+                            class: "vmux-prompt-input relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                            autofocus: true,
+                            rows: "1",
+                            placeholder: "{placeholder}",
+                            value: "{value}",
+                            oninput: move |event| on_input.call(event.value()),
+                            onpaste: move |_| on_paste.call(()),
+                            onkeydown: move |event| on_keydown.call(event),
+                        }
                     }
                 }
                 div { class: "relative z-10 mt-0.5 flex min-w-0 items-center gap-1 px-1",
@@ -285,4 +240,14 @@ pub fn focus_prompt_end(input_id: &str) {
         );
     }
     closure.forget();
+}
+
+fn resize_prompt_textarea(input_id: &str) {
+    let Some(textarea) = prompt_textarea(input_id) else {
+        return;
+    };
+    let _ = textarea.set_attribute("style", "height:auto;overflow-y:hidden");
+    let height = textarea.scroll_height().clamp(48, 192);
+    let overflow = if height == 192 { "auto" } else { "hidden" };
+    let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
 }

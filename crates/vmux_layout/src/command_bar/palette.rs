@@ -50,7 +50,6 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const HOST_SEARCH_DEBOUNCE_MS: i32 = 300;
-const START_QUERY_COMMIT_DEBOUNCE_MS: i32 = 80;
 
 type HostSearchTimer = Rc<RefCell<Option<(i32, js_sys::Function, Rc<Cell<bool>>)>>>;
 
@@ -65,7 +64,7 @@ fn cancel_host_search(timer: &HostSearchTimer) {
     let _ = callback.call0(&JsValue::NULL);
 }
 
-fn schedule_deferred(timer: HostSearchTimer, delay_ms: i32, callback: impl FnOnce() + 'static) {
+fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
     cancel_host_search(&timer);
     let Some(window) = web_sys::window() else {
         return;
@@ -80,30 +79,14 @@ fn schedule_deferred(timer: HostSearchTimer, delay_ms: i32, callback: impl FnOnc
         }
     })
     .unchecked_into::<js_sys::Function>();
-    match window.set_timeout_with_callback_and_timeout_and_arguments_0(&callback, delay_ms) {
+    match window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, HOST_SEARCH_DEBOUNCE_MS)
+    {
         Ok(id) => *timer.borrow_mut() = Some((id, callback, cancelled)),
         Err(_) => {
             let _ = callback.call0(&JsValue::NULL);
         }
     }
-}
-
-fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
-    schedule_deferred(timer, HOST_SEARCH_DEBOUNCE_MS, callback);
-}
-
-fn set_query_immediately(
-    mut query: Signal<String>,
-    mut live_query: Signal<String>,
-    mut query_revision: Signal<u64>,
-    timer: &HostSearchTimer,
-    value: String,
-) {
-    cancel_host_search(timer);
-    live_query.set(value.clone());
-    query.set(value);
-    let revision = (*query_revision.peek()).wrapping_add(1);
-    query_revision.set(revision);
 }
 
 /// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
@@ -153,9 +136,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_start_agent_transition = props.on_start_agent_transition;
 
     let mut query = use_signal(String::new);
-    let mut live_query = use_signal(String::new);
-    let query_revision = use_signal(|| 0u64);
-    let start_query_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut selected = use_signal(|| 0usize);
     let mut nav_mode = use_signal(|| false);
     let mut path_completions = use_signal(Vec::<PathEntry>::new);
@@ -178,18 +158,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut start_agent_menu_open = use_signal(|| false);
 
     let path_search_effect_timer = path_search_timer.clone();
-    let state_query_timer = start_query_timer.clone();
     use_effect(move || {
         let s = state();
         if last_open_id() != s.open_id {
             last_open_id.set(s.open_id);
-            set_query_immediately(
-                query,
-                live_query,
-                query_revision,
-                &state_query_timer,
-                s.url.clone(),
-            );
+            query.set(s.url.clone());
             selected.set(if s.space_switch {
                 active_space_index(&s.spaces)
             } else {
@@ -362,9 +335,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         });
     });
 
-    let drop_start_query_timer = start_query_timer.clone();
     use_drop(move || {
-        cancel_host_search(&drop_start_query_timer);
         cancel_host_search(&path_search_timer);
         cancel_host_search(&suggestions_search_timer);
         cancel_host_search(&media_search_timer);
@@ -589,11 +560,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let execute = move |item: &ResultItem| {
-        let prompt = if is_start {
-            live_query.peek().clone()
-        } else {
-            query()
-        };
+        let prompt = query();
         let transition = if is_start
             && let Some(agent_url) = agent_page_url(item)
             && crate::start::supports_inline_agent_transition(agent_url)
@@ -845,24 +812,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
         }
     };
+    let start_keydown_q = q.clone();
     let start_keydown_results = results.clone();
     let start_keydown_default_agent = default_agent_item.clone();
     let start_keydown_nav = nav;
     let start_keydown_ghost = ghost_text.clone();
-    let start_keydown_query_timer = start_query_timer.clone();
     let start_keydown = move |e: KeyboardEvent| {
-        let start_keydown_q = live_query.peek().clone();
-        let start_keydown_prompt_mode = is_start_prompt_query(&start_keydown_q);
         if e.key() == Key::Tab {
             e.prevent_default();
             if !start_keydown_ghost.is_empty() {
-                set_query_immediately(
-                    query,
-                    live_query,
-                    query_revision,
-                    &start_keydown_query_timer,
-                    format!("{}{}", start_keydown_q, start_keydown_ghost),
-                );
+                query.set(format!("{}{}", start_keydown_q, start_keydown_ghost));
                 selected.set(0);
                 focus_prompt_end(PROMPT_INPUT_ID);
             }
@@ -911,27 +870,18 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if e.key() == Key::Enter && !e.modifiers().shift() {
                 e.prevent_default();
                 if let Some(entry) = media_entries.read().get(media_sel).cloned() {
-                    select_start_media_entry(
-                        &entry,
-                        query,
-                        live_query,
-                        query_revision,
-                        start_keydown_query_timer.clone(),
-                        media_selected,
-                    );
+                    select_start_media_entry(&entry, query, media_selected);
                 }
                 return;
             }
             if e.key() == Key::Escape {
                 e.prevent_default();
                 if let Some(media_query) = inline_media_query(&start_keydown_q) {
-                    set_query_immediately(
-                        query,
-                        live_query,
-                        query_revision,
-                        &start_keydown_query_timer,
-                        replace_inline_media_query(&start_keydown_q, media_query, ""),
-                    );
+                    query.set(replace_inline_media_query(
+                        &start_keydown_q,
+                        media_query,
+                        "",
+                    ));
                 }
                 media_selected.set(0);
                 return;
@@ -964,7 +914,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 if let Some(item) = start_keydown_results.get(sel) {
                     execute(item);
                 }
-            } else if start_keydown_prompt_mode {
+            } else if start_prompt_mode {
                 if let Some(item) = start_keydown_results.get(sel).filter(|item| {
                     start_keydown_nav
                         || agent_page_matches_query(item, &start_keydown_q)
@@ -1095,8 +1045,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             }
         }
     };
-    let start_input_query_timer = start_query_timer.clone();
-    let media_select_query_timer = start_query_timer.clone();
 
     rsx! {
         div { class: "relative",
@@ -1154,7 +1102,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 PromptComposer {
                     value: display_text.clone(),
-                    value_revision: query_revision(),
                     completion: ghost_text.clone(),
                     attachments: start_prompt_attachments,
                     show_examples: q.is_empty() && ghost_text.is_empty(),
@@ -1165,27 +1112,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     footer: Some(start_composer_footer),
                     action_title: translate("command-send"),
                     action_enabled: start_action_enabled,
-                    on_input: move |value: String| {
-                        if *start_agent_menu_open.peek() {
-                            start_agent_menu_open.set(false);
-                        }
-                        live_query.set(value.clone());
-                        schedule_deferred(
-                            start_input_query_timer.clone(),
-                            START_QUERY_COMMIT_DEBOUNCE_MS,
-                            move || {
-                                if live_query.peek().as_str() != value {
-                                    return;
-                                }
-                                query.set(value);
-                                if *selected.peek() != 0 {
-                                    selected.set(0);
-                                }
-                                if *nav_mode.peek() {
-                                    nav_mode.set(false);
-                                }
-                            },
-                        );
+                    on_input: move |value| {
+                        start_agent_menu_open.set(false);
+                        query.set(value);
+                        selected.set(0);
+                        nav_mode.set(false);
                     },
                     on_keydown: start_keydown,
                     on_paste: move |_| {
@@ -1203,13 +1134,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     },
                     on_action: {
                         let action_results = results.clone();
+                        let action_query = q.clone();
                         let action_default_agent = default_agent_item.clone();
                         let action_nav = nav;
                         move |_| {
-                            let action_query = live_query.peek().clone();
-                            let action_prompt_mode = is_start_prompt_query(&action_query);
                             if let Some(item) = action_results.get(sel).filter(|item| {
-                                !action_prompt_mode
+                                !start_prompt_mode
                                     || action_nav
                                     || agent_page_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
@@ -1365,14 +1295,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         on_hover: move |index| media_selected.set(index),
                         on_select: move |index| {
                             if let Some(entry) = media_entries.peek().get(index).cloned() {
-                                select_start_media_entry(
-                                    &entry,
-                                    query,
-                                    live_query,
-                                    query_revision,
-                                    media_select_query_timer.clone(),
-                                    media_selected,
-                                );
+                                select_start_media_entry(&entry, query, media_selected);
                             }
                         },
                     }
@@ -1669,13 +1592,10 @@ fn file_extension_label(name: &str) -> String {
 
 fn select_start_media_entry(
     entry: &ChatMediaEntry,
-    query: Signal<String>,
-    live_query: Signal<String>,
-    query_revision: Signal<u64>,
-    query_timer: HostSearchTimer,
+    mut query: Signal<String>,
     mut selected: Signal<usize>,
 ) {
-    let value = live_query.peek().clone();
+    let value = query.peek().clone();
     let Some(media_query) = inline_media_query(&value) else {
         return;
     };
@@ -1692,13 +1612,11 @@ fn select_start_media_entry(
         }
         String::new()
     };
-    set_query_immediately(
-        query,
-        live_query,
-        query_revision,
-        &query_timer,
-        replace_inline_media_query(&value, media_query, &replacement),
-    );
+    query.set(replace_inline_media_query(
+        &value,
+        media_query,
+        &replacement,
+    ));
     selected.set(0);
     focus_prompt_end(PROMPT_INPUT_ID);
 }
