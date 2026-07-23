@@ -302,6 +302,7 @@ mod tests {
         };
         let refreshed = ChatAttachment {
             size: 3,
+            preview_data_url: String::new(),
             ..first.clone()
         };
 

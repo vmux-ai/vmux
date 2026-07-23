@@ -194,6 +194,7 @@ fn consume_page_agent_stream(
         Option<&ImportedConversation>,
     )>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
+    service: Option<Res<ServiceClient>>,
     mut commands: Commands,
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
@@ -276,8 +277,9 @@ fn consume_page_agent_stream(
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
         if let Ok((_, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
-            let auto_allowed =
-                acp.is_some() && policy.is_some_and(|policy| policy.auto.contains(&approval.name));
+            let auto_allowed = service.is_some()
+                && acp.is_some()
+                && policy.is_some_and(|policy| policy.auto.contains(&approval.name));
             if !auto_allowed {
                 *state = AgentRunState::AwaitingApproval {
                     call_id: approval.call_id.clone(),
@@ -310,7 +312,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_approved_acp_request_never_enters_awaiting_state() {
+    fn auto_approved_acp_request_without_service_falls_back_to_awaiting_state() {
         let mut app = App::new();
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
@@ -347,7 +349,8 @@ mod tests {
 
         assert!(matches!(
             app.world().get::<AgentRunState>(entity),
-            Some(AgentRunState::Streaming)
+            Some(AgentRunState::AwaitingApproval { call_id, name, args })
+                if call_id == "call-1" && name == "run" && args == &serde_json::json!({})
         ));
     }
 

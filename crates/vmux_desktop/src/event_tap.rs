@@ -73,6 +73,12 @@ unsafe extern "C-unwind" fn tap_callback(
     event: NonNull<CGEvent>,
     _user_info: *mut c_void,
 ) -> *mut CGEvent {
+    TAP_STATE.with(|s| {
+        if let Some(state) = s.borrow().as_ref() {
+            (state.wake)();
+        }
+    });
+
     if event_type == CGEventType::TapDisabledByTimeout
         || event_type == CGEventType::TapDisabledByUserInput
     {
@@ -83,12 +89,6 @@ unsafe extern "C-unwind" fn tap_callback(
         });
         return event.as_ptr();
     }
-
-    TAP_STATE.with(|s| {
-        if let Some(state) = s.borrow().as_ref() {
-            (state.wake)();
-        }
-    });
 
     if event_type != CGEventType::KeyDown {
         return event.as_ptr();

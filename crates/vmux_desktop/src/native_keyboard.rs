@@ -101,6 +101,23 @@ pub(crate) fn push_command(cmd: AppCommand) {
     PENDING_COMMANDS.lock().push(cmd);
 }
 
+fn handle_key_action(
+    action: KeyAction,
+    wake: impl FnOnce(),
+    mut queue: impl FnMut(AppCommand),
+) -> bool {
+    match action {
+        KeyAction::Consume(cmd) => {
+            wake();
+            if let Some(cmd) = cmd {
+                queue(cmd);
+            }
+            true
+        }
+        KeyAction::PassThrough => false,
+    }
+}
+
 fn translate(key_code: u16, flags: NSEventModifierFlags) -> Option<KeyCombo> {
     let key = key_code_from_vk(key_code)?;
     let modifiers = Modifiers {
@@ -203,15 +220,12 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
         let Some(combo) = translate(key_code, flags) else {
             return event.as_ptr();
         };
-        match classify(combo) {
-            KeyAction::Consume(cmd) => {
-                wake();
-                if let Some(cmd) = cmd {
-                    PENDING_COMMANDS.lock().push(cmd);
-                }
-                std::ptr::null_mut()
-            }
-            KeyAction::PassThrough => event.as_ptr(),
+        if handle_key_action(classify(combo), &wake, |cmd| {
+            PENDING_COMMANDS.lock().push(cmd);
+        }) {
+            std::ptr::null_mut()
+        } else {
+            event.as_ptr()
         }
     });
     let mask = NSEventMask::KeyDown | NSEventMask::KeyUp | NSEventMask::FlagsChanged;
@@ -319,6 +333,29 @@ mod tests {
             Instant::now(),
         );
         assert!(matches!(action, KeyAction::PassThrough));
+    }
+
+    #[test]
+    fn consumed_shortcut_wakes_and_queues_command() {
+        let mut woke = false;
+        let mut queued = Vec::new();
+
+        let consumed = handle_key_action(
+            KeyAction::Consume(Some(AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft,
+            )))),
+            || woke = true,
+            |command| queued.push(command),
+        );
+
+        assert!(consumed);
+        assert!(woke);
+        assert!(matches!(
+            queued.as_slice(),
+            [AppCommand::Layout(LayoutCommand::Pane(
+                PaneCommand::SelectLeft
+            ))]
+        ));
     }
 
     #[test]

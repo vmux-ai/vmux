@@ -426,25 +426,38 @@ pub(crate) fn apply_acp_model_selection_result(
 
 /// ACP agents re-request permission every time, so "allow always" must be answered by the host:
 /// if the tool name is already in this session's auto-policy, reply `Allow` without prompting.
+fn acp_auto_approval_message(
+    session: &AcpSession,
+    policy: &AgentApprovalPolicy,
+    request: &AgentApprovalRequest,
+) -> Option<ClientMessage> {
+    policy
+        .auto
+        .contains(&request.name)
+        .then(|| ClientMessage::AgentApprove {
+            sid: session.sid.clone(),
+            call_id: request.call_id.clone(),
+            decision: vmux_service::protocol::ApprovalDecision::Allow,
+        })
+}
+
 fn auto_allow_acp_approval(
     trigger: On<AgentApprovalRequest>,
     sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
     service: Option<Res<ServiceClient>>,
 ) {
-    let Some(service) = service else {
-        return;
-    };
     let request = trigger.event();
     let Ok((session, policy)) = sessions.get(request.session) else {
         return;
     };
-    if policy.auto.contains(&request.name) {
-        service.0.send(ClientMessage::AgentApprove {
-            sid: session.sid.clone(),
-            call_id: request.call_id.clone(),
-            decision: vmux_service::protocol::ApprovalDecision::Allow,
-        });
-    }
+    let Some(message) = acp_auto_approval_message(session, policy, request) else {
+        return;
+    };
+    let Some(service) = service else {
+        warn!(sid = %session.sid, call_id = %request.call_id, "auto-approval waiting for service connection");
+        return;
+    };
+    service.0.send(message);
 }
 
 /// Marks an `AcpSession` whose install has already been kicked off, so
@@ -1058,6 +1071,33 @@ mod tests {
 
     fn s(k: &str, v: &str) -> (String, String) {
         (k.to_string(), v.to_string())
+    }
+
+    #[test]
+    fn auto_approval_message_targets_requested_session_and_call() {
+        let session = AcpSession {
+            agent_id: "claude".into(),
+            sid: "s1".into(),
+            cwd: "/tmp".into(),
+            anchor: vmux_core::ProcessId::new(),
+            resume: None,
+        };
+        let mut policy = AgentApprovalPolicy::default();
+        policy.auto.insert("run".into());
+        let request = AgentApprovalRequest {
+            session: Entity::PLACEHOLDER,
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args: serde_json::json!({}),
+        };
+
+        assert!(matches!(
+            acp_auto_approval_message(&session, &policy, &request),
+            Some(ClientMessage::AgentApprove { sid, call_id, decision })
+                if sid == "s1"
+                    && call_id == "call-1"
+                    && decision == vmux_service::protocol::ApprovalDecision::Allow
+        ));
     }
 
     #[test]

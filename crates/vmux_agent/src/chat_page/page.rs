@@ -801,7 +801,9 @@ pub fn Page(
             label: attachment_label(attachment),
             preview_data_url: prompt_attachment_previews
                 .get(&attachment.path)
-                .map(|preview| preview.preview_data_url.clone())
+                .and_then(|preview| {
+                    (!preview.preview_data_url.is_empty()).then(|| preview.preview_data_url.clone())
+                })
                 .unwrap_or_else(|| attachment.preview_data_url.clone()),
             remove_index: None,
         })
@@ -816,7 +818,10 @@ pub fn Page(
                     label: attachment_label(attachment),
                     preview_data_url: prompt_attachment_previews
                         .get(&attachment.path)
-                        .map(|preview| preview.preview_data_url.clone())
+                        .and_then(|preview| {
+                            (!preview.preview_data_url.is_empty())
+                                .then(|| preview.preview_data_url.clone())
+                        })
                         .unwrap_or_else(|| attachment.preview_data_url.clone()),
                     remove_index: Some(index),
                 }),
