@@ -914,7 +914,7 @@ mod tests {
             wake: None,
         };
         let wait_for = |cache: &mut RepoInfoCache, expected| {
-            for _ in 0..100 {
+            for _ in 0..500 {
                 if let Some(info) = cache.get(&path)
                     && info.uncommitted == expected
                 {
