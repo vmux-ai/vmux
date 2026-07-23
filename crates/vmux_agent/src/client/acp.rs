@@ -432,8 +432,7 @@ fn acp_auto_approval_message(
     request: &AgentApprovalRequest,
 ) -> Option<ClientMessage> {
     policy
-        .auto
-        .contains(&request.name)
+        .allows(&request.name)
         .then(|| ClientMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
@@ -1083,7 +1082,7 @@ mod tests {
             resume: None,
         };
         let mut policy = AgentApprovalPolicy::default();
-        policy.auto.insert("run".into());
+        policy.allow("run");
         let request = AgentApprovalRequest {
             session: Entity::PLACEHOLDER,
             call_id: "call-1".into(),
