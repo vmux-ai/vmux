@@ -92,7 +92,7 @@ impl Plugin for AgentsManagerPlugin {
                 host: "agents",
                 url: "vmux://agents/",
                 title: "Agents",
-                pool_size: 1,
+                pool_size: 0,
             },
         ));
         vmux_core::register_host_spawn(app, "agents");

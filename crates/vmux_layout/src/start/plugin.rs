@@ -29,10 +29,9 @@ use crate::window::VmuxWindow;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// How many prewarmed `vmux://start/` webviews to keep ready. Each new tab / stack /
-/// pane / space is an independent persistent start page, so a singleton (like the
-/// command-bar modal) cannot serve them — a small pool is refilled after each claim.
-const WARM_START_POOL_SIZE: usize = 1;
+/// How many prewarmed `vmux://start/` webviews to keep ready. Zero keeps hidden start
+/// pages from consuming rendering resources; pages still spawn on demand.
+const WARM_START_POOL_SIZE: usize = 0;
 
 /// Marks a prewarmed, parked `vmux://start/` webview waiting to be claimed by the next
 /// start open. Removed when the spare is reparented into a real stack.
@@ -139,9 +138,8 @@ impl StartPromptContextParams<'_, '_> {
     }
 }
 
-/// Bevy plugin for `vmux://start/`: spawns the page manifest, keeps a warm pool of
-/// prewarmed launcher webviews, claims start page-open tasks (reusing a warm spare when
-/// available), and answers [`StartDataRequest`] with the shared command-bar payload.
+/// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
+/// and answers [`StartDataRequest`] with the shared command-bar payload.
 pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
@@ -848,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_fills_to_target() {
+    fn start_pool_stays_empty_when_disabled() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
@@ -863,6 +861,6 @@ mod tests {
             .query_filtered::<(), With<WarmStartSpare>>()
             .iter(app.world())
             .count();
-        assert_eq!(count, WARM_START_POOL_SIZE);
+        assert_eq!(count, 0);
     }
 }
