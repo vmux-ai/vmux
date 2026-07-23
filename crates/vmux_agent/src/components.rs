@@ -30,15 +30,18 @@ pub struct AgentApprovalPolicy {
 }
 
 impl AgentApprovalPolicy {
+    /// Remembers a normalized tool identifier for automatic approval.
     pub fn allow(&mut self, tool: &str) {
         self.auto.insert(approval_tool_key(tool));
     }
 
+    /// Returns whether a normalized tool identifier is automatically approved.
     pub fn allows(&self, tool: &str) -> bool {
         self.auto.contains(&approval_tool_key(tool))
     }
 }
 
+/// Normalizes equivalent ACP, CLI, and MCP tool identifiers to one policy key.
 pub fn approval_tool_key(tool: &str) -> String {
     tool.trim()
         .to_ascii_lowercase()
