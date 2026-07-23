@@ -1106,7 +1106,7 @@ watch and take over. Use mcp__vmux__read_terminal to inspect continued output. O
 argument because it targets your own terminal pane. Do ALL web access via the vmux browser tools. \
 If you invoke a required Skill tool, continue the original user request in the same turn after \
 the skill loads. Never end the turn after skill activation or answer only Ready.";
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "Immediately after every user message, call mcp__vmux__set_conversation_title as the first tool of the turn, before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim. Update the title even when the user sends a short follow-up.";
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "Call mcp__vmux__set_conversation_title as the first tool of the turn only when the conversation has no title yet or the latest user message materially changes the conversation's topic. If the current title still accurately summarizes the conversation, do not call the tool. When a title is needed, call it before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
@@ -2180,6 +2180,8 @@ mod tests {
         assert!(generic.starts_with("skill context\n\n"));
         assert!(generic.contains("mcp__vmux__set_conversation_title"));
         assert!(generic.contains("first tool of the turn"));
+        assert!(generic.contains("materially changes the conversation's topic"));
+        assert!(generic.contains("do not call the tool"));
         assert!(generic.contains("Correct spelling and grammar"));
         assert!(generic.contains("Never copy the user's prompt verbatim"));
     }
