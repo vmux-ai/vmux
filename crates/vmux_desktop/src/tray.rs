@@ -195,14 +195,14 @@ fn sync_tray_recording(status: Res<RecordingStatus>, handle: Option<NonSendMut<T
     handle.last_status = Some(*status);
 
     let recording = !matches!(*status, RecordingStatus::Idle);
-    // Template mode renders monochrome; turn it off so the red REC dot shows.
-    handle._tray.set_icon_as_template(!recording);
     let icon = if recording {
         load_tray_icon_recording()
     } else {
         load_tray_icon()
     };
-    let _ = handle._tray.set_icon(Some(icon));
+    let _ = handle
+        ._tray
+        .set_icon_with_as_template(Some(icon), !recording);
 
     handle
         .pause
