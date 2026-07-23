@@ -437,7 +437,7 @@ fn acp_auto_approval_message(
         .then(|| ClientMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
-            decision: vmux_service::protocol::ApprovalDecision::Allow,
+            decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
         })
 }
 
@@ -1096,7 +1096,7 @@ mod tests {
             Some(ClientMessage::AgentApprove { sid, call_id, decision })
                 if sid == "s1"
                     && call_id == "call-1"
-                    && decision == vmux_service::protocol::ApprovalDecision::Allow
+                    && decision == vmux_service::protocol::ApprovalDecision::AllowAlways
         ));
     }
 

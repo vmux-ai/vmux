@@ -7,6 +7,14 @@ use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ApprovalDecision as ProtoDecision, ClientMessage};
 
+fn protocol_decision(decision: ApprovalDecision) -> ProtoDecision {
+    match decision {
+        ApprovalDecision::Allow => ProtoDecision::Allow,
+        ApprovalDecision::AllowAlways => ProtoDecision::AllowAlways,
+        ApprovalDecision::Deny => ProtoDecision::Deny,
+    }
+}
+
 #[allow(clippy::type_complexity)]
 pub fn handle_approval_reply(
     trigger: On<AgentApprovalReply>,
@@ -40,10 +48,7 @@ pub fn handle_approval_reply(
     {
         policy.auto.insert(name.clone());
     }
-    let decision = match reply.decision {
-        ApprovalDecision::Allow | ApprovalDecision::AllowAlways => ProtoDecision::Allow,
-        ApprovalDecision::Deny => ProtoDecision::Deny,
-    };
+    let decision = protocol_decision(reply.decision);
     if let Some(service) = service.as_ref() {
         service.0.send(ClientMessage::AgentApprove {
             sid,
@@ -139,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn allow_always_records_in_policy() {
+    fn allow_always_records_policy_and_preserves_decision_scope() {
         let mut app = make_app();
         let entity = app
             .world_mut()
@@ -161,5 +166,9 @@ mod tests {
         app.update();
         let policy = app.world().get::<AgentApprovalPolicy>(entity).unwrap();
         assert!(policy.auto.contains("run_shell"));
+        assert_eq!(
+            protocol_decision(ApprovalDecision::AllowAlways),
+            ProtoDecision::AllowAlways
+        );
     }
 }

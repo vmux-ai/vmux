@@ -358,6 +358,7 @@ pub enum AgentQueryResult {
 pub enum ApprovalDecision {
     Allow,
     Deny,
+    AllowAlways,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -1571,6 +1572,11 @@ mod tests {
                 sid: "s".into(),
                 call_id: "c".into(),
                 decision: ApprovalDecision::Allow,
+            },
+            ClientMessage::AgentApprove {
+                sid: "s".into(),
+                call_id: "ca".into(),
+                decision: ApprovalDecision::AllowAlways,
             },
             ClientMessage::ClosePageAgent { sid: "s".into() },
             ClientMessage::AgentToolResult {

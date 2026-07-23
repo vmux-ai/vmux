@@ -1396,10 +1396,9 @@ async fn release_terminal(
     Ok(ReleaseTerminalResponse::new())
 }
 
-/// Maps a host decision (the wire `Allow`/`Deny`) onto an ACP permission option, preferring the
-/// one-shot kind, then the always-kind. Returns `None` (→ the request is cancelled) when the agent
-/// offers no option matching the decision — never falls back to an option that could approve a
-/// denied call.
+/// Maps a host decision onto an ACP permission option while preserving one-shot versus remembered
+/// approval. Returns `None` (→ the request is cancelled) when the agent offers no option matching
+/// the decision — never falls back to an option that could approve a denied call.
 fn pick_permission_option(
     options: &[PermissionOption],
     decision: ApprovalDecision,
@@ -1408,6 +1407,7 @@ fn pick_permission_option(
     let preferred: &[Kind] = match decision {
         ApprovalDecision::Allow => &[Kind::AllowOnce, Kind::AllowAlways],
         ApprovalDecision::Deny => &[Kind::RejectOnce, Kind::RejectAlways],
+        ApprovalDecision::AllowAlways => &[Kind::AllowAlways, Kind::AllowOnce],
     };
     preferred
         .iter()
@@ -2185,7 +2185,7 @@ mod tests {
     }
 
     #[test]
-    fn pick_permission_option_prefers_once_then_first() {
+    fn pick_permission_option_preserves_decision_scope() {
         let opts = vec![
             opt("once", PermissionOptionKind::AllowOnce),
             opt("always", PermissionOptionKind::AllowAlways),
@@ -2196,6 +2196,12 @@ mod tests {
                 .unwrap()
                 .to_string(),
             "once"
+        );
+        assert_eq!(
+            pick_permission_option(&opts, ApprovalDecision::AllowAlways)
+                .unwrap()
+                .to_string(),
+            "always"
         );
         assert_eq!(
             pick_permission_option(&opts, ApprovalDecision::Deny)
