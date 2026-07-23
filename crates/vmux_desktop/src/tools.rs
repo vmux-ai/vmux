@@ -13,6 +13,10 @@ use vmux_core::tools::{
     ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
     ToolsRefreshRequest, ToolsSnapshot,
 };
+use vmux_core::vault::{
+    VAULT_ACTION_RESULT_EVENT, VaultAction, VaultActionRequest, VaultActionResult,
+    VaultRefreshRequest, VaultRepository, VaultSnapshot,
+};
 use vmux_layout::LayoutCef;
 
 const PAGE_MANIFEST: PageManifest = PageManifest {
@@ -25,12 +29,21 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
     command_bar: true,
 };
 
+const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
+    host: "vault",
+    title: "Vault",
+    keywords: &["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
+    icon: Some(vmux_core::BuiltinIcon::Vault),
+    command_bar: true,
+};
+
 pub struct ToolsPlugin;
 
 #[derive(Resource)]
 struct ToolsState {
     dirty: bool,
     refresh_catalogs: bool,
+    load_vault_repositories: bool,
     generation: u64,
     revision: u64,
     loaded: bool,
@@ -43,6 +56,7 @@ impl Default for ToolsState {
         Self {
             dirty: true,
             refresh_catalogs: false,
+            load_vault_repositories: false,
             generation: 1,
             revision: 0,
             loaded: false,
@@ -68,6 +82,16 @@ struct ToolActionTask {
 #[derive(Resource, Default)]
 struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
 
+#[derive(Component)]
+struct VaultActionTask {
+    target: Entity,
+    request: VaultActionRequest,
+    task: Task<Result<String, String>>,
+}
+
+#[derive(Resource, Default)]
+struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
+
 #[derive(Clone, Debug)]
 struct InventoryItem {
     id: String,
@@ -89,16 +113,31 @@ impl Plugin for ToolsPlugin {
                 pool_size: 1,
             },
         ));
+        app.world_mut().spawn((
+            VAULT_PAGE_MANIFEST,
+            PrewarmPage {
+                host: "vault",
+                url: "vmux://vault/",
+                title: "Vault",
+                pool_size: 1,
+            },
+        ));
         vmux_core::register_host_spawn(app, "tools");
+        vmux_core::register_host_spawn(app, "vault");
         app.init_resource::<ToolsState>()
             .init_resource::<ToolActionQueue>()
+            .init_resource::<VaultActionQueue>()
             .add_plugins(BinEventEmitterPlugin::<(
                 ToolsRefreshRequest,
                 ToolActionRequest,
                 ToolOpenRequest,
+                VaultActionRequest,
+                VaultRefreshRequest,
             )>::default())
             .add_observer(on_refresh_request)
             .add_observer(on_action_request)
+            .add_observer(on_vault_action_request)
+            .add_observer(on_vault_refresh_request)
             .add_observer(on_open_request)
             .add_systems(
                 Update,
@@ -107,6 +146,8 @@ impl Plugin for ToolsPlugin {
                     drain_tools_scan,
                     start_tool_action,
                     drain_tool_actions,
+                    start_vault_action,
+                    drain_vault_actions,
                     emit_tools_snapshot,
                 )
                     .chain(),
@@ -156,13 +197,34 @@ fn on_action_request(
     queue.0.push_back((target, request));
 }
 
+fn on_vault_action_request(
+    trigger: On<BinReceive<VaultActionRequest>>,
+    mut state: ResMut<ToolsState>,
+    mut queue: ResMut<VaultActionQueue>,
+) {
+    let target = trigger.event().webview;
+    state.subscribers.insert(target, 0);
+    queue.0.push_back((target, trigger.event().payload.clone()));
+}
+
+fn on_vault_refresh_request(
+    trigger: On<BinReceive<VaultRefreshRequest>>,
+    mut state: ResMut<ToolsState>,
+) {
+    state.subscribers.insert(trigger.event().webview, 0);
+    state.dirty = true;
+    state.load_vault_repositories = true;
+    state.generation = state.generation.wrapping_add(1);
+}
+
 fn start_tool_action(
     mut queue: ResMut<ToolActionQueue>,
     tasks: Query<(), With<ToolActionTask>>,
+    vault_tasks: Query<(), With<VaultActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
     mut commands: Commands,
 ) {
-    if !tasks.is_empty() || !scans.is_empty() {
+    if !tasks.is_empty() || !vault_tasks.is_empty() || !scans.is_empty() {
         return;
     }
     let Some((target, request)) = queue.0.pop_front() else {
@@ -177,21 +239,56 @@ fn start_tool_action(
     });
 }
 
+fn start_vault_action(
+    mut queue: ResMut<VaultActionQueue>,
+    tasks: Query<(), With<VaultActionTask>>,
+    tool_tasks: Query<(), With<ToolActionTask>>,
+    scans: Query<(), With<ToolsScanTask>>,
+    mut commands: Commands,
+) {
+    if !tasks.is_empty() || !tool_tasks.is_empty() || !scans.is_empty() {
+        return;
+    }
+    let Some((target, request)) = queue.0.pop_front() else {
+        return;
+    };
+    let task_request = request.clone();
+    let task = IoTaskPool::get().spawn(async move { perform_vault_action(&task_request) });
+    commands.spawn(VaultActionTask {
+        target,
+        request,
+        task,
+    });
+}
+
 fn start_tools_scan(
     mut state: ResMut<ToolsState>,
     tasks: Query<(), With<ToolsScanTask>>,
     action_tasks: Query<(), With<ToolActionTask>>,
+    vault_tasks: Query<(), With<VaultActionTask>>,
     queue: Res<ToolActionQueue>,
+    vault_queue: Res<VaultActionQueue>,
     mut commands: Commands,
 ) {
-    if !state.dirty || !tasks.is_empty() || !action_tasks.is_empty() || !queue.0.is_empty() {
+    if !state.dirty
+        || !tasks.is_empty()
+        || !action_tasks.is_empty()
+        || !vault_tasks.is_empty()
+        || !queue.0.is_empty()
+        || !vault_queue.0.is_empty()
+    {
         return;
     }
     let generation = state.generation;
     let refresh_catalogs = state.refresh_catalogs;
+    let load_vault_repositories = state.load_vault_repositories;
+    let previous_vault = state.snapshot.vault.clone();
     state.dirty = false;
     state.refresh_catalogs = false;
-    let task = IoTaskPool::get().spawn(async move { scan_tools(refresh_catalogs) });
+    state.load_vault_repositories = false;
+    let task = IoTaskPool::get().spawn(async move {
+        scan_tools(refresh_catalogs, load_vault_repositories, previous_vault)
+    });
     commands.spawn(ToolsScanTask { generation, task });
 }
 
@@ -251,6 +348,39 @@ fn drain_tool_actions(
     }
 }
 
+fn drain_vault_actions(
+    mut tasks: Query<(Entity, &mut VaultActionTask)>,
+    mut state: ResMut<ToolsState>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    for (entity, mut task) in &mut tasks {
+        let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
+            continue;
+        };
+        commands.entity(entity).despawn();
+        let (success, message) = match result {
+            Ok(message) => (true, message),
+            Err(message) => (false, message),
+        };
+        let event = VaultActionResult {
+            action: task.request.action,
+            success,
+            message,
+        };
+        if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                task.target,
+                VAULT_ACTION_RESULT_EVENT,
+                &event,
+            ));
+        }
+        state.dirty = true;
+        state.load_vault_repositories = true;
+        state.generation = state.generation.wrapping_add(1);
+    }
+}
+
 fn emit_tools_snapshot(
     mut state: ResMut<ToolsState>,
     browsers: NonSend<Browsers>,
@@ -291,7 +421,11 @@ fn emit_tools_snapshot(
     });
 }
 
-fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
+fn scan_tools(
+    refresh_catalogs: bool,
+    load_vault_repositories: bool,
+    previous_vault: VaultSnapshot,
+) -> ToolsSnapshot {
     let (mut manifest, manifest_error) = match manifest_store::load_manifest() {
         Ok(manifest) => (manifest, None),
         Err(error) => (ToolsManifest::default(), Some(error)),
@@ -355,12 +489,48 @@ fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
         .count() as u32;
     ToolsSnapshot {
         root: manifest_store::root_dir().to_string_lossy().into_owned(),
+        vault: scan_vault(load_vault_repositories, previous_vault),
         categories,
         installed,
         updates,
         conflicts,
         error: errors.join("\n"),
     }
+}
+
+fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot {
+    let status = if load_repositories {
+        vmux_core::profile::vault::status_with_repositories()
+    } else {
+        vmux_core::profile::vault::status()
+    };
+    let mut snapshot = VaultSnapshot {
+        root: status.root.to_string_lossy().into_owned(),
+        initialized: status.initialized,
+        remote: status.remote,
+        branch: status.branch,
+        dirty: status.dirty,
+        ahead: status.ahead,
+        behind: status.behind,
+        github_owner: status.github_owner,
+        repositories: status
+            .repositories
+            .into_iter()
+            .map(|repository| VaultRepository {
+                name: repository.name,
+                url: repository.url,
+                private: repository.private,
+                empty: repository.empty,
+            })
+            .collect(),
+        error: status.error,
+    };
+    if !load_repositories && (!snapshot.initialized || snapshot.remote.is_empty()) {
+        snapshot.github_owner = previous.github_owner;
+        snapshot.repositories = previous.repositories;
+        snapshot.error = previous.error;
+    }
+    snapshot
 }
 
 fn build_category(
@@ -881,6 +1051,21 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
     }
 }
 
+fn perform_vault_action(request: &VaultActionRequest) -> Result<String, String> {
+    match request.action {
+        VaultAction::Create => vmux_core::profile::vault::create_remote(
+            &request.repository,
+            if request.private {
+                vmux_core::profile::vault::RepositoryVisibility::Private
+            } else {
+                vmux_core::profile::vault::RepositoryVisibility::Public
+            },
+        ),
+        VaultAction::Connect => vmux_core::profile::vault::connect_remote(&request.repository),
+        VaultAction::Sync => vmux_core::profile::vault::sync(),
+    }
+}
+
 fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String> {
     match provider {
         ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
@@ -963,7 +1148,7 @@ fn import_inventory(
 
 fn apply_manifest() -> Result<String, String> {
     let manifest = manifest_store::load_manifest()?;
-    let snapshot = scan_tools(false);
+    let snapshot = scan_tools(false, false, VaultSnapshot::default());
     let mut installed = 0;
     for item in snapshot
         .categories

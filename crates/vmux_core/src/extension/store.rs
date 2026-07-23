@@ -96,8 +96,7 @@ impl Default for Index {
 }
 
 pub fn root() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".vmux").join("extensions")
+    crate::profile::extensions_dir()
 }
 
 pub fn packages_root(root: &Path) -> PathBuf {

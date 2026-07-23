@@ -882,6 +882,7 @@ fn SideSheetView(
             }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
+                VaultCard { pane_id, vault: tools.vault.clone(), loaded: tools_loaded }
                 KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
                 ToolsCard { pane_id, tools, loaded: tools_loaded }
             }
@@ -1186,6 +1187,57 @@ fn open_tools(pane_id: u64) {
         stack_index: 0,
         path: String::new(),
     });
+}
+
+fn open_vault(pane_id: u64) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: "open_vault".to_string(),
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path: String::new(),
+    });
+}
+
+#[component]
+fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool) -> Element {
+    let detail = if !loaded {
+        translate("common-loading")
+    } else if !vault.initialized || vault.remote.is_empty() {
+        translate("vault-not-connected")
+    } else if vault.dirty > 0 {
+        translate_with(
+            "vault-change-count",
+            &[("count", TranslationValue::Number(vault.dirty as i64))],
+        )
+    } else {
+        translate("vault-clean")
+    };
+    rsx! {
+        button {
+            r#type: "button",
+            title: translate("vault-open"),
+            class: "glass mb-2 flex shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-glass-hover",
+            onclick: move |_| open_vault(pane_id),
+            div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-violet-500/10 text-violet-300 ring-1 ring-inset ring-violet-500/20",
+                Icon { class: "h-4 w-4",
+                    path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
+                    path { d: "m9 12 2 2 4-4" }
+                }
+            }
+            div { class: "min-w-0 flex-1",
+                div { class: "text-ui font-semibold text-foreground", {translate("vault-title")} }
+                div { class: "truncate text-[10px] text-foreground/65", "{detail}" }
+            }
+            if loaded && vault.initialized && !vault.remote.is_empty() {
+                span { class: if vault.dirty > 0 {
+                        "size-1.5 rounded-full bg-amber-500"
+                    } else {
+                        "size-1.5 rounded-full bg-emerald-500"
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[component]
