@@ -1,28 +1,23 @@
 use std::path::PathBuf;
-use vmux_service::registry::{StartMode, start_mode_for};
+use vmux_service::registry::{StartMode, start_mode_for_profile};
 
 #[test]
-fn bundled_service_app_registers() {
-    let exe = PathBuf::from(
+fn start_mode_depends_on_profile_and_bundle_location() {
+    let service_app = PathBuf::from(
         "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
     );
-    assert_eq!(start_mode_for(&exe), StartMode::Register);
-}
+    let main_app = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
+    let dev_binary = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
+    let plain_binary = PathBuf::from("/usr/local/bin/vmux_service");
 
-#[test]
-fn bundled_main_app_registers() {
-    let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
-    assert_eq!(start_mode_for(&exe), StartMode::Register);
-}
-
-#[test]
-fn dev_target_debug_spawns_detached() {
-    let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_service");
-    assert_eq!(start_mode_for(&exe), StartMode::SpawnDetached);
-}
-
-#[test]
-fn plain_bin_spawns_detached() {
-    let exe = PathBuf::from("/usr/local/bin/vmux_service");
-    assert_eq!(start_mode_for(&exe), StartMode::SpawnDetached);
+    for (profile, exe, expected) in [
+        ("release", &service_app, StartMode::Register),
+        ("release", &main_app, StartMode::Register),
+        ("local", &service_app, StartMode::SpawnDetached),
+        ("dev", &main_app, StartMode::SpawnDetached),
+        ("release", &dev_binary, StartMode::SpawnDetached),
+        ("release", &plain_binary, StartMode::SpawnDetached),
+    ] {
+        assert_eq!(start_mode_for_profile(profile, exe), expected);
+    }
 }

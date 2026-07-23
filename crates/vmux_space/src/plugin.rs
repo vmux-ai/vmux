@@ -548,6 +548,7 @@ fn on_space_command(
                 content: TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string()),
                 clear_pending_stack: true,
                 focus: true,
+                replaces: None,
             });
         }
         _ => {}
@@ -623,6 +624,7 @@ fn handle_open_in_new_space(
             content,
             clear_pending_stack: true,
             focus: true,
+            replaces: None,
         });
     }
 }

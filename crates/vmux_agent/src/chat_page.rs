@@ -156,6 +156,68 @@ struct AcpSetModelRequest {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource, Default)]
+struct LastUsedAcpModels {
+    by_agent: std::collections::BTreeMap<String, String>,
+    dirty: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl LastUsedAcpModels {
+    fn remember(&mut self, agent_id: &str, model_id: &str) {
+        if self
+            .by_agent
+            .get(agent_id)
+            .is_some_and(|saved| saved == model_id)
+        {
+            return;
+        }
+        self.by_agent
+            .insert(agent_id.to_string(), model_id.to_string());
+        self.dirty = true;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn last_used_acp_models_path() -> std::path::PathBuf {
+    vmux_core::profile::profile_dir().join("agent-models.json")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
+    let Ok(bytes) = std::fs::read(last_used_acp_models_path()) else {
+        return;
+    };
+    let Ok(saved) = serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes)
+    else {
+        return;
+    };
+    models.by_agent = saved;
+    models.dirty = false;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
+    if !models.dirty {
+        return;
+    }
+    let path = last_used_acp_models_path();
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
+        return;
+    };
+    let temp = path.with_extension("json.tmp");
+    if std::fs::create_dir_all(parent).is_ok()
+        && std::fs::write(&temp, bytes).is_ok()
+        && std::fs::rename(&temp, &path).is_ok()
+    {
+        models.dirty = false;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
 struct AcpModelRequestCounter(u64);
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -171,7 +233,9 @@ impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
             .add_message::<AcpSetModelRequest>()
+            .add_systems(Startup, load_last_used_acp_models)
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatSubmit,
                 ChatApproval,
@@ -225,7 +289,9 @@ impl Plugin for AgentChatPagePlugin {
                     push_acp_model_state_to_page,
                     push_removed_acp_model_state_to_page,
                     push_composer_context_to_page,
+                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
                     send_acp_model_requests,
+                    save_last_used_acp_models.after(apply_last_used_acp_model),
                     drain_chat_attachment_tasks,
                     drain_chat_media_list_tasks,
                     drain_chat_media_preview_tasks,
@@ -937,7 +1003,6 @@ struct ComposerContextCache {
 struct ComposerContextCacheEntry {
     input: ComposerContextInput,
     context: ComposerContext,
-    refreshed_at: f32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -982,13 +1047,12 @@ fn composer_context_input(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext {
-    let info = (!input.cwd.as_os_str().is_empty())
-        .then(|| vmux_git::worktree::repo_info(&input.cwd))
-        .flatten();
-    let is_git_repo = info.is_some() || input.cwd.join(".git").exists();
+fn composer_context_from_input(
+    input: &ComposerContextInput,
+    info: Option<&vmux_git::worktree::RepoInfo>,
+) -> ComposerContext {
+    let is_git_repo = info.is_some() || input.worktree.is_some() || input.cwd.join(".git").exists();
     let branch = info
-        .as_ref()
         .map(|info| info.branch.clone())
         .filter(|branch| !branch.is_empty())
         .or_else(|| {
@@ -996,11 +1060,6 @@ fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext 
                 .worktree
                 .as_ref()
                 .map(|worktree| worktree.branch.clone())
-        })
-        .or_else(|| {
-            is_git_repo
-                .then(|| vmux_git::worktree::head_ref(&input.cwd).ok())
-                .flatten()
         })
         .unwrap_or_default();
     let workspace_name = input
@@ -1014,18 +1073,15 @@ fn composer_context_from_input(input: &ComposerContextInput) -> ComposerContext 
         workspace_name,
         workspace_selected: input.workspace_selected,
         is_git_repo,
-        is_worktree: info.as_ref().is_some_and(|info| info.is_worktree) || input.worktree.is_some(),
+        is_worktree: info.is_some_and(|info| info.is_worktree) || input.worktree.is_some(),
         branch,
         base_ref: input
             .worktree
             .as_ref()
             .map(|worktree| worktree.base_ref.clone())
             .unwrap_or_default(),
-        uncommitted: info
-            .as_ref()
-            .map(|info| info.uncommitted)
-            .unwrap_or_default(),
-        ahead: info.as_ref().map(|info| info.ahead).unwrap_or_default(),
+        uncommitted: info.map(|info| info.uncommitted).unwrap_or_default(),
+        ahead: info.map(|info| info.ahead).unwrap_or_default(),
         can_manage_workspace: input.can_manage_workspace,
         auto_allow_count: input.auto_allow_count,
     }
@@ -1043,11 +1099,10 @@ fn push_composer_context_to_page(
         Option<&vmux_layout::tab::TabWorktree>,
     )>,
     browsers: NonSend<Browsers>,
-    time: Res<Time>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut cache: Local<ComposerContextCache>,
     mut commands: Commands,
 ) {
-    let now = time.elapsed_secs();
     let live_views = views
         .iter()
         .map(|(webview, _, _)| webview)
@@ -1064,22 +1119,18 @@ fn push_composer_context_to_page(
             continue;
         };
         let input = composer_context_input(stack, acp, policy, &child_of, &tabs);
-        let refresh = cache
-            .entries
-            .get(&webview)
-            .is_none_or(|entry| entry.input != input || now - entry.refreshed_at >= 3.0);
-        if !refresh && !ready.is_changed() {
-            continue;
-        }
-        let context = if refresh {
-            composer_context_from_input(&input)
-        } else {
-            cache.entries.get(&webview).unwrap().context.clone()
-        };
+        let info = (!input.cwd.as_os_str().is_empty())
+            .then(|| {
+                repo_info
+                    .as_mut()
+                    .and_then(|cache| cache.bypass_change_detection().get(&input.cwd))
+            })
+            .flatten();
+        let context = composer_context_from_input(&input, info.as_ref());
         let changed = cache
             .entries
             .get(&webview)
-            .is_none_or(|entry| entry.context != context);
+            .is_none_or(|entry| entry.input != input || entry.context != context);
         if changed || ready.is_changed() {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 webview,
@@ -1087,14 +1138,9 @@ fn push_composer_context_to_page(
                 &context,
             ));
         }
-        cache.entries.insert(
-            webview,
-            ComposerContextCacheEntry {
-                input,
-                context,
-                refreshed_at: now,
-            },
-        );
+        cache
+            .entries
+            .insert(webview, ComposerContextCacheEntry { input, context });
     }
 }
 
@@ -1605,6 +1651,7 @@ fn on_select_model(
     child_of: Query<&ChildOf>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
     mut counter: ResMut<AcpModelRequestCounter>,
+    mut last_used: ResMut<LastUsedAcpModels>,
     mut requests: MessageWriter<AcpSetModelRequest>,
 ) {
     let Ok(parent) = child_of.get(trigger.event().webview) else {
@@ -1620,6 +1667,7 @@ fn on_select_model(
         return;
     }
     let request_id = counter.next();
+    last_used.remember(&session.agent_id, &model_id);
     requests.write(AcpSetModelRequest {
         sid: session.sid.clone(),
         request_id,
@@ -1630,6 +1678,36 @@ fn on_select_model(
         request_id,
         model_id,
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_last_used_acp_model(
+    mut sessions: Query<(&AcpSession, &mut AcpModelState), Added<AcpModelState>>,
+    last_used: Res<LastUsedAcpModels>,
+    mut counter: ResMut<AcpModelRequestCounter>,
+    mut requests: MessageWriter<AcpSetModelRequest>,
+) {
+    for (session, mut state) in &mut sessions {
+        let Some(model_id) = last_used.by_agent.get(&session.agent_id) else {
+            continue;
+        };
+        if state.display_model_id() == model_id
+            || !state.models.iter().any(|model| &model.id == model_id)
+        {
+            continue;
+        }
+        let request_id = counter.next();
+        requests.write(AcpSetModelRequest {
+            sid: session.sid.clone(),
+            request_id,
+            config_id: state.config_id.clone(),
+            model_id: model_id.clone(),
+        });
+        state.pending = Some(crate::client::acp::PendingAcpModelSelection {
+            request_id,
+            model_id: model_id.clone(),
+        });
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2074,6 +2152,7 @@ mod native_tests {
     fn model_selection_updates_cached_state_before_response() {
         let mut app = App::new();
         app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
             .add_message::<AcpSetModelRequest>()
             .add_observer(on_select_model);
         let stack = app
@@ -2138,6 +2217,14 @@ mod native_tests {
         assert_eq!(requests[0].request_id, 1);
         assert_eq!(requests[0].config_id, "model");
         assert_eq!(requests[0].model_id, "fable");
+        assert_eq!(
+            app.world()
+                .resource::<LastUsedAcpModels>()
+                .by_agent
+                .get("claude")
+                .map(String::as_str),
+            Some("fable")
+        );
 
         app.world_mut().trigger(BinReceive {
             webview,
@@ -2158,6 +2245,61 @@ mod native_tests {
                 .count(),
             0
         );
+    }
+
+    #[test]
+    fn fresh_agent_session_applies_last_used_model() {
+        let mut app = App::new();
+        app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
+            .add_message::<AcpSetModelRequest>()
+            .add_systems(Update, apply_last_used_acp_model);
+        app.world_mut()
+            .resource_mut::<LastUsedAcpModels>()
+            .by_agent
+            .insert("claude".into(), "fable".into());
+        let stack = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "claude".into(),
+                    sid: "s2".into(),
+                    cwd: "/tmp".into(),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AcpModelState {
+                    config_id: "model".into(),
+                    current_model_id: "default".into(),
+                    pending: None,
+                    models: vec![
+                        vmux_service::protocol::AcpModelOption {
+                            id: "default".into(),
+                            name: "Default".into(),
+                            description: None,
+                        },
+                        vmux_service::protocol::AcpModelOption {
+                            id: "fable".into(),
+                            name: "Fable".into(),
+                            description: None,
+                        },
+                    ],
+                },
+            ))
+            .id();
+
+        app.update();
+
+        let state = app.world().get::<AcpModelState>(stack).unwrap();
+        assert_eq!(state.display_model_id(), "fable");
+        let requests: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<AcpSetModelRequest>>()
+            .drain()
+            .collect();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].sid, "s2");
+        assert_eq!(requests[0].model_id, "fable");
     }
 
     #[test]

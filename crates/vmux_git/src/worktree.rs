@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::runner::{GitError, git, git_err};
+use crate::runner::{GitError, git, git_err, git_read};
 
 /// A vmux-managed worktree: its checkout path, branch, base ref, and owning repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -401,18 +401,60 @@ pub struct RepoInfo {
     pub is_worktree: bool,
     pub uncommitted: u32,
     pub ahead: u32,
+    pub(crate) repo_root: PathBuf,
+    pub(crate) git_dir: PathBuf,
+    pub(crate) common_dir: PathBuf,
 }
 
 /// Detect git info for `dir`: `None` if it isn't inside a git repo, else the current branch,
 /// whether it's a linked worktree, and uncommitted/ahead counts. Auto-detected from git alone.
 pub fn repo_info(dir: &Path) -> Option<RepoInfo> {
-    repo_root_of(dir).ok()?;
-    let status = worktree_status(dir).unwrap_or_default();
+    let (status, _, ok) = git_read(dir, &["status", "--porcelain=v2", "--branch"]).ok()?;
+    if !ok {
+        return None;
+    }
+    let branch = status
+        .lines()
+        .find_map(|line| line.strip_prefix("# branch.head "))
+        .filter(|branch| *branch != "(detached)")
+        .unwrap_or_default()
+        .to_string();
+    let ahead = status
+        .lines()
+        .find_map(|line| line.strip_prefix("# branch.ab +"))
+        .and_then(|value| value.split_once(' '))
+        .and_then(|(ahead, _)| ahead.parse::<u32>().ok())
+        .unwrap_or_default();
+    let uncommitted = status
+        .lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .count() as u32;
+    let (dirs, _, ok) = git_read(
+        dir,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    )
+    .ok()?;
+    if !ok {
+        return None;
+    }
+    let mut dirs = dirs.lines().map(PathBuf::from);
+    let repo_root = dirs.next()?;
+    let git_dir = dirs.next()?;
+    let common_dir = dirs.next()?;
     Some(RepoInfo {
-        branch: head_ref(dir).unwrap_or_default(),
-        is_worktree: is_linked_worktree(dir),
-        uncommitted: status.uncommitted,
-        ahead: status.ahead,
+        branch,
+        is_worktree: git_dir != common_dir,
+        uncommitted,
+        ahead,
+        repo_root,
+        git_dir,
+        common_dir,
     })
 }
 

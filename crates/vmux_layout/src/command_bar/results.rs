@@ -174,9 +174,10 @@ pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str)
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn prepend_prompt_agent(
+pub(crate) fn prepend_prompt_agents(
     results: &mut Vec<CommandBarResultItem>,
-    agent: Option<&CommandBarResultItem>,
+    selected_agent: Option<&CommandBarResultItem>,
+    recent_agents: &[CommandBarResultItem],
     query: &str,
 ) {
     if !vmux_command::event::is_start_prompt_query(query)
@@ -187,9 +188,23 @@ pub(crate) fn prepend_prompt_agent(
     {
         return;
     }
-    if let Some(agent) = agent {
-        results.insert(0, agent.clone());
+    let mut suggestions = Vec::new();
+    for agent in selected_agent.into_iter().chain(recent_agents) {
+        let Some(url) = agent_page_url(agent) else {
+            continue;
+        };
+        if suggestions
+            .iter()
+            .any(|existing| agent_page_url(existing) == Some(url))
+        {
+            continue;
+        }
+        suggestions.push(agent.clone());
+        if suggestions.len() == 3 {
+            break;
+        }
     }
+    results.splice(0..0, suggestions);
 }
 
 pub fn start_page_results(
@@ -234,15 +249,12 @@ pub fn start_page_results(
         } else {
             search_engines
         };
-        results.extend(
-            engines
-                .iter()
-                .copied()
-                .map(|engine| CommandBarResultItem::Search {
-                    engine,
-                    query: trimmed.to_string(),
-                }),
-        );
+        results.extend(engines.iter().take(3).copied().map(|engine| {
+            CommandBarResultItem::Search {
+                engine,
+                query: trimmed.to_string(),
+            }
+        }));
     } else if !trimmed.is_empty() {
         results.push(CommandBarResultItem::Navigate {
             url: trimmed.to_string(),
@@ -843,8 +855,13 @@ mod tests {
     }
 
     #[test]
-    fn start_page_offers_each_search_engine_in_supplied_order() {
-        let engines = [SearchEngine::Kagi, SearchEngine::Google, SearchEngine::Bing];
+    fn start_page_offers_three_recent_search_engines_in_supplied_order() {
+        let engines = [
+            SearchEngine::Kagi,
+            SearchEngine::Google,
+            SearchEngine::Bing,
+            SearchEngine::DuckDuckGo,
+        ];
         let results =
             start_page_results(&sample_pages(), &[], &[], &engines, "fix the failing test");
         let actual = results
@@ -855,24 +872,51 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        assert_eq!(actual, engines);
+        assert_eq!(actual, engines[..3]);
     }
 
     #[test]
-    fn selected_agent_precedes_web_search_for_prompt_text() {
-        let agent = agent_page_results(&sample_pages(), "").remove(0);
+    fn selected_agent_and_two_recent_agents_precede_web_search() {
+        let mut pages = sample_pages();
+        pages.extend([
+            CommandBarPage {
+                host: "agent".into(),
+                url: "vmux://agent/codex/cli".into(),
+                title: "Codex".into(),
+                keywords: vec!["codex".into(), "agent".into()],
+                icon: vmux_core::PageIcon::None,
+                shortcut: String::new(),
+            },
+            CommandBarPage {
+                host: "agent".into(),
+                url: "vmux://agent/claude".into(),
+                title: "Claude".into(),
+                keywords: vec!["claude".into(), "agent".into()],
+                icon: vmux_core::PageIcon::None,
+                shortcut: String::new(),
+            },
+        ]);
+        let agents = agent_page_results(&pages, "");
+        let selected = agents[1].clone();
         let mut results = start_page_results(
-            &sample_pages(),
+            &pages,
             &[],
             &[],
             &[SearchEngine::Google, SearchEngine::Bing],
             "show me something fun",
         );
 
-        prepend_prompt_agent(&mut results, Some(&agent), "show me something fun");
+        prepend_prompt_agents(
+            &mut results,
+            Some(&selected),
+            &agents,
+            "show me something fun",
+        );
 
-        assert_eq!(agent_page_url(&results[0]), Some("vmux://agent/vibe/"));
-        assert!(matches!(results[1], CommandBarResultItem::Search { .. }));
+        assert_eq!(agent_page_url(&results[0]), Some("vmux://agent/codex/cli"));
+        assert_eq!(agent_page_url(&results[1]), Some("vmux://agent/vibe/"));
+        assert_eq!(agent_page_url(&results[2]), Some("vmux://agent/claude"));
+        assert!(matches!(results[3], CommandBarResultItem::Search { .. }));
     }
 
     #[test]
@@ -880,7 +924,7 @@ mod tests {
         let agent = agent_page_results(&sample_pages(), "").remove(0);
         let mut results = start_page_results(&sample_pages(), &[], &[], &[], "terminal");
 
-        prepend_prompt_agent(&mut results, Some(&agent), "terminal");
+        prepend_prompt_agents(&mut results, Some(&agent), &[], "terminal");
 
         assert_eq!(
             results,

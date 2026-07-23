@@ -93,7 +93,7 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Result<(String, String, bool), 
     ))
 }
 
-fn git_read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
+pub(crate) fn git_read(root: &Path, args: &[&str]) -> Result<(String, String, bool), GitError> {
     let out = git_command(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)

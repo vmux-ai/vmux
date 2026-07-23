@@ -10,8 +10,8 @@ use crate::command_bar::keyboard::{
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_results, agent_page_url, filter_results, prepend_prompt_agent, space_switch_results,
-    start_page_results,
+    agent_page_results, agent_page_url, filter_results, prepend_prompt_agents,
+    space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -456,7 +456,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     if start_prompt_mode {
-        prepend_prompt_agent(&mut results, default_agent_item.as_ref(), &q);
+        prepend_prompt_agents(
+            &mut results,
+            default_agent_item.as_ref(),
+            &start_agent_items,
+            &q,
+        );
     }
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
@@ -1452,10 +1457,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         class: result_favicon_class().to_string(),
                                         globe_class: result_leading_icon_class().to_string(),
                                     }
-                                    div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        span { class: result_primary_text_class(), "Search with {engine.name()}" }
-                                        span { class: result_secondary_text_class(), "{query}" }
-                                    }
+                                    span { class: result_primary_text_class(), "Search with {engine.name()}" }
                                 }
                                 span { class: result_trailing_slot_class(), "\u{21b5}" }
                             },

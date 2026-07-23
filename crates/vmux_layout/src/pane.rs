@@ -54,6 +54,7 @@ impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Pane>()
             .register_type::<PaneId>()
+            .register_type::<SideSheetCardCollapsed>()
             .register_type::<PaneSplit>()
             .register_type::<PaneSplitDirection>()
             .register_type::<PaneSize>()
@@ -162,6 +163,12 @@ pub struct Pane;
 #[type_path = "vmux_desktop::layout::pane"]
 #[require(Save)]
 pub struct PaneId(pub String);
+
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::pane"]
+#[require(Save)]
+pub struct SideSheetCardCollapsed;
 
 pub fn assign_pane_ids(
     panes: Query<Entity, (With<Pane>, Without<PaneId>)>,

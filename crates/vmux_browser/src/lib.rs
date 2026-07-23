@@ -56,7 +56,7 @@ use vmux_layout::{
         TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT,
         UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
     },
-    pane::{Pane, PaneHoverIntent, PaneSplit, first_stack_in_pane},
+    pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed, first_stack_in_pane},
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::{
         ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
@@ -3447,6 +3447,7 @@ fn push_pane_tree_emit(
     tab_q: Query<(), With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+    collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -3532,6 +3533,7 @@ fn push_pane_tree_emit(
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
+            collapsed: collapsed_panes.contains(pane_entity),
             stacks,
         });
     }
@@ -3583,8 +3585,7 @@ fn abbreviate_home(path: &std::path::Path) -> String {
     s.into_owned()
 }
 
-/// Emit the active tab's working-directory boundary (dir + provenance + worktree/branch) to the
-/// layout side sheet.
+/// Emit the active tab's working-directory boundary from the shared event-driven Git cache.
 #[allow(clippy::too_many_arguments)]
 fn push_tab_boundary_emit(
     mut commands: Commands,
@@ -3598,8 +3599,7 @@ fn push_tab_boundary_emit(
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last: Local<String>,
-    mut git_cache: Local<(String, f32, Option<vmux_git::worktree::RepoInfo>)>,
-    time: Res<Time>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
@@ -3610,14 +3610,9 @@ fn push_tab_boundary_emit(
     let boundary = focus.tab.and_then(|tab_e| {
         let tab = tabs.get(tab_e).ok()?;
         let (path, source) = tab_boundary_dir(tab, &settings, active_space.as_deref())?;
-        // Auto-detect git status for the tab dir, cached by dir + refreshed every ~3s. This only
-        // runs when the loop wakes (Reactive mode), so it never polls git while idle.
-        let dir_key = path.to_string_lossy().to_string();
-        let now = time.elapsed_secs();
-        if git_cache.0 != dir_key || now - git_cache.1 > 3.0 {
-            *git_cache = (dir_key, now, vmux_git::worktree::repo_info(&path));
-        }
-        let info = git_cache.2.clone();
+        let info = repo_info
+            .as_mut()
+            .and_then(|cache| cache.bypass_change_detection().get(&path));
         let wt = worktrees.get(tab_e).ok();
         let branch = info.as_ref().map(|i| i.branch.clone()).unwrap_or_default();
         let base_ref = wt.map(|w| w.base_ref.clone()).unwrap_or_default();
@@ -4257,6 +4252,14 @@ fn on_side_sheet_command_emit(
                 command: cmd.clone(),
             });
             messages.write(cmd);
+        }
+        "collapse_card" => {
+            commands.entity(target_pane).insert(SideSheetCardCollapsed);
+        }
+        "expand_card" => {
+            commands
+                .entity(target_pane)
+                .remove::<SideSheetCardCollapsed>();
         }
         "open_knowledge_path" => {
             let Some(url) =

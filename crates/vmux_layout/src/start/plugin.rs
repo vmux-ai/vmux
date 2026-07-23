@@ -12,8 +12,10 @@ use vmux_command::snapshot::{
     CommandBarWorkSnapshot,
 };
 use vmux_core::{
-    CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
+    Active, CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet,
+    PageOpenTask,
 };
+use vmux_history::LastActivatedAt;
 
 use crate::cef::Browser;
 use crate::command_bar::handler::{
@@ -24,14 +26,14 @@ use crate::start::START_PAGE_URL;
 use crate::start::event::{
     START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput, StartSelectWorkspace,
 };
-use crate::tab::{Tab, TabWorkspace, TabWorktree};
+use crate::tab::{PendingTabReplacement, Tab, TabWorkspace, TabWorktree};
+use crate::webview_reveal::PendingWebviewReveal;
 use crate::window::VmuxWindow;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// How many prewarmed `vmux://start/` webviews to keep ready. Zero keeps hidden start
-/// pages from consuming rendering resources; pages still spawn on demand.
-const WARM_START_POOL_SIZE: usize = 0;
+/// How many prewarmed `vmux://start/` webviews to keep ready.
+const WARM_START_POOL_SIZE: usize = 1;
 
 /// Marks a prewarmed, parked `vmux://start/` webview waiting to be claimed by the next
 /// start open. Removed when the spare is reparented into a real stack.
@@ -55,6 +57,9 @@ struct WarmStartPoolNode;
 /// becomes ready after snapshots were populated still gets the data.
 #[derive(Component)]
 struct StartWorkSynced;
+
+#[derive(Component)]
+struct StartMountReady;
 
 /// Host-internal signal that a warm spare was just revealed into a stack, so its launcher
 /// data must be refreshed (it captured boot-time tabs/spaces) and its input refocused.
@@ -94,27 +99,39 @@ impl StartPromptContextParams<'_, '_> {
         })
     }
 
-    fn context(&self, tab: Option<Entity>) -> CommandBarPromptContext {
+    fn cwd(&self, tab: Option<Entity>) -> String {
         let Some(tab) = tab else {
-            return default();
+            return String::new();
         };
-        let Ok((tab, workspace, worktree)) = self.tabs.get(tab) else {
-            return default();
+        let Ok((tab, workspace, _)) = self.tabs.get(tab) else {
+            return String::new();
         };
-        let cwd = tab
-            .startup_dir
+        tab.startup_dir
             .clone()
             .or_else(|| {
                 workspace
                     .as_ref()
                     .map(|workspace| workspace.project_dir.clone())
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    fn context(
+        &self,
+        tab: Option<Entity>,
+        info: Option<&vmux_git::worktree::RepoInfo>,
+    ) -> CommandBarPromptContext {
+        let Some(tab) = tab else {
+            return default();
+        };
+        let Ok((_, _, worktree)) = self.tabs.get(tab) else {
+            return default();
+        };
+        let cwd = self.cwd(Some(tab));
         if cwd.is_empty() {
             return default();
         }
         let path = std::path::Path::new(&cwd);
-        let info = vmux_git::worktree::repo_info(path);
         CommandBarPromptContext {
             workspace_name: path
                 .file_name()
@@ -123,17 +140,14 @@ impl StartPromptContextParams<'_, '_> {
                 .unwrap_or_else(|| cwd.clone()),
             cwd,
             is_git_repo: info.is_some(),
-            is_worktree: info.as_ref().is_some_and(|info| info.is_worktree),
-            branch: info
-                .as_ref()
-                .map(|info| info.branch.clone())
-                .unwrap_or_default(),
+            is_worktree: info.is_some_and(|info| info.is_worktree),
+            branch: info.map(|info| info.branch.clone()).unwrap_or_default(),
             base_ref: worktree
                 .as_ref()
                 .map(|worktree| worktree.base_ref.clone())
                 .unwrap_or_default(),
-            uncommitted: info.as_ref().map(|info| info.uncommitted).unwrap_or(0),
-            ahead: info.as_ref().map(|info| info.ahead).unwrap_or(0),
+            uncommitted: info.map(|info| info.uncommitted).unwrap_or(0),
+            ahead: info.map(|info| info.ahead).unwrap_or(0),
         }
     }
 }
@@ -161,6 +175,10 @@ impl Plugin for StartPlugin {
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
                 ),
+            )
+            .add_systems(
+                Update,
+                finish_ready_tab_replacements.after(sync_live_start_pages),
             );
     }
 }
@@ -300,9 +318,26 @@ fn sync_live_start_pages(
         Without<crate::start::StartAgentTransitionView>,
     >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
+    replacements: Query<&PendingTabReplacement>,
     browsers: NonSend<Browsers>,
+    mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
+    mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
     mut commands: Commands,
 ) {
+    let cwd = prompt_context.cwd(tab_gather.active_tab.get());
+    let git_info = (!cwd.is_empty())
+        .then(|| {
+            repo_info.as_mut().and_then(|cache| {
+                cache
+                    .bypass_change_detection()
+                    .get(std::path::Path::new(&cwd))
+            })
+        })
+        .flatten();
+    let git_changed = last_git.0 != cwd || last_git.1 != git_info;
+    if git_changed {
+        *last_git = (cwd, git_info.clone());
+    }
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
@@ -311,6 +346,7 @@ fn sync_live_start_pages(
         work_snapshot.is_changed(),
         focus_changed,
     ) || prompt_context.changed(tab_gather.active_tab.get())
+        || git_changed
         || locale.as_ref().is_some_and(|locale| locale.is_changed());
     let locale = locale
         .as_deref()
@@ -319,6 +355,9 @@ fn sync_live_start_pages(
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
+            if ancestor_replacement_tab(e, &tab_gather.child_of_q, &replacements).is_some() {
+                return None;
+            }
             let WebviewSource::Url(url) = src else {
                 return None;
             };
@@ -347,6 +386,8 @@ fn sync_live_start_pages(
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
+        tab_gather.active_tab.get(),
+        git_info.as_ref(),
         &locale,
     );
     for (e, focus_requested) in targets {
@@ -491,6 +532,8 @@ fn on_start_spare_revealed(
             &pages_snapshot,
             &work_snapshot,
             &prompt_context,
+            tab_gather.active_tab.get(),
+            None,
             &locale,
         );
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -512,6 +555,8 @@ fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
     spares: Query<(), With<WarmStartSpare>>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
+    child_of: Query<&ChildOf>,
+    replacements: Query<&PendingTabReplacement>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
@@ -526,6 +571,8 @@ fn on_start_data_request(
     if is_spare {
         commands.entity(webview).insert(WarmStartReady);
     }
+    commands.entity(webview).insert(StartMountReady);
+    let replacement_tab = ancestor_replacement_tab(webview, &child_of, &replacements);
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -533,6 +580,8 @@ fn on_start_data_request(
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
+        replacement_tab.or_else(|| tab_gather.active_tab.get()),
+        None,
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
@@ -543,7 +592,7 @@ fn on_start_data_request(
         COMMAND_BAR_OPEN_EVENT,
         &payload,
     ));
-    if keyboard_targets.contains(webview) {
+    if keyboard_targets.contains(webview) && replacement_tab.is_none() {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             START_FOCUS_INPUT_EVENT,
@@ -560,12 +609,14 @@ fn build_start_payload(
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &CommandBarWorkSnapshot,
     prompt_context: &StartPromptContextParams,
+    active_tab: Option<Entity>,
+    git_info: Option<&vmux_git::worktree::RepoInfo>,
     locale: &str,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = spaces_snapshot.active_space_name.clone();
     let tabs = gather_command_bar_tabs(
-        tab_gather.active_tab.get(),
+        active_tab,
         &tab_gather.all_children,
         &tab_gather.leaf_panes,
         &tab_gather.pane_ts,
@@ -591,8 +642,64 @@ fn build_start_payload(
         tabs,
         Some(OpenTarget::InPlace),
     );
-    payload.prompt_context = prompt_context.context(tab_gather.active_tab.get());
+    payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload
+}
+
+fn ancestor_replacement_tab(
+    entity: Entity,
+    child_of: &Query<&ChildOf>,
+    replacements: &Query<&PendingTabReplacement>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if replacements.contains(current) {
+            return Some(current);
+        }
+        current = child_of.get(current).ok()?.parent();
+    }
+}
+
+fn finish_ready_tab_replacements(
+    ready: Query<Entity, (With<StartMountReady>, Without<PendingWebviewReveal>)>,
+    child_of: Query<&ChildOf>,
+    replacements: Query<&PendingTabReplacement>,
+    mut focused: ResMut<crate::stack::FocusedStack>,
+    mut commands: Commands,
+) {
+    for webview in &ready {
+        let Some(tab) = ancestor_replacement_tab(webview, &child_of, &replacements) else {
+            continue;
+        };
+        let Ok(replacement) = replacements.get(tab) else {
+            continue;
+        };
+        let Some(stack) = child_of.get(webview).ok().map(ChildOf::parent) else {
+            continue;
+        };
+        let Some(pane) = child_of.get(stack).ok().map(ChildOf::parent) else {
+            continue;
+        };
+        commands.entity(replacement.old_tab).try_despawn();
+        commands
+            .entity(tab)
+            .insert((Active, LastActivatedAt::now()))
+            .remove::<PendingTabReplacement>();
+        commands
+            .entity(pane)
+            .insert((Active, LastActivatedAt::now()));
+        commands
+            .entity(stack)
+            .insert((Active, LastActivatedAt::now()));
+        focused.tab = Some(tab);
+        focused.pane = Some(pane);
+        focused.stack = Some(stack);
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            START_FOCUS_INPUT_EVENT,
+            &StartFocusInput,
+        ));
+    }
 }
 
 /// Despawn a stack's existing webview children before attaching new content.
@@ -716,6 +823,56 @@ mod tests {
 
         let emitted = &app.world().resource::<EmittedIds>().0;
         assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
+    }
+
+    #[test]
+    fn replacement_keeps_old_tab_until_start_mounts_then_switches_atomically() {
+        let mut app = App::new();
+        app.init_resource::<crate::stack::FocusedStack>()
+            .init_resource::<EmittedIds>()
+            .add_observer(capture_emit)
+            .add_systems(Update, finish_ready_tab_replacements);
+        let old_tab = app
+            .world_mut()
+            .spawn((Tab::default(), Active, LastActivatedAt(10)))
+            .id();
+        let new_tab = app
+            .world_mut()
+            .spawn((
+                Tab::default(),
+                PendingTabReplacement { old_tab },
+                LastActivatedAt(0),
+            ))
+            .id();
+        let split = app.world_mut().spawn(ChildOf(new_tab)).id();
+        let pane = app
+            .world_mut()
+            .spawn((LastActivatedAt(0), ChildOf(split)))
+            .id();
+        let stack = app
+            .world_mut()
+            .spawn((LastActivatedAt(0), ChildOf(pane)))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(stack)).id();
+
+        app.update();
+        assert!(app.world().get_entity(old_tab).is_ok());
+        assert!(app.world().get::<Active>(new_tab).is_none());
+
+        app.world_mut().entity_mut(webview).insert(StartMountReady);
+        app.update();
+
+        assert!(app.world().get_entity(old_tab).is_err());
+        assert!(app.world().get::<Active>(new_tab).is_some());
+        assert!(app.world().get::<PendingTabReplacement>(new_tab).is_none());
+        let focused = app.world().resource::<crate::stack::FocusedStack>();
+        assert_eq!(focused.tab, Some(new_tab));
+        assert_eq!(focused.pane, Some(pane));
+        assert_eq!(focused.stack, Some(stack));
+        assert_eq!(
+            app.world().resource::<EmittedIds>().0,
+            [START_FOCUS_INPUT_EVENT]
+        );
     }
 
     #[test]
@@ -846,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn start_pool_stays_empty_when_disabled() {
+    fn start_pool_fills_one_ready_slot() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<Mesh>>()
@@ -861,6 +1018,6 @@ mod tests {
             .query_filtered::<(), With<WarmStartSpare>>()
             .iter(app.world())
             .count();
-        assert_eq!(count, 0);
+        assert_eq!(count, WARM_START_POOL_SIZE);
     }
 }

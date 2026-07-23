@@ -23,7 +23,8 @@ use crate::settings::LayoutSettings;
 use crate::space::{ActiveSpaceEntity, Space, SpaceId, space_of};
 use crate::stack::{ActiveTabParam, FocusedStack, Stack, StackCommandSet, stack_bundle};
 use crate::tab::{
-    CloseTabRequest, LastTabCloseAt, Tab, active_tab_siblings, pick_after_close, tab_bundle,
+    CloseTabRequest, LastTabCloseAt, Tab, TabReplacementSource, active_tab_siblings,
+    pick_after_close, tab_bundle,
 };
 use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
@@ -304,9 +305,9 @@ pub(crate) fn handle_close_tab_requests(
     active_tab_param: ActiveTabParam,
     tab_data: Query<&Tab>,
     tab_q: Query<Entity, With<Tab>>,
+    replacement_sources: Query<(), With<TabReplacementSource>>,
     layout: TabArchiveLayout,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut last_tab_close: ResMut<LastTabCloseAt>,
     mut commands: Commands,
@@ -316,6 +317,7 @@ pub(crate) fn handle_close_tab_requests(
         .read()
         .filter_map(|request| seen.insert(request.tab).then_some(request.tab))
         .filter(|tab| tab_data.contains(*tab))
+        .filter(|tab| !replacement_sources.contains(*tab))
         .collect();
     let closing: HashSet<Entity> = requests.iter().copied().collect();
     let mut replacement_spaces = HashSet::new();
@@ -331,6 +333,7 @@ pub(crate) fn handle_close_tab_requests(
             .copied()
             .filter(|sibling| !closing.contains(sibling))
             .collect();
+        let mut defer_despawn = false;
         if surviving_siblings.is_empty() {
             let Ok(tab_space) = layout
                 .child_of
@@ -339,26 +342,24 @@ pub(crate) fn handle_close_tab_requests(
             else {
                 continue;
             };
-            if !replacement_spaces.contains(&tab_space) {
-                let Some((space, startup_dir)) = effective_startup_dir
-                    .as_deref()
-                    .and_then(|effective| effective.0.clone())
-                else {
-                    continue;
-                };
-                if space != tab_space {
-                    continue;
-                }
+            let preferred_source = active_tab_param
+                .get()
+                .filter(|active| siblings.contains(active) && closing.contains(active))
+                .unwrap_or(request.tab);
+            if request.tab == preferred_source && !replacement_spaces.contains(&tab_space) {
                 layout_requests.write(TabLayoutSpawnRequest {
-                    space,
+                    space: tab_space,
                     primary_window: *primary_window,
-                    name: Some(format!("Tab {}", tab_q.iter().count() + 1)),
-                    startup_dir: startup_dir.clone(),
+                    name: Some("Tab 1".to_string()),
+                    startup_dir: None,
                     content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                     clear_pending_stack: true,
-                    focus: true,
+                    focus: false,
+                    replaces: Some(request.tab),
                 });
-                replacement_spaces.insert(space);
+                replacement_spaces.insert(tab_space);
+                commands.entity(request.tab).insert(TabReplacementSource);
+                defer_despawn = true;
             }
         } else if active_tab_param.get() == Some(request.tab)
             && let Some(next) = pick_after_close(
@@ -377,7 +378,9 @@ pub(crate) fn handle_close_tab_requests(
 
         archive_tab(request.tab, tab, &layout, &mut commands);
         last_tab_close.0 = Some(std::time::Instant::now());
-        commands.entity(request.tab).despawn();
+        if !defer_despawn {
+            commands.entity(request.tab).despawn();
+        }
     }
 }
 
@@ -1642,8 +1645,13 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(first).is_err());
+        assert!(app.world().get_entity(first).is_ok());
         assert!(app.world().get_entity(second).is_err());
+        assert!(
+            app.world()
+                .get::<crate::tab::TabReplacementSource>(first)
+                .is_some()
+        );
         let requests: Vec<TabLayoutSpawnRequest> = app
             .world_mut()
             .resource_mut::<Messages<TabLayoutSpawnRequest>>()
@@ -1651,6 +1659,9 @@ mod tests {
             .collect();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].space, space);
+        assert_eq!(requests[0].startup_dir, None);
+        assert!(!requests[0].focus);
+        assert_eq!(requests[0].replaces, Some(first));
     }
 
     fn reopen_app() -> App {

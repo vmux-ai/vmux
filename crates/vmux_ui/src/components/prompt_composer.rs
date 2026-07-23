@@ -1,6 +1,3 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::i18n::translate;
 use dioxus::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -13,6 +10,7 @@ pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
 
 const PROMPT_COMPOSER_CSS: &str = r#"
 .vmux-prompt-input{caret-color:var(--vmux-prompt-accent)}
+.vmux-prompt-input.vmux-prompt-input-empty{caret-color:transparent}
 .vmux-prompt-composer{box-shadow:0 22px 70px -30px rgba(0,0,0,.58),0 8px 24px -16px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.16)}
 .vmux-prompt-composer:focus-within{box-shadow:0 28px 84px -34px rgba(0,0,0,.7),0 10px 28px -18px color-mix(in srgb,var(--vmux-prompt-accent) 32%,transparent),inset 0 0 0 1px color-mix(in srgb,var(--vmux-prompt-accent) 28%,transparent),inset 0 1px 0 rgba(255,255,255,.2)}
 "#;
@@ -69,6 +67,11 @@ pub fn PromptComposer(
     } else {
         "relative z-10 flex h-8 w-8 shrink-0 cursor-default items-center justify-center rounded-full bg-foreground/[0.055] text-muted-foreground/35 ring-1 ring-inset ring-foreground/[0.07]".to_string()
     };
+    let input_class = if value.is_empty() && preview.is_empty() && show_examples {
+        "vmux-prompt-input vmux-prompt-input-empty relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none"
+    } else {
+        "vmux-prompt-input relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none"
+    };
 
     rsx! {
             style { dangerous_inner_html: PROMPT_COMPOSER_CSS }
@@ -121,16 +124,16 @@ pub fn PromptComposer(
                     }
                     div { class: "relative min-w-32 overflow-hidden",
                         if value.is_empty() {
-                            div { class: "pointer-events-none absolute inset-0 flex -translate-y-px items-center overflow-hidden px-1 py-1",
+                            div { class: "pointer-events-none absolute inset-0 overflow-hidden px-1 py-2 text-[15px] leading-6",
                                 if !preview.is_empty() {
-                                    div { class: "max-w-full truncate whitespace-nowrap text-[15px] leading-6 text-foreground", "{preview}" }
+                                    div { class: "max-w-full truncate whitespace-nowrap text-foreground", "{preview}" }
                                 } else if show_examples {
                                     PromptGhost {
                                         accent_bg,
                                         terminal: false,
                                     }
                                 } else {
-                                    div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
+                                    div { class: "max-w-full truncate whitespace-nowrap text-muted-foreground/50",
                                         span { class: "min-w-0 truncate", "{placeholder}" }
                                     }
                                 }
@@ -145,7 +148,7 @@ pub fn PromptComposer(
                         }
                         textarea {
                             id: PROMPT_INPUT_ID,
-                            class: "vmux-prompt-input relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
+                            class: "{input_class}",
                             autofocus: true,
                             rows: "1",
                             placeholder: "{placeholder}",

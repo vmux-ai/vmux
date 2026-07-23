@@ -368,7 +368,7 @@ fn apply_acp_workspace_changed(
     }
 }
 
-fn apply_acp_model_info(
+pub(crate) fn apply_acp_model_info(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentModelInfo>,
     mut sessions: Query<(Entity, &AcpSession, Option<&mut AcpModelState>)>,
     mut commands: Commands,
@@ -404,7 +404,7 @@ fn apply_acp_model_info(
     }
 }
 
-fn apply_acp_model_selection_result(
+pub(crate) fn apply_acp_model_selection_result(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentModelSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
 ) {
