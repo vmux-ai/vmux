@@ -84,6 +84,12 @@ unsafe extern "C-unwind" fn tap_callback(
         return event.as_ptr();
     }
 
+    TAP_STATE.with(|s| {
+        if let Some(state) = s.borrow().as_ref() {
+            (state.wake)();
+        }
+    });
+
     if event_type != CGEventType::KeyDown {
         return event.as_ptr();
     }
@@ -97,11 +103,6 @@ unsafe extern "C-unwind" fn tap_callback(
 
     match gate(app_is_frontmost(), || classify(combo)) {
         TapOutcome::Consume(cmd) => {
-            TAP_STATE.with(|s| {
-                if let Some(state) = s.borrow().as_ref() {
-                    (state.wake)();
-                }
-            });
             if let Some(cmd) = cmd {
                 push_command(cmd);
             }

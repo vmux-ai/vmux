@@ -387,9 +387,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 local_wake(interval);
             }
         } else if scroll {
-            if layout_pointer.is_some_and(|result| result.owns_pointer) || !over_windowed_page {
-                local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
-            }
+            local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         } else {
             if layout_pointer.is_some_and(|result| {
                 result.owns_pointer && result.presenter_active && result.pending
@@ -1021,21 +1019,6 @@ mod tests {
 
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(true)"));
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
-    }
-
-    #[test]
-    fn native_layout_scroll_only_wakes_for_layout_regions() {
-        let source = include_str!("background_lifecycle.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("NSEventMask::ScrollWheel"));
-        assert!(monitor.contains("else if scroll"));
-        assert!(monitor.contains("layout_pointer.is_some_and(|result| result.owns_pointer)"));
-        assert!(monitor.contains("|| !over_windowed_page"));
     }
 
     #[test]

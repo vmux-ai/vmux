@@ -49,12 +49,6 @@ pub(crate) enum KeyAction {
     PassThrough,
 }
 
-impl KeyAction {
-    fn is_consumed(&self) -> bool {
-        matches!(self, Self::Consume(_))
-    }
-}
-
 pub(crate) fn decide(
     map: &ShortcutMap,
     pending: &mut Option<(KeyCombo, Instant)>,
@@ -201,6 +195,7 @@ pub(crate) fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 fn install(wake: impl Fn() + Send + Sync + 'static) {
     let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
+        wake();
         if ev.r#type() != NSEventType::KeyDown {
             return event.as_ptr();
         }
@@ -209,11 +204,7 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
         let Some(combo) = translate(key_code, flags) else {
             return event.as_ptr();
         };
-        let action = classify(combo);
-        if action.is_consumed() {
-            wake();
-        }
-        match action {
+        match classify(combo) {
             KeyAction::Consume(cmd) => {
                 if let Some(cmd) = cmd {
                     PENDING_COMMANDS.lock().push(cmd);
@@ -328,18 +319,6 @@ mod tests {
             Instant::now(),
         );
         assert!(matches!(action, KeyAction::PassThrough));
-        assert!(!action.is_consumed());
-    }
-
-    #[test]
-    fn consumed_shortcut_requires_host_wake() {
-        assert!(KeyAction::Consume(None).is_consumed());
-        assert!(
-            KeyAction::Consume(Some(AppCommand::Layout(LayoutCommand::Pane(
-                PaneCommand::SelectLeft
-            ),)))
-            .is_consumed()
-        );
     }
 
     #[test]
