@@ -507,6 +507,8 @@ pub fn Page(
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
     let mut resume_loading = use_signal(|| false);
+    let activity_counts = use_memo(move || composer_activity_counts(&items.read()));
+    let latest_tool = use_memo(move || latest_tool_location(&items.read()));
 
     use_effect(move || {
         install_global_prompt_input(draft, slash_cmds, choice_options, approval, approval_sel)
@@ -768,10 +770,7 @@ pub fn Page(
     let session_menu_open = resume_query.is_some();
     let model_menu_open = model_query.is_some();
     let media_menu_open = media_query.is_some();
-    let latest_tool = {
-        let items = items.read();
-        latest_tool_location(&items)
-    };
+    let latest_tool = latest_tool();
     let resume_state = resume_query.map(|_| {
         resume_menu_state(
             resume_requested(),
@@ -1114,7 +1113,7 @@ pub fn Page(
 
     let context = composer_context();
     let model_name = current_model();
-    let (active_subagents, active_tasks) = composer_activity_counts(&items.read());
+    let (active_subagents, active_tasks) = activity_counts();
     let queued_count = queued.read().len();
     let workspace_label = if context.workspace_selected && !context.workspace_name.is_empty() {
         context.workspace_name.clone()
@@ -1391,15 +1390,17 @@ pub fn Page(
                             p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
                         }
                     }
-                    for (i , item) in items.read().iter().enumerate() {
-                        {render_item(
-                            loaded_start() as usize + i,
-                            item,
+                    for i in 0..items.read().len() {
+                        ChatItemRow {
+                            key: "{loaded_start() as usize + i}",
+                            index: i,
+                            absolute_index: loaded_start() as usize + i,
+                            items,
                             attachment_previews,
-                            latest_tool
+                            latest_tool_block: latest_tool
                                 .filter(|(item_index, _)| *item_index == i)
                                 .map(|(_, block_index)| block_index),
-                        )}
+                        }
                         if !handoff_source().is_empty()
                             && is_handoff_boundary(
                                 loaded_start() as usize + i,
@@ -1842,6 +1843,21 @@ fn send_approval(call_id: String, decision: u8) -> bool {
     try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision }).is_ok()
 }
 
+#[component]
+fn ChatItemRow(
+    index: usize,
+    absolute_index: usize,
+    items: Signal<Vec<ChatItem>>,
+    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+    latest_tool_block: Option<usize>,
+) -> Element {
+    let items = items.read();
+    let Some(item) = items.get(index) else {
+        return rsx! {};
+    };
+    render_item(absolute_index, item, attachment_previews, latest_tool_block)
+}
+
 fn render_item(
     key: usize,
     item: &ChatItem,
@@ -1857,6 +1873,7 @@ fn render_item(
             div {
                 key: "{key}",
                 class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm",
+                style: "content-visibility:auto;contain-intrinsic-size:auto 96px;",
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
@@ -1984,7 +2001,10 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
         }
     });
     rsx! {
-        div { key: "{key}", class: "flex max-w-[92%] flex-col gap-2 self-start",
+        div {
+            key: "{key}",
+            class: "flex max-w-[92%] flex-col gap-2 self-start",
+            style: "content-visibility:auto;contain-intrinsic-size:auto 180px;",
             if !blocks.is_empty() {
                 div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
                     for (j , block , children) in blocks {
