@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementov
 }
+
+tools-title = Orodja
+tools-search = Iskanje paketov, agentov, MCP, jezikovnih orodij in nastavitvenih datotek…
+tools-open = Odpri orodja
+tools-fold = Strni orodja
+tools-unfold = Razširi orodja
+tools-scanning = Pregledovanje lokalnih orodij…
+tools-no-installed = Ni nameščenih orodij
+tools-empty = Ni ustreznih orodij
+tools-empty-detail = Namestite paket ali dodajte paket nastavitvenih datotek v slogu Stow.
+tools-apply = Uporabi
+tools-homebrew = Homebrew
+tools-homebrew-sync = Nameščene formule in aplikacije se samodejno sinhronizirajo.
+tools-open-brewfile = Odpri Brewfile
+tools-managed = upravljano
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplikacije Homebrew
+tools-provider-npm = Paketi npm
+tools-provider-acp-agents = Agenti ACP
+tools-provider-language-tools = Jezikovna orodja
+tools-provider-mcp-servers = Strežniki MCP
+tools-provider-dotfiles = Nastavitvene datoteke
+tools-status-available = Na voljo
+tools-status-missing = Manjka
+tools-status-conflict = Spor
+tools-forget = Pozabi
+tools-manage = Upravljaj
+tools-link = Poveži
+tools-unlink = Prekini povezavo
+tools-import = Uvozi
+tools-update-count = { $count ->
+    [one] 1 posodobitev
+   *[other] { $count } posodobitev
+}
+tools-conflict-count = { $count ->
+    [one] 1 spor
+   *[other] { $count } sporov
+}
+tools-result-applied = Orodja uporabljena
+tools-result-imported = Orodja uvožena
+tools-result-installed = { $name } nameščen
+tools-result-updated = { $name } posodobljen
+tools-result-uninstalled = { $name } odstranjen
+tools-result-forgotten = { $name } pozabljen
+tools-result-managed = { $name } je zdaj upravljan
+tools-result-linked = { $name } povezan
+tools-result-unlinked = Povezava z { $name } prekinjena
+
 start-title = Začetek
 start-tagline = En prompt. Vse opravljeno.
 

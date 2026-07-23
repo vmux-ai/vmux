@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Hulpmiddelen
+tools-search = Zoeken naar pakketten, agenten, MCP, taalhulpmiddelen en configuratiebestanden…
+tools-open = Hulpmiddelen openen
+tools-fold = Hulpmiddelen invouwen
+tools-unfold = Hulpmiddelen uitvouwen
+tools-scanning = Lokale hulpmiddelen scannen…
+tools-no-installed = Geen hulpmiddelen geïnstalleerd
+tools-empty = Geen overeenkomende hulpmiddelen
+tools-empty-detail = Installeer een pakket of voeg een configuratiebestandenpakket in Stow-stijl toe.
+tools-apply = Toepassen
+tools-homebrew = Homebrew
+tools-homebrew-sync = Geïnstalleerde formules en toepassingen worden automatisch gesynchroniseerd.
+tools-open-brewfile = Brewfile openen
+tools-managed = beheerd
+tools-provider-homebrew-formulae = Homebrew-formules
+tools-provider-homebrew-casks = Homebrew-toepassingen
+tools-provider-npm = npm-pakketten
+tools-provider-acp-agents = ACP-agenten
+tools-provider-language-tools = Taalhulpmiddelen
+tools-provider-mcp-servers = MCP-servers
+tools-provider-dotfiles = Configuratiebestanden
+tools-status-available = Beschikbaar
+tools-status-missing = Ontbreekt
+tools-status-conflict = Tegenstrijdigheid
+tools-forget = Vergeten
+tools-manage = Beheren
+tools-link = Koppelen
+tools-unlink = Ontkoppelen
+tools-import = Importeren
+tools-update-count = { $count ->
+    [one] 1 update
+   *[other] { $count } updates
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicten
+}
+tools-result-applied = Hulpmiddelen toegepast
+tools-result-imported = Hulpmiddelen geïmporteerd
+tools-result-installed = { $name } geïnstalleerd
+tools-result-updated = { $name } bijgewerkt
+tools-result-uninstalled = { $name } verwijderd
+tools-result-forgotten = { $name } vergeten
+tools-result-managed = { $name } wordt nu beheerd
+tools-result-linked = { $name } gekoppeld
+tools-result-unlinked = { $name } ontkoppeld
+
 start-title = Start
 start-tagline = Eén prompt. Alles geregeld.
 

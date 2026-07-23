@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } yam
    *[other] { $count } yam
 }
+
+tools-title = Cov cuab yeej
+tools-search = Tshawb cov pob, cov neeg sawv cev, MCP, cuab yeej lus thiab ntaub ntawv teeb tsa…
+tools-open = Qhib cov cuab yeej
+tools-fold = Quav cov cuab yeej
+tools-unfold = Nthuav cov cuab yeej
+tools-scanning = Tab tom tshuaj xyuas cov cuab yeej hauv zos…
+tools-no-installed = Tsis muaj cuab yeej raug nruab
+tools-empty = Tsis muaj cuab yeej phim
+tools-empty-detail = Nruab ib pob lossis ntxiv ib pob ntaub ntawv teeb tsa hom Stow.
+tools-apply = Siv
+tools-homebrew = Homebrew
+tools-homebrew-sync = Cov qauv thiab kev siv uas twb nruab lawm sib txuas tau txais.
+tools-open-brewfile = Qhib Brewfile
+tools-managed = raug tswj
+tools-provider-homebrew-formulae = Cov qauv Homebrew
+tools-provider-homebrew-casks = Cov kev siv Homebrew
+tools-provider-npm = Cov pob npm
+tools-provider-acp-agents = Cov neeg sawv cev ACP
+tools-provider-language-tools = Cuab yeej lus
+tools-provider-mcp-servers = Cov tshuab pab MCP
+tools-provider-dotfiles = Ntaub ntawv teeb tsa
+tools-status-available = Muaj
+tools-status-missing = Ploj lawm
+tools-status-conflict = Kev tsis sib haum
+tools-forget = Tsis nco qab
+tools-manage = Tswj
+tools-link = Txuas
+tools-unlink = Tshem kev txuas
+tools-import = Nqa tuaj
+tools-update-count = { $count ->
+    [one] 1 qhov hloov tshiab
+   *[other] { $count } qhov hloov tshiab
+}
+tools-conflict-count = { $count ->
+    [one] 1 qhov tsis sib haum
+   *[other] { $count } qhov tsis sib haum
+}
+tools-result-applied = Siv cov cuab yeej lawm
+tools-result-imported = Nqa cov cuab yeej tuaj lawm
+tools-result-installed = Nruab { $name } lawm
+tools-result-updated = Hloov tshiab { $name } lawm
+tools-result-uninstalled = Tshem { $name } lawm
+tools-result-forgotten = Tsis nco { $name } lawm
+tools-result-managed = Tam sim no { $name } raug tswj
+tools-result-linked = Txuas { $name } lawm
+tools-result-unlinked = Tshem kev txuas ntawm { $name } lawm
+
 start-title = Pib
 start-tagline = Ib lo lus txib. Ua tau txhua yam, kom tiav.
 

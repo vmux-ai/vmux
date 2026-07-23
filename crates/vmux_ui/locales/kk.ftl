@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } элемент
    *[other] { $count } элемент
 }
+
+tools-title = Құралдар
+tools-search = Пакеттерді, агенттерді, MCP, тіл құралдарын және конфигурация файлдарын іздеу…
+tools-open = Құралдарды ашу
+tools-fold = Құралдарды жинау
+tools-unfold = Құралдарды жаю
+tools-scanning = Жергілікті құралдар сканерленуде…
+tools-no-installed = Орнатылған құралдар жоқ
+tools-empty = Сәйкес құралдар жоқ
+tools-empty-detail = Пакет орнатыңыз немесе Stow үлгісіндегі конфигурация файлдары пакетін қосыңыз.
+tools-apply = Қолдану
+tools-homebrew = Homebrew
+tools-homebrew-sync = Орнатылған формулалар мен қолданбалар автоматты түрде синхрондалады.
+tools-open-brewfile = Brewfile файлын ашу
+tools-managed = басқарылатын
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew қолданбалары
+tools-provider-npm = npm пакеттері
+tools-provider-acp-agents = ACP агенттері
+tools-provider-language-tools = Тіл құралдары
+tools-provider-mcp-servers = MCP серверлері
+tools-provider-dotfiles = Конфигурация файлдары
+tools-status-available = Қолжетімді
+tools-status-missing = Жоқ
+tools-status-conflict = Қайшылық
+tools-forget = Ұмыту
+tools-manage = Басқару
+tools-link = Байланыстыру
+tools-unlink = Байланысты үзу
+tools-import = Импорттау
+tools-update-count = { $count ->
+    [one] 1 жаңарту
+   *[other] { $count } жаңарту
+}
+tools-conflict-count = { $count ->
+    [one] 1 қайшылық
+   *[other] { $count } қайшылық
+}
+tools-result-applied = Құралдар қолданылды
+tools-result-imported = Құралдар импортталды
+tools-result-installed = { $name } орнатылды
+tools-result-updated = { $name } жаңартылды
+tools-result-uninstalled = { $name } жойылды
+tools-result-forgotten = { $name } ұмытылды
+tools-result-managed = { $name } енді басқарылады
+tools-result-linked = { $name } байланыстырылды
+tools-result-unlinked = { $name } байланысы үзілді
+
 start-title = Бастау
 start-tagline = Бір prompt. Кез келген іс — дайын.
 

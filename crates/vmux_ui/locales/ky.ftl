@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } нерсе
    *[other] { $count } нерсе
 }
+
+tools-title = Куралдар
+tools-search = Топтомдорду, агенттерди, MCP, тил куралдарын жана жөндөө файлдарын издөө…
+tools-open = Куралдарды ачуу
+tools-fold = Куралдарды жыйноо
+tools-unfold = Куралдарды жаюу
+tools-scanning = Жергиликтүү куралдар сканерленүүдө…
+tools-no-installed = Орнотулган куралдар жок
+tools-empty = Дал келген куралдар жок
+tools-empty-detail = Топтом орнотуңуз же Stow стилиндеги жөндөө файлдарынын топтомун кошуңуз.
+tools-apply = Колдонуу
+tools-homebrew = Homebrew
+tools-homebrew-sync = Орнотулган формулалар жана колдонмолор автоматтык түрдө шайкештештирилет.
+tools-open-brewfile = Brewfile файлын ачуу
+tools-managed = башкарылуучу
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew колдонмолору
+tools-provider-npm = npm топтомдору
+tools-provider-acp-agents = ACP агенттери
+tools-provider-language-tools = Тил куралдары
+tools-provider-mcp-servers = MCP серверлери
+tools-provider-dotfiles = Жөндөө файлдары
+tools-status-available = Жеткиликтүү
+tools-status-missing = Жок
+tools-status-conflict = Карама-каршылык
+tools-forget = Унутуу
+tools-manage = Башкаруу
+tools-link = Байлоо
+tools-unlink = Байланышты үзүү
+tools-import = Импорттоо
+tools-update-count = { $count ->
+    [one] 1 жаңыртуу
+   *[other] { $count } жаңыртуу
+}
+tools-conflict-count = { $count ->
+    [one] 1 карама-каршылык
+   *[other] { $count } карама-каршылык
+}
+tools-result-applied = Куралдар колдонулду
+tools-result-imported = Куралдар импорттолду
+tools-result-installed = { $name } орнотулду
+tools-result-updated = { $name } жаңыртылды
+tools-result-uninstalled = { $name } өчүрүлдү
+tools-result-forgotten = { $name } унутулду
+tools-result-managed = { $name } эми башкарылат
+tools-result-linked = { $name } байланды
+tools-result-unlinked = { $name } байланышы үзүлдү
+
 start-title = Баштоо
 start-tagline = Бир промпт. Баары даяр.
 

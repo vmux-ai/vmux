@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] ohun kan { $count }
    *[other] ohun { $count }
 }
+
+tools-title = Àwọn irinṣẹ́
+tools-search = Wá àwọn àkójọpọ̀, aṣojú, MCP, irinṣẹ́ èdè àti fáìlì ìṣètò…
+tools-open = Ṣí àwọn irinṣẹ́
+tools-fold = Kó àwọn irinṣẹ́ pọ̀
+tools-unfold = Na àwọn irinṣẹ́ síta
+tools-scanning = Ń ṣàyẹ̀wò àwọn irinṣẹ́ abẹ́nú…
+tools-no-installed = Kò sí irinṣẹ́ tí a ti fi sílẹ̀
+tools-empty = Kò sí irinṣẹ́ tó bá mu
+tools-empty-detail = Fi àkójọpọ̀ kan sílẹ̀ tàbí ṣàfikún àkójọpọ̀ fáìlì ìṣètò irú Stow.
+tools-apply = Lò
+tools-homebrew = Homebrew
+tools-homebrew-sync = Àwọn fọ́múlà àti ohun èlò tí a fi sílẹ̀ máa ń bá ara wọn mu fúnra wọn.
+tools-open-brewfile = Ṣí Brewfile
+tools-managed = ń ṣàkóso
+tools-provider-homebrew-formulae = Àwọn fọ́múlà Homebrew
+tools-provider-homebrew-casks = Àwọn ohun èlò Homebrew
+tools-provider-npm = Àwọn àkójọpọ̀ npm
+tools-provider-acp-agents = Àwọn aṣojú ACP
+tools-provider-language-tools = Àwọn irinṣẹ́ èdè
+tools-provider-mcp-servers = Àwọn olupin MCP
+tools-provider-dotfiles = Àwọn fáìlì ìṣètò
+tools-status-available = Wà
+tools-status-missing = Pàdánù
+tools-status-conflict = Ìtakora
+tools-forget = Gbàgbé
+tools-manage = Ṣàkóso
+tools-link = Sopọ̀
+tools-unlink = Yọ ìsopọ̀
+tools-import = Gbé wọlé
+tools-update-count = { $count ->
+    [one] Àtúnṣe 1
+   *[other] Àtúnṣe { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ìtakora 1
+   *[other] Ìtakora { $count }
+}
+tools-result-applied = A ti lo àwọn irinṣẹ́
+tools-result-imported = A ti gbé àwọn irinṣẹ́ wọlé
+tools-result-installed = A ti fi { $name } sílẹ̀
+tools-result-updated = A ti tún { $name } ṣe
+tools-result-uninstalled = A ti yọ { $name }
+tools-result-forgotten = A ti gbàgbé { $name }
+tools-result-managed = A ń ṣàkóso { $name } báyìí
+tools-result-linked = A ti so { $name }
+tools-result-unlinked = A ti yọ ìsopọ̀ { $name }
+
 start-title = Bẹ̀rẹ̀
 start-tagline = Prompt kan. Ohunkóhun, ti ṣe.
 

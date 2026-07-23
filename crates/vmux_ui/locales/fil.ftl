@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Mga kasangkapan
+tools-search = Maghanap ng mga pakete, agent, MCP, kasangkapang pangwika at configuration file…
+tools-open = Buksan ang mga kasangkapan
+tools-fold = Itiklop ang mga kasangkapan
+tools-unfold = Iladlad ang mga kasangkapan
+tools-scanning = Ini-scan ang mga lokal na kasangkapan…
+tools-no-installed = Walang naka-install na kasangkapan
+tools-empty = Walang tumutugmang kasangkapan
+tools-empty-detail = Mag-install ng pakete o magdagdag ng Stow-style na pakete ng mga configuration file.
+tools-apply = Ilapat
+tools-homebrew = Homebrew
+tools-homebrew-sync = Awtomatikong sini-sync ang mga naka-install na formula at application.
+tools-open-brewfile = Buksan ang Brewfile
+tools-managed = pinamamahalaan
+tools-provider-homebrew-formulae = Mga formula ng Homebrew
+tools-provider-homebrew-casks = Mga application ng Homebrew
+tools-provider-npm = Mga pakete ng npm
+tools-provider-acp-agents = Mga agent ng ACP
+tools-provider-language-tools = Mga kasangkapang pangwika
+tools-provider-mcp-servers = Mga server ng MCP
+tools-provider-dotfiles = Mga configuration file
+tools-status-available = Magagamit
+tools-status-missing = Nawawala
+tools-status-conflict = Salungatan
+tools-forget = Kalimutan
+tools-manage = Pamahalaan
+tools-link = I-link
+tools-unlink = Alisin ang link
+tools-import = I-import
+tools-update-count = { $count ->
+    [one] 1 update
+   *[other] { $count } update
+}
+tools-conflict-count = { $count ->
+    [one] 1 salungatan
+   *[other] { $count } salungatan
+}
+tools-result-applied = Nailapat ang mga kasangkapan
+tools-result-imported = Na-import ang mga kasangkapan
+tools-result-installed = Na-install ang { $name }
+tools-result-updated = Na-update ang { $name }
+tools-result-uninstalled = Na-uninstall ang { $name }
+tools-result-forgotten = Nakalimutan ang { $name }
+tools-result-managed = Pinamamahalaan na ang { $name }
+tools-result-linked = Na-link ang { $name }
+tools-result-unlinked = Inalis ang link ng { $name }
+
 start-title = Magsimula
 start-tagline = Isang prompt. Kahit ano, tapos.
 

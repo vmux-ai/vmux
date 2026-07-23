@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } res
    *[other] { $count } res
 }
+
+tools-title = Instrumenta
+tools-search = Quaere fasciculos, agentes, MCP, instrumenta linguarum et tabulas configurationis…
+tools-open = Aperi instrumenta
+tools-fold = Complica instrumenta
+tools-unfold = Explica instrumenta
+tools-scanning = Instrumenta localia explorantur…
+tools-no-installed = Nulla instrumenta instituta
+tools-empty = Nulla instrumenta congruentia
+tools-empty-detail = Fasciculum institue aut fasciculum tabularum configurationis more Stow adde.
+tools-apply = Applica
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulae et applicationes institutae automatice synchronizantur.
+tools-open-brewfile = Aperi Brewfile
+tools-managed = administratum
+tools-provider-homebrew-formulae = Formulae Homebrew
+tools-provider-homebrew-casks = Applicationes Homebrew
+tools-provider-npm = Fasciculi npm
+tools-provider-acp-agents = Agentes ACP
+tools-provider-language-tools = Instrumenta linguarum
+tools-provider-mcp-servers = Servitores MCP
+tools-provider-dotfiles = Tabulae configurationis
+tools-status-available = Praesto
+tools-status-missing = Abest
+tools-status-conflict = Conflictus
+tools-forget = Oblivisci
+tools-manage = Administra
+tools-link = Coniunge
+tools-unlink = Disiunge
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 renovatio
+   *[other] { $count } renovationes
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflictus
+   *[other] { $count } conflictus
+}
+tools-result-applied = Instrumenta applicata
+tools-result-imported = Instrumenta importata
+tools-result-installed = { $name } institutum
+tools-result-updated = { $name } renovatum
+tools-result-uninstalled = { $name } remotum
+tools-result-forgotten = { $name } oblitum
+tools-result-managed = { $name } nunc administratur
+tools-result-linked = { $name } coniunctum
+tools-result-unlinked = { $name } disiunctum
+
 start-title = Initium
 start-tagline = Unum promptum. Quidlibet, perfectum.
 

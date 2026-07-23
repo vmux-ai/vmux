@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } आयटम
    *[other] { $count } आयटम
 }
+
+tools-title = साधने
+tools-search = पॅकेज, एजंट, MCP, भाषा साधने आणि संरचना फाइल शोधा…
+tools-open = साधने उघडा
+tools-fold = साधने संकुचित करा
+tools-unfold = साधने विस्तृत करा
+tools-scanning = स्थानिक साधने स्कॅन केली जात आहेत…
+tools-no-installed = कोणतीही साधने स्थापित नाहीत
+tools-empty = जुळणारी साधने नाहीत
+tools-empty-detail = पॅकेज स्थापित करा किंवा Stow-शैलीचे संरचना फाइल पॅकेज जोडा.
+tools-apply = लागू करा
+tools-homebrew = Homebrew
+tools-homebrew-sync = स्थापित केलेली सूत्रे आणि अनुप्रयोग आपोआप समक्रमित होतात.
+tools-open-brewfile = Brewfile उघडा
+tools-managed = व्यवस्थापित
+tools-provider-homebrew-formulae = Homebrew सूत्रे
+tools-provider-homebrew-casks = Homebrew अनुप्रयोग
+tools-provider-npm = npm पॅकेज
+tools-provider-acp-agents = ACP एजंट
+tools-provider-language-tools = भाषा साधने
+tools-provider-mcp-servers = MCP सर्व्हर
+tools-provider-dotfiles = संरचना फाइल
+tools-status-available = उपलब्ध
+tools-status-missing = अनुपस्थित
+tools-status-conflict = संघर्ष
+tools-forget = विसरा
+tools-manage = व्यवस्थापित करा
+tools-link = जोडा
+tools-unlink = दुवा काढा
+tools-import = आयात करा
+tools-update-count = { $count ->
+    [one] 1 अद्यतन
+   *[other] { $count } अद्यतने
+}
+tools-conflict-count = { $count ->
+    [one] 1 संघर्ष
+   *[other] { $count } संघर्ष
+}
+tools-result-applied = साधने लागू केली
+tools-result-imported = साधने आयात केली
+tools-result-installed = { $name } स्थापित केले
+tools-result-updated = { $name } अद्यतनित केले
+tools-result-uninstalled = { $name } विस्थापित केले
+tools-result-forgotten = { $name } विसरले
+tools-result-managed = { $name } आता व्यवस्थापित आहे
+tools-result-linked = { $name } जोडले
+tools-result-unlinked = { $name }चा दुवा काढला
+
 start-title = सुरुवात
 start-tagline = एक प्रॉम्प्ट. काहीही काम पूर्ण.
 

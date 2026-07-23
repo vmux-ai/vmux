@@ -17,6 +17,53 @@ common-failed = 失敗
 common-installed = インストール済み
 common-items = { $count } 件
 
+tools-title = ツール
+tools-search = パッケージ、エージェント、MCP、言語ツール、設定ファイルを検索…
+tools-open = ツールを開く
+tools-fold = ツールを折りたたむ
+tools-unfold = ツールを展開
+tools-scanning = ローカルツールをスキャン中…
+tools-no-installed = インストール済みのツールはありません
+tools-empty = 一致するツールはありません
+tools-empty-detail = パッケージをインストールするか、Stow 形式の設定ファイルパッケージを追加してください。
+tools-apply = 適用
+tools-homebrew = Homebrew
+tools-homebrew-sync = インストール済みのフォーミュラとアプリは自動的に同期されます。
+tools-open-brewfile = Brewfile を開く
+tools-managed = 管理対象
+tools-provider-homebrew-formulae = Homebrew フォーミュラ
+tools-provider-homebrew-casks = Homebrew アプリ
+tools-provider-npm = npm パッケージ
+tools-provider-acp-agents = ACP エージェント
+tools-provider-language-tools = 言語ツール
+tools-provider-mcp-servers = MCP サーバー
+tools-provider-dotfiles = 設定ファイル
+tools-status-available = 利用可能
+tools-status-missing = 不足
+tools-status-conflict = 競合
+tools-forget = 登録解除
+tools-manage = 管理
+tools-link = リンク
+tools-unlink = リンク解除
+tools-import = インポート
+tools-update-count = { $count ->
+    [one] 1 件の更新
+   *[other] { $count } 件の更新
+}
+tools-conflict-count = { $count ->
+    [one] 1 件の競合
+   *[other] { $count } 件の競合
+}
+tools-result-applied = ツールを適用しました
+tools-result-imported = ツールをインポートしました
+tools-result-installed = { $name } をインストールしました
+tools-result-updated = { $name } を更新しました
+tools-result-uninstalled = { $name } をアンインストールしました
+tools-result-forgotten = { $name } の登録を解除しました
+tools-result-managed = { $name } は管理対象になりました
+tools-result-linked = { $name } をリンクしました
+tools-result-unlinked = { $name } のリンクを解除しました
+
 start-title = スタート
 start-tagline = ひとつのプロンプトで、すべてを実行。
 

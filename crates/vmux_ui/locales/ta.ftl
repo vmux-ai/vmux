@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } உருப்படி
    *[other] { $count } உருப்படிகள்
 }
+
+tools-title = கருவிகள்
+tools-search = தொகுப்புகள், முகவர்கள், MCP, மொழிக் கருவிகள் மற்றும் கட்டமைப்புக் கோப்புகளைத் தேடுக…
+tools-open = கருவிகளைத் திற
+tools-fold = கருவிகளை மடக்கு
+tools-unfold = கருவிகளை விரி
+tools-scanning = உள்ளூர் கருவிகள் வருடப்படுகின்றன…
+tools-no-installed = நிறுவப்பட்ட கருவிகள் எதுவும் இல்லை
+tools-empty = பொருந்தும் கருவிகள் எதுவும் இல்லை
+tools-empty-detail = ஒரு தொகுப்பை நிறுவுக அல்லது Stow பாணியிலான கட்டமைப்புக் கோப்புத் தொகுப்பைச் சேர்க்கவும்.
+tools-apply = செயல்படுத்து
+tools-homebrew = Homebrew
+tools-homebrew-sync = நிறுவப்பட்ட சூத்திரங்களும் பயன்பாடுகளும் தானாக ஒத்திசைக்கப்படும்.
+tools-open-brewfile = Brewfile-ஐத் திற
+tools-managed = நிர்வகிக்கப்படுகிறது
+tools-provider-homebrew-formulae = Homebrew சூத்திரங்கள்
+tools-provider-homebrew-casks = Homebrew பயன்பாடுகள்
+tools-provider-npm = npm தொகுப்புகள்
+tools-provider-acp-agents = ACP முகவர்கள்
+tools-provider-language-tools = மொழிக் கருவிகள்
+tools-provider-mcp-servers = MCP சேவையகங்கள்
+tools-provider-dotfiles = கட்டமைப்புக் கோப்புகள்
+tools-status-available = கிடைக்கிறது
+tools-status-missing = காணவில்லை
+tools-status-conflict = முரண்பாடு
+tools-forget = மறந்துவிடு
+tools-manage = நிர்வகி
+tools-link = இணை
+tools-unlink = இணைப்பை நீக்கு
+tools-import = இறக்குமதி செய்
+tools-update-count = { $count ->
+    [one] 1 புதுப்பிப்பு
+   *[other] { $count } புதுப்பிப்புகள்
+}
+tools-conflict-count = { $count ->
+    [one] 1 முரண்பாடு
+   *[other] { $count } முரண்பாடுகள்
+}
+tools-result-applied = கருவிகள் செயல்படுத்தப்பட்டன
+tools-result-imported = கருவிகள் இறக்குமதி செய்யப்பட்டன
+tools-result-installed = { $name } நிறுவப்பட்டது
+tools-result-updated = { $name } புதுப்பிக்கப்பட்டது
+tools-result-uninstalled = { $name } நிறுவல் நீக்கப்பட்டது
+tools-result-forgotten = { $name } மறக்கப்பட்டது
+tools-result-managed = { $name } இப்போது நிர்வகிக்கப்படுகிறது
+tools-result-linked = { $name } இணைக்கப்பட்டது
+tools-result-unlinked = { $name } இணைப்பு நீக்கப்பட்டது
+
 start-title = தொடங்கு
 start-tagline = ஒரே prompt. எதுவும் முடிந்துவிடும்.
 

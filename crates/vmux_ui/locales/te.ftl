@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } అంశం
    *[other] { $count } అంశాలు
 }
+
+tools-title = సాధనాలు
+tools-search = ప్యాకేజీలు, ఏజెంట్లు, MCP, భాషా సాధనాలు మరియు కాన్ఫిగరేషన్ ఫైళ్లను వెతకండి…
+tools-open = సాధనాలను తెరవండి
+tools-fold = సాధనాలను మడవండి
+tools-unfold = సాధనాలను విస్తరించండి
+tools-scanning = స్థానిక సాధనాలను స్కాన్ చేస్తోంది…
+tools-no-installed = ఇన్‌స్టాల్ చేసిన సాధనాలు లేవు
+tools-empty = సరిపోలే సాధనాలు లేవు
+tools-empty-detail = ప్యాకేజీని ఇన్‌స్టాల్ చేయండి లేదా Stow-శైలి కాన్ఫిగరేషన్ ఫైళ్ల ప్యాకేజీని జోడించండి.
+tools-apply = వర్తింపజేయండి
+tools-homebrew = Homebrew
+tools-homebrew-sync = ఇన్‌స్టాల్ చేసిన ఫార్ములాలు మరియు అనువర్తనాలు స్వయంచాలకంగా సమకాలీకరించబడతాయి.
+tools-open-brewfile = Brewfile తెరవండి
+tools-managed = నిర్వహించబడుతోంది
+tools-provider-homebrew-formulae = Homebrew ఫార్ములాలు
+tools-provider-homebrew-casks = Homebrew అనువర్తనాలు
+tools-provider-npm = npm ప్యాకేజీలు
+tools-provider-acp-agents = ACP ఏజెంట్లు
+tools-provider-language-tools = భాషా సాధనాలు
+tools-provider-mcp-servers = MCP సర్వర్లు
+tools-provider-dotfiles = కాన్ఫిగరేషన్ ఫైళ్లు
+tools-status-available = అందుబాటులో ఉంది
+tools-status-missing = లేదు
+tools-status-conflict = వైరుధ్యం
+tools-forget = మర్చిపోండి
+tools-manage = నిర్వహించండి
+tools-link = లింక్ చేయండి
+tools-unlink = లింక్ తొలగించండి
+tools-import = దిగుమతి చేయండి
+tools-update-count = { $count ->
+    [one] 1 నవీకరణ
+   *[other] { $count } నవీకరణలు
+}
+tools-conflict-count = { $count ->
+    [one] 1 వైరుధ్యం
+   *[other] { $count } వైరుధ్యాలు
+}
+tools-result-applied = సాధనాలు వర్తింపజేయబడ్డాయి
+tools-result-imported = సాధనాలు దిగుమతి చేయబడ్డాయి
+tools-result-installed = { $name } ఇన్‌స్టాల్ చేయబడింది
+tools-result-updated = { $name } నవీకరించబడింది
+tools-result-uninstalled = { $name } అన్‌ఇన్‌స్టాల్ చేయబడింది
+tools-result-forgotten = { $name } మర్చిపోబడింది
+tools-result-managed = { $name } ఇప్పుడు నిర్వహించబడుతోంది
+tools-result-linked = { $name } లింక్ చేయబడింది
+tools-result-unlinked = { $name } లింక్ తొలగించబడింది
+
 start-title = ప్రారంభం
 start-tagline = ఒక్క ప్రాంప్ట్. ఏదైనా — పూర్తిగా.
 

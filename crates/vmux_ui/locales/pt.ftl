@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } itens
 }
+
+tools-title = Ferramentas
+tools-search = Procurar pacotes, agentes, MCP, ferramentas de linguagem e ficheiros de configuração…
+tools-open = Abrir Ferramentas
+tools-fold = Recolher ferramentas
+tools-unfold = Expandir ferramentas
+tools-scanning = A analisar ferramentas locais…
+tools-no-installed = Nenhuma ferramenta instalada
+tools-empty = Nenhuma ferramenta correspondente
+tools-empty-detail = Instale um pacote ou adicione um pacote de ficheiros de configuração ao estilo Stow.
+tools-apply = Aplicar
+tools-homebrew = Homebrew
+tools-homebrew-sync = As fórmulas e aplicações instaladas são sincronizadas automaticamente.
+tools-open-brewfile = Abrir Brewfile
+tools-managed = gerido
+tools-provider-homebrew-formulae = Fórmulas Homebrew
+tools-provider-homebrew-casks = Aplicações Homebrew
+tools-provider-npm = Pacotes npm
+tools-provider-acp-agents = Agentes ACP
+tools-provider-language-tools = Ferramentas de linguagem
+tools-provider-mcp-servers = Servidores MCP
+tools-provider-dotfiles = Ficheiros de configuração
+tools-status-available = Disponível
+tools-status-missing = Em falta
+tools-status-conflict = Conflito
+tools-forget = Esquecer
+tools-manage = Gerir
+tools-link = Associar
+tools-unlink = Desassociar
+tools-import = Importar
+tools-update-count = { $count ->
+    [one] 1 atualização
+   *[other] { $count } atualizações
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflito
+   *[other] { $count } conflitos
+}
+tools-result-applied = Ferramentas aplicadas
+tools-result-imported = Ferramentas importadas
+tools-result-installed = { $name } instalado
+tools-result-updated = { $name } atualizado
+tools-result-uninstalled = { $name } desinstalado
+tools-result-forgotten = { $name } esquecido
+tools-result-managed = { $name } é agora gerido
+tools-result-linked = { $name } associado
+tools-result-unlinked = { $name } desassociado
+
 start-title = Início
 start-tagline = Um prompt. Tudo feito.
 

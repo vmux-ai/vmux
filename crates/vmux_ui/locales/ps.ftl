@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } توکی
    *[other] { $count } توکي
 }
+
+tools-title = وسایل
+tools-search = د کڅوړو، استازو، MCP، ژبې وسایلو او سازونې فایلونو لټون…
+tools-open = وسایل پرانیستل
+tools-fold = وسایل راټولول
+tools-unfold = وسایل غځول
+tools-scanning = ځايي وسایل کتل کېږي…
+tools-no-installed = هېڅ وسیله نه ده لګول شوې
+tools-empty = هېڅ سمون خوړونکې وسیله نشته
+tools-empty-detail = یوه کڅوړه ولګوئ یا د Stow په بڼه د سازونې فایلونو کڅوړه ورزیاته کړئ.
+tools-apply = پلي کول
+tools-homebrew = Homebrew
+tools-homebrew-sync = لګول شوې فورمولې او کاریالونه په اتومات ډول همغږي کېږي.
+tools-open-brewfile = Brewfile پرانیستل
+tools-managed = اداره شوی
+tools-provider-homebrew-formulae = د Homebrew فورمولې
+tools-provider-homebrew-casks = د Homebrew کاریالونه
+tools-provider-npm = د npm کڅوړې
+tools-provider-acp-agents = د ACP استازي
+tools-provider-language-tools = د ژبې وسایل
+tools-provider-mcp-servers = د MCP سرورونه
+tools-provider-dotfiles = د سازونې فایلونه
+tools-status-available = شته
+tools-status-missing = ورک
+tools-status-conflict = ټکر
+tools-forget = هېرول
+tools-manage = اداره کول
+tools-link = تړل
+tools-unlink = تړاو لرې کول
+tools-import = واردول
+tools-update-count = { $count ->
+    [one] ۱ اوسمهالونه
+   *[other] { $count } اوسمهالونه
+}
+tools-conflict-count = { $count ->
+    [one] ۱ ټکر
+   *[other] { $count } ټکرونه
+}
+tools-result-applied = وسایل پلي شول
+tools-result-imported = وسایل وارد شول
+tools-result-installed = { $name } ولګول شو
+tools-result-updated = { $name } اوسمهال شو
+tools-result-uninstalled = { $name } لرې شو
+tools-result-forgotten = { $name } هېر شو
+tools-result-managed = { $name } اوس اداره کېږي
+tools-result-linked = { $name } وتړل شو
+tools-result-unlinked = د { $name } تړاو لرې شو
+
 start-title = پیل
 start-tagline = یوه لارښوونه. هر کار، بشپړ.
 

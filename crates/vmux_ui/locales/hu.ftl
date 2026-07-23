@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } elem
    *[other] { $count } elem
 }
+
+tools-title = Eszközök
+tools-search = Csomagok, ügynökök, MCP, nyelvi eszközök és konfigurációs fájlok keresése…
+tools-open = Eszközök megnyitása
+tools-fold = Eszközök összecsukása
+tools-unfold = Eszközök kibontása
+tools-scanning = Helyi eszközök vizsgálata…
+tools-no-installed = Nincs telepített eszköz
+tools-empty = Nincs egyező eszköz
+tools-empty-detail = Telepítsen egy csomagot, vagy adjon hozzá egy Stow-stílusú konfigurációsfájl-csomagot.
+tools-apply = Alkalmaz
+tools-homebrew = Homebrew
+tools-homebrew-sync = A telepített képletek és alkalmazások automatikusan szinkronizálódnak.
+tools-open-brewfile = Brewfile megnyitása
+tools-managed = kezelt
+tools-provider-homebrew-formulae = Homebrew-képletek
+tools-provider-homebrew-casks = Homebrew-alkalmazások
+tools-provider-npm = npm-csomagok
+tools-provider-acp-agents = ACP-ügynökök
+tools-provider-language-tools = Nyelvi eszközök
+tools-provider-mcp-servers = MCP-kiszolgálók
+tools-provider-dotfiles = Konfigurációs fájlok
+tools-status-available = Elérhető
+tools-status-missing = Hiányzik
+tools-status-conflict = Ütközés
+tools-forget = Elfelejtés
+tools-manage = Kezelés
+tools-link = Összekapcsolás
+tools-unlink = Szétkapcsolás
+tools-import = Importálás
+tools-update-count = { $count ->
+    [one] 1 frissítés
+   *[other] { $count } frissítés
+}
+tools-conflict-count = { $count ->
+    [one] 1 ütközés
+   *[other] { $count } ütközés
+}
+tools-result-applied = Eszközök alkalmazva
+tools-result-imported = Eszközök importálva
+tools-result-installed = { $name } telepítve
+tools-result-updated = { $name } frissítve
+tools-result-uninstalled = { $name } eltávolítva
+tools-result-forgotten = { $name } elfelejtve
+tools-result-managed = { $name } mostantól kezelt
+tools-result-linked = { $name } összekapcsolva
+tools-result-unlinked = { $name } szétkapcsolva
+
 start-title = Kezdés
 start-tagline = Egy prompt. Bármi elkészül.
 

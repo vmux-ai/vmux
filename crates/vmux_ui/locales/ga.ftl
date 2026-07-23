@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } mhír
    *[other] { $count } mír
 }
+
+tools-title = Uirlisí
+tools-search = Cuardaigh pacáistí, gníomhairí, MCP, uirlisí teanga agus comhaid chumraíochta…
+tools-open = Oscail Uirlisí
+tools-fold = Fill na huirlisí
+tools-unfold = Leathnaigh na huirlisí
+tools-scanning = Uirlisí áitiúla á scanadh…
+tools-no-installed = Níl aon uirlis suiteáilte
+tools-empty = Níl aon uirlis mheaitseála ann
+tools-empty-detail = Suiteáil pacáiste nó cuir pacáiste comhad cumraíochta ar nós Stow leis.
+tools-apply = Cuir i bhfeidhm
+tools-homebrew = Homebrew
+tools-homebrew-sync = Sioncronaítear foirmlí agus feidhmchláir shuiteáilte go huathoibríoch.
+tools-open-brewfile = Oscail Brewfile
+tools-managed = bainistithe
+tools-provider-homebrew-formulae = Foirmlí Homebrew
+tools-provider-homebrew-casks = Feidhmchláir Homebrew
+tools-provider-npm = Pacáistí npm
+tools-provider-acp-agents = Gníomhairí ACP
+tools-provider-language-tools = Uirlisí teanga
+tools-provider-mcp-servers = Freastalaithe MCP
+tools-provider-dotfiles = Comhaid chumraíochta
+tools-status-available = Ar fáil
+tools-status-missing = Ar iarraidh
+tools-status-conflict = Coimhlint
+tools-forget = Déan dearmad
+tools-manage = Bainistigh
+tools-link = Nasc
+tools-unlink = Dínasc
+tools-import = Iompórtáil
+tools-update-count = { $count ->
+    [one] 1 nuashonrú
+   *[other] { $count } nuashonrú
+}
+tools-conflict-count = { $count ->
+    [one] 1 choimhlint
+   *[other] { $count } coimhlint
+}
+tools-result-applied = Uirlisí curtha i bhfeidhm
+tools-result-imported = Uirlisí iompórtáilte
+tools-result-installed = { $name } suiteáilte
+tools-result-updated = { $name } nuashonraithe
+tools-result-uninstalled = { $name } díshuiteáilte
+tools-result-forgotten = Rinneadh dearmad ar { $name }
+tools-result-managed = Tá { $name } á bhainistiú anois
+tools-result-linked = { $name } nasctha
+tools-result-unlinked = { $name } dínasctha
+
 start-title = Tosaigh
 start-tagline = Leid amháin. Déanta, pé rud é.
 

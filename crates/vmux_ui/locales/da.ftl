@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementer
 }
+
+tools-title = Værktøjer
+tools-search = Søg efter pakker, agenter, MCP, sprogværktøjer og konfigurationsfiler…
+tools-open = Åbn Værktøjer
+tools-fold = Fold værktøjer sammen
+tools-unfold = Fold værktøjer ud
+tools-scanning = Scanner lokale værktøjer…
+tools-no-installed = Ingen installerede værktøjer
+tools-empty = Ingen matchende værktøjer
+tools-empty-detail = Installer en pakke, eller tilføj en konfigurationsfilpakke i Stow-stil.
+tools-apply = Anvend
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installerede formler og programmer synkroniseres automatisk.
+tools-open-brewfile = Åbn Brewfile
+tools-managed = administreret
+tools-provider-homebrew-formulae = Homebrew-formler
+tools-provider-homebrew-casks = Homebrew-programmer
+tools-provider-npm = npm-pakker
+tools-provider-acp-agents = ACP-agenter
+tools-provider-language-tools = Sprogværktøjer
+tools-provider-mcp-servers = MCP-servere
+tools-provider-dotfiles = Konfigurationsfiler
+tools-status-available = Tilgængelig
+tools-status-missing = Mangler
+tools-status-conflict = Konflikt
+tools-forget = Glem
+tools-manage = Administrer
+tools-link = Tilknyt
+tools-unlink = Fjern tilknytning
+tools-import = Importer
+tools-update-count = { $count ->
+    [one] 1 opdatering
+   *[other] { $count } opdateringer
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikter
+}
+tools-result-applied = Værktøjer anvendt
+tools-result-imported = Værktøjer importeret
+tools-result-installed = { $name } installeret
+tools-result-updated = { $name } opdateret
+tools-result-uninstalled = { $name } afinstalleret
+tools-result-forgotten = { $name } glemt
+tools-result-managed = { $name } administreres nu
+tools-result-linked = { $name } tilknyttet
+tools-result-unlinked = Tilknytningen til { $name } er fjernet
+
 start-title = Start
 start-tagline = Ét prompt. Alt bliver klaret.
 

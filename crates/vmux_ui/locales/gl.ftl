@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } elemento
    *[other] { $count } elementos
 }
+
+tools-title = Ferramentas
+tools-search = Buscar paquetes, axentes, MCP, ferramentas de linguaxe e ficheiros de configuración…
+tools-open = Abrir Ferramentas
+tools-fold = Pregar as ferramentas
+tools-unfold = Despregar as ferramentas
+tools-scanning = Analizando as ferramentas locais…
+tools-no-installed = Non hai ferramentas instaladas
+tools-empty = Non hai ferramentas coincidentes
+tools-empty-detail = Instala un paquete ou engade un paquete de ficheiros de configuración ao estilo Stow.
+tools-apply = Aplicar
+tools-homebrew = Homebrew
+tools-homebrew-sync = As fórmulas e aplicacións instaladas sincronízanse automaticamente.
+tools-open-brewfile = Abrir Brewfile
+tools-managed = xestionado
+tools-provider-homebrew-formulae = Fórmulas de Homebrew
+tools-provider-homebrew-casks = Aplicacións de Homebrew
+tools-provider-npm = Paquetes npm
+tools-provider-acp-agents = Axentes ACP
+tools-provider-language-tools = Ferramentas de linguaxe
+tools-provider-mcp-servers = Servidores MCP
+tools-provider-dotfiles = Ficheiros de configuración
+tools-status-available = Dispoñible
+tools-status-missing = Falta
+tools-status-conflict = Conflito
+tools-forget = Esquecer
+tools-manage = Xestionar
+tools-link = Vincular
+tools-unlink = Desvincular
+tools-import = Importar
+tools-update-count = { $count ->
+    [one] 1 actualización
+   *[other] { $count } actualizacións
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflito
+   *[other] { $count } conflitos
+}
+tools-result-applied = Ferramentas aplicadas
+tools-result-imported = Ferramentas importadas
+tools-result-installed = { $name } instalado
+tools-result-updated = { $name } actualizado
+tools-result-uninstalled = { $name } desinstalado
+tools-result-forgotten = { $name } esquecido
+tools-result-managed = { $name } agora está xestionado
+tools-result-linked = { $name } vinculado
+tools-result-unlinked = { $name } desvinculado
+
 start-title = Inicio
 start-tagline = Unha instrución. Todo feito.
 

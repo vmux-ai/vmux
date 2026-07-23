@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } تۈر
    *[other] { $count } تۈر
 }
+
+tools-title = قوراللار
+tools-search = بوغچا، ۋاكالەتچى، MCP، تىل قورالى ۋە سەپلىمە ھۆججەتلىرىنى ئىزدەش…
+tools-open = قوراللارنى ئېچىش
+tools-fold = قوراللارنى يىغىش
+tools-unfold = قوراللارنى يېيىش
+tools-scanning = يەرلىك قوراللار تەكشۈرۈلۈۋاتىدۇ…
+tools-no-installed = قاچىلانغان قورال يوق
+tools-empty = ماس كېلىدىغان قورال يوق
+tools-empty-detail = بىر بوغچا قاچىلاڭ ياكى Stow ئۇسلۇبىدىكى سەپلىمە ھۆججەتلىرى بوغچىسىنى قوشۇڭ.
+tools-apply = قوللىنىش
+tools-homebrew = Homebrew
+tools-homebrew-sync = قاچىلانغان فورمۇلا ۋە ئەپلەر ئاپتوماتىك ماسقەدەملىنىدۇ.
+tools-open-brewfile = Brewfile نى ئېچىش
+tools-managed = باشقۇرۇلىدۇ
+tools-provider-homebrew-formulae = Homebrew فورمۇلالىرى
+tools-provider-homebrew-casks = Homebrew ئەپلىرى
+tools-provider-npm = npm بوغچىلىرى
+tools-provider-acp-agents = ACP ۋاكالەتچىلىرى
+tools-provider-language-tools = تىل قوراللىرى
+tools-provider-mcp-servers = MCP مۇلازىمېتىرلىرى
+tools-provider-dotfiles = سەپلىمە ھۆججەتلىرى
+tools-status-available = بار
+tools-status-missing = يوق
+tools-status-conflict = توقۇنۇش
+tools-forget = ئۇنتۇش
+tools-manage = باشقۇرۇش
+tools-link = ئۇلاش
+tools-unlink = ئۇلىنىشنى ئۈزۈش
+tools-import = ئەكىرىش
+tools-update-count = { $count ->
+    [one] 1 يېڭىلاش
+   *[other] { $count } يېڭىلاش
+}
+tools-conflict-count = { $count ->
+    [one] 1 توقۇنۇش
+   *[other] { $count } توقۇنۇش
+}
+tools-result-applied = قوراللار قوللىنىلدى
+tools-result-imported = قوراللار ئەكىرىلدى
+tools-result-installed = { $name } قاچىلاندى
+tools-result-updated = { $name } يېڭىلاندى
+tools-result-uninstalled = { $name } ئۆچۈرۈلدى
+tools-result-forgotten = { $name } ئۇنتۇلدى
+tools-result-managed = { $name } ھازىر باشقۇرۇلىدۇ
+tools-result-linked = { $name } ئۇلاندى
+tools-result-unlinked = { $name } نىڭ ئۇلىنىشى ئۈزۈلدى
+
 start-title = باشلاش
 start-tagline = بىر prompt. ھەممىسى تەييار.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] عنصر واحد
    *[other] { $count } عناصر
 }
+
+tools-title = الأدوات
+tools-search = البحث في الحزم والوكلاء وMCP وأدوات اللغات وملفات الإعداد…
+tools-open = فتح الأدوات
+tools-fold = طي الأدوات
+tools-unfold = توسيع الأدوات
+tools-scanning = جارٍ فحص الأدوات المحلية…
+tools-no-installed = لا توجد أدوات مثبّتة
+tools-empty = لا توجد أدوات مطابقة
+tools-empty-detail = ثبّت حزمة أو أضف حزمة ملفات إعداد بأسلوب Stow.
+tools-apply = تطبيق
+tools-homebrew = Homebrew
+tools-homebrew-sync = تتم مزامنة الصيغ وحزم التطبيقات المثبّتة تلقائيًا.
+tools-open-brewfile = فتح Brewfile
+tools-managed = مُدار
+tools-provider-homebrew-formulae = صيغ Homebrew
+tools-provider-homebrew-casks = حزم تطبيقات Homebrew
+tools-provider-npm = حزم npm
+tools-provider-acp-agents = وكلاء ACP
+tools-provider-language-tools = أدوات اللغات
+tools-provider-mcp-servers = خوادم MCP
+tools-provider-dotfiles = ملفات الإعداد
+tools-status-available = متاح
+tools-status-missing = مفقود
+tools-status-conflict = تعارض
+tools-forget = نسيان
+tools-manage = إدارة
+tools-link = ربط
+tools-unlink = إلغاء الربط
+tools-import = استيراد
+tools-update-count = { $count ->
+    [one] تحديث واحد
+   *[other] { $count } تحديثات
+}
+tools-conflict-count = { $count ->
+    [one] تعارض واحد
+   *[other] { $count } تعارضات
+}
+tools-result-applied = تم تطبيق الأدوات
+tools-result-imported = تم استيراد الأدوات
+tools-result-installed = تم تثبيت { $name }
+tools-result-updated = تم تحديث { $name }
+tools-result-uninstalled = تم إلغاء تثبيت { $name }
+tools-result-forgotten = تم نسيان { $name }
+tools-result-managed = أصبح { $name } مُدارًا
+tools-result-linked = تم ربط { $name }
+tools-result-unlinked = تم إلغاء ربط { $name }
+
 start-title = البدء
 start-tagline = موجّه واحد. وأنجز أي شيء.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } ta element
    *[other] { $count } ta element
 }
+
+tools-title = Asboblar
+tools-search = Paketlar, agentlar, MCP, til asboblari va sozlama fayllarini qidiring…
+tools-open = Asboblarni ochish
+tools-fold = Asboblarni yig‘ish
+tools-unfold = Asboblarni yoyish
+tools-scanning = Mahalliy asboblar tekshirilmoqda…
+tools-no-installed = O‘rnatilgan asbob yo‘q
+tools-empty = Mos asbob yo‘q
+tools-empty-detail = Paket o‘rnating yoki Stow uslubidagi sozlama fayllari paketini qo‘shing.
+tools-apply = Qo‘llash
+tools-homebrew = Homebrew
+tools-homebrew-sync = O‘rnatilgan formulalar va ilovalar avtomatik sinxronlanadi.
+tools-open-brewfile = Brewfile faylini ochish
+tools-managed = boshqarilmoqda
+tools-provider-homebrew-formulae = Homebrew formulalari
+tools-provider-homebrew-casks = Homebrew ilovalari
+tools-provider-npm = npm paketlari
+tools-provider-acp-agents = ACP agentlari
+tools-provider-language-tools = Til asboblari
+tools-provider-mcp-servers = MCP serverlari
+tools-provider-dotfiles = Sozlama fayllari
+tools-status-available = Mavjud
+tools-status-missing = Yo‘q
+tools-status-conflict = Ziddiyat
+tools-forget = Unutish
+tools-manage = Boshqarish
+tools-link = Bog‘lash
+tools-unlink = Bog‘lanishni uzish
+tools-import = Import qilish
+tools-update-count = { $count ->
+    [one] 1 yangilanish
+   *[other] { $count } yangilanish
+}
+tools-conflict-count = { $count ->
+    [one] 1 ziddiyat
+   *[other] { $count } ziddiyat
+}
+tools-result-applied = Asboblar qo‘llandi
+tools-result-imported = Asboblar import qilindi
+tools-result-installed = { $name } o‘rnatildi
+tools-result-updated = { $name } yangilandi
+tools-result-uninstalled = { $name } olib tashlandi
+tools-result-forgotten = { $name } unutildi
+tools-result-managed = { $name } endi boshqariladi
+tools-result-linked = { $name } bog‘landi
+tools-result-unlinked = { $name } bog‘lanishi uzildi
+
 start-title = Boshlash
 start-tagline = Bitta prompt. Hammasi tayyor.
 

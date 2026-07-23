@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Alat
+tools-search = Cari pakej, ejen, MCP, alat bahasa dan fail konfigurasi…
+tools-open = Buka Alat
+tools-fold = Kuncupkan alat
+tools-unfold = Kembangkan alat
+tools-scanning = Mengimbas alat setempat…
+tools-no-installed = Tiada alat dipasang
+tools-empty = Tiada alat yang sepadan
+tools-empty-detail = Pasang pakej atau tambah pakej fail konfigurasi gaya Stow.
+tools-apply = Guna
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula dan aplikasi yang dipasang disegerakkan secara automatik.
+tools-open-brewfile = Buka Brewfile
+tools-managed = diurus
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Pakej npm
+tools-provider-acp-agents = Ejen ACP
+tools-provider-language-tools = Alat bahasa
+tools-provider-mcp-servers = Pelayan MCP
+tools-provider-dotfiles = Fail konfigurasi
+tools-status-available = Tersedia
+tools-status-missing = Tiada
+tools-status-conflict = Konflik
+tools-forget = Lupakan
+tools-manage = Urus
+tools-link = Pautkan
+tools-unlink = Nyahpaut
+tools-import = Bawa masuk
+tools-update-count = { $count ->
+    [one] 1 kemas kini
+   *[other] { $count } kemas kini
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflik
+}
+tools-result-applied = Alat digunakan
+tools-result-imported = Alat diimport
+tools-result-installed = { $name } dipasang
+tools-result-updated = { $name } dikemas kini
+tools-result-uninstalled = { $name } dinyahpasang
+tools-result-forgotten = { $name } dilupakan
+tools-result-managed = { $name } kini diurus
+tools-result-linked = { $name } dipautkan
+tools-result-unlinked = { $name } dinyahpaut
+
 start-title = Mula
 start-tagline = Satu prompt. Apa-apa pun siap.
 

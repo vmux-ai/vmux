@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] Into eyi-{ $count }
    *[other] Izinto eziyi-{ $count }
 }
+
+tools-title = Izixhobo
+tools-search = Khangela iipakethe, iiarhente, MCP, izixhobo zolwimi neefayile zoqwalaselo…
+tools-open = Vula izixhobo
+tools-fold = Songa izixhobo
+tools-unfold = Yandisa izixhobo
+tools-scanning = Kuskenwa izixhobo zalapha…
+tools-no-installed = Akukho zixhobo zifakiweyo
+tools-empty = Akukho zixhobo zihambelanayo
+tools-empty-detail = Faka ipakethe okanye wongeze ipakethe yeefayile zoqwalaselo yohlobo lweStow.
+tools-apply = Sebenzisa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Iifomyula neenkqubo ezifakiweyo ziyangqamaniswa ngokuzenzekelayo.
+tools-open-brewfile = Vula Brewfile
+tools-managed = ilawulwa
+tools-provider-homebrew-formulae = Iifomyula zeHomebrew
+tools-provider-homebrew-casks = Iinkqubo zeHomebrew
+tools-provider-npm = Iipakethe zenpm
+tools-provider-acp-agents = Iiarhente zeACP
+tools-provider-language-tools = Izixhobo zolwimi
+tools-provider-mcp-servers = Iiseva zeMCP
+tools-provider-dotfiles = Iifayile zoqwalaselo
+tools-status-available = Iyafumaneka
+tools-status-missing = Ilahlekile
+tools-status-conflict = Ungquzulwano
+tools-forget = Libala
+tools-manage = Lawula
+tools-link = Qhagamshela
+tools-unlink = Nqamula
+tools-import = Ngenisa
+tools-update-count = { $count ->
+    [one] Uhlaziyo olu-1
+   *[other] Uhlaziyo olu-{ $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ungquzulwano olu-1
+   *[other] Ungquzulwano olu-{ $count }
+}
+tools-result-applied = Izixhobo zisetyenzisiwe
+tools-result-imported = Izixhobo zingenisiwe
+tools-result-installed = { $name } ifakiwe
+tools-result-updated = { $name } ihlaziyiwe
+tools-result-uninstalled = { $name } isusiwe
+tools-result-forgotten = { $name } ilityelwe
+tools-result-managed = { $name } ngoku iyalawulwa
+tools-result-linked = { $name } iqhagamshelwe
+tools-result-unlinked = { $name } inqamliwe
+
 start-title = Qalisa
 start-tagline = Umyalelo omnye. Nantoni na, yenziwe.
 

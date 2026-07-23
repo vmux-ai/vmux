@@ -1191,12 +1191,18 @@ fn open_tools(pane_id: u64) {
 #[component]
 fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
     let mut folded = use_signal(|| false);
+    let tools_title = translate("tools-title");
+    let fold_title = if folded() {
+        translate("tools-unfold")
+    } else {
+        translate("tools-fold")
+    };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
                 button {
                     r#type: "button",
-                    title: "Open Tools",
+                    title: translate("tools-open"),
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
@@ -1204,44 +1210,42 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "flex items-baseline gap-1.5",
-                            span { class: "text-ui font-semibold text-foreground", "Tools" }
+                            span { class: "text-ui font-semibold text-foreground", "{tools_title}" }
                             if loaded {
                                 span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{tools.installed}" }
                             }
                         }
                         div { class: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground/65",
                             if loaded {
-                                span { class: "whitespace-nowrap", "installed" }
+                                span { class: "whitespace-nowrap", {translate("common-installed")} }
                                 if tools.updates > 0 {
                                     span { class: "flex whitespace-nowrap items-center gap-1",
                                         span { class: "size-1.5 rounded-full bg-amber-500" }
-                                        if tools.updates == 1 {
-                                            "1 update"
-                                        } else {
-                                            "{tools.updates} updates"
-                                        }
+                                        {translate_with(
+                                            "tools-update-count",
+                                            &[("count", TranslationValue::Number(tools.updates as i64))],
+                                        )}
                                     }
                                 }
                                 if tools.conflicts > 0 {
                                     span { class: "flex whitespace-nowrap items-center gap-1",
                                         span { class: "size-1.5 rounded-full bg-rose-500" }
-                                        if tools.conflicts == 1 {
-                                            "1 conflict"
-                                        } else {
-                                            "{tools.conflicts} conflicts"
-                                        }
+                                        {translate_with(
+                                            "tools-conflict-count",
+                                            &[("count", TranslationValue::Number(tools.conflicts as i64))],
+                                        )}
                                     }
                                 }
                             } else {
-                                "Scanning local tools…"
+                                {translate("tools-scanning")}
                             }
                         }
                     }
                 }
                 button {
                     r#type: "button",
-                    aria_label: if folded() { "Unfold tools" } else { "Fold tools" },
-                    title: if folded() { "Unfold tools" } else { "Fold tools" },
+                    aria_label: "{fold_title}",
+                    title: "{fold_title}",
                     class: if folded() {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     } else {
@@ -1261,9 +1265,9 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
                 div { class: "overflow-hidden",
                     div { class: "border-t border-foreground/10 p-1.5",
                         if !loaded {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "Scanning…" }
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("tools-scanning")} }
                         } else if tools.categories.iter().all(|category| category.items.is_empty()) {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", "No installed tools" }
+                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("tools-no-installed")} }
                         } else {
                             div { class: "flex flex-col gap-0.5",
                                 for category in tools.categories.iter().filter(|category| !category.items.is_empty()) {
@@ -1300,7 +1304,7 @@ fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
                 Icon { class: "h-3 w-3 shrink-0",
                     path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                 }
-                span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{category.provider.title()}" }
+                span { class: "min-w-0 flex-1 truncate text-ui font-medium", {tools_provider_title(category.provider)} }
                 if updates > 0 {
                     span { class: "flex items-center gap-1 whitespace-nowrap text-[9px] text-muted-foreground",
                         span { class: "size-1 rounded-full bg-amber-500" }
@@ -1338,19 +1342,31 @@ fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
     rsx! {
         button {
             r#type: "button",
-            title: "{item.detail}",
+            title: tools_provider_title(item.provider),
             class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
             onclick: move |_| open_tools(pane_id),
             span { class: "size-1.5 shrink-0 rounded-full {status_class}" }
             span { class: "min-w-0 flex-1 truncate text-ui", "{item.name}" }
             if item.managed {
-                span { class: "text-[9px] text-cyan-300/80", "managed" }
+                span { class: "text-[9px] text-cyan-300/80", {translate("tools-managed")} }
             }
             if let Some(version) = item.version.as_ref() {
                 span { class: "max-w-20 truncate text-[9px] text-muted-foreground/60", "{version}" }
             }
         }
     }
+}
+
+fn tools_provider_title(provider: vmux_core::tools::ToolProvider) -> String {
+    translate(match provider {
+        vmux_core::tools::ToolProvider::HomebrewFormula => "tools-provider-homebrew-formulae",
+        vmux_core::tools::ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
+        vmux_core::tools::ToolProvider::Npm => "tools-provider-npm",
+        vmux_core::tools::ToolProvider::Acp => "tools-provider-acp-agents",
+        vmux_core::tools::ToolProvider::Lsp => "tools-provider-language-tools",
+        vmux_core::tools::ToolProvider::Mcp => "tools-provider-mcp-servers",
+        vmux_core::tools::ToolProvider::Dotfiles => "tools-provider-dotfiles",
+    })
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the
