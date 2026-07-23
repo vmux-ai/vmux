@@ -69,13 +69,13 @@ args = ["-y", "local-mcp-server"]
 packages = ["git", "nushell"]
 ```
 
-The manifest is created only after an explicit management action. Merely opening Tools never
-seeds default or empty configuration.
+Discovery automatically adopts concrete installed tools. Tools never writes default or empty
+configuration; it persists only packages, MCP servers, and dotfile packages found on the machine.
 
-The Tools page exposes the vmux-owned Brewfile directly. Users can open it in the editor, import an
-existing Brewfile, or adopt every installed formula and cask in one action. Package actions keep
-the Brewfile synchronized while preserving comments and unsupported directives such as taps or
-Mac App Store entries.
+The Tools page exposes the vmux-owned Brewfile directly. Installed formulae and casks are added to
+it automatically, and users can open it in the editor for direct changes. Package actions keep the
+Brewfile synchronized while preserving comments and unsupported directives such as taps or Mac App
+Store entries. Explicit imports from another Brewfile remain available through the CLI.
 
 Existing `~/.vmux/registry/registry.toml` and its dotfiles tree migrate in place to the Tools paths
 on first access. Migration stops if both old and new roots exist, avoiding silent overwrites.
@@ -118,13 +118,10 @@ manager in the active pane.
 `vmux://tools/` provides:
 
 - Search across all providers.
-- A Brewfile source card with Open, Import Brewfile, and Import installed actions.
+- A compact Homebrew source card that opens the automatically synchronized Brewfile.
 - Categorized package rows.
-- Install, update, uninstall, manage, forget, link, and unlink actions.
-- Add-package controls for Homebrew, npm, ACP, and language tools.
-- Source-specific import controls for package.json, installed ACP/LSP receipts, MCP configs, and
-  existing Stow roots.
-- Dotfile adoption by package name and path.
+- Install, update, uninstall, forget, link, and unlink actions.
+- Automatic adoption of installed Homebrew, npm, ACP, language-tool, MCP, and Tools dotfile state.
 - Refresh and declarative Apply actions.
 
 The page reuses the shared manager components used by the language-tool and extension managers.
@@ -170,7 +167,7 @@ Import merges into existing desired state. Brewfile formulae and casks retain se
 npm imports runtime, development, and optional dependencies; MCP import normalizes stdio, HTTP,
 and SSE definitions from Claude JSON and Codex/Vibe TOML. Dotfile import copies complete package
 directories into Tools ownership, rejects symlinks and collisions, and leaves the source tree
-untouched.
+untouched. These commands cover non-default source paths; normal discovery requires no import UI.
 
 ## Implementation
 
@@ -187,6 +184,7 @@ untouched.
 - Dotfile plan, apply, unlink, conflict blocking, adoption, and rollback behavior.
 - Homebrew inventory parsing.
 - Managed Brewfile projection that preserves comments and unsupported directives.
+- Automatic adoption of discovered installed tools without writing empty state.
 - Desired-but-missing package projection.
 - Action policy for managed and unmanaged packages.
 - Brewfile, package.json, MCP JSON/TOML, and Stow-root import behavior.

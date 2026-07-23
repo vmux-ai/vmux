@@ -24,7 +24,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::PageIconView;
+use vmux_ui::icon::{PageIconView, builtin_icon};
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
@@ -1200,29 +1200,36 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
-                        Icon { class: "h-3.5 w-3.5",
-                            path { d: "m15 12-8.5 8.5a2.12 2.12 0 1 1-3-3L12 9" }
-                            path { d: "M17.64 15 22 10.64" }
-                            path { d: "m20.91 11.7-1.25-1.25a1 1 0 0 1 0-1.41l.35-.35a1 1 0 0 0 0-1.41l-3.33-3.33a1 1 0 0 0-1.41 0l-.35.35a1 1 0 0 1-1.41 0l-1.25-1.25a3.09 3.09 0 0 0-4.37 0L6.8 4.14a1 1 0 0 0 0 1.41l11.65 11.65a1 1 0 0 0 1.41 0l1.09-1.09a3.09 3.09 0 0 0-.04-4.41Z" }
-                        }
+                        {builtin_icon(vmux_core::BuiltinIcon::Hammer, "h-4 w-4")}
                     }
                     div { class: "min-w-0 flex-1",
-                        div { class: "text-ui font-semibold text-foreground", "Tools" }
-                        div { class: "flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground",
+                        div { class: "flex items-baseline gap-1.5",
+                            span { class: "text-ui font-semibold text-foreground", "Tools" }
                             if loaded {
-                                span { "{tools.installed} installed" }
+                                span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{tools.installed}" }
+                            }
+                        }
+                        div { class: "mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-foreground/65",
+                            if loaded {
+                                span { class: "whitespace-nowrap", "installed" }
                                 if tools.updates > 0 {
-                                    if tools.updates == 1 {
-                                        span { class: "text-amber-300", "· 1 update" }
-                                    } else {
-                                        span { class: "text-amber-300", "· {tools.updates} updates" }
+                                    span { class: "flex whitespace-nowrap items-center gap-1",
+                                        span { class: "size-1.5 rounded-full bg-amber-500" }
+                                        if tools.updates == 1 {
+                                            "1 update"
+                                        } else {
+                                            "{tools.updates} updates"
+                                        }
                                     }
                                 }
                                 if tools.conflicts > 0 {
-                                    if tools.conflicts == 1 {
-                                        span { class: "text-ansi-1", "· 1 conflict" }
-                                    } else {
-                                        span { class: "text-ansi-1", "· {tools.conflicts} conflicts" }
+                                    span { class: "flex whitespace-nowrap items-center gap-1",
+                                        span { class: "size-1.5 rounded-full bg-rose-500" }
+                                        if tools.conflicts == 1 {
+                                            "1 conflict"
+                                        } else {
+                                            "{tools.conflicts} conflicts"
+                                        }
                                     }
                                 }
                             } else {
@@ -1295,10 +1302,16 @@ fn ToolCategoryRow(category: ToolCategory, pane_id: u64) -> Element {
                 }
                 span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{category.provider.title()}" }
                 if updates > 0 {
-                    span { class: "text-[9px] text-amber-300", "↑{updates}" }
+                    span { class: "flex items-center gap-1 whitespace-nowrap text-[9px] text-muted-foreground",
+                        span { class: "size-1 rounded-full bg-amber-500" }
+                        "{updates}"
+                    }
                 }
                 if conflicts > 0 {
-                    span { class: "text-[9px] text-ansi-1", "!{conflicts}" }
+                    span { class: "flex items-center gap-1 whitespace-nowrap text-[9px] text-muted-foreground",
+                        span { class: "size-1 rounded-full bg-rose-500" }
+                        "{conflicts}"
+                    }
                 }
                 span { class: "text-[10px] tabular-nums text-muted-foreground/70", "{category.items.len()}" }
             }
