@@ -189,6 +189,7 @@ fn consume_page_agent_stream(
         &mut PromptQueue,
         Option<&AgentSession>,
         Option<&AcpSession>,
+        Option<&AgentApprovalPolicy>,
         Option<&mut PendingHandoff>,
         Option<&ImportedConversation>,
     )>,
@@ -197,7 +198,7 @@ fn consume_page_agent_stream(
 ) {
     let by_sid: std::collections::HashMap<String, Entity> = q
         .iter()
-        .filter_map(|(e, _, _, _, page, acp, _, _)| {
+        .filter_map(|(e, _, _, _, page, acp, _, _, _)| {
             let sid = page
                 .map(|s| s.sid.clone())
                 .or_else(|| acp.map(|s| s.sid.clone()))?;
@@ -215,7 +216,7 @@ fn consume_page_agent_stream(
     }
     for snapshot in snapshots.read() {
         if let Some(&entity) = by_sid.get(&snapshot.sid)
-            && let Ok((_, mut messages, _, _, _, _, _, imported)) = q.get_mut(entity)
+            && let Ok((_, mut messages, _, _, _, _, _, _, imported)) = q.get_mut(entity)
             && let Ok(mut parsed) = serde_json::from_str::<Vec<Message>>(&snapshot.messages_json)
         {
             sanitize_replayed_messages(
@@ -227,7 +228,7 @@ fn consume_page_agent_stream(
     }
     for status in statuses.read() {
         if let Some(&entity) = by_sid.get(&status.sid)
-            && let Ok((_, _, mut state, mut queue, _, _, mut pending, _)) = q.get_mut(entity)
+            && let Ok((_, _, mut state, mut queue, _, _, _, mut pending, _)) = q.get_mut(entity)
         {
             let was_streaming = matches!(*state, AgentRunState::Streaming);
             match &status.status {
@@ -274,12 +275,16 @@ fn consume_page_agent_stream(
         };
         let args: serde_json::Value =
             serde_json::from_str(&approval.args_json).unwrap_or_else(|_| serde_json::json!({}));
-        if let Ok((_, _, mut state, _, _, _, _, _)) = q.get_mut(entity) {
-            *state = AgentRunState::AwaitingApproval {
-                call_id: approval.call_id.clone(),
-                name: approval.name.clone(),
-                args: args.clone(),
-            };
+        if let Ok((_, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
+            let auto_allowed =
+                acp.is_some() && policy.is_some_and(|policy| policy.auto.contains(&approval.name));
+            if !auto_allowed {
+                *state = AgentRunState::AwaitingApproval {
+                    call_id: approval.call_id.clone(),
+                    name: approval.name.clone(),
+                    args: args.clone(),
+                };
+            }
         }
         commands.trigger(AgentApprovalRequest {
             session: entity,
@@ -302,6 +307,48 @@ mod tests {
             .init_resource::<BinIpcEventRawBuffer>()
             .add_plugins(PageAgentPlugin);
         app.update();
+    }
+
+    #[test]
+    fn auto_approved_acp_request_never_enters_awaiting_state() {
+        let mut app = App::new();
+        app.add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+        let mut policy = AgentApprovalPolicy::default();
+        policy.auto.insert("run".into());
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "a".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AgentMessages::default(),
+                AgentRunState::Streaming,
+                PromptQueue::default(),
+                policy,
+            ))
+            .id();
+        app.world_mut().write_message(PageAgentAwaitingApproval {
+            sid: "s1".into(),
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args_json: "{}".into(),
+        });
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::Streaming)
+        ));
     }
 
     #[test]

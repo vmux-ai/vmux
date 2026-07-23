@@ -16,7 +16,7 @@ use vmux_setting::AppSettings;
 use vmux_terminal::reattach_terminal_bundle;
 
 use crate::components::{AgentApprovalPolicy, PromptQueue};
-use crate::events::{AgentApprovalReply, AgentApprovalRequest, ApprovalDecision};
+use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
@@ -428,18 +428,21 @@ fn apply_acp_model_selection_result(
 /// if the tool name is already in this session's auto-policy, reply `Allow` without prompting.
 fn auto_allow_acp_approval(
     trigger: On<AgentApprovalRequest>,
-    policies: Query<&AgentApprovalPolicy, With<AcpSession>>,
-    mut commands: Commands,
+    sessions: Query<(&AcpSession, &AgentApprovalPolicy)>,
+    service: Option<Res<ServiceClient>>,
 ) {
+    let Some(service) = service else {
+        return;
+    };
     let request = trigger.event();
-    let Ok(policy) = policies.get(request.session) else {
+    let Ok((session, policy)) = sessions.get(request.session) else {
         return;
     };
     if policy.auto.contains(&request.name) {
-        commands.trigger(AgentApprovalReply {
-            session: request.session,
+        service.0.send(ClientMessage::AgentApprove {
+            sid: session.sid.clone(),
             call_id: request.call_id.clone(),
-            decision: ApprovalDecision::Allow,
+            decision: vmux_service::protocol::ApprovalDecision::Allow,
         });
     }
 }
