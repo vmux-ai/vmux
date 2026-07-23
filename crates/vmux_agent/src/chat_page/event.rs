@@ -20,6 +20,8 @@ pub use vmux_command::prompt_media::{
     Clone,
     Debug,
     Default,
+    PartialEq,
+    Eq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
@@ -448,7 +450,7 @@ pub struct RuntimeSwitchRequest {
 
 /// The page's block type inside a [`ChatTurn`]. Mirrors `vmux_service::message::AssistantBlock`
 /// plus folded tool results and reconnect progress.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatBlock {
     Text(String),
     Thinking(String),
@@ -480,7 +482,7 @@ pub enum ChatBlock {
 }
 
 /// Page representation of `vmux_service::message::SubagentBlock`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatSubagent {
     pub call_id: String,
     pub provider: String,
@@ -499,7 +501,7 @@ pub struct ChatSubagent {
 }
 
 /// Mirror of `vmux_service::message::PlanStep`.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatPlanStep {
     pub content: String,
     pub status: String,
@@ -507,7 +509,7 @@ pub struct ChatPlanStep {
 
 /// A rendered conversation entry: a user bubble or a grouped assistant turn. Built backend by
 /// `group_turns`, carried as JSON in [`ChatSnapshot::messages_json`].
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ChatItem {
     User {
         text: String,
@@ -530,7 +532,7 @@ impl ChatItem {
 }
 
 /// One assistant turn: its ordered prose/activity timeline and run-state.
-#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChatTurn {
     /// Prose, thinking, tools, reconnects, plans, and diffs in transcript order.
     pub blocks: Vec<ChatBlock>,

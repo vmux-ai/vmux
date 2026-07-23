@@ -44,6 +44,12 @@ use wasm_bindgen::{JsCast, JsValue, closure::Closure};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
 
+fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
+    if signal.peek().ne(&value) {
+        signal.set(value);
+    }
+}
+
 fn slash_command_description(command: &SlashCommandEntry) -> String {
     match command.name.as_str() {
         "upload" => translate("agent-slash-attach-files"),
@@ -463,25 +469,25 @@ pub fn Page(
 ) -> Element {
     use_theme();
     let agent = agent_override.unwrap_or_else(current_agent);
-    let mut transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
-    let mut transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
+    let transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
+    let transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
     let mut items = use_signal(Vec::<ChatItem>::new);
     let mut loaded_start = use_signal(|| 0u32);
     let mut messages_total = use_signal(|| 0u32);
     let mut history_loading = use_signal(|| false);
     let mut recent_messages_json = use_signal(String::new);
     let mut recent_messages_start = use_signal(|| u32::MAX);
-    let mut status = use_signal(|| "installing".to_string());
-    let mut error = use_signal(String::new);
+    let status = use_signal(|| "installing".to_string());
+    let error = use_signal(String::new);
     let mut approval = use_signal(|| Option::<(String, String, String)>::None);
     let mut approval_sel = use_signal(|| 0usize);
-    let mut agent_name = use_signal(String::new);
-    let mut conversation_title = use_signal(String::new);
-    let mut agent_icon = use_signal(String::new);
-    let mut accent = use_signal(String::new);
-    let mut handoff_source = use_signal(String::new);
-    let mut handoff_truncated = use_signal(|| false);
-    let mut handoff_message_count = use_signal(|| 0u32);
+    let agent_name = use_signal(String::new);
+    let conversation_title = use_signal(String::new);
+    let agent_icon = use_signal(String::new);
+    let accent = use_signal(String::new);
+    let handoff_source = use_signal(String::new);
+    let handoff_truncated = use_signal(|| false);
+    let handoff_message_count = use_signal(|| 0u32);
     let mut choice_question = use_signal(String::new);
     let mut choice_options = use_signal(Vec::<String>::new);
     let mut draft = use_signal(String::new);
@@ -492,8 +498,8 @@ pub fn Page(
     let mut history_scratch = use_signal(String::new);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
-    let mut queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
-    let mut paused = use_signal(|| false);
+    let queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
+    let paused = use_signal(|| false);
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
     let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
     let mut models = use_signal(Vec::<ModelOptionEntry>::new);
@@ -539,48 +545,44 @@ pub fn Page(
                 parsed,
                 snap.messages_start,
             );
-            loaded_start.set(start);
+            set_if_changed(loaded_start, start);
             recent_messages_json.set(snap.messages_json.clone());
             recent_messages_start.set(snap.messages_start);
             if start == 0 {
-                history_loading.set(false);
+                set_if_changed(history_loading, false);
             }
         }
-        messages_total.set(snap.messages_total);
-        status.set(snap.status.clone());
-        error.set(snap.error.clone());
-        queued.set(snap.queued.clone());
-        transition_preview.set(String::new());
-        transition_attachments.set(Vec::new());
-        paused.set(snap.paused);
-        agent_name.set(snap.agent_name.clone());
-        conversation_title.set(snap.conversation_title.clone());
-        agent_icon.set(snap.agent_icon.clone());
-        accent.set(snap.accent_color.clone());
-        handoff_source.set(snap.handoff_source.clone());
-        handoff_truncated.set(snap.handoff_truncated);
-        handoff_message_count.set(snap.handoff_message_count);
+        set_if_changed(messages_total, snap.messages_total);
+        set_if_changed(status, snap.status.clone());
+        set_if_changed(error, snap.error.clone());
+        set_if_changed(queued, snap.queued.clone());
+        set_if_changed(transition_preview, String::new());
+        set_if_changed(transition_attachments, Vec::new());
+        set_if_changed(paused, snap.paused);
+        set_if_changed(agent_name, snap.agent_name.clone());
+        set_if_changed(conversation_title, snap.conversation_title.clone());
+        set_if_changed(agent_icon, snap.agent_icon.clone());
+        set_if_changed(accent, snap.accent_color.clone());
+        set_if_changed(handoff_source, snap.handoff_source.clone());
+        set_if_changed(handoff_truncated, snap.handoff_truncated);
+        set_if_changed(handoff_message_count, snap.handoff_message_count);
+        set_if_changed(choice_question, snap.choice_question.clone());
         if choice_options.peek().as_slice() != snap.choice_options.as_slice() {
-            menu_sel.set(0);
+            set_if_changed(menu_sel, 0);
+            choice_options.set(snap.choice_options.clone());
         }
-        choice_question.set(snap.choice_question.clone());
-        choice_options.set(snap.choice_options.clone());
-        if snap.status == "awaiting" {
-            let changed = approval
-                .peek()
-                .as_ref()
-                .is_none_or(|(call_id, _, _)| call_id != &snap.approval_call_id);
-            approval.set(Some((
+        let next_approval = if snap.status == "awaiting" {
+            Some((
                 snap.approval_call_id.clone(),
                 snap.approval_name.clone(),
                 snap.approval_args_json.clone(),
-            )));
-            if changed {
-                approval_sel.set(0);
-            }
+            ))
         } else {
-            approval.set(None);
-            approval_sel.set(0);
+            None
+        };
+        if approval.peek().ne(&next_approval) {
+            approval.set(next_approval);
+            set_if_changed(approval_sel, 0);
         }
     });
     let _history =
@@ -1395,12 +1397,11 @@ pub fn Page(
                             p { class: "text-sm text-muted-foreground", {translate("agent-ready")} }
                         }
                     }
-                    for i in 0..items.read().len() {
+                    for (i, item) in items.read().iter().cloned().enumerate() {
                         ChatItemRow {
                             key: "{loaded_start() as usize + i}",
-                            index: i,
                             absolute_index: loaded_start() as usize + i,
-                            items,
+                            item,
                             attachment_previews,
                             latest_tool_block: latest_tool
                                 .filter(|(item_index, _)| *item_index == i)
@@ -1850,17 +1851,17 @@ fn send_approval(call_id: String, decision: u8) -> bool {
 
 #[component]
 fn ChatItemRow(
-    index: usize,
     absolute_index: usize,
-    items: Signal<Vec<ChatItem>>,
+    item: ChatItem,
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
     latest_tool_block: Option<usize>,
 ) -> Element {
-    let items = items.read();
-    let Some(item) = items.get(index) else {
-        return rsx! {};
-    };
-    render_item(absolute_index, item, attachment_previews, latest_tool_block)
+    render_item(
+        absolute_index,
+        &item,
+        attachment_previews,
+        latest_tool_block,
+    )
 }
 
 fn render_item(
@@ -3007,9 +3008,9 @@ fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> E
 
 fn status_dot_class(status: &str) -> &'static str {
     match status {
-        "streaming" => "agent-status-dot bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
-        "installing" => "agent-status-dot bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
-        "awaiting" => "agent-status-dot bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
+        "streaming" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
+        "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
+        "awaiting" => "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
         _ => "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     }
@@ -3093,10 +3094,6 @@ fn md_to_html(src: &str) -> String {
 /// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
 /// light and dark.
 const MD_CSS: &str = r#"
-@keyframes agent-status-breathe{0%,100%{opacity:0.58;transform:scale(0.82)}50%{opacity:1;transform:scale(1)}}
-@keyframes agent-working-hop{0%,60%,100%{opacity:0.42;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
-.agent-status-dot{animation:agent-status-breathe 1.8s ease-in-out infinite;will-change:opacity,transform}
-.agent-working-dot{animation:agent-working-hop 900ms ease-in-out infinite;will-change:opacity,transform}
 .agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);pointer-events:none}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-header{border-color:color-mix(in srgb,var(--agent-accent) 12%,transparent)}
@@ -3142,5 +3139,5 @@ const MD_CSS: &str = r#"
 .chat-md hr{border:0;border-top:1px solid rgba(127,127,127,0.25);margin:0.9em 0}
 .chat-md table{border-collapse:collapse;margin:0.5em 0;font-size:0.95em}
 .chat-md th,.chat-md td{border:1px solid rgba(127,127,127,0.3);padding:0.3em 0.6em;text-align:left}
-@media (prefers-reduced-motion:reduce){.agent-chat-caret,.agent-status-dot,.agent-working-dot{animation:none}.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
+@media (prefers-reduced-motion:reduce){.agent-chat-caret{animation:none}.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
 "#;

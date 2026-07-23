@@ -2,6 +2,7 @@ use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::socket_path;
 use bevy::ecs::resource::Resource;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use vmux_service_client::client::ServiceConnection;
 
@@ -15,6 +16,7 @@ const MAX_SERVICE_MESSAGES_PER_DRAIN: usize = 128;
 pub struct ServiceHandle {
     cmd_tx: std::sync::mpsc::Sender<ClientMessage>,
     msg_rx: std::sync::Mutex<std::sync::mpsc::Receiver<ServiceMessage>>,
+    wake_pending: Arc<AtomicBool>,
     _runtime: Arc<tokio::runtime::Runtime>,
 }
 
@@ -24,10 +26,13 @@ pub type ServiceWake = Arc<dyn Fn() + Send + Sync + 'static>;
 fn forward_service_message(
     msg_tx: &std::sync::mpsc::Sender<ServiceMessage>,
     wake: Option<&ServiceWake>,
+    wake_pending: &AtomicBool,
     msg: ServiceMessage,
 ) -> Result<(), std::sync::mpsc::SendError<ServiceMessage>> {
     msg_tx.send(msg)?;
-    if let Some(wake) = wake {
+    if let Some(wake) = wake
+        && !wake_pending.swap(true, Ordering::AcqRel)
+    {
         wake();
     }
     Ok(())
@@ -155,10 +160,12 @@ impl ServiceHandle {
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<ClientMessage>();
         let (msg_tx, msg_rx) = std::sync::mpsc::channel::<ServiceMessage>();
+        let wake_pending = Arc::new(AtomicBool::new(false));
 
         // Reader task: service -> msg_tx
         let conn_r = Arc::clone(&conn);
         let rt2 = Arc::clone(&rt);
+        let reader_wake_pending = Arc::clone(&wake_pending);
         std::thread::Builder::new()
             .name("service-reader".into())
             .spawn(move || {
@@ -166,7 +173,14 @@ impl ServiceHandle {
                     loop {
                         match conn_r.recv().await {
                             Ok(Some(msg)) => {
-                                if forward_service_message(&msg_tx, wake.as_ref(), msg).is_err() {
+                                if forward_service_message(
+                                    &msg_tx,
+                                    wake.as_ref(),
+                                    &reader_wake_pending,
+                                    msg,
+                                )
+                                .is_err()
+                                {
                                     break;
                                 }
                             }
@@ -196,6 +210,7 @@ impl ServiceHandle {
         Some(Self {
             cmd_tx,
             msg_rx: std::sync::Mutex::new(msg_rx),
+            wake_pending,
             _runtime: rt,
         })
     }
@@ -217,6 +232,7 @@ impl ServiceHandle {
     /// the tail is processed on the next frame instead of stalling until the
     /// reactive timeout.
     pub fn drain_with_status(&self) -> (Vec<ServiceMessage>, bool) {
+        self.wake_pending.store(false, Ordering::Release);
         let rx = self.msg_rx.lock().unwrap();
         drain_service_messages_bounded(&rx)
     }
@@ -241,17 +257,28 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn forwarding_service_message_wakes_consumer() {
+    fn forwarding_burst_wakes_consumer_once_until_drain() {
         let (tx, rx) = std::sync::mpsc::channel();
         let wakes = Arc::new(AtomicUsize::new(0));
         let wakes_for_callback = Arc::clone(&wakes);
         let wake: ServiceWake = Arc::new(move || {
             wakes_for_callback.fetch_add(1, Ordering::Relaxed);
         });
+        let wake_pending = AtomicBool::new(false);
 
         forward_service_message(
             &tx,
             Some(&wake),
+            &wake_pending,
+            ServiceMessage::ProcessList {
+                processes: Vec::new(),
+            },
+        )
+        .expect("message should forward");
+        forward_service_message(
+            &tx,
+            Some(&wake),
+            &wake_pending,
             ServiceMessage::ProcessList {
                 processes: Vec::new(),
             },
@@ -262,7 +289,24 @@ mod tests {
             rx.try_recv(),
             Ok(ServiceMessage::ProcessList { processes }) if processes.is_empty()
         ));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(ServiceMessage::ProcessList { processes }) if processes.is_empty()
+        ));
         assert_eq!(wakes.load(Ordering::Relaxed), 1);
+
+        wake_pending.store(false, Ordering::Release);
+        forward_service_message(
+            &tx,
+            Some(&wake),
+            &wake_pending,
+            ServiceMessage::ProcessList {
+                processes: Vec::new(),
+            },
+        )
+        .expect("message should forward");
+
+        assert_eq!(wakes.load(Ordering::Relaxed), 2);
     }
 
     #[test]

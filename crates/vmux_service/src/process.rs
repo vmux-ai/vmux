@@ -7,12 +7,13 @@ use alacritty_terminal::{
     vte::ansi::{Color, NamedColor, Processor},
 };
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-#[cfg(unix)]
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 #[cfg(unix)]
@@ -22,8 +23,22 @@ use vmux_core::event::*;
 
 const MAX_PTY_CHUNKS_PER_POLL: usize = 64;
 const _: () = assert!(MAX_PTY_CHUNKS_PER_POLL <= 256);
+const HEAVY_OUTPUT_FRAME_INTERVAL: Duration = Duration::from_millis(100);
 
-pub type PtyInputWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+#[derive(Clone)]
+pub struct PtyInputWriter {
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    input_pending: Arc<AtomicBool>,
+}
+
+impl PtyInputWriter {
+    fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self {
+            writer: Arc::new(Mutex::new(writer)),
+            input_pending: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
 
 #[cfg(unix)]
 fn is_executable(path: &std::path::Path) -> bool {
@@ -139,7 +154,7 @@ impl TermEventListener for ServiceEventProxy {
     fn send_event(&self, event: TermEvent) {
         match event {
             TermEvent::PtyWrite(text) => {
-                if let Ok(mut writer) = self.pty_writer.lock() {
+                if let Ok(mut writer) = self.pty_writer.writer.lock() {
                     let _ = writer.write_all(text.as_bytes());
                 }
             }
@@ -222,6 +237,9 @@ pub struct Process {
     last_selection: Option<TermSelectionRange>,
     /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
+    output_viewport_dirty: bool,
+    last_output_viewport_at: Option<Instant>,
+    last_output_viewport_heavy: bool,
     /// Last broadcast (mouse_capture, copy_mode, alt_screen) flags.
     last_terminal_mode: Option<(bool, bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
@@ -483,7 +501,7 @@ impl Process {
             .master
             .as_raw_fd()
             .ok_or_else(|| "PTY master has no file descriptor".to_string())?;
-        let writer: PtyInputWriter = Arc::new(Mutex::new(
+        let writer = PtyInputWriter::new(Box::new(
             pair.master
                 .take_writer()
                 .map_err(|e| format!("failed to take PTY writer: {e}"))?,
@@ -538,7 +556,7 @@ impl Process {
         let (patch_tx, _) = broadcast::channel(256);
         let event_proxy = ServiceEventProxy {
             process_id: id,
-            pty_writer: Arc::clone(&writer),
+            pty_writer: writer.clone(),
             patch_tx: patch_tx.clone(),
         };
         let dims = PtyDimensions { cols, rows };
@@ -576,6 +594,9 @@ impl Process {
             selection: None,
             last_selection: None,
             last_viewport_copy_mode: None,
+            output_viewport_dirty: false,
+            last_output_viewport_at: None,
+            last_output_viewport_heavy: false,
             last_terminal_mode: None,
             copy_mode: None,
             keep_after_exit: false,
@@ -621,11 +642,12 @@ impl Process {
     }
 
     pub fn input_writer(&self) -> PtyInputWriter {
-        Arc::clone(&self.pty_writer)
+        self.pty_writer.clone()
     }
 
     pub fn write_input_to_writer(writer: &PtyInputWriter, data: &[u8]) {
-        if let Ok(mut w) = writer.lock() {
+        writer.input_pending.store(true, Ordering::Release);
+        if let Ok(mut w) = writer.writer.lock() {
             let _ = w.write_all(data);
         }
     }
@@ -1533,14 +1555,17 @@ impl Process {
             self.selection = None;
         }
         if got_data {
-            self.sync_viewport();
+            self.output_viewport_dirty = true;
         }
-        self.maybe_broadcast_mode();
         if self.exit_code.is_none()
             && let Ok(Some(status)) = self.child.try_wait()
         {
             self.exit_code = Some(status.exit_code() as i32);
         }
+        if self.output_viewport_dirty {
+            self.maybe_sync_output_viewport(pty_closed || self.exit_code.is_some(), got_data);
+        }
+        self.maybe_broadcast_mode();
         if !self.exit_reported
             && let Some(code) = self.exit_code
             && self.pty_reader_drained()
@@ -1559,7 +1584,26 @@ impl Process {
         false
     }
 
-    fn sync_viewport(&mut self) {
+    fn maybe_sync_output_viewport(&mut self, force: bool, got_data: bool) {
+        let now = Instant::now();
+        let elapsed = self
+            .last_output_viewport_at
+            .map(|last| now.saturating_duration_since(last));
+        let input_pending = take_input_priority(&self.pty_writer.input_pending, got_data);
+        if !output_viewport_due(
+            self.last_output_viewport_heavy,
+            force || input_pending,
+            elapsed,
+        ) {
+            return;
+        }
+        let changed_rows = self.sync_viewport();
+        self.output_viewport_dirty = false;
+        self.last_output_viewport_at = Some(now);
+        self.last_output_viewport_heavy = changed_rows.saturating_mul(2) >= self.rows as usize;
+    }
+
+    fn sync_viewport(&mut self) -> usize {
         let mode = self.term.mode();
         let passthrough = self.copy_mode.is_some()
             || mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
@@ -1571,16 +1615,16 @@ impl Process {
             self.last_passthrough = passthrough;
         }
         if passthrough {
-            self.sync_screen_relative();
+            self.sync_screen_relative()
         } else {
-            self.sync_document_window();
+            self.sync_document_window()
         }
     }
 
     /// Passthrough path (alt-screen / copy-mode): render the visible screen at
     /// document rows `0..screen_lines` with `first_row = 0` and no native scroll.
     /// Preserves the pre-native-scroll behavior for TUIs and copy-mode.
-    fn sync_screen_relative(&mut self) {
+    fn sync_screen_relative(&mut self) -> usize {
         let grid = self.term.grid();
         let num_lines = grid.screen_lines();
         let num_cols = grid.columns();
@@ -1635,8 +1679,9 @@ impl Process {
             && !selection_changed
             && !copy_mode_changed
         {
-            return;
+            return 0;
         }
+        let changed_rows = changed_lines.len();
         self.last_cursor = Some(cursor_pos);
         self.last_selection = self.selection;
         self.last_viewport_copy_mode = Some(copy_mode);
@@ -1677,12 +1722,13 @@ impl Process {
             evicted_total: 0,
         };
         let _ = self.patch_tx.send(patch);
+        changed_rows
     }
 
     /// Native-scroll path (primary screen, no copy-mode): serve a document-row
     /// window around `view_top` (or the bottom when `following`) by direct grid
     /// `Line` indexing. `display_offset` stays 0.
-    fn sync_document_window(&mut self) {
+    fn sync_document_window(&mut self) -> usize {
         let grid = self.term.grid();
         let screen = grid.screen_lines();
         let num_cols = grid.columns();
@@ -1690,12 +1736,16 @@ impl Process {
         let history = total_rows.saturating_sub(screen as u32);
         let visible = screen as u16;
 
-        let overscan = vmux_core::scroll::overscan_for(
-            visible,
-            vmux_core::scroll::TERMINAL_OVERSCAN_K,
-            vmux_core::scroll::OVERSCAN_FLOOR,
-            vmux_core::scroll::OVERSCAN_CAP,
-        );
+        let overscan = if self.following {
+            0
+        } else {
+            vmux_core::scroll::overscan_for(
+                visible,
+                vmux_core::scroll::TERMINAL_OVERSCAN_K,
+                vmux_core::scroll::OVERSCAN_FLOOR,
+                vmux_core::scroll::OVERSCAN_CAP,
+            )
+        };
         let view_top = if self.following {
             history
         } else {
@@ -1735,8 +1785,9 @@ impl Process {
 
         if changed_lines.is_empty() && !full && !cursor_moved && !selection_changed && !win_changed
         {
-            return;
+            return 0;
         }
+        let changed_rows = changed_lines.len();
         self.last_cursor = Some(cursor_key);
         self.last_selection = self.selection;
         self.last_win = Some(win);
@@ -1764,6 +1815,7 @@ impl Process {
             evicted_total: 0,
         };
         let _ = self.patch_tx.send(patch);
+        changed_rows
     }
 
     pub fn snapshot(&self) -> ServiceMessage {
@@ -1952,38 +2004,51 @@ impl ProcessManager {
 
 // --- Grid helpers ---
 
+fn output_viewport_due(heavy: bool, force: bool, elapsed: Option<Duration>) -> bool {
+    force || !heavy || elapsed.is_none_or(|elapsed| elapsed >= HEAVY_OUTPUT_FRAME_INTERVAL)
+}
+
+fn take_input_priority(input_pending: &AtomicBool, got_data: bool) -> bool {
+    got_data && input_pending.swap(false, Ordering::AcqRel)
+}
+
+fn mix_row_hash(hash: &mut u64, value: u64) {
+    *hash ^= value;
+    *hash = hash.wrapping_mul(0x100000001b3);
+}
+
+fn mix_color_hash(hash: &mut u64, color: &Color) {
+    match color {
+        Color::Named(color) => {
+            mix_row_hash(hash, 0);
+            mix_row_hash(hash, *color as u8 as u64);
+        }
+        Color::Spec(rgb) => {
+            mix_row_hash(hash, 1);
+            mix_row_hash(hash, rgb.r as u64);
+            mix_row_hash(hash, rgb.g as u64);
+            mix_row_hash(hash, rgb.b as u64);
+        }
+        Color::Indexed(index) => {
+            mix_row_hash(hash, 2);
+            mix_row_hash(hash, *index as u64);
+        }
+    }
+}
+
 fn hash_grid_row<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut hash = 0xcbf29ce484222325;
     let grid = term.grid();
     let num_cols = grid.columns();
     let row = &grid[Line(row_idx as i32 - offset)];
     for col_idx in 0..num_cols {
         let cell = &row[Column(col_idx)];
-        cell.c.hash(&mut hasher);
-        std::mem::discriminant(&cell.fg).hash(&mut hasher);
-        match &cell.fg {
-            Color::Named(c) => (*c as u8).hash(&mut hasher),
-            Color::Spec(rgb) => {
-                rgb.r.hash(&mut hasher);
-                rgb.g.hash(&mut hasher);
-                rgb.b.hash(&mut hasher);
-            }
-            Color::Indexed(i) => i.hash(&mut hasher),
-        }
-        std::mem::discriminant(&cell.bg).hash(&mut hasher);
-        match &cell.bg {
-            Color::Named(c) => (*c as u8).hash(&mut hasher),
-            Color::Spec(rgb) => {
-                rgb.r.hash(&mut hasher);
-                rgb.g.hash(&mut hasher);
-                rgb.b.hash(&mut hasher);
-            }
-            Color::Indexed(i) => i.hash(&mut hasher),
-        }
-        cell.flags.bits().hash(&mut hasher);
+        mix_row_hash(&mut hash, cell.c as u32 as u64);
+        mix_color_hash(&mut hash, &cell.fg);
+        mix_color_hash(&mut hash, &cell.bg);
+        mix_row_hash(&mut hash, cell.flags.bits() as u64);
     }
-    hasher.finish()
+    hash
 }
 
 fn build_line<T: TermEventListener>(term: &Term<T>, row_idx: usize, offset: i32) -> TermLine {
@@ -2126,6 +2191,32 @@ fn ansi_256_to_rgb(idx: u8) -> [u8; 3] {
 mod tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn heavy_output_waits_for_frame_interval_but_sparse_and_final_output_do_not() {
+        assert!(!output_viewport_due(
+            true,
+            false,
+            Some(HEAVY_OUTPUT_FRAME_INTERVAL - Duration::from_millis(1)),
+        ));
+        assert!(output_viewport_due(
+            true,
+            false,
+            Some(HEAVY_OUTPUT_FRAME_INTERVAL),
+        ));
+        assert!(output_viewport_due(true, true, Some(Duration::ZERO)));
+        assert!(output_viewport_due(false, false, Some(Duration::ZERO)));
+    }
+
+    #[test]
+    fn input_priority_waits_for_fresh_pty_output() {
+        let input_pending = AtomicBool::new(true);
+
+        assert!(!take_input_priority(&input_pending, false));
+        assert!(input_pending.load(Ordering::Acquire));
+        assert!(take_input_priority(&input_pending, true));
+        assert!(!input_pending.load(Ordering::Acquire));
+    }
 
     #[test]
     fn pty_reader_notifies_when_output_arrives() {
@@ -2405,12 +2496,12 @@ mod tests {
         }
 
         let captured = Arc::new(Mutex::new(Vec::new()));
-        let writer: PtyInputWriter =
-            Arc::new(Mutex::new(Box::new(CapturingWriter(captured.clone()))));
+        let writer = PtyInputWriter::new(Box::new(CapturingWriter(captured.clone())));
 
         Process::write_input_to_writer(&writer, b"abc");
 
         assert_eq!(*captured.lock().unwrap(), b"abc".to_vec());
+        assert!(writer.input_pending.load(Ordering::Acquire));
     }
 
     #[test]
@@ -2442,7 +2533,7 @@ mod tests {
         )
         .expect("process should spawn");
         let captured = Arc::new(Mutex::new(Vec::new()));
-        process.pty_writer = Arc::new(Mutex::new(Box::new(CapturingWriter(captured.clone()))));
+        process.pty_writer = PtyInputWriter::new(Box::new(CapturingWriter(captured.clone())));
 
         process.process_output_for_test(b"\x1b[?1049h\x1b[Hone\r\ntwo\r\nthree\x1b[H");
         process.enter_copy_mode();
@@ -2484,7 +2575,7 @@ mod tests {
         )
         .expect("process should spawn");
         let captured = Arc::new(Mutex::new(Vec::new()));
-        process.pty_writer = Arc::new(Mutex::new(Box::new(CapturingWriter(captured.clone()))));
+        process.pty_writer = PtyInputWriter::new(Box::new(CapturingWriter(captured.clone())));
         (process, captured)
     }
 
@@ -2580,6 +2671,27 @@ mod tests {
     }
 
     #[test]
+    fn following_patch_contains_only_visible_rows() {
+        let (mut process, _) = capturing_process(12, 4);
+        let mut patches = process.subscribe();
+        let mut feed = Vec::new();
+        for i in 0..40 {
+            feed.extend_from_slice(format!("line{i}\r\n").as_bytes());
+        }
+
+        process.process_output_for_test(&feed);
+
+        let changed_lines = std::iter::from_fn(|| patches.try_recv().ok())
+            .find_map(|message| match message {
+                ServiceMessage::ViewportPatch { changed_lines, .. } => Some(changed_lines),
+                _ => None,
+            })
+            .expect("output must broadcast a viewport patch");
+        assert!(changed_lines.len() <= process.rows as usize);
+        process.kill();
+    }
+
+    #[test]
     fn terminal_mode_broadcasts_alt_screen_toggle() {
         let (wake_tx, _) = mpsc::unbounded_channel();
         let mut process = Process::new_with_wake(
@@ -2654,7 +2766,7 @@ mod tests {
         use std::io;
 
         let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
-        let writer: PtyInputWriter = Arc::new(Mutex::new(Box::new(io::sink())));
+        let writer = PtyInputWriter::new(Box::new(io::sink()));
         let process_id = ProcessId::new();
         let proxy = ServiceEventProxy {
             process_id,
@@ -2682,7 +2794,7 @@ mod tests {
         use std::io;
 
         let (tx, mut rx) = broadcast::channel::<ServiceMessage>(8);
-        let writer: PtyInputWriter = Arc::new(Mutex::new(Box::new(io::sink())));
+        let writer = PtyInputWriter::new(Box::new(io::sink()));
         let process_id = ProcessId::new();
         let proxy = ServiceEventProxy {
             process_id,

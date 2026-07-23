@@ -109,8 +109,7 @@ impl Plugin for MessageLoopPlugin {
 
         #[cfg(target_os = "macos")]
         {
-            drop(rx);
-            app.insert_non_send(cef_pump_timer::install(1.0 / 120.0));
+            app.insert_non_send(cef_pump_timer::install(rx, 1.0 / 60.0));
         }
     }
 }
@@ -383,6 +382,13 @@ mod tests {
 #[cfg(target_os = "macos")]
 mod cef_pump_timer {
     use std::os::raw::c_void;
+    use std::sync::mpsc::Receiver;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use bevy_cef_core::prelude::MessageLoopTimer;
+
+    const IDLE_PUMP_INTERVAL: Duration = Duration::from_secs(1);
 
     type CFRunLoopRef = *mut c_void;
     type CFRunLoopTimerRef = *mut c_void;
@@ -408,8 +414,45 @@ mod cef_pump_timer {
         fn CFRelease(cf: *const c_void);
     }
 
+    struct PumpState {
+        receiver: Receiver<MessageLoopTimer>,
+        next: Option<MessageLoopTimer>,
+        last_pump: Instant,
+    }
+
+    impl PumpState {
+        fn should_pump(&mut self, now: Instant) -> bool {
+            while let Ok(timer) = self.receiver.try_recv() {
+                self.next = Some(self.next.map_or(timer, |next| next.earliest(timer)));
+            }
+            let requested = self.next.is_some_and(|timer| timer.is_finished());
+            let fallback = now.duration_since(self.last_pump) >= IDLE_PUMP_INTERVAL;
+            if !requested && !fallback {
+                return false;
+            }
+            if requested {
+                self.next = None;
+            }
+            self.last_pump = now;
+            true
+        }
+    }
+
+    static PUMP_STATE: OnceLock<Mutex<Option<PumpState>>> = OnceLock::new();
+
+    fn pump_state() -> &'static Mutex<Option<PumpState>> {
+        PUMP_STATE.get_or_init(|| Mutex::new(None))
+    }
+
     extern "C" fn pump(_timer: CFRunLoopTimerRef, _info: *mut c_void) {
-        cef::do_message_loop_work();
+        let should_pump = pump_state()
+            .lock()
+            .unwrap()
+            .as_mut()
+            .is_some_and(|state| state.should_pump(Instant::now()));
+        if should_pump {
+            cef::do_message_loop_work();
+        }
     }
 
     pub struct Controller {
@@ -429,6 +472,7 @@ mod cef_pump_timer {
                 CFRunLoopTimerInvalidate(self.timer);
                 CFRelease(self.timer.cast_const());
             }
+            pump_state().lock().unwrap().take();
         }
     }
 
@@ -438,7 +482,15 @@ mod cef_pump_timer {
         }
     }
 
-    pub fn install(interval: f64) -> Controller {
+    pub fn install(receiver: Receiver<MessageLoopTimer>, interval: f64) -> Controller {
+        let mut state = pump_state().lock().unwrap();
+        assert!(state.is_none(), "CEF pump already installed");
+        *state = Some(PumpState {
+            receiver,
+            next: Some(MessageLoopTimer::new(0)),
+            last_pump: Instant::now(),
+        });
+        drop(state);
         unsafe {
             let timer = CFRunLoopTimerCreate(
                 std::ptr::null(),
@@ -457,6 +509,48 @@ mod cef_pump_timer {
                 timer,
                 stopped: false,
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn state(receiver: Receiver<MessageLoopTimer>) -> PumpState {
+            PumpState {
+                receiver,
+                next: None,
+                last_pump: Instant::now(),
+            }
+        }
+
+        #[test]
+        fn immediate_requests_coalesce_into_one_pump() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(MessageLoopTimer::new(0)).unwrap();
+            tx.send(MessageLoopTimer::new(0)).unwrap();
+            let mut state = state(rx);
+
+            assert!(state.should_pump(Instant::now()));
+            assert!(!state.should_pump(Instant::now()));
+        }
+
+        #[test]
+        fn future_request_waits_for_its_deadline() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            tx.send(MessageLoopTimer::new(100)).unwrap();
+            let mut state = state(rx);
+
+            assert!(!state.should_pump(Instant::now()));
+        }
+
+        #[test]
+        fn idle_fallback_keeps_cef_alive() {
+            let (_tx, rx) = std::sync::mpsc::channel();
+            let mut state = state(rx);
+            state.last_pump = Instant::now() - IDLE_PUMP_INTERVAL;
+
+            assert!(state.should_pump(Instant::now()));
         }
     }
 }
