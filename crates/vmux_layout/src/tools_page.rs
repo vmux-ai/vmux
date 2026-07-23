@@ -5,9 +5,9 @@ use std::collections::BTreeSet;
 use dioxus::prelude::*;
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
-    ToolActionResult, ToolItem, ToolProvider, ToolStatus, ToolsRefreshRequest, ToolsSnapshot,
+    ToolActionResult, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus, ToolsRefreshRequest,
+    ToolsSnapshot,
 };
-use vmux_ui::components::icon::Icon;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
@@ -26,8 +26,9 @@ pub fn Page() -> Element {
     let add_name = use_signal(String::new);
     let adopt_package = use_signal(String::new);
     let adopt_path = use_signal(String::new);
-    let import_provider = use_signal(|| ToolProvider::HomebrewFormula.id().to_string());
+    let import_provider = use_signal(|| ToolProvider::Npm.id().to_string());
     let import_path = use_signal(String::new);
+    let brewfile_import_path = use_signal(String::new);
 
     let _snapshot_listener =
         use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
@@ -97,6 +98,11 @@ pub fn Page() -> Element {
                 },
             }
             ManagerList {
+                HomebrewSourceCard {
+                    root: current.root.clone(),
+                    import_path: brewfile_import_path,
+                    pending,
+                }
                 ToolsControls {
                     add_provider,
                     add_name,
@@ -149,6 +155,83 @@ pub fn Page() -> Element {
 }
 
 #[component]
+fn HomebrewSourceCard(
+    root: String,
+    mut import_path: Signal<String>,
+    pending: Signal<BTreeSet<String>>,
+) -> Element {
+    let brewfile = format!("{root}/Brewfile");
+    let open_brewfile = brewfile.clone();
+    let import_key = action_key(ToolProvider::HomebrewFormula, ToolAction::Import, "");
+    rsx! {
+        div { class: "flex flex-col gap-3 rounded-2xl bg-foreground/[0.035] p-4 ring-1 ring-inset ring-foreground/10",
+            div { class: "flex items-center gap-3",
+                div { class: "grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-foreground/[0.06] ring-1 ring-inset ring-foreground/10",
+                    svg { class: "h-5 w-5 text-foreground/80", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                        path { d: "m15 12-8.5 8.5a2.12 2.12 0 1 1-3-3L12 9" }
+                        path { d: "M17.64 15 22 10.64" }
+                        path { d: "m20.91 11.7-1.25-1.25a1 1 0 0 1 0-1.41l.35-.35a1 1 0 0 0 0-1.41l-3.33-3.33a1 1 0 0 0-1.41 0l-.35.35a1 1 0 0 1-1.41 0l-1.25-1.25a3.09 3.09 0 0 0-4.37 0L6.8 4.14a1 1 0 0 0 0 1.41l11.65 11.65a1 1 0 0 0 1.41 0l1.09-1.09a3.09 3.09 0 0 0-.04-4.41Z" }
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "font-medium text-foreground/95", "Brewfile" }
+                    div { class: "truncate text-xs text-muted-foreground/70", "{brewfile}" }
+                }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
+                    disabled: root.is_empty(),
+                    onclick: move |_| open_tool_file(open_brewfile.clone()),
+                    "Open"
+                }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Primary,
+                    disabled: pending().contains(&import_key),
+                    onclick: move |_| send_action(
+                        pending,
+                        ToolProvider::HomebrewFormula,
+                        ToolAction::Import,
+                        String::new(),
+                        String::new(),
+                    ),
+                    "Import installed"
+                }
+            }
+            div { class: "flex min-w-0 gap-2 border-t border-foreground/[0.07] pt-3",
+                input {
+                    r#type: "text",
+                    class: "min-w-0 flex-1 rounded-lg bg-foreground/[0.05] px-3 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-cyan-400/30",
+                    placeholder: "Import another Brewfile…",
+                    value: "{import_path}",
+                    oninput: move |event| import_path.set(event.value()),
+                }
+                ManagerButton {
+                    variant: ManagerButtonVariant::Secondary,
+                    disabled: import_path().trim().is_empty() || pending().contains(&import_key),
+                    onclick: move |_| {
+                        let path = import_path().trim().to_string();
+                        if path.is_empty() {
+                            return;
+                        }
+                        send_action(
+                            pending,
+                            ToolProvider::HomebrewFormula,
+                            ToolAction::Import,
+                            String::new(),
+                            path,
+                        );
+                        import_path.set(String::new());
+                    },
+                    "Import Brewfile"
+                }
+            }
+            div { class: "text-[10px] text-muted-foreground/60",
+                "Edit the Brewfile directly or use the package browser below."
+            }
+        }
+    }
+}
+
+#[component]
 fn ToolsControls(
     mut add_provider: Signal<String>,
     mut add_name: Signal<String>,
@@ -158,6 +241,14 @@ fn ToolsControls(
     mut import_path: Signal<String>,
     pending: Signal<BTreeSet<String>>,
 ) -> Element {
+    let selected_import_provider =
+        provider_from_id(&import_provider()).unwrap_or(ToolProvider::Npm);
+    let import_copy = import_copy(selected_import_provider, import_path().trim().is_empty());
+    let import_requires_path = selected_import_provider == ToolProvider::Dotfiles;
+    let import_supports_path = matches!(
+        selected_import_provider,
+        ToolProvider::Npm | ToolProvider::Mcp | ToolProvider::Dotfiles
+    );
     rsx! {
         div { class: "grid gap-3 rounded-2xl bg-foreground/[0.035] p-4 ring-1 ring-inset ring-foreground/10 md:grid-cols-2",
             div { class: "flex min-w-0 flex-col gap-2",
@@ -243,33 +334,43 @@ fn ToolsControls(
                 }
             }
             div { class: "flex min-w-0 flex-col gap-2 md:col-span-2",
-                div { class: "text-xs font-medium text-foreground/90", "Import existing" }
+                div { class: "flex items-baseline gap-2",
+                    div { class: "text-xs font-medium text-foreground/90", "Import existing" }
+                    div { class: "text-[10px] text-muted-foreground/60", "{import_copy.detail}" }
+                }
                 div { class: "flex min-w-0 gap-2",
                     select {
                         class: "min-w-0 rounded-lg bg-foreground/[0.05] px-2.5 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10",
                         value: "{import_provider}",
-                        onchange: move |event| import_provider.set(event.value()),
-                        option { value: "homebrew-formula", "Homebrew / Brewfile" }
-                        option { value: "npm", "npm / package.json" }
+                        onchange: move |event| {
+                            import_provider.set(event.value());
+                            import_path.set(String::new());
+                        },
+                        option { value: "npm", "npm" }
                         option { value: "acp", "Installed ACP agents" }
                         option { value: "lsp", "Installed language tools" }
-                        option { value: "mcp", "MCP config" }
+                        option { value: "mcp", "MCP servers" }
                         option { value: "dotfiles", "Stow dotfiles" }
                     }
-                    input {
-                        r#type: "text",
-                        class: "min-w-0 flex-1 rounded-lg bg-foreground/[0.05] px-3 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-cyan-400/30",
-                        placeholder: "Path (optional — imports installed/default config)",
-                        value: "{import_path}",
-                        oninput: move |event| import_path.set(event.value()),
+                    if import_supports_path {
+                        input {
+                            r#type: "text",
+                            class: "min-w-0 flex-1 rounded-lg bg-foreground/[0.05] px-3 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-cyan-400/30",
+                            placeholder: "{import_copy.placeholder}",
+                            value: "{import_path}",
+                            oninput: move |event| import_path.set(event.value()),
+                        }
+                    } else {
+                        div { class: "min-w-0 flex-1" }
                     }
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
-                        disabled: pending().contains(&action_key(
-                            provider_from_id(&import_provider()).unwrap_or(ToolProvider::HomebrewFormula),
-                            ToolAction::Import,
-                            "",
-                        )),
+                        disabled: (import_requires_path && import_path().trim().is_empty())
+                            || pending().contains(&action_key(
+                                selected_import_provider,
+                                ToolAction::Import,
+                                "",
+                            )),
                         onclick: move |_| {
                             let Some(provider) = provider_from_id(&import_provider()) else {
                                 return;
@@ -282,14 +383,62 @@ fn ToolsControls(
                                 import_path().trim().to_string(),
                             );
                         },
-                        "Import"
+                        "{import_copy.action}"
                     }
-                }
-                div { class: "text-[10px] text-muted-foreground/60",
-                    "Imports into vmux without modifying the original manifest."
                 }
             }
         }
+    }
+}
+
+struct ImportCopy {
+    detail: &'static str,
+    placeholder: &'static str,
+    action: &'static str,
+}
+
+fn import_copy(provider: ToolProvider, path_empty: bool) -> ImportCopy {
+    match provider {
+        ToolProvider::Npm if path_empty => ImportCopy {
+            detail: "Adopt every globally installed package.",
+            placeholder: "package.json path (optional)",
+            action: "Import installed",
+        },
+        ToolProvider::Npm => ImportCopy {
+            detail: "Import dependencies from package.json.",
+            placeholder: "package.json path (optional)",
+            action: "Import package.json",
+        },
+        ToolProvider::Acp => ImportCopy {
+            detail: "Adopt every installed ACP agent.",
+            placeholder: "",
+            action: "Import installed",
+        },
+        ToolProvider::Lsp => ImportCopy {
+            detail: "Adopt every installed language tool.",
+            placeholder: "",
+            action: "Import installed",
+        },
+        ToolProvider::Mcp if path_empty => ImportCopy {
+            detail: "Import servers from Claude, Codex, and Vibe configs.",
+            placeholder: "Config path (optional)",
+            action: "Import configs",
+        },
+        ToolProvider::Mcp => ImportCopy {
+            detail: "Import servers from one MCP config.",
+            placeholder: "Config path (optional)",
+            action: "Import config",
+        },
+        ToolProvider::Dotfiles => ImportCopy {
+            detail: "Copy packages from an existing Stow directory.",
+            placeholder: "Stow root path",
+            action: "Import dotfiles",
+        },
+        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => ImportCopy {
+            detail: "Managed through Brewfile above.",
+            placeholder: "",
+            action: "Import",
+        },
     }
 }
 
@@ -307,8 +456,8 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
     let id = item.id.clone();
     rsx! {
         ManagerRow {
-            show_icon: true,
-            icon: provider_icon(provider),
+            show_icon: false,
+            icon: rsx! {},
             title: item.name.clone(),
             subtitle,
             meta: rsx! {
@@ -439,24 +588,6 @@ fn action_key(provider: ToolProvider, action: ToolAction, id: &str) -> String {
     format!("{}:{action:?}:{id}", provider.id())
 }
 
-fn provider_icon(provider: ToolProvider) -> Element {
-    let path = match provider {
-        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
-            "M8 2h8l-1 4h3a2 2 0 0 1 2 2v1a3 3 0 0 1-3 3h-1l-1 8H9L8 2Zm8 6-.3 2H17a1 1 0 0 0 1-1V8h-2Z"
-        }
-        ToolProvider::Npm => {
-            "M2 7h20v10H12v-3h-2v3H2V7Zm3 3v4h2v-4H5Zm7 0v2h2v-2h-2Zm5 0v4h2v-4h-2Z"
-        }
-        ToolProvider::Acp => {
-            "M12 3a6 6 0 0 0-6 6v2a3 3 0 0 0-2 3v4h4v-5h8v5h4v-4a3 3 0 0 0-2-3V9a6 6 0 0 0-6-6Z"
-        }
-        ToolProvider::Lsp => "M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4Z",
-        ToolProvider::Mcp => {
-            "M7 4h10v4h3v8h-3v4H7v-4H4V8h3V4Zm2 2v12h6V6H9Zm-3 4v4h1v-4H6Zm11 0v4h1v-4h-1Z"
-        }
-        ToolProvider::Dotfiles => {
-            "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 2 4 4h-4V4Z"
-        }
-    };
-    rsx! { Icon { class: "h-5 w-5 text-foreground/80", path { d: "{path}" } } }
+fn open_tool_file(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&ToolOpenRequest { path });
 }

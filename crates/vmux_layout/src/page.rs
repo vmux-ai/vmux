@@ -1191,7 +1191,6 @@ fn open_tools(pane_id: u64) {
 #[component]
 fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
     let mut folded = use_signal(|| false);
-    let root = compact_tools_path(&tools.root);
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             div { class: "flex items-center transition-colors hover:bg-glass-hover",
@@ -1202,22 +1201,30 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
                         Icon { class: "h-3.5 w-3.5",
-                            path { d: "M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" }
+                            path { d: "m15 12-8.5 8.5a2.12 2.12 0 1 1-3-3L12 9" }
+                            path { d: "M17.64 15 22 10.64" }
+                            path { d: "m20.91 11.7-1.25-1.25a1 1 0 0 1 0-1.41l.35-.35a1 1 0 0 0 0-1.41l-3.33-3.33a1 1 0 0 0-1.41 0l-.35.35a1 1 0 0 1-1.41 0l-1.25-1.25a3.09 3.09 0 0 0-4.37 0L6.8 4.14a1 1 0 0 0 0 1.41l11.65 11.65a1 1 0 0 0 1.41 0l1.09-1.09a3.09 3.09 0 0 0-.04-4.41Z" }
                         }
                     }
                     div { class: "min-w-0 flex-1",
-                        div { class: "flex items-center gap-1.5",
-                            div { class: "text-ui font-semibold text-foreground", "Tools" }
-                            if tools.updates > 0 {
-                                span { class: "rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-medium text-amber-300", "{tools.updates} updates" }
-                            }
-                            if tools.conflicts > 0 {
-                                span { class: "rounded-full bg-ansi-1/15 px-1.5 py-0.5 text-[9px] font-medium text-ansi-1", "{tools.conflicts} conflicts" }
-                            }
-                        }
-                        div { class: "truncate text-[10px] text-muted-foreground",
+                        div { class: "text-ui font-semibold text-foreground", "Tools" }
+                        div { class: "flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground",
                             if loaded {
-                                "{tools.installed} installed · {root}"
+                                span { "{tools.installed} installed" }
+                                if tools.updates > 0 {
+                                    if tools.updates == 1 {
+                                        span { class: "text-amber-300", "· 1 update" }
+                                    } else {
+                                        span { class: "text-amber-300", "· {tools.updates} updates" }
+                                    }
+                                }
+                                if tools.conflicts > 0 {
+                                    if tools.conflicts == 1 {
+                                        span { class: "text-ansi-1", "· 1 conflict" }
+                                    } else {
+                                        span { class: "text-ansi-1", "· {tools.conflicts} conflicts" }
+                                    }
+                                }
                             } else {
                                 "Scanning local tools…"
                             }
@@ -1331,12 +1338,6 @@ fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
             }
         }
     }
-}
-
-fn compact_tools_path(path: &str) -> String {
-    path.rfind("/.vmux/")
-        .map(|index| format!("~{}", &path[index..]))
-        .unwrap_or_else(|| path.to_string())
 }
 
 /// The active tab's working directory + live git status, rendered inside the space card. Shows the

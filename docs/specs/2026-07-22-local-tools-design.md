@@ -16,7 +16,8 @@ vmux-managed receipt stores.
 ## Decisions
 
 - Product name: **Tools**. Existing service, ACP, and LSP registries retain their domain names.
-- Source of truth: `~/.vmux/tools/tools.toml`.
+- Source of truth: `~/.vmux/tools/tools.toml`, with Homebrew formulae and casks projected through
+  an editable `~/.vmux/tools/Brewfile`.
 - Dotfile source: `~/.vmux/tools/dotfiles/<package>/...`.
 - Tools is profile-agnostic. Browser/runtime profiles do not own machine configuration.
 - Installed state and desired state remain distinct. Discovered packages are never automatically
@@ -34,6 +35,7 @@ vmux-managed receipt stores.
 
 ```text
 ~/.vmux/tools/
+  Brewfile
   tools.toml
   dotfiles/
     git/
@@ -69,6 +71,11 @@ packages = ["git", "nushell"]
 
 The manifest is created only after an explicit management action. Merely opening Tools never
 seeds default or empty configuration.
+
+The Tools page exposes the vmux-owned Brewfile directly. Users can open it in the editor, import an
+existing Brewfile, or adopt every installed formula and cask in one action. Package actions keep
+the Brewfile synchronized while preserving comments and unsupported directives such as taps or
+Mac App Store entries.
 
 Existing `~/.vmux/registry/registry.toml` and its dotfiles tree migrate in place to the Tools paths
 on first access. Migration stops if both old and new roots exist, avoiding silent overwrites.
@@ -111,11 +118,12 @@ manager in the active pane.
 `vmux://tools/` provides:
 
 - Search across all providers.
+- A Brewfile source card with Open, Import Brewfile, and Import installed actions.
 - Categorized package rows.
 - Install, update, uninstall, manage, forget, link, and unlink actions.
 - Add-package controls for Homebrew, npm, ACP, and language tools.
-- Import controls for Brewfile, package.json, installed ACP/LSP receipts, MCP configs, and existing
-  Stow roots.
+- Source-specific import controls for package.json, installed ACP/LSP receipts, MCP configs, and
+  existing Stow roots.
 - Dotfile adoption by package name and path.
 - Refresh and declarative Apply actions.
 
@@ -178,6 +186,7 @@ untouched.
 - Manifest round-trip and normalization.
 - Dotfile plan, apply, unlink, conflict blocking, adoption, and rollback behavior.
 - Homebrew inventory parsing.
+- Managed Brewfile projection that preserves comments and unsupported directives.
 - Desired-but-missing package projection.
 - Action policy for managed and unmanaged packages.
 - Brewfile, package.json, MCP JSON/TOML, and Stow-root import behavior.
