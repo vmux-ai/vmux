@@ -5,7 +5,6 @@ use crate::i18n::translate;
 use dioxus::prelude::*;
 use wasm_bindgen::{JsCast, closure::Closure};
 
-use crate::listener_guard::GuardedListener;
 use crate::prompt_ghost::PromptGhost;
 
 use super::prompt_box::PromptBox;
@@ -13,9 +12,7 @@ use super::prompt_box::PromptBox;
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
 
 const PROMPT_COMPOSER_CSS: &str = r#"
-.vmux-prompt-input{caret-color:transparent}
-.vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite;background:var(--vmux-prompt-accent)}
-@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.vmux-prompt-input{caret-color:var(--vmux-prompt-accent)}
 .vmux-prompt-composer{box-shadow:0 22px 70px -30px rgba(0,0,0,.58),0 8px 24px -16px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.16)}
 .vmux-prompt-composer:focus-within{box-shadow:0 28px 84px -34px rgba(0,0,0,.7),0 10px 28px -18px color-mix(in srgb,var(--vmux-prompt-accent) 32%,transparent),inset 0 0 0 1px color-mix(in srgb,var(--vmux-prompt-accent) 28%,transparent),inset 0 1px 0 rgba(255,255,255,.2)}
 "#;
@@ -34,23 +31,6 @@ pub enum PromptComposerAction {
     #[default]
     Send,
     Stop,
-}
-
-struct PromptFocusTracking {
-    window: web_sys::Window,
-    focus: Closure<dyn FnMut()>,
-    blur: Closure<dyn FnMut()>,
-}
-
-impl Drop for PromptFocusTracking {
-    fn drop(&mut self) {
-        let _ = self
-            .window
-            .remove_event_listener_with_callback("focus", self.focus.as_ref().unchecked_ref());
-        let _ = self
-            .window
-            .remove_event_listener_with_callback("blur", self.blur.as_ref().unchecked_ref());
-    }
 }
 
 #[component]
@@ -75,46 +55,10 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
-    let mut caret = use_signal(|| None::<u32>);
-    let scroll_top = use_signal(|| 0i32);
-
-    let focus_listener = use_hook(|| {
-        GuardedListener::new(Box::new(move |_: ()| {
-            sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top);
-        }) as Box<dyn FnMut(())>)
-    });
-    let blur_listener = use_hook(|| {
-        GuardedListener::new(Box::new(move |_: ()| {
-            caret.set(None);
-        }) as Box<dyn FnMut(())>)
-    });
-    let focus_tracking = use_hook(|| Rc::new(RefCell::new(None::<PromptFocusTracking>)));
-    use_effect({
-        let focus_listener = focus_listener.clone();
-        let blur_listener = blur_listener.clone();
-        let focus_tracking = focus_tracking.clone();
-        move || {
-            *focus_tracking.borrow_mut() =
-                install_prompt_focus_tracking(focus_listener.clone(), blur_listener.clone());
-        }
-    });
-    let focus_guard = focus_listener.guard();
-    let blur_guard = blur_listener.guard();
-    use_drop(move || {
-        focus_guard.deactivate();
-        blur_guard.deactivate();
-        focus_tracking.borrow_mut().take();
-    });
-
     use_effect(use_reactive((&value,), move |_| {
         resize_prompt_textarea(PROMPT_INPUT_ID);
-        sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top);
     }));
 
-    let caret_prefix = caret()
-        .filter(|_| !value.is_empty())
-        .map(|offset| prompt_prefix_at_utf16(&value, offset).to_string());
-    let prompt_scroll_offset = scroll_top();
     let action_class = if action_enabled {
         match action {
             PromptComposerAction::Send => format!(
@@ -187,9 +131,6 @@ pub fn PromptComposer(
                                     }
                                 } else {
                                     div { class: "flex max-w-full items-center whitespace-nowrap text-[15px] leading-6 text-muted-foreground/50",
-                                        if caret().is_some() {
-                                            span { class: "vmux-prompt-caret relative top-px mr-px h-4 w-1.5 shrink-0" }
-                                        }
                                         span { class: "min-w-0 truncate", "{placeholder}" }
                                     }
                                 }
@@ -202,16 +143,6 @@ pub fn PromptComposer(
                                 span { class: "text-muted-foreground/40", "{completion}" }
                             }
                         }
-                        if let Some(prefix) = caret_prefix.as_ref() {
-                            div { class: "pointer-events-none absolute inset-0 z-20 overflow-hidden",
-                                div {
-                                    class: "min-h-12 w-full whitespace-pre-wrap break-words px-1 py-2 text-[15px] leading-6 text-transparent",
-                                    style: "transform:translateY(-{prompt_scroll_offset}px);",
-                                    span { "{prefix}" }
-                                    span { class: "vmux-prompt-caret relative top-px ml-px inline-block h-4 w-1.5 align-middle" }
-                                }
-                            }
-                        }
                         textarea {
                             id: PROMPT_INPUT_ID,
                             class: "vmux-prompt-input relative z-10 max-h-48 min-h-12 w-full resize-none bg-transparent px-1 py-2 text-[15px] leading-6 placeholder:text-transparent focus:outline-none",
@@ -219,17 +150,8 @@ pub fn PromptComposer(
                             rows: "1",
                             placeholder: "{placeholder}",
                             value: "{value}",
-                            oninput: move |event| {
-                                on_input.call(event.value());
-                                resize_prompt_textarea(PROMPT_INPUT_ID);
-                                sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top);
-                            },
+                            oninput: move |event| on_input.call(event.value()),
                             onpaste: move |_| on_paste.call(()),
-                            onfocus: move |_| sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top),
-                            onblur: move |_| sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top),
-                            onkeyup: move |_| sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top),
-                            onmouseup: move |_| sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top),
-                            onscroll: move |_| sync_prompt_caret(PROMPT_INPUT_ID, caret, scroll_top),
                             onkeydown: move |event| on_keydown.call(event),
                         }
                     }
@@ -328,54 +250,4 @@ fn resize_prompt_textarea(input_id: &str) {
     let height = textarea.scroll_height().clamp(48, 192);
     let overflow = if height == 192 { "auto" } else { "hidden" };
     let _ = textarea.set_attribute("style", &format!("height:{height}px;overflow-y:{overflow}"));
-}
-
-fn sync_prompt_caret(input_id: &str, mut caret: Signal<Option<u32>>, mut scroll_top: Signal<i32>) {
-    let page_active = web_sys::window()
-        .and_then(|window| window.document())
-        .is_some_and(|document| document.has_focus().unwrap_or(false));
-    if !page_active {
-        caret.set(None);
-        return;
-    }
-    let Some(textarea) = prompt_textarea(input_id) else {
-        return;
-    };
-    let start = textarea.selection_start().ok().flatten().unwrap_or(0);
-    let end = textarea.selection_end().ok().flatten().unwrap_or(start);
-    caret.set((start == end).then_some(start));
-    scroll_top.set(textarea.scroll_top());
-}
-
-fn install_prompt_focus_tracking(
-    focus_listener: GuardedListener<Box<dyn FnMut(())>>,
-    blur_listener: GuardedListener<Box<dyn FnMut(())>>,
-) -> Option<PromptFocusTracking> {
-    let window = web_sys::window()?;
-    let focus = Closure::wrap(Box::new(move || {
-        focus_listener.call(());
-    }) as Box<dyn FnMut()>);
-    let _ = window.add_event_listener_with_callback("focus", focus.as_ref().unchecked_ref());
-
-    let blur = Closure::wrap(Box::new(move || {
-        blur_listener.call(());
-    }) as Box<dyn FnMut()>);
-    let _ = window.add_event_listener_with_callback("blur", blur.as_ref().unchecked_ref());
-
-    Some(PromptFocusTracking {
-        window,
-        focus,
-        blur,
-    })
-}
-
-fn prompt_prefix_at_utf16(value: &str, offset: u32) -> &str {
-    let mut units = 0u32;
-    for (byte, character) in value.char_indices() {
-        if units >= offset {
-            return &value[..byte];
-        }
-        units += character.len_utf16() as u32;
-    }
-    value
 }

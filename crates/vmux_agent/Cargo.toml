@@ -30,7 +30,7 @@ rfd = { workspace = true }
 crossbeam-channel = "0.5"
 futures-lite = "2"
 futures-util = "0.3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff"] }
 tokio = { workspace = true, features = ["rt"] }
 toml = { workspace = true }
 uuid = { workspace = true }

@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::command_bar::keyboard::{
@@ -29,10 +30,10 @@ use vmux_command::event::{
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
-    CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT, ChatAttachPaths, ChatAttachment,
-    ChatAttachments, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, inline_media_query, media_display_path, media_reference,
-    replace_inline_media_query,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
+    ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query, media_display_path,
+    media_reference, merge_chat_attachments, replace_inline_media_query,
 };
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
@@ -146,6 +147,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut last_open_id = use_signal(|| u64::MAX);
     let mut last_focus_open_id = use_signal(|| u64::MAX);
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
+    let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
     let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
     let mut media_request_id = use_signal(|| 0u64);
     let mut media_requested_query = use_signal(|| None::<String>);
@@ -216,15 +218,34 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if !is_start {
                 return;
             }
-            let mut next = attachments.peek().clone();
-            for attachment in &selected.attachments {
-                if !next.iter().any(|existing| existing.path == attachment.path) {
-                    next.push(attachment.clone());
-                }
-            }
-            attachments.set(next);
+            let current = attachments.peek().clone();
+            attachments.set(merge_chat_attachments(&current, &selected.attachments));
             focus_prompt_end(PROMPT_INPUT_ID);
         });
+
+    let _attachment_previews_listener = use_bin_event_listener::<ChatAttachments, _>(
+        CHAT_ATTACHMENT_PREVIEWS_EVENT,
+        move |loaded| {
+            if !is_start {
+                return;
+            }
+            let mut previews = attachment_previews.peek().clone();
+            for attachment in &loaded.attachments {
+                previews.insert(attachment.path.clone(), attachment.clone());
+            }
+            attachment_previews.set(previews);
+            let mut current = attachments.peek().clone();
+            for preview in &loaded.attachments {
+                if let Some(attachment) = current
+                    .iter_mut()
+                    .find(|attachment| attachment.path == preview.path)
+                {
+                    attachment.preview_data_url = preview.preview_data_url.clone();
+                }
+            }
+            attachments.set(current);
+        },
+    );
 
     let _media_entries_listener =
         use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
@@ -636,6 +657,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     let start_accent = active_agent_accent.unwrap_or_else(|| agent_accent("vibe"));
+    let start_attachment_previews = attachment_previews.read();
     let start_prompt_attachments = attachments
         .read()
         .iter()
@@ -644,7 +666,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             key: format!("start-attachment-{}", attachment.path),
             name: attachment.name.clone(),
             label: file_extension_label(&attachment.name),
-            preview_data_url: attachment.preview_data_url.clone(),
+            preview_data_url: start_attachment_previews
+                .get(&attachment.path)
+                .map(|preview| preview.preview_data_url.clone())
+                .unwrap_or_else(|| attachment.preview_data_url.clone()),
             remove_index: Some(index),
         })
         .collect::<Vec<_>>();

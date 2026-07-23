@@ -210,6 +210,28 @@ pub fn media_display_path(entry: &ChatMediaEntry) -> String {
     }
 }
 
+pub fn merge_chat_attachments(
+    current: &[ChatAttachment],
+    incoming: &[ChatAttachment],
+) -> Vec<ChatAttachment> {
+    let mut merged = current.to_vec();
+    for attachment in incoming {
+        if let Some(existing) = merged
+            .iter_mut()
+            .find(|existing| existing.path == attachment.path)
+        {
+            let mut replacement = attachment.clone();
+            if replacement.preview_data_url.is_empty() {
+                replacement.preview_data_url = existing.preview_data_url.clone();
+            }
+            *existing = replacement;
+        } else {
+            merged.push(attachment.clone());
+        }
+    }
+    merged
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +282,35 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(media_display_path(&root_entry), "~/Pictures");
+    }
+
+    #[test]
+    fn attachment_batches_append_new_files_and_refresh_existing_metadata() {
+        let first = ChatAttachment {
+            path: "/tmp/one.png".into(),
+            name: "one.png".into(),
+            mime_type: "image/png".into(),
+            size: 1,
+            preview_data_url: "data:image/png;base64,preview".into(),
+        };
+        let second = ChatAttachment {
+            path: "/tmp/two.png".into(),
+            name: "two.png".into(),
+            mime_type: "image/png".into(),
+            size: 2,
+            preview_data_url: String::new(),
+        };
+        let refreshed = ChatAttachment {
+            size: 3,
+            ..first.clone()
+        };
+
+        let merged =
+            merge_chat_attachments(std::slice::from_ref(&first), &[second.clone(), refreshed]);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].size, 3);
+        assert_eq!(merged[0].preview_data_url, first.preview_data_url);
+        assert_eq!(merged[1], second);
     }
 }

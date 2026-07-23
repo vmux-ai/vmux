@@ -228,6 +228,7 @@ impl Plugin for AgentChatPagePlugin {
                     send_acp_model_requests,
                     drain_chat_attachment_tasks,
                     drain_chat_media_list_tasks,
+                    drain_chat_media_preview_tasks,
                     drain_resume_list_tasks,
                     drain_resume_handoff_tasks,
                 ),
@@ -304,7 +305,12 @@ struct ChatMediaListTask {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const ATTACHMENT_PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
+#[derive(Component)]
+struct ChatMediaPreviewTask {
+    webview: Entity,
+    task: Task<ChatMediaEntries>,
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
@@ -349,26 +355,12 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
     }
     let name = path.file_name()?.to_string_lossy().into_owned();
     let mime_type = attachment_mime(&path);
-    let preview_data_url =
-        if mime_type.starts_with("image/") && metadata.len() <= ATTACHMENT_PREVIEW_LIMIT {
-            std::fs::read(&path)
-                .ok()
-                .map(|bytes| {
-                    format!(
-                        "data:{mime_type};base64,{}",
-                        base64::engine::general_purpose::STANDARD.encode(bytes)
-                    )
-                })
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
     Some(ChatAttachment {
         path: path.to_string_lossy().into_owned(),
         name,
         mime_type,
         size: metadata.len(),
-        preview_data_url,
+        preview_data_url: String::new(),
     })
 }
 
@@ -404,10 +396,22 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
+    let mut attachment = chat_attachment(path)?;
+    if !attachment.mime_type.starts_with("image/") {
+        return None;
+    }
+    attachment.preview_data_url =
+        media_thumbnail_data_url(std::path::Path::new(&attachment.path), attachment.size);
+    (!attachment.preview_data_url.is_empty()).then_some(attachment)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_chat_attachment_task(
     webview: Entity,
     event: &'static str,
     paths: Vec<std::path::PathBuf>,
+    previews: bool,
     commands: &mut Commands,
 ) {
     if paths.is_empty() {
@@ -415,7 +419,14 @@ fn spawn_chat_attachment_task(
     }
     let task = IoTaskPool::get().spawn(async move {
         ChatAttachments {
-            attachments: paths.into_iter().filter_map(chat_attachment).collect(),
+            attachments: paths
+                .into_iter()
+                .filter_map(if previews {
+                    chat_attachment_preview
+                } else {
+                    chat_attachment
+                })
+                .collect(),
         }
     });
     commands.spawn(ChatAttachmentTask {
@@ -423,6 +434,21 @@ fn spawn_chat_attachment_task(
         event,
         task,
     });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_selected_attachment_tasks(
+    webview: Entity,
+    paths: Vec<std::path::PathBuf>,
+    commands: &mut Commands,
+) {
+    spawn_chat_attachment_task(
+        webview,
+        CHAT_ATTACHMENTS_EVENT,
+        paths.clone(),
+        false,
+        commands,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -564,8 +590,17 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
         })
     });
     entries.truncate(100);
+    ChatMediaEntries {
+        request_id,
+        query,
+        entries,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
-    for entry in &mut entries {
+    for entry in &mut response.entries {
         if entry.is_dir || !entry.mime_type.starts_with("image/") {
             continue;
         }
@@ -581,11 +616,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
             remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
         }
     }
-    ChatMediaEntries {
-        request_id,
-        query,
-        entries,
-    }
+    response
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -612,12 +643,7 @@ fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: 
         .filter(|path| !path.is_empty())
         .map(std::path::PathBuf::from)
         .collect();
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        paths,
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -637,6 +663,7 @@ fn on_chat_attachment_preview_request(
         trigger.event().webview,
         CHAT_ATTACHMENT_PREVIEWS_EVENT,
         paths,
+        true,
         &mut commands,
     );
 }
@@ -658,12 +685,15 @@ fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Comm
     let Some(paths) = dialog.pick_files() else {
         return;
     };
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        paths,
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).ok()?;
+    let mut output = std::io::Cursor::new(Vec::new());
+    image.write_to(&mut output, image::ImageFormat::Png).ok()?;
+    Some(output.into_inner())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -671,7 +701,9 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
     if let Some(path) = vmux_terminal::clipboard::image_file_path() {
         return Some(std::path::PathBuf::from(path));
     }
-    let png = vmux_terminal::clipboard::read_image_png()?;
+    let png = vmux_terminal::clipboard::read_image_png().or_else(|| {
+        vmux_terminal::clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes))
+    })?;
     let directory = std::env::temp_dir().join("vmux-prompt-attachments");
     std::fs::create_dir_all(&directory).ok()?;
     let path = directory.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));
@@ -684,12 +716,7 @@ fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Co
     let Some(path) = clipboard_image_path() else {
         return;
     };
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENTS_EVENT,
-        vec![path],
-        &mut commands,
-    );
+    spawn_selected_attachment_tasks(trigger.event().webview, vec![path], &mut commands);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -701,11 +728,27 @@ fn drain_chat_attachment_tasks(
         let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
             continue;
         };
+        let preview_paths = (pending.event == CHAT_ATTACHMENTS_EVENT).then(|| {
+            attachments
+                .attachments
+                .iter()
+                .map(|attachment| std::path::PathBuf::from(&attachment.path))
+                .collect::<Vec<_>>()
+        });
         commands.trigger(BinHostEmitEvent::from_rkyv(
             pending.webview,
             pending.event,
             &attachments,
         ));
+        if let Some(paths) = preview_paths {
+            spawn_chat_attachment_task(
+                pending.webview,
+                CHAT_ATTACHMENT_PREVIEWS_EVENT,
+                paths,
+                true,
+                &mut commands,
+            );
+        }
         commands.entity(entity).despawn();
     }
 }
@@ -713,6 +756,35 @@ fn drain_chat_attachment_tasks(
 #[cfg(not(target_arch = "wasm32"))]
 fn drain_chat_media_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
+    mut commands: Commands,
+) {
+    for (entity, mut pending) in &mut tasks {
+        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
+            continue;
+        };
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            pending.webview,
+            CHAT_MEDIA_ENTRIES_EVENT,
+            &entries,
+        ));
+        if entries
+            .entries
+            .iter()
+            .any(|entry| !entry.is_dir && entry.mime_type.starts_with("image/"))
+        {
+            let task = IoTaskPool::get().spawn(async move { chat_media_previews(entries) });
+            commands.spawn(ChatMediaPreviewTask {
+                webview: pending.webview,
+                task,
+            });
+        }
+        commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_chat_media_preview_tasks(
+    mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
     mut commands: Commands,
 ) {
     for (entity, mut pending) in &mut tasks {
@@ -1923,6 +1995,22 @@ mod native_tests {
             .unwrap();
         let thumbnail = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumbnail.width().max(thumbnail.height()), 96);
+    }
+
+    #[test]
+    fn clipboard_tiff_is_converted_to_png() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            4,
+            3,
+            image::Rgba([20, 40, 60, 255]),
+        ));
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut tiff, image::ImageFormat::Tiff).unwrap();
+
+        let png = tiff_to_png(&tiff.into_inner()).unwrap();
+        let decoded = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap();
+
+        assert_eq!((decoded.width(), decoded.height()), (4, 3));
     }
 
     #[test]

@@ -24,7 +24,8 @@ use dioxus::prelude::*;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use vmux_command::prompt_media::{
-    inline_media_query, media_display_path, media_reference, replace_inline_media_query,
+    inline_media_query, media_display_path, media_reference, merge_chat_attachments,
+    replace_inline_media_query,
 };
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
@@ -601,16 +602,8 @@ pub fn Page(
         });
     let _attachments =
         use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
-            let mut next = attachments.peek().clone();
-            let mut previews = attachment_previews.peek().clone();
-            for attachment in &selected.attachments {
-                previews.insert(attachment.path.clone(), attachment.clone());
-                if !next.iter().any(|existing| existing.path == attachment.path) {
-                    next.push(attachment.clone());
-                }
-            }
-            attachment_previews.set(previews);
-            attachments.set(next);
+            let current = attachments.peek().clone();
+            attachments.set(merge_chat_attachments(&current, &selected.attachments));
             focus_prompt_end(PROMPT_INPUT_ID);
         });
     let _attachment_previews = use_bin_event_listener::<ChatAttachments, _>(
@@ -799,6 +792,7 @@ pub fn Page(
             is_dir: entry.is_dir,
         })
         .collect::<Vec<_>>();
+    let prompt_attachment_previews = attachment_previews.read();
     let prompt_attachments = transition_attachments
         .read()
         .iter()
@@ -806,7 +800,10 @@ pub fn Page(
             key: format!("transition-attachment-{}", attachment.path),
             name: attachment.name.clone(),
             label: attachment_label(attachment),
-            preview_data_url: attachment.preview_data_url.clone(),
+            preview_data_url: prompt_attachment_previews
+                .get(&attachment.path)
+                .map(|preview| preview.preview_data_url.clone())
+                .unwrap_or_else(|| attachment.preview_data_url.clone()),
             remove_index: None,
         })
         .chain(
@@ -818,7 +815,10 @@ pub fn Page(
                     key: format!("attachment-pill-{}", attachment.path),
                     name: attachment.name.clone(),
                     label: attachment_label(attachment),
-                    preview_data_url: attachment.preview_data_url.clone(),
+                    preview_data_url: prompt_attachment_previews
+                        .get(&attachment.path)
+                        .map(|preview| preview.preview_data_url.clone())
+                        .unwrap_or_else(|| attachment.preview_data_url.clone()),
                     remove_index: Some(index),
                 }),
         )
