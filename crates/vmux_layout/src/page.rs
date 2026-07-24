@@ -6,12 +6,36 @@ use std::rc::Rc;
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
-    BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent,
-    CommandBarPanelCloseEvent, FolderRow, HeaderCommandEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT,
-    LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, PanelPlacement, RELOAD_EVENT, REMOTE_STATE_EVENT, ReloadEvent,
-    RemoteCommandEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT, StackNode, StackRow,
-    StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent, clamp_panel_placement,
+    BookmarksCommandEvent,
+    BookmarksHostEvent,
+    CommandBarPanelActiveEvent,
+    CommandBarPanelCloseEvent,
+    FolderRow,
+    HeaderCommandEvent,
+    LAYOUT_COMMAND_BAR_CLOSE_EVENT,
+    LAYOUT_COMMAND_BAR_OPEN_EVENT,
+    LAYOUT_STATE_EVENT,
+    LayoutStateEvent,
+    PANE_TREE_EVENT,
+    PanelPlacement,
+    PaneNode,
+    PaneTreeEvent,
+    RELOAD_EVENT,
+    ReloadEvent,
+    REMOTE_STATE_EVENT,
+    RemoteCommandEvent,
+    RemoteCopyEvent,
+    RemotePhase,
+    RemoteStateEvent,
+    StackNode,
+    StackRow,
+    STACKS_EVENT,
+    StacksHostEvent,
+    TabRow,
+    TABS_EVENT,
+    TabsCommandEvent,
+    TabsHostEvent,
+    clamp_panel_placement,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -1285,7 +1309,6 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     } else {
         None
     };
-    let pairing_url = remote.pairing_url.clone();
     rsx! {
         div {
             class: if remote.enabled {
@@ -1379,7 +1402,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         r#type: "button",
                         class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
                         onclick: move |_| {
-                            copy_to_clipboard(&pairing_url);
+                            let _ = try_cef_bin_emit_rkyv(&RemoteCopyEvent);
                             copied.set(true);
                         },
                         if copied() { "Copied" } else { "Copy" }
@@ -1425,13 +1448,6 @@ fn pairing_qr_svg(value: &str) -> Option<String> {
             .light_color(svg::Color("#ffffff"))
             .build(),
     )
-}
-
-fn copy_to_clipboard(value: &str) {
-    let Ok(value) = serde_json::to_string(value) else {
-        return;
-    };
-    let _ = document::eval(&format!("navigator.clipboard.writeText({value});"));
 }
 
 #[derive(Clone, PartialEq)]
