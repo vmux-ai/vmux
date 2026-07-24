@@ -21,6 +21,7 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
+use vmux_ui::file_icon::type_icon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::PageIconView;
@@ -840,6 +841,14 @@ fn SideSheetView(
         .find(|pane| pane.is_active)
         .or_else(|| panes.first())
         .map(|pane| pane.id);
+    let project_boundary = tab_boundary.clone().or_else(|| {
+        active_space.as_ref().and_then(|space| {
+            (!space.startup_dir.is_empty()).then(|| crate::event::TabBoundary {
+                effective_dir: space.startup_dir.clone(),
+                ..Default::default()
+            })
+        })
+    });
     rsx! {
         div {
             class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground",
@@ -850,23 +859,9 @@ fn SideSheetView(
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
-                    if let Some(b) = tab_boundary {
-                        TabBoundaryPanel { boundary: b }
-                    } else if !space.startup_dir.is_empty() {
-                        div { class: "flex items-center gap-1.5 border-t border-foreground/10 px-2.5 py-2 text-muted-foreground",
-                            Icon { class: "h-3.5 w-3.5 shrink-0",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            }
-                            span {
-                                class: "min-w-0 flex-1 truncate text-xs",
-                                style: "direction:rtl;",
-                                title: "{space.startup_dir}",
-                                bdi { style: "unicode-bidi:isolate;direction:ltr;", "{space.startup_dir}" }
-                            }
-                        }
-                    }
                 }
             }
+            ProjectsCard { boundary: project_boundary }
             BookmarksSection { bookmarks: bookmarks.clone(), active_page }
             if let Some(pane_id) = active_pane_id {
                 KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
@@ -883,6 +878,44 @@ fn SideSheetView(
                 for (i, pane) in panes.iter().enumerate() {
                     PaneSection { key: "{pane.id}", pane: pane.clone(), index: i }
                 }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProjectsCard(boundary: Option<crate::event::TabBoundary>) -> Element {
+    let title = translate("layout-projects");
+    let empty = translate("layout-no-project-selected");
+    let project_name = boundary
+        .as_ref()
+        .and_then(|boundary| {
+            boundary
+                .effective_dir
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .filter(|name| !name.is_empty())
+        })
+        .map(str::to_string)
+        .unwrap_or_else(|| empty.clone());
+    rsx! {
+        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            div { class: "flex min-w-0 items-center gap-2 px-2.5 py-2",
+                div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                    Icon { class: "h-3.5 w-3.5",
+                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "text-ui font-semibold text-foreground", "{title}" }
+                    div { class: "truncate text-[10px] text-muted-foreground", "{project_name}" }
+                }
+            }
+            if let Some(boundary) = boundary {
+                TabBoundaryPanel { boundary }
+            } else {
+                div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
             }
         }
     }
@@ -1155,19 +1188,13 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                 title: "{entry.path}",
                 class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                 onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                Icon { class: "h-3.5 w-3.5 shrink-0",
-                    path { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }
-                    path { d: "M14 2v6h6" }
-                }
+                {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
                 span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
             }
         }
     }
 }
 
-/// The active tab's working directory + live git status, rendered inside the space card. Shows the
-/// dir always; when it's a git repo, adds an auto-detected git row (branch, worktree, dirty/ahead).
-/// Read-only — worktree lifecycle is agent-driven (no UI actions).
 #[component]
 fn TabBoundaryPanel(boundary: crate::event::TabBoundary) -> Element {
     let b = boundary;

@@ -279,6 +279,8 @@ menu-bookmark = Grāmatzīme
 menu-edit = Rediģēt
 
 layout-knowledge = Zināšanas
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Atvērt Zināšanas
 layout-open-welcome-knowledge = Atvērt “Laipni lūdzam Zināšanās”
 layout-open-path = Atvērt { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ielādē multividi…
 agent-no-matching-media = Nav atbilstošas multivides
 agent-prompt-context = Uzvednes konteksts
 agent-details = Detalizēti
+agent-copy = Copy
 agent-path = Ceļš
 agent-tool = Rīks
 agent-server = Serveris

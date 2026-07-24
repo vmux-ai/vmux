@@ -27,14 +27,6 @@ pub struct CloseTabRequest {
     pub tab: Entity,
 }
 
-#[derive(Component)]
-pub(crate) struct TabReplacementSource;
-
-#[derive(Component)]
-pub(crate) struct PendingTabReplacement {
-    pub old_tab: Entity,
-}
-
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
@@ -201,7 +193,6 @@ fn handle_tab_commands(
                     content,
                     clear_pending_stack: true,
                     focus: true,
-                    replaces: None,
                 });
             }
             AppCommand::Layout(LayoutCommand::Tab(tab_cmd)) => match tab_cmd {
@@ -225,7 +216,6 @@ fn handle_tab_commands(
                         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
                         clear_pending_stack: true,
                         focus: true,
-                        replaces: None,
                     });
                 }
                 TabCommand::Next | TabCommand::Previous => {
@@ -938,7 +928,6 @@ mod tests {
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,
-                replaces: None,
             });
 
         app.update();

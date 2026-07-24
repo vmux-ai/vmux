@@ -279,6 +279,8 @@ menu-bookmark = Хатчӯб
 menu-edit = Таҳрир
 
 layout-knowledge = Дониш
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Кушодани Дониш
 layout-open-welcome-knowledge = Кушодани «Хуш омадед ба Дониш»
 layout-open-path = Кушодани { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Медиа бор мешавад…
 agent-no-matching-media = Медияи мувофиқ нест
 agent-prompt-context = Контексти дархост
 agent-details = Тафсилот
+agent-copy = Copy
 agent-path = Масир
 agent-tool = Абзор
 agent-server = Сервер

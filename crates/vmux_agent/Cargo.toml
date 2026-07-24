@@ -54,6 +54,7 @@ vmux_ui = { path = "../vmux_ui", default-features = false }
 vmux_core = { path = "../vmux_core" }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
+    "Clipboard",
     "Window",
     "Document",
     "Element",
@@ -63,6 +64,7 @@ web-sys = { version = "0.3", features = [
     "HtmlTextAreaElement",
     "KeyboardEvent",
     "KeyboardEventInit",
+    "Navigator",
     "ScrollIntoViewOptions",
     "ScrollLogicalPosition",
     "Selection",

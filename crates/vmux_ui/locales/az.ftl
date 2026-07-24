@@ -279,6 +279,8 @@ menu-bookmark = Əlfəcin
 menu-edit = Redaktə
 
 layout-knowledge = Bilik
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Biliyi aç
 layout-open-welcome-knowledge = Biliyə xoş gəlmisiniz səhifəsini aç
 layout-open-path = { $path } aç
@@ -435,6 +437,7 @@ agent-loading-media = Media yüklənir…
 agent-no-matching-media = Uyğun media yoxdur
 agent-prompt-context = Prompt konteksti
 agent-details = Təfərrüatlar
+agent-copy = Copy
 agent-path = Yol
 agent-tool = Alət
 agent-server = Server

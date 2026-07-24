@@ -279,6 +279,8 @@ menu-bookmark = Comharra-lìn
 menu-edit = Deasaich
 
 layout-knowledge = Eòlas
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Fosgail Eòlas
 layout-open-welcome-knowledge = Fosgail Fàilte gu Eòlas
 layout-open-path = Fosgail { $path }
@@ -435,6 +437,7 @@ agent-loading-media = A’ luchdadh mheadhanan…
 agent-no-matching-media = Chan eil meadhanan a’ freagairt ann
 agent-prompt-context = Co-theacsa a’ phroimt
 agent-details = Mion-fhiosrachadh
+agent-copy = Copy
 agent-path = Slighe
 agent-tool = Inneal
 agent-server = Frithealaiche

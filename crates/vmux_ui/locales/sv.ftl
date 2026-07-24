@@ -279,6 +279,8 @@ menu-bookmark = Bokmärke
 menu-edit = Redigera
 
 layout-knowledge = Kunskap
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Öppna Kunskap
 layout-open-welcome-knowledge = Öppna Välkommen till Kunskap
 layout-open-path = Öppna { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Läser in media…
 agent-no-matching-media = Inga matchande media
 agent-prompt-context = Promptkontext
 agent-details = Detaljer
+agent-copy = Copy
 agent-path = Sökväg
 agent-tool = Verktyg
 agent-server = Server

@@ -279,6 +279,8 @@ menu-bookmark = Makè
 menu-edit = Edite
 
 layout-knowledge = Konesans
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Louvri Konesans
 layout-open-welcome-knowledge = Louvri Byenveni nan Konesans
 layout-open-path = Louvri { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ap chaje medya…
 agent-no-matching-media = Pa gen medya ki koresponn
 agent-prompt-context = Kontèks envit
 agent-details = Detay
+agent-copy = Copy
 agent-path = Chemen
 agent-tool = Zouti
 agent-server = Sèvè

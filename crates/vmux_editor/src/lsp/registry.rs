@@ -73,6 +73,26 @@ pub fn builtin_spec(ext: &str) -> Option<ServerSpec> {
     })
 }
 
+pub fn preferred_package(ext: &str) -> Option<&'static str> {
+    Some(match ext {
+        "rs" => "rust-analyzer",
+        "py" | "pyi" => "pyright",
+        "ts" | "tsx" | "js" | "jsx" => "typescript-language-server",
+        "go" => "gopls",
+        "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "hh" => "clangd",
+        "lua" => "lua-language-server",
+        "rb" => "solargraph",
+        "zig" => "zls",
+        "sh" | "bash" => "bash-language-server",
+        "json" => "json-lsp",
+        "yaml" | "yml" => "yaml-language-server",
+        "toml" => "taplo",
+        "md" | "markdown" => "marksman",
+        "java" => "jdtls",
+        _ => return None,
+    })
+}
+
 pub fn resolve_spec(
     ext: &str,
     overrides: &std::collections::BTreeMap<String, ServerSpec>,
@@ -150,6 +170,29 @@ mod tests {
         assert_eq!(builtin_spec("tsx").unwrap().language_id, "typescriptreact");
         assert_eq!(builtin_spec("cpp").unwrap().language_id, "cpp");
         assert!(builtin_spec("xyzzy").is_none());
+    }
+
+    #[test]
+    fn known_extensions_map_to_preferred_packages() {
+        for (extension, package) in [
+            ("rs", "rust-analyzer"),
+            ("py", "pyright"),
+            ("tsx", "typescript-language-server"),
+            ("go", "gopls"),
+            ("cpp", "clangd"),
+            ("lua", "lua-language-server"),
+            ("rb", "solargraph"),
+            ("zig", "zls"),
+            ("sh", "bash-language-server"),
+            ("json", "json-lsp"),
+            ("yaml", "yaml-language-server"),
+            ("toml", "taplo"),
+            ("md", "marksman"),
+            ("java", "jdtls"),
+        ] {
+            assert_eq!(preferred_package(extension), Some(package));
+        }
+        assert_eq!(preferred_package("xyzzy"), None);
     }
 
     #[test]

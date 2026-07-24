@@ -162,6 +162,28 @@ pub fn repository_init(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(&dir).map(|info| info.root)
 }
 
+/// Create the empty root commit required before Git can add a linked worktree.
+pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
+    let (_, _, has_head) = git(root, &["rev-parse", "--verify", "HEAD"])?;
+    if has_head {
+        return Ok(());
+    }
+    let (stdout, stderr, ok) = git(
+        root,
+        &[
+            "commit",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "--message",
+            "Initial commit",
+        ],
+    )?;
+    if !ok {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(())
+}
+
 /// The absolute common Git directory shared by a repository's main and linked worktrees.
 pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.common_dir)

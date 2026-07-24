@@ -279,6 +279,8 @@ menu-bookmark = Alamar shafi
 menu-edit = Gyara
 
 layout-knowledge = Ilimi
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Buɗe Ilimi
 layout-open-welcome-knowledge = Buɗe Maraba zuwa Ilimi
 layout-open-path = Buɗe { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ana loda midiya…
 agent-no-matching-media = Babu midiya da ta dace
 agent-prompt-context = Mahallin prompt
 agent-details = Cikakkun bayanai
+agent-copy = Copy
 agent-path = Hanya
 agent-tool = Kayan aiki
 agent-server = Sabar

@@ -143,10 +143,7 @@ impl Plugin for BrowserPlugin {
                 .collect(),
         );
         webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
-        let cef_command_line = CommandLineConfig {
-            switches: vmux_core::profile::cef_keychain_switches().to_vec(),
-            switch_values: Vec::new(),
-        };
+        let cef_command_line = cef_command_line_config();
         configure_cef_backend_sync(app)
             .insert_resource(crate::extensions::load::PreparedExtensions(
                 prepared_extensions,
@@ -357,6 +354,13 @@ impl Plugin for BrowserPlugin {
                     .after(sync_windowed_frames)
                     .after(sync_windowed_command_bar),
             );
+    }
+}
+
+fn cef_command_line_config() -> CommandLineConfig {
+    CommandLineConfig {
+        switches: vmux_core::profile::cef_keychain_switches().to_vec(),
+        switch_values: vec![("disable-features", "BackForwardCache")],
     }
 }
 
@@ -5058,6 +5062,15 @@ fn cef_root_cache_path() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cef_disables_bfcache_for_extension_ports() {
+        assert!(
+            cef_command_line_config()
+                .switch_values
+                .contains(&("disable-features", "BackForwardCache"))
+        );
+    }
 
     #[test]
     fn knowledge_paths_only_open_vault_markdown_and_directories() {

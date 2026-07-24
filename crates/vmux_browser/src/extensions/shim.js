@@ -357,8 +357,51 @@
     patchWindowEvent("onBoundsChanged");
   }
 
+  function defaultPopupPath() {
+    if (!c.runtime || typeof c.runtime.getManifest !== "function") return "";
+    var manifest = c.runtime.getManifest() || {};
+    var action = manifest.action || manifest.browser_action || {};
+    return typeof action.default_popup === "string" ? action.default_popup : "";
+  }
+  function replaceActionMethod(action, name, method) {
+    try {
+      Object.defineProperty(action, name, {
+        value: method,
+        configurable: true,
+      });
+      return;
+    } catch (_error) {}
+    try { action[name] = method; } catch (_ignored) {}
+  }
+  var patchedActions = [];
+  function patchActionPopup(action) {
+    if (!action || patchedActions.indexOf(action) >= 0) return;
+    patchedActions.push(action);
+    var popup = defaultPopupPath();
+    var nativeSetPopup = typeof action.setPopup === "function" ? action.setPopup.bind(action) : null;
+    if (nativeSetPopup) {
+      replaceActionMethod(action, "setPopup", function (details, cb) {
+        if (details && typeof details.popup === "string") popup = details.popup;
+        return nativeSetPopup(details || {}, cb);
+      });
+    }
+    var openPopup = function (options, cb) {
+      if (typeof options === "function") { cb = options; options = undefined; }
+      if (!popup) return callbackResult(Promise.resolve(undefined), cb, false);
+      var url = c.runtime.getURL(popup);
+      var promise = windowRequest("create", [{ url: url, type: "popup", focused: true }], function () {
+        return fallbackCreate({ url: url });
+      });
+      return callbackResult(promise, cb, false);
+    };
+    replaceActionMethod(action, "openPopup", openPopup);
+  }
+  patchActionPopup(c.action);
+  patchActionPopup(c.browserAction);
+
   if (globalThis.window === globalThis && typeof globalThis.close === "function") {
     var nativeWindowClose = globalThis.close.bind(globalThis);
+    var firstExtensionWindowId = 1000000000;
     globalThis.close = function () {
       if (!bridgeRuntime || typeof bridgeRuntime.request !== "function") {
         nativeWindowClose();
@@ -370,6 +413,7 @@
             nativeWindowClose();
             return;
           }
+          if (win.id < firstExtensionWindowId) return;
           bridgeRuntime.request("windows", "remove", [win.id]).catch(nativeWindowClose);
         },
         nativeWindowClose,

@@ -108,6 +108,31 @@ fn line_start_offsets(text: &str) -> Vec<usize> {
     offsets
 }
 
+fn inline_text(inlines: &[MdInline], output: &mut String) {
+    for inline in inlines {
+        match inline {
+            MdInline::Text(text) | MdInline::Code(text) => output.push_str(text),
+            MdInline::Strong(children)
+            | MdInline::Emph(children)
+            | MdInline::Strike(children)
+            | MdInline::Link {
+                inlines: children, ..
+            } => inline_text(children, output),
+            MdInline::Image { alt, .. } => output.push_str(alt),
+            MdInline::SoftBreak | MdInline::HardBreak => output.push(' '),
+        }
+    }
+}
+
+fn heading_matches_title(block: &MdBlock, title: &str) -> bool {
+    let MdBlock::Heading { level: 1, inlines } = block else {
+        return false;
+    };
+    let mut text = String::new();
+    inline_text(inlines, &mut text);
+    text.trim() == title.trim()
+}
+
 fn offset_to_line(line_starts: &[usize], byte: usize) -> u32 {
     match line_starts.binary_search(&byte) {
         Ok(index) => index as u32,
@@ -347,6 +372,9 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
         })
         .collect::<Vec<_>>();
     if !metadata.title.is_empty()
+        && !parsed
+            .first()
+            .is_some_and(|block| heading_matches_title(&block.block, &metadata.title))
         && let Some(title_line) = metadata.title_line
     {
         let source = text
@@ -417,5 +445,18 @@ mod tests {
             MdBlock::Heading { level: 1, .. }
         ));
         assert_eq!(note.blocks[1].start_line, 4);
+    }
+
+    #[test]
+    fn frontmatter_title_does_not_duplicate_matching_heading() {
+        let note = parse_note_document("---\ntitle: Welcome Home\n---\n\n# Welcome Home\n\nBody\n");
+
+        assert_eq!(note.title, "Welcome Home");
+        assert_eq!(note.blocks.len(), 2);
+        assert_eq!(note.blocks[0].start_line, 4);
+        assert!(matches!(
+            &note.blocks[0].block,
+            MdBlock::Heading { level: 1, .. }
+        ));
     }
 }

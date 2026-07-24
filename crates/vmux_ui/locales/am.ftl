@@ -279,6 +279,8 @@ menu-bookmark = ዕልባት
 menu-edit = አርትዕ
 
 layout-knowledge = ዕውቀት
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ዕውቀትን ክፈት
 layout-open-welcome-knowledge = የዕውቀት እንኳን ደህና መጡን ክፈት
 layout-open-path = { $path } ክፈት
@@ -435,6 +437,7 @@ agent-loading-media = ሚዲያ በመጫን ላይ…
 agent-no-matching-media = የሚዛመድ ሚዲያ የለም
 agent-prompt-context = የፕሮምፕት አውድ
 agent-details = ዝርዝሮች
+agent-copy = Copy
 agent-path = ዱካ
 agent-tool = መሳሪያ
 agent-server = አገልጋይ

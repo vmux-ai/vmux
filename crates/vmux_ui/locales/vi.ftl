@@ -279,6 +279,8 @@ menu-bookmark = Dấu trang
 menu-edit = Sửa
 
 layout-knowledge = Tri thức
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Mở Tri thức
 layout-open-welcome-knowledge = Mở Chào mừng đến với Tri thức
 layout-open-path = Mở { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Đang tải phương tiện…
 agent-no-matching-media = Không có phương tiện phù hợp
 agent-prompt-context = Ngữ cảnh prompt
 agent-details = Chi tiết
+agent-copy = Copy
 agent-path = Đường dẫn
 agent-tool = Công cụ
 agent-server = Máy chủ

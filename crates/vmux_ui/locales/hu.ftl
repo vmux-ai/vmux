@@ -279,6 +279,8 @@ menu-bookmark = Könyvjelző
 menu-edit = Szerkesztés
 
 layout-knowledge = Tudástár
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Tudástár megnyitása
 layout-open-welcome-knowledge = Tudástár üdvözlőlapjának megnyitása
 layout-open-path = { $path } megnyitása
@@ -435,6 +437,7 @@ agent-loading-media = Média betöltése…
 agent-no-matching-media = Nincs egyező média
 agent-prompt-context = Promptkörnyezet
 agent-details = Részletek
+agent-copy = Copy
 agent-path = Útvonal
 agent-tool = Eszköz
 agent-server = Kiszolgáló

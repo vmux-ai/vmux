@@ -2,7 +2,7 @@
 name = "vmux_mcp"
 version.workspace = true
 edition.workspace = true
-description = "MCP stdio server for Vmux workspace controls"
+description = "MCP stdio server for Vmux project controls"
 publish = false
 
 [lib]

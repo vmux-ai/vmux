@@ -444,7 +444,7 @@ is typed into an interactive shell, so the terminal stays usable afterwards."
 fn create_worktree_definition() -> ToolDefinition {
     ToolDefinition {
         name: "create_worktree".into(),
-        description: "Call immediately before the first edit, write, test, build, or other project mutation, after a Git workspace is selected. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
+        description: "Call immediately before the first edit, write, test, build, or other project mutation, after a Git project is selected. Never call for requests that only read, show, search, or explain existing files. vmux reuses the current linked worktree, accepts a known existing worktree path, automatically uses a single unambiguous existing worktree, or creates a managed worktree when none exists. If multiple existing worktrees are returned as ambiguous, ask the user with request_user_choice to choose an existing path or Create new worktree; call again with path or create=true. Never run git worktree add manually. Returns the absolute worktree path."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -459,10 +459,10 @@ fn create_worktree_definition() -> ToolDefinition {
     }
 }
 
-fn select_workspace_definition() -> ToolDefinition {
+fn select_project_definition() -> ToolDefinition {
     ToolDefinition {
-        name: "select_workspace".into(),
-        description: "Start the Create or select workspace flow. Pass path when the conversation already identifies a valid local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. vmux treats it as Git only when the selected directory contains .git; otherwise vmux asks whether to initialize a Git repository. A non-Git workspace remains usable when the user declines. For a Git workspace, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory for workspaces. Do not call for general questions or self-contained terminal demonstrations."
+        name: "select_project".into(),
+        description: "Select an existing project before the first edit, write, test, build, or other project mutation. Never call for requests that only read, show, search, or explain existing files. Pass a known path or omit it to open the native project picker rooted at ~/.vmux/workspace. For a new project, first use request_user_choice to offer a concrete suggested location and Choose existing project; do not ask the user to invent a folder. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/workspace/local/<project> otherwise. When creation is selected, use run only to create the empty directory, then call this tool with that path. vmux offers Git initialization and uses that new project root directly without a linked worktree. For a previously existing Git project, call create_worktree immediately before the first mutation. The request returns immediately when user selection is needed: stop the current turn and do not call again while pending. Do not search the user's home directory. Do not call for general questions or self-contained terminal demonstrations."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -477,7 +477,7 @@ fn select_workspace_definition() -> ToolDefinition {
 fn request_user_choice_definition() -> ToolDefinition {
     ToolDefinition {
         name: "request_user_choice".into(),
-        description: "Show a native multiple-choice question in the agent conversation. When the user asks for options, alternatives, or things to choose or play with, use this instead of returning a plain Markdown list. Also use it for ambiguous worktree selection and other short user decisions. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
+        description: "Show a native multiple-choice question in the agent conversation. For a new project without a selected project, use it to offer the concrete suggested ~/.vmux/workspace path or Choose existing project. Also use it for other user-requested options and ambiguous worktree selection. Keep options concise and actionable. The user can choose with arrow keys, Ctrl+N/Ctrl+P, number keys, mouse, or Enter. The request returns immediately: stop the current turn; vmux resumes the same conversation with the selected option."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -499,7 +499,7 @@ fn request_user_choice_definition() -> ToolDefinition {
 fn set_conversation_title_definition() -> ToolDefinition {
     ToolDefinition {
         name: "set_conversation_title".into(),
-        description: "Set the agent conversation header to a concise model-written summary. Call as the first tool after every user message, before skills or other tools. Summarize the whole conversation in 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."
+        description: "Set the agent conversation header to a concise model-written summary without asking permission. Always call first after the first user message to replace the provisional raw-prompt title. On later messages, call first only when the topic materially changes. Use 3 to 7 words, correct spelling and grammar, and never copy the user's prompt verbatim."
             .into(),
         input_schema: serde_json::json!({
             "type": "object",
@@ -511,6 +511,24 @@ fn set_conversation_title_definition() -> ToolDefinition {
                     "minLength": 1,
                     "maxLength": 120
                 }
+            }
+        }),
+    }
+}
+
+fn write_knowledge_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "write_knowledge".into(),
+        description: "Create or replace a Markdown note in the user's vmux Knowledge base, then open it beside the conversation. Use this when the user asks to save, copy, or organize information in Knowledge. Provide a relative path under skills/, memories/, projects/, meetings/, or handbook/; omit path to create projects/<title-slug>.md. Never write directly to ~/.vmux/knowledge with shell commands."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["title", "content"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "title": {"type": "string"},
+                "content": {"type": "string"}
             }
         }),
     }
@@ -778,7 +796,8 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
     }
     defs.push(request_user_choice_definition());
     defs.push(set_conversation_title_definition());
-    defs.push(select_workspace_definition());
+    defs.push(write_knowledge_definition());
+    defs.push(select_project_definition());
     defs.push(create_worktree_definition());
     if !acp_terminals {
         defs.push(read_terminal_definition());
@@ -1032,9 +1051,40 @@ pub fn dispatch_with_anchor(
             },
         ));
     }
-    if name == "select_workspace" || name == "choose_workspace" {
+    if name == "write_knowledge" {
         let anchor = anchor
-            .ok_or("select_workspace requires an agent anchor (not available to this client)")?;
+            .ok_or("write_knowledge requires an agent anchor (not available to this client)")?;
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(str::to_string);
+        let title = arguments
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .ok_or("write_knowledge.title is empty")?;
+        let content = arguments
+            .get("content")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|content| !content.is_empty())
+            .ok_or("write_knowledge.content is empty")?;
+        return Ok(DispatchTarget::Command(AgentCommand::WriteKnowledge {
+            anchor,
+            path,
+            title: title.to_string(),
+            content: content.to_string(),
+        }));
+    }
+    if matches!(
+        name,
+        "select_project" | "select_workspace" | "choose_workspace"
+    ) {
+        let anchor = anchor
+            .ok_or("select_project requires an agent anchor (not available to this client)")?;
         if let Some(path) = arguments
             .get("path")
             .and_then(Value::as_str)
@@ -1495,7 +1545,8 @@ mod tests {
             "read_terminal",
             "request_user_choice",
             "set_conversation_title",
-            "select_workspace",
+            "write_knowledge",
+            "select_project",
             "create_worktree",
         ] {
             assert!(
@@ -1503,7 +1554,12 @@ mod tests {
                 "missing hand-written {hand}"
             );
         }
-        for removed_tool in ["new_terminal_tab", "run_shell", "in_pane"] {
+        for removed_tool in [
+            "new_terminal_tab",
+            "run_shell",
+            "in_pane",
+            "select_workspace",
+        ] {
             assert!(
                 !names.contains(&removed_tool.to_string()),
                 "superseded tool {removed_tool} should no longer appear in MCP tools"
@@ -1693,10 +1749,49 @@ mod tests {
     }
 
     #[test]
-    fn workspace_tools_dispatch_with_anchor_and_branch() {
+    fn knowledge_write_dispatches_validated_note_to_host() {
         let anchor = vmux_service::protocol::ProcessId::new();
-        let select_definition = select_workspace_definition();
+        let target = dispatch_with_anchor(
+            "write_knowledge",
+            serde_json::json!({
+                "path": "projects/yc.md",
+                "title": "YC Startup School",
+                "content": "Notes"
+            }),
+            Some(anchor),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::WriteKnowledge {
+                anchor: got,
+                path: Some(path),
+                title,
+                content,
+            }) if got == anchor
+                && path == "projects/yc.md"
+                && title == "YC Startup School"
+                && content == "Notes"
+        ));
+    }
+
+    #[test]
+    fn project_tools_dispatch_with_anchor_and_branch() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let worktree_definition = create_worktree_definition();
+        let select_definition = select_project_definition();
         let choice_definition = request_user_choice_definition();
+        assert!(
+            worktree_definition
+                .description
+                .contains("Never call for requests that only read")
+        );
+        assert!(
+            select_definition
+                .description
+                .contains("Never call for requests that only read")
+        );
         assert!(
             select_definition
                 .description
@@ -1707,19 +1802,38 @@ mod tests {
                 .description
                 .contains("Do not search the user's home directory")
         );
-        assert!(select_definition.description.contains("Any directory"));
-        assert!(select_definition.description.contains("folder picker"));
-        assert!(select_definition.description.contains("contains .git"));
+        assert!(
+            select_definition
+                .description
+                .contains("native project picker")
+        );
+        assert!(
+            select_definition
+                .description
+                .contains("~/.vmux/workspace/<remote-host>")
+        );
+        assert!(
+            select_definition
+                .description
+                .contains("~/.vmux/workspace/local/<project>")
+        );
+        assert!(select_definition.description.contains("empty directory"));
+        assert!(
+            select_definition
+                .description
+                .contains("without a linked worktree")
+        );
         assert!(
             select_definition
                 .description
                 .contains("returns immediately")
         );
+        assert!(choice_definition.description.contains("~/.vmux/workspace"));
         assert!(choice_definition.description.contains("Ctrl+N/Ctrl+P"));
         let choose =
-            dispatch_with_anchor("select_workspace", serde_json::json!({}), Some(anchor)).unwrap();
+            dispatch_with_anchor("select_project", serde_json::json!({}), Some(anchor)).unwrap();
         let choose_path = dispatch_with_anchor(
-            "select_workspace",
+            "select_project",
             serde_json::json!({"path": "/repo"}),
             Some(anchor),
         )

@@ -279,6 +279,8 @@ menu-bookmark = Bhukumaki
 menu-edit = Gadzirisa
 
 layout-knowledge = Ruzivo
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Vhura Ruzivo
 layout-open-welcome-knowledge = Vhura Kugamuchirwa kuRuzivo
 layout-open-path = Vhura { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Kurodha midhiya…
 agent-no-matching-media = Hapana midhiya inoenderana
 agent-prompt-context = Mamiriro eprompt
 agent-details = Ruzivo
+agent-copy = Copy
 agent-path = Nzira
 agent-tool = Chishandiso
 agent-server = Sevha

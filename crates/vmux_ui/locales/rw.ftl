@@ -279,6 +279,8 @@ menu-bookmark = Akamenyetso
 menu-edit = Guhindura
 
 layout-knowledge = Ubumenyi
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Fungura Ubumenyi
 layout-open-welcome-knowledge = Fungura Ikaze mu Bumenyi
 layout-open-path = Fungura { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Kuzana media…
 agent-no-matching-media = Nta media ihuye
 agent-prompt-context = Context ya prompt
 agent-details = Ibisobanuro
+agent-copy = Copy
 agent-path = Inzira
 agent-tool = Igikoresho
 agent-server = Serveri

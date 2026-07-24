@@ -283,6 +283,7 @@ pub(crate) fn tool_activity(name: &str) -> ToolActivity {
         ToolActivity::WriteFile
     } else if lower.contains("worktree")
         || lower.contains("workspace")
+        || lower == "select_project"
         || lower.contains("repository")
     {
         ToolActivity::Worktree
@@ -313,6 +314,40 @@ pub(crate) fn tool_activity(name: &str) -> ToolActivity {
     } else {
         ToolActivity::Other
     }
+}
+
+pub(crate) fn tool_args_read_skill(args: &str) -> bool {
+    fn skill_path(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
+                matches!(key.as_str(), "path" | "file" | "file_path" | "filename")
+                    && value.as_str().is_some_and(|path| {
+                        std::path::Path::new(path)
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+                    })
+                    || skill_path(value)
+            }),
+            serde_json::Value::Array(values) => values.iter().any(skill_path),
+            _ => false,
+        }
+    }
+
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(args) else {
+        return false;
+    };
+    while let serde_json::Value::Object(map) = &value {
+        let Some(arguments) = map.get("arguments") else {
+            break;
+        };
+        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
+            value = arguments.clone();
+        } else {
+            break;
+        }
+    }
+    skill_path(&value)
 }
 
 fn normalize_chat_page_title(value: &str) -> String {
@@ -671,6 +706,7 @@ mod tests {
         assert_eq!(tool_activity("apply_patch"), ToolActivity::WriteFile);
         assert_eq!(tool_activity("read_layout"), ToolActivity::Layout);
         assert_eq!(tool_activity("create_worktree"), ToolActivity::Worktree);
+        assert_eq!(tool_activity("select_project"), ToolActivity::Worktree);
         assert_eq!(tool_activity("view_image"), ToolActivity::Image);
         assert_eq!(tool_activity("vmux_screenshot"), ToolActivity::Screenshot);
         assert_eq!(tool_activity("vmux_open_page"), ToolActivity::OpenPage);
@@ -679,6 +715,16 @@ mod tests {
         assert_eq!(tool_activity("search_files"), ToolActivity::Search);
         assert_eq!(tool_activity("exec_command"), ToolActivity::Command);
         assert_eq!(tool_activity("custom_tool"), ToolActivity::Other);
+    }
+
+    #[test]
+    fn skill_reads_are_identified_from_nested_tool_arguments() {
+        assert!(tool_args_read_skill(
+            r#"{"arguments":{"path":"/tmp/skills/caveman/SKILL.md"},"server":"vmux","tool":"read_file"}"#
+        ));
+        assert!(!tool_args_read_skill(
+            r#"{"arguments":{"path":"/tmp/src/lib.rs"},"server":"vmux","tool":"read_file"}"#
+        ));
     }
 
     #[test]

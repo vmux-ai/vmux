@@ -279,6 +279,8 @@ menu-bookmark = Закладка
 menu-edit = Правка
 
 layout-knowledge = Знания
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Открыть Знания
 layout-open-welcome-knowledge = Открыть «Добро пожаловать» в Знаниях
 layout-open-path = Открыть { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Загрузка медиа…
 agent-no-matching-media = Подходящих медиа нет
 agent-prompt-context = Контекст запроса
 agent-details = Подробности
+agent-copy = Copy
 agent-path = Путь
 agent-tool = Инструмент
 agent-server = Сервер

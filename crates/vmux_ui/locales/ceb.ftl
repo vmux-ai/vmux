@@ -279,6 +279,8 @@ menu-bookmark = Bookmark
 menu-edit = Edit
 
 layout-knowledge = Kahibalo
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Ablihi ang Kahibalo
 layout-open-welcome-knowledge = Ablihi ang Welcome to Knowledge
 layout-open-path = Ablihi ang { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Nag-load sa media…
 agent-no-matching-media = Walay parehas nga media
 agent-prompt-context = Context sa prompt
 agent-details = Mga detalye
+agent-copy = Copy
 agent-path = Path
 agent-tool = Tool
 agent-server = Server

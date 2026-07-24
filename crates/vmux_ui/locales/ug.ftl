@@ -279,6 +279,8 @@ menu-bookmark = خەتكۈچ
 menu-edit = تەھرىرلەش
 
 layout-knowledge = بىلىم
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = بىلىمنى ئېچىش
 layout-open-welcome-knowledge = بىلىمگە خۇش كەلدىڭىزنى ئېچىش
 layout-open-path = { $path } نى ئېچىش
@@ -435,6 +437,7 @@ agent-loading-media = مېدىيا يۈكلىنىۋاتىدۇ…
 agent-no-matching-media = ماس مېدىيا يوق
 agent-prompt-context = ئەسكەرتىش مەزمۇنى
 agent-details = تەپسىلاتلار
+agent-copy = Copy
 agent-path = يول
 agent-tool = قورال
 agent-server = مۇلازىمېتىر

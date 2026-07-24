@@ -279,6 +279,8 @@ menu-bookmark = לייענצייכן
 menu-edit = רעדאַגירן
 
 layout-knowledge = וויסן
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = עפֿן וויסן
 layout-open-welcome-knowledge = עפֿן ברוכים הבאים צו וויסן
 layout-open-path = עפֿן { $path }
@@ -435,6 +437,7 @@ agent-loading-media = מעדיע לאָדט זיך…
 agent-no-matching-media = קיין פּאַסיקע מעדיע ניטאָ
 agent-prompt-context = פּראַמפּט־קאָנטעקסט
 agent-details = פּרטים
+agent-copy = Copy
 agent-path = וועג
 agent-tool = געצייג
 agent-server = סערווער

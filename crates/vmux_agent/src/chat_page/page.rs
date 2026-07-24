@@ -5,7 +5,7 @@ use crate::chat_page::composer::{
     approval_decision_for_index, chat_page_title, choice_number_index, edit_prompt, filter_models,
     filter_sessions, is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
     prompt_history_direction, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_expand_thinking, should_fetch_resume, tool_activity,
+    should_expand_thinking, should_fetch_resume, tool_activity, tool_args_read_skill,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
@@ -94,6 +94,12 @@ fn has_text_selection() -> bool {
         .and_then(|w| w.get_selection().ok().flatten())
         .map(|s| !s.is_collapsed())
         .unwrap_or(false)
+}
+
+fn copy_to_clipboard(text: &str) {
+    if let Some(window) = web_sys::window() {
+        let _ = window.navigator().clipboard().write_text(text);
+    }
 }
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
@@ -1125,7 +1131,7 @@ pub fn Page(
     let workspace_label = if context.workspace_selected && !context.workspace_name.is_empty() {
         context.workspace_name.clone()
     } else {
-        "Select workspace".to_string()
+        "Select project".to_string()
     };
     let access_label = if context.auto_allow_count == 0 {
         "Ask".to_string()
@@ -1133,9 +1139,9 @@ pub fn Page(
         format!("Ask · {} allowed", context.auto_allow_count)
     };
     let workspace_title = if context.cwd.is_empty() {
-        "Create or select workspace".to_string()
+        "Choose project".to_string()
     } else {
-        format!("Create or select workspace · {}", context.cwd)
+        format!("Choose project · {}", context.cwd)
     };
     let branch_title = if context.branch.is_empty() {
         "Git repository".to_string()
@@ -1270,7 +1276,7 @@ pub fn Page(
                     } else if context.can_manage_workspace {
                         button {
                             class: "flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[10px] font-medium text-muted-foreground transition hover:bg-violet-500/[0.08] hover:text-violet-600 dark:hover:text-violet-300",
-                            title: "Create or select a worktree for this workspace",
+                            title: "Create or select a worktree for this project",
                             onmousedown: move |event| event.prevent_default(),
                             onclick: move |_| {
                                 let _ = try_cef_bin_emit_rkyv(&ChatCreateWorktree);
@@ -1850,6 +1856,33 @@ fn send_approval(call_id: String, decision: u8) -> bool {
 }
 
 #[component]
+fn MessageCopyButton(text: String) -> Element {
+    let label = translate("agent-copy");
+    rsx! {
+        button {
+            class: "absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground/60 transition hover:bg-foreground/[0.08] hover:text-foreground",
+            title: "{label}",
+            aria_label: "{label}",
+            onclick: move |event| {
+                event.stop_propagation();
+                copy_to_clipboard(&text);
+            },
+            svg {
+                class: "h-3.5 w-3.5",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "1.8",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
+                path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+            }
+        }
+    }
+}
+
+#[component]
 fn ChatItemRow(
     absolute_index: usize,
     item: ChatItem,
@@ -1878,8 +1911,11 @@ fn render_item(
         } => rsx! {
             div {
                 key: "{key}",
-                class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm",
+                class: "chat-user-bubble relative flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border py-2.5 pl-2.5 pr-10 text-sm",
                 style: "content-visibility:auto;contain-intrinsic-size:auto 96px;",
+                if !text.is_empty() {
+                    MessageCopyButton { text: text.clone() }
+                }
                 if let Some(context) = context {
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
@@ -2006,13 +2042,25 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
             )
         }
     });
+    let copy_text = turn
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ChatBlock::Text(text) if !text.is_empty() => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
     rsx! {
         div {
             key: "{key}",
             class: "flex max-w-[92%] flex-col gap-2 self-start",
             style: "content-visibility:auto;contain-intrinsic-size:auto 180px;",
             if !blocks.is_empty() {
-                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3",
+                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border py-3 pl-3.5 pr-10",
+                    if !copy_text.is_empty() {
+                        MessageCopyButton { text: copy_text.clone() }
+                    }
                     for (j , block , children) in blocks {
                         {render_block(
                             j,
@@ -2484,9 +2532,13 @@ fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, String) {
     let icon = tool_activity_icon_for(name, args);
     match activity {
         ToolActivity::Guardian => (icon, translate("agent-tool-guardian-review")),
+        ToolActivity::ReadFile if tool_args_read_skill(args) => (icon, "Read skill".into()),
         ToolActivity::ReadFile => (icon, translate("agent-tool-read-files")),
         ToolActivity::WriteFile => (icon, translate("agent-edited")),
         ToolActivity::Layout => (icon, translate("schema-layout")),
+        ToolActivity::Worktree if name.ends_with("select_project") => {
+            (icon, "Select project".into())
+        }
         ToolActivity::Worktree => (icon, translate("layout-worktree")),
         ToolActivity::Image => (icon, translate("agent-tool-viewed-image")),
         ToolActivity::Screenshot => (icon, translate("agent-tool-viewed-image")),

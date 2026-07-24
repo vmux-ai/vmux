@@ -279,6 +279,8 @@ menu-bookmark = Leabharmharc
 menu-edit = Eagar
 
 layout-knowledge = Eolas
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Oscail Eolas
 layout-open-welcome-knowledge = Oscail Fáilte chuig Eolas
 layout-open-path = Oscail { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Meáin á lódáil…
 agent-no-matching-media = Níl aon mheáin mheaitseála ann
 agent-prompt-context = Comhthéacs leide
 agent-details = Sonraí
+agent-copy = Copy
 agent-path = Conair
 agent-tool = Uirlis
 agent-server = Freastalaí

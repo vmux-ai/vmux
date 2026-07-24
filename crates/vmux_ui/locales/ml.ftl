@@ -279,6 +279,8 @@ menu-bookmark = ബുക്ക്‌മാർക്ക്
 menu-edit = തിരുത്തുക
 
 layout-knowledge = അറിവ്
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = അറിവ് തുറക്കുക
 layout-open-welcome-knowledge = അറിവിലേക്ക് സ്വാഗതം തുറക്കുക
 layout-open-path = { $path } തുറക്കുക
@@ -435,6 +437,7 @@ agent-loading-media = മീഡിയ ലോഡ് ചെയ്യുന്ന�
 agent-no-matching-media = പൊരുത്തപ്പെടുന്ന മീഡിയ ഇല്ല
 agent-prompt-context = പ്രോംപ്റ്റ് സന്ദർഭം
 agent-details = വിശദാംശങ്ങൾ
+agent-copy = Copy
 agent-path = പാത്ത്
 agent-tool = ടൂൾ
 agent-server = സർവർ

@@ -279,6 +279,8 @@ menu-bookmark = Хавчуурга
 menu-edit = Засах
 
 layout-knowledge = Мэдлэг
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Мэдлэгийг нээх
 layout-open-welcome-knowledge = Мэдлэгт тавтай морилыг нээх
 layout-open-path = { $path } нээх
@@ -435,6 +437,7 @@ agent-loading-media = Медиа ачаалж байна…
 agent-no-matching-media = Тохирох медиа алга
 agent-prompt-context = Хүсэлтийн контекст
 agent-details = Дэлгэрэнгүй
+agent-copy = Copy
 agent-path = Зам
 agent-tool = Хэрэгсэл
 agent-server = Сервер

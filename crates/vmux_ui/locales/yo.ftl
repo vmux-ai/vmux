@@ -279,6 +279,8 @@ menu-bookmark = Àmì ìwé
 menu-edit = Ṣàtúnṣe
 
 layout-knowledge = Ìmọ̀
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Ṣí Ìmọ̀
 layout-open-welcome-knowledge = Ṣí Káàbọ̀ sí Ìmọ̀
 layout-open-path = Ṣí { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ń ṣàkójọpọ̀ mídíà…
 agent-no-matching-media = Kò sí mídíà tó bá mu
 agent-prompt-context = Àyíká prompt
 agent-details = Àlàyé
+agent-copy = Copy
 agent-path = Ipa
 agent-tool = Irinṣẹ́
 agent-server = Sàbà

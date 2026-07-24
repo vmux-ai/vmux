@@ -90,7 +90,6 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("let mut note_editing = use_signal(|| false)"));
     assert!(s.contains("if note_editing() && Some(index as u32) == active"));
     assert!(s.contains("note_pointer_line(&event, start, end)"));
-    assert!(s.contains("note_pointer_col(&event, &pointer_raw)"));
     assert!(s.contains("query_selector(\"[data-note-line-text]\")"));
     assert!(s.contains("class: \"flow-root w-full cursor-text\""));
     assert!(

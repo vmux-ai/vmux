@@ -766,7 +766,7 @@ mod tests {
         let items = vec![
             ChatItem::User {
                 text: "hi".into(),
-                context: Some("workspace policy".into()),
+                context: Some("project policy".into()),
                 attachments: vec![ChatSubmitAttachment {
                     path: "/tmp/image.png".into(),
                     name: "image.png".into(),
@@ -795,7 +795,7 @@ mod tests {
         assert!(matches!(
             &back[0],
             ChatItem::User { context, attachments, .. }
-                if context.as_deref() == Some("workspace policy")
+                if context.as_deref() == Some("project policy")
                     && attachments.first().is_some_and(|attachment| attachment.name == "image.png")
         ));
         let ChatItem::Turn(turn) = &back[1] else {

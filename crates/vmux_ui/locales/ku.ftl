@@ -279,6 +279,8 @@ menu-bookmark = Nîşank
 menu-edit = Sererastkirin
 
 layout-knowledge = Zanîn
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Zanînê veke
 layout-open-welcome-knowledge = Bi xêr hatî Zanînê veke
 layout-open-path = { $path } veke
@@ -435,6 +437,7 @@ agent-loading-media = بارکردنی میدیا…
 agent-no-matching-media = هیچ میدیایەکی هاوتا نییە
 agent-prompt-context = کۆنتێکستی داواکاری
 agent-details = وردەکاری
+agent-copy = Copy
 agent-path = ڕێڕەو
 agent-tool = ئامراز
 agent-server = سێرڤەر

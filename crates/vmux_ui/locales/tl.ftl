@@ -279,6 +279,8 @@ menu-bookmark = Pananda
 menu-edit = I-edit
 
 layout-knowledge = Kaalaman
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Buksan ang Kaalaman
 layout-open-welcome-knowledge = Buksan ang Maligayang Pagdating sa Kaalaman
 layout-open-path = Buksan ang { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Nilo-load ang media…
 agent-no-matching-media = Walang tugmang media
 agent-prompt-context = Konteksto ng prompt
 agent-details = Mga detalye
+agent-copy = Copy
 agent-path = Path
 agent-tool = Tool
 agent-server = Server

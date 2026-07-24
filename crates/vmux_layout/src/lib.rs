@@ -210,7 +210,6 @@ pub struct TabLayoutSpawnRequest {
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,
-    pub replaces: Option<Entity>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -279,6 +279,8 @@ menu-bookmark = Закладка
 menu-edit = Рэдагаванне
 
 layout-knowledge = Веды
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Адкрыць Веды
 layout-open-welcome-knowledge = Адкрыць «Вітаем у Ведах»
 layout-open-path = Адкрыць { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Загрузка медыя…
 agent-no-matching-media = Няма адпаведных медыя
 agent-prompt-context = Кантэкст запыту
 agent-details = Падрабязнасці
+agent-copy = Copy
 agent-path = Шлях
 agent-tool = Інструмент
 agent-server = Сервер

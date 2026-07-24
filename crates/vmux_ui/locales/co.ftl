@@ -279,6 +279,8 @@ menu-bookmark = Segnalibru
 menu-edit = Mudificà
 
 layout-knowledge = Cunniscenza
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Apre Cunniscenza
 layout-open-welcome-knowledge = Apre Benvenutu in Cunniscenza
 layout-open-path = Apre { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Caricamentu di i media…
 agent-no-matching-media = Nisun media currispundente
 agent-prompt-context = Cuntestu di a richiesta
 agent-details = Detagli
+agent-copy = Copy
 agent-path = Percorsu
 agent-tool = Strumentu
 agent-server = Servitore

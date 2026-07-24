@@ -279,6 +279,8 @@ menu-bookmark = სანიშნე
 menu-edit = რედაქტირება
 
 layout-knowledge = ცოდნა
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ცოდნის გახსნა
 layout-open-welcome-knowledge = „კეთილი იყოს თქვენი მობრძანება ცოდნაში“-ს გახსნა
 layout-open-path = გახსნა: { $path }
@@ -435,6 +437,7 @@ agent-loading-media = მედია იტვირთება…
 agent-no-matching-media = შესაბამისი მედია არ არის
 agent-prompt-context = მოთხოვნის კონტექსტი
 agent-details = დეტალები
+agent-copy = Copy
 agent-path = ბილიკი
 agent-tool = ხელსაწყო
 agent-server = სერვერი

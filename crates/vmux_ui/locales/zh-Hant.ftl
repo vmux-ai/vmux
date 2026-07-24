@@ -279,6 +279,8 @@ menu-bookmark = 書籤
 menu-edit = 編輯
 
 layout-knowledge = 知識
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = 開啟知識
 layout-open-welcome-knowledge = 開啟「歡迎使用知識」
 layout-open-path = 開啟 { $path }
@@ -435,6 +437,7 @@ agent-loading-media = 正在載入媒體…
 agent-no-matching-media = 沒有相符的媒體
 agent-prompt-context = 提示脈絡
 agent-details = 詳細資訊
+agent-copy = Copy
 agent-path = 路徑
 agent-tool = 工具
 agent-server = 伺服器

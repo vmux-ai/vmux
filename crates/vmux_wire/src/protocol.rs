@@ -252,6 +252,14 @@ pub enum AgentCommand {
         anchor: ProcessId,
         title: String,
     },
+    /// Write a user-approved Markdown note into the vmux Knowledge base.
+    /// Appended to preserve existing positional enum discriminants.
+    WriteKnowledge {
+        anchor: ProcessId,
+        path: Option<String>,
+        title: String,
+        content: String,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -434,7 +442,18 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
             Err("request_user_choice requires a question and 2 to 9 non-empty options")
         }
         AgentCommand::ChooseWorkspaceAtPath { path, .. } if path.trim().is_empty() => {
-            Err("select_workspace.path is empty")
+            Err("select_project.path is empty")
+        }
+        AgentCommand::WriteKnowledge {
+            path,
+            title,
+            content,
+            ..
+        } if path.as_ref().is_some_and(|path| path.trim().is_empty())
+            || title.trim().is_empty()
+            || content.trim().is_empty() =>
+        {
+            Err("write_knowledge requires a non-empty title and content")
         }
         _ => Ok(()),
     }
@@ -1531,6 +1550,19 @@ mod tests {
             let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
             assert_eq!(decoded, command);
         }
+    }
+
+    #[test]
+    fn write_knowledge_rkyv_roundtrip() {
+        let command = AgentCommand::WriteKnowledge {
+            anchor: ProcessId::new(),
+            path: Some("projects/yc.md".into()),
+            title: "YC".into(),
+            content: "Notes".into(),
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
+        let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+        assert_eq!(decoded, command);
     }
 
     #[test]

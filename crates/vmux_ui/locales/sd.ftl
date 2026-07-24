@@ -279,6 +279,8 @@ menu-bookmark = نشان
 menu-edit = سنوار
 
 layout-knowledge = ڄاڻ
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ڄاڻ کوليو
 layout-open-welcome-knowledge = ڄاڻ ۾ ڀليڪار کوليو
 layout-open-path = { $path } کوليو
@@ -435,6 +437,7 @@ agent-loading-media = ميڊيا لوڊ ٿي رهي آهي…
 agent-no-matching-media = ملندڙ ميڊيا ناهي
 agent-prompt-context = پرامپٽ جو حوالو
 agent-details = تفصيل
+agent-copy = Copy
 agent-path = پاٿ
 agent-tool = ٽول
 agent-server = سرور

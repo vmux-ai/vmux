@@ -692,7 +692,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .unwrap_or_default()
         .to_string();
     let workspace_label = if prompt_context.workspace_name.is_empty() {
-        "Select workspace".to_string()
+        "Select project".to_string()
     } else {
         prompt_context.workspace_name.clone()
     };
@@ -756,7 +756,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
                 button {
                         class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground transition hover:bg-foreground/[0.08] hover:text-foreground",
-                        title: if prompt_context.cwd.is_empty() { "Create or select workspace" } else { "{prompt_context.cwd}" },
+                        title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| {
                             let _ = try_cef_bin_emit_rkyv(&StartSelectWorkspace {

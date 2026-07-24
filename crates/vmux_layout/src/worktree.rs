@@ -230,7 +230,7 @@ pub fn validate_linked_workspace(
         .map_err(|error| format!("invalid worktree directory: {error}"))?;
     let workspace_cwd = workspace_cwd
         .canonicalize()
-        .map_err(|error| format!("invalid workspace directory: {error}"))?;
+        .map_err(|error| format!("invalid project directory: {error}"))?;
     let checkout = worktree::checkout_info(&cwd).map_err(|error| error.0)?;
     let workspace = worktree::checkout_info(&workspace_cwd).map_err(|error| error.0)?;
     if checkout.common_dir != workspace.common_dir {
@@ -337,6 +337,7 @@ pub fn create_worktree_blocking(
         .canonicalize()
         .map_err(|error| format!("invalid project directory: {error}"))?;
     let checkout = worktree::checkout_info(&base_dir).map_err(|error| error.0)?;
+    worktree::ensure_initial_commit(&checkout.root).map_err(|error| error.0)?;
     let relative_dir = base_dir
         .strip_prefix(&checkout.root)
         .map_err(|_| "project directory is outside its checkout".to_string())?;
@@ -364,6 +365,7 @@ pub fn create_worktree_for_branch_blocking(
         .map_err(|error| format!("invalid project directory: {error}"))?;
     let checkout = worktree::checkout_info(&base_dir).map_err(|error| error.0)?;
     worktree::validate_branch_name(&checkout.root, branch).map_err(|error| error.0)?;
+    worktree::ensure_initial_commit(&checkout.root).map_err(|error| error.0)?;
     if let Some(registration) = worktree::worktree_registrations(&checkout.root)
         .map_err(|error| error.0)?
         .into_iter()
@@ -932,6 +934,30 @@ mod tests {
             worktree::head_ref(&activation.execution_dir).unwrap(),
             "vmux/fix-dashboard-tests"
         );
+    }
+
+    #[test]
+    fn create_worktree_for_branch_initializes_unborn_repository() {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q", "-b", "main"]);
+        git(repo.path(), &["config", "user.email", "t@example.com"]);
+        git(repo.path(), &["config", "user.name", "Test"]);
+        git(repo.path(), &["config", "commit.gpgsign", "false"]);
+        let managed_root = tempfile::tempdir().unwrap();
+
+        let activation = create_worktree_for_branch_blocking(
+            repo.path(),
+            "feat/izakaya-website",
+            managed_root.path(),
+        )
+        .unwrap();
+
+        assert_eq!(activation.metadata.base_ref, "main");
+        assert_eq!(
+            worktree::head_ref(&activation.execution_dir).unwrap(),
+            "feat/izakaya-website"
+        );
+        assert_eq!(worktree::head_ref(repo.path()).unwrap(), "main");
     }
 
     #[test]

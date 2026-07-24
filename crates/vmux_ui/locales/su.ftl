@@ -279,6 +279,8 @@ menu-bookmark = Tetengger
 menu-edit = Édit
 
 layout-knowledge = Pangaweruh
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Buka Pangaweruh
 layout-open-welcome-knowledge = Buka Wilujeng sumping ka Pangaweruh
 layout-open-path = Buka { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ngamuat média…
 agent-no-matching-media = Euweuh média nu cocog
 agent-prompt-context = Kontéks prompt
 agent-details = Rincian
+agent-copy = Copy
 agent-path = Path
 agent-tool = Pakakas
 agent-server = Server

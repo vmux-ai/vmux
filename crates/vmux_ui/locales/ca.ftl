@@ -279,6 +279,8 @@ menu-bookmark = Marcador
 menu-edit = Edició
 
 layout-knowledge = Coneixement
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Obre Coneixement
 layout-open-welcome-knowledge = Obre Benvinguda al coneixement
 layout-open-path = Obre { $path }
@@ -435,6 +437,7 @@ agent-loading-media = S’estan carregant els mitjans…
 agent-no-matching-media = No hi ha cap mitjà coincident
 agent-prompt-context = Context del prompt
 agent-details = Detalls
+agent-copy = Copy
 agent-path = Camí
 agent-tool = Eina
 agent-server = Servidor

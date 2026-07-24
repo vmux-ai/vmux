@@ -279,6 +279,8 @@ menu-bookmark = Žymelė
 menu-edit = Redagavimas
 
 layout-knowledge = Žinios
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Atidaryti žinias
 layout-open-welcome-knowledge = Atidaryti „Sveiki atvykę į žinias“
 layout-open-path = Atidaryti { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Įkeliama medija…
 agent-no-matching-media = Atitinkančios medijos nėra
 agent-prompt-context = Užklausos kontekstas
 agent-details = Išsamiau
+agent-copy = Copy
 agent-path = Kelias
 agent-tool = Įrankis
 agent-server = Serveris

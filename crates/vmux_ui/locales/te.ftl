@@ -279,6 +279,8 @@ menu-bookmark = బుక్‌మార్క్
 menu-edit = సవరించు
 
 layout-knowledge = జ్ఞానం
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = జ్ఞానం తెరువు
 layout-open-welcome-knowledge = జ్ఞానానికి స్వాగతం తెరువు
 layout-open-path = { $path } తెరువు
@@ -435,6 +437,7 @@ agent-loading-media = మీడియా లోడ్ అవుతోంది�
 agent-no-matching-media = సరిపోలే మీడియా లేదు
 agent-prompt-context = ప్రాంప్ట్ సందర్భం
 agent-details = వివరాలు
+agent-copy = Copy
 agent-path = పాత్
 agent-tool = టూల్
 agent-server = సర్వర్

@@ -179,6 +179,7 @@ fn project_file_touches(
 pub struct AcpProjector {
     messages: Vec<Message>,
     hidden_tool_calls: HashSet<String>,
+    hidden_tool_details: HashMap<String, (String, String)>,
     file_touches: HashMap<String, FileTouchState>,
     file_touch_order: VecDeque<String>,
     finalized_file_touches: HashSet<String>,
@@ -197,6 +198,9 @@ impl AcpProjector {
 
     /// Returns the projected title and raw input for a tool call.
     pub fn tool_call_details(&self, call_id: &str) -> Option<(String, String)> {
+        if let Some(details) = self.hidden_tool_details.get(call_id) {
+            return Some(details.clone());
+        }
         self.messages.iter().find_map(|message| {
             let Message::Assistant { blocks } = message else {
                 return None;
@@ -405,7 +409,9 @@ impl AcpProjector {
                 tc.status,
                 ToolCallStatus::Completed | ToolCallStatus::Failed
             ) {
-                self.hidden_tool_calls.insert(call_id);
+                self.hidden_tool_calls.insert(call_id.clone());
+                self.hidden_tool_details
+                    .insert(call_id, (tc.title, raw_input_json(tc.raw_input.as_ref())));
             }
             return Vec::new();
         }
@@ -471,8 +477,19 @@ impl AcpProjector {
                 Some(ToolCallStatus::Completed | ToolCallStatus::Failed)
             ) {
                 self.hidden_tool_calls.remove(&call_id);
+                self.hidden_tool_details.remove(&call_id);
             } else {
-                self.hidden_tool_calls.insert(call_id);
+                self.hidden_tool_calls.insert(call_id.clone());
+                let details = self
+                    .hidden_tool_details
+                    .entry(call_id)
+                    .or_insert_with(|| (String::new(), "{}".to_string()));
+                if !title.is_empty() {
+                    details.0 = title;
+                }
+                if let Some(raw_input) = update.fields.raw_input.as_ref() {
+                    details.1 = raw_input.to_string();
+                }
             }
             return Vec::new();
         }
@@ -1362,10 +1379,17 @@ mod tests {
     #[test]
     fn conversation_title_tool_stays_out_of_transcript() {
         let mut p = AcpProjector::new();
-        let started = p.apply(SessionUpdate::ToolCall(ToolCall::new(
-            "title-1",
-            "mcp__vmux__set_conversation_title",
-        )));
+        let started = p.apply(SessionUpdate::ToolCall(
+            ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
+                .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+        ));
+        assert_eq!(
+            p.tool_call_details("title-1"),
+            Some((
+                "mcp__vmux__set_conversation_title".to_string(),
+                r#"{"title":"Paris Izakaya Website"}"#.to_string(),
+            ))
+        );
         let completed = p.apply(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
             "title-1",
             ToolCallUpdateFields::new().status(ToolCallStatus::Completed),

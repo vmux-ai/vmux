@@ -59,8 +59,8 @@ unicode-width = "0.2"
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
-    "Window", "Document", "Element", "HtmlElement", "Node",
-    "DomRect", "CssStyleDeclaration",
+    "Window", "Document", "DocumentFragment", "Element", "FocusOptions", "HtmlElement", "Node",
+    "CaretPosition", "DomRect", "Range", "CssStyleDeclaration",
     "ResizeObserver", "ResizeObserverEntry",
     "WheelEvent", "KeyboardEvent", "Location",
     "Blob", "Url",

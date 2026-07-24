@@ -279,6 +279,8 @@ menu-bookmark = Legosigno
 menu-edit = Redakto
 
 layout-knowledge = Scioj
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Malfermi Sciojn
 layout-open-welcome-knowledge = Malfermi Bonvenon al Scioj
 layout-open-path = Malfermi { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ŝargante aŭdvidaĵojn…
 agent-no-matching-media = Neniuj kongruaj aŭdvidaĵoj
 agent-prompt-context = Invita kunteksto
 agent-details = Detaloj
+agent-copy = Copy
 agent-path = Vojo
 agent-tool = Ilo
 agent-server = Servilo

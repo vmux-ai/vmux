@@ -279,6 +279,8 @@ menu-bookmark = Nod Tudalen
 menu-edit = Golygu
 
 layout-knowledge = Gwybodaeth
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Agor Gwybodaeth
 layout-open-welcome-knowledge = Agor Croeso i Wybodaeth
 layout-open-path = Agor { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Yn llwytho cyfryngau…
 agent-no-matching-media = Dim cyfryngau sy’n cyfateb
 agent-prompt-context = Cyd-destun anogiad
 agent-details = Manylion
+agent-copy = Copy
 agent-path = Llwybr
 agent-tool = Offeryn
 agent-server = Gweinydd

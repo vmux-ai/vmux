@@ -279,6 +279,8 @@ menu-bookmark = Oznaka
 menu-edit = Uredi
 
 layout-knowledge = Znanje
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Otvori Znanje
 layout-open-welcome-knowledge = Otvori Dobro došli u Znanje
 layout-open-path = Otvori { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Učitavanje medija…
 agent-no-matching-media = Nema podudarnih medija
 agent-prompt-context = Kontekst upita
 agent-details = Pojedinosti
+agent-copy = Copy
 agent-path = Putanja
 agent-tool = Alat
 agent-server = Poslužitelj

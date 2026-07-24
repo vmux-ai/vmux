@@ -279,6 +279,8 @@ menu-bookmark = Lieszeechen
 menu-edit = Änneren
 
 layout-knowledge = Wëssen
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Wëssen opmaachen
 layout-open-welcome-knowledge = Wëllkomm am Wëssen opmaachen
 layout-open-path = { $path } opmaachen
@@ -435,6 +437,7 @@ agent-loading-media = Medien gi gelueden…
 agent-no-matching-media = Keng passend Medien
 agent-prompt-context = Prompt-Kontext
 agent-details = Detailer
+agent-copy = Copy
 agent-path = Pad
 agent-tool = Tool
 agent-server = Server

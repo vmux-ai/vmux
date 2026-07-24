@@ -279,6 +279,8 @@ menu-bookmark = Fa'ailoga tusi
 menu-edit = Teuteu
 
 layout-knowledge = Malamalama
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Tatala Malamalama
 layout-open-welcome-knowledge = Tatala Afio mai i le Malamalama
 layout-open-path = Tatala { $path }
@@ -435,6 +437,7 @@ agent-loading-media = O lo‘o utaina media…
 agent-no-matching-media = E leai ni media e fetaui
 agent-prompt-context = Context o le prompt
 agent-details = Fa‘amatalaga
+agent-copy = Copy
 agent-path = Ala
 agent-tool = Meafaigaluega
 agent-server = Server

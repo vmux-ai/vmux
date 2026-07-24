@@ -279,6 +279,8 @@ menu-bookmark = Chosungira tsamba
 menu-edit = Sinthani
 
 layout-knowledge = Chidziwitso
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Tsegulani Chidziwitso
 layout-open-welcome-knowledge = Tsegulani Takulandirani ku Chidziwitso
 layout-open-path = Tsegulani { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Kutsegula media…
 agent-no-matching-media = Palibe media yofanana
 agent-prompt-context = Nkhani ya mawu
 agent-details = Tsatanetsatane
+agent-copy = Copy
 agent-path = Njira
 agent-tool = Chida
 agent-server = Seva

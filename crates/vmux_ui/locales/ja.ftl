@@ -265,6 +265,8 @@ menu-bookmark = ブックマーク
 menu-edit = 編集
 
 layout-knowledge = ナレッジ
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ナレッジを開く
 layout-open-welcome-knowledge = 「ナレッジへようこそ」を開く
 layout-open-path = { $path } を開く
@@ -421,6 +423,7 @@ agent-loading-media = メディアを読み込み中…
 agent-no-matching-media = 一致するメディアがありません
 agent-prompt-context = プロンプトのコンテキスト
 agent-details = 詳細
+agent-copy = Copy
 agent-path = パス
 agent-tool = ツール
 agent-server = サーバー

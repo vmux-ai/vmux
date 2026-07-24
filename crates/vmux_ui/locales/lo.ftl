@@ -279,6 +279,8 @@ menu-bookmark = ບຸກມາກ
 menu-edit = ແກ້ໄຂ
 
 layout-knowledge = ຄວາມຮູ້
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ເປີດຄວາມຮູ້
 layout-open-welcome-knowledge = ເປີດຍິນດີຕ້ອນຮັບສູ່ຄວາມຮູ້
 layout-open-path = ເປີດ { $path }
@@ -435,6 +437,7 @@ agent-loading-media = ກຳລັງໂຫຼດມີເດຍ…
 agent-no-matching-media = ບໍ່ມີມີເດຍທີ່ກົງກັນ
 agent-prompt-context = ບໍລິບົດພຣອມ
 agent-details = ລາຍລະອຽດ
+agent-copy = Copy
 agent-path = ພາທ
 agent-tool = ເຄື່ອງມື
 agent-server = ເຊີບເວີ
