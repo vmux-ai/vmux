@@ -5,12 +5,13 @@ use std::process::{Command, Output};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
 use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
 use vmux_core::tools::{
     TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
-    ToolActionResult, ToolCategory, ToolItem, ToolProvider, ToolStatus, ToolsRefreshRequest,
-    ToolsSnapshot,
+    ToolActionResult, ToolCategory, ToolItem, ToolOpenRequest, ToolProvider, ToolStatus,
+    ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_layout::LayoutCef;
 
@@ -20,7 +21,7 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
     keywords: &[
         "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
     ],
-    icon: Some(vmux_core::BuiltinIcon::Layers),
+    icon: Some(vmux_core::BuiltinIcon::Hammer),
     command_bar: true,
 };
 
@@ -94,9 +95,11 @@ impl Plugin for ToolsPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 ToolsRefreshRequest,
                 ToolActionRequest,
+                ToolOpenRequest,
             )>::default())
             .add_observer(on_refresh_request)
             .add_observer(on_action_request)
+            .add_observer(on_open_request)
             .add_systems(
                 Update,
                 (
@@ -109,6 +112,27 @@ impl Plugin for ToolsPlugin {
                     .chain(),
             );
     }
+}
+
+fn on_open_request(
+    trigger: On<BinReceive<ToolOpenRequest>>,
+    mut commands: MessageWriter<AppCommand>,
+) {
+    let path = Path::new(trigger.event().payload.path.trim());
+    if path == manifest_store::brewfile_path() && !path.exists() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, "");
+    }
+    let Ok(url) = url::Url::from_file_path(path) else {
+        return;
+    };
+    commands.write(AppCommand::Browser(BrowserCommand::Open(
+        OpenCommand::InNewStack {
+            url: Some(url.to_string()),
+        },
+    )));
 }
 
 fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: ResMut<ToolsState>) {

@@ -196,6 +196,22 @@ pub struct ToolsRefreshRequest {
     pub refresh: bool,
 }
 
+/// Opens a Tools-owned manifest in the editor.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ToolOpenRequest {
+    pub path: String,
+}
+
 /// Requests one package, manifest, or dotfile mutation.
 #[derive(
     Clone,

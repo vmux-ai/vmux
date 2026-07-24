@@ -224,6 +224,11 @@ pub fn manifest_path() -> PathBuf {
     root_dir().join("tools.toml")
 }
 
+/// Homebrew desired state managed by Tools.
+pub fn brewfile_path() -> PathBuf {
+    root_dir().join("Brewfile")
+}
+
 /// Root of Stow-style package directories.
 pub fn dotfiles_dir() -> PathBuf {
     root_dir().join("dotfiles")
@@ -274,7 +279,14 @@ fn rename_for_migration(source: &Path, destination: &Path) -> Result<(), String>
 /// Loads the user Tools manifest, returning an empty in-memory manifest when absent.
 pub fn load_manifest() -> Result<ToolsManifest, String> {
     migrate_legacy_storage()?;
-    load_manifest_from(&manifest_path())
+    let mut manifest = load_manifest_from(&manifest_path())?;
+    let brewfile = brewfile_path();
+    if brewfile.is_file() {
+        sync_manifest_from_brewfile(&mut manifest, &brewfile)?;
+    } else {
+        write_managed_brewfile(&manifest)?;
+    }
+    Ok(manifest)
 }
 
 /// Loads and validates a Tools manifest from an explicit path.
@@ -297,7 +309,8 @@ pub fn load_manifest_from(path: &Path) -> Result<ToolsManifest, String> {
 /// Atomically writes the normalized user Tools manifest.
 pub fn write_manifest(manifest: &ToolsManifest) -> Result<(), String> {
     migrate_legacy_storage()?;
-    write_manifest_to(&manifest_path(), manifest)
+    write_manifest_to(&manifest_path(), manifest)?;
+    write_managed_brewfile(manifest)
 }
 
 /// Atomically writes a normalized Tools manifest to an explicit path.
@@ -316,7 +329,14 @@ pub fn write_manifest_to(path: &Path, manifest: &ToolsManifest) -> Result<(), St
 /// Imports formulae and casks from a Brewfile into the Tools manifest.
 pub fn import_brewfile(path: &Path) -> Result<(usize, usize), String> {
     migrate_legacy_storage()?;
-    import_brewfile_to(path, &manifest_path())
+    let source_path = expand_user_path(path)?;
+    let source = std::fs::read_to_string(&source_path).map_err(|error| error.to_string())?;
+    let imported = import_brewfile_to(&source_path, &manifest_path())?;
+    std::fs::create_dir_all(root_dir()).map_err(|error| error.to_string())?;
+    std::fs::write(brewfile_path(), source).map_err(|error| error.to_string())?;
+    let manifest = load_manifest_from(&manifest_path())?;
+    write_managed_brewfile(&manifest)?;
+    Ok(imported)
 }
 
 /// Imports a Brewfile into an explicit Tools manifest.
@@ -347,6 +367,89 @@ pub fn parse_brewfile(source: &str) -> BrewfileImport {
     normalize_names(&mut import.formulae);
     normalize_names(&mut import.casks);
     import
+}
+
+fn sync_manifest_from_brewfile(manifest: &mut ToolsManifest, path: &Path) -> Result<(), String> {
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let imported = parse_brewfile(&source);
+    set_packages(manifest, "homebrew-formula", imported.formulae);
+    set_packages(manifest, "homebrew-cask", imported.casks);
+    Ok(())
+}
+
+fn set_packages(manifest: &mut ToolsManifest, provider: &str, packages: Vec<String>) {
+    if packages.is_empty() {
+        manifest.packages.remove(provider);
+    } else {
+        manifest.packages.insert(provider.to_string(), packages);
+    }
+    manifest.normalize();
+}
+
+fn write_managed_brewfile(manifest: &ToolsManifest) -> Result<(), String> {
+    write_brewfile_to(&brewfile_path(), manifest)
+}
+
+fn write_brewfile_to(path: &Path, manifest: &ToolsManifest) -> Result<(), String> {
+    let formulae = manifest
+        .packages
+        .get("homebrew-formula")
+        .cloned()
+        .unwrap_or_default();
+    let casks = manifest
+        .packages
+        .get("homebrew-cask")
+        .cloned()
+        .unwrap_or_default();
+    if formulae.is_empty() && casks.is_empty() && !path.exists() {
+        return Ok(());
+    }
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let source = merge_brewfile(&existing, &formulae, &casks);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let temporary = path.with_extension("tmp");
+    std::fs::write(&temporary, source).map_err(|error| error.to_string())?;
+    std::fs::rename(temporary, path).map_err(|error| error.to_string())
+}
+
+fn merge_brewfile(source: &str, formulae: &[String], casks: &[String]) -> String {
+    let desired_formulae = formulae.iter().map(String::as_str).collect::<BTreeSet<_>>();
+    let desired_casks = casks.iter().map(String::as_str).collect::<BTreeSet<_>>();
+    let mut seen_formulae = BTreeSet::new();
+    let mut seen_casks = BTreeSet::new();
+    let mut lines = Vec::new();
+    for line in source.lines() {
+        if let Some(name) = parse_quoted_call(line, "brew") {
+            if desired_formulae.contains(name.as_str()) {
+                seen_formulae.insert(name);
+                lines.push(line.to_string());
+            }
+        } else if let Some(name) = parse_quoted_call(line, "cask") {
+            if desired_casks.contains(name.as_str()) {
+                seen_casks.insert(name);
+                lines.push(line.to_string());
+            }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    for package in formulae {
+        if !seen_formulae.contains(package) {
+            lines.push(format!("brew {:?}", package));
+        }
+    }
+    for package in casks {
+        if !seen_casks.contains(package) {
+            lines.push(format!("cask {:?}", package));
+        }
+    }
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", lines.join("\n"))
+    }
 }
 
 /// Imports dependency names from a package.json as global npm desired state.
@@ -1288,6 +1391,31 @@ brew "ripgrep"
 
         assert_eq!(imported.formulae, ["openssl@3", "ripgrep"]);
         assert_eq!(imported.casks, ["ghostty"]);
+    }
+
+    #[test]
+    fn managed_brewfile_round_trips_homebrew_desired_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Brewfile");
+        std::fs::write(
+            &path,
+            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nbrew \"old\"\nmas \"Xcode\", id: 497799835\n",
+        )
+        .unwrap();
+        let mut manifest = ToolsManifest::default();
+        manifest.set_package("homebrew-formula", "ripgrep", true);
+        manifest.set_package("homebrew-formula", "fd", true);
+        manifest.set_package("homebrew-cask", "ghostty", true);
+
+        write_brewfile_to(&path, &manifest).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "tap \"homebrew/cask-fonts\"\n# keep this\nbrew \"fd\", link: false\nmas \"Xcode\", id: 497799835\nbrew \"ripgrep\"\ncask \"ghostty\"\n"
+        );
+        let mut loaded = ToolsManifest::default();
+        sync_manifest_from_brewfile(&mut loaded, &path).unwrap();
+        assert_eq!(loaded.packages, manifest.packages);
     }
 
     #[test]
