@@ -202,6 +202,7 @@ pub enum LayoutSpawnRequest {
 pub enum TabLayoutSpawnContent {
     StartupUrlOrPrompt,
     Url(String),
+    AgentPrompt { url: String, prompt: String },
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -214,6 +215,12 @@ pub struct TabLayoutSpawnRequest {
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Message, Clone, Debug)]
+pub struct NewAgentChatRequest {
+    pub prompt: String,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
