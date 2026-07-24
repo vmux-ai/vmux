@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use vmux_wire::protocol::{AgentAttachment, AgentRunStatus};
+pub use vmux_wire::protocol::AgentAttachment;
+use vmux_wire::protocol::AgentRunStatus;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Message {
@@ -117,6 +118,17 @@ pub struct RemoteApproval {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RemoteMediaEntry {
+    pub path: String,
+    pub name: String,
+    pub parent: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub is_dir: bool,
+    pub preview_data_url: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RemoteSession {
     pub sid: String,
     pub name: String,
@@ -141,6 +153,8 @@ pub enum RemoteEvent {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PromptRequest {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AgentAttachment>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -152,6 +166,57 @@ pub struct NewChatRequest {
 pub struct ApprovalRequest {
     pub call_id: String,
     pub allow: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineMediaQuery<'a> {
+    pub start: usize,
+    pub query: &'a str,
+}
+
+pub fn inline_media_query(draft: &str) -> Option<InlineMediaQuery<'_>> {
+    draft.rmatch_indices('@').find_map(|(start, _)| {
+        let boundary = start == 0
+            || draft[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace);
+        let query = &draft[start + 1..];
+        (boundary && !query.chars().any(char::is_whitespace))
+            .then_some(InlineMediaQuery { start, query })
+    })
+}
+
+pub fn replace_inline_media_query(
+    draft: &str,
+    query: InlineMediaQuery<'_>,
+    replacement: &str,
+) -> String {
+    let mut value = String::with_capacity(draft.len() + replacement.len());
+    value.push_str(&draft[..query.start]);
+    value.push_str(replacement);
+    value
+}
+
+pub fn media_reference(entry: &RemoteMediaEntry) -> String {
+    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+    if entry.parent == "~" {
+        format!("~/{name}", name = encode(&entry.name))
+    } else {
+        format!(
+            "{parent}/{name}",
+            parent = encode(&entry.parent),
+            name = encode(&entry.name)
+        )
+    }
+}
+
+pub fn media_display_path(entry: &RemoteMediaEntry) -> String {
+    if entry.parent == "~" {
+        format!("~/{}", entry.name)
+    } else {
+        format!("{}/{}", entry.parent.trim_end_matches('/'), entry.name)
+    }
 }
 
 #[cfg(test)]
@@ -213,5 +278,25 @@ mod tests {
         let json = serde_json::to_string(&request).unwrap();
         let back: NewChatRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.text, request.text);
+    }
+
+    #[test]
+    fn prompt_request_deserializes_without_attachments() {
+        let request: PromptRequest = serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+        assert_eq!(request.text, "hello");
+        assert!(request.attachments.is_empty());
+    }
+
+    #[test]
+    fn inline_media_query_requires_an_open_token() {
+        assert_eq!(
+            inline_media_query("inspect @Pictures/scr"),
+            Some(InlineMediaQuery {
+                start: 8,
+                query: "Pictures/scr",
+            })
+        );
+        assert_eq!(inline_media_query("mail@example.com"), None);
+        assert_eq!(inline_media_query("inspect @image.png next"), None);
     }
 }

@@ -9,12 +9,15 @@ use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat_ui::{
-    AssistantTurn, DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock,
-    ToolResultBlock, ToolUseBlock, UserBubble,
+    AssistantTurn, DiffBlock, PlanBlock, PlanItem, PromptBoxTone, PromptComposer,
+    PromptComposerAction, PromptComposerAttachment, PromptMediaOption, PromptMediaOptions,
+    PromptPopup, PromptPopupPlacement, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
+    ToolUseBlock, UserBubble,
 };
 use vmux_remote::{
-    ApprovalRequest, AssistantBlock, Message, NewChatRequest, PromptRequest, RemoteApproval,
-    RemoteEvent, RemoteSession, RemoteStatus,
+    AgentAttachment, ApprovalRequest, AssistantBlock, Message, NewChatRequest, PromptRequest,
+    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, inline_media_query,
+    media_display_path, media_reference, replace_inline_media_query,
 };
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
@@ -137,6 +140,107 @@ impl Api {
             )))
         }
     }
+
+    async fn media(&self, sid: &str, query: &str) -> Result<Vec<RemoteMediaEntry>, ApiError> {
+        let mut endpoint = Url::parse(&self.endpoint(&format!("/api/sessions/{sid}/media")))
+            .map_err(|error| ApiError::Message(error.to_string()))?;
+        endpoint.query_pairs_mut().append_pair("query", query);
+        let response = self
+            .client
+            .get(endpoint)
+            .bearer_auth(&self.credentials.token)
+            .send()
+            .await
+            .map_err(|error| ApiError::Message(error.to_string()))?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(ApiError::Unauthorized);
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::Message(format!(
+                "Mac returned HTTP {}.",
+                response.status()
+            )));
+        }
+        response
+            .json()
+            .await
+            .map_err(|error| ApiError::Message(error.to_string()))
+    }
+}
+
+fn submit_remote_prompt(
+    api: Signal<Option<Api>>,
+    sid: String,
+    mut draft: Signal<String>,
+    mut attachments: Signal<Vec<RemoteMediaEntry>>,
+    mut status: Signal<RemoteStatus>,
+) {
+    let Some(client) = api() else { return };
+    let text = draft.peek().trim().to_string();
+    let selected = attachments.peek().clone();
+    if sid.is_empty() || (text.is_empty() && selected.is_empty()) {
+        return;
+    }
+    let attachments_to_submit = selected
+        .into_iter()
+        .filter(|attachment| !attachment.is_dir)
+        .map(|attachment| AgentAttachment {
+            path: attachment.path,
+            name: attachment.name,
+            mime_type: attachment.mime_type,
+            size: attachment.size,
+        })
+        .collect();
+    draft.set(String::new());
+    attachments.set(Vec::new());
+    status.set(RemoteStatus::Streaming);
+    spawn(async move {
+        if let Err(ApiError::Message(message)) = client
+            .post_json(
+                &format!("/api/sessions/{sid}/messages"),
+                &PromptRequest {
+                    text,
+                    attachments: attachments_to_submit,
+                },
+            )
+            .await
+        {
+            status.set(RemoteStatus::Errored(message));
+        }
+    });
+}
+
+fn insert_media_token(mut draft: Signal<String>) {
+    let mut value = draft.peek().clone();
+    if !value.is_empty() && !value.ends_with(char::is_whitespace) {
+        value.push(' ');
+    }
+    value.push('@');
+    draft.set(value);
+}
+
+fn select_remote_media_entry(
+    entry: &RemoteMediaEntry,
+    mut draft: Signal<String>,
+    mut attachments: Signal<Vec<RemoteMediaEntry>>,
+    mut selected: Signal<usize>,
+) {
+    let value = draft.peek().clone();
+    let Some(query) = inline_media_query(&value) else {
+        return;
+    };
+    let replacement = if entry.is_dir {
+        format!("@{}/", media_reference(entry))
+    } else {
+        let mut next = attachments.peek().clone();
+        if !next.iter().any(|attached| attached.path == entry.path) {
+            next.push(entry.clone());
+            attachments.set(next);
+        }
+        String::new()
+    };
+    draft.set(replace_inline_media_query(&value, query, &replacement));
+    selected.set(0);
 }
 
 #[component]
@@ -149,9 +253,15 @@ fn App() -> Element {
     let mut current = use_signal(|| None::<RemoteSession>);
     let mut messages = use_signal(Vec::<Message>::new);
     let mut live_delta = use_signal(String::new);
-    let mut status = use_signal(|| RemoteStatus::Idle);
+    let status = use_signal(|| RemoteStatus::Idle);
     let mut approval = use_signal(|| None::<RemoteApproval>);
     let mut draft = use_signal(String::new);
+    let mut attachments = use_signal(Vec::<RemoteMediaEntry>::new);
+    let mut media_entries = use_signal(Vec::<RemoteMediaEntry>::new);
+    let mut media_loading = use_signal(|| false);
+    let mut media_generation = use_signal(|| 0_u64);
+    let mut media_selected = use_signal(|| 0_usize);
+    let mut attachment_sid = use_signal(String::new);
     let connected = use_signal(|| false);
     let mut drawer = use_signal(|| false);
     let mut stream_generation = use_signal(|| 0_u64);
@@ -169,6 +279,53 @@ fn App() -> Element {
         let _ = document::eval(
             "const el = document.getElementById('remote-chat-scroll'); if (el) el.scrollTop = el.scrollHeight;",
         );
+    });
+
+    use_effect(move || {
+        let sid = current().map(|session| session.sid).unwrap_or_default();
+        if *attachment_sid.peek() == sid {
+            return;
+        }
+        attachment_sid.set(sid);
+        attachments.set(Vec::new());
+        media_entries.set(Vec::new());
+        media_loading.set(false);
+    });
+
+    use_effect(move || {
+        let value = draft();
+        let query = inline_media_query(&value).map(|query| query.query.to_string());
+        let sid = current().map(|session| session.sid).unwrap_or_default();
+        let client = api();
+        let generation = media_generation.peek().wrapping_add(1);
+        media_generation.set(generation);
+        media_selected.set(0);
+        let (Some(query), Some(client)) = (query, client) else {
+            media_entries.set(Vec::new());
+            media_loading.set(false);
+            return;
+        };
+        if sid.is_empty() {
+            media_entries.set(Vec::new());
+            media_loading.set(false);
+            return;
+        }
+        media_loading.set(true);
+        spawn(async move {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            if *media_generation.peek() != generation {
+                return;
+            }
+            let result = client.media(&sid, &query).await;
+            if *media_generation.peek() != generation {
+                return;
+            }
+            match result {
+                Ok(entries) => media_entries.set(entries),
+                Err(_) => media_entries.set(Vec::new()),
+            }
+            media_loading.set(false);
+        });
     });
 
     use_future(move || async move {
@@ -360,7 +517,39 @@ fn App() -> Element {
         .map(|session| session.sid.clone())
         .unwrap_or_default();
     let is_streaming = matches!(status(), RemoteStatus::Streaming);
-    let can_send = current_value.is_some() && !draft().trim().is_empty();
+    let draft_value = draft();
+    let can_send = current_value.is_some()
+        && (!draft_value.trim().is_empty() || !attachments.read().is_empty());
+    let prompt_action = if is_streaming {
+        PromptComposerAction::Stop
+    } else {
+        PromptComposerAction::Send
+    };
+    let prompt_attachments = attachments
+        .read()
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| PromptComposerAttachment {
+            key: format!("remote-attachment-{}", attachment.path),
+            name: attachment.name.clone(),
+            label: file_extension_label(&attachment.name),
+            preview_data_url: attachment.preview_data_url.clone(),
+            remove_index: Some(index),
+        })
+        .collect::<Vec<_>>();
+    let prompt_media_options = media_entries
+        .read()
+        .iter()
+        .map(|entry| PromptMediaOption {
+            key: format!("remote-media-{}", entry.path),
+            name: entry.name.clone(),
+            display_path: media_display_path(entry),
+            preview_data_url: entry.preview_data_url.clone(),
+            label: file_extension_label(&entry.name),
+            is_dir: entry.is_dir,
+        })
+        .collect::<Vec<_>>();
+    let media_menu_open = inline_media_query(&draft_value).is_some();
     let submit_sid = selected_sid.clone();
     let cancel_sid = selected_sid.clone();
     let approval_sid = selected_sid.clone();
@@ -368,7 +557,9 @@ fn App() -> Element {
 
     rsx! {
         AppHead {}
-        div { class: "flex h-dvh min-h-0 flex-col bg-zinc-950 text-zinc-100",
+        div {
+            class: "flex h-dvh min-h-0 flex-col bg-zinc-950 text-zinc-100",
+            style: "--background:#09090b;--foreground:#f4f4f5;--muted-foreground:#a1a1aa;",
             header { class: "flex shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl",
                 button {
                     class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-lg text-zinc-300 active:bg-white/10",
@@ -470,56 +661,143 @@ fn App() -> Element {
                 }
             }
 
-            form {
+            div {
                 class: "shrink-0 border-t border-white/10 bg-zinc-950/95 px-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl",
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    let text = draft().trim().to_string();
-                    let Some(client) = api() else { return };
-                    if text.is_empty() || submit_sid.is_empty() {
-                        return;
-                    }
-                    draft.set(String::new());
-                    status.set(RemoteStatus::Streaming);
-                    let sid = submit_sid.clone();
-                    spawn(async move {
-                        if let Err(ApiError::Message(message)) = client.post_json(
-                            &format!("/api/sessions/{sid}/messages"),
-                            &PromptRequest { text },
-                        ).await {
-                            status.set(RemoteStatus::Errored(message));
+                div { class: "relative mx-auto w-full max-w-3xl",
+                    if media_menu_open {
+                        PromptPopup {
+                            placement: PromptPopupPlacement::Upward,
+                            tone: PromptBoxTone::Dark,
+                            PromptMediaOptions {
+                                items: prompt_media_options,
+                                selected: media_selected(),
+                                loading: media_loading(),
+                                tone: PromptBoxTone::Dark,
+                                on_hover: move |index| media_selected.set(index),
+                                on_select: move |index| {
+                                    if let Some(entry) = media_entries.peek().get(index).cloned() {
+                                        select_remote_media_entry(
+                                            &entry,
+                                            draft,
+                                            attachments,
+                                            media_selected,
+                                        );
+                                    }
+                                },
+                            }
                         }
-                    });
-                },
-                div { class: "mx-auto flex max-w-3xl items-end gap-2",
-                    textarea {
-                        class: "min-h-12 max-h-32 flex-1 resize-none rounded-2xl border border-white/10 bg-black/30 px-3.5 py-3 text-base leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
-                        rows: "1",
-                        placeholder: if current_value.is_some() { "Message agent…" } else { "No active session" },
+                    }
+                    PromptComposer {
+                        value: draft_value.clone(),
+                        attachments: prompt_attachments,
+                        placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
+                        accent_color: "#a78bfa".to_string(),
+                        accent_gradient: "from-violet-500 to-violet-700".to_string(),
+                        tone: PromptBoxTone::Dark,
+                        autofocus: true,
                         disabled: current_value.is_none(),
-                        value: "{draft}",
-                        oninput: move |event| draft.set(event.value()),
-                    }
-                    if is_streaming {
-                        button {
-                            class: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-800 text-lg active:scale-95",
-                            r#type: "button",
-                            onclick: move |_| {
-                                let Some(client) = api() else { return };
-                                let sid = cancel_sid.clone();
-                                spawn(async move {
-                                    let _ = client.post_json(&format!("/api/sessions/{sid}/cancel"), &serde_json::json!({})).await;
-                                });
-                            },
-                            "■"
-                        }
-                    } else {
-                        button {
-                            class: "flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-xl font-bold text-black active:scale-95 disabled:opacity-30",
-                            r#type: "submit",
-                            disabled: !can_send,
-                            "↑"
-                        }
+                        action: prompt_action,
+                        action_title: if is_streaming { "Stop".to_string() } else { "Send".to_string() },
+                        action_enabled: if is_streaming { true } else { can_send },
+                        on_input: move |value| draft.set(value),
+                        on_keydown: {
+                            let sid = submit_sid.clone();
+                            move |event: KeyboardEvent| {
+                                let value = draft.peek().clone();
+                                let media_open = inline_media_query(&value).is_some();
+                                if media_open {
+                                    match event.key() {
+                                        Key::ArrowDown => {
+                                            event.prevent_default();
+                                            let len = media_entries.peek().len();
+                                            if len > 0 {
+                                                media_selected.set((media_selected() + 1) % len);
+                                            }
+                                            return;
+                                        }
+                                        Key::ArrowUp => {
+                                            event.prevent_default();
+                                            let len = media_entries.peek().len();
+                                            if len > 0 {
+                                                media_selected.set((media_selected() + len - 1) % len);
+                                            }
+                                            return;
+                                        }
+                                        Key::Enter if !event.modifiers().shift() => {
+                                            event.prevent_default();
+                                            if let Some(entry) = media_entries
+                                                .peek()
+                                                .get(media_selected())
+                                                .cloned()
+                                            {
+                                                select_remote_media_entry(
+                                                    &entry,
+                                                    draft,
+                                                    attachments,
+                                                    media_selected,
+                                                );
+                                            }
+                                            return;
+                                        }
+                                        Key::Escape => {
+                                            event.prevent_default();
+                                            if let Some(query) = inline_media_query(&value) {
+                                                draft.set(replace_inline_media_query(
+                                                    &value,
+                                                    query,
+                                                    "",
+                                                ));
+                                            }
+                                            return;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if event.key() == Key::Enter
+                                    && !event.modifiers().shift()
+                                    && !is_streaming
+                                {
+                                    event.prevent_default();
+                                    submit_remote_prompt(
+                                        api,
+                                        sid.clone(),
+                                        draft,
+                                        attachments,
+                                        status,
+                                    );
+                                }
+                            }
+                        },
+                        on_paste: move |_| {},
+                        on_attach: move |_| insert_media_token(draft),
+                        on_remove_attachment: move |index| {
+                            let mut next = attachments.peek().clone();
+                            if index < next.len() {
+                                next.remove(index);
+                                attachments.set(next);
+                            }
+                        },
+                        on_action: {
+                            let send_sid = submit_sid.clone();
+                            let stop_sid = cancel_sid.clone();
+                            move |_| {
+                                if is_streaming {
+                                    let Some(client) = api() else { return };
+                                    let sid = stop_sid.clone();
+                                    spawn(async move {
+                                        let _ = client.post_json(&format!("/api/sessions/{sid}/cancel"), &serde_json::json!({})).await;
+                                    });
+                                } else {
+                                    submit_remote_prompt(
+                                        api,
+                                        send_sid.clone(),
+                                        draft,
+                                        attachments,
+                                        status,
+                                    );
+                                }
+                            }
+                        },
                     }
                 }
             }
@@ -917,7 +1195,11 @@ fn open_session(
                     let Some(event) = parse_sse_event(&frame) else {
                         continue;
                     };
+                    let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
                     apply_remote_event(event, current, messages, live_delta, status, approval);
+                    if refresh_now {
+                        tokio::task::yield_now().await;
+                    }
                 }
             }
             connected.set(false);
@@ -1090,6 +1372,15 @@ fn cwd_name(cwd: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or(cwd)
         .to_string()
+}
+
+fn file_extension_label(name: &str) -> String {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_uppercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| "FILE".to_string())
 }
 
 fn status_dot(status: &RemoteStatus) -> &'static str {

@@ -13,7 +13,8 @@ use crate::systems::{approval, surface_errors};
 use crate::toast::AgentToast;
 use crate::tools::mcp_tool_defs;
 use vmux_service::agent_events::{
-    PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
+    PageAgentApprovalResolved, PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus,
+    PageAgentSnapshot,
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage};
@@ -27,6 +28,7 @@ impl Plugin for PageAgentPlugin {
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_plugins(BinEventEmitterPlugin::<(AgentToast,)>::with_id(
@@ -183,6 +185,7 @@ fn consume_page_agent_stream(
     mut deltas: MessageReader<PageAgentDelta>,
     mut statuses: MessageReader<PageAgentRunStatus>,
     mut approvals: MessageReader<PageAgentAwaitingApproval>,
+    mut resolved_approvals: MessageReader<PageAgentApprovalResolved>,
     mut snapshots: MessageReader<PageAgentSnapshot>,
     mut q: Query<(
         Entity,
@@ -297,6 +300,20 @@ fn consume_page_agent_stream(
             args,
         });
     }
+    for resolved in resolved_approvals.read() {
+        let Some(&entity) = by_sid.get(&resolved.sid) else {
+            continue;
+        };
+        if let Ok((_, _, mut state, _, _, _, _, _, _)) = q.get_mut(entity)
+            && matches!(
+                &*state,
+                AgentRunState::AwaitingApproval { call_id, .. }
+                    if call_id.as_str() == resolved.call_id.as_str()
+            )
+        {
+            *state = AgentRunState::Streaming;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +336,7 @@ mod tests {
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -370,6 +388,7 @@ mod tests {
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -421,6 +440,7 @@ mod tests {
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -481,6 +501,7 @@ mod tests {
             .add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -529,6 +550,7 @@ mod tests {
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -572,6 +594,7 @@ mod tests {
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
             .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
             .add_message::<PageAgentSnapshot>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
@@ -602,5 +625,47 @@ mod tests {
             .drain()
             .count();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn remote_approval_resolution_restores_streaming_state() {
+        let mut app = App::new();
+        app.add_message::<PageAgentDelta>()
+            .add_message::<PageAgentRunStatus>()
+            .add_message::<PageAgentAwaitingApproval>()
+            .add_message::<PageAgentApprovalResolved>()
+            .add_message::<PageAgentSnapshot>()
+            .add_message::<vmux_core::notify::AgentAttention>()
+            .add_systems(Update, consume_page_agent_stream);
+        let entity = app
+            .world_mut()
+            .spawn((
+                AcpSession {
+                    agent_id: "mistral-vibe".into(),
+                    sid: "s1".into(),
+                    cwd: std::path::PathBuf::from("/tmp"),
+                    anchor: vmux_core::ProcessId::new(),
+                    resume: None,
+                },
+                AgentMessages::default(),
+                AgentRunState::AwaitingApproval {
+                    call_id: "call-1".into(),
+                    name: "run".into(),
+                    args: serde_json::json!({}),
+                },
+                PromptQueue::default(),
+            ))
+            .id();
+        app.world_mut().write_message(PageAgentApprovalResolved {
+            sid: "s1".into(),
+            call_id: "call-1".into(),
+        });
+
+        app.update();
+
+        assert!(matches!(
+            app.world().get::<AgentRunState>(entity),
+            Some(AgentRunState::Streaming)
+        ));
     }
 }
