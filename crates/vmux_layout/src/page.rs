@@ -832,9 +832,13 @@ fn SideSheetView(
     tools_loaded: bool,
     pane_tree_error: Option<String>,
 ) -> Element {
-    let active_page = panes
+    let active_pane = panes
         .iter()
         .find(|pane| pane.is_active)
+        .or_else(|| panes.first())
+        .cloned();
+    let active_page = active_pane
+        .as_ref()
         .and_then(|pane| pane.stacks.iter().find(|stack| stack.is_active))
         .filter(|stack| !stack.url.is_empty())
         .cloned();
@@ -849,11 +853,6 @@ fn SideSheetView(
         remove_bookmark_drag_ghost();
         set_bookmark_context_menu_active(false);
     });
-    let active_pane_id = panes
-        .iter()
-        .find(|pane| pane.is_active)
-        .or_else(|| panes.first())
-        .map(|pane| pane.id);
     let project_boundary = tab_boundary.clone().or_else(|| {
         active_space.as_ref().and_then(|space| {
             (!space.startup_dir.is_empty()).then(|| crate::event::TabBoundary {
@@ -874,12 +873,31 @@ fn SideSheetView(
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
                 }
             }
-            ProjectsCard { boundary: project_boundary }
-            BookmarksSection { bookmarks: bookmarks.clone(), active_page }
-            if let Some(pane_id) = active_pane_id {
-                VaultCard { pane_id, vault: tools.vault.clone(), loaded: tools_loaded }
-                KnowledgeCard { pane_id, knowledge, loaded: knowledge_loaded }
-                ToolsCard { pane_id, tools, loaded: tools_loaded }
+            if let Some(pane) = active_pane {
+                ProjectsCard {
+                    boundary: project_boundary,
+                    pane_id: pane.id,
+                    expanded: pane.projects_expanded,
+                }
+                BookmarksSection {
+                    bookmarks: bookmarks.clone(),
+                    active_page,
+                    pane_id: pane.id,
+                    expanded: pane.bookmarks_expanded,
+                }
+                VaultCard { pane_id: pane.id, vault: tools.vault.clone(), loaded: tools_loaded }
+                KnowledgeCard {
+                    pane_id: pane.id,
+                    knowledge,
+                    loaded: knowledge_loaded,
+                    expanded: pane.knowledge_expanded,
+                }
+                ToolsCard {
+                    pane_id: pane.id,
+                    tools,
+                    loaded: tools_loaded,
+                    expanded: pane.tools_expanded,
+                }
             }
             if let Some(err) = pane_tree_error {
                 div { class: "flex shrink-0 items-center px-2 py-1",
@@ -898,10 +916,32 @@ fn SideSheetView(
     }
 }
 
+fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
+    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+        command: if expanded {
+            "expand_section".to_string()
+        } else {
+            "collapse_section".to_string()
+        },
+        pane_id: pane_id.to_string(),
+        stack_index: 0,
+        path: section.to_string(),
+    });
+}
+
 #[component]
-fn ProjectsCard(boundary: Option<crate::event::TabBoundary>) -> Element {
+fn ProjectsCard(
+    boundary: Option<crate::event::TabBoundary>,
+    pane_id: u64,
+    expanded: bool,
+) -> Element {
     let title = translate("layout-projects");
     let empty = translate("layout-no-project-selected");
+    let fold_title = if expanded {
+        translate("common-collapse")
+    } else {
+        translate("common-expand")
+    };
     let project_name = boundary
         .as_ref()
         .and_then(|boundary| {
@@ -915,22 +955,46 @@ fn ProjectsCard(boundary: Option<crate::event::TabBoundary>) -> Element {
         .map(str::to_string)
         .unwrap_or_else(|| empty.clone());
     rsx! {
-        div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
-            div { class: "flex min-w-0 items-center gap-2 px-2.5 py-2",
-                div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
-                    Icon { class: "h-3.5 w-3.5",
-                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+        div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
+            div { class: "flex items-center transition-colors hover:bg-glass-hover",
+                div { class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2",
+                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                        Icon { class: "h-3.5 w-3.5",
+                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                        }
+                    }
+                    div { class: "min-w-0 flex-1",
+                        div { class: "text-ui font-semibold text-foreground", "{title}" }
+                        div { class: "truncate text-[10px] text-muted-foreground", "{project_name}" }
                     }
                 }
-                div { class: "min-w-0 flex-1",
-                    div { class: "text-ui font-semibold text-foreground", "{title}" }
-                    div { class: "truncate text-[10px] text-muted-foreground", "{project_name}" }
+                button {
+                    r#type: "button",
+                    aria_label: "{fold_title}",
+                    title: "{fold_title}",
+                    class: if expanded {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                    },
+                    onclick: move |_| set_side_sheet_section(pane_id, "projects", !expanded),
+                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                    }
                 }
             }
-            if let Some(boundary) = boundary {
-                TabBoundaryPanel { boundary }
-            } else {
-                div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
+            div { class: if expanded {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    if let Some(boundary) = boundary {
+                        TabBoundaryPanel { boundary }
+                    } else {
+                        div { class: "border-t border-foreground/10 px-2.5 py-2 text-ui-xs text-muted-foreground", "{empty}" }
+                    }
+                }
             }
         }
     }
@@ -1056,8 +1120,12 @@ fn compact_knowledge_path(path: &str) -> String {
 }
 
 #[component]
-fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> Element {
-    let mut folded = use_signal(|| false);
+fn KnowledgeCard(
+    pane_id: u64,
+    knowledge: KnowledgeTreeEvent,
+    loaded: bool,
+    expanded: bool,
+) -> Element {
     let root = knowledge.root.clone();
     let landing_path = knowledge
         .entries
@@ -1081,10 +1149,10 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
         )
     };
     let knowledge_title = translate("layout-knowledge");
-    let fold_title = if folded() {
-        translate("layout-unfold-knowledge")
-    } else {
+    let fold_title = if expanded {
         translate("layout-fold-knowledge")
+    } else {
+        translate("layout-unfold-knowledge")
     };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
@@ -1109,21 +1177,21 @@ fn KnowledgeCard(pane_id: u64, knowledge: KnowledgeTreeEvent, loaded: bool) -> E
                     r#type: "button",
                     aria_label: "{fold_title}",
                     title: "{fold_title}",
-                    class: if folded() {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    } else {
+                    class: if expanded {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
-                    onclick: move |_| folded.set(!folded()),
+                    onclick: move |_| set_side_sheet_section(pane_id, "knowledge", !expanded),
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                     }
                 }
             }
-            div { class: if folded() {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
+            div { class: if expanded {
                     "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
                     div { class: "border-t border-foreground/10 p-1.5",
@@ -1271,13 +1339,12 @@ fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool)
 }
 
 #[component]
-fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
-    let mut folded = use_signal(|| false);
+fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -> Element {
     let tools_title = translate("tools-title");
-    let fold_title = if folded() {
-        translate("tools-unfold")
-    } else {
+    let fold_title = if expanded {
         translate("tools-fold")
+    } else {
+        translate("tools-unfold")
     };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
@@ -1328,21 +1395,21 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool) -> Element {
                     r#type: "button",
                     aria_label: "{fold_title}",
                     title: "{fold_title}",
-                    class: if folded() {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    } else {
+                    class: if expanded {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
-                    onclick: move |_| folded.set(!folded()),
+                    onclick: move |_| set_side_sheet_section(pane_id, "tools", !expanded),
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                     }
                 }
             }
-            div { class: if folded() {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
+            div { class: if expanded {
                     "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
                     div { class: "border-t border-foreground/10 p-1.5",
@@ -1950,10 +2017,14 @@ fn commit_folder_rename(uuid: String, name: String) {
 }
 
 #[component]
-fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode>) -> Element {
+fn BookmarksSection(
+    bookmarks: BookmarksHostEvent,
+    active_page: Option<StackNode>,
+    pane_id: u64,
+    expanded: bool,
+) -> Element {
     let BookmarksHostEvent { pins, roots } = bookmarks;
     let drag_state: Signal<Option<BookmarkDragState>> = use_context();
-    let mut folded = use_signal(|| false);
     let mut creating_folder = use_signal(|| false);
     let new_folder_draft = use_signal(|| translate("layout-new-folder"));
     let folders = bookmark_folder_choices(&roots);
@@ -2024,21 +2095,21 @@ fn BookmarksSection(bookmarks: BookmarksHostEvent, active_page: Option<StackNode
                     r#type: "button",
                     aria_label: "{bookmarks_title}",
                     title: "{bookmarks_title}",
-                    class: if folded() {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    } else {
+                    class: if expanded {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
-                    onclick: move |_| folded.set(!folded()),
+                    onclick: move |_| set_side_sheet_section(pane_id, "bookmarks", !expanded),
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                     }
                 }
             }
-            div { class: if folded() {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
+            div { class: if expanded {
                     "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
                     div { class: "border-t border-foreground/10 p-1.5",
@@ -2618,11 +2689,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
     );
     let pane_id = pane.id;
     let any_loading = pane.stacks.iter().any(|s| s.is_loading);
-    let mut folded = use_signal(|| pane.collapsed);
-    let fold_title = if folded() {
-        translate("layout-unfold-stack")
-    } else {
+    let expanded = !pane.collapsed;
+    let fold_title = if expanded {
         translate("layout-fold-stack")
+    } else {
+        translate("layout-unfold-stack")
     };
     let visible_stacks = pane
         .stacks
@@ -2630,12 +2701,6 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
         .filter(|stack| !(stack.url.is_empty() && stack.title == "New Stack"))
         .cloned()
         .collect::<Vec<_>>();
-    let collapsed_stack = visible_stacks
-        .iter()
-        .find(|stack| stack.is_active)
-        .or_else(|| visible_stacks.first())
-        .cloned();
-
     rsx! {
         div { class: if pane.is_active && any_loading {
                 "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
@@ -2665,43 +2730,30 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     r#type: "button",
                     aria_label: "{fold_title}",
                     title: "{fold_title}",
-                    class: if folded() {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    } else {
+                    class: if expanded {
                         "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                    } else {
+                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
                     },
-                    onclick: move |_| {
-                        let next = !folded();
-                        folded.set(next);
-                        let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
-                            command: if next {
-                                "collapse_card".to_string()
-                            } else {
-                                "expand_card".to_string()
-                            },
-                            pane_id: pane_id.to_string(),
-                            stack_index: 0,
-                            path: String::new(),
-                        });
-                    },
+                    onclick: move |_| set_side_sheet_section(pane_id, "pane", !expanded),
                     Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if folded() { "m9 18 6-6-6-6" } else { "m6 9 6 6 6-6" } }
+                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
                     }
                 }
             }
-            div { class: "border-t border-foreground/10 p-1.5",
-                div { class: "flex flex-col gap-1",
-                    if folded() {
-                        if let Some(stack) = collapsed_stack {
-                            SideSheetStackRow { stack, pane_id }
-                        } else {
-                            NewStackRow { pane_id }
-                        }
-                    } else {
+            div { class: if expanded {
+                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                } else {
+                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                },
+                div { class: "overflow-hidden",
+                    div { class: "border-t border-foreground/10 p-1.5",
+                        div { class: "flex flex-col gap-1",
                         for stack in visible_stacks.iter() {
                             SideSheetStackRow { stack: stack.clone(), pane_id }
                         }
                         NewStackRow { pane_id }
+                        }
                     }
                 }
             }

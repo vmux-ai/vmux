@@ -8,7 +8,9 @@ pub(crate) struct SideSheetLayoutPlugin;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SideSheetWidth(0.0))
+        app.register_type::<SideSheetSectionsExpanded>()
+            .register_type::<SideSheetPaneExpanded>()
+            .insert_resource(SideSheetWidth(0.0))
             .add_systems(Update, side_sheet_drag_resize)
             .add_systems(
                 PostUpdate,
@@ -22,6 +24,41 @@ impl Plugin for SideSheetLayoutPlugin {
 
 #[derive(Component)]
 pub struct SideSheet;
+
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::side_sheet"]
+#[require(moonshine_save::prelude::Save)]
+pub struct SideSheetSectionsExpanded {
+    pub projects: bool,
+    pub bookmarks: bool,
+    pub knowledge: bool,
+    pub tools: bool,
+}
+
+impl SideSheetSectionsExpanded {
+    pub fn set(&mut self, section: &str, expanded: bool) -> bool {
+        let value = match section {
+            "projects" => &mut self.projects,
+            "bookmarks" => &mut self.bookmarks,
+            "knowledge" => &mut self.knowledge,
+            "tools" => &mut self.tools,
+            _ => return false,
+        };
+        *value = expanded;
+        true
+    }
+
+    pub fn is_empty(self) -> bool {
+        !self.projects && !self.bookmarks && !self.knowledge && !self.tools
+    }
+}
+
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component)]
+#[type_path = "vmux_desktop::layout::side_sheet"]
+#[require(moonshine_save::prelude::Save)]
+pub struct SideSheetPaneExpanded;
 
 #[derive(Component, PartialEq, Eq)]
 pub enum SideSheetPosition {

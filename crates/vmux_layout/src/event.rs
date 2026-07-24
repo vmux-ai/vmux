@@ -415,6 +415,14 @@ pub struct PaneNode {
     pub is_active: bool,
     #[serde(default)]
     pub collapsed: bool,
+    #[serde(default)]
+    pub projects_expanded: bool,
+    #[serde(default)]
+    pub bookmarks_expanded: bool,
+    #[serde(default)]
+    pub knowledge_expanded: bool,
+    #[serde(default)]
+    pub tools_expanded: bool,
     pub stacks: Vec<StackNode>,
 }
 

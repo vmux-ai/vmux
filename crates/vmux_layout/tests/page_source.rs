@@ -109,7 +109,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(source.contains("if entry.title.is_empty()"));
     assert!(source.contains("if expanded() {"));
     assert!(!source.contains("if expanded() && has_children"));
-    assert!(knowledge_card.contains("let mut folded = use_signal(|| false)"));
     assert!(knowledge_card.contains("grid-rows-[0fr]"));
     assert!(knowledge_card.contains("grid-rows-[1fr]"));
     assert!(source.contains("overflow-x-hidden overflow-y-auto"));
