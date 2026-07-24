@@ -172,6 +172,7 @@ pub struct ToolCategory {
 )]
 pub struct ToolsSnapshot {
     pub root: String,
+    pub vault: crate::vault::VaultSnapshot,
     pub categories: Vec<ToolCategory>,
     pub installed: u32,
     pub updates: u32,

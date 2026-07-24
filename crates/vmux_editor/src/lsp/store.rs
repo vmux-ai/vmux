@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub fn default_root() -> PathBuf {
-    std::env::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".vmux")
-        .join("lsp")
+    vmux_core::profile::lsp_dir()
 }
 
 pub fn bin_dir(root: &Path) -> PathBuf {

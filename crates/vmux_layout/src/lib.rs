@@ -23,6 +23,8 @@ pub mod snapshot;
 pub mod start;
 #[cfg(target_arch = "wasm32")]
 pub mod tools_page;
+#[cfg(target_arch = "wasm32")]
+pub mod vault_page;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod active_panes;

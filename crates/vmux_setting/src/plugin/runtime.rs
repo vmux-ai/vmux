@@ -126,7 +126,8 @@ pub struct LspServerOverride {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RecordingSettings {
     /// Output directory for screenshots and screen recordings. Absent falls back
-    /// to the default `~/.vmux/recording` (see [`vmux_core::profile::recording_dir`]).
+    /// to the active runtime profile's recording directory (see
+    /// [`vmux_core::profile::recording_dir`]).
     #[serde(default)]
     pub output_dir: Option<String>,
 }

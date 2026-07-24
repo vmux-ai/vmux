@@ -35,6 +35,7 @@ pub enum BuiltinIcon {
     Bash,
     Zsh,
     Hammer,
+    Vault,
 }
 
 impl BuiltinIcon {
