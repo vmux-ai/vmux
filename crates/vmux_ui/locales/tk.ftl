@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } zat
    *[other] { $count } zat
 }
+
+tools-title = Gurallar
+tools-search = Bukjalary, agentleri, MCP, dil gurallaryny we sazlama faýllaryny gözle…
+tools-open = Gurallary aç
+tools-fold = Gurallary ýygna
+tools-unfold = Gurallary giňelt
+tools-scanning = Ýerli gurallar barlanýar…
+tools-no-installed = Gurnalan gural ýok
+tools-empty = Gabat gelýän gural ýok
+tools-empty-detail = Bukja gurnaň ýa-da Stow görnüşli sazlama faýllary bukjasyny goşuň.
+tools-apply = Ulan
+tools-homebrew = Homebrew
+tools-homebrew-sync = Gurnalan formulalar we programmalar awtomatiki sinhronlanýar.
+tools-open-brewfile = Brewfile aç
+tools-managed = dolandyrylýar
+tools-provider-homebrew-formulae = Homebrew formulalary
+tools-provider-homebrew-casks = Homebrew programmalary
+tools-provider-npm = npm bukjalary
+tools-provider-acp-agents = ACP agentleri
+tools-provider-language-tools = Dil gurallary
+tools-provider-mcp-servers = MCP serwerleri
+tools-provider-dotfiles = Sazlama faýllary
+tools-status-available = Elýeterli
+tools-status-missing = Ýok
+tools-status-conflict = Gapma-garşylyk
+tools-forget = Ýatdan çykar
+tools-manage = Dolandyr
+tools-link = Bagla
+tools-unlink = Baglanyşygy aýyr
+tools-import = Import et
+tools-update-count = { $count ->
+    [one] 1 täzelenme
+   *[other] { $count } täzelenme
+}
+tools-conflict-count = { $count ->
+    [one] 1 gapma-garşylyk
+   *[other] { $count } gapma-garşylyk
+}
+tools-result-applied = Gurallar ulanyldy
+tools-result-imported = Gurallar import edildi
+tools-result-installed = { $name } gurnaldy
+tools-result-updated = { $name } täzelendi
+tools-result-uninstalled = { $name } aýryldy
+tools-result-forgotten = { $name } ýatdan çykaryldy
+tools-result-managed = { $name } indi dolandyrylýar
+tools-result-linked = { $name } baglandy
+tools-result-unlinked = { $name } baglanyşygy aýryldy
+
 start-title = Başla
 start-tagline = Bir prompt. Islendik iş ýerine.
 

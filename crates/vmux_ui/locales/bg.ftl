@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } елемент
    *[other] { $count } елемента
 }
+
+tools-title = Инструменти
+tools-search = Търсене на пакети, агенти, MCP, езикови инструменти и конфигурационни файлове…
+tools-open = Отваряне на инструментите
+tools-fold = Свиване на инструментите
+tools-unfold = Разгъване на инструментите
+tools-scanning = Сканиране на локалните инструменти…
+tools-no-installed = Няма инсталирани инструменти
+tools-empty = Няма съвпадащи инструменти
+tools-empty-detail = Инсталирайте пакет или добавете пакет с конфигурационни файлове в стил Stow.
+tools-apply = Прилагане
+tools-homebrew = Homebrew
+tools-homebrew-sync = Инсталираните формули и приложения се синхронизират автоматично.
+tools-open-brewfile = Отваряне на Brewfile
+tools-managed = управляван
+tools-provider-homebrew-formulae = Формули на Homebrew
+tools-provider-homebrew-casks = Приложения на Homebrew
+tools-provider-npm = Пакети на npm
+tools-provider-acp-agents = Агенти на ACP
+tools-provider-language-tools = Езикови инструменти
+tools-provider-mcp-servers = Сървъри на MCP
+tools-provider-dotfiles = Конфигурационни файлове
+tools-status-available = Налично
+tools-status-missing = Липсва
+tools-status-conflict = Конфликт
+tools-forget = Забравяне
+tools-manage = Управление
+tools-link = Свързване
+tools-unlink = Прекъсване на връзката
+tools-import = Импортиране
+tools-update-count = { $count ->
+    [one] 1 актуализация
+   *[other] { $count } актуализации
+}
+tools-conflict-count = { $count ->
+    [one] 1 конфликт
+   *[other] { $count } конфликта
+}
+tools-result-applied = Инструментите са приложени
+tools-result-imported = Инструментите са импортирани
+tools-result-installed = { $name } е инсталиран
+tools-result-updated = { $name } е актуализиран
+tools-result-uninstalled = { $name } е деинсталиран
+tools-result-forgotten = { $name } е забравен
+tools-result-managed = { $name } вече се управлява
+tools-result-linked = { $name } е свързан
+tools-result-unlinked = Връзката с { $name } е прекъсната
+
 start-title = Старт
 start-tagline = Един prompt. Всичко — готово.
 

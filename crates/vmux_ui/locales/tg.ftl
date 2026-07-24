@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } адад
    *[other] { $count } адад
 }
+
+tools-title = Абзорҳо
+tools-search = Ҷустуҷӯи бастаҳо, агентҳо, MCP, абзорҳои забон ва файлҳои танзимот…
+tools-open = Кушодани абзорҳо
+tools-fold = Ҷамъ кардани абзорҳо
+tools-unfold = Кушодани абзорҳо
+tools-scanning = Санҷиши абзорҳои маҳаллӣ…
+tools-no-installed = Абзори насбшуда нест
+tools-empty = Абзори мувофиқ нест
+tools-empty-detail = Бастаеро насб кунед ё бастаи файлҳои танзимоти сабки Stow илова кунед.
+tools-apply = Татбиқ
+tools-homebrew = Homebrew
+tools-homebrew-sync = Формулаҳо ва барномаҳои насбшуда худкор ҳамоҳанг мешаванд.
+tools-open-brewfile = Кушодани Brewfile
+tools-managed = идорашаванда
+tools-provider-homebrew-formulae = Формулаҳои Homebrew
+tools-provider-homebrew-casks = Барномаҳои Homebrew
+tools-provider-npm = Бастаҳои npm
+tools-provider-acp-agents = Агентҳои ACP
+tools-provider-language-tools = Абзорҳои забон
+tools-provider-mcp-servers = Серверҳои MCP
+tools-provider-dotfiles = Файлҳои танзимот
+tools-status-available = Дастрас
+tools-status-missing = Нест
+tools-status-conflict = Ихтилоф
+tools-forget = Фаромӯш кардан
+tools-manage = Идора кардан
+tools-link = Пайваст кардан
+tools-unlink = Қатъи пайваст
+tools-import = Ворид кардан
+tools-update-count = { $count ->
+    [one] 1 навсозӣ
+   *[other] { $count } навсозӣ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ихтилоф
+   *[other] { $count } ихтилоф
+}
+tools-result-applied = Абзорҳо татбиқ шуданд
+tools-result-imported = Абзорҳо ворид шуданд
+tools-result-installed = { $name } насб шуд
+tools-result-updated = { $name } нав шуд
+tools-result-uninstalled = { $name } ҳазф шуд
+tools-result-forgotten = { $name } фаромӯш шуд
+tools-result-managed = { $name } акнун идора мешавад
+tools-result-linked = { $name } пайваст шуд
+tools-result-unlinked = Пайвасти { $name } қатъ шуд
+
 start-title = Оғоз
 start-tagline = Як prompt. Ҳар кор — анҷом.
 

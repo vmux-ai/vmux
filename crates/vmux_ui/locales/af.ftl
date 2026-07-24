@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Gereedskap
+tools-search = Soek pakkette, agente, MCP, taalhulpmiddels en konfigurasielêers…
+tools-open = Maak Gereedskap oop
+tools-fold = Vou gereedskap toe
+tools-unfold = Vou gereedskap oop
+tools-scanning = Plaaslike gereedskap word geskandeer…
+tools-no-installed = Geen geïnstalleerde gereedskap nie
+tools-empty = Geen ooreenstemmende gereedskap nie
+tools-empty-detail = Installeer ’n pakket of voeg ’n Stow-styl konfigurasielêerpakket by.
+tools-apply = Pas toe
+tools-homebrew = Homebrew
+tools-homebrew-sync = Geïnstalleerde formules en vate sinkroniseer outomaties.
+tools-open-brewfile = Maak Brewfile oop
+tools-managed = bestuur
+tools-provider-homebrew-formulae = Homebrew-formules
+tools-provider-homebrew-casks = Homebrew-vate
+tools-provider-npm = npm-pakkette
+tools-provider-acp-agents = ACP-agente
+tools-provider-language-tools = Taalhulpmiddels
+tools-provider-mcp-servers = MCP-bedieners
+tools-provider-dotfiles = Konfigurasielêers
+tools-status-available = Beskikbaar
+tools-status-missing = Ontbreek
+tools-status-conflict = Konflik
+tools-forget = Vergeet
+tools-manage = Bestuur
+tools-link = Koppel
+tools-unlink = Ontkoppel
+tools-import = Voer in
+tools-update-count = { $count ->
+    [one] 1 opdatering
+   *[other] { $count } opdaterings
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflikte
+}
+tools-result-applied = Gereedskap toegepas
+tools-result-imported = Gereedskap ingevoer
+tools-result-installed = { $name } geïnstalleer
+tools-result-updated = { $name } opgedateer
+tools-result-uninstalled = { $name } gedeïnstalleer
+tools-result-forgotten = { $name } vergeet
+tools-result-managed = { $name } word nou bestuur
+tools-result-linked = { $name } gekoppel
+tools-result-unlinked = { $name } ontkoppel
+
 start-title = Begin
 start-tagline = Een prompt. Enigiets, klaar.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } Element
    *[other] { $count } Elementer
 }
+
+tools-title = Instrumenter
+tools-search = Sich no Packagen, Agenten, MCP, Sproochtools a Konfiguratiounsdateien…
+tools-open = Tools opmaachen
+tools-fold = Tools zouklappen
+tools-unfold = Tools opklappen
+tools-scanning = Lokal Tools ginn duerchsicht…
+tools-no-installed = Keng Tools installéiert
+tools-empty = Keng passend Tools
+tools-empty-detail = Installéiert e Package oder füügt e Stow-ähnleche Package mat Konfiguratiounsdateien derbäi.
+tools-apply = Uwenden
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installéiert Formelen an Applikatioune ginn automatesch synchroniséiert.
+tools-open-brewfile = Brewfile opmaachen
+tools-managed = verwalt
+tools-provider-homebrew-formulae = Homebrew-Formelen
+tools-provider-homebrew-casks = Homebrew-Applikatiounen
+tools-provider-npm = npm-Packagen
+tools-provider-acp-agents = ACP-Agenten
+tools-provider-language-tools = Sproochtools
+tools-provider-mcp-servers = MCP-Serveren
+tools-provider-dotfiles = Konfiguratiounsdateien
+tools-status-available = Verfügbar
+tools-status-missing = Feelt
+tools-status-conflict = Konflikt
+tools-forget = Vergiessen
+tools-manage = Verwalten
+tools-link = Verknëppen
+tools-unlink = Verknëppung léisen
+tools-import = Importéieren
+tools-update-count = { $count ->
+    [one] 1 Aktualiséierung
+   *[other] { $count } Aktualiséierungen
+}
+tools-conflict-count = { $count ->
+    [one] 1 Konflikt
+   *[other] { $count } Konflikter
+}
+tools-result-applied = Tools ugewannt
+tools-result-imported = Tools importéiert
+tools-result-installed = { $name } installéiert
+tools-result-updated = { $name } aktualiséiert
+tools-result-uninstalled = { $name } deinstalléiert
+tools-result-forgotten = { $name } vergiess
+tools-result-managed = { $name } gëtt elo verwalt
+tools-result-linked = { $name } verknëppt
+tools-result-unlinked = { $name } net méi verknëppt
+
 start-title = Start
 start-tagline = Eng Uweisung. Alles gemaach.
 

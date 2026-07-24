@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] 항목 { $count }개
    *[other] 항목 { $count }개
 }
+
+tools-title = 도구
+tools-search = 패키지, 에이전트, MCP, 언어 도구, 설정 파일 검색…
+tools-open = 도구 열기
+tools-fold = 도구 접기
+tools-unfold = 도구 펼치기
+tools-scanning = 로컬 도구 검색 중…
+tools-no-installed = 설치된 도구 없음
+tools-empty = 일치하는 도구 없음
+tools-empty-detail = 패키지를 설치하거나 Stow 방식의 설정 파일 패키지를 추가하세요.
+tools-apply = 적용
+tools-homebrew = Homebrew
+tools-homebrew-sync = 설치된 포뮬러와 애플리케이션은 자동으로 동기화됩니다.
+tools-open-brewfile = Brewfile 열기
+tools-managed = 관리됨
+tools-provider-homebrew-formulae = Homebrew 포뮬러
+tools-provider-homebrew-casks = Homebrew 애플리케이션
+tools-provider-npm = npm 패키지
+tools-provider-acp-agents = ACP 에이전트
+tools-provider-language-tools = 언어 도구
+tools-provider-mcp-servers = MCP 서버
+tools-provider-dotfiles = 설정 파일
+tools-status-available = 사용 가능
+tools-status-missing = 누락
+tools-status-conflict = 충돌
+tools-forget = 잊기
+tools-manage = 관리
+tools-link = 연결
+tools-unlink = 연결 해제
+tools-import = 가져오기
+tools-update-count = { $count ->
+    [one] 업데이트 1개
+   *[other] 업데이트 { $count }개
+}
+tools-conflict-count = { $count ->
+    [one] 충돌 1개
+   *[other] 충돌 { $count }개
+}
+tools-result-applied = 도구 적용됨
+tools-result-imported = 도구 가져옴
+tools-result-installed = { $name } 설치됨
+tools-result-updated = { $name } 업데이트됨
+tools-result-uninstalled = { $name } 제거됨
+tools-result-forgotten = { $name } 잊음
+tools-result-managed = { $name } 관리 시작됨
+tools-result-linked = { $name } 연결됨
+tools-result-unlinked = { $name } 연결 해제됨
+
 start-title = 시작
 start-tagline = 프롬프트 하나로 무엇이든 완료하세요.
 

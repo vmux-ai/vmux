@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } aitema
    *[other] { $count } aitema
 }
+
+tools-title = Meafaigaluega
+tools-search = Suʻe afifi, sui, MCP, meafaigaluega o gagana ma faila faatulagaina…
+tools-open = Tatala meafaigaluega
+tools-fold = Gaugau meafaigaluega
+tools-unfold = Tatala faalautele meafaigaluega
+tools-scanning = O loo siaki meafaigaluega i le masini…
+tools-no-installed = E leai ni meafaigaluega ua faapipii
+tools-empty = E leai ni meafaigaluega e fetaui
+tools-empty-detail = Faapipii se afifi pe faaopoopo se afifi faila faatulagaina i le faiga Stow.
+tools-apply = Faaaoga
+tools-homebrew = Homebrew
+tools-homebrew-sync = E otometi ona ogatasi fua ma polokalame ua faapipii.
+tools-open-brewfile = Tatala Brewfile
+tools-managed = pulea
+tools-provider-homebrew-formulae = Fua Homebrew
+tools-provider-homebrew-casks = Polokalame Homebrew
+tools-provider-npm = Afifi npm
+tools-provider-acp-agents = Sui ACP
+tools-provider-language-tools = Meafaigaluega o gagana
+tools-provider-mcp-servers = Sava MCP
+tools-provider-dotfiles = Faila faatulagaina
+tools-status-available = Avanoa
+tools-status-missing = Leiloa
+tools-status-conflict = Feteenaʻiga
+tools-forget = Faagalo
+tools-manage = Pulea
+tools-link = Fesootaʻi
+tools-unlink = Tatala le sootaga
+tools-import = Aumai i totonu
+tools-update-count = { $count ->
+    [one] 1 faafouga
+   *[other] { $count } faafouga
+}
+tools-conflict-count = { $count ->
+    [one] 1 feteenaʻiga
+   *[other] { $count } feteenaʻiga
+}
+tools-result-applied = Ua faaaoga meafaigaluega
+tools-result-imported = Ua aumai i totonu meafaigaluega
+tools-result-installed = Ua faapipii { $name }
+tools-result-updated = Ua faafou { $name }
+tools-result-uninstalled = Ua aveese { $name }
+tools-result-forgotten = Ua faagalo { $name }
+tools-result-managed = Ua pulea nei { $name }
+tools-result-linked = Ua fesootaʻi { $name }
+tools-result-unlinked = Ua tatala le sootaga o { $name }
+
 start-title = Amata
 start-tagline = Tasi le faatonuga. Uma ona fai.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } פּונקט
    *[other] { $count } פּונקטן
 }
+
+tools-title = מכשירים
+tools-search = זוכן פּעקלעך, אַגענטן, MCP, שפּראַך־מכשירים און קאָנפֿיגוראַציע־טעקעס…
+tools-open = עפֿענען מכשירים
+tools-fold = צונויפֿלייגן מכשירים
+tools-unfold = אויספֿאַלטן מכשירים
+tools-scanning = סקאַנירט לאָקאַלע מכשירים…
+tools-no-installed = קיין אינסטאַלירטע מכשירים
+tools-empty = קיין פּאַסיקע מכשירים
+tools-empty-detail = אינסטאַלירט אַ פּעקל אָדער לייגט צו אַ Stow־נוסח פּעקל פֿון קאָנפֿיגוראַציע־טעקעס.
+tools-apply = אָנווענדן
+tools-homebrew = Homebrew
+tools-homebrew-sync = אינסטאַלירטע פֿאָרמולעס און אַפּליקאַציעס ווערן אויטאָמאַטיש סינכראָניזירט.
+tools-open-brewfile = עפֿענען Brewfile
+tools-managed = פאַרוואַלטעט
+tools-provider-homebrew-formulae = Homebrew־פֿאָרמולעס
+tools-provider-homebrew-casks = Homebrew־אַפּליקאַציעס
+tools-provider-npm = npm־פּעקלעך
+tools-provider-acp-agents = ACP־אַגענטן
+tools-provider-language-tools = שפּראַך־מכשירים
+tools-provider-mcp-servers = MCP־סערווערס
+tools-provider-dotfiles = קאָנפֿיגוראַציע־טעקעס
+tools-status-available = פֿאַראַן
+tools-status-missing = פֿעלט
+tools-status-conflict = קאָנפֿליקט
+tools-forget = פֿאַרגעסן
+tools-manage = פאַרוואַלטן
+tools-link = פֿאַרבינדן
+tools-unlink = אָפּבינדן
+tools-import = אימפּאָרטירן
+tools-update-count = { $count ->
+    [one] 1 דערהייַנטיקונג
+   *[other] { $count } דערהייַנטיקונגען
+}
+tools-conflict-count = { $count ->
+    [one] 1 קאָנפֿליקט
+   *[other] { $count } קאָנפֿליקטן
+}
+tools-result-applied = מכשירים אָנגענומען
+tools-result-imported = מכשירים אימפּאָרטירט
+tools-result-installed = { $name } אינסטאַלירט
+tools-result-updated = { $name } דערהייַנטיקט
+tools-result-uninstalled = { $name } אָפּאינסטאַלירט
+tools-result-forgotten = { $name } פֿאַרגעסן
+tools-result-managed = { $name } ווערט איצט פאַרוואַלטעט
+tools-result-linked = { $name } פֿאַרבונדן
+tools-result-unlinked = { $name } אָפּגעבונדן
+
 start-title = אָנהייב
 start-tagline = איין פּראָמפּט. אַלץ געטאָן.
 

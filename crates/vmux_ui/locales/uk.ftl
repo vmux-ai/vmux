@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } елемент
    *[other] { $count } елементів
 }
+
+tools-title = Інструменти
+tools-search = Пошук пакетів, агентів, MCP, мовних інструментів і файлів конфігурації…
+tools-open = Відкрити інструменти
+tools-fold = Згорнути інструменти
+tools-unfold = Розгорнути інструменти
+tools-scanning = Сканування локальних інструментів…
+tools-no-installed = Немає встановлених інструментів
+tools-empty = Відповідних інструментів немає
+tools-empty-detail = Установіть пакет або додайте пакет файлів конфігурації у стилі Stow.
+tools-apply = Застосувати
+tools-homebrew = Homebrew
+tools-homebrew-sync = Установлені формули й застосунки синхронізуються автоматично.
+tools-open-brewfile = Відкрити Brewfile
+tools-managed = керується
+tools-provider-homebrew-formulae = Формули Homebrew
+tools-provider-homebrew-casks = Застосунки Homebrew
+tools-provider-npm = Пакети npm
+tools-provider-acp-agents = Агенти ACP
+tools-provider-language-tools = Мовні інструменти
+tools-provider-mcp-servers = Сервери MCP
+tools-provider-dotfiles = Файли конфігурації
+tools-status-available = Доступно
+tools-status-missing = Відсутнє
+tools-status-conflict = Конфлікт
+tools-forget = Забути
+tools-manage = Керувати
+tools-link = Зв’язати
+tools-unlink = Відв’язати
+tools-import = Імпортувати
+tools-update-count = { $count ->
+    [one] 1 оновлення
+   *[other] { $count } оновлень
+}
+tools-conflict-count = { $count ->
+    [one] 1 конфлікт
+   *[other] { $count } конфліктів
+}
+tools-result-applied = Інструменти застосовано
+tools-result-imported = Інструменти імпортовано
+tools-result-installed = { $name } установлено
+tools-result-updated = { $name } оновлено
+tools-result-uninstalled = { $name } видалено
+tools-result-forgotten = { $name } забуто
+tools-result-managed = { $name } тепер керується
+tools-result-linked = { $name } зв’язано
+tools-result-unlinked = { $name } відв’язано
+
 start-title = Початок
 start-tagline = Один prompt — і все готово.
 

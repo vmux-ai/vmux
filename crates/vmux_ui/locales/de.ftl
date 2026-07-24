@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } Element
    *[other] { $count } Elemente
 }
+
+tools-title = Werkzeuge
+tools-search = Pakete, Agenten, MCP, Sprachwerkzeuge und Konfigurationsdateien durchsuchen…
+tools-open = Werkzeuge öffnen
+tools-fold = Werkzeuge einklappen
+tools-unfold = Werkzeuge ausklappen
+tools-scanning = Lokale Werkzeuge werden durchsucht…
+tools-no-installed = Keine Werkzeuge installiert
+tools-empty = Keine passenden Werkzeuge
+tools-empty-detail = Installieren Sie ein Paket oder fügen Sie ein Konfigurationsdateipaket im Stow-Stil hinzu.
+tools-apply = Anwenden
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installierte Formeln und Anwendungen werden automatisch synchronisiert.
+tools-open-brewfile = Brewfile öffnen
+tools-managed = verwaltet
+tools-provider-homebrew-formulae = Homebrew-Formeln
+tools-provider-homebrew-casks = Homebrew-Anwendungen
+tools-provider-npm = npm-Pakete
+tools-provider-acp-agents = ACP-Agenten
+tools-provider-language-tools = Sprachwerkzeuge
+tools-provider-mcp-servers = MCP-Server
+tools-provider-dotfiles = Konfigurationsdateien
+tools-status-available = Verfügbar
+tools-status-missing = Fehlt
+tools-status-conflict = Konflikt
+tools-forget = Vergessen
+tools-manage = Verwalten
+tools-link = Verknüpfen
+tools-unlink = Verknüpfung lösen
+tools-import = Importieren
+tools-update-count = { $count ->
+    [one] 1 Aktualisierung
+   *[other] { $count } Aktualisierungen
+}
+tools-conflict-count = { $count ->
+    [one] 1 Konflikt
+   *[other] { $count } Konflikte
+}
+tools-result-applied = Werkzeuge angewendet
+tools-result-imported = Werkzeuge importiert
+tools-result-installed = { $name } installiert
+tools-result-updated = { $name } aktualisiert
+tools-result-uninstalled = { $name } deinstalliert
+tools-result-forgotten = { $name } vergessen
+tools-result-managed = { $name } wird jetzt verwaltet
+tools-result-linked = { $name } verknüpft
+tools-result-unlinked = Verknüpfung mit { $name } gelöst
+
 start-title = Start
 start-tagline = Ein Prompt. Alles erledigt.
 

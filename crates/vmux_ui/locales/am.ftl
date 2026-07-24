@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } ንጥል
    *[other] { $count } ንጥሎች
 }
+
+tools-title = መሣሪያዎች
+tools-search = ጥቅሎችን፣ ወኪሎችን፣ MCPን፣ የቋንቋ መሣሪያዎችን እና የውቅር ፋይሎችን ፈልግ…
+tools-open = መሣሪያዎችን ክፈት
+tools-fold = መሣሪያዎችን ሰብስብ
+tools-unfold = መሣሪያዎችን ዘርጋ
+tools-scanning = አካባቢያዊ መሣሪያዎችን በመፈተሽ ላይ…
+tools-no-installed = ምንም የተጫነ መሣሪያ የለም
+tools-empty = የሚዛመድ መሣሪያ የለም
+tools-empty-detail = ጥቅል ይጫኑ ወይም የStow ቅጥ ያለው የውቅር ፋይል ጥቅል ያክሉ።
+tools-apply = ተግብር
+tools-homebrew = Homebrew
+tools-homebrew-sync = የተጫኑ ቀመሮችና መተግበሪያዎች በራስ-ሰር ይመሳሰላሉ።
+tools-open-brewfile = Brewfileን ክፈት
+tools-managed = የሚተዳደር
+tools-provider-homebrew-formulae = የHomebrew ቀመሮች
+tools-provider-homebrew-casks = የHomebrew መተግበሪያዎች
+tools-provider-npm = የnpm ጥቅሎች
+tools-provider-acp-agents = የACP ወኪሎች
+tools-provider-language-tools = የቋንቋ መሣሪያዎች
+tools-provider-mcp-servers = የMCP አገልጋዮች
+tools-provider-dotfiles = የውቅር ፋይሎች
+tools-status-available = ይገኛል
+tools-status-missing = የለም
+tools-status-conflict = ግጭት
+tools-forget = እርሳ
+tools-manage = አስተዳድር
+tools-link = አገናኝ
+tools-unlink = ግንኙነት አቋርጥ
+tools-import = አስገባ
+tools-update-count = { $count ->
+    [one] 1 ዝማኔ
+   *[other] { $count } ዝማኔዎች
+}
+tools-conflict-count = { $count ->
+    [one] 1 ግጭት
+   *[other] { $count } ግጭቶች
+}
+tools-result-applied = መሣሪያዎች ተተግብረዋል
+tools-result-imported = መሣሪያዎች ገብተዋል
+tools-result-installed = { $name } ተጭኗል
+tools-result-updated = { $name } ዘምኗል
+tools-result-uninstalled = { $name } ተወግዷል
+tools-result-forgotten = { $name } ተረስቷል
+tools-result-managed = { $name } አሁን ይተዳደራል
+tools-result-linked = { $name } ተገናኝቷል
+tools-result-unlinked = { $name } ግንኙነቱ ተቋርጧል
+
 start-title = ጀምር
 start-tagline = አንድ prompt። ማንኛውም ስራ፣ ተጠናቋል።
 

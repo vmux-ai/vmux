@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] kipengee { $count }
    *[other] vipengee { $count }
 }
+
+tools-title = Zana
+tools-search = Tafuta vifurushi, mawakala, MCP, zana za lugha na faili za usanidi…
+tools-open = Fungua zana
+tools-fold = Kunja zana
+tools-unfold = Panua zana
+tools-scanning = Inachanganua zana za ndani…
+tools-no-installed = Hakuna zana zilizosakinishwa
+tools-empty = Hakuna zana zinazolingana
+tools-empty-detail = Sakinisha kifurushi au ongeza kifurushi cha faili za usanidi cha mtindo wa Stow.
+tools-apply = Tekeleza
+tools-homebrew = Homebrew
+tools-homebrew-sync = Fomula na programu zilizosakinishwa husawazishwa kiotomatiki.
+tools-open-brewfile = Fungua Brewfile
+tools-managed = inayodhibitiwa
+tools-provider-homebrew-formulae = Fomula za Homebrew
+tools-provider-homebrew-casks = Programu za Homebrew
+tools-provider-npm = Vifurushi vya npm
+tools-provider-acp-agents = Mawakala wa ACP
+tools-provider-language-tools = Zana za lugha
+tools-provider-mcp-servers = Seva za MCP
+tools-provider-dotfiles = Faili za usanidi
+tools-status-available = Inapatikana
+tools-status-missing = Haipo
+tools-status-conflict = Mgongano
+tools-forget = Sahau
+tools-manage = Dhibiti
+tools-link = Unganisha
+tools-unlink = Tenganisha
+tools-import = Leta
+tools-update-count = { $count ->
+    [one] Sasisho 1
+   *[other] Masasisho { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Mgongano 1
+   *[other] Migongano { $count }
+}
+tools-result-applied = Zana zimetekelezwa
+tools-result-imported = Zana zimeletwa
+tools-result-installed = { $name } imesakinishwa
+tools-result-updated = { $name } imesasishwa
+tools-result-uninstalled = { $name } imeondolewa
+tools-result-forgotten = { $name } imesahaulika
+tools-result-managed = { $name } sasa inadhibitiwa
+tools-result-linked = { $name } imeunganishwa
+tools-result-unlinked = { $name } imetenganishwa
+
 start-title = Anza
 start-tagline = Maelekezo moja. Chochote, kimekamilika.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } տարր
    *[other] { $count } տարր
 }
+
+tools-title = Գործիքներ
+tools-search = Փնտրել փաթեթներ, գործակալներ, MCP, լեզվական գործիքներ և կազմաձևման ֆայլեր…
+tools-open = Բացել գործիքները
+tools-fold = Ծալել գործիքները
+tools-unfold = Բացել գործիքների ցանկը
+tools-scanning = Տեղային գործիքների սկանավորում…
+tools-no-installed = Տեղադրված գործիքներ չկան
+tools-empty = Համապատասխան գործիքներ չկան
+tools-empty-detail = Տեղադրեք փաթեթ կամ ավելացրեք Stow ոճի կազմաձևման ֆայլերի փաթեթ։
+tools-apply = Կիրառել
+tools-homebrew = Homebrew
+tools-homebrew-sync = Տեղադրված բանաձևերն ու հավելվածները ինքնաբերաբար համաժամացվում են։
+tools-open-brewfile = Բացել Brewfile-ը
+tools-managed = կառավարվող
+tools-provider-homebrew-formulae = Homebrew բանաձևեր
+tools-provider-homebrew-casks = Homebrew հավելվածներ
+tools-provider-npm = npm փաթեթներ
+tools-provider-acp-agents = ACP գործակալներ
+tools-provider-language-tools = Լեզվական գործիքներ
+tools-provider-mcp-servers = MCP սերվերներ
+tools-provider-dotfiles = Կազմաձևման ֆայլեր
+tools-status-available = Հասանելի
+tools-status-missing = Բացակայում է
+tools-status-conflict = Հակասություն
+tools-forget = Մոռանալ
+tools-manage = Կառավարել
+tools-link = Կապել
+tools-unlink = Անջատել
+tools-import = Ներմուծել
+tools-update-count = { $count ->
+    [one] 1 թարմացում
+   *[other] { $count } թարմացում
+}
+tools-conflict-count = { $count ->
+    [one] 1 հակասություն
+   *[other] { $count } հակասություն
+}
+tools-result-applied = Գործիքները կիրառվեցին
+tools-result-imported = Գործիքները ներմուծվեցին
+tools-result-installed = { $name }-ը տեղադրվեց
+tools-result-updated = { $name }-ը թարմացվեց
+tools-result-uninstalled = { $name }-ը հեռացվեց
+tools-result-forgotten = { $name }-ը մոռացվեց
+tools-result-managed = { $name }-ն այժմ կառավարվում է
+tools-result-linked = { $name }-ը կապվեց
+tools-result-unlinked = { $name }-ն անջատվեց
+
 start-title = Սկիզբ
 start-tagline = Մեկ prompt, և ամեն ինչ՝ պատրաստ։
 

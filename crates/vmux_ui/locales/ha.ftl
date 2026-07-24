@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] abu { $count }
    *[other] abubuwa { $count }
 }
+
+tools-title = Kayan aiki
+tools-search = Nemi fakiti, wakilai, MCP, kayan aikin harshe da fayilolin saiti…
+tools-open = Buɗe kayan aiki
+tools-fold = Naɗe kayan aiki
+tools-unfold = Buɗe kayan aiki
+tools-scanning = Ana binciken kayan aikin gida…
+tools-no-installed = Babu kayan aiki da aka girka
+tools-empty = Babu kayan aiki da ya dace
+tools-empty-detail = Girka fakiti ko ƙara fakitin fayilolin saiti irin na Stow.
+tools-apply = Aiwatar
+tools-homebrew = Homebrew
+tools-homebrew-sync = Tsare-tsare da manhajojin da aka girka suna daidaituwa ta atomatik.
+tools-open-brewfile = Buɗe Brewfile
+tools-managed = ana sarrafawa
+tools-provider-homebrew-formulae = Tsare-tsaren Homebrew
+tools-provider-homebrew-casks = Manhajojin Homebrew
+tools-provider-npm = Fakitin npm
+tools-provider-acp-agents = Wakilan ACP
+tools-provider-language-tools = Kayan aikin harshe
+tools-provider-mcp-servers = Sabar MCP
+tools-provider-dotfiles = Fayilolin saiti
+tools-status-available = Akwai
+tools-status-missing = Babu
+tools-status-conflict = Saɓani
+tools-forget = Manta
+tools-manage = Sarrafa
+tools-link = Haɗa
+tools-unlink = Cire haɗi
+tools-import = Shigo da
+tools-update-count = { $count ->
+    [one] Sabuntawa 1
+   *[other] Sabuntawa { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Saɓani 1
+   *[other] Saɓani { $count }
+}
+tools-result-applied = An aiwatar da kayan aiki
+tools-result-imported = An shigo da kayan aiki
+tools-result-installed = An girka { $name }
+tools-result-updated = An sabunta { $name }
+tools-result-uninstalled = An cire { $name }
+tools-result-forgotten = An manta da { $name }
+tools-result-managed = Yanzu ana sarrafa { $name }
+tools-result-linked = An haɗa { $name }
+tools-result-unlinked = An cire haɗin { $name }
+
 start-title = Fara
 start-tagline = Umurni ɗaya. Komai ya gama.
 

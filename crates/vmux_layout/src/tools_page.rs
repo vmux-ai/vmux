@@ -13,10 +13,11 @@ use vmux_ui::components::manager::{
     ManagerRow, ManagerSpinner,
 };
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
-    use_theme();
+    let locale = use_theme();
     let mut snapshot = use_signal(ToolsSnapshot::default);
     let mut loaded = use_signal(|| false);
     let mut query = use_signal(String::new);
@@ -38,8 +39,9 @@ pub fn Page() -> Element {
         });
 
     use_effect(move || {
+        locale();
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title("Tools");
+            document.set_title(&translate("tools-title"));
         }
         request_snapshot(false);
     });
@@ -55,10 +57,10 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             ManagerHeader {
-                title: "Tools",
+                title: translate("tools-title"),
                 count: visible_count,
                 search_value: query(),
-                search_placeholder: "Search packages, agents, MCP, language tools, dotfiles…",
+                search_placeholder: translate("tools-search"),
                 onsearch: move |event: FormEvent| query.set(event.value()),
                 onkeydown: None,
                 actions: rsx! {
@@ -78,7 +80,7 @@ pub fn Page() -> Element {
                                 String::new(),
                             );
                         },
-                        "Apply"
+                        {translate("tools-apply")}
                     }
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
@@ -86,7 +88,7 @@ pub fn Page() -> Element {
                             loaded.set(false);
                             request_snapshot(true);
                         },
-                        "Refresh"
+                        {translate("common-refresh")}
                     }
                 },
             }
@@ -101,7 +103,11 @@ pub fn Page() -> Element {
                         } else {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
-                        "{result.message}"
+                        if result.success {
+                            {action_result_message(&result)}
+                        } else {
+                            "{result.message}"
+                        }
                     }
                 }
                 if !current.error.is_empty() {
@@ -110,17 +116,17 @@ pub fn Page() -> Element {
                     }
                 }
                 if !loaded() {
-                    ManagerSpinner { detail: "Scanning local tools…" }
+                    ManagerSpinner { detail: translate("tools-scanning") }
                 } else if visible_count == 0 {
                     ManagerEmpty {
-                        title: "No matching tools",
-                        detail: "Install a package or add a Stow-style dotfile package.",
+                        title: translate("tools-empty"),
+                        detail: translate("tools-empty-detail"),
                     }
                 } else {
                     for category in current.categories.iter() {
                         if category.items.iter().any(|item| item_matches(item, &search)) {
                             div { class: "mt-3 flex items-center gap-2 px-1 first:mt-0",
-                                h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", "{category.provider.title()}" }
+                                h2 { class: "text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground", {provider_title(category.provider)} }
                                 span { class: "text-[10px] text-muted-foreground/60",
                                     "{category.items.iter().filter(|item| item_matches(item, &search)).count()}"
                                 }
@@ -152,17 +158,17 @@ fn HomebrewSourceCard(root: String) -> Element {
                 }
             }
             div { class: "min-w-0 flex-1",
-                div { class: "font-medium text-foreground/95", "Homebrew" }
+                div { class: "font-medium text-foreground/95", {translate("tools-homebrew")} }
                 div { class: "truncate text-xs text-muted-foreground/70", "{brewfile}" }
                 div { class: "mt-1 text-[10px] text-muted-foreground/60",
-                    "Installed formulae and casks sync automatically."
+                    {translate("tools-homebrew-sync")}
                 }
             }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 disabled: root.is_empty(),
                 onclick: move |_| open_tool_file(open_brewfile.clone()),
-                "Open Brewfile"
+                {translate("tools-open-brewfile")}
             }
         }
     }
@@ -171,13 +177,6 @@ fn HomebrewSourceCard(root: String) -> Element {
 #[component]
 fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
     let version = item.version.clone().unwrap_or_default();
-    let subtitle = if version.is_empty() {
-        item.detail.clone()
-    } else if item.detail.is_empty() {
-        version
-    } else {
-        format!("{version} · {}", item.detail)
-    };
     let provider = item.provider;
     let id = item.id.clone();
     rsx! {
@@ -185,15 +184,15 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
             show_icon: false,
             icon: rsx! {},
             title: item.name.clone(),
-            subtitle,
+            subtitle: version,
             meta: rsx! {
-                span { class: "shrink-0 text-[10px] text-muted-foreground/60", "{provider_short_label(provider)}" }
+                span { class: "shrink-0 text-[10px] text-muted-foreground/60", {provider_short_label(provider)} }
                 if item.managed {
-                    span { class: "shrink-0 text-[10px] text-muted-foreground/60", "· managed" }
+                    span { class: "shrink-0 text-[10px] text-muted-foreground/60", {format!("· {}", translate("tools-managed"))} }
                 }
                 span { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground/70",
                     span { class: "size-1.5 rounded-full {status_dot_class(item.status)}" }
-                    "{status_label(item.status)}"
+                    {status_label(item.status)}
                 }
             },
             actions: rsx! {
@@ -215,7 +214,7 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
                                         String::new(),
                                     );
                                 },
-                                "{action_label(action)}"
+                                {action_label(action)}
                             }
                         }
                     }
@@ -250,29 +249,43 @@ fn item_matches(item: &ToolItem, query: &str) -> bool {
         || item.name.to_ascii_lowercase().contains(query)
         || item.id.to_ascii_lowercase().contains(query)
         || item.detail.to_ascii_lowercase().contains(query)
-        || item.provider.title().to_ascii_lowercase().contains(query)
+        || provider_title(item.provider)
+            .to_ascii_lowercase()
+            .contains(query)
 }
 
-fn provider_short_label(provider: ToolProvider) -> &'static str {
+fn provider_title(provider: ToolProvider) -> String {
+    translate(match provider {
+        ToolProvider::HomebrewFormula => "tools-provider-homebrew-formulae",
+        ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
+        ToolProvider::Npm => "tools-provider-npm",
+        ToolProvider::Acp => "tools-provider-acp-agents",
+        ToolProvider::Lsp => "tools-provider-language-tools",
+        ToolProvider::Mcp => "tools-provider-mcp-servers",
+        ToolProvider::Dotfiles => "tools-provider-dotfiles",
+    })
+}
+
+fn provider_short_label(provider: ToolProvider) -> String {
     match provider {
-        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => "brew",
-        ToolProvider::Npm => "npm",
-        ToolProvider::Acp => "acp",
-        ToolProvider::Lsp => "lsp",
-        ToolProvider::Mcp => "mcp",
-        ToolProvider::Dotfiles => "dotfiles",
+        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => "brew".to_string(),
+        ToolProvider::Npm => "npm".to_string(),
+        ToolProvider::Acp => "acp".to_string(),
+        ToolProvider::Lsp => "lsp".to_string(),
+        ToolProvider::Mcp => "mcp".to_string(),
+        ToolProvider::Dotfiles => translate("tools-provider-dotfiles").to_lowercase(),
     }
 }
 
-fn status_label(status: ToolStatus) -> &'static str {
-    match status {
-        ToolStatus::Available => "available",
-        ToolStatus::Installed => "installed",
-        ToolStatus::Outdated => "update",
-        ToolStatus::Missing => "missing",
-        ToolStatus::Conflict => "conflict",
-        ToolStatus::Failed => "failed",
-    }
+fn status_label(status: ToolStatus) -> String {
+    translate(match status {
+        ToolStatus::Available => "tools-status-available",
+        ToolStatus::Installed => "common-installed",
+        ToolStatus::Outdated => "lsp-status-outdated",
+        ToolStatus::Missing => "tools-status-missing",
+        ToolStatus::Conflict => "tools-status-conflict",
+        ToolStatus::Failed => "common-failed",
+    })
 }
 
 fn status_dot_class(status: ToolStatus) -> &'static str {
@@ -285,17 +298,38 @@ fn status_dot_class(status: ToolStatus) -> &'static str {
     }
 }
 
-fn action_label(action: ToolAction) -> &'static str {
-    match action {
-        ToolAction::Install => "Install",
-        ToolAction::Update => "Update",
-        ToolAction::Uninstall => "Uninstall",
-        ToolAction::Forget => "Forget",
-        ToolAction::Adopt => "Manage",
-        ToolAction::Link => "Link",
-        ToolAction::Unlink => "Unlink",
-        ToolAction::Apply => "Apply",
-        ToolAction::Import => "Import",
+fn action_label(action: ToolAction) -> String {
+    translate(match action {
+        ToolAction::Install => "common-install",
+        ToolAction::Update => "common-update",
+        ToolAction::Uninstall => "common-uninstall",
+        ToolAction::Forget => "tools-forget",
+        ToolAction::Adopt => "tools-manage",
+        ToolAction::Link => "tools-link",
+        ToolAction::Unlink => "tools-unlink",
+        ToolAction::Apply => "tools-apply",
+        ToolAction::Import => "tools-import",
+    })
+}
+
+fn action_result_message(result: &ToolActionResult) -> String {
+    let id = result.id.as_str();
+    match result.action {
+        ToolAction::Apply => translate("tools-result-applied"),
+        ToolAction::Import => translate("tools-result-imported"),
+        action => translate_with(
+            match action {
+                ToolAction::Install => "tools-result-installed",
+                ToolAction::Update => "tools-result-updated",
+                ToolAction::Uninstall => "tools-result-uninstalled",
+                ToolAction::Forget => "tools-result-forgotten",
+                ToolAction::Adopt => "tools-result-managed",
+                ToolAction::Link => "tools-result-linked",
+                ToolAction::Unlink => "tools-result-unlinked",
+                ToolAction::Apply | ToolAction::Import => unreachable!(),
+            },
+            &[("name", TranslationValue::String(id))],
+        ),
     }
 }
 

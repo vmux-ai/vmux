@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } ಐಟಂ
    *[other] { $count } ಐಟಂಗಳು
 }
+
+tools-title = ಉಪಕರಣಗಳು
+tools-search = ಪ್ಯಾಕೇಜ್‌ಗಳು, ಏಜೆಂಟ್‌ಗಳು, MCP, ಭಾಷಾ ಉಪಕರಣಗಳು ಮತ್ತು ಸಂರಚನಾ ಕಡತಗಳನ್ನು ಹುಡುಕಿ…
+tools-open = ಉಪಕರಣಗಳನ್ನು ತೆರೆಯಿರಿ
+tools-fold = ಉಪಕರಣಗಳನ್ನು ಮಡಿಸಿ
+tools-unfold = ಉಪಕರಣಗಳನ್ನು ವಿಸ್ತರಿಸಿ
+tools-scanning = ಸ್ಥಳೀಯ ಉಪಕರಣಗಳನ್ನು ಸ್ಕ್ಯಾನ್ ಮಾಡಲಾಗುತ್ತಿದೆ…
+tools-no-installed = ಯಾವುದೇ ಉಪಕರಣ ಸ್ಥಾಪಿಸಲಾಗಿಲ್ಲ
+tools-empty = ಹೊಂದಿಕೆಯಾಗುವ ಉಪಕರಣಗಳಿಲ್ಲ
+tools-empty-detail = ಪ್ಯಾಕೇಜ್ ಸ್ಥಾಪಿಸಿ ಅಥವಾ Stow-ಶೈಲಿಯ ಸಂರಚನಾ ಕಡತಗಳ ಪ್ಯಾಕೇಜ್ ಸೇರಿಸಿ.
+tools-apply = ಅನ್ವಯಿಸಿ
+tools-homebrew = Homebrew
+tools-homebrew-sync = ಸ್ಥಾಪಿಸಲಾದ ಸೂತ್ರಗಳು ಮತ್ತು ಅನ್ವಯಗಳು ಸ್ವಯಂಚಾಲಿತವಾಗಿ ಸಿಂಕ್ ಆಗುತ್ತವೆ.
+tools-open-brewfile = Brewfile ತೆರೆಯಿರಿ
+tools-managed = ನಿರ್ವಹಿಸಲಾಗಿದೆ
+tools-provider-homebrew-formulae = Homebrew ಸೂತ್ರಗಳು
+tools-provider-homebrew-casks = Homebrew ಅನ್ವಯಗಳು
+tools-provider-npm = npm ಪ್ಯಾಕೇಜ್‌ಗಳು
+tools-provider-acp-agents = ACP ಏಜೆಂಟ್‌ಗಳು
+tools-provider-language-tools = ಭಾಷಾ ಉಪಕರಣಗಳು
+tools-provider-mcp-servers = MCP ಸರ್ವರ್‌ಗಳು
+tools-provider-dotfiles = ಸಂರಚನಾ ಕಡತಗಳು
+tools-status-available = ಲಭ್ಯ
+tools-status-missing = ಕಾಣೆಯಾಗಿದೆ
+tools-status-conflict = ಸಂಘರ್ಷ
+tools-forget = ಮರೆತುಬಿಡಿ
+tools-manage = ನಿರ್ವಹಿಸಿ
+tools-link = ಸಂಪರ್ಕಿಸಿ
+tools-unlink = ಸಂಪರ್ಕ ತೆಗೆದುಹಾಕಿ
+tools-import = ಆಮದು ಮಾಡಿ
+tools-update-count = { $count ->
+    [one] 1 ನವೀಕರಣ
+   *[other] { $count } ನವೀಕರಣಗಳು
+}
+tools-conflict-count = { $count ->
+    [one] 1 ಸಂಘರ್ಷ
+   *[other] { $count } ಸಂಘರ್ಷಗಳು
+}
+tools-result-applied = ಉಪಕರಣಗಳನ್ನು ಅನ್ವಯಿಸಲಾಗಿದೆ
+tools-result-imported = ಉಪಕರಣಗಳನ್ನು ಆಮದು ಮಾಡಲಾಗಿದೆ
+tools-result-installed = { $name } ಸ್ಥಾಪಿಸಲಾಗಿದೆ
+tools-result-updated = { $name } ನವೀಕರಿಸಲಾಗಿದೆ
+tools-result-uninstalled = { $name } ಅಸ್ಥಾಪಿಸಲಾಗಿದೆ
+tools-result-forgotten = { $name } ಮರೆತುಬಿಡಲಾಗಿದೆ
+tools-result-managed = { $name } ಅನ್ನು ಈಗ ನಿರ್ವಹಿಸಲಾಗುತ್ತಿದೆ
+tools-result-linked = { $name } ಸಂಪರ್ಕಿಸಲಾಗಿದೆ
+tools-result-unlinked = { $name } ಸಂಪರ್ಕ ತೆಗೆದುಹಾಕಲಾಗಿದೆ
+
 start-title = ಪ್ರಾರಂಭ
 start-tagline = ಒಂದೇ prompt. ಏನು ಬೇಕಾದರೂ, ಮುಗಿದಂತೇ.
 

@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } دانە
    *[other] { $count } دانە
 }
+
+tools-title = ئامرازەکان
+tools-search = گەڕان بۆ پاکێجەکان، بریکارەکان، MCP، ئامرازەکانی زمان و فایلەکانی ڕێکخستن…
+tools-open = کردنەوەی ئامرازەکان
+tools-fold = کۆکردنەوەی ئامرازەکان
+tools-unfold = بڵاوکردنەوەی ئامرازەکان
+tools-scanning = پشکنینی ئامرازە ناوخۆییەکان…
+tools-no-installed = هیچ ئامرازێک دامەزراو نییە
+tools-empty = هیچ ئامرازێکی گونجاو نییە
+tools-empty-detail = پاکێجێک دابمەزرێنە یان پاکێجێکی فایلەکانی ڕێکخستن بە شێوازی Stow زیاد بکە.
+tools-apply = جێبەجێکردن
+tools-homebrew = Homebrew
+tools-homebrew-sync = فۆرمولاکان و بەرنامە دامەزراوەکان خۆکارانە هاوکات دەکرێن.
+tools-open-brewfile = کردنەوەی Brewfile
+tools-managed = بەڕێوەبراو
+tools-provider-homebrew-formulae = فۆرمولاکانی Homebrew
+tools-provider-homebrew-casks = بەرنامەکانی Homebrew
+tools-provider-npm = پاکێجەکانی npm
+tools-provider-acp-agents = بریکارەکانی ACP
+tools-provider-language-tools = ئامرازەکانی زمان
+tools-provider-mcp-servers = ڕاژەکارەکانی MCP
+tools-provider-dotfiles = فایلەکانی ڕێکخستن
+tools-status-available = بەردەستە
+tools-status-missing = ونە
+tools-status-conflict = ناکۆکی
+tools-forget = لەبیرکردن
+tools-manage = بەڕێوەبردن
+tools-link = بەستنەوە
+tools-unlink = پچڕاندنی بەستەر
+tools-import = هاوردەکردن
+tools-update-count = { $count ->
+    [one] 1 نوێکردنەوە
+   *[other] { $count } نوێکردنەوە
+}
+tools-conflict-count = { $count ->
+    [one] 1 ناکۆکی
+   *[other] { $count } ناکۆکی
+}
+tools-result-applied = ئامرازەکان جێبەجێ کران
+tools-result-imported = ئامرازەکان هاوردە کران
+tools-result-installed = { $name } دامەزرا
+tools-result-updated = { $name } نوێ کرایەوە
+tools-result-uninstalled = { $name } لابرا
+tools-result-forgotten = { $name } لەبیر کرا
+tools-result-managed = { $name } ئێستا بەڕێوە دەبرێت
+tools-result-linked = { $name } بەسترایەوە
+tools-result-unlinked = بەستەری { $name } پچڕێنرا
+
 start-title = دەستپێک
 start-tagline = یەک پرۆمپت. هەر کارێک، تەواو.
 

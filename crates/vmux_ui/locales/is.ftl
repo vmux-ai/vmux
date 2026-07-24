@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } atriði
    *[other] { $count } atriði
 }
+
+tools-title = Verkfæri
+tools-search = Leita að pökkum, fulltrúum, MCP, tungumálaverkfærum og stillingarskrám…
+tools-open = Opna verkfæri
+tools-fold = Fella verkfæri saman
+tools-unfold = Fella verkfæri út
+tools-scanning = Skanna staðbundin verkfæri…
+tools-no-installed = Engin verkfæri uppsett
+tools-empty = Engin samsvarandi verkfæri
+tools-empty-detail = Settu upp pakka eða bættu við stillingarskrápakka í Stow-stíl.
+tools-apply = Beita
+tools-homebrew = Homebrew
+tools-homebrew-sync = Uppsettar formúlur og forrit samstillast sjálfkrafa.
+tools-open-brewfile = Opna Brewfile
+tools-managed = stýrt
+tools-provider-homebrew-formulae = Homebrew-formúlur
+tools-provider-homebrew-casks = Homebrew-forrit
+tools-provider-npm = npm-pakkar
+tools-provider-acp-agents = ACP-fulltrúar
+tools-provider-language-tools = Tungumálaverkfæri
+tools-provider-mcp-servers = MCP-þjónar
+tools-provider-dotfiles = Stillingarskrár
+tools-status-available = Tiltækt
+tools-status-missing = Vantar
+tools-status-conflict = Árekstur
+tools-forget = Gleyma
+tools-manage = Stjórna
+tools-link = Tengja
+tools-unlink = Aftengja
+tools-import = Flytja inn
+tools-update-count = { $count ->
+    [one] 1 uppfærsla
+   *[other] { $count } uppfærslur
+}
+tools-conflict-count = { $count ->
+    [one] 1 árekstur
+   *[other] { $count } árekstrar
+}
+tools-result-applied = Verkfærum beitt
+tools-result-imported = Verkfæri flutt inn
+tools-result-installed = { $name } sett upp
+tools-result-updated = { $name } uppfært
+tools-result-uninstalled = { $name } fjarlægt
+tools-result-forgotten = { $name } gleymt
+tools-result-managed = { $name } er nú stýrt
+tools-result-linked = { $name } tengt
+tools-result-unlinked = { $name } aftengt
+
 start-title = Byrja
 start-tagline = Ein fyrirmæli. Allt klárt.
 

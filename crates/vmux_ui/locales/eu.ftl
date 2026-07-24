@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] elementu { $count }
    *[other] { $count } elementu
 }
+
+tools-title = Tresnak
+tools-search = Bilatu paketeak, agenteak, MCP, hizkuntza-tresnak eta konfigurazio-fitxategiak…
+tools-open = Ireki tresnak
+tools-fold = Tolestu tresnak
+tools-unfold = Zabaldu tresnak
+tools-scanning = Tresna lokalak aztertzen…
+tools-no-installed = Ez dago instalatutako tresnarik
+tools-empty = Ez dago bat datorren tresnarik
+tools-empty-detail = Instalatu pakete bat edo gehitu Stow estiloko konfigurazio-fitxategien pakete bat.
+tools-apply = Aplikatu
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalatutako formulak eta aplikazioak automatikoki sinkronizatzen dira.
+tools-open-brewfile = Ireki Brewfile
+tools-managed = kudeatuta
+tools-provider-homebrew-formulae = Homebrew formulak
+tools-provider-homebrew-casks = Homebrew aplikazioak
+tools-provider-npm = npm paketeak
+tools-provider-acp-agents = ACP agenteak
+tools-provider-language-tools = Hizkuntza-tresnak
+tools-provider-mcp-servers = MCP zerbitzariak
+tools-provider-dotfiles = Konfigurazio-fitxategiak
+tools-status-available = Eskuragarri
+tools-status-missing = Falta da
+tools-status-conflict = Gatazka
+tools-forget = Ahaztu
+tools-manage = Kudeatu
+tools-link = Lotu
+tools-unlink = Askatu
+tools-import = Inportatu
+tools-update-count = { $count ->
+    [one] Eguneratze 1
+   *[other] { $count } eguneratze
+}
+tools-conflict-count = { $count ->
+    [one] Gatazka 1
+   *[other] { $count } gatazka
+}
+tools-result-applied = Tresnak aplikatu dira
+tools-result-imported = Tresnak inportatu dira
+tools-result-installed = { $name } instalatu da
+tools-result-updated = { $name } eguneratu da
+tools-result-uninstalled = { $name } desinstalatu da
+tools-result-forgotten = { $name } ahaztu da
+tools-result-managed = { $name } kudeatuta dago orain
+tools-result-linked = { $name } lotu da
+tools-result-unlinked = { $name } askatu da
+
 start-title = Hasi
 start-tagline = Prompt bakarra. Edozer, eginda.
 

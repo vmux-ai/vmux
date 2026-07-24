@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } ລາຍການ
    *[other] { $count } ລາຍການ
 }
+
+tools-title = ເຄື່ອງມື
+tools-search = ຄົ້ນຫາແພັກເກດ, ຕົວແທນ, MCP, ເຄື່ອງມືພາສາ ແລະ ໄຟລ໌ກຳນົດຄ່າ…
+tools-open = ເປີດເຄື່ອງມື
+tools-fold = ພັບເຄື່ອງມື
+tools-unfold = ຂະຫຍາຍເຄື່ອງມື
+tools-scanning = ກຳລັງສະແກນເຄື່ອງມືໃນເຄື່ອງ…
+tools-no-installed = ບໍ່ມີເຄື່ອງມືທີ່ຕິດຕັ້ງ
+tools-empty = ບໍ່ມີເຄື່ອງມືທີ່ກົງກັນ
+tools-empty-detail = ຕິດຕັ້ງແພັກເກດ ຫຼື ເພີ່ມແພັກເກດໄຟລ໌ກຳນົດຄ່າແບບ Stow.
+tools-apply = ນຳໃຊ້
+tools-homebrew = Homebrew
+tools-homebrew-sync = ສູດ ແລະ ແອັບພລິເຄຊັນທີ່ຕິດຕັ້ງຈະຊິງຄ໌ອັດຕະໂນມັດ.
+tools-open-brewfile = ເປີດ Brewfile
+tools-managed = ຖືກຈັດການ
+tools-provider-homebrew-formulae = ສູດ Homebrew
+tools-provider-homebrew-casks = ແອັບພລິເຄຊັນ Homebrew
+tools-provider-npm = ແພັກເກດ npm
+tools-provider-acp-agents = ຕົວແທນ ACP
+tools-provider-language-tools = ເຄື່ອງມືພາສາ
+tools-provider-mcp-servers = ເຊີບເວີ MCP
+tools-provider-dotfiles = ໄຟລ໌ກຳນົດຄ່າ
+tools-status-available = ມີໃຫ້ໃຊ້
+tools-status-missing = ຂາດຫາຍ
+tools-status-conflict = ຂັດແຍ່ງ
+tools-forget = ລືມ
+tools-manage = ຈັດການ
+tools-link = ເຊື່ອມຕໍ່
+tools-unlink = ຍົກເລີກການເຊື່ອມຕໍ່
+tools-import = ນຳເຂົ້າ
+tools-update-count = { $count ->
+    [one] 1 ການອັບເດດ
+   *[other] { $count } ການອັບເດດ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ຂໍ້ຂັດແຍ່ງ
+   *[other] { $count } ຂໍ້ຂັດແຍ່ງ
+}
+tools-result-applied = ນຳໃຊ້ເຄື່ອງມືແລ້ວ
+tools-result-imported = ນຳເຂົ້າເຄື່ອງມືແລ້ວ
+tools-result-installed = ຕິດຕັ້ງ { $name } ແລ້ວ
+tools-result-updated = ອັບເດດ { $name } ແລ້ວ
+tools-result-uninstalled = ຖອນການຕິດຕັ້ງ { $name } ແລ້ວ
+tools-result-forgotten = ລືມ { $name } ແລ້ວ
+tools-result-managed = ຕອນນີ້ { $name } ຖືກຈັດການ
+tools-result-linked = ເຊື່ອມຕໍ່ { $name } ແລ້ວ
+tools-result-unlinked = ຍົກເລີກການເຊື່ອມຕໍ່ { $name } ແລ້ວ
+
 start-title = ເລີ່ມຕົ້ນ
 start-tagline = ສັ່ງຄັ້ງດຽວ. ເຮັດຫຍັງກໍໄດ້ໃຫ້ສຳເລັດ.
 

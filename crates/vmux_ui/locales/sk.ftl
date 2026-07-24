@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } položka
    *[other] { $count } položiek
 }
+
+tools-title = Nástroje
+tools-search = Hľadať balíky, agentov, MCP, jazykové nástroje a konfiguračné súbory…
+tools-open = Otvoriť nástroje
+tools-fold = Zbaliť nástroje
+tools-unfold = Rozbaliť nástroje
+tools-scanning = Prehľadávajú sa miestne nástroje…
+tools-no-installed = Nie sú nainštalované žiadne nástroje
+tools-empty = Žiadne zodpovedajúce nástroje
+tools-empty-detail = Nainštalujte balík alebo pridajte balík konfiguračných súborov v štýle Stow.
+tools-apply = Použiť
+tools-homebrew = Homebrew
+tools-homebrew-sync = Nainštalované formule a aplikácie sa synchronizujú automaticky.
+tools-open-brewfile = Otvoriť Brewfile
+tools-managed = spravované
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplikácie Homebrew
+tools-provider-npm = Balíky npm
+tools-provider-acp-agents = Agenti ACP
+tools-provider-language-tools = Jazykové nástroje
+tools-provider-mcp-servers = Servery MCP
+tools-provider-dotfiles = Konfiguračné súbory
+tools-status-available = Dostupné
+tools-status-missing = Chýba
+tools-status-conflict = Konflikt
+tools-forget = Zabudnúť
+tools-manage = Spravovať
+tools-link = Prepojiť
+tools-unlink = Odpojiť
+tools-import = Importovať
+tools-update-count = { $count ->
+    [one] 1 aktualizácia
+   *[other] { $count } aktualizácií
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konfliktov
+}
+tools-result-applied = Nástroje boli použité
+tools-result-imported = Nástroje boli importované
+tools-result-installed = { $name } bol nainštalovaný
+tools-result-updated = { $name } bol aktualizovaný
+tools-result-uninstalled = { $name } bol odinštalovaný
+tools-result-forgotten = { $name } bol zabudnutý
+tools-result-managed = { $name } je teraz spravovaný
+tools-result-linked = { $name } bol prepojený
+tools-result-unlinked = { $name } bol odpojený
+
 start-title = Štart
 start-tagline = Jeden prompt. Hotové čokoľvek.
 

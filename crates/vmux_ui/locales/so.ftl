@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } shay
    *[other] { $count } shay
 }
+
+tools-title = Qalab
+tools-search = Raadi xirmooyinka, wakiillada, MCP, qalabka luqadda iyo faylasha habaynta…
+tools-open = Fur qalabka
+tools-fold = Laab qalabka
+tools-unfold = Kala bixi qalabka
+tools-scanning = Baaraya qalabka maxalliga ah…
+tools-no-installed = Qalab rakiban ma jiro
+tools-empty = Qalab ku habboon ma jiro
+tools-empty-detail = Rakib xirmo ama ku dar xirmo faylal habayn ah oo qaabka Stow ah.
+tools-apply = Dhaqan geli
+tools-homebrew = Homebrew
+tools-homebrew-sync = Qaacidooyinka iyo barnaamijyada rakiban si toos ah ayay isu waafajiyaan.
+tools-open-brewfile = Fur Brewfile
+tools-managed = la maamulo
+tools-provider-homebrew-formulae = Qaacidooyinka Homebrew
+tools-provider-homebrew-casks = Barnaamijyada Homebrew
+tools-provider-npm = Xirmooyinka npm
+tools-provider-acp-agents = Wakiillada ACP
+tools-provider-language-tools = Qalabka luqadda
+tools-provider-mcp-servers = Adeegayaasha MCP
+tools-provider-dotfiles = Faylasha habaynta
+tools-status-available = La heli karo
+tools-status-missing = Maqan
+tools-status-conflict = Iskahorimaad
+tools-forget = Illow
+tools-manage = Maamul
+tools-link = Xiriiri
+tools-unlink = Xiriirka ka saar
+tools-import = Soo dejiso
+tools-update-count = { $count ->
+    [one] 1 cusboonaysiin
+   *[other] { $count } cusboonaysiin
+}
+tools-conflict-count = { $count ->
+    [one] 1 iskahorimaad
+   *[other] { $count } iskahorimaad
+}
+tools-result-applied = Qalabka waa la dhaqan geliyey
+tools-result-imported = Qalabka waa la soo dejiyey
+tools-result-installed = { $name } waa la rakibay
+tools-result-updated = { $name } waa la cusboonaysiiyey
+tools-result-uninstalled = { $name } waa la saaray
+tools-result-forgotten = { $name } waa la illoobay
+tools-result-managed = { $name } hadda waa la maamulaa
+tools-result-linked = { $name } waa la xiriiriyey
+tools-result-unlinked = Xiriirka { $name } waa la saaray
+
 start-title = Bilow
 start-tagline = Hal amar. Wax kasta, waa dhammaaday.
 

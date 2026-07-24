@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } itens
 }
+
+tools-title = Ferramentas
+tools-search = Pesquisar pacotes, agentes, MCP, ferramentas de linguagem e arquivos de configuração…
+tools-open = Abrir Ferramentas
+tools-fold = Recolher ferramentas
+tools-unfold = Expandir ferramentas
+tools-scanning = Verificando ferramentas locais…
+tools-no-installed = Nenhuma ferramenta instalada
+tools-empty = Nenhuma ferramenta correspondente
+tools-empty-detail = Instale um pacote ou adicione um pacote de arquivos de configuração no estilo Stow.
+tools-apply = Aplicar
+tools-homebrew = Homebrew
+tools-homebrew-sync = As fórmulas e os aplicativos instalados são sincronizados automaticamente.
+tools-open-brewfile = Abrir Brewfile
+tools-managed = gerenciado
+tools-provider-homebrew-formulae = Fórmulas Homebrew
+tools-provider-homebrew-casks = Aplicativos Homebrew
+tools-provider-npm = Pacotes npm
+tools-provider-acp-agents = Agentes ACP
+tools-provider-language-tools = Ferramentas de linguagem
+tools-provider-mcp-servers = Servidores MCP
+tools-provider-dotfiles = Arquivos de configuração
+tools-status-available = Disponível
+tools-status-missing = Ausente
+tools-status-conflict = Conflito
+tools-forget = Esquecer
+tools-manage = Gerenciar
+tools-link = Vincular
+tools-unlink = Desvincular
+tools-import = Importar
+tools-update-count = { $count ->
+    [one] 1 atualização
+   *[other] { $count } atualizações
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflito
+   *[other] { $count } conflitos
+}
+tools-result-applied = Ferramentas aplicadas
+tools-result-imported = Ferramentas importadas
+tools-result-installed = { $name } instalado
+tools-result-updated = { $name } atualizado
+tools-result-uninstalled = { $name } desinstalado
+tools-result-forgotten = { $name } esquecido
+tools-result-managed = { $name } agora é gerenciado
+tools-result-linked = { $name } vinculado
+tools-result-unlinked = { $name } desvinculado
+
 start-title = Início
 start-tagline = Um prompt. Tudo pronto.
 

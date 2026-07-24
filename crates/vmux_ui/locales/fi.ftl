@@ -19,6 +19,54 @@ common-items = { $count ->
     [one] { $count } kohde
    *[other] { $count } kohdetta
 }
+
+tools-title = Työkalut
+tools-search = Hae paketteja, agentteja, MCP:tä, kielityökaluja ja määritystiedostoja…
+tools-open = Avaa työkalut
+tools-fold = Kutista työkalut
+tools-unfold = Laajenna työkalut
+tools-scanning = Tarkistetaan paikallisia työkaluja…
+tools-no-installed = Ei asennettuja työkaluja
+tools-empty = Ei vastaavia työkaluja
+tools-empty-detail = Asenna paketti tai lisää Stow-tyylinen määritystiedostopaketti.
+tools-apply = Käytä
+tools-homebrew = Homebrew
+tools-homebrew-sync = Asennetut kaavat ja sovellukset synkronoidaan automaattisesti.
+tools-open-brewfile = Avaa Brewfile
+tools-managed = hallinnoitu
+tools-provider-homebrew-formulae = Homebrew-kaavat
+tools-provider-homebrew-casks = Homebrew-sovellukset
+tools-provider-npm = npm-paketit
+tools-provider-acp-agents = ACP-agentit
+tools-provider-language-tools = Kielityökalut
+tools-provider-mcp-servers = MCP-palvelimet
+tools-provider-dotfiles = Määritystiedostot
+tools-status-available = Saatavilla
+tools-status-missing = Puuttuu
+tools-status-conflict = Ristiriita
+tools-forget = Unohda
+tools-manage = Hallinnoi
+tools-link = Linkitä
+tools-unlink = Poista linkitys
+tools-import = Tuo
+tools-update-count = { $count ->
+    [one] 1 päivitys
+   *[other] { $count } päivitystä
+}
+tools-conflict-count = { $count ->
+    [one] 1 ristiriita
+   *[other] { $count } ristiriitaa
+}
+tools-result-applied = Työkalut otettu käyttöön
+tools-result-imported = Työkalut tuotu
+tools-result-installed = { $name } asennettu
+tools-result-updated = { $name } päivitetty
+tools-result-uninstalled = { $name } poistettu
+tools-result-forgotten = { $name } unohdettu
+tools-result-managed = { $name } on nyt hallinnoitu
+tools-result-linked = { $name } linkitetty
+tools-result-unlinked = Kohteen { $name } linkitys poistettu
+
 start-title = Aloita
 start-tagline = Yksi kehote. Kaikki hoituu.
 
