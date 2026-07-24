@@ -512,14 +512,11 @@ async fn resolve_approval_details(
         } {
             return Some(details);
         }
-        if let Some(details) = approval_details_from_kind(request) {
-            return Some(details);
-        }
         if tokio::time::timeout_at(deadline, updates.changed())
             .await
             .is_err()
         {
-            return None;
+            return approval_details_from_kind(request);
         }
     }
 }
@@ -2168,7 +2165,9 @@ mod tests {
             "session-1",
             agent_client_protocol::schema::v1::ToolCallUpdate::new(
                 "call-1",
-                ToolCallUpdateFields::new(),
+                ToolCallUpdateFields::new()
+                    .kind(ToolKind::Execute)
+                    .raw_input(serde_json::json!({"command": "echo hi"})),
             ),
             Vec::new(),
         );
