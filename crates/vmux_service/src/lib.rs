@@ -33,7 +33,6 @@ pub mod framing;
 pub mod http;
 #[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
 pub mod launchd;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod message;
 #[cfg(not(target_arch = "wasm32"))]
 mod osc133;
@@ -41,12 +40,12 @@ mod osc133;
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod process;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod providers;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod registry;
+pub mod remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod run_marker;
 #[cfg(not(target_arch = "wasm32"))]
