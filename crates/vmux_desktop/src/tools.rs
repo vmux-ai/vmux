@@ -292,10 +292,12 @@ fn emit_tools_snapshot(
 }
 
 fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
-    let (manifest, manifest_error) = match manifest_store::load_manifest() {
+    let (mut manifest, manifest_error) = match manifest_store::load_manifest() {
         Ok(manifest) => (manifest, None),
         Err(error) => (ToolsManifest::default(), Some(error)),
     };
+    let can_persist = manifest_error.is_none();
+    let original_manifest = manifest.clone();
     let mut categories = Vec::new();
     let mut errors = manifest_error.into_iter().collect::<Vec<_>>();
     let providers = [
@@ -311,6 +313,7 @@ fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
         (ToolProvider::Acp, scan_acp(refresh_catalogs)),
         (ToolProvider::Lsp, scan_lsp(refresh_catalogs)),
     ];
+    let mut inventories = Vec::new();
     for (provider, result) in providers {
         let inventory = match result {
             Ok(inventory) => inventory,
@@ -319,10 +322,22 @@ fn scan_tools(refresh_catalogs: bool) -> ToolsSnapshot {
                 Vec::new()
             }
         };
-        categories.push(build_category(provider, inventory, &manifest));
+        import_inventory(&mut manifest, provider, inventory.clone());
+        inventories.push((provider, inventory));
     }
-    categories.push(scan_mcp(&manifest, &mut errors));
-    categories.push(scan_dotfiles(&manifest));
+    categories.extend(
+        inventories
+            .into_iter()
+            .map(|(provider, inventory)| build_category(provider, inventory, &manifest)),
+    );
+    categories.push(scan_mcp(&mut manifest, &mut errors));
+    categories.push(scan_dotfiles(&mut manifest));
+    if can_persist
+        && manifest != original_manifest
+        && let Err(error) = manifest_store::write_manifest(&manifest)
+    {
+        errors.push(format!("Tools: {error}"));
+    }
     let installed = categories
         .iter()
         .flat_map(|category| &category.items)
@@ -649,13 +664,22 @@ fn scan_lsp(refresh: bool) -> Result<Vec<InventoryItem>, String> {
     Ok(inventory)
 }
 
-fn scan_mcp(manifest: &ToolsManifest, errors: &mut Vec<String>) -> ToolCategory {
+fn scan_mcp(manifest: &mut ToolsManifest, errors: &mut Vec<String>) -> ToolCategory {
     let (discovered, discovery_errors) = manifest_store::discover_mcp_servers();
     errors.extend(
         discovery_errors
             .into_iter()
             .map(|error| format!("MCP Servers: {error}")),
     );
+    for (name, server) in &discovered {
+        if name != "vmux" && !server.conflict {
+            manifest
+                .mcp
+                .servers
+                .entry(name.clone())
+                .or_insert_with(|| server.definition.clone());
+        }
+    }
     let mut names = discovered.keys().cloned().collect::<BTreeSet<_>>();
     names.extend(manifest.mcp.servers.keys().cloned());
     let items = names
@@ -722,11 +746,12 @@ fn scan_mcp(manifest: &ToolsManifest, errors: &mut Vec<String>) -> ToolCategory 
     }
 }
 
-fn scan_dotfiles(manifest: &ToolsManifest) -> ToolCategory {
-    let mut package_names = manifest_store::dotfile_packages()
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+fn scan_dotfiles(manifest: &mut ToolsManifest) -> ToolCategory {
+    let discovered = manifest_store::dotfile_packages().unwrap_or_default();
+    for package in &discovered {
+        manifest.set_dotfile_package(package, true);
+    }
+    let mut package_names = discovered.into_iter().collect::<BTreeSet<_>>();
     package_names.extend(manifest.dotfiles.packages.iter().cloned());
     let mut items = Vec::new();
     for package in package_names {
