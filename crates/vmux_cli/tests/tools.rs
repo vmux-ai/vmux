@@ -1,6 +1,6 @@
 #[cfg(unix)]
 #[test]
-fn registry_adopt_and_apply_manage_home_links() {
+fn tools_adopt_and_apply_manage_home_links() {
     use assert_cmd::Command;
     use predicates::prelude::*;
 
@@ -14,7 +14,7 @@ fn registry_adopt_and_apply_manage_home_links() {
     adopt
         .env("HOME", &home)
         .args([
-            "registry",
+            "tools",
             "adopt",
             config.to_str().unwrap(),
             "--package",
@@ -23,7 +23,7 @@ fn registry_adopt_and_apply_manage_home_links() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            ".vmux/registry/dotfiles/shell/.config/nushell/config.nu",
+            ".vmux/tools/dotfiles/shell/.config/nushell/config.nu",
         ));
 
     assert!(config.symlink_metadata().unwrap().file_type().is_symlink());
@@ -32,7 +32,7 @@ fn registry_adopt_and_apply_manage_home_links() {
     let mut apply = Command::cargo_bin("vmux").unwrap();
     apply
         .env("HOME", &home)
-        .args(["registry", "apply"])
+        .args(["tools", "apply"])
         .assert()
         .success()
         .stdout(predicate::str::contains("linked 1 file(s)"));
@@ -42,7 +42,7 @@ fn registry_adopt_and_apply_manage_home_links() {
 }
 
 #[test]
-fn registry_import_adopts_existing_manifests() {
+fn tools_import_adopts_existing_manifests() {
     use assert_cmd::Command;
     use predicates::prelude::*;
 
@@ -61,21 +61,21 @@ fn registry_import_adopts_existing_manifests() {
     Command::cargo_bin("vmux")
         .unwrap()
         .env("HOME", &home)
-        .args(["registry", "import", "homebrew", brewfile.to_str().unwrap()])
+        .args(["tools", "import", "homebrew", brewfile.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("1 formulae and 1 casks"));
     Command::cargo_bin("vmux")
         .unwrap()
         .env("HOME", &home)
-        .args(["registry", "import", "mcp", mcp.to_str().unwrap()])
+        .args(["tools", "import", "mcp", mcp.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicate::str::contains("1 MCP server"));
     Command::cargo_bin("vmux")
         .unwrap()
         .env("HOME", &home)
-        .args(["registry", "status"])
+        .args(["tools", "status"])
         .assert()
         .success()
         .stdout(

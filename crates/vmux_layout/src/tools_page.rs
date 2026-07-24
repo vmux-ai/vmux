@@ -3,10 +3,9 @@
 use std::collections::BTreeSet;
 
 use dioxus::prelude::*;
-use vmux_core::registry::{
-    REGISTRY_ACTION_RESULT_EVENT, REGISTRY_SNAPSHOT_EVENT, RegistryAction, RegistryActionRequest,
-    RegistryActionResult, RegistryItem, RegistryProvider, RegistryRefreshRequest, RegistrySnapshot,
-    RegistryStatus,
+use vmux_core::tools::{
+    TOOL_ACTION_RESULT_EVENT, TOOLS_SNAPSHOT_EVENT, ToolAction, ToolActionRequest,
+    ToolActionResult, ToolItem, ToolProvider, ToolStatus, ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::manager::{
@@ -18,37 +17,35 @@ use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    let mut snapshot = use_signal(RegistrySnapshot::default);
+    let mut snapshot = use_signal(ToolsSnapshot::default);
     let mut loaded = use_signal(|| false);
     let mut query = use_signal(String::new);
     let mut pending = use_signal(BTreeSet::<String>::new);
-    let mut notice = use_signal(|| None::<RegistryActionResult>);
-    let add_provider = use_signal(|| RegistryProvider::HomebrewFormula.id().to_string());
+    let mut notice = use_signal(|| None::<ToolActionResult>);
+    let add_provider = use_signal(|| ToolProvider::HomebrewFormula.id().to_string());
     let add_name = use_signal(String::new);
     let adopt_package = use_signal(String::new);
     let adopt_path = use_signal(String::new);
-    let import_provider = use_signal(|| RegistryProvider::HomebrewFormula.id().to_string());
+    let import_provider = use_signal(|| ToolProvider::HomebrewFormula.id().to_string());
     let import_path = use_signal(String::new);
 
     let _snapshot_listener =
-        use_bin_event_listener::<RegistrySnapshot, _>(REGISTRY_SNAPSHOT_EVENT, move |event| {
+        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
             snapshot.set(event);
             loaded.set(true);
         });
-    let _action_listener = use_bin_event_listener::<RegistryActionResult, _>(
-        REGISTRY_ACTION_RESULT_EVENT,
-        move |result| {
+    let _action_listener =
+        use_bin_event_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
             pending
                 .write()
                 .remove(&action_key(result.provider, result.action, &result.id));
             notice.set(Some(result));
             request_snapshot(false);
-        },
-    );
+        });
 
     use_effect(move || {
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title("Registry");
+            document.set_title("Tools");
         }
         request_snapshot(false);
     });
@@ -64,7 +61,7 @@ pub fn Page() -> Element {
     rsx! {
         ManagerPage {
             ManagerHeader {
-                title: "Registry",
+                title: "Tools",
                 count: visible_count,
                 search_value: query(),
                 search_placeholder: "Search packages, agents, MCP, language tools, dotfiles…",
@@ -74,15 +71,15 @@ pub fn Page() -> Element {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         disabled: pending().contains(&action_key(
-                            RegistryProvider::Dotfiles,
-                            RegistryAction::Apply,
+                            ToolProvider::Dotfiles,
+                            ToolAction::Apply,
                             "",
                         )),
                         onclick: move |_| {
                             send_action(
                                 pending,
-                                RegistryProvider::Dotfiles,
-                                RegistryAction::Apply,
+                                ToolProvider::Dotfiles,
+                                ToolAction::Apply,
                                 String::new(),
                                 String::new(),
                             );
@@ -100,7 +97,7 @@ pub fn Page() -> Element {
                 },
             }
             ManagerList {
-                RegistryControls {
+                ToolsControls {
                     add_provider,
                     add_name,
                     adopt_package,
@@ -141,7 +138,7 @@ pub fn Page() -> Element {
                                 }
                             }
                             for item in category.items.iter().filter(|item| item_matches(item, &search)) {
-                                RegistryRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), pending }
+                                ToolRow { key: "{category.provider.id()}:{item.id}", item: item.clone(), pending }
                             }
                         }
                     }
@@ -152,7 +149,7 @@ pub fn Page() -> Element {
 }
 
 #[component]
-fn RegistryControls(
+fn ToolsControls(
     mut add_provider: Signal<String>,
     mut add_name: Signal<String>,
     mut adopt_package: Signal<String>,
@@ -196,7 +193,7 @@ fn RegistryControls(
                             send_action(
                                 pending,
                                 provider,
-                                RegistryAction::Install,
+                                ToolAction::Install,
                                 name,
                                 String::new(),
                             );
@@ -234,8 +231,8 @@ fn RegistryControls(
                             }
                             send_action(
                                 pending,
-                                RegistryProvider::Dotfiles,
-                                RegistryAction::Adopt,
+                                ToolProvider::Dotfiles,
+                                ToolAction::Adopt,
                                 package,
                                 path,
                             );
@@ -269,8 +266,8 @@ fn RegistryControls(
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         disabled: pending().contains(&action_key(
-                            provider_from_id(&import_provider()).unwrap_or(RegistryProvider::HomebrewFormula),
-                            RegistryAction::Import,
+                            provider_from_id(&import_provider()).unwrap_or(ToolProvider::HomebrewFormula),
+                            ToolAction::Import,
                             "",
                         )),
                         onclick: move |_| {
@@ -280,7 +277,7 @@ fn RegistryControls(
                             send_action(
                                 pending,
                                 provider,
-                                RegistryAction::Import,
+                                ToolAction::Import,
                                 String::new(),
                                 import_path().trim().to_string(),
                             );
@@ -297,7 +294,7 @@ fn RegistryControls(
 }
 
 #[component]
-fn RegistryRow(item: RegistryItem, pending: Signal<BTreeSet<String>>) -> Element {
+fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
     let version = item.version.clone().unwrap_or_default();
     let subtitle = if version.is_empty() {
         item.detail.clone()
@@ -351,18 +348,18 @@ fn RegistryRow(item: RegistryItem, pending: Signal<BTreeSet<String>>) -> Element
 }
 
 fn request_snapshot(refresh: bool) {
-    let _ = try_cef_bin_emit_rkyv(&RegistryRefreshRequest { refresh });
+    let _ = try_cef_bin_emit_rkyv(&ToolsRefreshRequest { refresh });
 }
 
 fn send_action(
     mut pending: Signal<BTreeSet<String>>,
-    provider: RegistryProvider,
-    action: RegistryAction,
+    provider: ToolProvider,
+    action: ToolAction,
     id: String,
     value: String,
 ) {
     pending.write().insert(action_key(provider, action, &id));
-    let _ = try_cef_bin_emit_rkyv(&RegistryActionRequest {
+    let _ = try_cef_bin_emit_rkyv(&ToolActionRequest {
         provider,
         action,
         id,
@@ -370,7 +367,7 @@ fn send_action(
     });
 }
 
-fn item_matches(item: &RegistryItem, query: &str) -> bool {
+fn item_matches(item: &ToolItem, query: &str) -> bool {
     query.is_empty()
         || item.name.to_ascii_lowercase().contains(query)
         || item.id.to_ascii_lowercase().contains(query)
@@ -378,86 +375,86 @@ fn item_matches(item: &RegistryItem, query: &str) -> bool {
         || item.provider.title().to_ascii_lowercase().contains(query)
 }
 
-fn provider_from_id(id: &str) -> Option<RegistryProvider> {
-    RegistryProvider::ALL
+fn provider_from_id(id: &str) -> Option<ToolProvider> {
+    ToolProvider::ALL
         .into_iter()
         .find(|provider| provider.id() == id)
 }
 
-fn provider_short_label(provider: RegistryProvider) -> &'static str {
+fn provider_short_label(provider: ToolProvider) -> &'static str {
     match provider {
-        RegistryProvider::HomebrewFormula | RegistryProvider::HomebrewCask => "brew",
-        RegistryProvider::Npm => "npm",
-        RegistryProvider::Acp => "acp",
-        RegistryProvider::Lsp => "lsp",
-        RegistryProvider::Mcp => "mcp",
-        RegistryProvider::Dotfiles => "dotfiles",
+        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => "brew",
+        ToolProvider::Npm => "npm",
+        ToolProvider::Acp => "acp",
+        ToolProvider::Lsp => "lsp",
+        ToolProvider::Mcp => "mcp",
+        ToolProvider::Dotfiles => "dotfiles",
     }
 }
 
-fn status_label(status: RegistryStatus) -> &'static str {
+fn status_label(status: ToolStatus) -> &'static str {
     match status {
-        RegistryStatus::Available => "available",
-        RegistryStatus::Installed => "installed",
-        RegistryStatus::Outdated => "update",
-        RegistryStatus::Missing => "missing",
-        RegistryStatus::Conflict => "conflict",
-        RegistryStatus::Failed => "failed",
+        ToolStatus::Available => "available",
+        ToolStatus::Installed => "installed",
+        ToolStatus::Outdated => "update",
+        ToolStatus::Missing => "missing",
+        ToolStatus::Conflict => "conflict",
+        ToolStatus::Failed => "failed",
     }
 }
 
-fn status_tone(status: RegistryStatus) -> ManagerTone {
+fn status_tone(status: ToolStatus) -> ManagerTone {
     match status {
-        RegistryStatus::Installed => ManagerTone::Green,
-        RegistryStatus::Outdated | RegistryStatus::Conflict => ManagerTone::Amber,
+        ToolStatus::Installed => ManagerTone::Green,
+        ToolStatus::Outdated | ToolStatus::Conflict => ManagerTone::Amber,
         _ => ManagerTone::Neutral,
     }
 }
 
-fn action_label(action: RegistryAction) -> &'static str {
+fn action_label(action: ToolAction) -> &'static str {
     match action {
-        RegistryAction::Install => "Install",
-        RegistryAction::Update => "Update",
-        RegistryAction::Uninstall => "Uninstall",
-        RegistryAction::Forget => "Forget",
-        RegistryAction::Adopt => "Manage",
-        RegistryAction::Link => "Link",
-        RegistryAction::Unlink => "Unlink",
-        RegistryAction::Apply => "Apply",
-        RegistryAction::Import => "Import",
+        ToolAction::Install => "Install",
+        ToolAction::Update => "Update",
+        ToolAction::Uninstall => "Uninstall",
+        ToolAction::Forget => "Forget",
+        ToolAction::Adopt => "Manage",
+        ToolAction::Link => "Link",
+        ToolAction::Unlink => "Unlink",
+        ToolAction::Apply => "Apply",
+        ToolAction::Import => "Import",
     }
 }
 
-fn action_variant(action: RegistryAction) -> ManagerButtonVariant {
+fn action_variant(action: ToolAction) -> ManagerButtonVariant {
     match action {
-        RegistryAction::Install | RegistryAction::Link => ManagerButtonVariant::Primary,
-        RegistryAction::Uninstall | RegistryAction::Forget | RegistryAction::Unlink => {
+        ToolAction::Install | ToolAction::Link => ManagerButtonVariant::Primary,
+        ToolAction::Uninstall | ToolAction::Forget | ToolAction::Unlink => {
             ManagerButtonVariant::Danger
         }
         _ => ManagerButtonVariant::Secondary,
     }
 }
 
-fn action_key(provider: RegistryProvider, action: RegistryAction, id: &str) -> String {
+fn action_key(provider: ToolProvider, action: ToolAction, id: &str) -> String {
     format!("{}:{action:?}:{id}", provider.id())
 }
 
-fn provider_icon(provider: RegistryProvider) -> Element {
+fn provider_icon(provider: ToolProvider) -> Element {
     let path = match provider {
-        RegistryProvider::HomebrewFormula | RegistryProvider::HomebrewCask => {
+        ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => {
             "M8 2h8l-1 4h3a2 2 0 0 1 2 2v1a3 3 0 0 1-3 3h-1l-1 8H9L8 2Zm8 6-.3 2H17a1 1 0 0 0 1-1V8h-2Z"
         }
-        RegistryProvider::Npm => {
+        ToolProvider::Npm => {
             "M2 7h20v10H12v-3h-2v3H2V7Zm3 3v4h2v-4H5Zm7 0v2h2v-2h-2Zm5 0v4h2v-4h-2Z"
         }
-        RegistryProvider::Acp => {
+        ToolProvider::Acp => {
             "M12 3a6 6 0 0 0-6 6v2a3 3 0 0 0-2 3v4h4v-5h8v5h4v-4a3 3 0 0 0-2-3V9a6 6 0 0 0-6-6Z"
         }
-        RegistryProvider::Lsp => "M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4Z",
-        RegistryProvider::Mcp => {
+        ToolProvider::Lsp => "M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4Z",
+        ToolProvider::Mcp => {
             "M7 4h10v4h3v8h-3v4H7v-4H4V8h3V4Zm2 2v12h6V6H9Zm-3 4v4h1v-4H6Zm11 0v4h1v-4h-1Z"
         }
-        RegistryProvider::Dotfiles => {
+        ToolProvider::Dotfiles => {
             "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 2 4 4h-4V4Z"
         }
     };

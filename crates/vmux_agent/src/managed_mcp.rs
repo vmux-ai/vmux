@@ -1,15 +1,15 @@
-//! Registry-managed MCP server projection for CLI and ACP agents.
+//! Tools-managed MCP server projection for CLI and ACP agents.
 
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
-use vmux_core::profile::registry::{McpServerManifest, McpTransport};
+use vmux_core::profile::tools::{McpServerManifest, McpTransport};
 use vmux_service::protocol::{ManagedMcpServer, ManagedMcpTransport};
 
-/// Loads Registry-owned MCP servers without blocking agent startup on a malformed manifest.
+/// Loads Tools-owned MCP servers without blocking agent startup on a malformed manifest.
 #[cfg(not(test))]
 pub fn load() -> BTreeMap<String, McpServerManifest> {
-    match vmux_core::profile::registry::load_manifest() {
+    match vmux_core::profile::tools::load_manifest() {
         Ok(manifest) => manifest.mcp.servers,
         Err(error) => {
             bevy::log::warn!("managed MCP servers unavailable: {error}");
@@ -48,7 +48,7 @@ fn acp_server(name: String, server: McpServerManifest) -> ManagedMcpServer {
     }
 }
 
-/// Converts one Registry server to Claude's `mcpServers` JSON shape.
+/// Converts one Tools server to Claude's `mcpServers` JSON shape.
 pub fn claude_value(server: &McpServerManifest) -> Value {
     let mut value = Map::new();
     match server.transport {
@@ -82,7 +82,7 @@ pub fn claude_value(server: &McpServerManifest) -> Value {
     Value::Object(value)
 }
 
-/// Converts one Registry server to Vibe's `VIBE_MCP_SERVERS` JSON shape.
+/// Converts one Tools server to Vibe's `VIBE_MCP_SERVERS` JSON shape.
 pub fn vibe_value(name: &str, server: &McpServerManifest) -> Value {
     let mut value = match claude_value(server) {
         Value::Object(value) => value,
