@@ -136,7 +136,7 @@ pub fn UserBubble(
     children: Element,
 ) -> Element {
     rsx! {
-        div { class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm", ..attributes,
+        div { class: "chat-user-bubble flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border p-2.5 text-sm [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto]", ..attributes,
             {children}
         }
     }
@@ -154,7 +154,7 @@ pub fn AssistantTurn(
         "w-full"
     };
     rsx! {
-        div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3 {placement}", ..attributes,
+        div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border px-3.5 py-3 [contain-intrinsic-size:auto_160px] [contain:layout_paint_style] [content-visibility:auto] {placement}", ..attributes,
             {children}
         }
     }
