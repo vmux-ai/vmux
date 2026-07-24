@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Eszközök
-tools-search = Csomagok, ügynökök, MCP, nyelvi eszközök és konfigurációs fájlok keresése…
+tools-search = Csomagok, ügynökök, MCP, LSP és konfigurációs fájlok keresése…
 tools-open = Eszközök megnyitása
 tools-fold = Eszközök összecsukása
 tools-unfold = Eszközök kibontása
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile megnyitása
 tools-managed = kezelt
 tools-provider-homebrew-formulae = Homebrew-képletek
 tools-provider-homebrew-casks = Homebrew-alkalmazások
-tools-provider-npm = npm-csomagok
+tools-provider-npm = NPM-csomagok
 tools-provider-acp-agents = ACP-ügynökök
-tools-provider-language-tools = Nyelvi eszközök
+tools-provider-lsp-servers = LSP-kiszolgálók
 tools-provider-mcp-servers = MCP-kiszolgálók
 tools-provider-dotfiles = Konfigurációs fájlok
 tools-status-available = Elérhető

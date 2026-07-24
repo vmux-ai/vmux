@@ -260,7 +260,7 @@ fn provider_title(provider: ToolProvider) -> String {
         ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
         ToolProvider::Npm => "tools-provider-npm",
         ToolProvider::Acp => "tools-provider-acp-agents",
-        ToolProvider::Lsp => "tools-provider-language-tools",
+        ToolProvider::Lsp => "tools-provider-lsp-servers",
         ToolProvider::Mcp => "tools-provider-mcp-servers",
         ToolProvider::Dotfiles => "tools-provider-dotfiles",
     })
@@ -269,7 +269,7 @@ fn provider_title(provider: ToolProvider) -> String {
 fn provider_short_label(provider: ToolProvider) -> String {
     match provider {
         ToolProvider::HomebrewFormula | ToolProvider::HomebrewCask => "brew".to_string(),
-        ToolProvider::Npm => "npm".to_string(),
+        ToolProvider::Npm => "NPM".to_string(),
         ToolProvider::Acp => "acp".to_string(),
         ToolProvider::Lsp => "lsp".to_string(),
         ToolProvider::Mcp => "mcp".to_string(),

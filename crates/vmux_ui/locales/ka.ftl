@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ხელსაწყოები
-tools-search = პაკეტების, აგენტების, MCP-ის, ენის ხელსაწყოებისა და კონფიგურაციის ფაილების ძიება…
+tools-search = პაკეტების, აგენტების, MCP-ის, LSPსა და კონფიგურაციის ფაილების ძიება…
 tools-open = ხელსაწყოების გახსნა
 tools-fold = ხელსაწყოების აკეცვა
 tools-unfold = ხელსაწყოების გაშლა
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile-ის გახსნა
 tools-managed = მართული
 tools-provider-homebrew-formulae = Homebrew-ის ფორმულები
 tools-provider-homebrew-casks = Homebrew-ის პროგრამები
-tools-provider-npm = npm-ის პაკეტები
+tools-provider-npm = NPM-ის პაკეტები
 tools-provider-acp-agents = ACP-ის აგენტები
-tools-provider-language-tools = ენის ხელსაწყოები
+tools-provider-lsp-servers = LSP-ის სერვერები
 tools-provider-mcp-servers = MCP-ის სერვერები
 tools-provider-dotfiles = კონფიგურაციის ფაილები
 tools-status-available = ხელმისაწვდომია

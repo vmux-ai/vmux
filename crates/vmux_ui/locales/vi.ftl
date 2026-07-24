@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Công cụ
-tools-search = Tìm gói, tác nhân, MCP, công cụ ngôn ngữ và tệp cấu hình…
+tools-search = Tìm gói, tác nhân, MCP, LSP và tệp cấu hình…
 tools-open = Mở Công cụ
 tools-fold = Thu gọn công cụ
 tools-unfold = Mở rộng công cụ
@@ -36,9 +36,9 @@ tools-open-brewfile = Mở Brewfile
 tools-managed = được quản lý
 tools-provider-homebrew-formulae = Công thức Homebrew
 tools-provider-homebrew-casks = Ứng dụng Homebrew
-tools-provider-npm = Gói npm
+tools-provider-npm = Gói NPM
 tools-provider-acp-agents = Tác nhân ACP
-tools-provider-language-tools = Công cụ ngôn ngữ
+tools-provider-lsp-servers = Máy chủ LSP
 tools-provider-mcp-servers = Máy chủ MCP
 tools-provider-dotfiles = Tệp cấu hình
 tools-status-available = Có sẵn

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ابزارها
-tools-search = جست‌وجوی بسته‌ها، عامل‌ها، MCP، ابزارهای زبان و پرونده‌های پیکربندی…
+tools-search = جست‌وجوی بسته‌ها، عامل‌ها، MCP، LSP و پرونده‌های پیکربندی…
 tools-open = باز کردن ابزارها
 tools-fold = جمع کردن ابزارها
 tools-unfold = باز کردن ابزارها
@@ -36,9 +36,9 @@ tools-open-brewfile = باز کردن Brewfile
 tools-managed = مدیریت‌شده
 tools-provider-homebrew-formulae = فرمول‌های Homebrew
 tools-provider-homebrew-casks = برنامه‌های Homebrew
-tools-provider-npm = بسته‌های npm
+tools-provider-npm = بسته‌های NPM
 tools-provider-acp-agents = عامل‌های ACP
-tools-provider-language-tools = ابزارهای زبان
+tools-provider-lsp-servers = سرورهای LSP
 tools-provider-mcp-servers = سرورهای MCP
 tools-provider-dotfiles = پرونده‌های پیکربندی
 tools-status-available = در دسترس

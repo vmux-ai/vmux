@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Tresnak
-tools-search = Bilatu paketeak, agenteak, MCP, hizkuntza-tresnak eta konfigurazio-fitxategiak…
+tools-search = Bilatu paketeak, agenteak, MCP, LSP eta konfigurazio-fitxategiak…
 tools-open = Ireki tresnak
 tools-fold = Tolestu tresnak
 tools-unfold = Zabaldu tresnak
@@ -36,9 +36,9 @@ tools-open-brewfile = Ireki Brewfile
 tools-managed = kudeatuta
 tools-provider-homebrew-formulae = Homebrew formulak
 tools-provider-homebrew-casks = Homebrew aplikazioak
-tools-provider-npm = npm paketeak
+tools-provider-npm = NPM paketeak
 tools-provider-acp-agents = ACP agenteak
-tools-provider-language-tools = Hizkuntza-tresnak
+tools-provider-lsp-servers = LSP zerbitzariak
 tools-provider-mcp-servers = MCP zerbitzariak
 tools-provider-dotfiles = Konfigurazio-fitxategiak
 tools-status-available = Eskuragarri

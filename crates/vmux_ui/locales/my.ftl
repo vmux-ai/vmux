@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ကိရိယာများ
-tools-search = ပက်ကေ့ချ်များ၊ အေးဂျင့်များ၊ MCP၊ ဘာသာစကားကိရိယာများနှင့် သတ်မှတ်ချက်ဖိုင်များကို ရှာရန်…
+tools-search = ပက်ကေ့ချ်များ၊ အေးဂျင့်များ၊ MCP၊ LSPနှင့် သတ်မှတ်ချက်ဖိုင်များကို ရှာရန်…
 tools-open = ကိရိယာများကို ဖွင့်ရန်
 tools-fold = ကိရိယာများကို ခေါက်ရန်
 tools-unfold = ကိရိယာများကို ဖြန့်ရန်
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile ကို ဖွင့်ရန်
 tools-managed = စီမံထားသည်
 tools-provider-homebrew-formulae = Homebrew ဖော်မြူလာများ
 tools-provider-homebrew-casks = Homebrew အက်ပ်များ
-tools-provider-npm = npm ပက်ကေ့ချ်များ
+tools-provider-npm = NPM ပက်ကေ့ချ်များ
 tools-provider-acp-agents = ACP အေးဂျင့်များ
-tools-provider-language-tools = ဘာသာစကားကိရိယာများ
+tools-provider-lsp-servers = LSP ဆာဗာများ
 tools-provider-mcp-servers = MCP ဆာဗာများ
 tools-provider-dotfiles = သတ်မှတ်ချက်ဖိုင်များ
 tools-status-available = ရရှိနိုင်သည်

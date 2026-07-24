@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Mga himan
-tools-search = Pangitaa ang mga pakete, ahente, MCP, himan sa pinulongan ug mga file sa kumpigurasyon…
+tools-search = Pangitaa ang mga pakete, ahente, MCP, LSP ug mga file sa kumpigurasyon…
 tools-open = Ablihi ang mga himan
 tools-fold = Piloa ang mga himan
 tools-unfold = Buklara ang mga himan
@@ -36,9 +36,9 @@ tools-open-brewfile = Ablihi ang Brewfile
 tools-managed = gidumala
 tools-provider-homebrew-formulae = Mga pormula sa Homebrew
 tools-provider-homebrew-casks = Mga aplikasyon sa Homebrew
-tools-provider-npm = Mga pakete sa npm
+tools-provider-npm = Mga pakete sa NPM
 tools-provider-acp-agents = Mga ahente sa ACP
-tools-provider-language-tools = Mga himan sa pinulongan
+tools-provider-lsp-servers = Mga server sa LSP
 tools-provider-mcp-servers = Mga server sa MCP
 tools-provider-dotfiles = Mga file sa kumpigurasyon
 tools-status-available = Anaa

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Mjete
-tools-search = Kërko paketa, agjentë, MCP, mjete gjuhësore dhe skedarë konfigurimi…
+tools-search = Kërko paketa, agjentë, MCP, LSP dhe skedarë konfigurimi…
 tools-open = Hap Mjetet
 tools-fold = Palos mjetet
 tools-unfold = Shpalos mjetet
@@ -36,9 +36,9 @@ tools-open-brewfile = Hap Brewfile
 tools-managed = i menaxhuar
 tools-provider-homebrew-formulae = Formula Homebrew
 tools-provider-homebrew-casks = Aplikacione Homebrew
-tools-provider-npm = Paketa npm
+tools-provider-npm = Paketa NPM
 tools-provider-acp-agents = Agjentë ACP
-tools-provider-language-tools = Mjete gjuhësore
+tools-provider-lsp-servers = Serverë LSP
 tools-provider-mcp-servers = Serverë MCP
 tools-provider-dotfiles = Skedarë konfigurimi
 tools-status-available = I disponueshëm

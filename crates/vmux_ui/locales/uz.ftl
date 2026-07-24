@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Asboblar
-tools-search = Paketlar, agentlar, MCP, til asboblari va sozlama fayllarini qidiring…
+tools-search = Paketlar, agentlar, MCP, LSP va sozlama fayllarini qidiring…
 tools-open = Asboblarni ochish
 tools-fold = Asboblarni yig‘ish
 tools-unfold = Asboblarni yoyish
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile faylini ochish
 tools-managed = boshqarilmoqda
 tools-provider-homebrew-formulae = Homebrew formulalari
 tools-provider-homebrew-casks = Homebrew ilovalari
-tools-provider-npm = npm paketlari
+tools-provider-npm = NPM paketlari
 tools-provider-acp-agents = ACP agentlari
-tools-provider-language-tools = Til asboblari
+tools-provider-lsp-servers = LSP serverlari
 tools-provider-mcp-servers = MCP serverlari
 tools-provider-dotfiles = Sozlama fayllari
 tools-status-available = Mavjud

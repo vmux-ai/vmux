@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = وسایل
-tools-search = د کڅوړو، استازو، MCP، ژبې وسایلو او سازونې فایلونو لټون…
+tools-search = د کڅوړو، استازو، MCP، LSP او سازونې فایلونو لټون…
 tools-open = وسایل پرانیستل
 tools-fold = وسایل راټولول
 tools-unfold = وسایل غځول
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile پرانیستل
 tools-managed = اداره شوی
 tools-provider-homebrew-formulae = د Homebrew فورمولې
 tools-provider-homebrew-casks = د Homebrew کاریالونه
-tools-provider-npm = د npm کڅوړې
+tools-provider-npm = د NPM کڅوړې
 tools-provider-acp-agents = د ACP استازي
-tools-provider-language-tools = د ژبې وسایل
+tools-provider-lsp-servers = د LSP سرورونه
 tools-provider-mcp-servers = د MCP سرورونه
 tools-provider-dotfiles = د سازونې فایلونه
 tools-status-available = شته

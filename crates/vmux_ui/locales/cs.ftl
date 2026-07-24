@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Nástroje
-tools-search = Hledat balíčky, agenty, MCP, jazykové nástroje a konfigurační soubory…
+tools-search = Hledat balíčky, agenty, MCP, LSP a konfigurační soubory…
 tools-open = Otevřít nástroje
 tools-fold = Sbalit nástroje
 tools-unfold = Rozbalit nástroje
@@ -36,9 +36,9 @@ tools-open-brewfile = Otevřít Brewfile
 tools-managed = spravováno
 tools-provider-homebrew-formulae = Formule Homebrew
 tools-provider-homebrew-casks = Aplikace Homebrew
-tools-provider-npm = Balíčky npm
+tools-provider-npm = Balíčky NPM
 tools-provider-acp-agents = Agenti ACP
-tools-provider-language-tools = Jazykové nástroje
+tools-provider-lsp-servers = Servery LSP
 tools-provider-mcp-servers = Servery MCP
 tools-provider-dotfiles = Konfigurační soubory
 tools-status-available = Dostupné

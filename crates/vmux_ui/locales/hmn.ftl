@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Cov cuab yeej
-tools-search = Tshawb cov pob, cov neeg sawv cev, MCP, cuab yeej lus thiab ntaub ntawv teeb tsa…
+tools-search = Tshawb cov pob, cov neeg sawv cev, MCP, LSP thiab ntaub ntawv teeb tsa…
 tools-open = Qhib cov cuab yeej
 tools-fold = Quav cov cuab yeej
 tools-unfold = Nthuav cov cuab yeej
@@ -36,9 +36,9 @@ tools-open-brewfile = Qhib Brewfile
 tools-managed = raug tswj
 tools-provider-homebrew-formulae = Cov qauv Homebrew
 tools-provider-homebrew-casks = Cov kev siv Homebrew
-tools-provider-npm = Cov pob npm
+tools-provider-npm = Cov pob NPM
 tools-provider-acp-agents = Cov neeg sawv cev ACP
-tools-provider-language-tools = Cuab yeej lus
+tools-provider-lsp-servers = Cov tshuab pab LSP
 tools-provider-mcp-servers = Cov tshuab pab MCP
 tools-provider-dotfiles = Ntaub ntawv teeb tsa
 tools-status-available = Muaj

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Ibikoresho
-tools-search = Shakisha amapaki, abakozi, MCP, ibikoresho by’indimi n’amadosiye y’imiterere…
+tools-search = Shakisha amapaki, abakozi, MCP, LSP n’amadosiye y’imiterere…
 tools-open = Fungura ibikoresho
 tools-fold = Hina ibikoresho
 tools-unfold = Rambura ibikoresho
@@ -36,9 +36,9 @@ tools-open-brewfile = Fungura Brewfile
 tools-managed = gicungwa
 tools-provider-homebrew-formulae = Amabwiriza ya Homebrew
 tools-provider-homebrew-casks = Porogaramu za Homebrew
-tools-provider-npm = Amapaki ya npm
+tools-provider-npm = Amapaki ya NPM
 tools-provider-acp-agents = Abakozi ba ACP
-tools-provider-language-tools = Ibikoresho by’indimi
+tools-provider-lsp-servers = Seriveri za LSP
 tools-provider-mcp-servers = Seriveri za MCP
 tools-provider-dotfiles = Amadosiye y’imiterere
 tools-status-available = Kirahari

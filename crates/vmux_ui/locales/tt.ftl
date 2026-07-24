@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Кораллар
-tools-search = Пакетлар, агентлар, MCP, тел кораллары һәм көйләү файлларын эзләү…
+tools-search = Пакетлар, агентлар, MCP, LSP һәм көйләү файлларын эзләү…
 tools-open = Коралларны ачу
 tools-fold = Коралларны җыю
 tools-unfold = Коралларны җәю
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile ачу
 tools-managed = идарә ителә
 tools-provider-homebrew-formulae = Homebrew формулалары
 tools-provider-homebrew-casks = Homebrew кушымталары
-tools-provider-npm = npm пакетлары
+tools-provider-npm = NPM пакетлары
 tools-provider-acp-agents = ACP агентлары
-tools-provider-language-tools = Тел кораллары
+tools-provider-lsp-servers = LSP серверлары
 tools-provider-mcp-servers = MCP серверлары
 tools-provider-dotfiles = Көйләү файллары
 tools-status-available = Кулланырга мөмкин

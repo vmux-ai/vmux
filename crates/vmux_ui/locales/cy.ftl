@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Offer
-tools-search = Chwilio pecynnau, asiantau, MCP, offer iaith a ffeiliau ffurfweddu…
+tools-search = Chwilio pecynnau, asiantau, MCP, LSP a ffeiliau ffurfweddu…
 tools-open = Agor Offer
 tools-fold = Plygu’r offer
 tools-unfold = Dadblygu’r offer
@@ -36,9 +36,9 @@ tools-open-brewfile = Agor Brewfile
 tools-managed = dan reolaeth
 tools-provider-homebrew-formulae = Fformiwlâu Homebrew
 tools-provider-homebrew-casks = Rhaglenni Homebrew
-tools-provider-npm = Pecynnau npm
+tools-provider-npm = Pecynnau NPM
 tools-provider-acp-agents = Asiantau ACP
-tools-provider-language-tools = Offer iaith
+tools-provider-lsp-servers = Gweinyddion LSP
 tools-provider-mcp-servers = Gweinyddion MCP
 tools-provider-dotfiles = Ffeiliau ffurfweddu
 tools-status-available = Ar gael

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Alat
-tools-search = Cari pakej, ejen, MCP, alat bahasa dan fail konfigurasi…
+tools-search = Cari pakej, ejen, MCP, LSP dan fail konfigurasi…
 tools-open = Buka Alat
 tools-fold = Kuncupkan alat
 tools-unfold = Kembangkan alat
@@ -36,9 +36,9 @@ tools-open-brewfile = Buka Brewfile
 tools-managed = diurus
 tools-provider-homebrew-formulae = Formula Homebrew
 tools-provider-homebrew-casks = Aplikasi Homebrew
-tools-provider-npm = Pakej npm
+tools-provider-npm = Pakej NPM
 tools-provider-acp-agents = Ejen ACP
-tools-provider-language-tools = Alat bahasa
+tools-provider-lsp-servers = Pelayan LSP
 tools-provider-mcp-servers = Pelayan MCP
 tools-provider-dotfiles = Fail konfigurasi
 tools-status-available = Tersedia

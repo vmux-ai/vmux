@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Ngwaọrụ
-tools-search = Chọọ ngwugwu, ndị nnọchi anya, MCP, ngwaọrụ asụsụ na faịlụ nhazi…
+tools-search = Chọọ ngwugwu, ndị nnọchi anya, MCP, LSP na faịlụ nhazi…
 tools-open = Mepee ngwaọrụ
 tools-fold = Kpachie ngwaọrụ
 tools-unfold = Gbasaa ngwaọrụ
@@ -36,9 +36,9 @@ tools-open-brewfile = Mepee Brewfile
 tools-managed = a na-achịkwa
 tools-provider-homebrew-formulae = Usoro Homebrew
 tools-provider-homebrew-casks = Ngwa Homebrew
-tools-provider-npm = Ngwugwu npm
+tools-provider-npm = Ngwugwu NPM
 tools-provider-acp-agents = Ndị nnọchi anya ACP
-tools-provider-language-tools = Ngwaọrụ asụsụ
+tools-provider-lsp-servers = Sava LSP
 tools-provider-mcp-servers = Sava MCP
 tools-provider-dotfiles = Faịlụ nhazi
 tools-status-available = Dị

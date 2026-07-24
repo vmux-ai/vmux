@@ -16,7 +16,7 @@ Vault:
 Application Support:
 
 - profiles, recordings, browser data, sessions, and layout state
-- installed agents, extensions, and language tools
+- installed agents, extensions, and LSP servers
 - logs, services, generated shell integration, downloads, and staging
 
 Managed worktrees remain under `~/.vmux/worktrees` and are Git-ignored. Moving linked worktrees requires repairing Git's absolute administrative paths and is deferred.

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Zana
-tools-search = Tafuta vifurushi, mawakala, MCP, zana za lugha na faili za usanidi…
+tools-search = Tafuta vifurushi, mawakala, MCP, LSP na faili za usanidi…
 tools-open = Fungua zana
 tools-fold = Kunja zana
 tools-unfold = Panua zana
@@ -36,9 +36,9 @@ tools-open-brewfile = Fungua Brewfile
 tools-managed = inayodhibitiwa
 tools-provider-homebrew-formulae = Fomula za Homebrew
 tools-provider-homebrew-casks = Programu za Homebrew
-tools-provider-npm = Vifurushi vya npm
+tools-provider-npm = Vifurushi vya NPM
 tools-provider-acp-agents = Mawakala wa ACP
-tools-provider-language-tools = Zana za lugha
+tools-provider-lsp-servers = Seva za LSP
 tools-provider-mcp-servers = Seva za MCP
 tools-provider-dotfiles = Faili za usanidi
 tools-status-available = Inapatikana

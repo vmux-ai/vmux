@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = כלים
-tools-search = חיפוש חבילות, סוכנים, MCP, כלי שפה וקובצי תצורה…
+tools-search = חיפוש חבילות, סוכנים, MCP, LSP וקובצי תצורה…
 tools-open = פתיחת כלים
 tools-fold = כיווץ הכלים
 tools-unfold = הרחבת הכלים
@@ -36,9 +36,9 @@ tools-open-brewfile = פתיחת Brewfile
 tools-managed = מנוהל
 tools-provider-homebrew-formulae = נוסחאות Homebrew
 tools-provider-homebrew-casks = יישומי Homebrew
-tools-provider-npm = חבילות npm
+tools-provider-npm = חבילות NPM
 tools-provider-acp-agents = סוכני ACP
-tools-provider-language-tools = כלי שפה
+tools-provider-lsp-servers = שרתי LSP
 tools-provider-mcp-servers = שרתי MCP
 tools-provider-dotfiles = קובצי תצורה
 tools-status-available = זמין

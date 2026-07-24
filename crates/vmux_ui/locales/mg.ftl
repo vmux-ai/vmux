@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Fitaovana
-tools-search = Mitadiava fonosana, mpandraharaha, MCP, fitaovan-teny ary rakitra fikirakirana…
+tools-search = Mitadiava fonosana, mpandraharaha, MCP, LSP ary rakitra fikirakirana…
 tools-open = Sokafy ny fitaovana
 tools-fold = Aforeto ny fitaovana
 tools-unfold = Velaro ny fitaovana
@@ -36,9 +36,9 @@ tools-open-brewfile = Sokafy ny Brewfile
 tools-managed = tantanana
 tools-provider-homebrew-formulae = Raikipohy Homebrew
 tools-provider-homebrew-casks = Fampiharana Homebrew
-tools-provider-npm = Fonosana npm
+tools-provider-npm = Fonosana NPM
 tools-provider-acp-agents = Mpandraharaha ACP
-tools-provider-language-tools = Fitaovan-teny
+tools-provider-lsp-servers = Mpizara LSP
 tools-provider-mcp-servers = Mpizara MCP
 tools-provider-dotfiles = Rakitra fikirakirana
 tools-status-available = Misy

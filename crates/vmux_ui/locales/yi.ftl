@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = מכשירים
-tools-search = זוכן פּעקלעך, אַגענטן, MCP, שפּראַך־מכשירים און קאָנפֿיגוראַציע־טעקעס…
+tools-search = זוכן פּעקלעך, אַגענטן, MCP, LSP און קאָנפֿיגוראַציע־טעקעס…
 tools-open = עפֿענען מכשירים
 tools-fold = צונויפֿלייגן מכשירים
 tools-unfold = אויספֿאַלטן מכשירים
@@ -36,9 +36,9 @@ tools-open-brewfile = עפֿענען Brewfile
 tools-managed = פאַרוואַלטעט
 tools-provider-homebrew-formulae = Homebrew־פֿאָרמולעס
 tools-provider-homebrew-casks = Homebrew־אַפּליקאַציעס
-tools-provider-npm = npm־פּעקלעך
+tools-provider-npm = NPM־פּעקלעך
 tools-provider-acp-agents = ACP־אַגענטן
-tools-provider-language-tools = שפּראַך־מכשירים
+tools-provider-lsp-servers = LSP־סערווערס
 tools-provider-mcp-servers = MCP־סערווערס
 tools-provider-dotfiles = קאָנפֿיגוראַציע־טעקעס
 tools-status-available = פֿאַראַן

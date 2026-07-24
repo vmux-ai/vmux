@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Työkalut
-tools-search = Hae paketteja, agentteja, MCP:tä, kielityökaluja ja määritystiedostoja…
+tools-search = Hae paketteja, agentteja, MCP:tä, LSP ja määritystiedostoja…
 tools-open = Avaa työkalut
 tools-fold = Kutista työkalut
 tools-unfold = Laajenna työkalut
@@ -36,9 +36,9 @@ tools-open-brewfile = Avaa Brewfile
 tools-managed = hallinnoitu
 tools-provider-homebrew-formulae = Homebrew-kaavat
 tools-provider-homebrew-casks = Homebrew-sovellukset
-tools-provider-npm = npm-paketit
+tools-provider-npm = NPM-paketit
 tools-provider-acp-agents = ACP-agentit
-tools-provider-language-tools = Kielityökalut
+tools-provider-lsp-servers = LSP-palvelimet
 tools-provider-mcp-servers = MCP-palvelimet
 tools-provider-dotfiles = Määritystiedostot
 tools-status-available = Saatavilla

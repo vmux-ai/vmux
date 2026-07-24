@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Qalab
-tools-search = Raadi xirmooyinka, wakiillada, MCP, qalabka luqadda iyo faylasha habaynta…
+tools-search = Raadi xirmooyinka, wakiillada, MCP, LSP iyo faylasha habaynta…
 tools-open = Fur qalabka
 tools-fold = Laab qalabka
 tools-unfold = Kala bixi qalabka
@@ -36,9 +36,9 @@ tools-open-brewfile = Fur Brewfile
 tools-managed = la maamulo
 tools-provider-homebrew-formulae = Qaacidooyinka Homebrew
 tools-provider-homebrew-casks = Barnaamijyada Homebrew
-tools-provider-npm = Xirmooyinka npm
+tools-provider-npm = Xirmooyinka NPM
 tools-provider-acp-agents = Wakiillada ACP
-tools-provider-language-tools = Qalabka luqadda
+tools-provider-lsp-servers = Adeegayaasha LSP
 tools-provider-mcp-servers = Adeegayaasha MCP
 tools-provider-dotfiles = Faylasha habaynta
 tools-status-available = La heli karo

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Mga kagamitan
-tools-search = Maghanap ng mga pakete, ahente, MCP, kagamitang pangwika at talaksan ng pagsasaayos…
+tools-search = Maghanap ng mga pakete, ahente, MCP, LSP at talaksan ng pagsasaayos…
 tools-open = Buksan ang mga kagamitan
 tools-fold = Itiklop ang mga kagamitan
 tools-unfold = Iladlad ang mga kagamitan
@@ -36,9 +36,9 @@ tools-open-brewfile = Buksan ang Brewfile
 tools-managed = pinamamahalaan
 tools-provider-homebrew-formulae = Mga pormula ng Homebrew
 tools-provider-homebrew-casks = Mga aplikasyon ng Homebrew
-tools-provider-npm = Mga pakete ng npm
+tools-provider-npm = Mga pakete ng NPM
 tools-provider-acp-agents = Mga ahente ng ACP
-tools-provider-language-tools = Mga kagamitang pangwika
+tools-provider-lsp-servers = Mga tagapagsilbi ng LSP
 tools-provider-mcp-servers = Mga tagapagsilbi ng MCP
 tools-provider-dotfiles = Mga talaksan ng pagsasaayos
 tools-status-available = Magagamit

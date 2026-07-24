@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Àwọn irinṣẹ́
-tools-search = Wá àwọn àkójọpọ̀, aṣojú, MCP, irinṣẹ́ èdè àti fáìlì ìṣètò…
+tools-search = Wá àwọn àkójọpọ̀, aṣojú, MCP, LSP àti fáìlì ìṣètò…
 tools-open = Ṣí àwọn irinṣẹ́
 tools-fold = Kó àwọn irinṣẹ́ pọ̀
 tools-unfold = Na àwọn irinṣẹ́ síta
@@ -36,9 +36,9 @@ tools-open-brewfile = Ṣí Brewfile
 tools-managed = ń ṣàkóso
 tools-provider-homebrew-formulae = Àwọn fọ́múlà Homebrew
 tools-provider-homebrew-casks = Àwọn ohun èlò Homebrew
-tools-provider-npm = Àwọn àkójọpọ̀ npm
+tools-provider-npm = Àwọn àkójọpọ̀ NPM
 tools-provider-acp-agents = Àwọn aṣojú ACP
-tools-provider-language-tools = Àwọn irinṣẹ́ èdè
+tools-provider-lsp-servers = Àwọn olupin LSP
 tools-provider-mcp-servers = Àwọn olupin MCP
 tools-provider-dotfiles = Àwọn fáìlì ìṣètò
 tools-status-available = Wà

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Gurallar
-tools-search = Bukjalary, agentleri, MCP, dil gurallaryny we sazlama faýllaryny gözle…
+tools-search = Bukjalary, agentleri, MCP, LSPny we sazlama faýllaryny gözle…
 tools-open = Gurallary aç
 tools-fold = Gurallary ýygna
 tools-unfold = Gurallary giňelt
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile aç
 tools-managed = dolandyrylýar
 tools-provider-homebrew-formulae = Homebrew formulalary
 tools-provider-homebrew-casks = Homebrew programmalary
-tools-provider-npm = npm bukjalary
+tools-provider-npm = NPM bukjalary
 tools-provider-acp-agents = ACP agentleri
-tools-provider-language-tools = Dil gurallary
+tools-provider-lsp-servers = LSP serwerleri
 tools-provider-mcp-servers = MCP serwerleri
 tools-provider-dotfiles = Sazlama faýllary
 tools-status-available = Elýeterli

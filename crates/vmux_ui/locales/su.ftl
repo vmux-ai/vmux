@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Pakakas
-tools-search = Téangan pakét, agén, MCP, pakakas basa jeung berkas konfigurasi…
+tools-search = Téangan pakét, agén, MCP, LSP jeung berkas konfigurasi…
 tools-open = Buka pakakas
 tools-fold = Tilep pakakas
 tools-unfold = Legakeun pakakas
@@ -36,9 +36,9 @@ tools-open-brewfile = Buka Brewfile
 tools-managed = dikokolakeun
 tools-provider-homebrew-formulae = Formula Homebrew
 tools-provider-homebrew-casks = Aplikasi Homebrew
-tools-provider-npm = Pakét npm
+tools-provider-npm = Pakét NPM
 tools-provider-acp-agents = Agén ACP
-tools-provider-language-tools = Pakakas basa
+tools-provider-lsp-servers = Pangladén LSP
 tools-provider-mcp-servers = Pangladén MCP
 tools-provider-dotfiles = Berkas konfigurasi
 tools-status-available = Aya

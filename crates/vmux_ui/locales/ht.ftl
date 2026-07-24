@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Zouti
-tools-search = Chèche pakè, ajan, MCP, zouti lang ak fichye konfigirasyon…
+tools-search = Chèche pakè, ajan, MCP, LSP ak fichye konfigirasyon…
 tools-open = Louvri Zouti
 tools-fold = Pliye zouti yo
 tools-unfold = Depliye zouti yo
@@ -36,9 +36,9 @@ tools-open-brewfile = Louvri Brewfile
 tools-managed = jere
 tools-provider-homebrew-formulae = Fòmil Homebrew
 tools-provider-homebrew-casks = Aplikasyon Homebrew
-tools-provider-npm = Pakè npm
+tools-provider-npm = Pakè NPM
 tools-provider-acp-agents = Ajan ACP
-tools-provider-language-tools = Zouti lang
+tools-provider-lsp-servers = Sèvè LSP
 tools-provider-mcp-servers = Sèvè MCP
 tools-provider-dotfiles = Fichye konfigirasyon
 tools-status-available = Disponib

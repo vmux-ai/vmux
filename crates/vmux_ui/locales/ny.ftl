@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Zida
-tools-search = Sakani mapaketi, othandizira, MCP, zida za zilankhulo ndi mafayilo a kasinthidwe…
+tools-search = Sakani mapaketi, othandizira, MCP, LSP ndi mafayilo a kasinthidwe…
 tools-open = Tsegulani zida
 tools-fold = Pindani zida
 tools-unfold = Tambasulani zida
@@ -36,9 +36,9 @@ tools-open-brewfile = Tsegulani Brewfile
 tools-managed = yoyendetsedwa
 tools-provider-homebrew-formulae = Mafomula a Homebrew
 tools-provider-homebrew-casks = Mapulogalamu a Homebrew
-tools-provider-npm = Mapaketi a npm
+tools-provider-npm = Mapaketi a NPM
 tools-provider-acp-agents = Othandizira a ACP
-tools-provider-language-tools = Zida za zilankhulo
+tools-provider-lsp-servers = Ma seva a LSP
 tools-provider-mcp-servers = Ma seva a MCP
 tools-provider-dotfiles = Mafayilo a kasinthidwe
 tools-status-available = Zilipo

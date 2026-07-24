@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = මෙවලම්
-tools-search = පැකේජ, නියෝජිත, MCP, භාෂා මෙවලම් සහ වින්‍යාස ගොනු සොයන්න…
+tools-search = පැකේජ, නියෝජිත, MCP, LSP සහ වින්‍යාස ගොනු සොයන්න…
 tools-open = මෙවලම් විවෘත කරන්න
 tools-fold = මෙවලම් හකුළන්න
 tools-unfold = මෙවලම් දිගහරින්න
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile විවෘත කරන්න
 tools-managed = කළමනාකරණය කෙරේ
 tools-provider-homebrew-formulae = Homebrew සූත්‍ර
 tools-provider-homebrew-casks = Homebrew යෙදුම්
-tools-provider-npm = npm පැකේජ
+tools-provider-npm = NPM පැකේජ
 tools-provider-acp-agents = ACP නියෝජිත
-tools-provider-language-tools = භාෂා මෙවලම්
+tools-provider-lsp-servers = LSP සේවාදායක
 tools-provider-mcp-servers = MCP සේවාදායක
 tools-provider-dotfiles = වින්‍යාස ගොනු
 tools-status-available = පවතී

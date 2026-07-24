@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Ngā utauta
-tools-search = Rapua ngā mōkihi, ngā māngai, MCP, ngā utauta reo me ngā kōnae whirihora…
+tools-search = Rapua ngā mōkihi, ngā māngai, MCP, LSP me ngā kōnae whirihora…
 tools-open = Huakina ngā utauta
 tools-fold = Whakapikoa ngā utauta
 tools-unfold = Whakawhānuitia ngā utauta
@@ -36,9 +36,9 @@ tools-open-brewfile = Huakina te Brewfile
 tools-managed = whakahaeretia
 tools-provider-homebrew-formulae = Ngā tātai Homebrew
 tools-provider-homebrew-casks = Ngā taupānga Homebrew
-tools-provider-npm = Ngā mōkihi npm
+tools-provider-npm = Ngā mōkihi NPM
 tools-provider-acp-agents = Ngā māngai ACP
-tools-provider-language-tools = Ngā utauta reo
+tools-provider-lsp-servers = Ngā tūmau LSP
 tools-provider-mcp-servers = Ngā tūmau MCP
 tools-provider-dotfiles = Ngā kōnae whirihora
 tools-status-available = Kei te wātea

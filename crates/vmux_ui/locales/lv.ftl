@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Rīki
-tools-search = Meklēt pakotnes, aģentus, MCP, valodu rīkus un konfigurācijas failus…
+tools-search = Meklēt pakotnes, aģentus, MCP, LSP un konfigurācijas failus…
 tools-open = Atvērt rīkus
 tools-fold = Sakļaut rīkus
 tools-unfold = Izvērst rīkus
@@ -36,9 +36,9 @@ tools-open-brewfile = Atvērt Brewfile
 tools-managed = pārvaldīts
 tools-provider-homebrew-formulae = Homebrew formulas
 tools-provider-homebrew-casks = Homebrew lietotnes
-tools-provider-npm = npm pakotnes
+tools-provider-npm = NPM pakotnes
 tools-provider-acp-agents = ACP aģenti
-tools-provider-language-tools = Valodu rīki
+tools-provider-lsp-servers = LSP serveri
 tools-provider-mcp-servers = MCP serveri
 tools-provider-dotfiles = Konfigurācijas faili
 tools-status-available = Pieejams

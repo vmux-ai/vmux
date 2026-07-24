@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Izixhobo
-tools-search = Khangela iipakethe, iiarhente, MCP, izixhobo zolwimi neefayile zoqwalaselo…
+tools-search = Khangela iipakethe, iiarhente, MCP, LSP neefayile zoqwalaselo…
 tools-open = Vula izixhobo
 tools-fold = Songa izixhobo
 tools-unfold = Yandisa izixhobo
@@ -36,9 +36,9 @@ tools-open-brewfile = Vula Brewfile
 tools-managed = ilawulwa
 tools-provider-homebrew-formulae = Iifomyula zeHomebrew
 tools-provider-homebrew-casks = Iinkqubo zeHomebrew
-tools-provider-npm = Iipakethe zenpm
+tools-provider-npm = Iipakethe zeNPM
 tools-provider-acp-agents = Iiarhente zeACP
-tools-provider-language-tools = Izixhobo zolwimi
+tools-provider-lsp-servers = Iiseva zeLSP
 tools-provider-mcp-servers = Iiseva zeMCP
 tools-provider-dotfiles = Iifayile zoqwalaselo
 tools-status-available = Iyafumaneka

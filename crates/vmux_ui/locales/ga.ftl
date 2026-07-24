@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Uirlisí
-tools-search = Cuardaigh pacáistí, gníomhairí, MCP, uirlisí teanga agus comhaid chumraíochta…
+tools-search = Cuardaigh pacáistí, gníomhairí, MCP, LSP agus comhaid chumraíochta…
 tools-open = Oscail Uirlisí
 tools-fold = Fill na huirlisí
 tools-unfold = Leathnaigh na huirlisí
@@ -36,9 +36,9 @@ tools-open-brewfile = Oscail Brewfile
 tools-managed = bainistithe
 tools-provider-homebrew-formulae = Foirmlí Homebrew
 tools-provider-homebrew-casks = Feidhmchláir Homebrew
-tools-provider-npm = Pacáistí npm
+tools-provider-npm = Pacáistí NPM
 tools-provider-acp-agents = Gníomhairí ACP
-tools-provider-language-tools = Uirlisí teanga
+tools-provider-lsp-servers = Freastalaithe LSP
 tools-provider-mcp-servers = Freastalaithe MCP
 tools-provider-dotfiles = Comhaid chumraíochta
 tools-status-available = Ar fáil

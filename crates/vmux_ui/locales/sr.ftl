@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Алатке
-tools-search = Претражи пакете, агенте, MCP, језичке алатке и конфигурационе датотеке…
+tools-search = Претражи пакете, агенте, MCP, LSP и конфигурационе датотеке…
 tools-open = Отвори алатке
 tools-fold = Скупи алатке
 tools-unfold = Прошири алатке
@@ -36,9 +36,9 @@ tools-open-brewfile = Отвори Brewfile
 tools-managed = управљано
 tools-provider-homebrew-formulae = Homebrew формуле
 tools-provider-homebrew-casks = Homebrew апликације
-tools-provider-npm = npm пакети
+tools-provider-npm = NPM пакети
 tools-provider-acp-agents = ACP агенти
-tools-provider-language-tools = Језичке алатке
+tools-provider-lsp-servers = LSP сервери
 tools-provider-mcp-servers = MCP сервери
 tools-provider-dotfiles = Конфигурационе датотеке
 tools-status-available = Доступно

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Verktøy
-tools-search = Søk etter pakker, agenter, MCP, språkverktøy og konfigurasjonsfiler…
+tools-search = Søk etter pakker, agenter, MCP, LSP og konfigurasjonsfiler…
 tools-open = Åpne verktøy
 tools-fold = Fold sammen verktøy
 tools-unfold = Fold ut verktøy
@@ -36,9 +36,9 @@ tools-open-brewfile = Åpne Brewfile
 tools-managed = administrert
 tools-provider-homebrew-formulae = Homebrew-formler
 tools-provider-homebrew-casks = Homebrew-programmer
-tools-provider-npm = npm-pakker
+tools-provider-npm = NPM-pakker
 tools-provider-acp-agents = ACP-agenter
-tools-provider-language-tools = Språkverktøy
+tools-provider-lsp-servers = LSP-servere
 tools-provider-mcp-servers = MCP-servere
 tools-provider-dotfiles = Konfigurasjonsfiler
 tools-status-available = Tilgjengelig

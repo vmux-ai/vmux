@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = اوزار
-tools-search = پيڪيج، ايجنٽ، MCP، ٻوليءَ جا اوزار ۽ ترتيب جون فائلون ڳوليو…
+tools-search = پيڪيج، ايجنٽ، MCP، LSP ۽ ترتيب جون فائلون ڳوليو…
 tools-open = اوزار کوليو
 tools-fold = اوزار سميٽو
 tools-unfold = اوزار پکيڙيو
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile کوليو
 tools-managed = منظم ٿيل
 tools-provider-homebrew-formulae = Homebrew فارمولا
 tools-provider-homebrew-casks = Homebrew ايپليڪيشنون
-tools-provider-npm = npm پيڪيج
+tools-provider-npm = NPM پيڪيج
 tools-provider-acp-agents = ACP ايجنٽ
-tools-provider-language-tools = ٻوليءَ جا اوزار
+tools-provider-lsp-servers = LSP سرور
 tools-provider-mcp-servers = MCP سرور
 tools-provider-dotfiles = ترتيب جون فائلون
 tools-status-available = موجود

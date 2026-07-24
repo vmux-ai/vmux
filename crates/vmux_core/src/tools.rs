@@ -61,9 +61,9 @@ impl ToolProvider {
         match self {
             Self::HomebrewFormula => "Homebrew Formulae",
             Self::HomebrewCask => "Homebrew Casks",
-            Self::Npm => "npm Globals",
+            Self::Npm => "NPM Globals",
             Self::Acp => "Agents",
-            Self::Lsp => "Language Tools",
+            Self::Lsp => "LSP Servers",
             Self::Dotfiles => "Dotfiles",
             Self::Mcp => "MCP Servers",
         }

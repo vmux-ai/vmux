@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = கருவிகள்
-tools-search = தொகுப்புகள், முகவர்கள், MCP, மொழிக் கருவிகள் மற்றும் கட்டமைப்புக் கோப்புகளைத் தேடுக…
+tools-search = தொகுப்புகள், முகவர்கள், MCP, LSP மற்றும் கட்டமைப்புக் கோப்புகளைத் தேடுக…
 tools-open = கருவிகளைத் திற
 tools-fold = கருவிகளை மடக்கு
 tools-unfold = கருவிகளை விரி
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile-ஐத் திற
 tools-managed = நிர்வகிக்கப்படுகிறது
 tools-provider-homebrew-formulae = Homebrew சூத்திரங்கள்
 tools-provider-homebrew-casks = Homebrew பயன்பாடுகள்
-tools-provider-npm = npm தொகுப்புகள்
+tools-provider-npm = NPM தொகுப்புகள்
 tools-provider-acp-agents = ACP முகவர்கள்
-tools-provider-language-tools = மொழிக் கருவிகள்
+tools-provider-lsp-servers = LSP சேவையகங்கள்
 tools-provider-mcp-servers = MCP சேவையகங்கள்
 tools-provider-dotfiles = கட்டமைப்புக் கோப்புகள்
 tools-status-available = கிடைக்கிறது

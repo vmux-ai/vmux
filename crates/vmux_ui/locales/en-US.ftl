@@ -33,7 +33,7 @@ common-items = { $count ->
 }
 
 tools-title = Tools
-tools-search = Search packages, agents, MCP, language tools, dotfiles…
+tools-search = Search packages, agents, MCP, LSP, dotfiles…
 tools-open = Open Tools
 tools-fold = Fold tools
 tools-unfold = Unfold tools
@@ -48,9 +48,9 @@ tools-open-brewfile = Open Brewfile
 tools-managed = managed
 tools-provider-homebrew-formulae = Homebrew Formulae
 tools-provider-homebrew-casks = Homebrew Casks
-tools-provider-npm = npm Packages
+tools-provider-npm = NPM Packages
 tools-provider-acp-agents = ACP Agents
-tools-provider-language-tools = Language Tools
+tools-provider-lsp-servers = LSP Servers
 tools-provider-mcp-servers = MCP Servers
 tools-provider-dotfiles = Dotfiles
 tools-status-available = Available

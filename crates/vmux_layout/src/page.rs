@@ -1445,7 +1445,7 @@ fn tools_provider_title(provider: vmux_core::tools::ToolProvider) -> String {
         vmux_core::tools::ToolProvider::HomebrewCask => "tools-provider-homebrew-casks",
         vmux_core::tools::ToolProvider::Npm => "tools-provider-npm",
         vmux_core::tools::ToolProvider::Acp => "tools-provider-acp-agents",
-        vmux_core::tools::ToolProvider::Lsp => "tools-provider-language-tools",
+        vmux_core::tools::ToolProvider::Lsp => "tools-provider-lsp-servers",
         vmux_core::tools::ToolProvider::Mcp => "tools-provider-mcp-servers",
         vmux_core::tools::ToolProvider::Dotfiles => "tools-provider-dotfiles",
     })

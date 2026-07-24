@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Mga kasangkapan
-tools-search = Maghanap ng mga pakete, agent, MCP, kasangkapang pangwika at configuration file…
+tools-search = Maghanap ng mga pakete, agent, MCP, LSP at configuration file…
 tools-open = Buksan ang mga kasangkapan
 tools-fold = Itiklop ang mga kasangkapan
 tools-unfold = Iladlad ang mga kasangkapan
@@ -36,9 +36,9 @@ tools-open-brewfile = Buksan ang Brewfile
 tools-managed = pinamamahalaan
 tools-provider-homebrew-formulae = Mga formula ng Homebrew
 tools-provider-homebrew-casks = Mga application ng Homebrew
-tools-provider-npm = Mga pakete ng npm
+tools-provider-npm = Mga pakete ng NPM
 tools-provider-acp-agents = Mga agent ng ACP
-tools-provider-language-tools = Mga kasangkapang pangwika
+tools-provider-lsp-servers = Mga server ng LSP
 tools-provider-mcp-servers = Mga server ng MCP
 tools-provider-dotfiles = Mga configuration file
 tools-status-available = Magagamit

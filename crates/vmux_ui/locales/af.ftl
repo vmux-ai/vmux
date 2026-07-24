@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Gereedskap
-tools-search = Soek pakkette, agente, MCP, taalhulpmiddels en konfigurasielêers…
+tools-search = Soek pakkette, agente, MCP, LSP en konfigurasielêers…
 tools-open = Maak Gereedskap oop
 tools-fold = Vou gereedskap toe
 tools-unfold = Vou gereedskap oop
@@ -36,9 +36,9 @@ tools-open-brewfile = Maak Brewfile oop
 tools-managed = bestuur
 tools-provider-homebrew-formulae = Homebrew-formules
 tools-provider-homebrew-casks = Homebrew-vate
-tools-provider-npm = npm-pakkette
+tools-provider-npm = NPM-pakkette
 tools-provider-acp-agents = ACP-agente
-tools-provider-language-tools = Taalhulpmiddels
+tools-provider-lsp-servers = LSP-bedieners
 tools-provider-mcp-servers = MCP-bedieners
 tools-provider-dotfiles = Konfigurasielêers
 tools-status-available = Beskikbaar

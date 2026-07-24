@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Amathuluzi
-tools-search = Sesha amaphakheji, ama-ejenti, MCP, amathuluzi olimi namafayela okumisa…
+tools-search = Sesha amaphakheji, ama-ejenti, MCP, LSP namafayela okumisa…
 tools-open = Vula amathuluzi
 tools-fold = Songa amathuluzi
 tools-unfold = Nweba amathuluzi
@@ -36,9 +36,9 @@ tools-open-brewfile = Vula Brewfile
 tools-managed = kulawulwa
 tools-provider-homebrew-formulae = Amafomula eHomebrew
 tools-provider-homebrew-casks = Izinhlelo zeHomebrew
-tools-provider-npm = Amaphakheji enpm
+tools-provider-npm = Amaphakheji eNPM
 tools-provider-acp-agents = Ama-ejenti eACP
-tools-provider-language-tools = Amathuluzi olimi
+tools-provider-lsp-servers = Amaseva eLSP
 tools-provider-mcp-servers = Amaseva eMCP
 tools-provider-dotfiles = Amafayela okumisa
 tools-status-available = Kuyatholakala

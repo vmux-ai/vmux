@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Хэрэгслүүд
-tools-search = Багц, агент, MCP, хэлний хэрэгсэл болон тохиргооны файл хайх…
+tools-search = Багц, агент, MCP, LSP болон тохиргооны файл хайх…
 tools-open = Хэрэгслүүдийг нээх
 tools-fold = Хэрэгслүүдийг хураах
 tools-unfold = Хэрэгслүүдийг дэлгэх
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile нээх
 tools-managed = удирдлагатай
 tools-provider-homebrew-formulae = Homebrew томьёонууд
 tools-provider-homebrew-casks = Homebrew аппууд
-tools-provider-npm = npm багцууд
+tools-provider-npm = NPM багцууд
 tools-provider-acp-agents = ACP агентууд
-tools-provider-language-tools = Хэлний хэрэгслүүд
+tools-provider-lsp-servers = LSP серверүүд
 tools-provider-mcp-servers = MCP серверүүд
 tools-provider-dotfiles = Тохиргооны файлууд
 tools-status-available = Боломжтой

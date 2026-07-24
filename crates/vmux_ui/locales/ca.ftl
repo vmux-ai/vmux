@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Eines
-tools-search = Cerca paquets, agents, MCP, eines de llenguatge i fitxers de configuració…
+tools-search = Cerca paquets, agents, MCP, LSP i fitxers de configuració…
 tools-open = Obre les eines
 tools-fold = Plega les eines
 tools-unfold = Desplega les eines
@@ -36,9 +36,9 @@ tools-open-brewfile = Obre el Brewfile
 tools-managed = gestionat
 tools-provider-homebrew-formulae = Fórmules de Homebrew
 tools-provider-homebrew-casks = Aplicacions de Homebrew
-tools-provider-npm = Paquets npm
+tools-provider-npm = Paquets NPM
 tools-provider-acp-agents = Agents ACP
-tools-provider-language-tools = Eines de llenguatge
+tools-provider-lsp-servers = Servidors LSP
 tools-provider-mcp-servers = Servidors MCP
 tools-provider-dotfiles = Fitxers de configuració
 tools-status-available = Disponible

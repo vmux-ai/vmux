@@ -708,7 +708,7 @@ fn parse_npm_inventory(
                     .get("version")
                     .and_then(|version| version.as_str())
                     .map(str::to_string),
-                detail: "Global npm package".to_string(),
+                detail: "Global NPM package".to_string(),
                 status,
                 removable: true,
             }
@@ -1086,7 +1086,7 @@ fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String>
         ToolProvider::Npm => {
             if !path.is_empty() {
                 let imported = manifest_store::import_npm_manifest(Path::new(path))?;
-                Ok(format!("imported {imported} npm package(s)"))
+                Ok(format!("imported {imported} NPM package(s)"))
             } else {
                 import_scanned_inventory(provider, scan_npm(false)?)
             }

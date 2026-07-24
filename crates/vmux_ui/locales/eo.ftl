@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Iloj
-tools-search = Serĉi pakaĵojn, agentojn, MCP, lingvajn ilojn kaj agordajn dosierojn…
+tools-search = Serĉi pakaĵojn, agentojn, MCP, LSP kaj agordajn dosierojn…
 tools-open = Malfermi ilojn
 tools-fold = Faldi ilojn
 tools-unfold = Malfaldi ilojn
@@ -36,9 +36,9 @@ tools-open-brewfile = Malfermi Brewfile
 tools-managed = administrata
 tools-provider-homebrew-formulae = Homebrew-formuloj
 tools-provider-homebrew-casks = Homebrew-aplikaĵoj
-tools-provider-npm = npm-pakaĵoj
+tools-provider-npm = NPM-pakaĵoj
 tools-provider-acp-agents = ACP-agentoj
-tools-provider-language-tools = Lingvaj iloj
+tools-provider-lsp-servers = LSP-serviloj
 tools-provider-mcp-servers = MCP-serviloj
 tools-provider-dotfiles = Agordaj dosieroj
 tools-status-available = Disponebla

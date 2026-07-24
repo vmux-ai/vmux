@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Piranti
-tools-search = Telusuri paket, agen, MCP, piranti basa lan berkas konfigurasi…
+tools-search = Telusuri paket, agen, MCP, LSP lan berkas konfigurasi…
 tools-open = Bukak Piranti
 tools-fold = Ciutaké piranti
 tools-unfold = Jembarake piranti
@@ -36,9 +36,9 @@ tools-open-brewfile = Bukak Brewfile
 tools-managed = dikelola
 tools-provider-homebrew-formulae = Formula Homebrew
 tools-provider-homebrew-casks = Aplikasi Homebrew
-tools-provider-npm = Paket npm
+tools-provider-npm = Paket NPM
 tools-provider-acp-agents = Agen ACP
-tools-provider-language-tools = Piranti basa
+tools-provider-lsp-servers = Server LSP
 tools-provider-mcp-servers = Server MCP
 tools-provider-dotfiles = Berkas konfigurasi
 tools-status-available = Kasedhiya

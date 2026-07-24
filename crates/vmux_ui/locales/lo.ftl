@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ເຄື່ອງມື
-tools-search = ຄົ້ນຫາແພັກເກດ, ຕົວແທນ, MCP, ເຄື່ອງມືພາສາ ແລະ ໄຟລ໌ກຳນົດຄ່າ…
+tools-search = ຄົ້ນຫາແພັກເກດ, ຕົວແທນ, MCP, LSP ແລະ ໄຟລ໌ກຳນົດຄ່າ…
 tools-open = ເປີດເຄື່ອງມື
 tools-fold = ພັບເຄື່ອງມື
 tools-unfold = ຂະຫຍາຍເຄື່ອງມື
@@ -36,9 +36,9 @@ tools-open-brewfile = ເປີດ Brewfile
 tools-managed = ຖືກຈັດການ
 tools-provider-homebrew-formulae = ສູດ Homebrew
 tools-provider-homebrew-casks = ແອັບພລິເຄຊັນ Homebrew
-tools-provider-npm = ແພັກເກດ npm
+tools-provider-npm = ແພັກເກດ NPM
 tools-provider-acp-agents = ຕົວແທນ ACP
-tools-provider-language-tools = ເຄື່ອງມືພາສາ
+tools-provider-lsp-servers = ເຊີບເວີ LSP
 tools-provider-mcp-servers = ເຊີບເວີ MCP
 tools-provider-dotfiles = ໄຟລ໌ກຳນົດຄ່າ
 tools-status-available = ມີໃຫ້ໃຊ້

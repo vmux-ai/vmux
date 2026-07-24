@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Nā mea hana
-tools-search = Huli i nā pūʻolo, nā ʻelele, MCP, nā mea hana ʻōlelo a me nā waihona hoʻonohonoho…
+tools-search = Huli i nā pūʻolo, nā ʻelele, MCP, LSP a me nā waihona hoʻonohonoho…
 tools-open = E wehe i nā mea hana
 tools-fold = E pelu i nā mea hana
 tools-unfold = E wehe aʻe i nā mea hana
@@ -36,9 +36,9 @@ tools-open-brewfile = E wehe i ka Brewfile
 tools-managed = mālama ʻia
 tools-provider-homebrew-formulae = Nā kumumanaʻo Homebrew
 tools-provider-homebrew-casks = Nā polokalamu Homebrew
-tools-provider-npm = Nā pūʻolo npm
+tools-provider-npm = Nā pūʻolo NPM
 tools-provider-acp-agents = Nā ʻelele ACP
-tools-provider-language-tools = Nā mea hana ʻōlelo
+tools-provider-lsp-servers = Nā kikowaena LSP
 tools-provider-mcp-servers = Nā kikowaena MCP
 tools-provider-dotfiles = Nā waihona hoʻonohonoho
 tools-status-available = Loaʻa

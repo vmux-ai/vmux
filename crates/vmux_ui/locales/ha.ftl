@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Kayan aiki
-tools-search = Nemi fakiti, wakilai, MCP, kayan aikin harshe da fayilolin saiti…
+tools-search = Nemi fakiti, wakilai, MCP, LSP da fayilolin saiti…
 tools-open = Buɗe kayan aiki
 tools-fold = Naɗe kayan aiki
 tools-unfold = Buɗe kayan aiki
@@ -36,9 +36,9 @@ tools-open-brewfile = Buɗe Brewfile
 tools-managed = ana sarrafawa
 tools-provider-homebrew-formulae = Tsare-tsaren Homebrew
 tools-provider-homebrew-casks = Manhajojin Homebrew
-tools-provider-npm = Fakitin npm
+tools-provider-npm = Fakitin NPM
 tools-provider-acp-agents = Wakilan ACP
-tools-provider-language-tools = Kayan aikin harshe
+tools-provider-lsp-servers = Sabar LSP
 tools-provider-mcp-servers = Sabar MCP
 tools-provider-dotfiles = Fayilolin saiti
 tools-status-available = Akwai

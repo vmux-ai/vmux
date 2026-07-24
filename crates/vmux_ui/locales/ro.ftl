@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Instrumente
-tools-search = Caută pachete, agenți, MCP, instrumente lingvistice și fișiere de configurare…
+tools-search = Caută pachete, agenți, MCP, LSP și fișiere de configurare…
 tools-open = Deschide Instrumente
 tools-fold = Restrânge instrumentele
 tools-unfold = Extinde instrumentele
@@ -36,9 +36,9 @@ tools-open-brewfile = Deschide Brewfile
 tools-managed = gestionat
 tools-provider-homebrew-formulae = Formule Homebrew
 tools-provider-homebrew-casks = Aplicații Homebrew
-tools-provider-npm = Pachete npm
+tools-provider-npm = Pachete NPM
 tools-provider-acp-agents = Agenți ACP
-tools-provider-language-tools = Instrumente lingvistice
+tools-provider-lsp-servers = Servere LSP
 tools-provider-mcp-servers = Servere MCP
 tools-provider-dotfiles = Fișiere de configurare
 tools-status-available = Disponibil

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = መሣሪያዎች
-tools-search = ጥቅሎችን፣ ወኪሎችን፣ MCPን፣ የቋንቋ መሣሪያዎችን እና የውቅር ፋይሎችን ፈልግ…
+tools-search = ጥቅሎችን፣ ወኪሎችን፣ MCPን፣ LSPን እና የውቅር ፋይሎችን ፈልግ…
 tools-open = መሣሪያዎችን ክፈት
 tools-fold = መሣሪያዎችን ሰብስብ
 tools-unfold = መሣሪያዎችን ዘርጋ
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfileን ክፈት
 tools-managed = የሚተዳደር
 tools-provider-homebrew-formulae = የHomebrew ቀመሮች
 tools-provider-homebrew-casks = የHomebrew መተግበሪያዎች
-tools-provider-npm = የnpm ጥቅሎች
+tools-provider-npm = የNPM ጥቅሎች
 tools-provider-acp-agents = የACP ወኪሎች
-tools-provider-language-tools = የቋንቋ መሣሪያዎች
+tools-provider-lsp-servers = የLSP አገልጋዮች
 tools-provider-mcp-servers = የMCP አገልጋዮች
 tools-provider-dotfiles = የውቅር ፋይሎች
 tools-status-available = ይገኛል

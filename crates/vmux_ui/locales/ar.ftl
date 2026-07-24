@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = الأدوات
-tools-search = البحث في الحزم والوكلاء وMCP وأدوات اللغات وملفات الإعداد…
+tools-search = البحث في الحزم والوكلاء وMCP وLSP وملفات الإعداد…
 tools-open = فتح الأدوات
 tools-fold = طي الأدوات
 tools-unfold = توسيع الأدوات
@@ -36,9 +36,9 @@ tools-open-brewfile = فتح Brewfile
 tools-managed = مُدار
 tools-provider-homebrew-formulae = صيغ Homebrew
 tools-provider-homebrew-casks = حزم تطبيقات Homebrew
-tools-provider-npm = حزم npm
+tools-provider-npm = حزم NPM
 tools-provider-acp-agents = وكلاء ACP
-tools-provider-language-tools = أدوات اللغات
+tools-provider-lsp-servers = خوادم LSP
 tools-provider-mcp-servers = خوادم MCP
 tools-provider-dotfiles = ملفات الإعداد
 tools-status-available = متاح

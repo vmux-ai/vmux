@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Zvishandiso
-tools-search = Tsvaga mapakeji, vamiriri, MCP, zvishandiso zvemutauro nemafaira ekugadzirisa…
+tools-search = Tsvaga mapakeji, vamiriri, MCP, LSP nemafaira ekugadzirisa…
 tools-open = Vhura zvishandiso
 tools-fold = Peta zvishandiso
 tools-unfold = Tambanudza zvishandiso
@@ -36,9 +36,9 @@ tools-open-brewfile = Vhura Brewfile
 tools-managed = chinotarisirwa
 tools-provider-homebrew-formulae = Mafomura eHomebrew
 tools-provider-homebrew-casks = Maapplication eHomebrew
-tools-provider-npm = Mapakeji enpm
+tools-provider-npm = Mapakeji eNPM
 tools-provider-acp-agents = Vamiriri veACP
-tools-provider-language-tools = Zvishandiso zvemutauro
+tools-provider-lsp-servers = Maseva eLSP
 tools-provider-mcp-servers = Maseva eMCP
 tools-provider-dotfiles = Mafaira ekugadzirisa
 tools-status-available = Chiripo

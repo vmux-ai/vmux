@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Għodod
-tools-search = Fittex pakketti, aġenti, MCP, għodod tal-lingwa u fajls tal-konfigurazzjoni…
+tools-search = Fittex pakketti, aġenti, MCP, LSP u fajls tal-konfigurazzjoni…
 tools-open = Iftaħ l-għodod
 tools-fold = Agħlaq l-għodod
 tools-unfold = Espandi l-għodod
@@ -36,9 +36,9 @@ tools-open-brewfile = Iftaħ Brewfile
 tools-managed = immaniġġjat
 tools-provider-homebrew-formulae = Formuli Homebrew
 tools-provider-homebrew-casks = Applikazzjonijiet Homebrew
-tools-provider-npm = Pakketti npm
+tools-provider-npm = Pakketti NPM
 tools-provider-acp-agents = Aġenti ACP
-tools-provider-language-tools = Għodod tal-lingwa
+tools-provider-lsp-servers = Servers LSP
 tools-provider-mcp-servers = Servers MCP
 tools-provider-dotfiles = Fajls tal-konfigurazzjoni
 tools-status-available = Disponibbli

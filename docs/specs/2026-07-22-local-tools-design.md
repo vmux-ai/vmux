@@ -6,11 +6,11 @@ Status: Implemented
 ## Summary
 
 Tools is vmux's profile-agnostic inventory and desired-state layer for local tools. It combines
-Homebrew formulae and casks, global npm packages, ACP agents, MCP servers, language tools, and
+Homebrew formulae and casks, global NPM packages, ACP agents, MCP servers, LSP servers, and
 Stow-style dotfiles in one side-sheet tree and one `vmux://tools/` manager.
 
 Tools delegates package installation to each native package manager. It does not copy Homebrew
-or npm packages into a vmux-owned store. ACP and language tools continue using their existing
+or NPM packages into a vmux-owned store. ACP agents and LSP servers continue using their existing
 vmux-managed receipt stores.
 
 ## Decisions
@@ -86,9 +86,9 @@ on first access. Migration stops if both old and new roots exist, avoiding silen
 | --- | --- | --- |
 | Homebrew formulae | `brew list --formula --versions` | `brew install/upgrade/uninstall` |
 | Homebrew casks | `brew list --cask --versions` | cask variants of the same commands |
-| npm | `npm list --global --depth=0 --json` | global install/update/uninstall |
+| NPM | `npm list --global --depth=0 --json` | global install/update/uninstall |
 | ACP | Existing `~/.vmux/agents` receipts and ACP catalog | Existing ACP installer |
-| Language tools | Existing `~/.vmux/lsp` receipts and Mason catalog | Existing LSP installer |
+| LSP Servers | Existing `~/.vmux/lsp` receipts and Mason catalog | Existing LSP installer |
 | MCP | Claude, Codex, Vibe, and explicit MCP configs | Tools-owned agent injection |
 | Dotfiles | Tools package trees and link plans | Native Rust link engine |
 
@@ -121,10 +121,10 @@ manager in the active pane.
 - A compact Homebrew source card that opens the automatically synchronized Brewfile.
 - Categorized package rows.
 - Install, update, uninstall, forget, link, and unlink actions.
-- Automatic adoption of installed Homebrew, npm, ACP, language-tool, MCP, and Tools dotfile state.
+- Automatic adoption of installed Homebrew, NPM, ACP, LSP servers, MCP, and Tools dotfile state.
 - Refresh and declarative Apply actions.
 
-The page reuses the shared manager components used by the language-tool and extension managers.
+The page reuses the shared manager components used by the LSP and extension managers.
 
 ## Dotfile Engine
 
@@ -164,7 +164,7 @@ already live.
 - `vmux tools import dotfiles [stow-root]`
 
 Import merges into existing desired state. Brewfile formulae and casks retain separate providers;
-npm imports runtime, development, and optional dependencies; MCP import normalizes stdio, HTTP,
+NPM imports runtime, development, and optional dependencies; MCP import normalizes stdio, HTTP,
 and SSE definitions from Claude JSON and Codex/Vibe TOML. Dotfile import copies complete package
 directories into Tools ownership, rejects symlinks and collisions, and leaves the source tree
 untouched. These commands cover non-default source paths; normal discovery requires no import UI.

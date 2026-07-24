@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Innealan
-tools-search = Lorg pacaidean, àidseantan, MCP, innealan cànain agus faidhlichean rèiteachaidh…
+tools-search = Lorg pacaidean, àidseantan, MCP, LSP agus faidhlichean rèiteachaidh…
 tools-open = Fosgail na h-innealan
 tools-fold = Paisg na h-innealan
 tools-unfold = Leudaich na h-innealan
@@ -36,9 +36,9 @@ tools-open-brewfile = Fosgail Brewfile
 tools-managed = air a stiùireadh
 tools-provider-homebrew-formulae = Foirmlean Homebrew
 tools-provider-homebrew-casks = Aplacaidean Homebrew
-tools-provider-npm = Pacaidean npm
+tools-provider-npm = Pacaidean NPM
 tools-provider-acp-agents = Àidseantan ACP
-tools-provider-language-tools = Innealan cànain
+tools-provider-lsp-servers = Frithealaichean LSP
 tools-provider-mcp-servers = Frithealaichean MCP
 tools-provider-dotfiles = Faidhlichean rèiteachaidh
 tools-status-available = Ri fhaighinn

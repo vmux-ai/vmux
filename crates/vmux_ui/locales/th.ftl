@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = เครื่องมือ
-tools-search = ค้นหาแพ็กเกจ เอเจนต์ MCP เครื่องมือภาษา และไฟล์กำหนดค่า…
+tools-search = ค้นหาแพ็กเกจ เอเจนต์ MCP LSP และไฟล์กำหนดค่า…
 tools-open = เปิดเครื่องมือ
 tools-fold = ย่อเครื่องมือ
 tools-unfold = ขยายเครื่องมือ
@@ -36,9 +36,9 @@ tools-open-brewfile = เปิด Brewfile
 tools-managed = จัดการอยู่
 tools-provider-homebrew-formulae = สูตร Homebrew
 tools-provider-homebrew-casks = แอปพลิเคชัน Homebrew
-tools-provider-npm = แพ็กเกจ npm
+tools-provider-npm = แพ็กเกจ NPM
 tools-provider-acp-agents = เอเจนต์ ACP
-tools-provider-language-tools = เครื่องมือภาษา
+tools-provider-lsp-servers = เซิร์ฟเวอร์ LSP
 tools-provider-mcp-servers = เซิร์ฟเวอร์ MCP
 tools-provider-dotfiles = ไฟล์กำหนดค่า
 tools-status-available = พร้อมใช้

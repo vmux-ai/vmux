@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Абзорҳо
-tools-search = Ҷустуҷӯи бастаҳо, агентҳо, MCP, абзорҳои забон ва файлҳои танзимот…
+tools-search = Ҷустуҷӯи бастаҳо, агентҳо, MCP, LSP ва файлҳои танзимот…
 tools-open = Кушодани абзорҳо
 tools-fold = Ҷамъ кардани абзорҳо
 tools-unfold = Кушодани абзорҳо
@@ -36,9 +36,9 @@ tools-open-brewfile = Кушодани Brewfile
 tools-managed = идорашаванда
 tools-provider-homebrew-formulae = Формулаҳои Homebrew
 tools-provider-homebrew-casks = Барномаҳои Homebrew
-tools-provider-npm = Бастаҳои npm
+tools-provider-npm = Бастаҳои NPM
 tools-provider-acp-agents = Агентҳои ACP
-tools-provider-language-tools = Абзорҳои забон
+tools-provider-lsp-servers = Серверҳои LSP
 tools-provider-mcp-servers = Серверҳои MCP
 tools-provider-dotfiles = Файлҳои танзимот
 tools-status-available = Дастрас

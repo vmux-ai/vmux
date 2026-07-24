@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Meafaigaluega
-tools-search = Suʻe afifi, sui, MCP, meafaigaluega o gagana ma faila faatulagaina…
+tools-search = Suʻe afifi, sui, MCP, LSP ma faila faatulagaina…
 tools-open = Tatala meafaigaluega
 tools-fold = Gaugau meafaigaluega
 tools-unfold = Tatala faalautele meafaigaluega
@@ -36,9 +36,9 @@ tools-open-brewfile = Tatala Brewfile
 tools-managed = pulea
 tools-provider-homebrew-formulae = Fua Homebrew
 tools-provider-homebrew-casks = Polokalame Homebrew
-tools-provider-npm = Afifi npm
+tools-provider-npm = Afifi NPM
 tools-provider-acp-agents = Sui ACP
-tools-provider-language-tools = Meafaigaluega o gagana
+tools-provider-lsp-servers = Sava LSP
 tools-provider-mcp-servers = Sava MCP
 tools-provider-dotfiles = Faila faatulagaina
 tools-status-available = Avanoa

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Instrumenter
-tools-search = Sich no Packagen, Agenten, MCP, Sproochtools a Konfiguratiounsdateien…
+tools-search = Sich no Packagen, Agenten, MCP, LSP a Konfiguratiounsdateien…
 tools-open = Tools opmaachen
 tools-fold = Tools zouklappen
 tools-unfold = Tools opklappen
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile opmaachen
 tools-managed = verwalt
 tools-provider-homebrew-formulae = Homebrew-Formelen
 tools-provider-homebrew-casks = Homebrew-Applikatiounen
-tools-provider-npm = npm-Packagen
+tools-provider-npm = NPM-Packagen
 tools-provider-acp-agents = ACP-Agenten
-tools-provider-language-tools = Sproochtools
+tools-provider-lsp-servers = LSP-Serveren
 tools-provider-mcp-servers = MCP-Serveren
 tools-provider-dotfiles = Konfiguratiounsdateien
 tools-status-available = Verfügbar

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Գործիքներ
-tools-search = Փնտրել փաթեթներ, գործակալներ, MCP, լեզվական գործիքներ և կազմաձևման ֆայլեր…
+tools-search = Փնտրել փաթեթներ, գործակալներ, MCP, LSP և կազմաձևման ֆայլեր…
 tools-open = Բացել գործիքները
 tools-fold = Ծալել գործիքները
 tools-unfold = Բացել գործիքների ցանկը
@@ -36,9 +36,9 @@ tools-open-brewfile = Բացել Brewfile-ը
 tools-managed = կառավարվող
 tools-provider-homebrew-formulae = Homebrew բանաձևեր
 tools-provider-homebrew-casks = Homebrew հավելվածներ
-tools-provider-npm = npm փաթեթներ
+tools-provider-npm = NPM փաթեթներ
 tools-provider-acp-agents = ACP գործակալներ
-tools-provider-language-tools = Լեզվական գործիքներ
+tools-provider-lsp-servers = LSP սերվերներ
 tools-provider-mcp-servers = MCP սերվերներ
 tools-provider-dotfiles = Կազմաձևման ֆայլեր
 tools-status-available = Հասանելի

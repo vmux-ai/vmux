@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ئامرازەکان
-tools-search = گەڕان بۆ پاکێجەکان، بریکارەکان، MCP، ئامرازەکانی زمان و فایلەکانی ڕێکخستن…
+tools-search = گەڕان بۆ پاکێجەکان، بریکارەکان، MCP، LSP و فایلەکانی ڕێکخستن…
 tools-open = کردنەوەی ئامرازەکان
 tools-fold = کۆکردنەوەی ئامرازەکان
 tools-unfold = بڵاوکردنەوەی ئامرازەکان
@@ -36,9 +36,9 @@ tools-open-brewfile = کردنەوەی Brewfile
 tools-managed = بەڕێوەبراو
 tools-provider-homebrew-formulae = فۆرمولاکانی Homebrew
 tools-provider-homebrew-casks = بەرنامەکانی Homebrew
-tools-provider-npm = پاکێجەکانی npm
+tools-provider-npm = پاکێجەکانی NPM
 tools-provider-acp-agents = بریکارەکانی ACP
-tools-provider-language-tools = ئامرازەکانی زمان
+tools-provider-lsp-servers = ڕاژەکارەکانی LSP
 tools-provider-mcp-servers = ڕاژەکارەکانی MCP
 tools-provider-dotfiles = فایلەکانی ڕێکخستن
 tools-status-available = بەردەستە

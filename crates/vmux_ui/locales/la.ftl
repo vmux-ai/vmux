@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Instrumenta
-tools-search = Quaere fasciculos, agentes, MCP, instrumenta linguarum et tabulas configurationis…
+tools-search = Quaere fasciculos, agentes, MCP, LSP et tabulas configurationis…
 tools-open = Aperi instrumenta
 tools-fold = Complica instrumenta
 tools-unfold = Explica instrumenta
@@ -36,9 +36,9 @@ tools-open-brewfile = Aperi Brewfile
 tools-managed = administratum
 tools-provider-homebrew-formulae = Formulae Homebrew
 tools-provider-homebrew-casks = Applicationes Homebrew
-tools-provider-npm = Fasciculi npm
+tools-provider-npm = Fasciculi NPM
 tools-provider-acp-agents = Agentes ACP
-tools-provider-language-tools = Instrumenta linguarum
+tools-provider-lsp-servers = Servitores LSP
 tools-provider-mcp-servers = Servitores MCP
 tools-provider-dotfiles = Tabulae configurationis
 tools-status-available = Praesto

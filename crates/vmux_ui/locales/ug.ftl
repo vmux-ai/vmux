@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = قوراللار
-tools-search = بوغچا، ۋاكالەتچى، MCP، تىل قورالى ۋە سەپلىمە ھۆججەتلىرىنى ئىزدەش…
+tools-search = بوغچا، ۋاكالەتچى، MCP، LSP ۋە سەپلىمە ھۆججەتلىرىنى ئىزدەش…
 tools-open = قوراللارنى ئېچىش
 tools-fold = قوراللارنى يىغىش
 tools-unfold = قوراللارنى يېيىش
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile نى ئېچىش
 tools-managed = باشقۇرۇلىدۇ
 tools-provider-homebrew-formulae = Homebrew فورمۇلالىرى
 tools-provider-homebrew-casks = Homebrew ئەپلىرى
-tools-provider-npm = npm بوغچىلىرى
+tools-provider-npm = NPM بوغچىلىرى
 tools-provider-acp-agents = ACP ۋاكالەتچىلىرى
-tools-provider-language-tools = تىل قوراللىرى
+tools-provider-lsp-servers = LSP مۇلازىمېتىرلىرى
 tools-provider-mcp-servers = MCP مۇلازىمېتىرلىرى
 tools-provider-dotfiles = سەپلىمە ھۆججەتلىرى
 tools-status-available = بار

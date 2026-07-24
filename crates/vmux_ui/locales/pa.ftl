@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = ਔਜ਼ਾਰ
-tools-search = ਪੈਕੇਜ, ਏਜੰਟ, MCP, ਭਾਸ਼ਾ ਔਜ਼ਾਰ ਅਤੇ ਸੰਰਚਨਾ ਫ਼ਾਈਲਾਂ ਖੋਜੋ…
+tools-search = ਪੈਕੇਜ, ਏਜੰਟ, MCP, LSP ਅਤੇ ਸੰਰਚਨਾ ਫ਼ਾਈਲਾਂ ਖੋਜੋ…
 tools-open = ਔਜ਼ਾਰ ਖੋਲ੍ਹੋ
 tools-fold = ਔਜ਼ਾਰ ਸਮੇਟੋ
 tools-unfold = ਔਜ਼ਾਰ ਫੈਲਾਓ
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile ਖੋਲ੍ਹੋ
 tools-managed = ਪ੍ਰਬੰਧਿਤ
 tools-provider-homebrew-formulae = Homebrew ਫ਼ਾਰਮੂਲੇ
 tools-provider-homebrew-casks = Homebrew ਐਪਲੀਕੇਸ਼ਨ
-tools-provider-npm = npm ਪੈਕੇਜ
+tools-provider-npm = NPM ਪੈਕੇਜ
 tools-provider-acp-agents = ACP ਏਜੰਟ
-tools-provider-language-tools = ਭਾਸ਼ਾ ਔਜ਼ਾਰ
+tools-provider-lsp-servers = LSP ਸਰਵਰ
 tools-provider-mcp-servers = MCP ਸਰਵਰ
 tools-provider-dotfiles = ਸੰਰਚਨਾ ਫ਼ਾਈਲਾਂ
 tools-status-available = ਉਪਲਬਧ

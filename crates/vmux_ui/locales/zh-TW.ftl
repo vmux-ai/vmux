@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = 工具
-tools-search = 搜尋套件、代理、MCP、語言工具和設定檔…
+tools-search = 搜尋套件、代理、MCP、LSP和設定檔…
 tools-open = 開啟工具
 tools-fold = 收合工具
 tools-unfold = 展開工具
@@ -36,9 +36,9 @@ tools-open-brewfile = 開啟 Brewfile
 tools-managed = 已管理
 tools-provider-homebrew-formulae = Homebrew 配方
 tools-provider-homebrew-casks = Homebrew 應用程式
-tools-provider-npm = npm 套件
+tools-provider-npm = NPM 套件
 tools-provider-acp-agents = ACP 代理
-tools-provider-language-tools = 語言工具
+tools-provider-lsp-servers = LSP 伺服器
 tools-provider-mcp-servers = MCP 伺服器
 tools-provider-dotfiles = 設定檔
 tools-status-available = 可用

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = 도구
-tools-search = 패키지, 에이전트, MCP, 언어 도구, 설정 파일 검색…
+tools-search = 패키지, 에이전트, MCP, LSP, 설정 파일 검색…
 tools-open = 도구 열기
 tools-fold = 도구 접기
 tools-unfold = 도구 펼치기
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile 열기
 tools-managed = 관리됨
 tools-provider-homebrew-formulae = Homebrew 포뮬러
 tools-provider-homebrew-casks = Homebrew 애플리케이션
-tools-provider-npm = npm 패키지
+tools-provider-npm = NPM 패키지
 tools-provider-acp-agents = ACP 에이전트
-tools-provider-language-tools = 언어 도구
+tools-provider-lsp-servers = LSP 서버
 tools-provider-mcp-servers = MCP 서버
 tools-provider-dotfiles = 설정 파일
 tools-status-available = 사용 가능

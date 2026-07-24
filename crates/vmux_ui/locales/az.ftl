@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Alətlər
-tools-search = Paketlər, agentlər, MCP, dil alətləri və konfiqurasiya fayllarında axtar…
+tools-search = Paketlər, agentlər, MCP, LSP və konfiqurasiya fayllarında axtar…
 tools-open = Alətləri aç
 tools-fold = Alətləri yığ
 tools-unfold = Alətləri genişləndir
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile-ı aç
 tools-managed = idarə olunan
 tools-provider-homebrew-formulae = Homebrew formulaları
 tools-provider-homebrew-casks = Homebrew tətbiq paketləri
-tools-provider-npm = npm paketləri
+tools-provider-npm = NPM paketləri
 tools-provider-acp-agents = ACP agentləri
-tools-provider-language-tools = Dil alətləri
+tools-provider-lsp-servers = LSP serverləri
 tools-provider-mcp-servers = MCP serverləri
 tools-provider-dotfiles = Konfiqurasiya faylları
 tools-status-available = Mövcuddur

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Ark
-tools-search = Sykje nei pakketten, aginten, MCP, taalark en konfiguraasjebestannen…
+tools-search = Sykje nei pakketten, aginten, MCP, LSP en konfiguraasjebestannen…
 tools-open = Ark iepenje
 tools-fold = Ark ynklappe
 tools-unfold = Ark útklappe
@@ -36,9 +36,9 @@ tools-open-brewfile = Brewfile iepenje
 tools-managed = beheard
 tools-provider-homebrew-formulae = Homebrew-formules
 tools-provider-homebrew-casks = Homebrew-tapassingen
-tools-provider-npm = npm-pakketten
+tools-provider-npm = NPM-pakketten
 tools-provider-acp-agents = ACP-aginten
-tools-provider-language-tools = Taalark
+tools-provider-lsp-servers = LSP-tsjinners
 tools-provider-mcp-servers = MCP-tsjinners
 tools-provider-dotfiles = Konfiguraasjebestannen
 tools-status-available = Beskikber

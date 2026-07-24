@@ -72,7 +72,7 @@ fn import(provider: ToolImportProvider, path: Option<PathBuf>) -> io::Result<()>
         ToolImportProvider::Npm => {
             let path = path.ok_or_else(|| io::Error::other("package.json path is required"))?;
             let imported = tools::import_npm_manifest(&path).map_err(io::Error::other)?;
-            println!("imported {imported} npm package(s)");
+            println!("imported {imported} NPM package(s)");
         }
         ToolImportProvider::Mcp => {
             let imported = if let Some(path) = path {

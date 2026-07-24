@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Lisebelisoa
-tools-search = Batla liphutheloana, baemeli, MCP, lisebelisoa tsa puo le lifaele tsa tlhophiso…
+tools-search = Batla liphutheloana, baemeli, MCP, LSP le lifaele tsa tlhophiso…
 tools-open = Bula lisebelisoa
 tools-fold = Mena lisebelisoa
 tools-unfold = Atolosa lisebelisoa
@@ -36,9 +36,9 @@ tools-open-brewfile = Bula Brewfile
 tools-managed = laoloa
 tools-provider-homebrew-formulae = Mefuta ea Homebrew
 tools-provider-homebrew-casks = Mananeo a Homebrew
-tools-provider-npm = Liphutheloana tsa npm
+tools-provider-npm = Liphutheloana tsa NPM
 tools-provider-acp-agents = Baemeli ba ACP
-tools-provider-language-tools = Lisebelisoa tsa puo
+tools-provider-lsp-servers = Li-server tsa LSP
 tools-provider-mcp-servers = Li-server tsa MCP
 tools-provider-dotfiles = Lifaele tsa tlhophiso
 tools-status-available = E teng

@@ -21,7 +21,7 @@ common-items = { $count ->
 }
 
 tools-title = Tööriistad
-tools-search = Otsi pakette, agente, MCP-d, keeletööriistu ja seadistusfaile…
+tools-search = Otsi pakette, agente, MCP-d, LSP ja seadistusfaile…
 tools-open = Ava tööriistad
 tools-fold = Ahenda tööriistad
 tools-unfold = Laienda tööriistad
@@ -36,9 +36,9 @@ tools-open-brewfile = Ava Brewfile
 tools-managed = hallatud
 tools-provider-homebrew-formulae = Homebrew’ valemid
 tools-provider-homebrew-casks = Homebrew’ rakendused
-tools-provider-npm = npm-paketid
+tools-provider-npm = NPM-paketid
 tools-provider-acp-agents = ACP-agendid
-tools-provider-language-tools = Keeletööriistad
+tools-provider-lsp-servers = LSP-serverid
 tools-provider-mcp-servers = MCP-serverid
 tools-provider-dotfiles = Seadistusfailid
 tools-status-available = Saadaval
