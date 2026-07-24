@@ -358,6 +358,7 @@ pub enum AgentQueryResult {
 pub enum ApprovalDecision {
     Allow,
     Deny,
+    AllowAlways,
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -1572,6 +1573,11 @@ mod tests {
                 call_id: "c".into(),
                 decision: ApprovalDecision::Allow,
             },
+            ClientMessage::AgentApprove {
+                sid: "s".into(),
+                call_id: "ca".into(),
+                decision: ApprovalDecision::AllowAlways,
+            },
             ClientMessage::ClosePageAgent { sid: "s".into() },
             ClientMessage::AgentToolResult {
                 request_id: AgentRequestId::new(),
@@ -1584,8 +1590,24 @@ mod tests {
             },
         ];
         for msg in messages {
+            let expects_allow_always = matches!(
+                &msg,
+                ClientMessage::AgentApprove {
+                    decision: ApprovalDecision::AllowAlways,
+                    ..
+                }
+            );
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
-            rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+            let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+            if expects_allow_always {
+                assert!(matches!(
+                    decoded,
+                    ClientMessage::AgentApprove {
+                        decision: ApprovalDecision::AllowAlways,
+                        ..
+                    }
+                ));
+            }
         }
     }
 

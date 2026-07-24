@@ -1191,7 +1191,7 @@ pub fn Page(
                 }
                 span {
                     class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
-                    title: "Tools ask before protected actions; Allow always is remembered per tool",
+                    title: "Tools ask before protected actions; Allow always is remembered per agent, repository or working directory, and tool",
                     svg {
                         class: "h-3.5 w-3.5",
                         view_box: "0 0 24 24",

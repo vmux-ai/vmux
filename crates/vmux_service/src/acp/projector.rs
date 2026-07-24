@@ -777,8 +777,11 @@ pub(crate) fn is_conversation_title_tool(title: &str) -> bool {
     title
         .trim()
         .to_ascii_lowercase()
-        .replace([' ', '-', '.', ':'], "_")
-        == "mcp__vmux__set_conversation_title"
+        .split(|character: char| {
+            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+        })
+        .filter(|part| !part.is_empty())
+        .eq(["mcp", "vmux", "set", "conversation", "title"])
 }
 
 fn subagent_block(
@@ -1375,10 +1378,17 @@ mod tests {
     }
 
     #[test]
-    fn conversation_title_tool_requires_exact_vmux_identifier() {
-        assert!(is_conversation_title_tool(
-            "mcp__vmux__set_conversation_title"
-        ));
+    fn conversation_title_tool_recognizes_agent_identifier_variants() {
+        for title in [
+            "mcp__vmux__set_conversation_title",
+            "mcp.vmux.set_conversation_title",
+            "mcp vmux set conversation title",
+            "mcp-vmux-set-conversation-title",
+            "mcp:vmux:set:conversation:title",
+            "mcp__vmux.set-conversation title",
+        ] {
+            assert!(is_conversation_title_tool(title));
+        }
         assert!(!is_conversation_title_tool(
             "mcp__other__set_conversation_title"
         ));

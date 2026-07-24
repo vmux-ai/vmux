@@ -197,7 +197,7 @@ async fn await_decision(
                 decision,
             }) if cid == call_id => {
                 return match decision {
-                    ApprovalDecision::Allow => Decision::Allow,
+                    ApprovalDecision::Allow | ApprovalDecision::AllowAlways => Decision::Allow,
                     ApprovalDecision::Deny => Decision::Deny,
                 };
             }

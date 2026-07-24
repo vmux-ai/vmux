@@ -20,7 +20,7 @@ use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "Immediately after every user message, call mcp__vmux__set_conversation_title as the first tool of the turn, before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim. Update the title even when the user sends a short follow-up.";
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "Call mcp__vmux__set_conversation_title as the first tool of the turn only when the conversation has no title yet or the latest user message materially changes the conversation's topic. If the current title still accurately summarizes the conversation, do not call the tool. When a title is needed, call it before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim.";
 
 const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. For development work, first call select_workspace. Pass a path when the conversation identifies a local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. If it has no .git, vmux asks whether to initialize Git; declining keeps the plain workspace usable. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
 const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
@@ -425,19 +425,19 @@ pub(crate) fn apply_acp_model_selection_result(
 }
 
 /// ACP agents re-request permission every time, so "allow always" must be answered by the host:
-/// if the tool name is already in this session's auto-policy, reply `Allow` without prompting.
+/// if the tool name is already in this session's auto-policy, reply `AllowAlways` without
+/// prompting.
 fn acp_auto_approval_message(
     session: &AcpSession,
     policy: &AgentApprovalPolicy,
     request: &AgentApprovalRequest,
 ) -> Option<ClientMessage> {
     policy
-        .auto
-        .contains(&request.name)
+        .allows(&request.name)
         .then(|| ClientMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
-            decision: vmux_service::protocol::ApprovalDecision::Allow,
+            decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
         })
 }
 
@@ -1083,7 +1083,7 @@ mod tests {
             resume: None,
         };
         let mut policy = AgentApprovalPolicy::default();
-        policy.auto.insert("run".into());
+        policy.allow("run");
         let request = AgentApprovalRequest {
             session: Entity::PLACEHOLDER,
             call_id: "call-1".into(),
@@ -1096,7 +1096,7 @@ mod tests {
             Some(ClientMessage::AgentApprove { sid, call_id, decision })
                 if sid == "s1"
                     && call_id == "call-1"
-                    && decision == vmux_service::protocol::ApprovalDecision::Allow
+                    && decision == vmux_service::protocol::ApprovalDecision::AllowAlways
         ));
     }
 
@@ -1719,6 +1719,8 @@ mod tests {
             let instructions = config["developer_instructions"].as_str().unwrap();
             assert!(instructions.contains("mcp__vmux__set_conversation_title"));
             assert!(instructions.contains("first tool of the turn"));
+            assert!(instructions.contains("materially changes the conversation's topic"));
+            assert!(instructions.contains("do not call the tool"));
         }
     }
 

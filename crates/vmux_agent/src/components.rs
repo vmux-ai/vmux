@@ -29,6 +29,30 @@ pub struct AgentApprovalPolicy {
     pub auto: HashSet<String>,
 }
 
+impl AgentApprovalPolicy {
+    /// Remembers a normalized tool identifier for automatic approval.
+    pub fn allow(&mut self, tool: &str) {
+        self.auto.insert(approval_tool_key(tool));
+    }
+
+    /// Returns whether a normalized tool identifier is automatically approved.
+    pub fn allows(&self, tool: &str) -> bool {
+        self.auto.contains(&approval_tool_key(tool))
+    }
+}
+
+/// Normalizes equivalent ACP, CLI, and MCP tool identifiers to one policy key.
+pub fn approval_tool_key(tool: &str) -> String {
+    tool.trim()
+        .to_ascii_lowercase()
+        .split(|character: char| {
+            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+        })
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
 /// FIFO of prompts waiting to be dispatched to this session's agent. Normal dispatch takes one
 /// prompt per idle turn. `paused` holds the queue after an interrupt until the user resumes,
 /// clears, or submits again; `flush_pending` combines all queued prompts for an Esc flush.
@@ -147,6 +171,15 @@ mod tests {
         let _ = AgentMessages::default();
         let _ = AgentApprovalPolicy::default();
         let _ = PromptQueue::default();
+    }
+
+    #[test]
+    fn approval_policy_normalizes_agent_tool_identifiers() {
+        let mut policy = AgentApprovalPolicy::default();
+        policy.allow("mcp__vmux__run");
+
+        assert!(policy.allows("mcp.vmux.run"));
+        assert!(!policy.allows("mcp.other.run"));
     }
 
     #[test]

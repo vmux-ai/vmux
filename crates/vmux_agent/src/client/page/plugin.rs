@@ -22,7 +22,8 @@ pub struct PageAgentPlugin;
 
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<AgentSession>()
+        app.insert_resource(approval::AgentApprovalStore::load())
+            .register_type::<AgentSession>()
             .register_type::<AgentApprovalPolicy>()
             .add_message::<AgentToast>()
             .add_message::<PageAgentDelta>()
@@ -45,6 +46,7 @@ impl Plugin for PageAgentPlugin {
                     ensure_prompt_queue,
                     spawn_page_session_on_add,
                     send_page_agent_input,
+                    approval::sync_persisted_acp_approval_policy.before(consume_page_agent_stream),
                     consume_page_agent_stream,
                     surface_errors::surface_errors,
                     attach_last_run_state_kind,
@@ -279,7 +281,7 @@ fn consume_page_agent_stream(
         if let Ok((_, _, mut state, _, _, acp, policy, _, _)) = q.get_mut(entity) {
             let auto_allowed = service.is_some()
                 && acp.is_some()
-                && policy.is_some_and(|policy| policy.auto.contains(&approval.name));
+                && policy.is_some_and(|policy| policy.allows(&approval.name));
             if !auto_allowed {
                 *state = AgentRunState::AwaitingApproval {
                     call_id: approval.call_id.clone(),
@@ -321,7 +323,7 @@ mod tests {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_systems(Update, consume_page_agent_stream);
         let mut policy = AgentApprovalPolicy::default();
-        policy.auto.insert("run".into());
+        policy.allow("run");
         let entity = app
             .world_mut()
             .spawn((
