@@ -217,7 +217,7 @@ fn pairing_info(base_url: &str, token: &str) -> Result<RemotePairingInfo, String
         url::Url::parse("vmuxremote://pair").map_err(|error| error.to_string())?;
     pairing_deep_link
         .query_pairs_mut()
-        .append_pair("base", &base_url)
+        .append_pair("base", base_url)
         .append_pair("token", token);
     Ok(RemotePairingInfo {
         pairing_url: pairing_url.to_string(),
