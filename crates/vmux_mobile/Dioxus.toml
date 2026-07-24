@@ -1,5 +1,5 @@
 [application]
-name = "Vmux Remote"
+name = "Vmux"
 default_platform = "ios"
 public_dir = "assets"
 tailwind_input = "assets/tailwind.css"
@@ -20,8 +20,8 @@ identifier = "ai.vmux.remote"
 icon = ["../../icon.png"]
 
 [ios.plist]
-CFBundleDisplayName = "Vmux Remote"
-CFBundleName = "Vmux Remote"
+CFBundleDisplayName = "Vmux"
+CFBundleName = "Vmux"
 NSAppTransportSecurity = { NSAllowsLocalNetworking = true }
 
 [android]
