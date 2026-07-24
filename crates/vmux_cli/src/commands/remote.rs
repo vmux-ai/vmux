@@ -21,7 +21,7 @@ pub fn run(args: RemoteArgs) -> std::io::Result<i32> {
         let port = vmux_service::remote_port();
         let local_url = format!("http://127.0.0.1:{port}/#token={token}");
         if args.local {
-            println!("open on this Mac: {local_url}");
+            println!("paste into Vmux Remote: {local_url}");
             return Ok(0);
         }
 
@@ -32,15 +32,14 @@ pub fn run(args: RemoteArgs) -> std::io::Result<i32> {
             .is_ok_and(|status| status.success());
         let dns_name = tailscale_dns_name();
         if served && let Some(host) = dns_name {
-            println!("open on your phone: https://{host}/#token={token}");
-            println!("then Add to Home Screen");
+            println!("paste into Vmux Remote: https://{host}/#token={token}");
             return Ok(0);
         }
 
         println!("mobile app ready on {target}");
         println!("run: tailscale serve --bg {target}");
         if let Some(host) = dns_name {
-            println!("open: https://{host}/#token={token}");
+            println!("paste into Vmux Remote: https://{host}/#token={token}");
         } else {
             println!("pair token: {token}");
         }

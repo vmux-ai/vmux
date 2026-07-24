@@ -1,0 +1,34 @@
+[package]
+name = "vmux_mobile"
+version.workspace = true
+edition.workspace = true
+description = "Native Dioxus Mobile client for Vmux Remote"
+publish = false
+
+[features]
+default = []
+mobile = ["dioxus/mobile"]
+
+[[bin]]
+name = "vmux_mobile"
+path = "src/main.rs"
+required-features = ["mobile"]
+
+[dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+    "json",
+] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+url = { workspace = true }
+vmux_remote = { path = "../vmux_remote" }

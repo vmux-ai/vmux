@@ -110,7 +110,6 @@ web_pages! {
     render_error: "error" => vmux_layout::error_page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,
     render_services: "services" => vmux_service::page::Page,
-    render_remote: "remote" => vmux_service::remote::page::Page,
     render_history: "history" => vmux_history::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
     render_team: "team" => vmux_team::page::Page,
