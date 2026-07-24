@@ -54,6 +54,6 @@ pub enum Command {
     Service(service::ServiceArgs),
     #[command(hide = true)]
     VaultKey(vault_key::VaultKeyArgs),
-    /// Expose active agent chats to a paired phone over Tailscale
+    /// Expose active agent chats to a local mobile client
     Remote(remote::RemoteArgs),
 }

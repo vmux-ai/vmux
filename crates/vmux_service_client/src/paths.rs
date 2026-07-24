@@ -50,7 +50,7 @@ pub fn remote_token_path() -> PathBuf {
     profile_file("remote-token")
 }
 
-/// Path to the desired Remote exposure state for Tailscale Serve reconciliation.
+/// Path to the desired Remote exposure state.
 pub fn remote_state_path() -> PathBuf {
     profile_file("remote-state")
 }

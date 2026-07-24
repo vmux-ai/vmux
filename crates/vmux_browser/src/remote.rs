@@ -1,5 +1,4 @@
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
@@ -204,86 +203,15 @@ fn remote_worker(command_rx: Receiver<bool>, result_tx: Sender<RemoteWorkerResul
 fn enable_remote() -> Result<RemotePairingInfo, String> {
     let token = wait_for_token().map_err(|error| error.to_string())?;
     let port = vmux_service::remote_port();
-    let https_port = format!("--https={port}");
-    let target = format!("http://127.0.0.1:{port}");
-    let output = tailscale_command()
-        .args(["serve", "--bg", "--yes", &https_port, &target])
-        .output()
-        .map_err(|error| format!("Tailscale is unavailable: {error}"))?;
-    ensure_success("Tailscale Serve", output)?;
-    let host = tailscale_dns_name()?;
-    pairing_info(&host, port, &token)
+    pairing_info(&format!("http://127.0.0.1:{port}"), &token)
 }
 
 fn disable_remote() -> Result<(), String> {
-    let https_port = format!("--https={}", vmux_service::remote_port());
-    let output = tailscale_command()
-        .args(["serve", &https_port, "off"])
-        .output()
-        .map_err(|error| format!("Tailscale is unavailable: {error}"))?;
-    ensure_success("Tailscale Serve", output)
+    Ok(())
 }
 
-fn ensure_success(name: &str, output: Output) -> Result<(), String> {
-    if output.status.success() {
-        return Ok(());
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let detail = if !stderr.is_empty() { stderr } else { stdout };
-    if detail.is_empty() {
-        Err(format!("{name} failed with {}", output.status))
-    } else {
-        Err(format!("{name} failed: {detail}"))
-    }
-}
-
-fn tailscale_dns_name() -> Result<String, String> {
-    let output = tailscale_command()
-        .args(["status", "--json"])
-        .output()
-        .map_err(|error| format!("Tailscale is unavailable: {error}"))?;
-    ensure_success("Tailscale status", output.clone())?;
-    tailscale_dns_name_from_json(&output.stdout)
-        .ok_or_else(|| "Tailscale has no MagicDNS name for this Mac.".to_string())
-}
-
-fn tailscale_dns_name_from_json(bytes: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()?
-        .get("Self")?
-        .get("DNSName")?
-        .as_str()
-        .map(|name| name.trim_end_matches('.').to_string())
-        .filter(|name| !name.is_empty())
-}
-
-fn tailscale_command() -> Command {
-    Command::new(tailscale_binary())
-}
-
-fn tailscale_binary() -> PathBuf {
-    if let Some(path) = std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|directory| directory.join("tailscale"))
-            .find(|candidate| candidate.is_file())
-    }) {
-        return path;
-    }
-    [
-        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
-        "/opt/homebrew/bin/tailscale",
-        "/usr/local/bin/tailscale",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .find(|candidate| candidate.is_file())
-    .unwrap_or_else(|| PathBuf::from("tailscale"))
-}
-
-fn pairing_info(host: &str, port: u16, token: &str) -> Result<RemotePairingInfo, String> {
-    let base_url = format!("https://{host}:{port}");
-    let mut pairing_url = url::Url::parse(&base_url).map_err(|error| error.to_string())?;
+fn pairing_info(base_url: &str, token: &str) -> Result<RemotePairingInfo, String> {
+    let mut pairing_url = url::Url::parse(base_url).map_err(|error| error.to_string())?;
     pairing_url.set_fragment(Some(&format!("token={token}")));
     let mut pairing_deep_link =
         url::Url::parse("vmuxremote://pair").map_err(|error| error.to_string())?;
@@ -338,24 +266,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_tailscale_dns_name() {
-        let json = br#"{"Self":{"DNSName":"mac.tailnet.ts.net."}}"#;
-        assert_eq!(
-            tailscale_dns_name_from_json(json).as_deref(),
-            Some("mac.tailnet.ts.net")
-        );
-    }
-
-    #[test]
     fn builds_pairing_urls() {
-        let pairing = pairing_info("mac.tailnet.ts.net", 54_821, "secret").unwrap();
-        assert_eq!(
-            pairing.pairing_url,
-            "https://mac.tailnet.ts.net:54821/#token=secret"
-        );
+        let pairing = pairing_info("http://127.0.0.1:54821", "secret").unwrap();
+        assert_eq!(pairing.pairing_url, "http://127.0.0.1:54821/#token=secret");
         assert_eq!(
             pairing.pairing_deep_link,
-            "vmuxremote://pair?base=https%3A%2F%2Fmac.tailnet.ts.net%3A54821&token=secret"
+            "vmuxremote://pair?base=http%3A%2F%2F127.0.0.1%3A54821&token=secret"
         );
     }
 }

@@ -30,22 +30,29 @@ dx serve --android -p vmux_mobile --device "Pixel"
 
 ## Connect
 
-Open the left side sheet in Vmux and enable **Remote** in the space card. Vmux configures a
-profile-specific Tailscale Serve endpoint and keeps the setting across desktop restarts.
+Start the desktop and iOS Simulator in separate terminals:
+
+```sh
+make
+make ios
+```
+
+Open the left side sheet in Vmux and enable **Remote** in the space card. Local development uses a
+profile-specific loopback endpoint shared by the Mac and iOS Simulator.
 
 The first time, scan the QR code with the phone. It opens Vmux Remote through the
 `vmuxremote://pair` deep link, verifies the endpoint, and stores the credentials. After the first
 authenticated request, the desktop card switches to **Phone paired**. Use **Pair another** to show
-the QR again. The HTTPS pairing URL remains visible as a manual fallback.
+the QR again. In Simulator, copy the pairing URL from the desktop card and paste it into the mobile
+app because Simulator cannot scan the desktop QR code.
 
 `vmux remote` remains available as a command-line fallback. `vmux remote --reset` revokes the
 previous token.
 
 ## Runtime path
 
-The daemon binds an authenticated JSON and server-sent-events API to loopback. Tailscale Serve
-provides the encrypted HTTPS endpoint and tailnet access. The native app uses `reqwest` and stores
-the paired endpoint and bearer token in its WebView sandbox.
+The daemon binds an authenticated JSON and server-sent-events API to loopback. The native app uses
+`reqwest` and stores the paired endpoint and bearer token in its WebView sandbox.
 
 Each phone connection uses the same daemon registries as the desktop client:
 
@@ -60,6 +67,9 @@ The daemon generates a 256-bit bearer token in its profile-specific service dire
 `0600`. The QR deep link and manual URL carry the endpoint and token. The native app extracts them,
 verifies them against the API, and persists them locally.
 
-The API rejects unauthenticated requests, caps prompt size, and listens only on loopback. Resetting
-the token restarts the daemon and invalidates paired phones. Disabling Remote removes only Vmux's
-profile-specific Tailscale Serve HTTPS listener.
+The API rejects requests while Remote is off, rejects unauthenticated requests, caps prompt size,
+and listens only on loopback. Resetting the token restarts the daemon and invalidates paired phones.
+
+The production transport will replace direct loopback access with outbound encrypted WebSockets to
+the Rust Cloudflare relay. Direct `wasm-bindgen` bindings cover Worker APIs unavailable in Rust; no
+handwritten TypeScript is required.
