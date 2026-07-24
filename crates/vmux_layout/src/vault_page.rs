@@ -22,6 +22,10 @@ pub fn Page() -> Element {
     let repository = use_signal(|| "vmux-vault".to_string());
     let selected_repository = use_signal(String::new);
     let private = use_signal(|| true);
+    let preferred_provider = web_sys::window()
+        .and_then(|window| window.location().search().ok())
+        .and_then(|search| search.strip_prefix("?provider=").map(str::to_string))
+        .unwrap_or_default();
 
     let _snapshot_listener =
         use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
@@ -31,8 +35,14 @@ pub fn Page() -> Element {
     let _action_listener =
         use_bin_event_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |result| {
             pending.set(None);
-            notice.set(Some(result));
-            request_snapshot(false);
+            if result.action == VaultAction::ConnectGithub && result.success {
+                notice.set(None);
+                loaded.set(false);
+                request_snapshot(true);
+            } else {
+                notice.set(Some(result));
+                request_snapshot(false);
+            }
         });
 
     use_effect(move || {
@@ -70,6 +80,7 @@ pub fn Page() -> Element {
                         selected_repository,
                         private,
                         pending,
+                        preferred_provider,
                     }
                 }
                 if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
@@ -98,6 +109,7 @@ fn VaultPanel(
     selected_repository: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
+    preferred_provider: String,
 ) -> Element {
     let is_connected = vault.initialized && !vault.remote.is_empty();
     let status = if vault.dirty > 0 {
@@ -107,6 +119,16 @@ fn VaultPanel(
         )
     } else {
         translate("vault-clean")
+    };
+    let github_card_class = if preferred_provider == "github" {
+        "rounded-xl bg-background/35 p-4 ring-2 ring-inset ring-primary/35"
+    } else {
+        "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10"
+    };
+    let cloud_card_class = if preferred_provider == "cloud_folder" {
+        "rounded-xl bg-background/35 p-4 ring-2 ring-inset ring-primary/35"
+    } else {
+        "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10"
     };
     rsx! {
         div { class: "rounded-2xl bg-foreground/[0.035] p-5 ring-1 ring-inset ring-foreground/10",
@@ -154,7 +176,7 @@ fn VaultPanel(
             }
             if !is_connected {
                 div { class: "mt-5 grid gap-3 lg:grid-cols-2",
-                    div { class: "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
+                    div { class: "{github_card_class}",
                         div { class: "flex items-start gap-3",
                             svg { class: "mt-0.5 h-5 w-5 shrink-0 text-foreground/75", view_box: "0 0 24 24", fill: "currentColor",
                                 path { d: "M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.78-.25.78-.55v-2.16c-3.18.69-3.85-1.35-3.85-1.35-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.73-1.53-2.54-.29-5.21-1.27-5.21-5.65 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.11 1.17A10.8 10.8 0 0 1 12 5.93c.96 0 1.92.13 2.82.38 2.15-1.48 3.11-1.17 3.11-1.17.62 1.58.23 2.74.11 3.03.73.8 1.18 1.82 1.18 3.07 0 4.39-2.68 5.35-5.23 5.64.41.36.78 1.06.78 2.14v3.15c0 .3.21.66.79.55A11.3 11.3 0 0 0 12 .7Z" }
@@ -244,7 +266,7 @@ fn VaultPanel(
                             }
                         }
                     }
-                    div { class: "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
+                    div { class: "{cloud_card_class}",
                         div { class: "flex items-start gap-3",
                             svg { class: "mt-0.5 h-5 w-5 shrink-0 text-foreground/75", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }

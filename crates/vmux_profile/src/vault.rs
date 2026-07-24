@@ -75,7 +75,7 @@ pub fn status_with_repositories() -> VaultStatus {
 
 pub fn connect_github() -> Result<String, String> {
     if Command::new("gh")
-        .args(["auth", "status", "--hostname", "github.com"])
+        .args(["api", "user", "--jq", ".login"])
         .output()
         .map_err(|error| format!("failed to run gh: {error}"))?
         .status

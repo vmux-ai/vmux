@@ -496,6 +496,34 @@ fn request_user_choice_definition() -> ToolDefinition {
     }
 }
 
+fn vault_status_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "vault_status".into(),
+        description: "Read the local Vault sync state without connecting, uploading, or discovering remote repositories. Use this first when the user asks to back up, upload, sync, or migrate vmux. If Vault is not connected and the user did not already choose a provider, call request_user_choice with GitHub and Cloud folder. If changes need upload, ask the user to confirm syncing before opening Vault. Never claim data was uploaded until a later status reports no local changes and no commits ahead."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    }
+}
+
+fn open_vault_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "open_vault".into(),
+        description: "Open the user-facing Vault page for the final connection or sync confirmation. This tool never uploads by itself. First call vault_status. If the user did not already specify the provider or sync action, call request_user_choice and stop the turn; call open_vault only after the user selects GitHub, Cloud folder, or confirms Sync. The user completes the final repository/folder choice and clicks Create, Use, or Sync in Vault."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "provider": {"enum": ["overview", "github", "cloud_folder"]}
+            }
+        }),
+    }
+}
+
 fn set_conversation_title_definition() -> ToolDefinition {
     ToolDefinition {
         name: "set_conversation_title".into(),
@@ -795,6 +823,8 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
         defs.push(run_definition());
     }
     defs.push(request_user_choice_definition());
+    defs.push(vault_status_definition());
+    defs.push(open_vault_definition());
     defs.push(set_conversation_title_definition());
     defs.push(write_knowledge_definition());
     defs.push(select_project_definition());
@@ -1029,6 +1059,28 @@ pub fn dispatch_with_anchor(
             anchor,
             question: question.to_string(),
             options,
+        }));
+    }
+    if name == "open_vault" {
+        let anchor =
+            anchor.ok_or("open_vault requires an agent anchor (not available to this client)")?;
+        let provider = arguments
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("overview");
+        let url = match provider {
+            "overview" => "vmux://vault/".to_string(),
+            "github" => "vmux://vault/?provider=github".to_string(),
+            "cloud_folder" => "vmux://vault/?provider=cloud_folder".to_string(),
+            _ => {
+                return Err("open_vault.provider must be overview, github, or cloud_folder".into());
+            }
+        };
+        return Ok(DispatchTarget::Command(AgentCommand::OpenBeside {
+            anchor,
+            direction: None,
+            url,
+            focus: true,
         }));
     }
     if name == "set_conversation_title" {
@@ -1544,6 +1596,8 @@ mod tests {
             "run",
             "read_terminal",
             "request_user_choice",
+            "vault_status",
+            "open_vault",
             "set_conversation_title",
             "write_knowledge",
             "select_project",
@@ -2191,6 +2245,36 @@ mod tests {
         assert!(tool_definitions().iter().any(|d| d.name == "run"));
         assert!(tool_definitions().iter().any(|d| d.name == "read_file"));
         assert!(tool_definitions().iter().any(|d| d.name == "grep"));
+    }
+
+    #[test]
+    fn open_vault_dispatch_focuses_confirmed_provider() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let target = dispatch_with_anchor(
+            "open_vault",
+            serde_json::json!({"provider": "github"}),
+            Some(anchor),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            target,
+            DispatchTarget::Command(AgentCommand::OpenBeside {
+                anchor: got,
+                direction: None,
+                url,
+                focus: true,
+            }) if got == anchor && url == "vmux://vault/?provider=github"
+        ));
+        assert!(
+            dispatch_with_anchor(
+                "open_vault",
+                serde_json::json!({"provider": "unknown"}),
+                Some(anchor),
+            )
+            .is_err()
+        );
+        assert!(dispatch_with_anchor("open_vault", serde_json::json!({}), None).is_err());
     }
 
     #[test]

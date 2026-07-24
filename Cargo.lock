@@ -9926,6 +9926,7 @@ dependencies = [
  "tokio",
  "vmux_command_mcp",
  "vmux_macro",
+ "vmux_profile",
  "vmux_service_client",
 ]
 
