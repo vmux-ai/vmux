@@ -388,7 +388,7 @@ fn App() -> Element {
                             span { "· {cwd_name(&session.cwd)}" }
                         }
                     } else {
-                        div { class: "text-sm font-semibold", "Vmux Remote" }
+                        div { class: "text-sm font-semibold", "Vmux" }
                         div { class: "mt-1 text-[11px] text-zinc-500", "No active session" }
                     }
                 }
@@ -689,7 +689,7 @@ fn App() -> Element {
 #[component]
 fn AppHead() -> Element {
     rsx! {
-        document::Title { "Vmux Remote" }
+        document::Title { "Vmux" }
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
         document::Meta { name: "theme-color", content: "#09090b" }
         document::Stylesheet { href: TAILWIND_CSS }
@@ -1110,8 +1110,7 @@ mod tests {
     #[test]
     fn parses_pairing_url() {
         assert_eq!(
-            parse_pairing_url("paste into Vmux Remote: https://mac.example.ts.net/#token=secret")
-                .unwrap(),
+            parse_pairing_url("paste into Vmux: https://mac.example.ts.net/#token=secret").unwrap(),
             Credentials {
                 base_url: "https://mac.example.ts.net".to_string(),
                 token: "secret".to_string(),
