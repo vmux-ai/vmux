@@ -279,6 +279,8 @@ menu-bookmark = 书签
 menu-edit = 编辑
 
 layout-knowledge = 知识
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = 打开知识
 layout-open-welcome-knowledge = 打开“欢迎使用知识”
 layout-open-path = 打开 { $path }
@@ -435,6 +437,7 @@ agent-loading-media = 正在加载媒体…
 agent-no-matching-media = 没有匹配的媒体
 agent-prompt-context = 提示上下文
 agent-details = 详细信息
+agent-copy = Copy
 agent-path = 路径
 agent-tool = 工具
 agent-server = 服务器

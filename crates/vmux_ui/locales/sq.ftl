@@ -279,6 +279,8 @@ menu-bookmark = Faqeshënuesi
 menu-edit = Redaktimi
 
 layout-knowledge = Njohuri
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Hap Njohuritë
 layout-open-welcome-knowledge = Hap Mirë se vini te Njohuritë
 layout-open-path = Hap { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Po ngarkohet media…
 agent-no-matching-media = Nuk ka media që përputhet
 agent-prompt-context = Konteksti i kërkesës
 agent-details = Detaje
+agent-copy = Copy
 agent-path = Shtegu
 agent-tool = Vegla
 agent-server = Serveri

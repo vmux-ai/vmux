@@ -279,6 +279,8 @@ menu-bookmark = Tetenger
 menu-edit = Sunting
 
 layout-knowledge = Kawruh
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Bukak Kawruh
 layout-open-welcome-knowledge = Bukak Sugeng rawuh ing Kawruh
 layout-open-path = Bukak { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ngemot media…
 agent-no-matching-media = Ora ana media sing cocog
 agent-prompt-context = Konteks prompt
 agent-details = Rincian
+agent-copy = Copy
 agent-path = Path
 agent-tool = Piranti
 agent-server = Server

@@ -279,6 +279,8 @@ menu-bookmark = ที่คั่นหน้า
 menu-edit = แก้ไข
 
 layout-knowledge = คลังความรู้
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = เปิดคลังความรู้
 layout-open-welcome-knowledge = เปิดยินดีต้อนรับสู่คลังความรู้
 layout-open-path = เปิด { $path }
@@ -435,6 +437,7 @@ agent-loading-media = กำลังโหลดสื่อ…
 agent-no-matching-media = ไม่มีสื่อที่ตรงกัน
 agent-prompt-context = บริบทพรอมป์
 agent-details = รายละเอียด
+agent-copy = Copy
 agent-path = พาธ
 agent-tool = เครื่องมือ
 agent-server = เซิร์ฟเวอร์

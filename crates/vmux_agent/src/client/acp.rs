@@ -20,11 +20,11 @@ use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "Call mcp__vmux__set_conversation_title as the first tool of the turn only when the conversation has no title yet or the latest user message materially changes the conversation's topic. If the current title still accurately summarizes the conversation, do not call the tool. When a title is needed, call it before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim.";
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
-const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected workspace. For development work, first call select_workspace. Pass a path when the conversation identifies a local directory; otherwise vmux opens the native folder picker immediately after approval. Any directory can be a workspace. If it has no .git, vmux asks whether to initialize Git; declining keeps the plain workspace usable. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
-const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Workspace activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected workspace before inspecting, editing, testing, or running the project.";
-const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected workspace is a Git repository, but this tab is not isolated. Reading and inspection are allowed. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
+const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected project. Read-only inspection may use the current directory or a known path immediately. Never call select_project or create_worktree for requests that only read, show, search, or explain existing files. Before the first edit, write, test, build, or other mutation in an existing project, call select_project with its known path or without a path to open the project picker rooted at ~/.vmux/workspace. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/workspace, or choose an existing project. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/workspace/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
+const PENDING_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): Project activation is pending. Do not access project paths directly or run git worktree add yourself. Wait for vmux to finish preparing the selected project before inspecting, editing, testing, or running it.";
+const REPOSITORY_WORKTREE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): The selected project is a Git repository, but this tab is not isolated. Reading and inspection are allowed without a worktree. Never call create_worktree for requests that only read, show, search, or explain existing files. Immediately before the first edit, write, test, build, or other mutation, call create_worktree. It reuses a known linked worktree, automatically uses one unambiguous existing worktree, or creates one when none exists. If it reports multiple candidates, ask the user with request_user_choice to choose an existing path or Create new worktree, then call create_worktree again with path or create=true. Never run git worktree add yourself.";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AcpWorkspaceState {
@@ -733,6 +733,11 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
         .unwrap()
         .insert("web_search".to_string(), serde_json::Value::Bool(false));
 
+    disable_codex_skills(
+        &mut config,
+        &crate::client::cli::codex::codex_disabled_skill_files(),
+    );
+
     let mcp_servers = config
         .entry("mcp_servers")
         .or_insert_with(|| serde_json::json!({}));
@@ -783,6 +788,49 @@ fn apply_codex_compatibility_env(mut env: Vec<(String, String)>) -> Vec<(String,
         serde_json::Value::Object(config).to_string(),
     ));
     env
+}
+
+fn disable_codex_skills(
+    config: &mut serde_json::Map<String, serde_json::Value>,
+    skill_files: &[std::path::PathBuf],
+) {
+    if skill_files.is_empty() {
+        return;
+    }
+    let skills = config
+        .entry("skills")
+        .or_insert_with(|| serde_json::json!({}));
+    if !skills.is_object() {
+        *skills = serde_json::json!({});
+    }
+    let configured = skills
+        .as_object_mut()
+        .unwrap()
+        .entry("config")
+        .or_insert_with(|| serde_json::json!([]));
+    if !configured.is_array() {
+        *configured = serde_json::json!([]);
+    }
+    let configured = configured.as_array_mut().unwrap();
+    for skill_file in skill_files {
+        let path = skill_file.to_string_lossy();
+        if let Some(existing) = configured.iter_mut().find(|entry| {
+            entry
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|candidate| candidate == path)
+        }) {
+            existing
+                .as_object_mut()
+                .unwrap()
+                .insert("enabled".to_string(), serde_json::Value::Bool(false));
+        } else {
+            configured.push(serde_json::json!({
+                "path": path,
+                "enabled": false,
+            }));
+        }
+    }
 }
 
 fn parse_codex_config(
@@ -1126,14 +1174,19 @@ mod tests {
     }
 
     #[test]
-    fn unbound_workspace_context_requires_picker_before_project_work() {
+    fn unbound_workspace_context_allows_reading_before_project_setup() {
         let context = acp_prompt_context(None, Some(AcpWorkspaceState::Unbound)).unwrap();
 
-        assert!(context.contains("select_workspace"));
-        assert!(context.contains("Any directory can be a workspace"));
-        assert!(context.contains("initialize Git"));
+        assert!(context.contains("Read-only inspection"));
+        assert!(context.contains("Never call select_project or create_worktree"));
+        assert!(context.contains("select_project"));
+        assert!(context.contains("request_user_choice"));
+        assert!(context.contains("~/.vmux/workspace/<remote-host>"));
+        assert!(context.contains("~/.vmux/workspace/local/<project>"));
+        assert!(context.contains("create the empty directory"));
+        assert!(context.contains("use the new project root directly"));
         assert!(context.contains("Do not search the user's home directory"));
-        assert!(context.contains("folder picker"));
+        assert!(context.contains("project picker"));
     }
 
     #[test]
@@ -1142,6 +1195,7 @@ mod tests {
             acp_prompt_context(None, Some(AcpWorkspaceState::RepositoryNeedsWorktree)).unwrap();
 
         assert!(context.contains("Reading and inspection are allowed"));
+        assert!(context.contains("Never call create_worktree"));
         assert!(context.contains("Immediately before the first edit"));
         assert!(context.contains("create_worktree"));
         assert!(context.contains("request_user_choice"));
@@ -1719,9 +1773,42 @@ mod tests {
             let instructions = config["developer_instructions"].as_str().unwrap();
             assert!(instructions.contains("mcp__vmux__set_conversation_title"));
             assert!(instructions.contains("first tool of the turn"));
-            assert!(instructions.contains("materially changes the conversation's topic"));
-            assert!(instructions.contains("do not call the tool"));
+            assert!(instructions.contains("raw first prompt as a provisional title"));
+            assert!(instructions.contains("topic materially changes"));
+            assert!(instructions.contains("same-topic follow-ups"));
+            assert!(instructions.contains("never needs user permission"));
+            assert!(instructions.contains("mcp__vmux__browser_snapshot"));
+            assert!(instructions.contains("page already visible beside you"));
         }
+    }
+
+    #[test]
+    fn codex_acp_disables_session_skill_files() {
+        let mut config = serde_json::json!({
+            "skills": {
+                "config": [
+                    {"path": "/tmp/knowledge/alpha/SKILL.md", "enabled": true},
+                    {"path": "/tmp/other", "enabled": true}
+                ]
+            }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        disable_codex_skills(
+            &mut config,
+            &[
+                std::path::PathBuf::from("/tmp/knowledge/alpha/SKILL.md"),
+                std::path::PathBuf::from("/tmp/knowledge/beta/SKILL.md"),
+            ],
+        );
+
+        assert_eq!(config["skills"]["config"][0]["enabled"], false);
+        assert_eq!(config["skills"]["config"][1]["enabled"], true);
+        assert_eq!(
+            config["skills"]["config"][2],
+            serde_json::json!({"path": "/tmp/knowledge/beta/SKILL.md", "enabled": false})
+        );
     }
 
     #[test]

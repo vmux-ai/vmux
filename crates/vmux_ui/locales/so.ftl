@@ -279,6 +279,8 @@ menu-bookmark = Calaamad
 menu-edit = Tafatir
 
 layout-knowledge = Aqoon
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Fur Aqoon
 layout-open-welcome-knowledge = Fur Ku soo dhawoow Aqoon
 layout-open-path = Fur { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Warbaahin ayaa la raranayaa…
 agent-no-matching-media = Warbaahin ku habboon ma jirto
 agent-prompt-context = Macnaha codsiga
 agent-details = Faahfaahin
+agent-copy = Copy
 agent-path = Waddo
 agent-tool = Qalab
 agent-server = Seerfar

@@ -279,6 +279,8 @@ menu-bookmark = Blêdwizer
 menu-edit = Bewurkje
 
 layout-knowledge = Kennis
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Kennis iepenje
 layout-open-welcome-knowledge = Wolkom by Kennis iepenje
 layout-open-path = { $path } iepenje
@@ -435,6 +437,7 @@ agent-loading-media = Media lade…
 agent-no-matching-media = Gjin oerienkommende media
 agent-prompt-context = Promptkontekst
 agent-details = Details
+agent-copy = Copy
 agent-path = Paad
 agent-tool = Ark
 agent-server = Server

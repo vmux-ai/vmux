@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -30,6 +31,9 @@ pub enum ManagerMsg {
 #[derive(Resource, Clone, Default)]
 pub struct ManagerOutbox(pub Arc<Mutex<Vec<(Entity, ManagerMsg)>>>);
 
+#[derive(Resource, Clone, Default)]
+struct ActiveInstalls(Arc<Mutex<HashSet<String>>>);
+
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
@@ -45,6 +49,7 @@ impl Plugin for ManagerPlugin {
         ));
         vmux_core::register_host_spawn(app, "lsp");
         app.init_resource::<ManagerOutbox>()
+            .init_resource::<ActiveInstalls>()
             .add_plugins(BinEventEmitterPlugin::<(
                 LspCatalogRequest,
                 LspInstallRequest,
@@ -141,12 +146,24 @@ fn on_catalog_request(trigger: On<BinReceive<LspCatalogRequest>>, outbox: Res<Ma
     });
 }
 
-fn install_named(outbox: &ManagerOutbox, entity: Entity, name: String) {
+fn install_named(outbox: &ManagerOutbox, active: &ActiveInstalls, entity: Entity, name: String) {
+    {
+        let mut installs = active.0.lock().unwrap_or_else(|error| error.into_inner());
+        if !installs.insert(name.clone()) {
+            return;
+        }
+    }
     let sink = outbox.clone();
+    let active = active.clone();
     std::thread::spawn(move || {
         let root = store::default_root();
         let pkgs = catalog::ensure_catalog(&root, false).unwrap_or_default();
         let Some(pkg) = pkgs.iter().find(|p| p.name == name).cloned() else {
+            active
+                .0
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(&name);
             push(
                 &sink,
                 entity,
@@ -174,6 +191,11 @@ fn install_named(outbox: &ManagerOutbox, entity: Entity, name: String) {
                 }),
             );
         });
+        active
+            .0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&name);
         match result {
             Ok(receipt) => push(
                 &sink,
@@ -198,17 +220,27 @@ fn install_named(outbox: &ManagerOutbox, entity: Entity, name: String) {
     });
 }
 
-fn on_install_request(trigger: On<BinReceive<LspInstallRequest>>, outbox: Res<ManagerOutbox>) {
+fn on_install_request(
+    trigger: On<BinReceive<LspInstallRequest>>,
+    outbox: Res<ManagerOutbox>,
+    active: Res<ActiveInstalls>,
+) {
     install_named(
         &outbox,
+        &active,
         trigger.event().webview,
         trigger.event().payload.name.clone(),
     );
 }
 
-fn on_update_request(trigger: On<BinReceive<LspUpdateRequest>>, outbox: Res<ManagerOutbox>) {
+fn on_update_request(
+    trigger: On<BinReceive<LspUpdateRequest>>,
+    outbox: Res<ManagerOutbox>,
+    active: Res<ActiveInstalls>,
+) {
     install_named(
         &outbox,
+        &active,
         trigger.event().webview,
         trigger.event().payload.name.clone(),
     );
@@ -254,9 +286,32 @@ fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Re
     });
 }
 
+fn file_uses_package(view: &crate::plugin::FileView, package: &str) -> bool {
+    view.path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(crate::lsp::registry::preferred_package)
+        == Some(package)
+}
+
+fn install_targets(
+    source: Entity,
+    package: &str,
+    views: &Query<(Entity, &crate::plugin::FileView)>,
+) -> Vec<Entity> {
+    let mut targets = vec![source];
+    for (entity, view) in views {
+        if file_uses_package(view, package) && !targets.contains(&entity) {
+            targets.push(entity);
+        }
+    }
+    targets
+}
+
 fn drain_manager_outbox(
     outbox: Res<ManagerOutbox>,
     browsers: NonSend<Browsers>,
+    views: Query<(Entity, &crate::plugin::FileView)>,
     mut commands: Commands,
 ) {
     let drained: Vec<(Entity, ManagerMsg)> = {
@@ -264,23 +319,48 @@ fn drain_manager_outbox(
         q.drain(..).collect()
     };
     for (entity, msg) in drained {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
-            continue;
-        }
         match msg {
             ManagerMsg::Catalog(ev) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(entity, LSP_CATALOG_EVENT, &ev))
+                if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                    commands.trigger(BinHostEmitEvent::from_rkyv(entity, LSP_CATALOG_EVENT, &ev));
+                }
             }
-            ManagerMsg::Progress(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                LSP_INSTALL_PROGRESS_EVENT,
-                &ev,
-            )),
-            ManagerMsg::Status(ev) => commands.trigger(BinHostEmitEvent::from_rkyv(
-                entity,
-                LSP_PKG_STATUS_EVENT,
-                &ev,
-            )),
+            ManagerMsg::Progress(ev) => {
+                for target in install_targets(entity, &ev.name, &views) {
+                    if browsers.has_browser(target) && browsers.host_emit_ready(&target) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            target,
+                            LSP_INSTALL_PROGRESS_EVENT,
+                            &ev,
+                        ));
+                    }
+                }
+            }
+            ManagerMsg::Status(ev) => {
+                let targets = install_targets(entity, &ev.name, &views);
+                if ev.status == LspPkgStatus::Installed {
+                    for target in targets.iter().copied() {
+                        if views
+                            .get(target)
+                            .is_ok_and(|(_, view)| file_uses_package(view, &ev.name))
+                        {
+                            commands
+                                .entity(target)
+                                .remove::<crate::lsp::manager::LspOpened>()
+                                .remove::<crate::lsp::manager::LspStatusSent>();
+                        }
+                    }
+                }
+                for target in targets {
+                    if browsers.has_browser(target) && browsers.host_emit_ready(&target) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            target,
+                            LSP_PKG_STATUS_EVENT,
+                            &ev,
+                        ));
+                    }
+                }
+            }
         }
     }
 }

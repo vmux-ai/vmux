@@ -279,6 +279,8 @@ menu-bookmark = Cim tseg
 menu-edit = Kho
 
 layout-knowledge = Kev paub
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Qhib Kev paub
 layout-open-welcome-knowledge = Qhib Zoo siab txais tos rau Kev paub
 layout-open-path = Qhib { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Tab tom thauj media…
 agent-no-matching-media = Tsis muaj media phim
 agent-prompt-context = Prompt context
 agent-details = Lus qhia ntxiv
+agent-copy = Copy
 agent-path = Path
 agent-tool = Cuab yeej
 agent-server = Server

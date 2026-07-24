@@ -279,6 +279,8 @@ menu-bookmark = 북마크
 menu-edit = 편집
 
 layout-knowledge = 지식
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = 지식 열기
 layout-open-welcome-knowledge = 지식 시작하기 열기
 layout-open-path = { $path } 열기
@@ -435,6 +437,7 @@ agent-loading-media = 미디어 로드 중…
 agent-no-matching-media = 일치하는 미디어 없음
 agent-prompt-context = 프롬프트 컨텍스트
 agent-details = 세부 정보
+agent-copy = Copy
 agent-path = 경로
 agent-tool = 도구
 agent-server = 서버

@@ -23,6 +23,21 @@ pub struct AgentMessages(pub Vec<Message>);
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentConversationTitle(pub String);
 
+pub(crate) fn provisional_conversation_title(text: &str) -> Option<String> {
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.chars().count() <= 120 {
+        return Some(normalized);
+    }
+    let mut title = normalized.chars().take(119).collect::<String>();
+    let trimmed_len = title.trim_end().len();
+    title.truncate(trimmed_len);
+    title.push('…');
+    Some(title)
+}
+
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize, Reflect)]
 #[reflect(Component)]
 pub struct AgentApprovalPolicy {

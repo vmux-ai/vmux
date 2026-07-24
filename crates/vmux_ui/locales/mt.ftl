@@ -279,6 +279,8 @@ menu-bookmark = Bookmark
 menu-edit = Editja
 
 layout-knowledge = Għarfien
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Iftaħ l-Għarfien
 layout-open-welcome-knowledge = Iftaħ Merħba fl-Għarfien
 layout-open-path = Iftaħ { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Qed titgħabba l-media…
 agent-no-matching-media = L-ebda media taqbel
 agent-prompt-context = Kuntest tal-prompt
 agent-details = Dettalji
+agent-copy = Copy
 agent-path = Mogħdija
 agent-tool = Għodda
 agent-server = Server

@@ -279,6 +279,8 @@ menu-bookmark = Bellik
 menu-edit = Düzet
 
 layout-knowledge = Bilim
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Bilimi aç
 layout-open-welcome-knowledge = Bilime hoş geldiňiz sahypasyny aç
 layout-open-path = { $path } aç
@@ -435,6 +437,7 @@ agent-loading-media = Media ýüklenýär…
 agent-no-matching-media = Gabat gelýän media ýok
 agent-prompt-context = Prompt konteksti
 agent-details = Jikme-jiklikler
+agent-copy = Copy
 agent-path = Ýol
 agent-tool = Gural
 agent-server = Serwer

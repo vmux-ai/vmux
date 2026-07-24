@@ -279,6 +279,8 @@ menu-bookmark = Alamisho
 menu-edit = Hariri
 
 layout-knowledge = Maarifa
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Fungua Maarifa
 layout-open-welcome-knowledge = Fungua Karibu kwenye Maarifa
 layout-open-path = Fungua { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Inapakia midia…
 agent-no-matching-media = Hakuna midia inayolingana
 agent-prompt-context = Muktadha wa kidokezo
 agent-details = Maelezo
+agent-copy = Copy
 agent-path = Njia
 agent-tool = Zana
 agent-server = Seva

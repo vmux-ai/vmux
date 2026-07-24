@@ -279,6 +279,8 @@ menu-bookmark = Bókamerki
 menu-edit = Breyta
 
 layout-knowledge = Þekking
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Opna þekkingu
 layout-open-welcome-knowledge = Opna Velkomin í þekkingu
 layout-open-path = Opna { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Hleð miðli…
 agent-no-matching-media = Enginn samsvarandi miðill
 agent-prompt-context = Samhengi kvaðningar
 agent-details = Upplýsingar
+agent-copy = Copy
 agent-path = Slóð
 agent-tool = Verkfæri
 agent-server = Þjónn

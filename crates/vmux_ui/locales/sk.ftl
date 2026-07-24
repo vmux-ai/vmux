@@ -279,6 +279,8 @@ menu-bookmark = Záložka
 menu-edit = Upraviť
 
 layout-knowledge = Znalosti
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Otvoriť Znalosti
 layout-open-welcome-knowledge = Otvoriť uvítanie v Znalostiach
 layout-open-path = Otvoriť { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Načítavajú sa médiá…
 agent-no-matching-media = Žiadne zodpovedajúce médiá
 agent-prompt-context = Kontext promptu
 agent-details = Podrobnosti
+agent-copy = Copy
 agent-path = Cesta
 agent-tool = Nástroj
 agent-server = Server

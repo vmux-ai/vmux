@@ -116,6 +116,11 @@ pub fn config_dir() -> PathBuf {
     home.join(".vmux")
 }
 
+/// Default root for repositories and local projects managed through vmux.
+pub fn workspace_dir() -> PathBuf {
+    config_dir().join("workspace")
+}
+
 /// Default output directory for screenshots and screen recordings:
 /// `~/.vmux/profiles/<profile>/recording`. Overridable via the
 /// `recording.output_dir` setting.

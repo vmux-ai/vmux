@@ -279,6 +279,8 @@ menu-bookmark = Signum
 menu-edit = Editio
 
 layout-knowledge = Scientia
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Aperire Scientiam
 layout-open-welcome-knowledge = Aperire “Salve in Scientia”
 layout-open-path = Aperire { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Media onerantur…
 agent-no-matching-media = Nulla media congruentia
 agent-prompt-context = Contextus prompti
 agent-details = Singula
+agent-copy = Copy
 agent-path = Semita
 agent-tool = Instrumentum
 agent-server = Servitor

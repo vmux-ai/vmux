@@ -12,10 +12,8 @@ use vmux_command::snapshot::{
     CommandBarWorkSnapshot,
 };
 use vmux_core::{
-    Active, CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet,
-    PageOpenTask,
+    CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
-use vmux_history::LastActivatedAt;
 
 use crate::cef::Browser;
 use crate::command_bar::handler::{
@@ -26,8 +24,7 @@ use crate::start::START_PAGE_URL;
 use crate::start::event::{
     START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput, StartSelectWorkspace,
 };
-use crate::tab::{PendingTabReplacement, Tab, TabWorkspace, TabWorktree};
-use crate::webview_reveal::PendingWebviewReveal;
+use crate::tab::{Tab, TabWorkspace, TabWorktree};
 use crate::window::VmuxWindow;
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -57,9 +54,6 @@ struct WarmStartPoolNode;
 /// becomes ready after snapshots were populated still gets the data.
 #[derive(Component)]
 struct StartWorkSynced;
-
-#[derive(Component)]
-struct StartMountReady;
 
 /// Host-internal signal that a warm spare was just revealed into a stack, so its launcher
 /// data must be refreshed (it captured boot-time tabs/spaces) and its input refocused.
@@ -175,10 +169,6 @@ impl Plugin for StartPlugin {
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
                 ),
-            )
-            .add_systems(
-                Update,
-                finish_ready_tab_replacements.after(sync_live_start_pages),
             );
     }
 }
@@ -208,17 +198,24 @@ fn on_start_select_workspace(
         return;
     }
     let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
-    let initial_dir = std::path::PathBuf::from(&trigger.event().payload.current_dir)
-        .canonicalize()
+    let workspace_dir = vmux_core::profile::workspace_dir();
+    let initial_dir = std::fs::create_dir_all(&workspace_dir)
         .ok()
+        .map(|_| workspace_dir)
         .filter(|path| path.is_dir())
+        .or_else(|| {
+            std::path::PathBuf::from(&trigger.event().payload.current_dir)
+                .canonicalize()
+                .ok()
+                .filter(|path| path.is_dir())
+        })
         .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
         .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from))
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| std::path::PathBuf::from("/"));
     let task = IoTaskPool::get().spawn(async move {
         let selected = rfd::AsyncFileDialog::new()
-            .set_title("Create or select workspace")
+            .set_title("Choose existing project")
             .set_directory(initial_dir)
             .pick_folder()
             .await
@@ -231,7 +228,7 @@ fn on_start_select_workspace(
                     rfd::AsyncMessageDialog::new()
                         .set_title("Initialize Git repository?")
                         .set_description(
-                            "This workspace is not a Git repository. Initialize Git now?",
+                            "This project is not a Git repository. Initialize Git now?",
                         )
                         .set_buttons(rfd::MessageButtons::YesNo)
                         .show()
@@ -318,7 +315,6 @@ fn sync_live_start_pages(
         Without<crate::start::StartAgentTransitionView>,
     >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
-    replacements: Query<&PendingTabReplacement>,
     browsers: NonSend<Browsers>,
     mut repo_info: Option<ResMut<vmux_git::RepoInfoCache>>,
     mut last_git: Local<(String, Option<vmux_git::worktree::RepoInfo>)>,
@@ -355,9 +351,6 @@ fn sync_live_start_pages(
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
-            if ancestor_replacement_tab(e, &tab_gather.child_of_q, &replacements).is_some() {
-                return None;
-            }
             let WebviewSource::Url(url) = src else {
                 return None;
             };
@@ -555,8 +548,6 @@ fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
     spares: Query<(), With<WarmStartSpare>>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
-    child_of: Query<&ChildOf>,
-    replacements: Query<&PendingTabReplacement>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
@@ -571,8 +562,6 @@ fn on_start_data_request(
     if is_spare {
         commands.entity(webview).insert(WarmStartReady);
     }
-    commands.entity(webview).insert(StartMountReady);
-    let replacement_tab = ancestor_replacement_tab(webview, &child_of, &replacements);
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -580,7 +569,7 @@ fn on_start_data_request(
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
-        replacement_tab.or_else(|| tab_gather.active_tab.get()),
+        tab_gather.active_tab.get(),
         None,
         &locale
             .as_deref()
@@ -592,7 +581,7 @@ fn on_start_data_request(
         COMMAND_BAR_OPEN_EVENT,
         &payload,
     ));
-    if keyboard_targets.contains(webview) && replacement_tab.is_none() {
+    if keyboard_targets.contains(webview) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             webview,
             START_FOCUS_INPUT_EVENT,
@@ -644,62 +633,6 @@ fn build_start_payload(
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload
-}
-
-fn ancestor_replacement_tab(
-    entity: Entity,
-    child_of: &Query<&ChildOf>,
-    replacements: &Query<&PendingTabReplacement>,
-) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if replacements.contains(current) {
-            return Some(current);
-        }
-        current = child_of.get(current).ok()?.parent();
-    }
-}
-
-fn finish_ready_tab_replacements(
-    ready: Query<Entity, (With<StartMountReady>, Without<PendingWebviewReveal>)>,
-    child_of: Query<&ChildOf>,
-    replacements: Query<&PendingTabReplacement>,
-    mut focused: ResMut<crate::stack::FocusedStack>,
-    mut commands: Commands,
-) {
-    for webview in &ready {
-        let Some(tab) = ancestor_replacement_tab(webview, &child_of, &replacements) else {
-            continue;
-        };
-        let Ok(replacement) = replacements.get(tab) else {
-            continue;
-        };
-        let Some(stack) = child_of.get(webview).ok().map(ChildOf::parent) else {
-            continue;
-        };
-        let Some(pane) = child_of.get(stack).ok().map(ChildOf::parent) else {
-            continue;
-        };
-        commands.entity(replacement.old_tab).try_despawn();
-        commands
-            .entity(tab)
-            .insert((Active, LastActivatedAt::now()))
-            .remove::<PendingTabReplacement>();
-        commands
-            .entity(pane)
-            .insert((Active, LastActivatedAt::now()));
-        commands
-            .entity(stack)
-            .insert((Active, LastActivatedAt::now()));
-        focused.tab = Some(tab);
-        focused.pane = Some(pane);
-        focused.stack = Some(stack);
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            webview,
-            START_FOCUS_INPUT_EVENT,
-            &StartFocusInput,
-        ));
-    }
 }
 
 /// Despawn a stack's existing webview children before attaching new content.
@@ -823,56 +756,6 @@ mod tests {
 
         let emitted = &app.world().resource::<EmittedIds>().0;
         assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
-    }
-
-    #[test]
-    fn replacement_keeps_old_tab_until_start_mounts_then_switches_atomically() {
-        let mut app = App::new();
-        app.init_resource::<crate::stack::FocusedStack>()
-            .init_resource::<EmittedIds>()
-            .add_observer(capture_emit)
-            .add_systems(Update, finish_ready_tab_replacements);
-        let old_tab = app
-            .world_mut()
-            .spawn((Tab::default(), Active, LastActivatedAt(10)))
-            .id();
-        let new_tab = app
-            .world_mut()
-            .spawn((
-                Tab::default(),
-                PendingTabReplacement { old_tab },
-                LastActivatedAt(0),
-            ))
-            .id();
-        let split = app.world_mut().spawn(ChildOf(new_tab)).id();
-        let pane = app
-            .world_mut()
-            .spawn((LastActivatedAt(0), ChildOf(split)))
-            .id();
-        let stack = app
-            .world_mut()
-            .spawn((LastActivatedAt(0), ChildOf(pane)))
-            .id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.update();
-        assert!(app.world().get_entity(old_tab).is_ok());
-        assert!(app.world().get::<Active>(new_tab).is_none());
-
-        app.world_mut().entity_mut(webview).insert(StartMountReady);
-        app.update();
-
-        assert!(app.world().get_entity(old_tab).is_err());
-        assert!(app.world().get::<Active>(new_tab).is_some());
-        assert!(app.world().get::<PendingTabReplacement>(new_tab).is_none());
-        let focused = app.world().resource::<crate::stack::FocusedStack>();
-        assert_eq!(focused.tab, Some(new_tab));
-        assert_eq!(focused.pane, Some(pane));
-        assert_eq!(focused.stack, Some(stack));
-        assert_eq!(
-            app.world().resource::<EmittedIds>().0,
-            [START_FOCUS_INPUT_EVENT]
-        );
     }
 
     #[test]

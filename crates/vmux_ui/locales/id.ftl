@@ -279,6 +279,8 @@ menu-bookmark = Markah
 menu-edit = Sunting
 
 layout-knowledge = Pengetahuan
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Buka Pengetahuan
 layout-open-welcome-knowledge = Buka Selamat Datang di Pengetahuan
 layout-open-path = Buka { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Memuat media…
 agent-no-matching-media = Tidak ada media yang cocok
 agent-prompt-context = Konteks prompt
 agent-details = Detail
+agent-copy = Copy
 agent-path = Path
 agent-tool = Alat
 agent-server = Server

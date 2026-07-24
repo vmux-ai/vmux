@@ -279,6 +279,8 @@ menu-bookmark = Σελιδοδείκτης
 menu-edit = Επεξεργασία
 
 layout-knowledge = Γνώση
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Άνοιγμα Γνώσης
 layout-open-welcome-knowledge = Άνοιγμα Καλωσορίσματος στη Γνώση
 layout-open-path = Άνοιγμα { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Φόρτωση πολυμέσων…
 agent-no-matching-media = Δεν υπάρχουν αντίστοιχα πολυμέσα
 agent-prompt-context = Περιεχόμενο προτροπής
 agent-details = Λεπτομέρειες
+agent-copy = Copy
 agent-path = Διαδρομή
 agent-tool = Εργαλείο
 agent-server = Διακομιστής

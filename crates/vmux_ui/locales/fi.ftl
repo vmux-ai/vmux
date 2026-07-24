@@ -279,6 +279,8 @@ menu-bookmark = Kirjanmerkki
 menu-edit = Muokkaa
 
 layout-knowledge = Tietämys
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Avaa tietämys
 layout-open-welcome-knowledge = Avaa Tervetuloa tietämykseen
 layout-open-path = Avaa { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ladataan mediaa…
 agent-no-matching-media = Ei vastaavaa mediaa
 agent-prompt-context = Kehotteen konteksti
 agent-details = Tiedot
+agent-copy = Copy
 agent-path = Polku
 agent-tool = Työkalu
 agent-server = Palvelin

@@ -279,6 +279,8 @@ menu-bookmark = Xatcho‘p
 menu-edit = Tahrir
 
 layout-knowledge = Bilim
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Bilimni ochish
 layout-open-welcome-knowledge = Bilimga xush kelibsizni ochish
 layout-open-path = { $path } ni ochish
@@ -435,6 +437,7 @@ agent-loading-media = Media yuklanmoqda…
 agent-no-matching-media = Mos media yo‘q
 agent-prompt-context = Prompt konteksti
 agent-details = Tafsilotlar
+agent-copy = Copy
 agent-path = Yo‘l
 agent-tool = Vosita
 agent-server = Server

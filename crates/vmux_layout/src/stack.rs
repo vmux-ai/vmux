@@ -917,25 +917,17 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(tab_e).is_ok());
-        assert!(app.world().get_entity(original_stack).is_ok());
-        assert!(
-            app.world()
-                .get::<crate::tab::TabReplacementSource>(tab_e)
-                .is_some()
-        );
+        assert!(app.world().get_entity(tab_e).is_err());
+        assert!(app.world().get_entity(original_stack).is_err());
         let replacement_tab = app
             .world_mut()
-            .query_filtered::<Entity, With<crate::tab::PendingTabReplacement>>()
+            .query_filtered::<Entity, With<Tab>>()
             .single(app.world())
             .unwrap();
         assert_ne!(replacement_tab, tab_e);
         assert_eq!(
-            app.world()
-                .get::<crate::tab::PendingTabReplacement>(replacement_tab)
-                .unwrap()
-                .old_tab,
-            tab_e
+            app.world().resource::<FocusedStack>().tab,
+            Some(replacement_tab)
         );
         assert!(
             app.world()

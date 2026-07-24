@@ -53,9 +53,9 @@ pub use vmux_space::cwd::valid_cwd;
 
 const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
-const WORKSPACE_SELECTION_REQUESTED: &str = "Workspace selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
-const WORKSPACE_SELECTION_PENDING: &str = "Workspace selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
 const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
 
@@ -1892,7 +1892,7 @@ fn handle_agent_commands(
                             AgentCommandResult::Ok
                         } else {
                             AgentCommandResult::Error(
-                                "workspace directory is required to run a command".to_string(),
+                                "project directory is required to run a command".to_string(),
                             )
                         }
                     }
@@ -2119,6 +2119,7 @@ fn handle_agent_commands(
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::SetConversationTitle { .. }
+            | ServiceAgentCommand::WriteKnowledge { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
             | ServiceAgentCommand::ResumeInAcp { .. } => {
                 continue;
@@ -2223,6 +2224,7 @@ fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
         | ServiceAgentCommand::PrepareWorktree { anchor, .. }
         | ServiceAgentCommand::RequestUserChoice { anchor, .. }
         | ServiceAgentCommand::SetConversationTitle { anchor, .. }
+        | ServiceAgentCommand::WriteKnowledge { anchor, .. }
         | ServiceAgentCommand::CreateWorktreeOnBranch { anchor, .. } => Some(*anchor),
         _ => None,
     }
@@ -2237,6 +2239,7 @@ fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::SetConversationTitle { .. }
+            | ServiceAgentCommand::WriteKnowledge { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) {
         0
@@ -2257,6 +2260,7 @@ fn self_command_blocked_by_worktree_failure(
             | ServiceAgentCommand::PrepareWorktree { .. }
             | ServiceAgentCommand::RequestUserChoice { .. }
             | ServiceAgentCommand::SetConversationTitle { .. }
+            | ServiceAgentCommand::WriteKnowledge { .. }
             | ServiceAgentCommand::CreateWorktreeOnBranch { .. }
     ) && self_command_anchor(command).is_some_and(|anchor| failed.contains(&anchor))
 }
@@ -2671,7 +2675,7 @@ fn run_terminal_cwd(
     if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
         return Ok(path);
     }
-    Err("tab and agent workspace directories are missing".to_string())
+    Err("tab and agent project directories are missing".to_string())
 }
 
 #[cfg(test)]
@@ -2765,13 +2769,10 @@ fn handle_agent_choice_selected(
             workspace,
         } => {
             if !tabs.contains(*tab_entity) {
-                failed_workspace_continuation("The workspace tab no longer exists")
+                failed_workspace_continuation("The project tab no longer exists")
             } else if event.index == 0 {
                 match vmux_git::worktree::repository_init(workspace) {
-                    Ok(root) => {
-                        commands.entity(*tab_entity).insert(RepositoryNeedsWorktree);
-                        git_workspace_ready_continuation(&root)
-                    }
+                    Ok(root) => new_git_workspace_ready_continuation(&root),
                     Err(error) => git_initialization_failed_continuation(workspace, &error.0),
                 }
             } else {
@@ -2792,15 +2793,18 @@ fn workspace_picker_task(
     proxy: Option<&bevy::winit::EventLoopProxyWrapper>,
 ) -> Task<Option<PathBuf>> {
     let wake = proxy.map(|proxy| (**proxy).clone());
-    let initial_dir = std::env::current_dir()
+    let workspace_dir = vmux_core::profile::workspace_dir();
+    let initial_dir = std::fs::create_dir_all(&workspace_dir)
         .ok()
+        .map(|_| workspace_dir)
         .filter(|path| path.is_dir())
+        .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
         .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| PathBuf::from("/"));
     IoTaskPool::get().spawn(async move {
         let selected = rfd::AsyncFileDialog::new()
-            .set_title("Create or select workspace")
+            .set_title("Choose existing project")
             .set_directory(initial_dir)
             .pick_folder()
             .await
@@ -2837,28 +2841,35 @@ fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execu
 
 fn git_workspace_ready_continuation(path: &Path) -> String {
     format!(
-        "VMUX WORKSPACE SELECTION COMPLETED: Git workspace {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
+        "VMUX PROJECT SELECTION COMPLETED: Git project {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
+        path.display()
+    )
+}
+
+fn new_git_workspace_ready_continuation(path: &Path) -> String {
+    format!(
+        "VMUX NEW PROJECT READY: Git project {} is the dedicated project root. Continue the original user request immediately in this directory. Do not call create_worktree for this project.",
         path.display()
     )
 }
 
 fn plain_workspace_ready_continuation(path: &Path) -> String {
     format!(
-        "VMUX WORKSPACE SELECTION COMPLETED: Workspace {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
+        "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
         path.display()
     )
 }
 
 fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
     format!(
-        "VMUX GIT INITIALIZATION FAILED: {error}. Workspace {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
+        "VMUX GIT INITIALIZATION FAILED: {error}. Project {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
         path.display()
     )
 }
 
 fn failed_workspace_continuation(message: &str) -> String {
     format!(
-        "VMUX WORKSPACE SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request workspace selection again."
+        "VMUX PROJECT SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request project selection again."
     )
 }
 
@@ -2961,7 +2972,7 @@ fn activate_selected_workspace(
 ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
     let kind = if selected.join(".git").exists() {
         vmux_git::worktree::checkout_info(selected)
-            .map_err(|error| format!("selected workspace has invalid Git metadata: {}", error.0))?;
+            .map_err(|error| format!("selected project has invalid Git metadata: {}", error.0))?;
         SelectedWorkspaceKind::Git {
             needs_worktree: !vmux_git::worktree::is_linked_worktree(selected),
         }
@@ -3499,6 +3510,29 @@ fn handle_agent_self_commands(
                     }
                 }
             }
+            ServiceAgentCommand::WriteKnowledge {
+                anchor,
+                path,
+                title,
+                content,
+            } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
+                None => AgentCommandResult::Error("agent pane not found".to_string()),
+                Some((_, pane)) => {
+                    match vmux_core::knowledge::write_note(path.as_deref(), title, content) {
+                        Ok(path) => {
+                            writers.open_beside.write(vmux_layout::OpenBesideRequest {
+                                pane,
+                                direction: None,
+                                url: file_touch_url(&path.to_string_lossy(), None, None, None),
+                                request_id: request.request_id.0,
+                                focus: false,
+                            });
+                            AgentCommandResult::Text(format!("Knowledge saved: {}", path.display()))
+                        }
+                        Err(error) => AgentCommandResult::Error(error),
+                    }
+                }
+            },
             ServiceAgentCommand::ChooseWorkspace { anchor }
             | ServiceAgentCommand::ChooseWorkspaceAtPath { anchor, .. } => {
                 match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
@@ -3604,7 +3638,7 @@ fn handle_agent_self_commands(
                             service.0.send(ClientMessage::AgentCommandResponse {
                                 request_id: request.request_id,
                                 result: AgentCommandResult::Error(
-                                    "No Git workspace selected. Complete select_workspace and initialize Git first."
+                                    "No Git project selected. Complete select_project and initialize Git first."
                                         .to_string(),
                                 ),
                             });
@@ -3650,7 +3684,7 @@ fn handle_agent_self_commands(
                                             service.0.send(message);
                                         }
                                         AgentCommandResult::Text(format!(
-                                            "Worktree ready: {}\nContinue the user's request in this directory.",
+                                            "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
                                             candidate.execution_dir.display()
                                         ))
                                     }
@@ -3698,7 +3732,7 @@ fn handle_agent_self_commands(
                                                         .unwrap_or_default(),
                                                 );
                                                 AgentCommandResult::Text(format!(
-                                                    "Worktree ready: {}\nContinue the user's request in this directory.",
+                                                    "Worktree ready: {}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools.",
                                                     execution_dir.display()
                                                 ))
                                             }
@@ -3742,7 +3776,7 @@ fn handle_agent_self_commands(
                                         path.to_string_lossy().into_owned(),
                                     ),
                                     Ok(None) => AgentCommandResult::Error(
-                                        "tab workspace directory is missing".to_string(),
+                                        "tab project directory is missing".to_string(),
                                     ),
                                     Err(message) => AgentCommandResult::Error(message),
                                 }
@@ -3781,7 +3815,7 @@ fn handle_agent_self_commands(
                                             .or_else(|| workspace_dir.clone())
                                         else {
                                             break 'create_worktree AgentCommandResult::Error(
-                                                "tab workspace directory is missing".to_string(),
+                                                "tab project directory is missing".to_string(),
                                             );
                                         };
                                         if vmux_git::worktree::is_linked_worktree(&current_dir) {
@@ -3901,7 +3935,7 @@ fn handle_agent_self_commands(
                                 service.0.send(ClientMessage::AgentCommandResponse {
                                     request_id: request.request_id,
                                     result: AgentCommandResult::Error(
-                                        "No workspace selected. Call select_workspace first."
+                                        "No project selected. Call select_project first."
                                             .to_string(),
                                     ),
                                 });
@@ -3930,7 +3964,7 @@ fn handle_agent_self_commands(
                                             .insert(tab_entity, branch.clone());
                                         let path = execution_dir.to_string_lossy().into_owned();
                                         AgentCommandResult::Text(format!(
-                                            "Worktree ready: {path}\nContinue the user's request in this directory."
+                                            "Worktree ready: {path}\nContinue the original request immediately in this directory. Do not stop after setup or search for optional tools."
                                         ))
                                     }
                                     Err(error) => AgentCommandResult::Error(error),
@@ -3983,13 +4017,13 @@ fn drain_workspace_picker_tasks(
         };
         let continuation = match selected {
             None => Some(failed_workspace_continuation(
-                "The user cancelled workspace selection",
+                "The user cancelled project selection",
             )),
             Some(selected) => match selected.canonicalize() {
                 Ok(selected) if selected.is_dir() => {
                     if tabs.get(picker.tab_entity).is_err() {
                         Some(failed_workspace_continuation(
-                            "The workspace tab no longer exists",
+                            "The project tab no longer exists",
                         ))
                     } else {
                         match activate_selected_workspace(
@@ -4030,22 +4064,22 @@ fn drain_workspace_picker_tasks(
                                         None
                                     }
                                     SelectedWorkspaceKind::Plain => Some(format!(
-                                        "VMUX WORKSPACE SELECTION COMPLETED: Workspace {} is ready without Git. Ask the user: \"Initialize Git repository?\" If yes, initialize Git in this exact workspace, then call create_worktree before mutation. If no, continue the original request without a worktree.",
+                                        "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Ask the user: \"Initialize Git repository?\" If yes, initialize Git in this exact project and continue directly in the project root without calling create_worktree. If no, continue the original request without a worktree.",
                                         execution_dir.display()
                                     )),
                                 }
                             }
                             Err(error) => Some(failed_workspace_continuation(&format!(
-                                "The selected workspace could not be prepared: {error}"
+                                "The selected project could not be prepared: {error}"
                             ))),
                         }
                     }
                 }
                 Ok(_) => Some(failed_workspace_continuation(
-                    "The selected workspace is not a directory",
+                    "The selected project is not a directory",
                 )),
                 Err(error) => Some(failed_workspace_continuation(&format!(
-                    "The selected workspace directory is invalid: {error}"
+                    "The selected project directory is invalid: {error}"
                 ))),
             },
         };
@@ -5210,6 +5244,11 @@ fn insert_initial_prompt_queue(
     if prompt.trim().is_empty() && initial_attachments.is_empty() {
         return;
     }
+    if let Some(title) = crate::components::provisional_conversation_title(&prompt) {
+        commands
+            .entity(stack)
+            .insert(crate::components::AgentConversationTitle(title));
+    }
     let mut queue = crate::components::PromptQueue::default();
     queue.enqueue_with_attachments(prompt, initial_attachments);
     commands
@@ -5756,13 +5795,13 @@ mod tests {
     fn workspace_selection_continuations_resume_original_request() {
         let ready = git_workspace_ready_continuation(Path::new("/repo/dashboard"));
         let plain = plain_workspace_ready_continuation(Path::new("/tmp/demo"));
-        let cancelled = failed_workspace_continuation("The user cancelled workspace selection");
+        let cancelled = failed_workspace_continuation("The user cancelled project selection");
 
         assert!(ready.contains("same conversation"));
-        assert!(ready.contains("Git workspace /repo/dashboard is ready"));
+        assert!(ready.contains("Git project /repo/dashboard is ready"));
         assert!(ready.contains("Immediately before the first edit"));
         assert!(ready.contains("create_worktree"));
-        assert!(plain.contains("Workspace /tmp/demo is ready without Git"));
+        assert!(plain.contains("Project /tmp/demo is ready without Git"));
         assert!(plain.contains("Do not call create_worktree"));
         assert!(cancelled.contains("Do not retry automatically"));
     }
@@ -5795,7 +5834,7 @@ mod tests {
     }
 
     #[test]
-    fn initialize_git_choice_marks_workspace_for_worktree_creation() {
+    fn initialize_git_choice_uses_new_project_root_directly() {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let mut app = App::new();
@@ -5804,7 +5843,7 @@ mod tests {
         let tab = app
             .world_mut()
             .spawn(vmux_layout::tab::Tab {
-                name: "Workspace".into(),
+                name: "Project".into(),
                 startup_dir: Some(workspace_path.to_string_lossy().into_owned()),
             })
             .id();
@@ -5829,13 +5868,13 @@ mod tests {
         app.update();
 
         assert!(workspace_path.join(".git").is_dir());
-        assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_some());
+        assert!(app.world().get::<RepositoryNeedsWorktree>(tab).is_none());
         assert!(
             app.world()
                 .get::<PendingAgentContinuation>(session)
                 .unwrap()
                 .0
-                .contains("call create_worktree")
+                .contains("Do not call create_worktree")
         );
     }
 
@@ -8700,6 +8739,11 @@ mod tests {
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),
             Some("ship it")
+        );
+        assert_eq!(
+            app.world()
+                .get::<crate::components::AgentConversationTitle>(stack),
+            Some(&crate::components::AgentConversationTitle("ship it".into()))
         );
         assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
     }

@@ -279,6 +279,8 @@ menu-bookmark = Semn de carte
 menu-edit = Editare
 
 layout-knowledge = Cunoștințe
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Deschide Cunoștințe
 layout-open-welcome-knowledge = Deschide Bun venit în Cunoștințe
 layout-open-path = Deschide { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Se încarcă media…
 agent-no-matching-media = Niciun media potrivit
 agent-prompt-context = Contextul promptului
 agent-details = Detalii
+agent-copy = Copy
 agent-path = Cale
 agent-tool = Instrument
 agent-server = Server

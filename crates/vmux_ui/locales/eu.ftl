@@ -279,6 +279,8 @@ menu-bookmark = Laster-marka
 menu-edit = Editatu
 
 layout-knowledge = Ezagutza
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Ireki Ezagutza
 layout-open-welcome-knowledge = Ireki Ongi etorri Ezagutzara
 layout-open-path = Ireki { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Media kargatzen…
 agent-no-matching-media = Ez dago bat datorren mediarik
 agent-prompt-context = Promptaren testuingurua
 agent-details = Xehetasunak
+agent-copy = Copy
 agent-path = Bidea
 agent-tool = Tresna
 agent-server = Zerbitzaria

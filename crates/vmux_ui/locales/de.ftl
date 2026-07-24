@@ -279,6 +279,8 @@ menu-bookmark = Lesezeichen
 menu-edit = Bearbeiten
 
 layout-knowledge = Wissen
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Wissen öffnen
 layout-open-welcome-knowledge = Willkommen im Wissen öffnen
 layout-open-path = { $path } öffnen
@@ -435,6 +437,7 @@ agent-loading-media = Medien werden geladen…
 agent-no-matching-media = Keine passenden Medien
 agent-prompt-context = Prompt-Kontext
 agent-details = Details
+agent-copy = Copy
 agent-path = Pfad
 agent-tool = Tool
 agent-server = Server

@@ -279,6 +279,8 @@ menu-bookmark = Bogmærke
 menu-edit = Rediger
 
 layout-knowledge = Viden
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Åbn Viden
 layout-open-welcome-knowledge = Åbn Velkommen til Viden
 layout-open-path = Åbn { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Indlæser medier…
 agent-no-matching-media = Ingen matchende medier
 agent-prompt-context = Promptkontekst
 agent-details = Detaljer
+agent-copy = Copy
 agent-path = Sti
 agent-tool = Værktøj
 agent-server = Server

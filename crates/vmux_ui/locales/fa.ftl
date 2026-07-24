@@ -279,6 +279,8 @@ menu-bookmark = نشانک
 menu-edit = ویرایش
 
 layout-knowledge = دانش
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = بازکردن دانش
 layout-open-welcome-knowledge = بازکردن خوشامدگویی دانش
 layout-open-path = بازکردن { $path }
@@ -435,6 +437,7 @@ agent-loading-media = در حال بارگذاری رسانه…
 agent-no-matching-media = رسانهٔ منطبقی وجود ندارد
 agent-prompt-context = زمینهٔ درخواست
 agent-details = جزئیات
+agent-copy = Copy
 agent-path = مسیر
 agent-tool = ابزار
 agent-server = سرور

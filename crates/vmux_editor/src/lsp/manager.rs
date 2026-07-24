@@ -881,6 +881,10 @@ fn lsp_status_system(
             &FileLspStatusEvent {
                 path: fv.path.to_string_lossy().into_owned(),
                 server: spec.command.clone(),
+                package: (!overrides.contains_key(ext))
+                    .then(|| crate::lsp::registry::preferred_package(ext))
+                    .flatten()
+                    .map(str::to_string),
                 state: desired,
             },
         ));

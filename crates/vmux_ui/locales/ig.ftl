@@ -279,6 +279,8 @@ menu-bookmark = Edokọbara
 menu-edit = Dezie
 
 layout-knowledge = Ọmụma
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Mepee Ọmụma
 layout-open-welcome-knowledge = Mepee Nnọọ na Ọmụma
 layout-open-path = Mepee { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Na-ebubata media…
 agent-no-matching-media = Enweghị media dabara
 agent-prompt-context = Ọnọdụ prompt
 agent-details = Nkọwa
+agent-copy = Copy
 agent-path = Ụzọ
 agent-tool = Ngwaọrụ
 agent-server = Sava

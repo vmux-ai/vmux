@@ -15,17 +15,28 @@ commands via the mcp__vmux__run tool (a visible terminal the user can watch and 
 output returned by run directly; call read_terminal only when run says the command is still running. To READ \
 a file, use the mcp__vmux__read_file tool (it shows the file in a pane beside you and returns its \
 text) - do NOT cat/sed/head/tail a file via run. To SEARCH code, use the mcp__vmux__grep tool (it \
-opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. Do ALL web access via the vmux browser tools in the \
-user's visible browser: mcp__vmux__browser_navigate (it returns the page snapshot on load), then \
-mcp__vmux__browser_scroll to read more. Omit the pane argument - it targets your own browser pane. \
-Do not look for a built-in web search. For development work without a selected workspace, first \
-call mcp__vmux__select_workspace. Pass a known local directory or omit it so vmux opens the native \
-folder picker immediately after approval. Any directory can be a workspace; vmux asks whether to \
-initialize Git when .git is absent. Immediately before the first edit, \
-write, test, build, or mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
+opens each matching file in a pane and returns the matches) - do NOT run rg/grep/ag via run. OpenAI's bundled browser skill is disabled inside vmux. \
+Never use browser:control-in-app-browser, a Node REPL, agent.browsers, or connector discovery. Do ALL web access via the vmux browser tools in the \
+user's visible browser. If the user refers to a page already visible beside you, first call mcp__vmux__browser_snapshot without a pane argument. \
+For a new URL, call mcp__vmux__browser_navigate, then mcp__vmux__browser_scroll to read more. Omitting the pane targets the visible browser pane associated with you. \
+Do not look for a built-in web search. Read-only inspection may use the current directory or a known \
+path directly; never call mcp__vmux__select_project or mcp__vmux__create_worktree for requests \
+that only read, show, search, or explain existing files. Before the first mutation in an existing \
+project without a selected project, call mcp__vmux__select_project, passing its known path or omitting it to \
+choose under ~/.vmux/workspace. For a new project, first use mcp__vmux__request_user_choice to offer \
+a concrete suggested path and Choose existing project. Use \
+~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and \
+~/.vmux/workspace/local/<project> otherwise. If creation is selected, use run to create the \
+empty directory, then select that path. vmux will offer Git initialization and use the new project \
+root directly; never call create_worktree for that new project. Do not ask the user to invent a \
+folder location. In a previously existing Git project, immediately before any edit, write, test, \
+build, or other mutation, call mcp__vmux__create_worktree. If it reports ambiguous existing \
 worktrees, ask whether to create or choose an existing path, then call mcp__vmux__create_worktree with \
 create=true or the selected path. Never \
-run git worktree add yourself.";
+run git worktree add yourself. After project or worktree setup succeeds, continue the original \
+request immediately. Never enumerate tool registries or wait for optional tools. If a skill requires \
+an unavailable tool, continue with the available tools; for website visuals, use code-native design \
+or available project assets.";
 const FILE_TOUCH_MATCHER: &str = "apply_patch|Edit|Write";
 
 pub struct CodexStrategy;
@@ -72,6 +83,10 @@ impl CliAgentStrategy for CodexStrategy {
         ));
         args.push("-c".into());
         args.push("tools.web_search=false".to_string());
+        if let Some(skills) = build_skills_config_override(&codex_disabled_skill_files()) {
+            args.push("-c".into());
+            args.push(skills);
+        }
         args.push("-c".into());
         args.push(format!(
             "developer_instructions={}",
@@ -137,6 +152,63 @@ pub(crate) fn quote_toml(s: &str) -> String {
 pub(crate) fn toml_array(items: &[String]) -> String {
     let inner: Vec<String> = items.iter().map(|s| quote_toml(s)).collect();
     format!("[{}]", inner.join(","))
+}
+
+fn build_skills_config_override(skill_files: &[PathBuf]) -> Option<String> {
+    if skill_files.is_empty() {
+        return None;
+    }
+    let entries = skill_files
+        .iter()
+        .map(|path| {
+            format!(
+                "{{path={},enabled=false}}",
+                quote_toml(&path.to_string_lossy())
+            )
+        })
+        .collect::<Vec<_>>();
+    Some(format!("skills.config=[{}]", entries.join(",")))
+}
+
+pub(crate) fn codex_disabled_skill_files() -> Vec<PathBuf> {
+    let mut files = vmux_core::knowledge::configured_skill_files();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    collect_skill_files(
+        &codex_home.join("plugins/cache/openai-bundled/browser"),
+        &mut files,
+    );
+    files.sort();
+    files.dedup();
+    files
+}
+
+fn collect_skill_files(root: &Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            collect_skill_files(&path, files);
+        } else if file_type.is_file()
+            && path
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
+        {
+            files.push(path);
+        }
+    }
 }
 
 /// `-c` override registering a PostToolUse hook that pings vmux on file edits.
@@ -529,6 +601,34 @@ mod tests {
     }
 
     #[test]
+    fn skill_config_override_disables_embedded_vmux_skills() {
+        let override_value = build_skills_config_override(&[
+            PathBuf::from("/tmp/knowledge/alpha/SKILL.md"),
+            PathBuf::from("/tmp/knowledge/beta/SKILL.md"),
+        ])
+        .unwrap();
+        assert_eq!(
+            override_value,
+            "skills.config=[{path=\"/tmp/knowledge/alpha/SKILL.md\",enabled=false},{path=\"/tmp/knowledge/beta/SKILL.md\",enabled=false}]"
+        );
+    }
+
+    #[test]
+    fn bundled_browser_skill_discovery_finds_versioned_skill_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let skill = temp
+            .path()
+            .join("26.1/skills/control-in-app-browser/SKILL.md");
+        std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+        std::fs::write(&skill, "browser").unwrap();
+        std::fs::write(temp.path().join("ignored.md"), "ignored").unwrap();
+
+        let mut files = Vec::new();
+        collect_skill_files(temp.path(), &mut files);
+        assert_eq!(files, vec![skill]);
+    }
+
+    #[test]
     fn build_args_steers_web_access_to_vmux_browser() {
         let mcp = McpServerConfig {
             command: "/bin/vmux".into(),
@@ -542,6 +642,9 @@ mod tests {
             .expect("developer_instructions override present");
         assert!(steer.contains("mcp__vmux__run"));
         assert!(steer.contains("browser_navigate"));
+        assert!(steer.contains("browser_snapshot"));
+        assert!(steer.contains("page already visible beside you"));
+        assert!(steer.contains("Never use browser:control-in-app-browser"));
     }
 
     #[test]

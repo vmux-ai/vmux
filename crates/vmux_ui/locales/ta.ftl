@@ -279,6 +279,8 @@ menu-bookmark = புத்தகக்குறி
 menu-edit = திருத்து
 
 layout-knowledge = அறிவு
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = அறிவைத் திற
 layout-open-welcome-knowledge = அறிவுக்கு வரவேற்பைத் திற
 layout-open-path = { $path } திற
@@ -435,6 +437,7 @@ agent-loading-media = மீடியா ஏற்றப்படுகிறத
 agent-no-matching-media = பொருந்தும் மீடியா இல்லை
 agent-prompt-context = Prompt சூழல்
 agent-details = விவரங்கள்
+agent-copy = Copy
 agent-path = பாதை
 agent-tool = கருவி
 agent-server = சேவையகம்

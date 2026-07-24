@@ -9,7 +9,7 @@ use crate::{
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::stack_bundle,
-    tab::{PendingTabReplacement, Tab, tab_bundle},
+    tab::{Tab, tab_bundle},
     unit::WindowExt,
 };
 use bevy::{
@@ -481,7 +481,6 @@ fn request_default_layout(
         content: TabLayoutSpawnContent::StartupUrlOrPrompt,
         clear_pending_stack: false,
         focus: true,
-        replaces: None,
     });
 }
 
@@ -591,12 +590,6 @@ pub fn spawn_requested_tab_layouts(
             commands.entity(leaf).insert(LastActivatedAt(0));
             commands.entity(stack).insert(LastActivatedAt(0));
         }
-        if let Some(old_tab) = request.replaces {
-            commands
-                .entity(tab_e)
-                .insert(PendingTabReplacement { old_tab });
-        }
-
         if request.clear_pending_stack
             && let Some(old_stack) = new_stack_ctx.stack.take()
         {
@@ -1408,7 +1401,6 @@ mod tests {
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,
-                replaces: None,
             });
 
         app.update();
@@ -1448,7 +1440,6 @@ mod tests {
                 content: crate::TabLayoutSpawnContent::StartupUrlOrPrompt,
                 clear_pending_stack: false,
                 focus: true,
-                replaces: None,
             });
         app.world_mut()
             .entity_mut(requested_space)

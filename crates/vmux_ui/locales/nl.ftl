@@ -279,6 +279,8 @@ menu-bookmark = Bladwijzer
 menu-edit = Bewerk
 
 layout-knowledge = Kennis
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Kennis openen
 layout-open-welcome-knowledge = Welkom bij Kennis openen
 layout-open-path = { $path } openen
@@ -435,6 +437,7 @@ agent-loading-media = Media laden…
 agent-no-matching-media = Geen overeenkomende media
 agent-prompt-context = Promptcontext
 agent-details = Details
+agent-copy = Copy
 agent-path = Pad
 agent-tool = Tool
 agent-server = Server

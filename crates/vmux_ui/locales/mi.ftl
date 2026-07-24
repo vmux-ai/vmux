@@ -279,6 +279,8 @@ menu-bookmark = Tohuwāhi
 menu-edit = Whakatika
 
 layout-knowledge = Mātauranga
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Whakatuwhera Mātauranga
 layout-open-welcome-knowledge = Whakatuwhera Nau mai ki te Mātauranga
 layout-open-path = Whakatuwhera { $path }
@@ -435,6 +437,7 @@ agent-loading-media = E uta ana i te pāpāho…
 agent-no-matching-media = Kāore he pāpāho ōrite
 agent-prompt-context = Horopaki akiaki
 agent-details = Taipitopito
+agent-copy = Copy
 agent-path = Ara
 agent-tool = Utauta
 agent-server = Tūmau

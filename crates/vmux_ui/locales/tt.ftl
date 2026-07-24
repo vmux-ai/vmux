@@ -279,6 +279,8 @@ menu-bookmark = Кыстыргыч
 menu-edit = Үзгәртү
 
 layout-knowledge = Белем
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Белемне ачу
 layout-open-welcome-knowledge = «Белемгә рәхим итегез»не ачу
 layout-open-path = { $path } ачу
@@ -435,6 +437,7 @@ agent-loading-media = Медиа йөкләнә…
 agent-no-matching-media = Туры килгән медиа юк
 agent-prompt-context = Сорау контексты
 agent-details = Тулырак
+agent-copy = Copy
 agent-path = Юл
 agent-tool = Корал
 agent-server = Сервер

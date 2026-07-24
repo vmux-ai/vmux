@@ -493,11 +493,11 @@ mod tests {
     fn private_continuation_starts_hidden_turn() {
         let private = vmux_service::protocol::compose_agent_prompt(
             "",
-            Some("Workspace selected. Continue the original request."),
+            Some("Project selected. Continue the original request."),
         );
         let messages = vec![
             Message::user("fix it"),
-            assistant(vec![AssistantBlock::Text("Choose a workspace.".into())]),
+            assistant(vec![AssistantBlock::Text("Choose a project.".into())]),
             Message::user(private),
             assistant(vec![AssistantBlock::Text("Which branch?".into())]),
         ];
@@ -509,7 +509,7 @@ mod tests {
         assert!(matches!(
             &items[1],
             ChatItem::Turn(turn)
-                if matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Choose a workspace.")
+                if matches!(&turn.blocks[0], ChatBlock::Text(text) if text == "Choose a project.")
         ));
         assert!(matches!(
             &items[2],
@@ -522,7 +522,7 @@ mod tests {
     fn private_context_is_collapsed_separately_from_display_prompt() {
         let private = vmux_service::protocol::compose_agent_prompt(
             "show me something fun",
-            Some("workspace policy"),
+            Some("project policy"),
         );
         let messages = vec![Message::user(format!("show me something fun{private}"))];
 
@@ -532,7 +532,7 @@ mod tests {
             &items[0],
             ChatItem::User { text, context, .. }
                 if text == "show me something fun"
-                    && context.as_deref() == Some("workspace policy")
+                    && context.as_deref() == Some("project policy")
         ));
     }
 

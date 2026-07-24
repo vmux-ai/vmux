@@ -666,6 +666,7 @@ pub enum LspServerState {
 pub struct FileLspStatusEvent {
     pub path: String,
     pub server: String,
+    pub package: Option<String>,
     pub state: LspServerState,
 }
 
@@ -1412,12 +1413,14 @@ mod file_event_tests {
         let ev = FileLspStatusEvent {
             path: "/x.rs".into(),
             server: "rust-analyzer".into(),
+            package: Some("rust-analyzer".into()),
             state: LspServerState::Ready,
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&ev).unwrap();
         let d = rkyv::from_bytes::<FileLspStatusEvent, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.path, "/x.rs");
         assert_eq!(d.server, "rust-analyzer");
+        assert_eq!(d.package.as_deref(), Some("rust-analyzer"));
         assert_eq!(d.state, LspServerState::Ready);
     }
 

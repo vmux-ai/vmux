@@ -279,6 +279,8 @@ menu-bookmark = Էջանիշ
 menu-edit = Խմբագրել
 
 layout-knowledge = Գիտելիք
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Բացել գիտելիքը
 layout-open-welcome-knowledge = Բացել «Բարի գալուստ Գիտելիք»
 layout-open-path = Բացել { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Մեդիան բեռնվում է…
 agent-no-matching-media = Համապատասխան մեդիա չկա
 agent-prompt-context = Հուշման համատեքստ
 agent-details = Մանրամասներ
+agent-copy = Copy
 agent-path = Ուղի
 agent-tool = Գործիք
 agent-server = Սերվեր

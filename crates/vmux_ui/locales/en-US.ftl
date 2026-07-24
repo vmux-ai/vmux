@@ -380,6 +380,8 @@ menu-edit = Edit
 menu-close-vmux = Close Vmux
 
 layout-knowledge = Knowledge
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Open Knowledge
 layout-open-welcome-knowledge = Open Welcome to Knowledge
 layout-open-path = Open { $path }
@@ -444,6 +446,7 @@ agent-loading-media = Loading media…
 agent-no-matching-media = No matching media
 agent-prompt-context = Prompt context
 agent-details = Details
+agent-copy = Copy
 agent-path = Path
 agent-tool = Tool
 agent-server = Server

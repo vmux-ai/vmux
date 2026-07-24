@@ -279,6 +279,8 @@ menu-bookmark = Tsoratadidy
 menu-edit = Fanitsiana
 
 layout-knowledge = Fahalalana
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Sokafy ny Fahalalana
 layout-open-welcome-knowledge = Sokafy ny Tongasoa eto amin'ny Fahalalana
 layout-open-path = Sokafy { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Mampiditra media…
 agent-no-matching-media = Tsy misy media mifanaraka
 agent-prompt-context = Contexte prompt
 agent-details = Antsipiriany
+agent-copy = Copy
 agent-path = Lalana
 agent-tool = Fitaovana
 agent-server = Server

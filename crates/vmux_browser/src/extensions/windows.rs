@@ -14,6 +14,7 @@ use super::model::{ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, Ch
 pub const WINDOW_ID_NONE: i32 = -1;
 pub const WINDOW_ID_CURRENT: i32 = -2;
 const FIRST_EXTENSION_WINDOW_ID: i32 = 1_000_000_000;
+const FALLBACK_HOST_WINDOW_ID: i32 = 1;
 
 #[derive(Clone, Debug)]
 struct ExtensionWindow {
@@ -250,7 +251,7 @@ fn get_last_focused(
         .filter(|id| window_exists(*id, model, windows))
         .or_else(|| focused_host_window(model))
         .or_else(|| model.windows.first().map(|window| window.id))
-        .ok_or_else(|| ChromeError::new("window_not_found", "focused window is unavailable"))?;
+        .unwrap_or(FALLBACK_HOST_WINDOW_ID);
     let result = window_by_id(
         id,
         argument(request, 0),
@@ -582,6 +583,7 @@ fn current_window_id(
         .map(|window| window.window.id)
         .or_else(|| focused_host_window(model))
         .or_else(|| model.windows.first().map(|window| window.id))
+        .or(Some(FALLBACK_HOST_WINDOW_ID))
 }
 
 fn focused_host_window(model: &ChromeModel) -> Option<i32> {
@@ -610,9 +612,9 @@ fn resolve_native_window_alias(
             "extension window is unavailable",
         ));
     }
-    focused_host_window(model)
+    Ok(focused_host_window(model)
         .or_else(|| model.windows.first().map(|window| window.id))
-        .ok_or_else(|| ChromeError::new("window_not_found", "window is unavailable"))
+        .unwrap_or(id))
 }
 
 fn window_by_id(
@@ -639,11 +641,13 @@ fn window_by_id(
             authorization,
         ));
     }
-    let window = model
-        .windows
-        .iter()
-        .find(|window| window.id == id)
-        .ok_or_else(|| ChromeError::new("window_not_found", "window is unavailable"))?;
+    let fallback;
+    let window = if let Some(window) = model.windows.iter().find(|window| window.id == id) {
+        window
+    } else {
+        fallback = fallback_host_window(id);
+        &fallback
+    };
     if !type_matches(window, options) {
         return Err(ChromeError::new(
             "window_not_found",
@@ -662,6 +666,21 @@ fn window_by_id(
         request,
         authorization,
     ))
+}
+
+fn fallback_host_window(id: i32) -> ChromeWindow {
+    ChromeWindow {
+        id,
+        focused: true,
+        left: 0,
+        top: 0,
+        width: 1920,
+        height: 1080,
+        incognito: false,
+        window_type: "normal".into(),
+        state: "normal".into(),
+        always_on_top: false,
+    }
 }
 
 fn window_value(
@@ -1152,6 +1171,39 @@ mod tests {
         assert_eq!(result.result["id"], 1);
         assert_eq!(result.result["left"], 10);
         assert_eq!(result.result["tabs"][0]["id"], 7);
+    }
+
+    #[test]
+    fn window_queries_return_fallback_geometry_before_host_projection() {
+        let model = ChromeModel {
+            windows: Vec::new(),
+            tabs: Vec::new(),
+        };
+        let mut windows = ExtensionWindows::default();
+
+        let by_id = dispatch(
+            &request("get", json!([1_798_152_106, { "populate": true }])),
+            &model,
+            &mut windows,
+            &BridgeAuthorization::default(),
+        )
+        .unwrap();
+        let current = dispatch(
+            &request("getCurrent", json!([{ "populate": true }])),
+            &model,
+            &mut windows,
+            &BridgeAuthorization::default(),
+        )
+        .unwrap();
+
+        assert_eq!(by_id.result["id"], 1_798_152_106);
+        assert_eq!(by_id.result["left"], 0);
+        assert_eq!(by_id.result["top"], 0);
+        assert_eq!(by_id.result["width"], 1920);
+        assert_eq!(by_id.result["height"], 1080);
+        assert_eq!(by_id.result["tabs"], json!([]));
+        assert_eq!(current.result["id"], FALLBACK_HOST_WINDOW_ID);
+        assert_eq!(current.result["width"], 1920);
     }
 
     #[test]

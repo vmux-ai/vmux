@@ -279,6 +279,8 @@ menu-bookmark = Bokmerke
 menu-edit = Rediger
 
 layout-knowledge = Kunnskap
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Åpne Kunnskap
 layout-open-welcome-knowledge = Åpne Velkommen til Kunnskap
 layout-open-path = Åpne { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Laster inn medier …
 agent-no-matching-media = Ingen samsvarende medier
 agent-prompt-context = Forespørselskontekst
 agent-details = Detaljer
+agent-copy = Copy
 agent-path = Sti
 agent-tool = Verktøy
 agent-server = Tjener

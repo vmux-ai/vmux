@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::collections::HashSet;
 
-use super::{agent_memories_prompt, memories_dir, migrate_external_memories, skills_dir};
+use super::{
+    agent_memories_prompt, configured_skill_dirs_from, memories_dir, migrate_external_memories,
+    skills_dir,
+};
 
 const KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
 const KNOWLEDGE_END: &str = "<!-- vmux-knowledge:end -->";
@@ -74,7 +77,7 @@ fn sync_external_agent_configs_from(
     memories_root: &Path,
     memories: &str,
 ) -> io::Result<()> {
-    let skills = skill_dirs(skills_root);
+    let skills = configured_skill_dirs_from(skills_root);
     let mut error = None;
     keep_first_error(
         &mut error,
@@ -183,23 +186,6 @@ fn merge_managed_section(
         "{without_managed}{separator}{start_marker}\n{}\n{end_marker}\n",
         body.trim_end()
     ))
-}
-
-fn skill_dirs(root: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    let mut skills = entries
-        .flatten()
-        .filter_map(|entry| {
-            let file_type = entry.file_type().ok()?;
-            let path = entry.path();
-            (!file_type.is_symlink() && file_type.is_dir() && path.join("SKILL.md").is_file())
-                .then_some(path)
-        })
-        .collect::<Vec<_>>();
-    skills.sort();
-    skills
 }
 
 fn sync_claude_settings(path: &Path, memories: &Path) -> io::Result<()> {

@@ -42,6 +42,7 @@ use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{
     AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
+    provisional_conversation_title,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::events::{
@@ -1457,7 +1458,12 @@ fn on_chat_history_request(
 fn on_chat_submit(
     trigger: On<BinReceive<ChatSubmit>>,
     child_of: Query<&ChildOf>,
-    mut sessions: Query<(&mut PromptQueue, &mut AgentRunState)>,
+    mut sessions: Query<(
+        &mut PromptQueue,
+        &mut AgentRunState,
+        Option<&AgentConversationTitle>,
+    )>,
+    mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
     let payload = &trigger.event().payload;
@@ -1479,7 +1485,15 @@ fn on_chat_submit(
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    if let Ok((mut queue, mut state)) = sessions.get_mut(parent.parent()) {
+    let session = parent.parent();
+    if let Ok((mut queue, mut state, title)) = sessions.get_mut(session) {
+        if title.is_none()
+            && let Some(title) = provisional_conversation_title(&text)
+        {
+            commands
+                .entity(session)
+                .insert(AgentConversationTitle(title));
+        }
         enqueue_prompt(&mut queue, &mut state, text, attachments);
     }
 }
@@ -2588,6 +2602,58 @@ mod native_tests {
         assert!(page.contains("current_activity_icon(&items, &status)"));
         assert!(page.contains("ActivityIcon::Python"));
         assert!(page.contains("language_activity_icon(path)"));
+    }
+
+    #[test]
+    fn first_prompt_updates_conversation_title_immediately() {
+        use bevy_cef::prelude::BinReceive;
+
+        let mut app = App::new();
+        app.add_observer(on_chat_submit);
+        let session = app
+            .world_mut()
+            .spawn((PromptQueue::default(), AgentRunState::Idle))
+            .id();
+        let webview = app.world_mut().spawn(ChildOf(session)).id();
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ChatSubmit {
+                text: "  make me a new\nJapanese restaurant website  ".into(),
+                attachments: Vec::new(),
+            },
+        });
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world().get::<AgentConversationTitle>(session),
+            Some(&AgentConversationTitle(
+                "make me a new Japanese restaurant website".into()
+            ))
+        );
+        assert_eq!(
+            app.world()
+                .get::<PromptQueue>(session)
+                .and_then(|queue| queue.items.front())
+                .map(|prompt| prompt.text.as_str()),
+            Some("  make me a new\nJapanese restaurant website  ")
+        );
+
+        app.world_mut().trigger(BinReceive {
+            webview,
+            payload: ChatSubmit {
+                text: "make it darker".into(),
+                attachments: Vec::new(),
+            },
+        });
+        app.world_mut().flush();
+
+        assert_eq!(
+            app.world().get::<AgentConversationTitle>(session),
+            Some(&AgentConversationTitle(
+                "make me a new Japanese restaurant website".into()
+            ))
+        );
     }
 
     #[test]

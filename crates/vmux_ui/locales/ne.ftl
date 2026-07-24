@@ -279,6 +279,8 @@ menu-bookmark = बुकमार्क
 menu-edit = सम्पादन
 
 layout-knowledge = ज्ञान
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = ज्ञान खोल्नुहोस्
 layout-open-welcome-knowledge = ज्ञानमा स्वागत खोल्नुहोस्
 layout-open-path = { $path } खोल्नुहोस्
@@ -435,6 +437,7 @@ agent-loading-media = मिडिया लोड हुँदै…
 agent-no-matching-media = मिल्ने मिडिया छैन
 agent-prompt-context = प्रम्प्ट सन्दर्भ
 agent-details = विवरण
+agent-copy = Copy
 agent-path = पाथ
 agent-tool = टुल
 agent-server = सर्भर

@@ -279,6 +279,8 @@ menu-bookmark = Ibhukhimakhi
 menu-edit = Hlela
 
 layout-knowledge = Ulwazi
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Vula Ulwazi
 layout-open-welcome-knowledge = Vula okuthi Siyakwamukela kuLwazi
 layout-open-path = Vula { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Kulayishwa imidiya…
 agent-no-matching-media = Ayikho imidiya efanayo
 agent-prompt-context = Umongo womlayezo
 agent-details = Imininingwane
+agent-copy = Copy
 agent-path = Indlela
 agent-tool = Ithuluzi
 agent-server = Iseva

@@ -686,7 +686,7 @@ pub async fn run(
                         RequestPermissionOutcome::Cancelled,
                     ));
                 };
-                if is_conversation_title_tool(&name) {
+                if is_permissionless_host_tool(&name) {
                     let outcome =
                         match pick_permission_option(&req.options, ApprovalDecision::Allow) {
                             Some(id) => RequestPermissionOutcome::Selected(
@@ -1168,7 +1168,7 @@ watch and take over. Use mcp__vmux__read_terminal to inspect continued output. O
 argument because it targets your own terminal pane. Do ALL web access via the vmux browser tools. \
 If you invoke a required Skill tool, continue the original user request in the same turn after \
 the skill loads. Never end the turn after skill activation or answer only Ready.";
-const CONVERSATION_TITLE_STEER_PROMPT: &str = "Call mcp__vmux__set_conversation_title as the first tool of the turn only when the conversation has no title yet or the latest user message materially changes the conversation's topic. If the current title still accurately summarizes the conversation, do not call the tool. When a title is needed, call it before reading skills, calling any other tool, or answering. Write a concise 3 to 7 word model-generated summary of the whole conversation. Correct spelling and grammar. Never copy the user's prompt verbatim.";
+const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
 fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
@@ -1214,6 +1214,9 @@ fn session_meta_for_agent_with_knowledge(
                 "disallowedTools": ["Bash", "Monitor", "WebSearch", "WebFetch"],
                 "allowedTools": [
                     "mcp__vmux__set_conversation_title",
+                    "mcp__vmux__request_user_choice",
+                    "mcp__vmux__select_workspace",
+                    "mcp__vmux__create_worktree",
                     "mcp__vmux__run",
                     "mcp__vmux__read_terminal",
                     "mcp__vmux__browser_navigate",
@@ -1475,6 +1478,41 @@ fn pick_permission_option(
         .iter()
         .find_map(|kind| options.iter().find(|option| &option.kind == kind))
         .map(|option| option.option_id.clone())
+}
+
+fn is_permissionless_host_tool(name: &str) -> bool {
+    if is_conversation_title_tool(name) {
+        return true;
+    }
+    let parts = name
+        .trim()
+        .to_ascii_lowercase()
+        .split(|character: char| {
+            character.is_ascii_whitespace() || matches!(character, '-' | '.' | ':' | '_')
+        })
+        .filter(|part| !part.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    matches!(
+        parts.as_slice(),
+        [mcp, vmux, request, user, choice]
+            if mcp == "mcp"
+                && vmux == "vmux"
+                && request == "request"
+                && user == "user"
+                && choice == "choice"
+    ) || matches!(
+        parts.as_slice(),
+        [vmux, request, user, choice]
+            if vmux == "vmux"
+                && request == "request"
+                && user == "user"
+                && choice == "choice"
+    ) || matches!(
+        parts.as_slice(),
+        [request, user, choice]
+            if request == "request" && user == "user" && choice == "choice"
+    )
 }
 
 /// Resolve an ACP fs path against the session cwd, rejecting traversal and anything outside
@@ -2195,6 +2233,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conversation_title_permission_resolves_as_host_owned_tool() {
+        let (stream_tx, _) = broadcast::channel(2);
+        let shared = AcpShared::new(
+            "s1".into(),
+            PathBuf::from("/tmp"),
+            ProcessId::new(),
+            stream_tx,
+            Arc::new(tokio::sync::Mutex::new(ProcessManager::default())),
+            Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        );
+        project_session_update(
+            &shared,
+            SessionUpdate::ToolCall(
+                ToolCall::new("title-1", "mcp__vmux__set_conversation_title")
+                    .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+            ),
+        );
+        let request = RequestPermissionRequest::new(
+            "session-1",
+            agent_client_protocol::schema::v1::ToolCallUpdate::new(
+                "title-1",
+                ToolCallUpdateFields::new()
+                    .kind(ToolKind::Execute)
+                    .raw_input(serde_json::json!({"title": "Paris Izakaya Website"})),
+            ),
+            Vec::new(),
+        );
+
+        let (name, _) = resolve_approval_details(&request, &shared).await.unwrap();
+        assert!(is_conversation_title_tool(&name));
+    }
+
+    #[test]
+    fn native_choice_tool_is_always_permissionless() {
+        for name in [
+            "mcp__vmux__request_user_choice",
+            "mcp.vmux.request_user_choice",
+            "vmux:request-user-choice",
+            "request_user_choice",
+        ] {
+            assert!(is_permissionless_host_tool(name), "{name}");
+        }
+        assert!(!is_permissionless_host_tool("other_request_user_choice"));
+    }
+
+    #[tokio::test]
     async fn requested_resume_loads_only_when_supported() {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let loaded = load_requested_session(Some("resume-1".into()), true, |sid| {
@@ -2322,10 +2406,12 @@ mod tests {
         assert!(generic.starts_with("skill context\n\n"));
         assert!(generic.contains("mcp__vmux__set_conversation_title"));
         assert!(generic.contains("first tool of the turn"));
-        assert!(generic.contains("materially changes the conversation's topic"));
-        assert!(generic.contains("do not call the tool"));
-        assert!(generic.contains("Correct spelling and grammar"));
+        assert!(generic.contains("raw first prompt as a provisional title"));
+        assert!(generic.contains("topic materially changes"));
+        assert!(generic.contains("same-topic follow-ups"));
+        assert!(generic.contains("corrected spelling and grammar"));
         assert!(generic.contains("Never copy the user's prompt verbatim"));
+        assert!(generic.contains("never needs user permission"));
     }
 
     #[test]

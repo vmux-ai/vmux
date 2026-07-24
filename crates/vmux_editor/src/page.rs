@@ -26,6 +26,9 @@ const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
 const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
+const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
+const LSP_NOTICE_DONE_MS: i32 = 2_500;
+const LSP_NOTICE_FAILED_MS: i32 = 6_000;
 
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
@@ -65,6 +68,46 @@ fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32) -> u32 {
     start + ((ratio * count as f64).floor() as u32).min(count - 1)
 }
 
+fn note_pointer_anchor_top(event: &Event<MouseData>) -> Option<f64> {
+    let data = event.data();
+    let raw = data.downcast::<web_sys::MouseEvent>()?;
+    if let Some(document) = web_sys::window().and_then(|window| window.document())
+        && let Some(caret) =
+            document.caret_position_from_point(raw.client_x() as f32, raw.client_y() as f32)
+        && let Some(rect) = caret.get_client_rect()
+    {
+        return Some(rect.top());
+    }
+    raw.target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .map(|element| element.get_bounding_client_rect().top())
+}
+
+fn restore_note_line_position(line: u32, top: f64) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&format!("note-line-{line}")))
+        else {
+            return;
+        };
+        let Some(scroll) = scroll_el() else {
+            return;
+        };
+        let delta = element.get_bounding_client_rect().top() - top;
+        if delta.abs() >= 0.5 {
+            scroll.set_scroll_top(scroll.scroll_top().saturating_add(delta.round() as i32));
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
 fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
     let data = event.data();
     let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
@@ -81,6 +124,27 @@ fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
         .ok()
         .flatten()
         .unwrap_or(target);
+    let char_count = text.chars().count() as u32;
+    if let Some(document) = web_sys::window().and_then(|window| window.document())
+        && let Some(caret) =
+            document.caret_position_from_point(raw.client_x() as f32, raw.client_y() as f32)
+        && let Some(offset_node) = caret.offset_node()
+    {
+        let text_node: &web_sys::Node = text_target.as_ref();
+        if text_node.contains(Some(&offset_node))
+            && let Ok(range) = document.create_range()
+            && range.select_node_contents(text_node).is_ok()
+            && range.set_end(&offset_node, caret.offset()).is_ok()
+            && let Ok(fragment) = range.clone_contents()
+        {
+            return fragment
+                .text_content()
+                .unwrap_or_default()
+                .chars()
+                .count()
+                .min(char_count as usize) as u32;
+        }
+    }
     let rect = text_target.get_bounding_client_rect();
     if rect.width() <= 0.0 {
         return 0;
@@ -90,10 +154,68 @@ fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
         return 0;
     }
     if x >= rect.width() {
-        return text.chars().count() as u32;
+        return char_count;
     }
     let ratio = x / rect.width();
-    (ratio * text.chars().count() as f64).round() as u32
+    (ratio * char_count as f64).round() as u32
+}
+
+#[derive(Clone, PartialEq)]
+struct NoteLineChunk {
+    text: String,
+    selected: bool,
+    caret_before: bool,
+}
+
+fn note_line_chunks(
+    text: &str,
+    caret: Option<u32>,
+    selection: Option<vmux_core::editor::SelSpan>,
+) -> Vec<NoteLineChunk> {
+    let chars = text.chars().collect::<Vec<_>>();
+    let len = chars.len() as u32;
+    let caret = caret.map(|column| column.min(len));
+    let selection = selection.map(|span| {
+        let start = span.start.min(len);
+        let end = if span.end == u32::MAX {
+            len
+        } else {
+            span.end.min(len)
+        };
+        (start.min(end), start.max(end))
+    });
+    let mut boundaries = vec![0, len];
+    if let Some(caret) = caret {
+        boundaries.push(caret);
+    }
+    if let Some((start, end)) = selection {
+        boundaries.push(start);
+        boundaries.push(end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    let mut chunks = boundaries
+        .windows(2)
+        .map(|range| {
+            let start = range[0];
+            let end = range[1];
+            NoteLineChunk {
+                text: chars[start as usize..end as usize].iter().collect(),
+                selected: selection.is_some_and(|(selection_start, selection_end)| {
+                    start < selection_end && end > selection_start
+                }),
+                caret_before: caret == Some(start),
+            }
+        })
+        .collect::<Vec<_>>();
+    if chunks.is_empty() || caret == Some(len) {
+        chunks.push(NoteLineChunk {
+            text: String::new(),
+            selected: false,
+            caret_before: caret == Some(len),
+        });
+    }
+    chunks
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -425,6 +547,61 @@ fn set_explorer_visible(
     }
 }
 
+fn show_explorer_if_room(
+    visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        if visible() {
+            return;
+        }
+        let Some(page_width) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(CONTAINER_ID))
+            .map(|element| element.client_width().max(0) as u32)
+        else {
+            return;
+        };
+        if NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(width()) <= page_width {
+            set_explorer_visible(true, visible, client_id, request_id, mode);
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn schedule_lsp_notice_clear(
+    mut notice: Signal<Option<LspInstallProgress>>,
+    mut request: Signal<Option<(String, String)>>,
+    mut generation: Signal<u32>,
+    delay: i32,
+) {
+    let id = generation().wrapping_add(1);
+    generation.set(id);
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let clear = Closure::once(move || {
+        if generation() == id {
+            notice.set(None);
+            request.set(None);
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        clear.as_ref().unchecked_ref(),
+        delay,
+    );
+    clear.forget();
+}
+
 fn toggle_explorer(
     visible: Signal<bool>,
     client_id: Signal<u64>,
@@ -556,6 +733,9 @@ pub fn Page() -> Element {
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
     let mut lsp_status = use_signal(|| Option::<FileLspStatusEvent>::None);
+    let mut lsp_install_notice = use_signal(|| Option::<LspInstallProgress>::None);
+    let mut lsp_install_request = use_signal(|| Option::<(String, String)>::None);
+    let mut lsp_notice_generation = use_signal(|| 0u32);
     let mut error = use_signal(String::new);
     let dir_entries = use_signal(Vec::<FileDirEntry>::new);
     let parent_entries = use_signal(Vec::<FileDirEntry>::new);
@@ -577,6 +757,7 @@ pub fn Page() -> Element {
     let mut note_blocks = use_signal(Vec::<NoteBlock>::new);
     let mut note_active = use_signal(|| Option::<u32>::None);
     let mut note_editing = use_signal(|| false);
+    let mut note_dragging = use_signal(|| false);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
@@ -651,6 +832,16 @@ pub fn Page() -> Element {
         git_path.set(m.abs_path);
         total_lines.set(m.total_lines);
         mode.set(Mode::Text);
+        lsp_install_notice.set(None);
+        lsp_install_request.set(None);
+        lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+        show_explorer_if_room(
+            explorer_visible,
+            explorer_width,
+            explorer_client_id,
+            explorer_request_id,
+            mode,
+        );
         note_blocks.set(Vec::new());
         note_active.set(None);
         note_editing.set(false);
@@ -671,7 +862,7 @@ pub fn Page() -> Element {
         ed_label.set(c.mode_label);
         cursor.set(c.primary);
         sel.set(c.selections);
-        if moved {
+        if moved && (file_view_mode() != FileViewMode::Note || !is_markdown_file(&git_path())) {
             ensure_line_visible(c.primary.row, cell_dims().1);
         }
     });
@@ -742,7 +933,68 @@ pub fn Page() -> Element {
             if s.path != git_path() {
                 return;
             }
+            if s.state == LspServerState::Missing
+                && let Some(package) = s.package.clone()
+            {
+                let request = (s.path.clone(), package.clone());
+                if lsp_install_request() != Some(request.clone()) {
+                    lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+                    lsp_install_request.set(Some(request));
+                    lsp_install_notice.set(Some(LspInstallProgress {
+                        name: package.clone(),
+                        phase: InstallPhase::Resolving,
+                        pct: None,
+                        message: translate("lsp-status-installing"),
+                    }));
+                    let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: package });
+                }
+            }
             lsp_status.set(Some(s));
+        });
+
+    let _lsp_install_progress = use_bin_event_listener::<LspInstallProgress, _>(
+        LSP_INSTALL_PROGRESS_EVENT,
+        move |progress| {
+            let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
+            if !active {
+                return;
+            }
+            let delay = match progress.phase {
+                InstallPhase::Done => Some(LSP_NOTICE_DONE_MS),
+                InstallPhase::Failed => Some(LSP_NOTICE_FAILED_MS),
+                _ => None,
+            };
+            lsp_install_notice.set(Some(progress));
+            if let Some(delay) = delay {
+                schedule_lsp_notice_clear(
+                    lsp_install_notice,
+                    lsp_install_request,
+                    lsp_notice_generation,
+                    delay,
+                );
+            }
+        },
+    );
+
+    let _lsp_package_status =
+        use_bin_event_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+            if status.status != LspPkgStatus::Installed
+                || lsp_install_request().is_none_or(|(_, package)| package != status.name)
+            {
+                return;
+            }
+            lsp_install_notice.set(Some(LspInstallProgress {
+                name: status.name,
+                phase: InstallPhase::Done,
+                pct: Some(100),
+                message: translate("lsp-status-installed"),
+            }));
+            schedule_lsp_notice_clear(
+                lsp_install_notice,
+                lsp_install_request,
+                lsp_notice_generation,
+                LSP_NOTICE_DONE_MS,
+            );
         });
 
     let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
@@ -922,6 +1174,7 @@ pub fn Page() -> Element {
                 }
             },
             onmouseup: move |_| {
+                note_dragging.set(false);
                 if explorer_resizing() {
                     explorer_resizing.set(false);
                     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
@@ -1339,6 +1592,7 @@ pub fn Page() -> Element {
                         {
                             let active = note_active();
                             let current = cursor();
+                            let selections = sel();
                             rsx! {
                                 div {
                                     id: "file-scroll",
@@ -1361,47 +1615,72 @@ pub fn Page() -> Element {
                                                             for (line_offset, raw) in source_lines.iter().enumerate() {
                                                                 {
                                                                     let line = start + line_offset as u32;
-                                                                    let pointer_raw = raw.clone();
-                                                                    if line == current.line {
-                                                                        let column = current.col as usize;
-                                                                        let byte = raw
-                                                                            .char_indices()
-                                                                            .nth(column)
-                                                                            .map(|(byte, _)| byte)
-                                                                            .unwrap_or(raw.len());
-                                                                        let before = raw[..byte].to_string();
-                                                                        let after = raw[byte..].to_string();
-                                                                        rsx! {
-                                                                            div {
-                                                                                key: "{line}",
-                                                                                class: "min-h-7 w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
-                                                                                onmousedown: move |event| {
-                                                                                    event.stop_propagation();
-                                                                                    event.prevent_default();
-                                                                                    let col = note_pointer_col(&event, &pointer_raw);
-                                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
-                                                                                    focus_file_input();
-                                                                                },
-                                                                                span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]",
-                                                                                    span { "{before}" }
-                                                                                    span { class: "inline-block w-px animate-pulse bg-primary align-text-bottom", style: "height:1.15em;" }
-                                                                                    span { "{after}" }
+                                                                    let pointer_raw_down = raw.clone();
+                                                                    let pointer_raw_drag = raw.clone();
+                                                                    let line_selection = selections
+                                                                        .iter()
+                                                                        .find(|selection| selection.line == line)
+                                                                        .copied();
+                                                                    let chunks = note_line_chunks(
+                                                                        raw,
+                                                                        (line == current.line).then_some(current.col),
+                                                                        line_selection,
+                                                                    );
+                                                                    rsx! {
+                                                                        div {
+                                                                            key: "{line}",
+                                                                            id: "note-line-{line}",
+                                                                            class: "min-h-7 w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
+                                                                            onmousedown: move |event| {
+                                                                                event.stop_propagation();
+                                                                                event.prevent_default();
+                                                                                let extend = event
+                                                                                    .data()
+                                                                                    .downcast::<web_sys::MouseEvent>()
+                                                                                    .is_some_and(|raw| raw.shift_key());
+                                                                                let col = note_pointer_col(&event, &pointer_raw_down);
+                                                                                note_dragging.set(true);
+                                                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend });
+                                                                                focus_file_input();
+                                                                            },
+                                                                            onmousemove: move |event| {
+                                                                                if !note_dragging() {
+                                                                                    return;
                                                                                 }
-                                                                            }
-                                                                        }
-                                                                    } else {
-                                                                        rsx! {
-                                                                            div {
-                                                                                key: "{line}",
-                                                                                class: "min-h-7 w-full whitespace-pre-wrap break-words font-sans text-[15px] leading-7",
-                                                                                onmousedown: move |event| {
-                                                                                    event.stop_propagation();
-                                                                                    event.prevent_default();
-                                                                                    let col = note_pointer_col(&event, &pointer_raw);
-                                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend: false });
-                                                                                    focus_file_input();
-                                                                                },
-                                                                                span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]", "{raw}" }
+                                                                                let pressed = event
+                                                                                    .data()
+                                                                                    .downcast::<web_sys::MouseEvent>()
+                                                                                    .is_some_and(|raw| raw.buttons() & 1 == 1);
+                                                                                if !pressed {
+                                                                                    note_dragging.set(false);
+                                                                                    return;
+                                                                                }
+                                                                                event.stop_propagation();
+                                                                                event.prevent_default();
+                                                                                let col = note_pointer_col(&event, &pointer_raw_drag);
+                                                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                                    line,
+                                                                                    col,
+                                                                                    extend: true,
+                                                                                });
+                                                                            },
+                                                                            span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]",
+                                                                                for (chunk_index, chunk) in chunks.iter().enumerate() {
+                                                                                    if chunk.caret_before {
+                                                                                        span {
+                                                                                            key: "caret-{chunk_index}",
+                                                                                            class: "relative inline-block h-[1.15em] w-0 align-text-bottom",
+                                                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 w-px animate-pulse bg-primary" }
+                                                                                        }
+                                                                                    }
+                                                                                    if !chunk.text.is_empty() {
+                                                                                        span {
+                                                                                            key: "text-{chunk_index}",
+                                                                                            class: if chunk.selected { "bg-cyan-400/20" } else { "" },
+                                                                                            "{chunk.text}"
+                                                                                        }
+                                                                                    }
+                                                                                }
                                                                             }
                                                                         }
                                                                     }
@@ -1473,8 +1752,12 @@ pub fn Page() -> Element {
                                                                 event.stop_propagation();
                                                                 event.prevent_default();
                                                                 let line = note_pointer_line(&event, start, end);
+                                                                let anchor_top = note_pointer_anchor_top(&event);
                                                                 note_active.set(Some(index as u32));
                                                                 note_editing.set(true);
+                                                                if let Some(top) = anchor_top {
+                                                                    restore_note_line_position(line, top);
+                                                                }
                                                                 let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
                                                                     line,
                                                                     col: 0,
@@ -1893,6 +2176,34 @@ pub fn Page() -> Element {
             }
 
             {
+                lsp_install_notice().map(|progress| {
+                    let (icon_class, icon, spinning) = match progress.phase {
+                        InstallPhase::Done => ("text-ansi-2", "✓", false),
+                        InstallPhase::Failed => ("text-ansi-1", "×", false),
+                        _ => ("text-cyan-400", "", true),
+                    };
+                    let detail = progress.pct.map_or_else(
+                        || progress.message.clone(),
+                        |percent| format!("{} {percent}%", progress.message),
+                    );
+                    rsx! {
+                        div {
+                            class: "pointer-events-none fixed right-4 bottom-14 z-[60] flex min-w-64 max-w-sm items-center gap-3 rounded-xl bg-background/95 px-3 py-2.5 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28)] ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
+                            if spinning {
+                                span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-cyan-400/25 border-t-cyan-400" }
+                            } else {
+                                span { class: "grid h-4 w-4 shrink-0 place-items-center text-base font-semibold {icon_class}", "{icon}" }
+                            }
+                            div { class: "min-w-0",
+                                div { class: "truncate font-medium", "{progress.name}" }
+                                div { class: "truncate text-[10px] text-muted-foreground", "{detail}" }
+                            }
+                        }
+                    }
+                })
+            }
+
+            {
                 hover_diag().map(|d| rsx! {
                     div {
                         class: "pointer-events-none absolute right-4 bottom-12 z-50 max-w-md rounded-xl bg-foreground/[0.04] px-3 py-2 text-xs text-foreground/90 ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
@@ -2120,7 +2431,9 @@ fn focus_by_id(id: &str) {
         .and_then(|d| d.get_element_by_id(id))
         && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
     {
-        let _ = html.focus();
+        let options = web_sys::FocusOptions::new();
+        options.set_prevent_scroll(true);
+        let _ = html.focus_with_options(&options);
     }
 }
 

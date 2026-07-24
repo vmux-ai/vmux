@@ -279,6 +279,8 @@ menu-bookmark = סימנייה
 menu-edit = עריכה
 
 layout-knowledge = ידע
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = פתיחת ידע
 layout-open-welcome-knowledge = פתיחת ״ברוכים הבאים לידע״
 layout-open-path = פתיחת { $path }
@@ -435,6 +437,7 @@ agent-loading-media = מדיה נטענת…
 agent-no-matching-media = אין מדיה תואמת
 agent-prompt-context = הקשר ההנחיה
 agent-details = פרטים
+agent-copy = Copy
 agent-path = נתיב
 agent-tool = כלי
 agent-server = שרת

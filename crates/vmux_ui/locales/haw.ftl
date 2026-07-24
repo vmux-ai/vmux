@@ -279,6 +279,8 @@ menu-bookmark = Lepe puke
 menu-edit = Hoʻoponopono
 
 layout-knowledge = ʻIke
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Wehe i ka ʻIke
 layout-open-welcome-knowledge = Wehe i ka Welina i ka ʻIke
 layout-open-path = Wehe iā { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Ke hoʻouka nei i ka pāpaho…
 agent-no-matching-media = ʻAʻohe pāpaho kūlike
 agent-prompt-context = Pōʻaiapili paipai
 agent-details = ʻIke kikoʻī
+agent-copy = Copy
 agent-path = Ala
 agent-tool = Mea hana
 agent-server = Kikowaena

@@ -279,6 +279,8 @@ menu-bookmark = Järjehoidja
 menu-edit = Redigeerimine
 
 layout-knowledge = Teadmised
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Ava teadmised
 layout-open-welcome-knowledge = Ava „Tere tulemast teadmistesse“
 layout-open-path = Ava { $path }
@@ -435,6 +437,7 @@ agent-loading-media = Meedia laadimine…
 agent-no-matching-media = Sobivat meediat pole
 agent-prompt-context = Viiba kontekst
 agent-details = Üksikasjad
+agent-copy = Copy
 agent-path = Tee
 agent-tool = Tööriist
 agent-server = Server

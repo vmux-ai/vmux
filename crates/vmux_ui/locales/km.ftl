@@ -279,6 +279,8 @@ menu-bookmark = ចំណាំ
 menu-edit = កែសម្រួល
 
 layout-knowledge = ចំណេះដឹង
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = បើកចំណេះដឹង
 layout-open-welcome-knowledge = បើក «សូមស្វាគមន៍មកកាន់ចំណេះដឹង»
 layout-open-path = បើក { $path }
@@ -435,6 +437,7 @@ agent-loading-media = កំពុងផ្ទុកមេឌៀ…
 agent-no-matching-media = គ្មានមេឌៀដែលត្រូវគ្នា
 agent-prompt-context = បរិបទ prompt
 agent-details = ព័ត៌មានលម្អិត
+agent-copy = Copy
 agent-path = ផ្លូវ
 agent-tool = ឧបករណ៍
 agent-server = ម៉ាស៊ីនបម្រើ

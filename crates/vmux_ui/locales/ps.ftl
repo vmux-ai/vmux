@@ -279,6 +279,8 @@ menu-bookmark = نښه
 menu-edit = سمون
 
 layout-knowledge = پوهه
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = پوهه پرانیزه
 layout-open-welcome-knowledge = د پوهې ښه راغلاست پرانیزه
 layout-open-path = { $path } پرانیزه
@@ -435,6 +437,7 @@ agent-loading-media = رسنۍ پورته کېږي…
 agent-no-matching-media = برابره رسنۍ نشته
 agent-prompt-context = د پرامپټ متن
 agent-details = جزئیات
+agent-copy = Copy
 agent-path = مسیر
 agent-tool = وسیله
 agent-server = سرور

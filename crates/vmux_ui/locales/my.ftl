@@ -279,6 +279,8 @@ menu-bookmark = Bookmark
 menu-edit = တည်းဖြတ်
 
 layout-knowledge = Knowledge
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Knowledge ကို ဖွင့်ရန်
 layout-open-welcome-knowledge = Knowledge ကြိုဆိုရေးကို ဖွင့်ရန်
 layout-open-path = { $path } ကို ဖွင့်ရန်
@@ -435,6 +437,7 @@ agent-loading-media = မီဒီယာ ဖွင့်နေသည်…
 agent-no-matching-media = ကိုက်ညီသော မီဒီယာ မရှိပါ
 agent-prompt-context = Prompt context
 agent-details = အသေးစိတ်
+agent-copy = Copy
 agent-path = Path
 agent-tool = Tool
 agent-server = Server

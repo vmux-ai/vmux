@@ -279,6 +279,8 @@ menu-bookmark = Letshwao la leqephe
 menu-edit = Fetola
 
 layout-knowledge = Tsebo
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Bula Tsebo
 layout-open-welcome-knowledge = Bula Rea o amohela ho Tsebo
 layout-open-path = Bula { $path }
@@ -435,6 +437,7 @@ agent-loading-media = E kenya media…
 agent-no-matching-media = Ha ho media e tshwanang
 agent-prompt-context = Moelelo wa potso
 agent-details = Dintlha
+agent-copy = Copy
 agent-path = Tsela
 agent-tool = Sesebediswa
 agent-server = Seva

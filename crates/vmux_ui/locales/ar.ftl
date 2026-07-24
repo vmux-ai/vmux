@@ -279,6 +279,8 @@ menu-bookmark = الإشارة المرجعية
 menu-edit = تحرير
 
 layout-knowledge = المعرفة
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = فتح المعرفة
 layout-open-welcome-knowledge = فتح مرحبًا بك في المعرفة
 layout-open-path = فتح { $path }
@@ -435,6 +437,7 @@ agent-loading-media = جارٍ تحميل الوسائط…
 agent-no-matching-media = لا توجد وسائط مطابقة
 agent-prompt-context = سياق المطالبة
 agent-details = التفاصيل
+agent-copy = Copy
 agent-path = المسار
 agent-tool = الأداة
 agent-server = الخادم

@@ -279,6 +279,8 @@ menu-bookmark = Кыстарма
 menu-edit = Түзөтүү
 
 layout-knowledge = Билим
+layout-projects = Projects
+layout-no-project-selected = No project selected
 layout-open-knowledge = Билимди ачуу
 layout-open-welcome-knowledge = «Билимге кош келиңиз» барагын ачуу
 layout-open-path = { $path } ачуу
@@ -435,6 +437,7 @@ agent-loading-media = Медиа жүктөлүүдө…
 agent-no-matching-media = Дал келген медиа жок
 agent-prompt-context = Сурам контексти
 agent-details = Чоо-жайы
+agent-copy = Copy
 agent-path = Жол
 agent-tool = Курал
 agent-server = Сервер
