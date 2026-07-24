@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 pub use vmux_wire::protocol::AgentAttachment;
 use vmux_wire::protocol::AgentRunStatus;
+
+pub const CONVERSATION_TITLE_MAX_GRAPHEMES: usize = 64;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Message {
@@ -131,6 +134,8 @@ pub struct RemoteMediaEntry {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RemoteSession {
     pub sid: String,
+    #[serde(default)]
+    pub title: String,
     pub name: String,
     pub runtime: String,
     pub model: Option<String>,
@@ -138,6 +143,90 @@ pub struct RemoteSession {
     pub status: RemoteStatus,
     pub approval: Option<RemoteApproval>,
     pub created_at_ms: u64,
+}
+
+pub fn conversation_title(messages: &[Message], fallback: &str) -> String {
+    conversation_title_from_prompts(
+        messages.iter().filter_map(|message| match message {
+            Message::User { text, .. } => Some(text.as_str()),
+            Message::Assistant { .. } | Message::ToolResult { .. } => None,
+        }),
+        fallback,
+    )
+}
+
+pub fn conversation_title_from_prompts<'a>(
+    prompts: impl IntoIterator<Item = &'a str>,
+    fallback: &str,
+) -> String {
+    prompts
+        .into_iter()
+        .map(normalize_conversation_title)
+        .find(|title| !title.is_empty())
+        .unwrap_or_else(|| normalize_conversation_title(fallback))
+}
+
+fn normalize_conversation_title(value: &str) -> String {
+    let mut title = String::new();
+    let mut graphemes_written = 0;
+    let mut pending_space = false;
+    let mut truncated = false;
+
+    for grapheme in value.graphemes(true) {
+        if grapheme.chars().all(char::is_whitespace) {
+            pending_space = !title.is_empty();
+            continue;
+        }
+        let grapheme = grapheme
+            .chars()
+            .filter(|character| !is_disallowed_title_char(*character))
+            .collect::<String>();
+        if grapheme.is_empty() {
+            continue;
+        }
+        if pending_space {
+            if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
+                truncated = true;
+                break;
+            }
+            title.push(' ');
+            graphemes_written += 1;
+            pending_space = false;
+        }
+        if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
+            truncated = true;
+            break;
+        }
+        title.push_str(&grapheme);
+        graphemes_written += 1;
+    }
+
+    if truncated {
+        if let Some((start, _)) = title.grapheme_indices(true).next_back() {
+            title.truncate(start);
+        }
+        title.push('…');
+    }
+    title
+}
+
+fn is_disallowed_title_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+        )
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -298,5 +387,27 @@ mod tests {
         );
         assert_eq!(inline_media_query("mail@example.com"), None);
         assert_eq!(inline_media_query("inspect @image.png next"), None);
+    }
+
+    #[test]
+    fn conversation_title_uses_first_user_prompt() {
+        let messages = vec![
+            Message::user("  Show me something fun.\n in terminal  "),
+            Message::Assistant { blocks: Vec::new() },
+            Message::user("later"),
+        ];
+        assert_eq!(
+            conversation_title(&messages, "Codex"),
+            "Show me something fun. in terminal"
+        );
+    }
+
+    #[test]
+    fn conversation_title_falls_back_and_sanitizes() {
+        assert_eq!(conversation_title(&[], "Codex"), "Codex");
+        assert_eq!(
+            conversation_title(&[Message::user("Fix \u{202e}\x1b title")], "Codex"),
+            "Fix title"
+        );
     }
 }
