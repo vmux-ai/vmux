@@ -482,7 +482,7 @@ fn App() -> Element {
                 },
                 div { class: "mx-auto flex max-w-3xl items-end gap-2",
                     textarea {
-                        class: "min-h-12 max-h-32 flex-1 resize-none rounded-2xl border border-white/10 bg-black/30 px-3.5 py-3 text-sm leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
+                        class: "min-h-12 max-h-32 flex-1 resize-none rounded-2xl border border-white/10 bg-black/30 px-3.5 py-3 text-base leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
                         rows: "1",
                         placeholder: if current_value.is_some() { "Message agent…" } else { "No active session" },
                         disabled: current_value.is_none(),
@@ -615,7 +615,7 @@ fn PairScreen(props: PairScreenProps) -> Element {
                         props.on_pair.call(());
                     },
                     input {
-                        class: "h-14 rounded-xl border border-white/10 bg-black/30 px-4 font-mono text-xs text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
+                        class: "h-14 rounded-xl border border-white/10 bg-black/30 px-4 font-mono text-base text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
                         r#type: "url",
                         inputmode: "url",
                         autocomplete: "off",
