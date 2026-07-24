@@ -23,6 +23,7 @@ icon = ["../../icon.png"]
 CFBundleDisplayName = "Vmux"
 CFBundleName = "Vmux"
 NSAppTransportSecurity = { NSAllowsLocalNetworking = true }
+NSCameraUsageDescription = "Scan the pairing QR code shown by Vmux on your Mac."
 
 [android]
 min_sdk = 24

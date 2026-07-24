@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod native_transition;
+mod qr_scanner;
 
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
@@ -338,6 +339,7 @@ fn leave_session(
 #[component]
 fn App() -> Element {
     native_transition::install(&dioxus::mobile::window());
+    qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
     let mut pair_url = use_signal(String::new);
     let mut error = use_signal(String::new);
@@ -472,6 +474,22 @@ fn App() -> Element {
 
     use_future(move || async move {
         loop {
+            if let Some(result) = qr_scanner::take_result() {
+                match result {
+                    Ok(scanned) => {
+                        pair_url.set(scanned.clone());
+                        error.set(String::new());
+                        pending_pair_url.set(Some(scanned));
+                    }
+                    Err(message) => error.set(message),
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+
+    use_future(move || async move {
+        loop {
             tokio::time::sleep(Duration::from_millis(50)).await;
             let pending = pending_pair_url.write().take();
             let Some(input) = pending else {
@@ -587,6 +605,12 @@ fn App() -> Element {
                 on_pair_value: move |value| pair_url.set(value),
                 on_pair: move |_| {
                     pending_pair_url.set(Some(pair_url()));
+                },
+                on_scan: move |_| {
+                    error.set(String::new());
+                    if let Err(message) = qr_scanner::open() {
+                        error.set(message);
+                    }
                 },
                 on_disconnect: move |_| {
                     clear_credentials();
@@ -935,6 +959,7 @@ struct MobileStartPageProps {
     on_open: EventHandler<RemoteSession>,
     on_pair_value: EventHandler<String>,
     on_pair: EventHandler<()>,
+    on_scan: EventHandler<()>,
     on_disconnect: EventHandler<()>,
 }
 
@@ -946,11 +971,13 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
     let on_open = props.on_open;
 
     rsx! {
-        div { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-zinc-950 text-zinc-100",
+        div { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_8%,rgba(124,58,237,0.12),transparent_32%),#09090b] text-zinc-100",
             header { class: "flex shrink-0 items-center gap-2 px-5 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]",
-                span { class: "text-sm font-semibold", "Vmux" }
-                span { class: if props.paired { "ml-auto h-2 w-2 rounded-full bg-emerald-400" } else { "ml-auto h-2 w-2 rounded-full bg-zinc-700" } }
-                span { class: "text-[11px] text-zinc-500", if props.paired { "Mac connected" } else { "Mac disconnected" } }
+                span { class: "text-sm font-semibold tracking-tight text-zinc-300", "Vmux" }
+                span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-emerald-400/15 bg-emerald-400/[0.06] px-2.5 py-1 text-[10px] font-medium text-emerald-300" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2.5 py-1 text-[10px] font-medium text-zinc-500" },
+                    span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-emerald-400" } else { "h-1.5 w-1.5 rounded-full bg-zinc-600" } }
+                    if props.paired { "Connected" } else { "Not connected" }
+                }
                 if props.paired {
                     button {
                         class: "ml-2 rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
@@ -961,10 +988,11 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                 }
             }
             main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]",
-                div { class: "mx-auto flex w-full max-w-3xl flex-col pt-20",
-                    div { class: "flex flex-col items-center gap-2 text-center",
-                        h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-5xl font-semibold leading-none tracking-tight text-transparent", "vmux" }
-                        p { class: "text-sm text-zinc-500", "One prompt. Anything, done." }
+                div { class: if props.paired { "mx-auto flex w-full max-w-3xl flex-col pt-20" } else { "mx-auto flex w-full max-w-md flex-col pt-14" },
+                    div { class: "flex flex-col items-center text-center",
+                        div { class: "mb-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/80 to-cyan-400/80 text-sm font-bold text-white shadow-lg shadow-violet-950/40", "V" }
+                        h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-4xl font-semibold leading-none tracking-tight text-transparent", "vmux" }
+                        p { class: "mt-2 text-sm text-zinc-500", "Your work, wherever you are." }
                     }
                     if props.paired {
                         div { class: "mt-8 w-full",
@@ -1044,6 +1072,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                             pairing: props.pairing,
                             on_value: props.on_pair_value,
                             on_pair: props.on_pair,
+                            on_scan: props.on_scan,
                         }
                     }
                 }
@@ -1069,38 +1098,75 @@ struct PairCardProps {
     pairing: bool,
     on_value: EventHandler<String>,
     on_pair: EventHandler<()>,
+    on_scan: EventHandler<()>,
 }
 
 #[component]
 fn PairCard(props: PairCardProps) -> Element {
+    let mut show_link = use_signal(|| !props.value.trim().is_empty());
+
     rsx! {
-        div { class: "mt-8 w-full",
-            p { class: "mb-3 text-center text-xs text-zinc-500", "Paste the pairing link from Remote on your Mac" }
-            form {
-                class: "flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.035] p-2",
-                onsubmit: move |event| {
-                    event.prevent_default();
-                    props.on_pair.call(());
-                },
-                input {
-                    class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-sm text-white outline-none placeholder:text-zinc-600",
-                    r#type: "url",
-                    inputmode: "url",
-                    autocomplete: "off",
-                    autocapitalize: "none",
-                    placeholder: "Pairing link",
-                    value: "{props.value}",
-                    oninput: move |event| props.on_value.call(event.value()),
+        div { class: "mt-10 w-full",
+            div { class: "mb-5 text-center",
+                h2 { class: "text-base font-semibold text-zinc-200", "Connect to your Mac" }
+                p { class: "mt-1 text-xs leading-5 text-zinc-500", "In Vmux, open Remote and choose Connect device." }
+            }
+            button {
+                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-950 shadow-xl shadow-black/20 active:scale-[0.99] active:bg-white",
+                r#type: "button",
+                onclick: move |_| props.on_scan.call(()),
+                svg {
+                    class: "h-5 w-5",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M3 5a2 2 0 0 1 2-2h2" }
+                    path { d: "M17 3h2a2 2 0 0 1 2 2v2" }
+                    path { d: "M21 17v2a2 2 0 0 1-2 2h-2" }
+                    path { d: "M7 21H5a2 2 0 0 1-2-2v-2" }
+                    rect { width: "5", height: "5", x: "7", y: "7", rx: "1" }
+                    path { d: "M17 7v.01" }
+                    path { d: "M17 12v5" }
+                    path { d: "M12 17h5" }
                 }
-                button {
-                    class: "h-10 shrink-0 rounded-xl bg-white px-4 text-sm font-semibold text-black disabled:opacity-50 active:scale-[0.99]",
-                    r#type: "submit",
-                    disabled: props.pairing,
-                    if props.pairing { "Pairing…" } else { "Connect" }
+                "Scan QR code"
+            }
+            button {
+                class: "mx-auto mt-4 block rounded-lg px-3 py-2 text-xs font-medium text-zinc-400 active:bg-white/[0.05] active:text-zinc-200",
+                r#type: "button",
+                onclick: move |_| show_link.set(!show_link()),
+                if show_link() { "Hide pairing link" } else { "Enter pairing link manually" }
+            }
+            if show_link() {
+                form {
+                    class: "mt-2 flex items-center gap-2 rounded-2xl border border-white/[0.08] bg-black/20 p-1.5",
+                    onsubmit: move |event| {
+                        event.prevent_default();
+                        props.on_pair.call(());
+                    },
+                    input {
+                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-xs text-zinc-200 outline-none placeholder:text-zinc-600",
+                        r#type: "url",
+                        inputmode: "url",
+                        autocomplete: "off",
+                        autocapitalize: "none",
+                        placeholder: "Paste pairing link",
+                        value: "{props.value}",
+                        oninput: move |event| props.on_value.call(event.value()),
+                    }
+                    button {
+                        class: "h-10 shrink-0 rounded-xl bg-white/[0.09] px-4 text-xs font-semibold text-zinc-200 disabled:opacity-50 active:bg-white/[0.14]",
+                        r#type: "submit",
+                        disabled: props.pairing,
+                        if props.pairing { "Connecting…" } else { "Connect" }
+                    }
                 }
             }
             if !props.error.is_empty() {
-                p { class: "mt-2 px-2 text-xs leading-5 text-red-300", "{props.error}" }
+                p { class: "mt-3 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-3 py-2 text-xs leading-5 text-red-300", "{props.error}" }
             }
         }
     }
