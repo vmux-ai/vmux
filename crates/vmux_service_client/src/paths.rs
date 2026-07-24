@@ -50,6 +50,16 @@ pub fn remote_token_path() -> PathBuf {
     profile_file("remote-token")
 }
 
+/// Path to the desired Remote exposure state for Tailscale Serve reconciliation.
+pub fn remote_state_path() -> PathBuf {
+    profile_file("remote-state")
+}
+
+/// Path to the marker written after a phone first authenticates successfully.
+pub fn remote_paired_path() -> PathBuf {
+    profile_file("remote-paired")
+}
+
 /// Stable loopback port for the active build and profile.
 pub fn remote_port() -> u16 {
     let build = current_profile();
