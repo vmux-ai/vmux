@@ -286,6 +286,14 @@ impl EditCore {
                 self.set_head(h);
             }
             EditCommand::InsertText(t) => text_changed = self.insert_text(&t),
+            EditCommand::ReplaceText(t) => {
+                let caret = self.primary().head;
+                self.checkpoint(Group::Other);
+                self.buffer.remove(0..self.buffer.len_chars());
+                self.buffer.insert(0, &t);
+                self.set_caret(caret.min(self.buffer.len_chars()));
+                text_changed = true;
+            }
             EditCommand::InsertTab => text_changed = self.insert_text("\t"),
             EditCommand::InsertNewline => text_changed = self.insert_text("\n"),
             EditCommand::DeleteBack => {
@@ -630,6 +638,17 @@ mod tests {
         c.apply(EditCommand::InsertText("i".into()));
         c.apply(EditCommand::Undo);
         assert_eq!(text_of(&c), "");
+    }
+
+    #[test]
+    fn replace_text_is_one_undoable_edit() {
+        let mut c = core("old");
+        c.set_caret(2);
+        c.apply(EditCommand::ReplaceText("new text".into()));
+        assert_eq!(text_of(&c), "new text");
+        assert_eq!(c.primary().head, 2);
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "old");
     }
 
     #[test]

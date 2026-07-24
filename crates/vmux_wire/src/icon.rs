@@ -149,4 +149,17 @@ mod tests {
         assert!(PageIcon::None.is_none());
         assert_eq!(PageIcon::default(), PageIcon::None);
     }
+
+    #[test]
+    fn persisted_tool_and_vault_icons_deserialize() {
+        for (json, expected) in [
+            (r#"{"Builtin":"Hammer"}"#, BuiltinIcon::Hammer),
+            (r#"{"Builtin":"Vault"}"#, BuiltinIcon::Vault),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<PageIcon>(json).unwrap(),
+                PageIcon::Builtin(expected)
+            );
+        }
+    }
 }

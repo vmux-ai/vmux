@@ -1512,6 +1512,23 @@ fn is_permissionless_host_tool(name: &str) -> bool {
         parts.as_slice(),
         [request, user, choice]
             if request == "request" && user == "user" && choice == "choice"
+    ) || matches!(
+        parts.as_slice(),
+        [mcp, vmux, action, knowledge]
+            if mcp == "mcp"
+                && vmux == "vmux"
+                && matches!(action.as_str(), "search" | "read")
+                && knowledge == "knowledge"
+    ) || matches!(
+        parts.as_slice(),
+        [vmux, action, knowledge]
+            if vmux == "vmux"
+                && matches!(action.as_str(), "search" | "read")
+                && knowledge == "knowledge"
+    ) || matches!(
+        parts.as_slice(),
+        [action, knowledge]
+            if matches!(action.as_str(), "search" | "read") && knowledge == "knowledge"
     )
 }
 
@@ -2276,6 +2293,20 @@ mod tests {
             assert!(is_permissionless_host_tool(name), "{name}");
         }
         assert!(!is_permissionless_host_tool("other_request_user_choice"));
+    }
+
+    #[test]
+    fn knowledge_read_tools_are_always_permissionless() {
+        for name in [
+            "mcp__vmux__search_knowledge",
+            "mcp.vmux.read_knowledge",
+            "vmux:search-knowledge",
+            "read_knowledge",
+        ] {
+            assert!(is_permissionless_host_tool(name), "{name}");
+        }
+        assert!(!is_permissionless_host_tool("write_knowledge"));
+        assert!(!is_permissionless_host_tool("other_search_knowledge"));
     }
 
     #[tokio::test]

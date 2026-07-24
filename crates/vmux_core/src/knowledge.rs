@@ -1,6 +1,7 @@
 //! User-owned Knowledge Base conventions shared by agent launchers.
 
 pub const KNOWLEDGE_TREE_EVENT: &str = "knowledge-tree";
+pub const KNOWLEDGE_SEARCH_EVENT: &str = "knowledge-search";
 
 #[derive(
     Clone,
@@ -40,11 +41,194 @@ pub struct KnowledgeEntry {
     pub is_directory: bool,
 }
 
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeSearchMatch {
+    pub title: String,
+    pub path: String,
+    pub line: u32,
+    pub preview: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeSearchEvent {
+    pub query: String,
+    pub matches: Vec<KnowledgeSearchMatch>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeSearchRequest {
+    pub query: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeReference {
+    pub title: String,
+    pub path: String,
+    pub line: u32,
+    pub preview: String,
+    pub unlinked: bool,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum KnowledgePropertyKind {
+    #[default]
+    Text,
+    Number,
+    Checkbox,
+    Date,
+    List,
+    Link,
+    Tags,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeProperty {
+    pub key: String,
+    pub kind: KnowledgePropertyKind,
+    pub values: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct WikiLink {
+    pub start: usize,
+    pub end: usize,
+    pub note: String,
+    pub anchor: Option<String>,
+    pub label: Option<String>,
+    pub embed: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MarkdownMetadata {
     pub title: String,
+    pub aliases: Vec<String>,
+    pub properties: Vec<KnowledgeProperty>,
     pub title_line: Option<u32>,
     pub body_offset: usize,
+}
+
+fn metadata_scalar(value: &str) -> String {
+    let value = value.trim();
+    value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
+        .unwrap_or(value)
+        .to_string()
+}
+
+fn metadata_values(value: &str) -> Vec<String> {
+    let value = value.trim();
+    let values = value
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .map(|value| value.split(',').collect::<Vec<_>>())
+        .unwrap_or_else(|| vec![value]);
+    values
+        .into_iter()
+        .map(metadata_scalar)
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn property_kind(key: &str, raw: &str, values: &[String], list: bool) -> KnowledgePropertyKind {
+    if key.eq_ignore_ascii_case("tag") || key.eq_ignore_ascii_case("tags") {
+        KnowledgePropertyKind::Tags
+    } else if list {
+        KnowledgePropertyKind::List
+    } else if matches!(raw.trim().to_ascii_lowercase().as_str(), "true" | "false") {
+        KnowledgePropertyKind::Checkbox
+    } else if raw.trim().parse::<f64>().is_ok() {
+        KnowledgePropertyKind::Number
+    } else if values.first().is_some_and(|value| {
+        let bytes = value.as_bytes();
+        bytes.len() >= 10
+            && bytes[4] == b'-'
+            && bytes[7] == b'-'
+            && bytes[..4].iter().all(u8::is_ascii_digit)
+            && bytes[5..7].iter().all(u8::is_ascii_digit)
+            && bytes[8..10].iter().all(u8::is_ascii_digit)
+    }) {
+        KnowledgePropertyKind::Date
+    } else if values
+        .first()
+        .is_some_and(|value| value.starts_with("[[") && value.ends_with("]]"))
+    {
+        KnowledgePropertyKind::Link
+    } else {
+        KnowledgePropertyKind::Text
+    }
 }
 
 pub fn markdown_metadata(text: &str) -> MarkdownMetadata {
@@ -57,37 +241,121 @@ pub fn markdown_metadata(text: &str) -> MarkdownMetadata {
     }
 
     let mut offset = first.len();
+    let frontmatter = lines.collect::<Vec<_>>();
+    let Some(close) = frontmatter
+        .iter()
+        .position(|line| line.trim_end_matches(['\r', '\n']) == "---")
+    else {
+        return MarkdownMetadata::default();
+    };
     let mut title = String::new();
+    let mut aliases = Vec::new();
+    let mut properties = Vec::new();
     let mut title_line = None;
-    for (index, line) in lines.enumerate() {
-        let value = line.trim_end_matches(['\r', '\n']);
-        if value == "---" {
-            return MarkdownMetadata {
-                title,
-                title_line,
-                body_offset: offset + line.len(),
-            };
-        }
-        if title.is_empty()
-            && let Some((key, value)) = value.split_once(':')
-            && key.trim().eq_ignore_ascii_case("title")
+    let mut index = 0;
+    while index < close {
+        let value = frontmatter[index].trim_end_matches(['\r', '\n']);
+        if value.trim().is_empty() || value.trim_start().starts_with('#') || value.starts_with(' ')
         {
-            let value = value.trim();
-            title = value
-                .strip_prefix('"')
-                .and_then(|value| value.strip_suffix('"'))
-                .or_else(|| {
-                    value
-                        .strip_prefix('\'')
-                        .and_then(|value| value.strip_suffix('\''))
-                })
-                .unwrap_or(value)
-                .to_string();
-            title_line = Some(index as u32 + 1);
+            index += 1;
+            continue;
         }
-        offset += line.len();
+        let Some((key, raw)) = value.split_once(':') else {
+            index += 1;
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            index += 1;
+            continue;
+        }
+        let raw = raw.trim();
+        let mut values = metadata_values(raw);
+        let inline_list = raw.starts_with('[') && raw.ends_with(']');
+        let mut block_list = false;
+        if raw.is_empty() {
+            let mut next = index + 1;
+            while next < close {
+                let item = frontmatter[next].trim_end_matches(['\r', '\n']);
+                let Some(item) = item.trim().strip_prefix('-').map(str::trim) else {
+                    break;
+                };
+                values.extend(metadata_values(item));
+                block_list = true;
+                next += 1;
+            }
+            index = next.saturating_sub(1);
+        }
+        let kind = property_kind(key, raw, &values, inline_list || block_list);
+        if kind == KnowledgePropertyKind::Tags {
+            values = values
+                .into_iter()
+                .map(|value| value.trim_start_matches('#').to_string())
+                .filter(|value| !value.is_empty())
+                .collect();
+        }
+        if title.is_empty() && key.eq_ignore_ascii_case("title") {
+            title = values.first().cloned().unwrap_or_default();
+            title_line = Some(index.saturating_sub(values.len().saturating_sub(1)) as u32 + 1);
+        }
+        if key.eq_ignore_ascii_case("alias") || key.eq_ignore_ascii_case("aliases") {
+            aliases.extend(values.iter().cloned());
+        }
+        properties.push(KnowledgeProperty {
+            key: key.to_string(),
+            kind,
+            values,
+        });
+        index += 1;
     }
-    MarkdownMetadata::default()
+    offset += frontmatter[..=close]
+        .iter()
+        .map(|line| line.len())
+        .sum::<usize>();
+    MarkdownMetadata {
+        title,
+        aliases,
+        properties,
+        title_line,
+        body_offset: offset,
+    }
+}
+
+pub fn wiki_links(text: &str) -> Vec<WikiLink> {
+    let mut links = Vec::new();
+    let mut offset = 0;
+    while let Some(relative_start) = text[offset..].find("[[") {
+        let brackets = offset + relative_start;
+        let start = brackets.saturating_sub(1);
+        let embed = brackets > 0 && text.as_bytes()[brackets - 1] == b'!';
+        let start = if embed { start } else { brackets };
+        let content_start = brackets + 2;
+        let Some(relative_end) = text[content_start..].find("]]") else {
+            break;
+        };
+        let content_end = content_start + relative_end;
+        let content = text[content_start..content_end].trim();
+        if !content.is_empty() {
+            let (target, label) = content
+                .split_once('|')
+                .map(|(target, label)| (target.trim(), Some(label.trim().to_string())))
+                .unwrap_or((content, None));
+            let (note, anchor) = target
+                .split_once('#')
+                .map(|(note, anchor)| (note.trim(), Some(anchor.trim().to_string())))
+                .unwrap_or((target.trim(), None));
+            links.push(WikiLink {
+                start,
+                end: content_end + 2,
+                note: note.to_string(),
+                anchor: anchor.filter(|anchor| !anchor.is_empty()),
+                label: label.filter(|label| !label.is_empty()),
+                embed,
+            });
+        }
+        offset = content_end + 2;
+    }
+    links
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -99,6 +367,10 @@ use std::path::{Component, Path, PathBuf};
 mod agent_config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use agent_config::sync_external_agent_configs;
+#[cfg(not(target_arch = "wasm32"))]
+mod index;
+#[cfg(not(target_arch = "wasm32"))]
+pub use index::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
 
 #[cfg(not(target_arch = "wasm32"))]
 const MAX_SKILLS: usize = 64;
@@ -116,6 +388,160 @@ const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
 pub fn knowledge_dir() -> PathBuf {
     crate::profile::config_dir().join("knowledge")
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn yaml_scalar(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace(['\r', '\n'], " ")
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn property_source(
+    key: &str,
+    kind: KnowledgePropertyKind,
+    values: &[String],
+) -> Result<String, String> {
+    let key = key.trim();
+    if key.is_empty()
+        || key.len() > 100
+        || key.contains([':', '\r', '\n'])
+        || key.starts_with(['-', '#'])
+    {
+        return Err("property name is invalid".to_string());
+    }
+    let clean = values
+        .iter()
+        .map(|value| value.trim().replace(['\r', '\n'], " "))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    let source = match kind {
+        KnowledgePropertyKind::Tags | KnowledgePropertyKind::List => {
+            if clean.is_empty() {
+                format!("{key}: []\n")
+            } else {
+                let items = clean
+                    .iter()
+                    .map(|value| format!("  - {}\n", yaml_scalar(value)))
+                    .collect::<String>();
+                format!("{key}:\n{items}")
+            }
+        }
+        KnowledgePropertyKind::Checkbox => {
+            let checked = clean
+                .first()
+                .is_some_and(|value| value.eq_ignore_ascii_case("true"));
+            format!("{key}: {checked}\n")
+        }
+        KnowledgePropertyKind::Number => {
+            let value = clean.first().map(String::as_str).unwrap_or("0");
+            if value.parse::<f64>().is_err() {
+                return Err("number property requires a valid number".to_string());
+            }
+            format!("{key}: {value}\n")
+        }
+        KnowledgePropertyKind::Date => {
+            let value = clean.first().cloned().unwrap_or_default();
+            format!("{key}: {value}\n")
+        }
+        KnowledgePropertyKind::Link => {
+            let value = clean.first().cloned().unwrap_or_default();
+            let value = if value.is_empty() || (value.starts_with("[[") && value.ends_with("]]")) {
+                value
+            } else {
+                format!("[[{value}]]")
+            };
+            format!("{key}: {value}\n")
+        }
+        KnowledgePropertyKind::Text => {
+            let value = clean.first().cloned().unwrap_or_default();
+            format!("{key}: {}\n", yaml_scalar(&value))
+        }
+    };
+    Ok(source)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn frontmatter_property_range(text: &str, key: &str) -> Option<(usize, usize, usize)> {
+    let mut lines = text.split_inclusive('\n');
+    let first = lines.next()?;
+    if first.trim_end_matches(['\r', '\n']) != "---" {
+        return None;
+    }
+    let mut offset = first.len();
+    let mut property_start = None;
+    let mut found = None;
+    for line in lines {
+        let value = line.trim_end_matches(['\r', '\n']);
+        if value == "---" {
+            if let Some(start) = property_start.take() {
+                found = Some((start, offset));
+            }
+            return found
+                .filter(|_| !key.is_empty())
+                .map(|(start, end)| (start, end, offset))
+                .or(Some((usize::MAX, usize::MAX, offset)));
+        }
+        if !value.starts_with([' ', '\t'])
+            && let Some((candidate, _)) = value.split_once(':')
+        {
+            if let Some(start) = property_start.take() {
+                found = Some((start, offset));
+            }
+            if candidate.trim().eq_ignore_ascii_case(key.trim()) {
+                property_start = Some(offset);
+                found = None;
+            }
+        }
+        offset += line.len();
+    }
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn edit_markdown_property(
+    text: &str,
+    edit: &crate::event::FilePropertyEdit,
+) -> Result<String, String> {
+    let original = edit.original_key.trim();
+    let key = edit.key.trim();
+    if !edit.remove
+        && !original.eq_ignore_ascii_case(key)
+        && markdown_metadata(text)
+            .properties
+            .iter()
+            .any(|property| property.key.eq_ignore_ascii_case(key))
+    {
+        return Err(format!("property already exists: {key}"));
+    }
+    if let Some((start, end, close)) = frontmatter_property_range(text, original) {
+        if edit.remove {
+            if start == usize::MAX {
+                return Ok(text.to_string());
+            }
+            let mut output = text.to_string();
+            output.replace_range(start..end, "");
+            return Ok(output);
+        }
+        let source = property_source(&edit.key, edit.kind, &edit.values)?;
+        let mut output = text.to_string();
+        if start == usize::MAX {
+            output.insert_str(close, &source);
+        } else {
+            output.replace_range(start..end, &source);
+        }
+        return Ok(output);
+    }
+    if edit.remove {
+        return Ok(text.to_string());
+    }
+    let source = property_source(&edit.key, edit.kind, &edit.values)?;
+    Ok(format!("---\n{source}---\n\n{text}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -622,11 +1048,23 @@ mod tests {
 
     #[test]
     fn parses_markdown_frontmatter_title_and_body() {
-        let text = "---\ntitle: \"Page title\"\ntags: [one]\n---\n\nBody\n";
+        let text = "---\ntitle: \"Page title\"\ntags: [#one]\n---\n\nBody\n";
         let metadata = markdown_metadata(text);
         assert_eq!(metadata.title, "Page title");
         assert_eq!(metadata.title_line, Some(1));
+        assert_eq!(metadata.properties.len(), 2);
+        assert_eq!(metadata.properties[1].kind, KnowledgePropertyKind::Tags);
+        assert_eq!(metadata.properties[1].values, ["one"]);
         assert_eq!(&text[metadata.body_offset..], "\nBody\n");
+    }
+
+    #[test]
+    fn parses_quoted_titles_and_alias_lists_without_splitting_commas() {
+        let text =
+            "---\ntitle: \"Research, Notes\"\naliases:\n  - RN\n  - \"Reading Notes\"\n---\n";
+        let metadata = markdown_metadata(text);
+        assert_eq!(metadata.title, "Research, Notes");
+        assert_eq!(metadata.aliases, ["RN", "Reading Notes"]);
     }
 
     #[test]
@@ -635,6 +1073,73 @@ mod tests {
         assert_eq!(
             markdown_metadata("---\ntitle: Missing close\n"),
             MarkdownMetadata::default()
+        );
+    }
+
+    #[test]
+    fn parses_typed_frontmatter_properties() {
+        let metadata = markdown_metadata(
+            "---\npublished: true\nrating: 4.5\ndue: 2026-07-25\nrelated: '[[Roadmap]]'\npeople:\n  - Ada\n  - Lin\n---\n",
+        );
+        let kinds = metadata
+            .properties
+            .iter()
+            .map(|property| property.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            [
+                KnowledgePropertyKind::Checkbox,
+                KnowledgePropertyKind::Number,
+                KnowledgePropertyKind::Date,
+                KnowledgePropertyKind::Link,
+                KnowledgePropertyKind::List,
+            ]
+        );
+        assert_eq!(metadata.properties[4].values, ["Ada", "Lin"]);
+    }
+
+    #[test]
+    fn edits_frontmatter_properties_without_touching_body() {
+        let text = "---\ntitle: Old\ntags:\n  - alpha\nstatus: draft\n---\n\nBody\n";
+        let edited = edit_markdown_property(
+            text,
+            &crate::event::FilePropertyEdit {
+                original_key: "tags".into(),
+                key: "tags".into(),
+                kind: KnowledgePropertyKind::Tags,
+                values: vec!["alpha".into(), "beta".into()],
+                remove: false,
+            },
+        )
+        .unwrap();
+        let renamed = edit_markdown_property(
+            &edited,
+            &crate::event::FilePropertyEdit {
+                original_key: "status".into(),
+                key: "stage".into(),
+                kind: KnowledgePropertyKind::Text,
+                values: vec!["ready".into()],
+                remove: false,
+            },
+        )
+        .unwrap();
+        assert!(renamed.contains("tags:\n  - \"alpha\"\n  - \"beta\"\n"));
+        assert!(renamed.contains("stage: \"ready\"\n"));
+        assert!(!renamed.contains("status:"));
+        assert!(renamed.ends_with("\nBody\n"));
+        assert!(
+            edit_markdown_property(
+                &renamed,
+                &crate::event::FilePropertyEdit {
+                    original_key: "stage".into(),
+                    key: "title".into(),
+                    kind: KnowledgePropertyKind::Text,
+                    values: vec!["Duplicate".into()],
+                    remove: false,
+                },
+            )
+            .is_err()
         );
     }
 

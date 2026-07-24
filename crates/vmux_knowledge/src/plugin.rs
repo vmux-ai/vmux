@@ -2,9 +2,12 @@ use std::sync::mpsc;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use bevy_cef::prelude::{BinHostEmitEvent, Browsers};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeTreeEvent};
+use vmux_core::knowledge::{
+    KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT, KnowledgeIndex, KnowledgeSearchEvent,
+    KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent,
+};
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
 
@@ -41,7 +44,7 @@ struct KnowledgeWatch {
 #[derive(Component)]
 struct KnowledgeTreeTask {
     generation: u64,
-    task: Task<Result<KnowledgeTreeEvent, String>>,
+    task: Task<Result<(KnowledgeTreeEvent, KnowledgeIndex), String>>,
 }
 
 impl Plugin for KnowledgePlugin {
@@ -66,16 +69,20 @@ impl Plugin for KnowledgePlugin {
                 Err(error) => bevy::log::warn!("knowledge watcher init failed: {error}"),
             }
         }
-        app.init_resource::<KnowledgeState>().add_systems(
-            Update,
-            (
-                drain_knowledge_watch,
-                start_knowledge_tree_scan,
-                drain_knowledge_tree_scan,
-                emit_knowledge_tree,
+        app.init_resource::<KnowledgeState>()
+            .init_resource::<KnowledgeIndex>()
+            .add_plugins(BinEventEmitterPlugin::<(KnowledgeSearchRequest,)>::default())
+            .add_systems(
+                Update,
+                (
+                    drain_knowledge_watch,
+                    start_knowledge_tree_scan,
+                    drain_knowledge_tree_scan,
+                    emit_knowledge_tree,
+                )
+                    .chain(),
             )
-                .chain(),
-        );
+            .add_observer(on_knowledge_search);
     }
 }
 
@@ -105,8 +112,12 @@ fn start_knowledge_tree_scan(
         return;
     }
     let generation = state.generation;
-    let task = IoTaskPool::get()
-        .spawn(async move { build_tree(&vault_dir()).map_err(|error| error.to_string()) });
+    let task = IoTaskPool::get().spawn(async move {
+        let root = vault_dir();
+        let tree = build_tree(&root).map_err(|error| error.to_string())?;
+        let index = KnowledgeIndex::build(&root).map_err(|error| error.to_string())?;
+        Ok((tree, index))
+    });
     state.dirty = false;
     commands.spawn(KnowledgeTreeTask { generation, task });
 }
@@ -114,6 +125,7 @@ fn start_knowledge_tree_scan(
 fn drain_knowledge_tree_scan(
     mut tasks: Query<(Entity, &mut KnowledgeTreeTask)>,
     mut state: ResMut<KnowledgeState>,
+    mut index: ResMut<KnowledgeIndex>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -126,7 +138,10 @@ fn drain_knowledge_tree_scan(
             continue;
         }
         state.tree = match result {
-            Ok(tree) => tree,
+            Ok((tree, next_index)) => {
+                *index = next_index;
+                tree
+            }
             Err(error) => KnowledgeTreeEvent {
                 root: vault_dir().to_string_lossy().into_owned(),
                 entries: Vec::new(),
@@ -163,4 +178,32 @@ fn emit_knowledge_tree(
         &state.tree,
     ));
     *last_revision = state.revision;
+}
+
+fn on_knowledge_search(
+    trigger: On<BinReceive<KnowledgeSearchRequest>>,
+    index: Res<KnowledgeIndex>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        return;
+    }
+    let query = trigger.event().payload.query.trim().to_string();
+    let matches = index
+        .search(&query, 64)
+        .into_iter()
+        .map(|item| KnowledgeSearchMatch {
+            title: item.title,
+            path: item.path.to_string_lossy().into_owned(),
+            line: item.line + 1,
+            preview: item.preview,
+        })
+        .collect();
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        webview,
+        KNOWLEDGE_SEARCH_EVENT,
+        &KnowledgeSearchEvent { query, matches },
+    ));
 }

@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
+use vmux_ui::hooks::try_cef_bin_emit_rkyv;
 
 use crate::page_model::{heading_class, span_style, table_align_style};
 
@@ -53,7 +54,10 @@ pub fn render_block(block: &MdBlock, key: usize) -> Element {
 fn render_list(ordered: bool, start: u64, items: &[MdListItem], key: usize) -> Element {
     let inner = rsx! {
         for (index, item) in items.iter().enumerate() {
-            li { key: "{index}", class: "my-1",
+            li {
+                key: "{index}",
+                "data-note-list-line": "{item.source_line}",
+                class: "my-1",
                 if let Some(checked) = item.task {
                     input {
                         r#type: "checkbox",
@@ -162,5 +166,46 @@ fn render_inline(inline: &MdInline, key: usize) -> Element {
         },
         MdInline::SoftBreak => rsx! { span { key: "{key}", " " } },
         MdInline::HardBreak => rsx! { br { key: "{key}" } },
+        MdInline::WikiLink {
+            target,
+            label,
+            path,
+            line,
+            exists,
+            embed,
+        } => {
+            let open_path = path.clone();
+            let open_title = target.split('#').next().unwrap_or(target).to_string();
+            let open_line = *line;
+            let create = !*exists;
+            let disabled = open_path.is_empty();
+            rsx! {
+                button {
+                    key: "{key}",
+                    r#type: "button",
+                    disabled,
+                    title: if *exists { "Open linked note" } else { "Create linked note" },
+                    class: if *exists {
+                        "inline cursor-pointer rounded px-0.5 text-primary underline decoration-primary/35 underline-offset-2 hover:bg-primary/10 hover:decoration-primary"
+                    } else {
+                        "inline cursor-pointer rounded px-0.5 text-destructive underline decoration-dashed underline-offset-2 hover:bg-destructive/10 disabled:cursor-default disabled:opacity-50"
+                    },
+                    onmousedown: move |event: Event<MouseData>| {
+                        event.stop_propagation();
+                    },
+                    onclick: move |event: Event<MouseData>| {
+                        event.stop_propagation();
+                        let _ = try_cef_bin_emit_rkyv(&vmux_core::event::KnowledgeLinkOpen {
+                            path: open_path.clone(),
+                            title: open_title.clone(),
+                            line: open_line,
+                            create,
+                        });
+                    },
+                    if *embed { "↳ " }
+                    "{label}"
+                }
+            }
+        }
     }
 }
