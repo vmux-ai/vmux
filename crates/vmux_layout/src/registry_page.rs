@@ -27,6 +27,8 @@ pub fn Page() -> Element {
     let add_name = use_signal(String::new);
     let adopt_package = use_signal(String::new);
     let adopt_path = use_signal(String::new);
+    let import_provider = use_signal(|| RegistryProvider::HomebrewFormula.id().to_string());
+    let import_path = use_signal(String::new);
 
     let _snapshot_listener =
         use_bin_event_listener::<RegistrySnapshot, _>(REGISTRY_SNAPSHOT_EVENT, move |event| {
@@ -65,7 +67,7 @@ pub fn Page() -> Element {
                 title: "Registry",
                 count: visible_count,
                 search_value: query(),
-                search_placeholder: "Search packages, agents, language tools, dotfiles…",
+                search_placeholder: "Search packages, agents, MCP, language tools, dotfiles…",
                 onsearch: move |event: FormEvent| query.set(event.value()),
                 onkeydown: None,
                 actions: rsx! {
@@ -103,6 +105,8 @@ pub fn Page() -> Element {
                     add_name,
                     adopt_package,
                     adopt_path,
+                    import_provider,
+                    import_path,
                     pending,
                 }
                 if let Some(result) = notice() {
@@ -153,6 +157,8 @@ fn RegistryControls(
     mut add_name: Signal<String>,
     mut adopt_package: Signal<String>,
     mut adopt_path: Signal<String>,
+    mut import_provider: Signal<String>,
+    mut import_path: Signal<String>,
     pending: Signal<BTreeSet<String>>,
 ) -> Element {
     rsx! {
@@ -237,6 +243,53 @@ fn RegistryControls(
                         },
                         "Adopt"
                     }
+                }
+            }
+            div { class: "flex min-w-0 flex-col gap-2 md:col-span-2",
+                div { class: "text-xs font-medium text-foreground/90", "Import existing" }
+                div { class: "flex min-w-0 gap-2",
+                    select {
+                        class: "min-w-0 rounded-lg bg-foreground/[0.05] px-2.5 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10",
+                        value: "{import_provider}",
+                        onchange: move |event| import_provider.set(event.value()),
+                        option { value: "homebrew-formula", "Homebrew / Brewfile" }
+                        option { value: "npm", "npm / package.json" }
+                        option { value: "acp", "Installed ACP agents" }
+                        option { value: "lsp", "Installed language tools" }
+                        option { value: "mcp", "MCP config" }
+                        option { value: "dotfiles", "Stow dotfiles" }
+                    }
+                    input {
+                        r#type: "text",
+                        class: "min-w-0 flex-1 rounded-lg bg-foreground/[0.05] px-3 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-cyan-400/30",
+                        placeholder: "Path (optional — imports installed/default config)",
+                        value: "{import_path}",
+                        oninput: move |event| import_path.set(event.value()),
+                    }
+                    ManagerButton {
+                        variant: ManagerButtonVariant::Secondary,
+                        disabled: pending().contains(&action_key(
+                            provider_from_id(&import_provider()).unwrap_or(RegistryProvider::HomebrewFormula),
+                            RegistryAction::Import,
+                            "",
+                        )),
+                        onclick: move |_| {
+                            let Some(provider) = provider_from_id(&import_provider()) else {
+                                return;
+                            };
+                            send_action(
+                                pending,
+                                provider,
+                                RegistryAction::Import,
+                                String::new(),
+                                import_path().trim().to_string(),
+                            );
+                        },
+                        "Import"
+                    }
+                }
+                div { class: "text-[10px] text-muted-foreground/60",
+                    "Imports into vmux without modifying the original manifest."
                 }
             }
         }
@@ -337,6 +390,7 @@ fn provider_short_label(provider: RegistryProvider) -> &'static str {
         RegistryProvider::Npm => "npm",
         RegistryProvider::Acp => "acp",
         RegistryProvider::Lsp => "lsp",
+        RegistryProvider::Mcp => "mcp",
         RegistryProvider::Dotfiles => "dotfiles",
     }
 }
@@ -370,6 +424,7 @@ fn action_label(action: RegistryAction) -> &'static str {
         RegistryAction::Link => "Link",
         RegistryAction::Unlink => "Unlink",
         RegistryAction::Apply => "Apply",
+        RegistryAction::Import => "Import",
     }
 }
 
@@ -399,6 +454,9 @@ fn provider_icon(provider: RegistryProvider) -> Element {
             "M12 3a6 6 0 0 0-6 6v2a3 3 0 0 0-2 3v4h4v-5h8v5h4v-4a3 3 0 0 0-2-3V9a6 6 0 0 0-6-6Z"
         }
         RegistryProvider::Lsp => "M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4Z",
+        RegistryProvider::Mcp => {
+            "M7 4h10v4h3v8h-3v4H7v-4H4V8h3V4Zm2 2v12h6V6H9Zm-3 4v4h1v-4H6Zm11 0v4h1v-4h-1Z"
+        }
         RegistryProvider::Dotfiles => {
             "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 2 4 4h-4V4Z"
         }

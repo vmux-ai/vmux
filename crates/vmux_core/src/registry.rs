@@ -28,16 +28,18 @@ pub enum RegistryProvider {
     Acp,
     Lsp,
     Dotfiles,
+    Mcp,
 }
 
 impl RegistryProvider {
     /// Providers rendered by the Registry, in display order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::HomebrewFormula,
         Self::HomebrewCask,
         Self::Npm,
         Self::Acp,
         Self::Lsp,
+        Self::Mcp,
         Self::Dotfiles,
     ];
 
@@ -50,6 +52,7 @@ impl RegistryProvider {
             Self::Acp => "acp",
             Self::Lsp => "lsp",
             Self::Dotfiles => "dotfiles",
+            Self::Mcp => "mcp",
         }
     }
 
@@ -62,6 +65,7 @@ impl RegistryProvider {
             Self::Acp => "Agents",
             Self::Lsp => "Language Tools",
             Self::Dotfiles => "Dotfiles",
+            Self::Mcp => "MCP Servers",
         }
     }
 }
@@ -110,6 +114,7 @@ pub enum RegistryAction {
     Link,
     Unlink,
     Apply,
+    Import,
 }
 
 /// Provider-qualified package or dotfile-package row.

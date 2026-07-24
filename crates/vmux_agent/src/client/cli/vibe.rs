@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use serde::Serialize;
-
 use crate::client::cli::strategy::{
     CliAgentStrategy, ResumableSession, lines_skipping_invalid_utf8,
 };
@@ -131,26 +129,26 @@ fn merged_skill_paths(existing: Option<&str>, knowledge: &Path) -> String {
     serde_json::to_string(&paths).unwrap_or_else(|_| "[]".to_string())
 }
 
-#[derive(Serialize)]
-struct VibeMcpServerEnv {
-    name: &'static str,
-    transport: &'static str,
-    command: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    args: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cwd: Option<String>,
-}
-
 fn serialize_vibe_mcp_env(mcp: &McpServerConfig) -> String {
-    let server = VibeMcpServerEnv {
-        name: "vmux",
-        transport: "stdio",
-        command: mcp.command.clone(),
-        args: mcp.args.clone(),
-        cwd: mcp.cwd.as_ref().map(|c| c.to_string_lossy().to_string()),
-    };
-    serde_json::to_string(&[server]).unwrap_or_else(|_| "[]".to_string())
+    let mut vmux = serde_json::Map::from_iter([
+        ("name".to_string(), serde_json::json!("vmux")),
+        ("transport".to_string(), serde_json::json!("stdio")),
+        (
+            "command".to_string(),
+            serde_json::json!(mcp.command.clone()),
+        ),
+        ("args".to_string(), serde_json::json!(mcp.args.clone())),
+    ]);
+    if let Some(cwd) = &mcp.cwd {
+        vmux.insert("cwd".to_string(), serde_json::json!(cwd.to_string_lossy()));
+    }
+    let mut servers = vec![serde_json::Value::Object(vmux)];
+    servers.extend(
+        crate::managed_mcp::load()
+            .iter()
+            .map(|(name, server)| crate::managed_mcp::vibe_value(name, server)),
+    );
+    serde_json::to_string(&servers).unwrap_or_else(|_| "[]".to_string())
 }
 
 const VIBE_WEB_TOOLS: [&str; 2] = ["web_search", "web_fetch"];
