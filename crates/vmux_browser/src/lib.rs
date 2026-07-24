@@ -49,7 +49,7 @@ use vmux_core::{
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_layout::command_bar::state::{CommandBarState, CommandBarStateQuery};
-use vmux_layout::event::{RemoteCommandEvent, SideSheetCommandEvent};
+use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
@@ -228,6 +228,7 @@ impl Plugin for BrowserPlugin {
                         HeaderCommandEvent,
                         SideSheetCommandEvent,
                         RemoteCommandEvent,
+                        RemoteCopyEvent,
                     )>::for_hosts(&["layout"]),
                     BinEventEmitterPlugin::<(
                         DebugUpdateReady,
