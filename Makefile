@@ -88,6 +88,15 @@ mobile-android: ensure-mobile-android-deps
 	"$(DX_BIN)" build --android -p vmux_mobile
 
 mobile-ios-run: ensure-mobile-ios-deps
+	@udid="$$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries | sort_by(.key) | reverse[] | .value[] | select(.isAvailable != false and (.name | startswith("iPhone")))] | first | .udid // empty')"; \
+	if [ -z "$$udid" ]; then \
+		echo "No available iPhone simulator. Install one in Xcode Settings > Components."; \
+		exit 1; \
+	fi; \
+	xcrun simctl shutdown booted >/dev/null 2>&1 || true; \
+	xcrun simctl boot "$$udid"; \
+	xcrun simctl bootstatus "$$udid" -b; \
+	open -a Simulator --args -CurrentDeviceUDID "$$udid"
 	"$(DX_BIN)" serve --ios -p vmux_mobile
 
 mobile-android-run: ensure-mobile-android-deps
