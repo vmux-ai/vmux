@@ -8,9 +8,13 @@ use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_chat_ui::{
+    AssistantTurn, DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock,
+    ToolResultBlock, ToolUseBlock, UserBubble,
+};
 use vmux_remote::{
-    ApprovalRequest, AssistantBlock, Message, PlanStep, PromptRequest, RemoteApproval, RemoteEvent,
-    RemoteSession, RemoteStatus,
+    ApprovalRequest, AssistantBlock, Message, NewChatRequest, PromptRequest, RemoteApproval,
+    RemoteEvent, RemoteSession, RemoteStatus,
 };
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
@@ -154,6 +158,10 @@ fn App() -> Element {
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
+    let mut new_chat_open = use_signal(|| false);
+    let mut new_chat_draft = use_signal(String::new);
+    let mut new_chat_error = use_signal(String::new);
+    let mut creating_chat = use_signal(|| false);
 
     use_effect(move || {
         let _ = messages.read().len();
@@ -390,16 +398,19 @@ fn App() -> Element {
             main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5",
                 if messages().is_empty() && live_delta().is_empty() {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-zinc-600",
-                        if current_value.is_some() { "No messages yet." } else { "Start an agent chat on your Mac." }
+                        if current_value.is_some() { "No messages yet." } else { "Open the menu to start a new chat." }
                     }
                 }
                 div { class: "mx-auto flex w-full max-w-3xl flex-col",
-                    for (index, message) in messages().into_iter().enumerate() {
-                        MessageView { key: "{index}", message }
+                    for (index, item) in group_messages(messages()).into_iter().enumerate() {
+                        MessageView { key: "{index}", item }
                     }
                     if !live_delta().is_empty() {
-                        div { class: "mb-4 flex justify-start",
-                            div { class: "max-w-[94%] whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border border-white/10 bg-white/[0.035] px-3.5 py-3 text-sm leading-6 after:ml-1 after:inline-block after:h-3.5 after:w-1.5 after:animate-pulse after:bg-violet-400 after:align-[-2px] after:content-['']", "{live_delta()}" }
+                        div { class: "mb-4 flex flex-col",
+                            AssistantTurn {
+                                TextBlock { text: live_delta() }
+                                span { class: "ml-0.5 h-3.5 w-1.5 animate-pulse bg-violet-400" }
+                            }
                         }
                     }
                     if let RemoteStatus::Errored(message) = status() {
@@ -541,6 +552,100 @@ fn App() -> Element {
                             "Disconnect"
                         }
                     }
+                    button {
+                        class: "mx-2 mt-2 flex h-11 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-semibold text-black active:scale-[0.99]",
+                        r#type: "button",
+                        onclick: move |_| {
+                            new_chat_error.set(String::new());
+                            new_chat_open.set(true);
+                        },
+                        "+ New chat"
+                    }
+                    if new_chat_open() {
+                        form {
+                            class: "mx-2 mt-2 rounded-2xl border border-white/10 bg-black/20 p-3",
+                            onsubmit: move |event| {
+                                event.prevent_default();
+                                let text = new_chat_draft().trim().to_string();
+                                let Some(client) = api() else { return };
+                                if text.is_empty() || creating_chat() {
+                                    return;
+                                }
+                                let known = sessions()
+                                    .into_iter()
+                                    .map(|session| session.sid)
+                                    .collect::<std::collections::HashSet<_>>();
+                                creating_chat.set(true);
+                                new_chat_error.set(String::new());
+                                spawn(async move {
+                                    match client.post_json("/api/chats", &NewChatRequest { text }).await {
+                                        Ok(()) => {
+                                            for _ in 0..40 {
+                                                tokio::time::sleep(Duration::from_millis(250)).await;
+                                                if let Ok(next) = client.sessions().await {
+                                                    let created = next
+                                                        .iter()
+                                                        .find(|session| !known.contains(&session.sid))
+                                                        .cloned();
+                                                    sessions.set(next);
+                                                    if let Some(created) = created {
+                                                        new_chat_draft.set(String::new());
+                                                        new_chat_open.set(false);
+                                                        creating_chat.set(false);
+                                                        open_session(
+                                                            client,
+                                                            created,
+                                                            current,
+                                                            messages,
+                                                            live_delta,
+                                                            status,
+                                                            approval,
+                                                            connected,
+                                                            drawer,
+                                                            stream_generation,
+                                                        );
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                            new_chat_error.set("The desktop opened the chat, but its session did not appear.".to_string());
+                                        }
+                                        Err(ApiError::Unauthorized) => {
+                                            new_chat_error.set("Pairing expired. Pair with the Mac again.".to_string());
+                                        }
+                                        Err(ApiError::Message(message)) => new_chat_error.set(message),
+                                    }
+                                    creating_chat.set(false);
+                                });
+                            },
+                            textarea {
+                                class: "min-h-24 w-full resize-none rounded-xl border border-white/10 bg-zinc-950 px-3 py-3 text-base leading-5 text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
+                                rows: "3",
+                                autofocus: true,
+                                placeholder: "What should the agent do?",
+                                value: "{new_chat_draft}",
+                                oninput: move |event| new_chat_draft.set(event.value()),
+                            }
+                            if !new_chat_error().is_empty() {
+                                div { class: "mt-2 text-xs leading-5 text-red-300", "{new_chat_error}" }
+                            }
+                            div { class: "mt-3 flex gap-2",
+                                button {
+                                    class: "h-10 flex-1 rounded-xl bg-white/10 text-sm font-semibold text-zinc-300 active:scale-[0.99]",
+                                    r#type: "button",
+                                    disabled: creating_chat(),
+                                    onclick: move |_| new_chat_open.set(false),
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "h-10 flex-1 rounded-xl bg-white text-sm font-semibold text-black active:scale-[0.99] disabled:opacity-40",
+                                    r#type: "submit",
+                                    disabled: creating_chat() || new_chat_draft().trim().is_empty(),
+                                    if creating_chat() { "Starting…" } else { "Start chat" }
+                                }
+                            }
+                        }
+                    }
                     div { class: "min-h-0 flex-1 overflow-y-auto p-2",
                         if sessions().is_empty() {
                             div { class: "px-3 py-8 text-center text-sm text-zinc-600", "No active sessions" }
@@ -639,35 +744,46 @@ fn PairScreen(props: PairScreenProps) -> Element {
     }
 }
 
+#[derive(Clone, PartialEq)]
+enum MobileChatItem {
+    User { text: String },
+    Turn { blocks: Vec<MobileChatBlock> },
+}
+
+#[derive(Clone, PartialEq)]
+enum MobileChatBlock {
+    Assistant(AssistantBlock),
+    ToolResult { content: String, is_error: bool },
+}
+
 #[derive(Props, Clone, PartialEq)]
 struct MessageViewProps {
-    message: Message,
+    item: MobileChatItem,
 }
 
 #[component]
 fn MessageView(props: MessageViewProps) -> Element {
-    match props.message {
-        Message::User { text, .. } => rsx! {
-            div { class: "mb-4 flex justify-end",
-                div { class: "max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-zinc-100 px-3.5 py-3 text-sm leading-6 text-zinc-900", "{text}" }
-            }
-        },
-        Message::Assistant { blocks } => rsx! {
-            div { class: "mb-4 flex justify-start",
-                div { class: "flex max-w-[94%] flex-col gap-2",
-                    for (index, block) in blocks.into_iter().enumerate() {
-                        AssistantBlockView { key: "{index}", block }
-                    }
+    match props.item {
+        MobileChatItem::User { text } => rsx! {
+            div { class: "mb-4 flex flex-col",
+                UserBubble {
+                    div { class: "whitespace-pre-wrap break-words", "{text}" }
                 }
             }
         },
-        Message::ToolResult {
-            content, is_error, ..
-        } => rsx! {
-            div { class: "mb-4 flex justify-start",
-                details { class: if is_error { "max-w-[94%] rounded-xl border border-red-400/20 bg-red-400/[0.05] px-3 py-2 text-xs text-red-200" } else { "max-w-[94%] rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-zinc-400" },
-                    summary { class: "cursor-pointer font-medium", if is_error { "Tool error" } else { "Tool result" } }
-                    pre { class: "mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5", "{content}" }
+        MobileChatItem::Turn { blocks } => rsx! {
+            div { class: "mb-4 flex flex-col",
+                AssistantTurn {
+                    for (index, block) in blocks.into_iter().enumerate() {
+                        match block {
+                            MobileChatBlock::Assistant(block) => rsx! {
+                                AssistantBlockView { key: "{index}", block }
+                            },
+                            MobileChatBlock::ToolResult { content, is_error } => rsx! {
+                                ToolResultBlock { key: "{index}", content, is_error }
+                            },
+                        }
+                    }
                 }
             }
         },
@@ -682,69 +798,68 @@ struct AssistantBlockViewProps {
 #[component]
 fn AssistantBlockView(props: AssistantBlockViewProps) -> Element {
     match props.block {
-        AssistantBlock::Text(text) => rsx! {
-            div { class: "whitespace-pre-wrap break-words rounded-2xl rounded-bl-md border border-white/10 bg-white/[0.035] px-3.5 py-3 text-sm leading-6", "{text}" }
-        },
-        AssistantBlock::Thinking(text) => rsx! {
-            details { class: "rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-zinc-500",
-                summary { class: "cursor-pointer font-medium text-zinc-400", "Thinking" }
-                div { class: "mt-2 whitespace-pre-wrap break-words leading-5", "{text}" }
-            }
-        },
-        AssistantBlock::ToolUse { name, args, .. } => rsx! {
-            details { class: "rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-zinc-400",
-                summary { class: "cursor-pointer font-mono font-medium text-cyan-300/80", "{name}" }
-                pre { class: "mt-2 whitespace-pre-wrap break-words font-mono text-[11px] leading-5", "{args}" }
-            }
-        },
+        AssistantBlock::Text(text) => rsx! { TextBlock { text } },
+        AssistantBlock::Thinking(text) => rsx! { ThinkingBlock { text } },
+        AssistantBlock::ToolUse { name, args, .. } => rsx! { ToolUseBlock { name, args } },
         AssistantBlock::Diff {
             path,
             old_text,
             new_text,
             ..
-        } => rsx! {
-            details { class: "rounded-xl border border-violet-400/20 bg-violet-400/[0.055] px-3 py-2 text-xs text-zinc-400",
-                summary { class: "cursor-pointer font-mono text-violet-200", "Edited {path}" }
-                if let Some(old) = old_text {
-                    pre { class: "mt-2 whitespace-pre-wrap break-words bg-red-500/[0.06] p-2 font-mono text-[11px] text-red-200/70", "{old}" }
-                }
-                pre { class: "mt-2 whitespace-pre-wrap break-words bg-emerald-500/[0.06] p-2 font-mono text-[11px] text-emerald-100/70", "{new_text}" }
+        } => rsx! { DiffBlock { path, old_text, new_text } },
+        AssistantBlock::Plan { steps } => rsx! {
+            PlanBlock {
+                steps: steps.into_iter().map(|step| PlanItem {
+                    content: step.content,
+                    status: step.status,
+                }).collect()
             }
         },
-        AssistantBlock::Plan { steps } => rsx! { PlanView { steps } },
         AssistantBlock::Subagent(subagent) => rsx! {
-            details { class: "rounded-xl border border-cyan-400/20 bg-cyan-400/[0.045] px-3 py-2 text-xs text-zinc-400",
-                summary { class: "cursor-pointer font-medium text-cyan-100", "{subagent.title} · {subagent.status}" }
-                if let Some(prompt) = subagent.prompt {
-                    div { class: "mt-2 whitespace-pre-wrap break-words leading-5", "{prompt}" }
-                }
+            SubagentActivity {
+                title: subagent.title,
+                status: subagent.status,
+                provider: subagent.provider,
+                action: subagent.action,
+                agent_name: subagent.agent_name,
+                model: subagent.model,
+                reasoning_effort: subagent.reasoning_effort,
+                prompt: subagent.prompt,
+                thread_id: subagent.thread_id,
+                parent_thread_id: subagent.parent_thread_id,
+                child_thread_ids: subagent.child_thread_ids,
+                call_id: subagent.call_id,
+                raw_input: subagent.raw_input,
             }
         },
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
-struct PlanViewProps {
-    steps: Vec<PlanStep>,
-}
-
-#[component]
-fn PlanView(props: PlanViewProps) -> Element {
-    rsx! {
-        div { class: "rounded-xl border border-white/10 bg-white/[0.025] px-3 py-3",
-            div { class: "mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500", "Plan" }
-            div { class: "flex flex-col gap-2",
-                for step in props.steps {
-                    div { class: "flex items-start gap-2 text-xs leading-5 text-zinc-400",
-                        span { class: if step.status == "completed" { "text-emerald-400" } else if step.status == "in_progress" { "text-violet-300" } else { "text-zinc-600" },
-                            if step.status == "completed" { "✓" } else if step.status == "in_progress" { "●" } else { "○" }
-                        }
-                        span { "{step.content}" }
-                    }
+fn group_messages(messages: Vec<Message>) -> Vec<MobileChatItem> {
+    let mut items = Vec::new();
+    let mut turn = Vec::new();
+    for message in messages {
+        match message {
+            Message::User { text, .. } => {
+                if !turn.is_empty() {
+                    items.push(MobileChatItem::Turn {
+                        blocks: std::mem::take(&mut turn),
+                    });
                 }
+                items.push(MobileChatItem::User { text });
             }
+            Message::Assistant { blocks } => {
+                turn.extend(blocks.into_iter().map(MobileChatBlock::Assistant))
+            }
+            Message::ToolResult {
+                content, is_error, ..
+            } => turn.push(MobileChatBlock::ToolResult { content, is_error }),
         }
     }
+    if !turn.is_empty() {
+        items.push(MobileChatItem::Turn { blocks: turn });
+    }
+    items
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1029,5 +1144,30 @@ mod tests {
             })
         );
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn groups_agent_activity_into_one_turn() {
+        let items = group_messages(vec![
+            Message::user("hello"),
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Thinking("working".to_string())],
+            },
+            Message::ToolResult {
+                call_id: "tool-1".to_string(),
+                content: "done".to_string(),
+                is_error: false,
+            },
+            Message::Assistant {
+                blocks: vec![AssistantBlock::Text("answer".to_string())],
+            },
+        ]);
+
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[0], MobileChatItem::User { .. }));
+        assert!(matches!(
+            &items[1],
+            MobileChatItem::Turn { blocks } if blocks.len() == 3
+        ));
     }
 }

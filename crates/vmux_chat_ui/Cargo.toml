@@ -1,0 +1,14 @@
+[package]
+name = "vmux_chat_ui"
+description = "Shared Dioxus chat presentation for desktop and mobile"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = ["minimal"] }
+pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+similar = "2"

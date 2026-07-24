@@ -23,6 +23,7 @@ use crate::chat_page::event::{
 use dioxus::prelude::*;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use vmux_chat_ui::{AssistantTurn, UserBubble};
 use vmux_command::prompt_media::{
     inline_media_query, media_display_path, media_reference, merge_chat_attachments,
     replace_inline_media_query,
@@ -2113,7 +2114,7 @@ fn render_item(
             context,
             attachments,
         } => rsx! {
-            div {
+            UserBubble {
                 key: "{key}",
                 class: "chat-user-bubble relative flex max-w-[80%] self-end flex-col gap-2 rounded-[1.35rem] rounded-tr-md border py-2.5 pl-2.5 pr-10 text-sm",
                 style: "content-visibility:auto;contain-intrinsic-size:auto 96px;",
@@ -2261,7 +2262,9 @@ fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) ->
             class: "flex max-w-[92%] flex-col gap-2 self-start",
             style: "content-visibility:auto;contain-intrinsic-size:auto 180px;",
             if !blocks.is_empty() {
-                div { class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border py-3 pl-3.5 pr-10",
+                AssistantTurn {
+                    standalone: false,
+                    class: "chat-assistant-turn relative flex flex-col gap-2.5 overflow-hidden rounded-2xl border py-3 pl-3.5 pr-10",
                     if !copy_text.is_empty() {
                         MessageCopyButton { text: copy_text.clone() }
                     }

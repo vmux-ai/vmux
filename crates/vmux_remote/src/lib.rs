@@ -144,6 +144,11 @@ pub struct PromptRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct NewChatRequest {
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApprovalRequest {
     pub call_id: String,
     pub allow: bool,
@@ -198,5 +203,15 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn new_chat_request_roundtrips() {
+        let request = NewChatRequest {
+            text: "start here".to_string(),
+        };
+        let json = serde_json::to_string(&request).unwrap();
+        let back: NewChatRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.text, request.text);
     }
 }
