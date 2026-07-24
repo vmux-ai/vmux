@@ -10,14 +10,14 @@ iOS requires Xcode. Build or run the simulator app from the repository root:
 
 ```sh
 make mobile-ios
-make mobile-ios-run
+make ios
 ```
 
 Android requires Android Studio, an SDK, an NDK, a JDK, `ANDROID_HOME`, and `ANDROID_NDK_HOME`:
 
 ```sh
 make mobile-android
-make mobile-android-run
+make android
 ```
 
 The build targets only compile the app. The run targets start Dioxus on the selected simulator or
