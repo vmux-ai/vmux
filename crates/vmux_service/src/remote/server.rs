@@ -1,5 +1,6 @@
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::extract::{Path as AxumPath, Request, State};
@@ -26,6 +27,7 @@ const MAX_PROMPT_BYTES: usize = 64 * 1024;
 #[derive(Clone)]
 struct RemoteState {
     token: Arc<str>,
+    paired: Arc<AtomicBool>,
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
 }
@@ -44,6 +46,7 @@ pub fn spawn(
         };
         let state = RemoteState {
             token: Arc::from(token),
+            paired: Arc::new(AtomicBool::new(crate::remote_paired_path().exists())),
             agents,
             acp,
         };
@@ -75,6 +78,7 @@ fn router(state: RemoteState) -> Router {
 
 async fn authorize(State(state): State<RemoteState>, request: Request, next: Next) -> Response {
     if request_token(request.headers()).is_some_and(|token| secure_eq(token, &state.token)) {
+        mark_paired(&state.paired);
         next.run(request).await
     } else {
         StatusCode::UNAUTHORIZED.into_response()
@@ -310,6 +314,22 @@ fn secure_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
+fn mark_paired(paired: &AtomicBool) {
+    if paired.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let path = crate::remote_paired_path();
+    let result = path
+        .parent()
+        .map(std::fs::create_dir_all)
+        .transpose()
+        .and_then(|_| std::fs::write(&path, b"paired\n"));
+    if let Err(error) = result {
+        paired.store(false, Ordering::Release);
+        tracing::warn!(%error, "remote: failed to record paired phone");
+    }
+}
+
 fn ensure_token() -> std::io::Result<String> {
     let path = crate::remote_token_path();
     if let Ok(existing) = std::fs::read_to_string(&path) {
@@ -326,6 +346,7 @@ fn ensure_token() -> std::io::Result<String> {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
+    let _ = std::fs::remove_file(crate::remote_paired_path());
     std::fs::write(&path, &token)?;
     #[cfg(unix)]
     {

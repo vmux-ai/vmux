@@ -8364,6 +8364,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11051,7 +11057,7 @@ dependencies = [
  "libc",
  "objc2-app-kit 0.3.2",
  "polling",
- "raw-window-handle",
+ "raw-window-handle 0.6.2",
  "reqwest",
  "ron 0.8.1",
  "serde",
@@ -11156,7 +11162,7 @@ dependencies = [
  "image",
  "libc",
  "moonshine-save",
- "muda",
+ "muda 0.19.2",
  "notify 6.1.1",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -11172,8 +11178,8 @@ dependencies = [
  "objc2-screen-capture-kit",
  "objc2-user-notifications 0.3.2",
  "parking_lot",
- "raw-window-handle",
- "rfd",
+ "raw-window-handle 0.6.2",
+ "rfd 0.15.4",
  "ron 0.8.1",
  "semver",
  "serde",
@@ -11322,6 +11328,7 @@ dependencies = [
  "moonshine-save",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "qrcode",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
  "rkyv",
@@ -11368,7 +11375,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_mobile"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "dioxus",
  "futures-util",
@@ -11399,7 +11406,7 @@ dependencies = [
 
 [[package]]
 name = "vmux_remote"
-version = "0.0.29"
+version = "0.0.30"
 dependencies = [
  "serde",
  "serde_json",
