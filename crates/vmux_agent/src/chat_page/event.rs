@@ -701,7 +701,6 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-mulling",
     "agent-working-spelunking",
 ];
-
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;

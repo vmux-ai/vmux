@@ -190,6 +190,7 @@ fn now_ms() -> u64 {
 fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
     RemoteSession {
         sid: sid.to_string(),
+        title: handle.provider.clone(),
         name: handle.provider.clone(),
         runtime: "page".to_string(),
         model: Some(handle.model.clone()),
