@@ -137,7 +137,7 @@ if [[ -x "${DX_BIN}" ]]; then
 	ok_line "dx (dioxus-cli) — ${DX_BIN}"
 else
 	bad_line "dx not found"
-	tip "Run: ${BOLD}\"${CARGO_BIN}\" install dioxus-cli --locked --version 0.7.4${RESET}"
+	tip "Run: ${BOLD}\"${CARGO_BIN}\" install dioxus-cli --locked --version 0.7.9${RESET}"
 	tip "Dioxus UIs build via ${BOLD}dx build${RESET} (Tailwind + wasm-bindgen are bundled; Node.js not required)"
 fi
 
