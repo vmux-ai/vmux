@@ -8,6 +8,7 @@ pub mod icon;
 pub mod knowledge;
 pub mod media;
 pub mod process_id;
+pub mod registry;
 pub mod scroll;
 pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use icon::{BuiltinIcon, PageIcon};
