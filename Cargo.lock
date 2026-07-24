@@ -11087,6 +11087,7 @@ name = "vmux_chat_ui"
 version = "0.0.30"
 dependencies = [
  "dioxus",
+ "dioxus-primitives",
  "pulldown-cmark",
  "similar",
 ]
@@ -11460,6 +11461,7 @@ dependencies = [
  "crossbeam-channel",
  "dioxus",
  "futures-util",
+ "image",
  "libc",
  "mockito",
  "objc2-foundation 0.3.2",
@@ -11621,6 +11623,7 @@ dependencies = [
  "sys-locale",
  "time",
  "unic-langid",
+ "vmux_chat_ui",
  "vmux_core",
  "wasm-bindgen",
  "web-sys",

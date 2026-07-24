@@ -73,6 +73,12 @@ pub struct PageAgentAwaitingApproval {
 }
 
 #[derive(Message)]
+pub struct PageAgentApprovalResolved {
+    pub sid: String,
+    pub call_id: String,
+}
+
+#[derive(Message)]
 pub struct PageAgentSnapshot {
     pub sid: String,
     pub messages_json: String,

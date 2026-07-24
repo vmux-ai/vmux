@@ -126,8 +126,20 @@ impl AgentSessionManager {
 
     pub fn input(&self, sid: &str, input: SessionInput) {
         if let Some(handle) = self.sessions.get(sid) {
-            if matches!(&input, SessionInput::Approve { .. }) {
-                *handle.approval.lock().unwrap() = None;
+            if let SessionInput::Approve { call_id, .. } = &input {
+                let mut approval = handle.approval.lock().unwrap();
+                if approval
+                    .as_ref()
+                    .is_some_and(|pending| pending.call_id == *call_id)
+                {
+                    *approval = None;
+                    let _ = handle
+                        .stream_tx
+                        .send(ServiceMessage::AgentApprovalResolved {
+                            sid: sid.to_string(),
+                            call_id: call_id.clone(),
+                        });
+                }
             }
             let _ = handle.input_tx.send(input);
         }
@@ -613,6 +625,44 @@ mod tests {
         assert_eq!(session.name, "openai");
         assert_eq!(session.model.as_deref(), Some("gpt-test"));
         assert_eq!(session.cwd, "/tmp/project");
+        mgr.close("s");
+    }
+
+    #[tokio::test]
+    async fn approval_resolution_is_broadcast_immediately() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "gpt-test".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+        let handle = mgr.sessions.get("s").unwrap();
+        *handle.approval.lock().unwrap() = Some(RemoteApproval {
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args_json: "{}".into(),
+        });
+        let mut receiver = mgr.subscribe("s").unwrap();
+
+        mgr.input(
+            "s",
+            SessionInput::Approve {
+                call_id: "call-1".into(),
+                decision: ApprovalDecision::Allow,
+            },
+        );
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(ServiceMessage::AgentApprovalResolved { sid, call_id })
+                if sid == "s" && call_id == "call-1"
+        ));
+        assert!(mgr.remote_session("s").unwrap().approval.is_none());
         mgr.close("s");
     }
 }

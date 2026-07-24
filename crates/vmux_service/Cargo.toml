@@ -42,6 +42,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 crossbeam-channel = "0.5"
 futures-util = "0.3"
 axum = "0.8"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_core = { path = "../vmux_core" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_service_client = { path = "../vmux_service_client" }
