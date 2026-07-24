@@ -47,7 +47,7 @@ pub enum RepositoryVisibility {
 struct GhRepository {
     name_with_owner: String,
     is_private: bool,
-    ssh_url: String,
+    url: String,
     is_empty: bool,
 }
 
@@ -71,6 +71,77 @@ pub fn status_with_repositories() -> VaultStatus {
         }
     }
     status
+}
+
+pub fn connect_github() -> Result<String, String> {
+    if Command::new("gh")
+        .args(["auth", "status", "--hostname", "github.com"])
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?
+        .status
+        .success()
+    {
+        return Ok("GitHub connected".to_string());
+    }
+    command_success(
+        Command::new("gh")
+            .args([
+                "auth",
+                "login",
+                "--hostname",
+                "github.com",
+                "--git-protocol",
+                "https",
+                "--web",
+                "--clipboard",
+            ])
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?,
+    )?;
+    Ok("GitHub connected".to_string())
+}
+
+pub fn connect_folder(folder: &Path) -> Result<String, String> {
+    connect_folder_in(&root_dir(), folder)
+}
+
+pub fn connect_folder_in(root: &Path, folder: &Path) -> Result<String, String> {
+    let remote = if folder
+        .extension()
+        .is_some_and(|extension| extension == "git")
+    {
+        folder.to_path_buf()
+    } else {
+        folder.join("vmux-vault.git")
+    };
+    if remote.exists() {
+        let remote_arg = remote.to_string_lossy().into_owned();
+        let bare = command_success(
+            Command::new("git")
+                .args([
+                    "--git-dir",
+                    &remote_arg,
+                    "rev-parse",
+                    "--is-bare-repository",
+                ])
+                .output()
+                .map_err(|error| format!("failed to run git: {error}"))?,
+        )?;
+        if bare != "true" {
+            return Err("selected folder is not a Vault repository".to_string());
+        }
+    } else {
+        std::fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        let remote_arg = remote.to_string_lossy().into_owned();
+        command_success(
+            Command::new("git")
+                .args(["init", "--bare", &remote_arg])
+                .output()
+                .map_err(|error| format!("failed to run git: {error}"))?,
+        )?;
+    }
+    connect_remote_in(root, &remote.to_string_lossy())?;
+    Ok(remote.to_string_lossy().into_owned())
 }
 
 pub fn status_in(root: &Path) -> VaultStatus {
@@ -363,7 +434,7 @@ fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), 
                 "--limit",
                 "100",
                 "--json",
-                "nameWithOwner,isPrivate,sshUrl,isEmpty",
+                "nameWithOwner,isPrivate,url,isEmpty",
             ])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
@@ -373,7 +444,7 @@ fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), 
         .into_iter()
         .map(|repository| VaultRepository {
             name: repository.name_with_owner,
-            url: repository.ssh_url,
+            url: repository.url,
             private: repository.is_private,
             empty: repository.is_empty,
         })
@@ -518,6 +589,35 @@ mod tests {
             git(root.path(), &["status", "--porcelain"])
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn cloud_folder_creates_and_connects_a_bare_vault_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let cloud = tempfile::tempdir().unwrap();
+        git(root.path(), &["init", "-b", "main"]).unwrap();
+        configure_identity(root.path());
+
+        let remote = connect_folder_in(root.path(), cloud.path()).unwrap();
+
+        assert_eq!(
+            git(root.path(), &["remote", "get-url", "origin"]).unwrap(),
+            remote
+        );
+        assert_eq!(
+            command_success(
+                Command::new("git")
+                    .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository",])
+                    .output()
+                    .unwrap(),
+            )
+            .unwrap(),
+            "true"
+        );
+        assert_eq!(
+            git(root.path(), &["rev-list", "--count", "origin/main"]).unwrap(),
+            "1"
         );
     }
 

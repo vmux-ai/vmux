@@ -9739,6 +9739,7 @@ dependencies = [
  "objc2-user-notifications 0.3.2",
  "parking_lot",
  "raw-window-handle",
+ "rfd",
  "ron 0.8.1",
  "semver",
  "serde",

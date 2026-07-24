@@ -213,7 +213,7 @@ fn on_vault_refresh_request(
 ) {
     state.subscribers.insert(trigger.event().webview, 0);
     state.dirty = true;
-    state.load_vault_repositories = true;
+    state.load_vault_repositories |= trigger.event().payload.load_repositories;
     state.generation = state.generation.wrapping_add(1);
 }
 
@@ -244,6 +244,7 @@ fn start_vault_action(
     tasks: Query<(), With<VaultActionTask>>,
     tool_tasks: Query<(), With<ToolActionTask>>,
     scans: Query<(), With<ToolsScanTask>>,
+    proxy: Option<Res<bevy::winit::EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     if !tasks.is_empty() || !tool_tasks.is_empty() || !scans.is_empty() {
@@ -253,7 +254,14 @@ fn start_vault_action(
         return;
     };
     let task_request = request.clone();
-    let task = IoTaskPool::get().spawn(async move { perform_vault_action(&task_request) });
+    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let task = IoTaskPool::get().spawn(async move {
+        let result = perform_vault_action(&task_request).await;
+        if let Some(wake) = wake {
+            let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+        }
+        result
+    });
     commands.spawn(VaultActionTask {
         target,
         request,
@@ -376,7 +384,7 @@ fn drain_vault_actions(
             ));
         }
         state.dirty = true;
-        state.load_vault_repositories = true;
+        state.load_vault_repositories |= task.request.action == VaultAction::ConnectGithub;
         state.generation = state.generation.wrapping_add(1);
     }
 }
@@ -1051,7 +1059,7 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
     }
 }
 
-fn perform_vault_action(request: &VaultActionRequest) -> Result<String, String> {
+async fn perform_vault_action(request: &VaultActionRequest) -> Result<String, String> {
     match request.action {
         VaultAction::Create => vmux_core::profile::vault::create_remote(
             &request.repository,
@@ -1063,6 +1071,22 @@ fn perform_vault_action(request: &VaultActionRequest) -> Result<String, String> 
         ),
         VaultAction::Connect => vmux_core::profile::vault::connect_remote(&request.repository),
         VaultAction::Sync => vmux_core::profile::vault::sync(),
+        VaultAction::ConnectGithub => vmux_core::profile::vault::connect_github(),
+        VaultAction::ConnectFolder => {
+            let initial_dir = std::env::var_os("HOME")
+                .map(std::path::PathBuf::from)
+                .map(|home| home.join("Library/CloudStorage"))
+                .filter(|path| path.is_dir())
+                .or_else(|| std::env::var_os("HOME").map(std::path::PathBuf::from));
+            let mut dialog = rfd::AsyncFileDialog::new();
+            if let Some(initial_dir) = initial_dir {
+                dialog = dialog.set_directory(initial_dir);
+            }
+            let Some(folder) = dialog.pick_folder().await else {
+                return Err(String::new());
+            };
+            vmux_core::profile::vault::connect_folder(folder.path())
+        }
     }
 }
 

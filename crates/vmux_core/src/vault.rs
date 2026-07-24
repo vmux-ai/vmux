@@ -56,7 +56,10 @@ pub struct VaultRepository {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct VaultRefreshRequest;
+pub struct VaultRefreshRequest {
+    #[serde(default)]
+    pub load_repositories: bool,
+}
 
 #[derive(
     Clone,
@@ -74,6 +77,8 @@ pub enum VaultAction {
     Create,
     Connect,
     Sync,
+    ConnectGithub,
+    ConnectFolder,
 }
 
 #[derive(

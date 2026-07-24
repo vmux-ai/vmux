@@ -82,6 +82,7 @@ parking_lot = "0.12"
 bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
+rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
