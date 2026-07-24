@@ -5,6 +5,7 @@ pub mod notify;
 pub mod notify_file_touch;
 pub mod notify_turn_end;
 pub mod open;
+pub mod remote;
 pub mod service;
 pub mod tools;
 pub mod vault_key;
@@ -53,4 +54,6 @@ pub enum Command {
     Service(service::ServiceArgs),
     #[command(hide = true)]
     VaultKey(vault_key::VaultKeyArgs),
+    /// Expose active agent chats to a paired phone over Tailscale
+    Remote(remote::RemoteArgs),
 }

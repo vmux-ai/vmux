@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::{Mutex, broadcast, mpsc};
 
@@ -9,6 +10,7 @@ use crate::protocol::{
     AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
 };
 use crate::providers::{anthropic, mistral, openai};
+use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
 
 pub struct PageProvider {
@@ -56,6 +58,12 @@ pub struct SessionHandle {
     pub stream_tx: broadcast::Sender<ServiceMessage>,
     pub messages: Arc<Mutex<Vec<Message>>>,
     pub task: tokio::task::JoinHandle<()>,
+    provider: String,
+    model: String,
+    cwd: String,
+    status: Arc<StdMutex<AgentRunStatus>>,
+    approval: Arc<StdMutex<Option<RemoteApproval>>>,
+    created_at_ms: u64,
 }
 
 #[derive(Default)]
@@ -70,6 +78,7 @@ impl AgentSessionManager {
         sid: String,
         provider_name: &str,
         model: String,
+        cwd: String,
         tools: Vec<ToolDef>,
         auto_tools: HashSet<String>,
         broker: AgentBroker,
@@ -82,16 +91,20 @@ impl AgentSessionManager {
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let (stream_tx, _) = broadcast::channel(256);
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let status = Arc::new(StdMutex::new(AgentRunStatus::Idle));
+        let approval = Arc::new(StdMutex::new(None));
         let task = tokio::spawn(run_session(
             sid.clone(),
             provider,
-            model,
+            model.clone(),
             tools,
             auto_tools,
             input_rx,
             stream_tx.clone(),
             broker,
             messages.clone(),
+            status.clone(),
+            approval.clone(),
         ));
         self.sessions.insert(
             sid,
@@ -100,6 +113,12 @@ impl AgentSessionManager {
                 stream_tx,
                 messages,
                 task,
+                provider: provider_name.to_string(),
+                model,
+                cwd,
+                status,
+                approval,
+                created_at_ms: now_ms(),
             },
         );
         Ok(())
@@ -107,6 +126,9 @@ impl AgentSessionManager {
 
     pub fn input(&self, sid: &str, input: SessionInput) {
         if let Some(handle) = self.sessions.get(sid) {
+            if matches!(&input, SessionInput::Approve { .. }) {
+                *handle.approval.lock().unwrap() = None;
+            }
             let _ = handle.input_tx.send(input);
         }
     }
@@ -120,11 +142,49 @@ impl AgentSessionManager {
         Some(snapshot_message(sid, &handle.messages).await)
     }
 
+    pub async fn remote_messages(&self, sid: &str) -> Option<Vec<Message>> {
+        let handle = self.sessions.get(sid)?;
+        Some(handle.messages.lock().await.clone())
+    }
+
+    pub fn remote_sessions(&self) -> Vec<RemoteSession> {
+        self.sessions
+            .iter()
+            .map(|(sid, handle)| remote_session(sid, handle))
+            .collect()
+    }
+
+    pub fn remote_session(&self, sid: &str) -> Option<RemoteSession> {
+        self.sessions
+            .get(sid)
+            .map(|handle| remote_session(sid, handle))
+    }
+
     pub fn close(&mut self, sid: &str) {
         if let Some(handle) = self.sessions.remove(sid) {
             let _ = handle.input_tx.send(SessionInput::Close);
             handle.task.abort();
         }
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
+    RemoteSession {
+        sid: sid.to_string(),
+        name: handle.provider.clone(),
+        runtime: "page".to_string(),
+        model: Some(handle.model.clone()),
+        cwd: handle.cwd.clone(),
+        status: RemoteStatus::from(&*handle.status.lock().unwrap()),
+        approval: handle.approval.lock().unwrap().clone(),
+        created_at_ms: handle.created_at_ms,
     }
 }
 
@@ -219,6 +279,8 @@ async fn run_session(
     stream_tx: broadcast::Sender<ServiceMessage>,
     broker: AgentBroker,
     messages: Arc<Mutex<Vec<Message>>>,
+    status: Arc<StdMutex<AgentRunStatus>>,
+    approval: Arc<StdMutex<Option<RemoteApproval>>>,
 ) {
     let api_key: Option<String> = if provider.env_var.is_empty() {
         Some(String::new())
@@ -236,10 +298,13 @@ async fn run_session(
             .push(Message::user_with_attachments(text, attachments));
 
         let Some(key) = api_key.as_deref() else {
-            let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                sid: sid.clone(),
-                status: AgentRunStatus::Errored(format!("Missing {}", provider.env_var)),
-            });
+            emit_status(
+                &sid,
+                AgentRunStatus::Errored(format!("Missing {}", provider.env_var)),
+                &stream_tx,
+                &status,
+                &approval,
+            );
             continue;
         };
 
@@ -248,10 +313,13 @@ async fn run_session(
                 let msgs = messages.lock().await;
                 (provider.build_request)(&model, msgs.as_slice(), &tools, key)
             };
-            let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                sid: sid.clone(),
-                status: AgentRunStatus::Streaming,
-            });
+            emit_status(
+                &sid,
+                AgentRunStatus::Streaming,
+                &stream_tx,
+                &status,
+                &approval,
+            );
 
             let (mut ev_rx, http) = spawn_sse(request, provider.parse_sse);
             let mut blocks: Vec<AssistantBlock> = Vec::new();
@@ -331,28 +399,31 @@ async fn run_session(
             }
             if cancelled {
                 let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
-                let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                    sid: sid.clone(),
-                    status: AgentRunStatus::Interrupted,
-                });
+                emit_status(
+                    &sid,
+                    AgentRunStatus::Interrupted,
+                    &stream_tx,
+                    &status,
+                    &approval,
+                );
                 break;
             }
 
             if let Some(msg) = errored {
-                let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                    sid: sid.clone(),
-                    status: AgentRunStatus::Errored(msg),
-                });
+                emit_status(
+                    &sid,
+                    AgentRunStatus::Errored(msg),
+                    &stream_tx,
+                    &status,
+                    &approval,
+                );
                 break;
             }
 
             let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
 
             let Some((call_id, name, args)) = pending_tool else {
-                let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                    sid: sid.clone(),
-                    status: AgentRunStatus::Idle,
-                });
+                emit_status(&sid, AgentRunStatus::Idle, &stream_tx, &status, &approval);
                 break;
             };
 
@@ -363,6 +434,12 @@ async fn run_session(
             };
 
             if !auto_tools.contains(&name) {
+                let next_approval = RemoteApproval {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    args_json: args_json.clone(),
+                };
+                *approval.lock().unwrap() = Some(next_approval.clone());
                 let _ = stream_tx.send(ServiceMessage::AgentAwaitingApproval {
                     sid: sid.clone(),
                     call_id: call_id.clone(),
@@ -372,13 +449,17 @@ async fn run_session(
                 match await_decision(&mut input_rx, &call_id).await {
                     Decision::Closed => return,
                     Decision::Cancelled => {
-                        let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
-                            sid: sid.clone(),
-                            status: AgentRunStatus::Interrupted,
-                        });
+                        emit_status(
+                            &sid,
+                            AgentRunStatus::Interrupted,
+                            &stream_tx,
+                            &status,
+                            &approval,
+                        );
                         break;
                     }
                     Decision::Deny => {
+                        *approval.lock().unwrap() = None;
                         messages.lock().await.push(Message::ToolResult {
                             call_id,
                             content: "Tool call denied by user.".to_string(),
@@ -386,7 +467,7 @@ async fn run_session(
                         });
                         continue;
                     }
-                    Decision::Allow => {}
+                    Decision::Allow => *approval.lock().unwrap() = None,
                 }
             }
 
@@ -405,6 +486,23 @@ async fn run_session(
             let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
         }
     }
+}
+
+fn emit_status(
+    sid: &str,
+    next: AgentRunStatus,
+    stream_tx: &broadcast::Sender<ServiceMessage>,
+    status: &StdMutex<AgentRunStatus>,
+    approval: &StdMutex<Option<RemoteApproval>>,
+) {
+    if !matches!(next, AgentRunStatus::Streaming) {
+        *approval.lock().unwrap() = None;
+    }
+    *status.lock().unwrap() = next.clone();
+    let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
+        sid: sid.to_string(),
+        status: next,
+    });
 }
 
 #[cfg(test)]
@@ -436,6 +534,7 @@ mod tests {
             "s".to_string(),
             "anthropic",
             "m".to_string(),
+            "/tmp/project".to_string(),
             Vec::new(),
             HashSet::new(),
             test_broker(),
@@ -458,6 +557,7 @@ mod tests {
             "s".into(),
             "openai",
             "m".into(),
+            "/tmp/project".into(),
             Vec::new(),
             HashSet::new(),
             test_broker(),
@@ -467,6 +567,7 @@ mod tests {
             "s".into(),
             "openai",
             "m".into(),
+            "/tmp/project".into(),
             Vec::new(),
             HashSet::new(),
             test_broker(),
@@ -484,11 +585,34 @@ mod tests {
                 "s".into(),
                 "bogus",
                 "m".into(),
+                "/tmp/project".into(),
                 Vec::new(),
                 HashSet::new(),
                 test_broker(),
             )
             .unwrap_err();
         assert!(err.contains("bogus"));
+    }
+
+    #[tokio::test]
+    async fn remote_summary_exposes_active_session() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "gpt-test".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+
+        let session = mgr.remote_session("s").unwrap();
+
+        assert_eq!(session.name, "openai");
+        assert_eq!(session.model.as_deref(), Some("gpt-test"));
+        assert_eq!(session.cwd, "/tmp/project");
+        mgr.close("s");
     }
 }

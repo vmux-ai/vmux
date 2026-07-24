@@ -110,6 +110,7 @@ web_pages! {
     render_error: "error" => vmux_layout::error_page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,
     render_services: "services" => vmux_service::page::Page,
+    render_remote: "remote" => vmux_service::remote::page::Page,
     render_history: "history" => vmux_history::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
     render_team: "team" => vmux_team::page::Page,
@@ -148,10 +149,12 @@ fn current_host() -> String {
 
 #[cfg(any(test, all(target_arch = "wasm32", feature = "web")))]
 fn host_for(protocol: &str, host: &str) -> String {
-    if protocol == "file:" {
-        "files".to_string()
-    } else if protocol == "https:" && host == "vault.vmux.ai" {
+    if protocol == "https:" && host == "vault.vmux.ai" {
         "vault".to_string()
+    } else if matches!(protocol, "http:" | "https:") {
+        "remote".to_string()
+    } else if protocol == "file:" {
+        "files".to_string()
     } else {
         host.to_string()
     }
@@ -165,8 +168,9 @@ mod host_tests {
     fn files_protocol_routes_to_files_host() {
         assert_eq!(host_for("file:", ""), "files");
         assert_eq!(host_for("vmux:", "terminal"), "terminal");
-        assert_eq!(host_for("https:", "example.com"), "example.com");
         assert_eq!(host_for("https:", "vault.vmux.ai"), "vault");
+        assert_eq!(host_for("https:", "example.com"), "remote");
+        assert_eq!(host_for("https:", "mac.example.ts.net"), "remote");
     }
 }
 
