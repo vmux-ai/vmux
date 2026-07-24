@@ -1074,35 +1074,34 @@ struct PairCardProps {
 #[component]
 fn PairCard(props: PairCardProps) -> Element {
     rsx! {
-        div { class: "mt-8 w-full rounded-3xl border border-white/10 bg-white/[0.035] p-5 shadow-lg shadow-black/20",
-                h1 { class: "text-2xl font-semibold tracking-tight", "Pair with your Mac" }
-                p { class: "mt-2 text-sm leading-6 text-zinc-500", "Enable Remote on your Mac and scan its QR code. You can also paste the pairing URL." }
-                form {
-                    class: "mt-6 flex flex-col gap-3",
-                    onsubmit: move |event| {
-                        event.prevent_default();
-                        props.on_pair.call(());
-                    },
-                    input {
-                        class: "h-14 rounded-xl border border-white/10 bg-black/30 px-4 font-mono text-base text-white outline-none placeholder:text-zinc-600 focus:border-violet-400/60",
-                        r#type: "url",
-                        inputmode: "url",
-                        autocomplete: "off",
-                        autocapitalize: "none",
-                        placeholder: "http://127.0.0.1:54821/#token=…",
-                        value: "{props.value}",
-                        oninput: move |event| props.on_value.call(event.value()),
-                    }
-                    if !props.error.is_empty() {
-                        p { class: "text-sm leading-5 text-red-300", "{props.error}" }
-                    }
-                    button {
-                        class: "h-13 rounded-xl bg-white font-semibold text-black disabled:opacity-50 active:scale-[0.99]",
-                        r#type: "submit",
-                        disabled: props.pairing,
-                        if props.pairing { "Pairing…" } else { "Pair" }
-                    }
+        div { class: "mt-8 w-full",
+            p { class: "mb-3 text-center text-xs text-zinc-500", "Paste the pairing link from Remote on your Mac" }
+            form {
+                class: "flex items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.035] p-2",
+                onsubmit: move |event| {
+                    event.prevent_default();
+                    props.on_pair.call(());
+                },
+                input {
+                    class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-sm text-white outline-none placeholder:text-zinc-600",
+                    r#type: "url",
+                    inputmode: "url",
+                    autocomplete: "off",
+                    autocapitalize: "none",
+                    placeholder: "Pairing link",
+                    value: "{props.value}",
+                    oninput: move |event| props.on_value.call(event.value()),
                 }
+                button {
+                    class: "h-10 shrink-0 rounded-xl bg-white px-4 text-sm font-semibold text-black disabled:opacity-50 active:scale-[0.99]",
+                    r#type: "submit",
+                    disabled: props.pairing,
+                    if props.pairing { "Pairing…" } else { "Connect" }
+                }
+            }
+            if !props.error.is_empty() {
+                p { class: "mt-2 px-2 text-xs leading-5 text-red-300", "{props.error}" }
+            }
         }
     }
 }
