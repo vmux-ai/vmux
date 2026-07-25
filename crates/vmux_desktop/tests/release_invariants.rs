@@ -3,12 +3,29 @@
 // share a stable codesigning identity, and that the local app and debug binary
 // share the bundle identifier so Chromium safe-storage ACL covers both flows.
 
+const CHROMIUM_WEBAUTHN_KEYCHAIN_GROUP: &str = "<string>.org.chromium.Chromium.webauthn</string>";
+
 #[test]
 fn startup_does_not_mutate_chromium_safe_storage_acl() {
     let source = include_str!("../src/main.rs");
     let symbol = ["ensure_chromium_safe_storage", "_acl("].concat();
 
     assert!(!source.contains(&symbol));
+}
+
+#[test]
+fn macos_signing_entitlements_allow_chromium_webauthn_keychain_group() {
+    for entitlements in [
+        include_str!("../../../packaging/macos/Vmux.entitlements"),
+        include_str!("../../../packaging/macos/VmuxDev.entitlements"),
+    ] {
+        assert_eq!(
+            entitlements
+                .matches(CHROMIUM_WEBAUTHN_KEYCHAIN_GROUP)
+                .count(),
+            1
+        );
+    }
 }
 
 #[test]
