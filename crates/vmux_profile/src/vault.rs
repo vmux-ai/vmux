@@ -85,14 +85,14 @@ pub fn status_with_repositories() -> VaultStatus {
 }
 
 pub fn connect_github() -> Result<String, String> {
-    if gh_command()?
-        .args(["api", "user", "--jq", ".login"])
-        .output()
-        .map_err(|error| format!("failed to run gh: {error}"))?
-        .status
-        .success()
-    {
-        return Ok("GitHub connected".to_string());
+    let existing_login = command_success(
+        gh_command()?
+            .args(["api", "user", "--jq", ".login"])
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?,
+    );
+    if let Ok(login) = existing_login {
+        return Ok(login);
     }
     let has_saved_account = github_has_saved_account()?;
     let mut command = gh_command()?;
@@ -116,13 +116,13 @@ pub fn connect_github() -> Result<String, String> {
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
-    command_success(
+    let login = command_success(
         gh_command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
-    Ok("GitHub connected".to_string())
+    Ok(login)
 }
 
 pub fn connect_folder(folder: &Path) -> Result<String, String> {

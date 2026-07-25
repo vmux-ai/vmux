@@ -42,6 +42,7 @@ pub struct ToolsPlugin;
 #[derive(Resource)]
 struct ToolsState {
     dirty: bool,
+    full_scan: bool,
     refresh_catalogs: bool,
     load_vault_repositories: bool,
     generation: u64,
@@ -55,6 +56,7 @@ impl Default for ToolsState {
     fn default() -> Self {
         Self {
             dirty: true,
+            full_scan: true,
             refresh_catalogs: false,
             load_vault_repositories: false,
             generation: 1,
@@ -181,6 +183,7 @@ fn on_refresh_request(trigger: On<BinReceive<ToolsRefreshRequest>>, mut state: R
     state.subscribers.insert(trigger.event().webview, 0);
     if request.refresh || !state.loaded {
         state.dirty = true;
+        state.full_scan = true;
         state.refresh_catalogs |= request.refresh;
         state.generation = state.generation.wrapping_add(1);
     }
@@ -213,6 +216,7 @@ fn on_vault_refresh_request(
 ) {
     state.subscribers.insert(trigger.event().webview, 0);
     state.dirty = true;
+    state.full_scan |= !state.loaded;
     state.load_vault_repositories |= trigger.event().payload.load_repositories;
     state.generation = state.generation.wrapping_add(1);
 }
@@ -288,14 +292,26 @@ fn start_tools_scan(
         return;
     }
     let generation = state.generation;
+    let full_scan = state.full_scan;
     let refresh_catalogs = state.refresh_catalogs;
     let load_vault_repositories = state.load_vault_repositories;
-    let previous_vault = state.snapshot.vault.clone();
+    let previous_snapshot = state.snapshot.clone();
     state.dirty = false;
+    state.full_scan = false;
     state.refresh_catalogs = false;
     state.load_vault_repositories = false;
     let task = IoTaskPool::get().spawn(async move {
-        scan_tools(refresh_catalogs, load_vault_repositories, previous_vault)
+        if full_scan {
+            scan_tools(
+                refresh_catalogs,
+                load_vault_repositories,
+                previous_snapshot.vault,
+            )
+        } else {
+            let mut snapshot = previous_snapshot;
+            snapshot.vault = scan_vault(load_vault_repositories, snapshot.vault);
+            snapshot
+        }
     });
     commands.spawn(ToolsScanTask { generation, task });
 }
@@ -351,6 +367,7 @@ fn drain_tool_actions(
         }
         if success {
             state.dirty = true;
+            state.full_scan = true;
             state.generation = state.generation.wrapping_add(1);
         }
     }
@@ -384,6 +401,7 @@ fn drain_vault_actions(
             ));
         }
         state.dirty = true;
+        state.full_scan |= !state.loaded;
         state.load_vault_repositories |= task.request.action == VaultAction::ConnectGithub;
         state.generation = state.generation.wrapping_add(1);
     }

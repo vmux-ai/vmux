@@ -29,19 +29,25 @@ pub fn Page() -> Element {
 
     let _snapshot_listener =
         use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+            if pending() == Some(VaultAction::ConnectGithub)
+                && (!event.vault.github_owner.is_empty() || !event.vault.error.is_empty())
+            {
+                pending.set(None);
+            }
             snapshot.set(event);
             loaded.set(true);
         });
     let _action_listener =
         use_bin_event_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |result| {
-            pending.set(None);
             if result.action == VaultAction::ConnectGithub && result.success {
+                let mut current = snapshot();
+                current.vault.github_owner = result.message.clone();
+                current.vault.error.clear();
+                snapshot.set(current);
                 notice.set(None);
-                loaded.set(false);
-                request_snapshot(true);
             } else {
+                pending.set(None);
                 notice.set(Some(result));
-                request_snapshot(false);
             }
         });
 
@@ -207,11 +213,16 @@ fn VaultPanel(
                             }
                         }
                         if !vault.github_owner.is_empty() {
-                            div { class: "mt-3 text-[10px] text-emerald-700 dark:text-emerald-300",
-                                {translate_with(
-                                    "vault-connected-as",
-                                    &[("name", TranslationValue::String(&vault.github_owner))],
-                                )}
+                            div { class: "mt-3 flex items-center gap-2 text-[10px] text-emerald-700 dark:text-emerald-300",
+                                span {
+                                    {translate_with(
+                                        "vault-connected-as",
+                                        &[("name", TranslationValue::String(&vault.github_owner))],
+                                    )}
+                                }
+                                if pending() == Some(VaultAction::ConnectGithub) {
+                                    span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                }
                             }
                             div { class: "mt-3 flex gap-2",
                                 select {
