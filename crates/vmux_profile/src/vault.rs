@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 #[cfg(not(target_os = "macos"))]
 use std::sync::{Mutex, OnceLock};
 use std::thread;
+use std::time::Duration;
 
 use ring::aead;
 use ring::digest;
@@ -249,9 +250,10 @@ pub fn status_with_repositories() -> VaultStatus {
     status
 }
 
-pub fn connect_github_with_progress<F>(mut progress: F) -> Result<String, String>
+pub fn connect_github_with_progress<F, C>(mut progress: F, canceled: C) -> Result<String, String>
 where
     F: FnMut(String),
+    C: Fn() -> bool,
 {
     let has_saved_account = github_has_saved_account()?;
     let mut command = gh_command()?;
@@ -277,7 +279,10 @@ where
             "--skip-ssh-key",
         ]);
     }
-    run_github_auth(&mut command, &mut progress)?;
+    run_github_auth(&mut command, &mut progress, &canceled)?;
+    if canceled() {
+        return Err("GitHub authorization canceled".to_string());
+    }
     command_success(
         gh_command()?
             .args(["api", "user", "--jq", ".login"])
@@ -286,9 +291,14 @@ where
     )
 }
 
-fn run_github_auth<F>(command: &mut Command, progress: &mut F) -> Result<(), String>
+fn run_github_auth<F, C>(
+    command: &mut Command,
+    progress: &mut F,
+    canceled: &C,
+) -> Result<(), String>
 where
     F: FnMut(String),
+    C: Fn() -> bool,
 {
     let mut child = command
         .env("BROWSER", "/usr/bin/true")
@@ -310,18 +320,42 @@ where
     let stderr_reader = spawn_line_reader(stderr, sender);
     let mut lines = Vec::new();
     let mut reported_code = false;
-    while let Ok(line) = receiver.recv() {
+    let status = loop {
+        if canceled() {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err("GitHub authorization canceled".to_string());
+        }
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(line) => {
+                if !reported_code && let Some(code) = github_device_code(&line) {
+                    progress(code);
+                    reported_code = true;
+                }
+                lines.push(line);
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {}
+        }
+        match child
+            .try_wait()
+            .map_err(|error| format!("failed to wait for gh: {error}"))?
+        {
+            Some(status) => break status,
+            None => continue,
+        }
+    };
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    for line in receiver.try_iter() {
         if !reported_code && let Some(code) = github_device_code(&line) {
             progress(code);
             reported_code = true;
         }
         lines.push(line);
     }
-    let status = child
-        .wait()
-        .map_err(|error| format!("failed to wait for gh: {error}"))?;
-    let _ = stdout_reader.join();
-    let _ = stderr_reader.join();
     if status.success() {
         Ok(())
     } else {
@@ -2172,9 +2206,31 @@ mod tests {
         ]);
         let mut codes = Vec::new();
 
-        run_github_auth(&mut command, &mut |code| codes.push(code)).unwrap();
+        run_github_auth(&mut command, &mut |code| codes.push(code), &|| false).unwrap();
 
         assert_eq!(codes, vec!["ABCD-1234"]);
+    }
+
+    #[test]
+    fn github_auth_can_be_canceled() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'One-time code (ABCD-1234) copied to clipboard\\n' >&2; exec sleep 10",
+        ]);
+        let canceled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel = canceled.clone();
+        let canceler = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+
+        let result = run_github_auth(&mut command, &mut |_| {}, &|| {
+            canceled.load(std::sync::atomic::Ordering::Relaxed)
+        });
+        canceler.join().unwrap();
+
+        assert_eq!(result, Err("GitHub authorization canceled".to_string()));
     }
 
     #[test]

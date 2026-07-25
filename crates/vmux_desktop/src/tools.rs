@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use bevy::prelude::*;
@@ -92,6 +94,7 @@ struct VaultActionTask {
     request: VaultActionRequest,
     task: Task<Result<String, String>>,
     progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
+    canceled: Arc<AtomicBool>,
 }
 
 #[derive(Resource, Default)]
@@ -207,10 +210,27 @@ fn on_vault_action_request(
     trigger: On<BinReceive<VaultActionRequest>>,
     mut state: ResMut<ToolsState>,
     mut queue: ResMut<VaultActionQueue>,
+    tasks: Query<&VaultActionTask>,
 ) {
     let target = trigger.event().webview;
+    let request = trigger.event().payload.clone();
     state.subscribers.insert(target, 0);
-    queue.0.push_back((target, trigger.event().payload.clone()));
+    if tasks
+        .iter()
+        .any(|task| task.request.action == VaultAction::ConnectGithub)
+    {
+        for task in &tasks {
+            if task.request.action == VaultAction::ConnectGithub {
+                task.canceled.store(true, Ordering::Relaxed);
+            }
+        }
+        queue.0.clear();
+    } else if request.action == VaultAction::ConnectGithub {
+        queue
+            .0
+            .retain(|(_, queued)| queued.action != VaultAction::ConnectGithub);
+    }
+    queue.0.push_back((target, request));
 }
 
 fn on_vault_refresh_request(
@@ -264,14 +284,20 @@ fn start_vault_action(
     let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
     let progress_wake = completion_wake.clone();
     let (progress_sender, progress_receiver) = mpsc::channel();
+    let canceled = Arc::new(AtomicBool::new(false));
+    let task_canceled = canceled.clone();
     let task = IoTaskPool::get().spawn(async move {
-        let result = perform_vault_action(&task_request, move |progress| {
-            if progress_sender.send(progress).is_ok()
-                && let Some(wake) = &progress_wake
-            {
-                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        })
+        let result = perform_vault_action(
+            &task_request,
+            move |progress| {
+                if progress_sender.send(progress).is_ok()
+                    && let Some(wake) = &progress_wake
+                {
+                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                }
+            },
+            move || task_canceled.load(Ordering::Relaxed),
+        )
         .await;
         if let Some(wake) = completion_wake {
             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
@@ -283,6 +309,7 @@ fn start_vault_action(
         request,
         task,
         progress: Mutex::new(progress_receiver),
+        canceled,
     });
 }
 
@@ -412,6 +439,9 @@ fn drain_vault_actions(
             continue;
         };
         commands.entity(entity).despawn();
+        if task.canceled.load(Ordering::Relaxed) {
+            continue;
+        }
         let (success, message) = match result {
             Ok(message) => (true, message),
             Err(message) => (false, message),
@@ -1113,12 +1143,14 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
     }
 }
 
-async fn perform_vault_action<F>(
+async fn perform_vault_action<F, C>(
     request: &VaultActionRequest,
     progress: F,
+    canceled: C,
 ) -> Result<String, String>
 where
     F: Fn(VaultAuthProgress),
+    C: Fn() -> bool,
 {
     match request.action {
         VaultAction::Create => vmux_core::profile::vault::create_remote(
@@ -1131,14 +1163,15 @@ where
         ),
         VaultAction::Connect => vmux_core::profile::vault::connect_remote(&request.repository),
         VaultAction::Sync => vmux_core::profile::vault::sync(),
-        VaultAction::ConnectGithub => {
-            vmux_core::profile::vault::connect_github_with_progress(|code| {
+        VaultAction::ConnectGithub => vmux_core::profile::vault::connect_github_with_progress(
+            |code| {
                 progress(VaultAuthProgress {
                     code,
                     url: "https://github.com/login/device".to_string(),
                 });
-            })
-        }
+            },
+            canceled,
+        ),
         VaultAction::ConnectFolder => {
             let initial_dir = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)

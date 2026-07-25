@@ -224,6 +224,8 @@ fn VaultPanel(
     } else {
         translate("vault-clean")
     };
+    let github_connected = !vault.github_owner.is_empty();
+    let github_repositories_loaded = vault.repositories_loaded;
     let provider = selected_provider();
     let authenticated = provider.is_some_and(|provider| {
         if provider.is_github() {
@@ -317,7 +319,7 @@ fn VaultPanel(
             if !is_connected {
                 div { class: "mt-5 flex flex-col gap-3",
                     VaultStep { number: 1, active: true, complete: provider.is_some(),
-                        div { class: "flex flex-wrap items-center gap-2",
+                        div { class: "flex flex-wrap items-center justify-center gap-2",
                             for option in RemoteProvider::ALL {
                                 button {
                                     class: if provider == Some(option) {
@@ -332,8 +334,17 @@ fn VaultPanel(
                                         github_device_code.set(String::new());
                                         cloud_root.set(String::new());
                                         selected_repository.set(None);
+                                        notice.set(None);
                                         if option.is_github() {
-                                            if !vault.repositories_loaded
+                                            if !github_connected {
+                                                repositories_requested.set(false);
+                                                send_action(
+                                                    pending,
+                                                    VaultAction::ConnectGithub,
+                                                    String::new(),
+                                                    true,
+                                                );
+                                            } else if !github_repositories_loaded
                                                 && !repositories_requested()
                                             {
                                                 repositories_requested.set(true);
@@ -341,6 +352,12 @@ fn VaultPanel(
                                             }
                                         } else {
                                             repository.set("vmux-vault".to_string());
+                                            send_action(
+                                                pending,
+                                                VaultAction::ConnectCloud,
+                                                option.name().to_string(),
+                                                true,
+                                            );
                                         }
                                     },
                                     ProviderIcon { provider: option }
@@ -350,9 +367,9 @@ fn VaultPanel(
                     }
                     VaultStep { number: 2, active: provider.is_some(), complete: authenticated,
                         if let Some(provider) = provider {
-                            div { class: "flex min-w-0 items-center gap-3",
+                            div { class: "flex min-w-0 flex-wrap items-center justify-center gap-3",
                                 ProviderIcon { provider }
-                                div { class: "min-w-0 flex-1",
+                                div { class: "min-w-0",
                                     if provider.is_github() && !vault.github_owner.is_empty() {
                                         div { class: "truncate text-xs text-emerald-700 dark:text-emerald-300",
                                             {translate_with(
@@ -371,46 +388,11 @@ fn VaultPanel(
                                         {github_device_code()}
                                     }
                                 }
-                                if !authenticated {
-                                    ManagerButton {
-                                        variant: ManagerButtonVariant::Primary,
-                                        disabled: pending().is_some()
-                                            || (provider.is_github() && repositories_requested()),
-                                        onclick: move |_| {
-                                            if provider.is_github() {
-                                                github_device_code.set(String::new());
-                                            }
-                                            send_action(
-                                                pending,
-                                                if provider.is_github() {
-                                                    VaultAction::ConnectGithub
-                                                } else {
-                                                    VaultAction::ConnectCloud
-                                                },
-                                                if provider.is_github() {
-                                                    String::new()
-                                                } else {
-                                                    provider.name().to_string()
-                                                },
-                                                true,
-                                            );
-                                        },
-                                        if pending().is_some_and(|action| {
-                                            action == VaultAction::ConnectGithub
-                                                || action == VaultAction::ConnectCloud
-                                        }) || (provider.is_github() && repositories_requested()) {
-                                            span { class: "flex items-center gap-2",
-                                                span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
-                                                {translate("common-loading")}
-                                            }
-                                        } else {
-                                            if provider.is_github() {
-                                                {translate("vault-connect-github")}
-                                            } else {
-                                                {translate("vault-choose-folder")}
-                                            }
-                                        }
-                                    }
+                                if pending().is_some_and(|action| {
+                                    action == VaultAction::ConnectGithub
+                                        || action == VaultAction::ConnectCloud
+                                }) || (provider.is_github() && repositories_requested()) {
+                                    span { class: "h-3.5 w-3.5 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground/70" }
                                 }
                             }
                         } else {
