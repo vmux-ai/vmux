@@ -28,7 +28,7 @@ The side sheet and dedicated Vault page expose setup and status.
 Setup is a progressive three-step flow:
 
 1. Pick remote storage: GitHub, Google Drive, Dropbox, or OneDrive.
-2. Connect the account. GitHub uses `gh` authentication; cloud folders use the provider's signed-in desktop sync client.
+2. Connect the account. GitHub opens GitHub.com browser authorization through `gh`; cloud folders use the provider's signed-in desktop sync client.
 3. Create a new remote location or choose an existing repository/folder.
 
 - Create a GitHub repository. Default name: `vmux-vault`.
@@ -82,7 +82,7 @@ key. Multiple Bitwarden, Apple Passwords, Google Password Manager, or other PRF-
 wrap the same master key. Providers without PRF support are rejected for encryption rather than
 silently creating an unusable recipient.
 
-GitHub authentication and repository creation use the installed `gh` CLI. Git credentials remain outside the Vault.
+GitHub authentication and repository creation use the installed `gh` CLI with a vmux-owned `GH_CONFIG_DIR` in Application Support. The browser authorization is separate from the user's global `gh` login. Git credentials remain outside the Vault.
 
 ## Safety
 

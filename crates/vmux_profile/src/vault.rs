@@ -24,6 +24,7 @@ const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
 const PASSKEY_KDF_PREFIX: &[u8] = b"vmux-vault-passkey-kdf-v1\0";
 const PASSKEY_PRF_PREFIX: &[u8] = b"vmux-vault-passkey-prf-v1\0";
+const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 #[cfg(not(target_os = "macos"))]
@@ -89,6 +90,34 @@ struct GhAuthStatus {
 #[derive(Deserialize)]
 struct GhAuthAccount {
     login: String,
+}
+
+#[derive(Deserialize)]
+struct GhViewerResponse {
+    data: GhViewerData,
+}
+
+#[derive(Deserialize)]
+struct GhViewerData {
+    viewer: GhViewer,
+}
+
+#[derive(Deserialize)]
+struct GhViewer {
+    login: String,
+    organizations: GhOrganizations,
+}
+
+#[derive(Deserialize)]
+struct GhOrganizations {
+    nodes: Vec<GhOrganization>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhOrganization {
+    login: String,
+    viewer_can_create_repositories: bool,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -218,19 +247,17 @@ pub fn status_with_repositories() -> VaultStatus {
 }
 
 pub fn connect_github() -> Result<String, String> {
-    let existing_login = command_success(
-        gh_command()?
-            .args(["api", "user", "--jq", ".login"])
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    );
-    if let Ok(login) = existing_login {
-        return Ok(login);
-    }
     let has_saved_account = github_has_saved_account()?;
     let mut command = gh_command()?;
     if has_saved_account {
-        command.args(["auth", "refresh", "--hostname", "github.com", "--clipboard"]);
+        command.args([
+            "auth",
+            "refresh",
+            "--hostname",
+            "github.com",
+            "--reset-scopes",
+            "--clipboard",
+        ]);
     } else {
         command.args([
             "auth",
@@ -1699,9 +1726,7 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
     }
     command_success(
         gh_command()?
-            .args([
-                "repo", "view", repository, "--json", "sshUrl", "--jq", ".sshUrl",
-            ])
+            .args(["repo", "view", repository, "--json", "url", "--jq", ".url"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )
@@ -1709,41 +1734,22 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
 
 fn github_identity_and_repositories() -> Result<(String, Vec<String>, Vec<VaultRepository>), String>
 {
-    let owner = command_success(
-        gh_command()?
-            .args(["api", "user", "--jq", ".login"])
+    if !github_has_saved_account()? {
+        return Ok((String::new(), Vec::new(), Vec::new()));
+    }
+    let mut command = gh_command()?;
+    command
+        .args(["api", "graphql", "-f"])
+        .arg(format!("query={GITHUB_VIEWER_QUERY}"));
+    let source = command_success(
+        command
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
-    let organizations = command_success(
-        gh_command()?
-            .args([
-                "api",
-                "user/memberships/orgs",
-                "--paginate",
-                "--jq",
-                ".[].organization.login",
-            ])
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )
-    .unwrap_or_default();
-    let mut owners = vec![owner.clone()];
-    owners.extend(
-        organizations
-            .lines()
-            .map(str::trim)
-            .filter(|organization| !organization.is_empty())
-            .map(str::to_string),
-    );
-    owners.sort();
-    owners.dedup();
-    if let Some(index) = owners.iter().position(|candidate| candidate == &owner) {
-        owners.swap(0, index);
-    }
+    let (owner, owners) = github_owners_from_graphql(&source)?;
     let mut repositories = Vec::new();
     for repository_owner in &owners {
-        let source = command_success(
+        let Ok(source) = command_success(
             gh_command()?
                 .args([
                     "repo",
@@ -1756,7 +1762,9 @@ fn github_identity_and_repositories() -> Result<(String, Vec<String>, Vec<VaultR
                 ])
                 .output()
                 .map_err(|error| format!("failed to run gh: {error}"))?,
-        )?;
+        ) else {
+            continue;
+        };
         repositories.extend(
             serde_json::from_str::<Vec<GhRepository>>(&source)
                 .map_err(|error| error.to_string())?
@@ -1776,6 +1784,29 @@ fn github_identity_and_repositories() -> Result<(String, Vec<String>, Vec<VaultR
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok((owner, owners, repositories))
+}
+
+fn github_owners_from_graphql(source: &str) -> Result<(String, Vec<String>), String> {
+    let viewer = serde_json::from_str::<GhViewerResponse>(source)
+        .map_err(|error| error.to_string())?
+        .data
+        .viewer;
+    let owner = viewer.login;
+    let mut owners = vec![owner.clone()];
+    owners.extend(
+        viewer
+            .organizations
+            .nodes
+            .into_iter()
+            .filter(|organization| organization.viewer_can_create_repositories)
+            .map(|organization| organization.login),
+    );
+    owners.sort();
+    owners.dedup();
+    if let Some(index) = owners.iter().position(|candidate| candidate == &owner) {
+        owners.swap(0, index);
+    }
+    Ok((owner, owners))
 }
 
 fn github_has_saved_account() -> Result<bool, String> {
@@ -1803,7 +1834,22 @@ fn has_saved_github_account(source: &str) -> Result<bool, String> {
 }
 
 fn gh_command() -> Result<Command, String> {
-    let executable = std::env::var_os("PATH")
+    let executable = github_cli().ok_or_else(|| "GitHub CLI is not installed".to_string())?;
+    let config_dir = github_config_dir();
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|error| format!("failed to create GitHub config directory: {error}"))?;
+    let mut command = Command::new(executable);
+    for variable in github_environment_variables() {
+        command.env_remove(variable);
+    }
+    command
+        .env("GH_CONFIG_DIR", config_dir)
+        .env("GH_NO_UPDATE_NOTIFIER", "1");
+    Ok(command)
+}
+
+fn github_cli() -> Option<PathBuf> {
+    std::env::var_os("PATH")
         .and_then(|path| {
             std::env::split_paths(&path)
                 .map(|directory| directory.join("gh"))
@@ -1815,16 +1861,51 @@ fn gh_command() -> Result<Command, String> {
                 .map(PathBuf::from)
                 .find(|candidate| candidate.is_file())
         })
-        .ok_or_else(|| "GitHub CLI is not installed".to_string())?;
-    Ok(Command::new(executable))
+}
+
+fn github_config_dir() -> PathBuf {
+    super::application_data_dir().join("auth/github")
+}
+
+fn github_environment_variables() -> [&'static str; 7] {
+    [
+        "GH_CONFIG_DIR",
+        "GH_ENTERPRISE_TOKEN",
+        "GH_HOST",
+        "GH_PROMPT_DISABLED",
+        "GH_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+        "GITHUB_TOKEN",
+    ]
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     let mut command = Command::new("git");
-    command
-        .current_dir(root)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .args(args);
+    command.current_dir(root).env("GIT_TERMINAL_PROMPT", "0");
+    if let Some(executable) = github_cli() {
+        let credential_helper = format!(
+            "credential.https://github.com.helper=!{} auth git-credential",
+            shell_quote(&executable.to_string_lossy())
+        );
+        command
+            .args([
+                "-c",
+                "credential.https://github.com.helper=",
+                "-c",
+                &credential_helper,
+            ])
+            .env("GH_CONFIG_DIR", github_config_dir());
+        for variable in github_environment_variables() {
+            if variable != "GH_CONFIG_DIR" {
+                command.env_remove(variable);
+            }
+        }
+    }
+    command.args(args);
     for variable in [
         "GIT_DIR",
         "GIT_WORK_TREE",
@@ -1966,6 +2047,31 @@ mod tests {
 
         assert!(has_saved_github_account(source).unwrap());
         assert!(!has_saved_github_account(r#"{"hosts":{}}"#).unwrap());
+    }
+
+    #[test]
+    fn github_owner_picker_only_includes_organizations_that_can_create_repositories() {
+        let source = r#"{
+            "data": {
+                "viewer": {
+                    "login": "octocat",
+                    "organizations": {
+                        "nodes": [
+                            {"login": "stale-org", "viewerCanCreateRepositories": false},
+                            {"login": "writable-org", "viewerCanCreateRepositories": true}
+                        ]
+                    }
+                }
+            }
+        }"#;
+
+        assert_eq!(
+            github_owners_from_graphql(source).unwrap(),
+            (
+                "octocat".to_string(),
+                vec!["octocat".to_string(), "writable-org".to_string()]
+            )
+        );
     }
 
     #[test]

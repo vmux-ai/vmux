@@ -180,6 +180,7 @@ pub fn Page() -> Element {
                         selected_owner,
                         selected_repository,
                         selected_provider,
+                        repositories_requested,
                         cloud_root,
                         private,
                         pending,
@@ -198,6 +199,7 @@ fn VaultPanel(
     selected_owner: Signal<Option<String>>,
     selected_repository: Signal<Option<String>>,
     selected_provider: Signal<Option<RemoteProvider>>,
+    repositories_requested: Signal<bool>,
     cloud_root: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
@@ -317,7 +319,14 @@ fn VaultPanel(
                                         selected_provider.set(Some(option));
                                         cloud_root.set(String::new());
                                         selected_repository.set(None);
-                                        if !option.is_github() {
+                                        if option.is_github() {
+                                            if !vault.repositories_loaded
+                                                && !repositories_requested()
+                                            {
+                                                repositories_requested.set(true);
+                                                request_snapshot(true);
+                                            }
+                                        } else {
                                             repository.set("vmux-vault".to_string());
                                         }
                                     },
@@ -354,7 +363,8 @@ fn VaultPanel(
                                 if !authenticated {
                                     ManagerButton {
                                         variant: ManagerButtonVariant::Primary,
-                                        disabled: pending().is_some(),
+                                        disabled: pending().is_some()
+                                            || (provider.is_github() && repositories_requested()),
                                         onclick: move |_| send_action(
                                             pending,
                                             if provider.is_github() {
@@ -372,13 +382,17 @@ fn VaultPanel(
                                         if pending().is_some_and(|action| {
                                             action == VaultAction::ConnectGithub
                                                 || action == VaultAction::ConnectCloud
-                                        }) {
+                                        }) || (provider.is_github() && repositories_requested()) {
                                             span { class: "flex items-center gap-2",
                                                 span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
                                                 {translate("common-loading")}
                                             }
                                         } else {
-                                            {translate("vault-connect")}
+                                            if provider.is_github() {
+                                                {translate("vault-connect-github")}
+                                            } else {
+                                                {translate("vault-choose-folder")}
+                                            }
                                         }
                                     }
                                 }
