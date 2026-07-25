@@ -553,11 +553,13 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
                 empty: repository.empty,
             })
             .collect(),
+        repositories_loaded: load_repositories,
         error: status.error,
     };
     if !load_repositories && (!snapshot.initialized || snapshot.remote.is_empty()) {
         snapshot.github_owner = previous.github_owner;
         snapshot.repositories = previous.repositories;
+        snapshot.repositories_loaded = previous.repositories_loaded;
         snapshot.error = previous.error;
     }
     snapshot

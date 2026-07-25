@@ -10,6 +10,10 @@ use vmux_core::vault::{
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSpinner,
 };
+use vmux_ui::components::select::{
+    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
+};
+use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
@@ -22,8 +26,9 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultActionResult>);
+    let mut repositories_requested = use_signal(|| false);
     let repository = use_signal(|| "vmux-vault".to_string());
-    let selected_repository = use_signal(String::new);
+    let selected_repository = use_signal(|| Some(None::<String>));
     let private = use_signal(|| true);
     let preferred_provider = web_sys::window()
         .and_then(|window| window.location().search().ok())
@@ -33,9 +38,18 @@ pub fn Page() -> Element {
     let _snapshot_listener =
         use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
             if pending() == Some(VaultAction::ConnectGithub)
-                && (!event.vault.github_owner.is_empty() || !event.vault.error.is_empty())
+                && (event.vault.repositories_loaded || !event.vault.error.is_empty())
             {
                 pending.set(None);
+            }
+            let needs_repositories = !event.vault.github_owner.is_empty()
+                && (!event.vault.initialized || event.vault.remote.is_empty())
+                && !event.vault.repositories_loaded;
+            if needs_repositories && !repositories_requested() {
+                repositories_requested.set(true);
+                request_snapshot(true);
+            } else if !needs_repositories {
+                repositories_requested.set(false);
             }
             snapshot.set(event);
             loaded.set(true);
@@ -45,6 +59,8 @@ pub fn Page() -> Element {
             if result.action == VaultAction::ConnectGithub && result.success {
                 let mut current = snapshot();
                 current.vault.github_owner = result.message.clone();
+                current.vault.repositories.clear();
+                current.vault.repositories_loaded = false;
                 current.vault.error.clear();
                 snapshot.set(current);
                 notice.set(None);
@@ -125,7 +141,7 @@ pub fn Page() -> Element {
 fn VaultPanel(
     vault: VaultSnapshot,
     repository: Signal<String>,
-    selected_repository: Signal<String>,
+    selected_repository: Signal<Option<Option<String>>>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
@@ -248,28 +264,58 @@ fn VaultPanel(
                                 }
                             }
                             div { class: "mt-3 flex gap-2",
-                                select {
-                                    class: "min-w-0 flex-1 rounded-xl bg-background/55 px-3 py-2 text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 focus:ring-primary/40",
-                                    value: selected_repository(),
-                                    onchange: move |event| selected_repository.set(event.value()),
-                                    option { value: "", {translate("vault-choose-repository")} }
-                                    for candidate in vault.repositories.iter() {
-                                        option { value: "{candidate.url}",
-                                            "{candidate.name}"
-                                            if candidate.empty {
-                                                " · "
-                                                {translate("vault-empty")}
+                                if vault.repositories_loaded {
+                                    Select::<String> {
+                                        value: Into::<ReadSignal<Option<Option<String>>>>::into(selected_repository),
+                                        on_value_change: Callback::new(move |value| selected_repository.set(Some(value))),
+                                        disabled: Into::<ReadSignal<bool>>::into(Signal::new(vault.repositories.is_empty())),
+                                        placeholder: Into::<ReadSignal<String>>::into(Signal::new(translate("vault-choose-repository"))),
+                                        attributes: attributes!(div { class: "min-w-0 flex-1" }),
+                                        SelectTrigger {
+                                            attributes: attributes!(button {
+                                                class: "w-full rounded-xl bg-background/55 text-xs text-foreground ring-1 ring-inset ring-foreground/10 shadow-none hover:bg-background/70 focus-visible:ring-primary/40",
+                                                aria_label: translate("vault-choose-repository"),
+                                            }),
+                                            SelectValue { attributes: attributes!(span { class: "min-w-0 flex-1 truncate text-left" }) }
+                                        }
+                                        SelectList { attributes: attributes!(div { class: "max-h-64 w-full overflow-y-auto rounded-xl bg-background/95 backdrop-blur-xl" }),
+                                            SelectGroup { attributes: vec![],
+                                                for (index, candidate) in vault.repositories.iter().enumerate() {
+                                                    SelectOption::<String> {
+                                                        key: "{candidate.url}",
+                                                        value: Into::<ReadSignal<String>>::into(Signal::new(candidate.url.clone())),
+                                                        index,
+                                                        text_value: Some(if candidate.empty {
+                                                            format!("{} · {}", candidate.name, translate("vault-empty"))
+                                                        } else {
+                                                            candidate.name.clone()
+                                                        }),
+                                                        attributes: vec![],
+                                                        span { class: "min-w-0 flex-1 truncate", "{candidate.name}"
+                                                            if candidate.empty {
+                                                                span { class: "text-muted-foreground/60", " · " {translate("vault-empty")} }
+                                                            }
+                                                        }
+                                                        SelectItemIndicator {}
+                                                    }
+                                                }
                                             }
                                         }
+                                    }
+                                } else {
+                                    div { class: "flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-background/55 px-3 py-2 pr-4 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                                        span { class: "h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                        span { class: "truncate", {translate("common-loading")} }
                                     }
                                 }
                                 ManagerButton {
                                     variant: ManagerButtonVariant::Secondary,
-                                    disabled: pending().is_some() || selected_repository().is_empty(),
+                                    disabled: pending().is_some()
+                                        || selected_repository().flatten().is_none(),
                                     onclick: move |_| send_action(
                                         pending,
                                         VaultAction::Connect,
-                                        selected_repository(),
+                                        selected_repository().flatten().unwrap_or_default(),
                                         true,
                                     ),
                                     {translate("vault-use-repository")}
