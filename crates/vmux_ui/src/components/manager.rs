@@ -1,4 +1,7 @@
 use dioxus::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_MANAGER_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum ManagerTone {
@@ -157,6 +160,202 @@ pub fn ManagerButton(
             onclick: move |event| onclick.call(event),
             {children}
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagerSelectItem {
+    pub value: String,
+    pub label: String,
+    pub kind: ManagerSelectItemKind,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ManagerSelectItemKind {
+    #[default]
+    Default,
+    User,
+    Organization,
+}
+
+#[component]
+pub fn ManagerSelect(
+    items: Vec<ManagerSelectItem>,
+    value: Option<String>,
+    placeholder: String,
+    #[props(default)] disabled: bool,
+    onselect: EventHandler<String>,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let mut highlighted = use_signal(|| 0usize);
+    let id = use_hook(|| {
+        format!(
+            "manager-select-{}",
+            NEXT_MANAGER_SELECT_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    });
+    let selected_index = value
+        .as_ref()
+        .and_then(|value| items.iter().position(|item| item.value == *value));
+    let selected_item = selected_index.and_then(|index| items.get(index));
+    let selected_label = selected_item
+        .map(|item| item.label.as_str())
+        .unwrap_or(&placeholder);
+
+    let scroll_id = id.clone();
+    use_effect(move || {
+        if !open() {
+            return;
+        }
+        let option_id = format!("{scroll_id}-option-{}", highlighted());
+        if let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&option_id))
+        {
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+        }
+    });
+
+    let key_items = items.clone();
+    let key_select = onselect;
+    let onkeydown = move |event: KeyboardEvent| {
+        let control = event.modifiers().contains(Modifiers::CONTROL);
+        let down = event.key() == Key::ArrowDown
+            || (control && matches!(event.code(), Code::KeyN | Code::KeyJ));
+        let up = event.key() == Key::ArrowUp
+            || (control && matches!(event.code(), Code::KeyP | Code::KeyK));
+        if (down || up) && !key_items.is_empty() {
+            event.prevent_default();
+            event.stop_propagation();
+            if open() {
+                let current = highlighted().min(key_items.len() - 1);
+                highlighted.set(if down {
+                    (current + 1) % key_items.len()
+                } else if current == 0 {
+                    key_items.len() - 1
+                } else {
+                    current - 1
+                });
+            } else {
+                open.set(true);
+                highlighted.set(if down {
+                    selected_index.unwrap_or(0)
+                } else {
+                    selected_index.unwrap_or(key_items.len() - 1)
+                });
+            }
+            return;
+        }
+        let activate = event.key() == Key::Enter
+            || matches!(event.key(), Key::Character(ref character) if character == " ");
+        if activate {
+            event.prevent_default();
+            event.stop_propagation();
+            if open() {
+                if let Some(item) = key_items.get(highlighted()) {
+                    key_select.call(item.value.clone());
+                }
+                open.set(false);
+            } else if !key_items.is_empty() {
+                highlighted.set(selected_index.unwrap_or(0));
+                open.set(true);
+            }
+            return;
+        }
+        if event.key() == Key::Escape && open() {
+            event.prevent_default();
+            event.stop_propagation();
+            open.set(false);
+        }
+    };
+
+    rsx! {
+        div { class: "relative min-w-0",
+            button {
+                r#type: "button",
+                class: "flex w-full min-w-0 items-center gap-2 rounded-xl bg-background/55 py-2 pl-3 pr-4 text-left text-xs text-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-background/70 focus-visible:outline-none focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-50",
+                disabled: disabled || items.is_empty(),
+                aria_haspopup: "listbox",
+                aria_expanded: open(),
+                onkeydown,
+                onblur: move |_| open.set(false),
+                onclick: move |_| {
+                    if !items.is_empty() {
+                        highlighted.set(selected_index.unwrap_or(0));
+                        open.toggle();
+                    }
+                },
+                if let Some(item) = selected_item {
+                    ManagerSelectItemIcon { kind: item.kind }
+                }
+                span { class: if selected_index.is_some() { "min-w-0 flex-1 truncate" } else { "min-w-0 flex-1 truncate text-muted-foreground" },
+                    "{selected_label}"
+                }
+                svg { class: "h-4 w-4 shrink-0 transition-transform data-[open=true]:rotate-180", "data-open": open(), view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                    path { d: "m6 9 6 6 6-6" }
+                }
+            }
+            if open() {
+                div {
+                    class: "absolute left-0 top-full z-[1000] mt-1 max-h-64 w-full min-w-48 overflow-y-auto rounded-xl bg-background/95 p-1 text-xs shadow-xl ring-1 ring-inset ring-foreground/10 backdrop-blur-xl",
+                    role: "listbox",
+                    for (index, item) in items.iter().enumerate() {
+                        div {
+                            id: "{id}-option-{index}",
+                            role: "option",
+                            aria_selected: value.as_ref() == Some(&item.value),
+                            class: if highlighted() == index {
+                                "flex cursor-pointer items-center gap-2 rounded-lg bg-foreground/[0.09] px-3 py-2 text-foreground"
+                            } else {
+                                "flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+                            },
+                            onpointerenter: move |_| highlighted.set(index),
+                            onpointerdown: {
+                                let item_value = item.value.clone();
+                                move |event| {
+                                    event.prevent_default();
+                                    onselect.call(item_value.clone());
+                                    open.set(false);
+                                }
+                            },
+                            ManagerSelectItemIcon { kind: item.kind }
+                            span { class: "min-w-0 flex-1 truncate", "{item.label}" }
+                            if value.as_ref() == Some(&item.value) {
+                                svg { class: "h-3.5 w-3.5 shrink-0", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
+                                    path { d: "m5 12 4 4L19 6" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ManagerSelectItemIcon(kind: ManagerSelectItemKind) -> Element {
+    match kind {
+        ManagerSelectItemKind::Default => rsx! {},
+        ManagerSelectItemKind::User => rsx! {
+            svg { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                circle { cx: "12", cy: "8", r: "4" }
+                path { d: "M4 21a8 8 0 0 1 16 0" }
+            }
+        },
+        ManagerSelectItemKind::Organization => rsx! {
+            svg { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                path { d: "M3 21h18" }
+                path { d: "M6 21V5l6-3 6 3v16" }
+                path { d: "M9 9h1" }
+                path { d: "M14 9h1" }
+                path { d: "M9 13h1" }
+                path { d: "M14 13h1" }
+                path { d: "M9 17h6" }
+            }
+        },
     }
 }
 

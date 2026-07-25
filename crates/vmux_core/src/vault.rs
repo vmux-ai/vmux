@@ -26,6 +26,7 @@ pub struct VaultSnapshot {
     pub ahead: u32,
     pub behind: u32,
     pub github_owner: String,
+    pub github_owners: Vec<String>,
     pub repositories: Vec<VaultRepository>,
     pub repositories_loaded: bool,
     pub error: String,

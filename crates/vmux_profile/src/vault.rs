@@ -53,6 +53,7 @@ pub struct VaultStatus {
     pub ahead: u32,
     pub behind: u32,
     pub github_owner: String,
+    pub github_owners: Vec<String>,
     pub repositories: Vec<VaultRepository>,
     pub error: String,
 }
@@ -205,8 +206,9 @@ pub fn status_with_repositories() -> VaultStatus {
     let mut status = status();
     if !status.initialized || status.remote.is_empty() {
         match github_identity_and_repositories() {
-            Ok((owner, repositories)) => {
+            Ok((owner, owners, repositories)) => {
                 status.github_owner = owner;
+                status.github_owners = owners;
                 status.repositories = repositories;
             }
             Err(error) => status.error = error,
@@ -1705,43 +1707,75 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
     )
 }
 
-fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), String> {
+fn github_identity_and_repositories() -> Result<(String, Vec<String>, Vec<VaultRepository>), String>
+{
     let owner = command_success(
         gh_command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
-    let source = command_success(
+    let organizations = command_success(
         gh_command()?
             .args([
-                "repo",
-                "list",
-                "--limit",
-                "100",
-                "--json",
-                "nameWithOwner,isPrivate,url,isEmpty",
+                "api",
+                "user/memberships/orgs",
+                "--paginate",
+                "--jq",
+                ".[].organization.login",
             ])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
-    )?;
-    let mut repositories = serde_json::from_str::<Vec<GhRepository>>(&source)
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .map(|repository| VaultRepository {
-            name: repository.name_with_owner,
-            url: repository.url,
-            private: repository.is_private,
-            empty: repository.is_empty,
-        })
-        .collect::<Vec<_>>();
+    )
+    .unwrap_or_default();
+    let mut owners = vec![owner.clone()];
+    owners.extend(
+        organizations
+            .lines()
+            .map(str::trim)
+            .filter(|organization| !organization.is_empty())
+            .map(str::to_string),
+    );
+    owners.sort();
+    owners.dedup();
+    if let Some(index) = owners.iter().position(|candidate| candidate == &owner) {
+        owners.swap(0, index);
+    }
+    let mut repositories = Vec::new();
+    for repository_owner in &owners {
+        let source = command_success(
+            gh_command()?
+                .args([
+                    "repo",
+                    "list",
+                    repository_owner,
+                    "--limit",
+                    "100",
+                    "--json",
+                    "nameWithOwner,isPrivate,url,isEmpty",
+                ])
+                .output()
+                .map_err(|error| format!("failed to run gh: {error}"))?,
+        )?;
+        repositories.extend(
+            serde_json::from_str::<Vec<GhRepository>>(&source)
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(|repository| VaultRepository {
+                    name: repository.name_with_owner,
+                    url: repository.url,
+                    private: repository.is_private,
+                    empty: repository.is_empty,
+                }),
+        );
+    }
     repositories.sort_by(|left, right| {
         right
             .empty
             .cmp(&left.empty)
             .then_with(|| left.name.cmp(&right.name))
     });
-    Ok((owner, repositories))
+    Ok((owner, owners, repositories))
 }
 
 fn github_has_saved_account() -> Result<bool, String> {

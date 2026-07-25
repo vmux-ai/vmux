@@ -8,12 +8,9 @@ use vmux_core::vault::{
     VaultRefreshRequest, VaultSnapshot,
 };
 use vmux_ui::components::manager::{
-    ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSpinner,
+    ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
+    ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::components::select::{
-    Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
-};
-use vmux_ui::dioxus_ext::attributes;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
@@ -27,8 +24,9 @@ pub fn Page() -> Element {
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultActionResult>);
     let mut repositories_requested = use_signal(|| false);
-    let repository = use_signal(|| "vmux-vault".to_string());
-    let selected_repository = use_signal(|| Some(None::<String>));
+    let mut repository = use_signal(|| "vmux-vault".to_string());
+    let mut selected_owner = use_signal(|| None::<String>);
+    let selected_repository = use_signal(|| None::<String>);
     let private = use_signal(|| true);
     let preferred_provider = web_sys::window()
         .and_then(|window| window.location().search().ok())
@@ -51,6 +49,17 @@ pub fn Page() -> Element {
             } else if !needs_repositories {
                 repositories_requested.set(false);
             }
+            if !event.vault.github_owner.is_empty()
+                && selected_owner()
+                    .as_ref()
+                    .is_none_or(|owner| !event.vault.github_owners.contains(owner))
+            {
+                selected_owner.set(Some(event.vault.github_owner.clone()));
+            }
+            if event.vault.repositories_loaded && repository() == "vmux-vault" {
+                let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
+                repository.set(suggested_repository_name(&owner, &event.vault.repositories));
+            }
             snapshot.set(event);
             loaded.set(true);
         });
@@ -59,6 +68,7 @@ pub fn Page() -> Element {
             if result.action == VaultAction::ConnectGithub && result.success {
                 let mut current = snapshot();
                 current.vault.github_owner = result.message.clone();
+                current.vault.github_owners = vec![result.message.clone()];
                 current.vault.repositories.clear();
                 current.vault.repositories_loaded = false;
                 current.vault.error.clear();
@@ -125,6 +135,7 @@ pub fn Page() -> Element {
                     VaultPanel {
                         vault: current.vault.clone(),
                         repository,
+                        selected_owner,
                         selected_repository,
                         private,
                         pending,
@@ -141,7 +152,8 @@ pub fn Page() -> Element {
 fn VaultPanel(
     vault: VaultSnapshot,
     repository: Signal<String>,
-    selected_repository: Signal<Option<Option<String>>>,
+    selected_owner: Signal<Option<String>>,
+    selected_repository: Signal<Option<String>>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
@@ -166,6 +178,35 @@ fn VaultPanel(
     } else {
         "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10"
     };
+    let owner = selected_owner().unwrap_or_else(|| vault.github_owner.clone());
+    let owner_items = vault
+        .github_owners
+        .iter()
+        .map(|owner| ManagerSelectItem {
+            value: owner.clone(),
+            label: owner.clone(),
+            kind: if owner == &vault.github_owner {
+                ManagerSelectItemKind::User
+            } else {
+                ManagerSelectItemKind::Organization
+            },
+        })
+        .collect::<Vec<_>>();
+    let owner_prefix = format!("{owner}/");
+    let repository_items = vault
+        .repositories
+        .iter()
+        .filter(|repository| repository.name.starts_with(&owner_prefix))
+        .map(|repository| ManagerSelectItem {
+            value: repository.url.clone(),
+            label: if repository.empty {
+                format!("{} · {}", repository.name, translate("vault-empty"))
+            } else {
+                repository.name.clone()
+            },
+            kind: ManagerSelectItemKind::Default,
+        })
+        .collect::<Vec<_>>();
     rsx! {
         div { class: "rounded-2xl bg-foreground/[0.035] p-5 ring-1 ring-inset ring-foreground/10",
             div { class: "flex items-start gap-4",
@@ -263,43 +304,82 @@ fn VaultPanel(
                                     span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
                                 }
                             }
-                            div { class: "mt-3 flex gap-2",
-                                if vault.repositories_loaded {
-                                    Select::<String> {
-                                        value: Into::<ReadSignal<Option<Option<String>>>>::into(selected_repository),
-                                        on_value_change: Callback::new(move |value| selected_repository.set(Some(value))),
-                                        disabled: Into::<ReadSignal<bool>>::into(Signal::new(vault.repositories.is_empty())),
-                                        placeholder: Into::<ReadSignal<String>>::into(Signal::new(translate("vault-choose-repository"))),
-                                        attributes: attributes!(div { class: "min-w-0 flex-1" }),
-                                        SelectTrigger {
-                                            attributes: attributes!(button {
-                                                class: "w-full rounded-xl bg-background/55 text-xs text-foreground ring-1 ring-inset ring-foreground/10 shadow-none hover:bg-background/70 focus-visible:ring-primary/40",
-                                                aria_label: translate("vault-choose-repository"),
-                                            }),
-                                            SelectValue { attributes: attributes!(span { class: "min-w-0 flex-1 truncate text-left" }) }
+                            if vault.repositories_loaded {
+                                div { class: "mt-3",
+                                    ManagerSelect {
+                                        items: owner_items,
+                                        value: Some(owner.clone()),
+                                        placeholder: vault.github_owner.clone(),
+                                        onselect: move |value: String| {
+                                            repository.set(suggested_repository_name(
+                                                &value,
+                                                &vault.repositories,
+                                            ));
+                                            selected_owner.set(Some(value));
+                                            selected_repository.set(None);
+                                        },
+                                    }
+                                }
+                            } else {
+                                div { class: "mt-3 flex items-center gap-2 rounded-xl bg-background/55 px-3 py-2 pr-4 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                                    span { class: "h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                    span { class: "truncate", {translate("common-loading")} }
+                                }
+                            }
+                            div { class: "mt-4 rounded-xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07]",
+                                div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
+                                div { class: "flex gap-2",
+                                    div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/55 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
+                                        span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
+                                        input {
+                                            class: "min-w-0 flex-1 bg-transparent py-2 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
+                                            value: repository(),
+                                            placeholder: translate("vault-repository-name"),
+                                            oninput: move |event| repository.set(event.value()),
                                         }
-                                        SelectList { attributes: attributes!(div { class: "max-h-64 w-full overflow-y-auto rounded-xl bg-background/95 backdrop-blur-xl" }),
-                                            SelectGroup { attributes: vec![],
-                                                for (index, candidate) in vault.repositories.iter().enumerate() {
-                                                    SelectOption::<String> {
-                                                        key: "{candidate.url}",
-                                                        value: Into::<ReadSignal<String>>::into(Signal::new(candidate.url.clone())),
-                                                        index,
-                                                        text_value: Some(if candidate.empty {
-                                                            format!("{} · {}", candidate.name, translate("vault-empty"))
-                                                        } else {
-                                                            candidate.name.clone()
-                                                        }),
-                                                        attributes: vec![],
-                                                        span { class: "min-w-0 flex-1 truncate", "{candidate.name}"
-                                                            if candidate.empty {
-                                                                span { class: "text-muted-foreground/60", " · " {translate("vault-empty")} }
-                                                            }
-                                                        }
-                                                        SelectItemIndicator {}
-                                                    }
-                                                }
-                                            }
+                                    }
+                                    ManagerButton {
+                                        variant: ManagerButtonVariant::Primary,
+                                        disabled: pending().is_some()
+                                            || !vault.repositories_loaded
+                                            || owner.is_empty()
+                                            || repository().trim().is_empty(),
+                                        onclick: move |_| send_action(
+                                            pending,
+                                            VaultAction::Create,
+                                            format!("{owner}/{}", repository().trim()),
+                                            private(),
+                                        ),
+                                        {translate("vault-create")}
+                                    }
+                                }
+                                label { class: "mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: private(),
+                                        onchange: move |event| private.set(event.checked()),
+                                    }
+                                    {translate("vault-private")}
+                                }
+                                if !private() {
+                                    div { class: "mt-2 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
+                                }
+                            }
+                            div { class: "my-3 flex items-center gap-3",
+                                span { class: "h-px flex-1 bg-foreground/[0.07]" }
+                                span { class: "h-1 w-1 rounded-full bg-foreground/20" }
+                                span { class: "h-px flex-1 bg-foreground/[0.07]" }
+                            }
+                            div { class: "rounded-xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07]",
+                                div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-repository")} }
+                                div { class: "flex gap-2",
+                                if vault.repositories_loaded {
+                                    div { class: "min-w-0 flex-1",
+                                        ManagerSelect {
+                                            items: repository_items,
+                                            value: selected_repository(),
+                                            placeholder: translate("vault-choose-repository"),
+                                            onselect: move |value| selected_repository.set(Some(value)),
                                         }
                                     }
                                 } else {
@@ -310,46 +390,16 @@ fn VaultPanel(
                                 }
                                 ManagerButton {
                                     variant: ManagerButtonVariant::Secondary,
-                                    disabled: pending().is_some()
-                                        || selected_repository().flatten().is_none(),
+                                    disabled: pending().is_some() || selected_repository().is_none(),
                                     onclick: move |_| send_action(
                                         pending,
                                         VaultAction::Connect,
-                                        selected_repository().flatten().unwrap_or_default(),
+                                        selected_repository().unwrap_or_default(),
                                         true,
                                     ),
                                     {translate("vault-use-repository")}
                                 }
                             }
-                            div { class: "mt-3 flex gap-2",
-                                input {
-                                    class: "min-w-0 flex-1 rounded-xl bg-background/55 px-3 py-2 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-primary/40",
-                                    value: repository(),
-                                    placeholder: translate("vault-repository-name"),
-                                    oninput: move |event| repository.set(event.value()),
-                                }
-                                ManagerButton {
-                                    variant: ManagerButtonVariant::Primary,
-                                    disabled: pending().is_some(),
-                                    onclick: move |_| send_action(
-                                        pending,
-                                        VaultAction::Create,
-                                        repository(),
-                                        private(),
-                                    ),
-                                    {translate("vault-create")}
-                                }
-                            }
-                            label { class: "mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground",
-                                input {
-                                    r#type: "checkbox",
-                                    checked: private(),
-                                    onchange: move |event| private.set(event.checked()),
-                                }
-                                {translate("vault-private")}
-                            }
-                            if !private() {
-                                div { class: "mt-2 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
                             }
                         }
                     }
@@ -754,4 +804,21 @@ fn action_result_message(action: VaultAction) -> String {
         VaultAction::AddPasskey => "vault-result-created",
         VaultAction::UnlockPasskey => "vault-result-connected",
     })
+}
+
+fn suggested_repository_name(
+    owner: &str,
+    repositories: &[vmux_core::vault::VaultRepository],
+) -> String {
+    let names = repositories
+        .iter()
+        .filter_map(|repository| repository.name.strip_prefix(&format!("{owner}/")))
+        .collect::<std::collections::BTreeSet<_>>();
+    if !names.contains("vmux-vault") {
+        return "vmux-vault".to_string();
+    }
+    (2..)
+        .map(|suffix| format!("vmux-vault-{suffix}"))
+        .find(|name| !names.contains(name.as_str()))
+        .unwrap()
 }

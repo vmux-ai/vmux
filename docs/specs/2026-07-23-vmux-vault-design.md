@@ -33,6 +33,22 @@ The side sheet and dedicated Vault page expose setup and status.
 - Existing Vault repositories become the base and local files are replayed on top.
 - Unrelated repositories that do not match the Vault layout are rejected rather than overwritten.
 
+## Multiple Vaults
+
+vmux follows the folder-and-switcher model: every Vault is an independent local folder with its
+own settings, Knowledge, tool manifest, dotfiles, encryption key, and remote. A local Vault connects
+to at most one Git repository or cloud folder. The same remote Vault can be opened on many devices.
+
+The Vault switcher stores only local paths and the active Vault identifier in Application Support.
+Removing a Vault from the switcher never deletes its local folder or remote. New local Vaults default
+to `~/.vmux/vaults/<name>/`, but users can open any folder as a Vault. Encrypted staging repositories
+remain under `~/Library/Application Support/Vmux/vaults/<id>/repository` and never mix with plaintext
+Vault content.
+
+Switching Vaults reloads settings, Knowledge, tools, and dotfiles as one unit. The first version may
+restart vmux to guarantee that no state from the previous Vault survives. Existing single-Vault
+installs migrate their authored `~/.vmux` content into a named Vault without moving runtime data.
+
 ## Encryption and device unlock
 
 Vault files use a random 256-bit master key and AES-256-GCM. The master key is cached in the local

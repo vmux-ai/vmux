@@ -543,6 +543,7 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
         ahead: status.ahead,
         behind: status.behind,
         github_owner: status.github_owner,
+        github_owners: status.github_owners,
         repositories: status
             .repositories
             .into_iter()
@@ -558,6 +559,7 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
     };
     if !load_repositories && (!snapshot.initialized || snapshot.remote.is_empty()) {
         snapshot.github_owner = previous.github_owner;
+        snapshot.github_owners = previous.github_owners;
         snapshot.repositories = previous.repositories;
         snapshot.repositories_loaded = previous.repositories_loaded;
         snapshot.error = previous.error;
