@@ -74,6 +74,20 @@ pub fn Page() -> Element {
                 if !loaded() {
                     ManagerSpinner { detail: translate("common-loading") }
                 } else {
+                    if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
+                        div {
+                            class: if result.success {
+                                "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
+                            } else {
+                                "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
+                            },
+                            if result.success {
+                                {action_result_message(result.action)}
+                            } else {
+                                "{result.message}"
+                            }
+                        }
+                    }
                     VaultPanel {
                         vault: current.vault.clone(),
                         repository,
@@ -81,20 +95,6 @@ pub fn Page() -> Element {
                         private,
                         pending,
                         preferred_provider,
-                    }
-                }
-                if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
-                    div {
-                        class: if result.success {
-                            "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
-                        } else {
-                            "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
-                        },
-                        if result.success {
-                            {action_result_message(result.action)}
-                        } else {
-                            "{result.message}"
-                        }
                     }
                 }
             }
@@ -195,7 +195,14 @@ fn VaultPanel(
                                         String::new(),
                                         true,
                                     ),
-                                    {translate("vault-connect-github")}
+                                    if pending() == Some(VaultAction::ConnectGithub) {
+                                        span { class: "flex items-center gap-2",
+                                            span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                            {translate("common-loading")}
+                                        }
+                                    } else {
+                                        {translate("vault-connect-github")}
+                                    }
                                 }
                             }
                         }

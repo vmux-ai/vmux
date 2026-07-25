@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -51,6 +52,16 @@ struct GhRepository {
     is_empty: bool,
 }
 
+#[derive(Deserialize)]
+struct GhAuthStatus {
+    hosts: HashMap<String, Vec<GhAuthAccount>>,
+}
+
+#[derive(Deserialize)]
+struct GhAuthAccount {
+    login: String,
+}
+
 pub fn root_dir() -> PathBuf {
     super::config_dir()
 }
@@ -74,7 +85,7 @@ pub fn status_with_repositories() -> VaultStatus {
 }
 
 pub fn connect_github() -> Result<String, String> {
-    if Command::new("gh")
+    if gh_command()?
         .args(["api", "user", "--jq", ".login"])
         .output()
         .map_err(|error| format!("failed to run gh: {error}"))?
@@ -83,18 +94,31 @@ pub fn connect_github() -> Result<String, String> {
     {
         return Ok("GitHub connected".to_string());
     }
+    let has_saved_account = github_has_saved_account()?;
+    let mut command = gh_command()?;
+    if has_saved_account {
+        command.args(["auth", "refresh", "--hostname", "github.com", "--clipboard"]);
+    } else {
+        command.args([
+            "auth",
+            "login",
+            "--hostname",
+            "github.com",
+            "--git-protocol",
+            "https",
+            "--web",
+            "--clipboard",
+            "--skip-ssh-key",
+        ]);
+    }
     command_success(
-        Command::new("gh")
-            .args([
-                "auth",
-                "login",
-                "--hostname",
-                "github.com",
-                "--git-protocol",
-                "https",
-                "--web",
-                "--clipboard",
-            ])
+        command
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?,
+    )?;
+    command_success(
+        gh_command()?
+            .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
@@ -203,7 +227,7 @@ pub fn create_remote_in(
         RepositoryVisibility::Public => "--public",
     };
     command_success(
-        Command::new("gh")
+        gh_command()?
             .current_dir(root)
             .args([
                 "repo", "create", repository, visibility, "--source", &root_arg, "--remote",
@@ -335,7 +359,10 @@ fn commit_changes(root: &Path, message: &str) -> Result<(), String> {
     if git_optional(root, &["status", "--porcelain"]).is_empty() {
         return Ok(());
     }
-    git(root, &["commit", "-m", message])?;
+    git(
+        root,
+        &["-c", "commit.gpgSign=false", "commit", "-m", message],
+    )?;
     Ok(())
 }
 
@@ -410,7 +437,7 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
     {
         return Ok(repository.to_string());
     }
-    let output = Command::new("gh")
+    let output = gh_command()?
         .args([
             "repo", "view", repository, "--json", "sshUrl", "--jq", ".sshUrl",
         ])
@@ -421,13 +448,13 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
 
 fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), String> {
     let owner = command_success(
-        Command::new("gh")
+        gh_command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
     let source = command_success(
-        Command::new("gh")
+        gh_command()?
             .args([
                 "repo",
                 "list",
@@ -456,6 +483,47 @@ fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), 
             .then_with(|| left.name.cmp(&right.name))
     });
     Ok((owner, repositories))
+}
+
+fn github_has_saved_account() -> Result<bool, String> {
+    let output = gh_command()?
+        .args([
+            "auth",
+            "status",
+            "--hostname",
+            "github.com",
+            "--json",
+            "hosts",
+        ])
+        .output()
+        .map_err(|error| format!("failed to run gh: {error}"))?;
+    let source = String::from_utf8_lossy(&output.stdout);
+    has_saved_github_account(&source)
+}
+
+fn has_saved_github_account(source: &str) -> Result<bool, String> {
+    let status = serde_json::from_str::<GhAuthStatus>(source).map_err(|error| error.to_string())?;
+    Ok(status
+        .hosts
+        .get("github.com")
+        .is_some_and(|accounts| accounts.iter().any(|account| !account.login.is_empty())))
+}
+
+fn gh_command() -> Result<Command, String> {
+    let executable = std::env::var_os("PATH")
+        .and_then(|path| {
+            std::env::split_paths(&path)
+                .map(|directory| directory.join("gh"))
+                .find(|candidate| candidate.is_file())
+        })
+        .or_else(|| {
+            ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
+                .into_iter()
+                .map(PathBuf::from)
+                .find(|candidate| candidate.is_file())
+        })
+        .ok_or_else(|| "GitHub CLI is not installed".to_string())?;
+    Ok(Command::new(executable))
 }
 
 fn validate_public_manifest(root: &Path) -> Result<(), String> {
@@ -538,6 +606,24 @@ mod tests {
     fn configure_identity(root: &Path) {
         git(root, &["config", "user.name", "Vmux Test"]).unwrap();
         git(root, &["config", "user.email", "vmux@example.com"]).unwrap();
+        git(root, &["config", "commit.gpgSign", "false"]).unwrap();
+    }
+
+    #[test]
+    fn invalid_saved_github_account_uses_reauthentication_flow() {
+        let source = r#"{
+            "hosts": {
+                "github.com": [{
+                    "state": "error",
+                    "active": true,
+                    "host": "github.com",
+                    "login": "octocat"
+                }]
+            }
+        }"#;
+
+        assert!(has_saved_github_account(source).unwrap());
+        assert!(!has_saved_github_account(r#"{"hosts":{}}"#).unwrap());
     }
 
     #[test]
