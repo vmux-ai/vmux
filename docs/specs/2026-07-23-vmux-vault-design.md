@@ -25,6 +25,12 @@ Managed worktrees remain under `~/.vmux/worktrees` and are Git-ignored. Moving l
 
 The side sheet and dedicated Vault page expose setup and status.
 
+Setup is a progressive three-step flow:
+
+1. Pick remote storage: GitHub, Google Drive, Dropbox, or OneDrive.
+2. Connect the account. GitHub uses `gh` authentication; cloud folders use the provider's signed-in desktop sync client.
+3. Create a new remote location or choose an existing repository/folder.
+
 - Create a GitHub repository. Default name: `vmux-vault`.
 - New repositories are private by default; public is an explicit option with a warning.
 - Connect an existing GitHub repository or Git URL.

@@ -16,6 +16,36 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteProvider {
+    Github,
+    GoogleDrive,
+    Dropbox,
+    OneDrive,
+}
+
+impl RemoteProvider {
+    const ALL: [Self; 4] = [
+        Self::Github,
+        Self::GoogleDrive,
+        Self::Dropbox,
+        Self::OneDrive,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Github => "GitHub",
+            Self::GoogleDrive => "Google Drive",
+            Self::Dropbox => "Dropbox",
+            Self::OneDrive => "OneDrive",
+        }
+    }
+
+    fn is_github(self) -> bool {
+        self == Self::Github
+    }
+}
+
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
@@ -27,11 +57,19 @@ pub fn Page() -> Element {
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
     let selected_repository = use_signal(|| None::<String>);
-    let private = use_signal(|| true);
     let preferred_provider = web_sys::window()
         .and_then(|window| window.location().search().ok())
         .and_then(|search| search.strip_prefix("?provider=").map(str::to_string))
         .unwrap_or_default();
+    let selected_provider = use_signal(|| match preferred_provider.as_str() {
+        "github" => Some(RemoteProvider::Github),
+        "google_drive" | "cloud_folder" => Some(RemoteProvider::GoogleDrive),
+        "dropbox" => Some(RemoteProvider::Dropbox),
+        "onedrive" => Some(RemoteProvider::OneDrive),
+        _ => None,
+    });
+    let mut cloud_root = use_signal(String::new);
+    let private = use_signal(|| true);
 
     let _snapshot_listener =
         use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
@@ -65,7 +103,11 @@ pub fn Page() -> Element {
         });
     let _action_listener =
         use_bin_event_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |result| {
-            if result.action == VaultAction::ConnectGithub && result.success {
+            if result.action == VaultAction::ConnectCloud && result.success {
+                cloud_root.set(result.message);
+                pending.set(None);
+                notice.set(None);
+            } else if result.action == VaultAction::ConnectGithub && result.success {
                 let mut current = snapshot();
                 current.vault.github_owner = result.message.clone();
                 current.vault.github_owners = vec![result.message.clone()];
@@ -137,10 +179,11 @@ pub fn Page() -> Element {
                         repository,
                         selected_owner,
                         selected_repository,
+                        selected_provider,
+                        cloud_root,
                         private,
                         pending,
                         notice,
-                        preferred_provider,
                     }
                 }
             }
@@ -154,10 +197,11 @@ fn VaultPanel(
     repository: Signal<String>,
     selected_owner: Signal<Option<String>>,
     selected_repository: Signal<Option<String>>,
+    selected_provider: Signal<Option<RemoteProvider>>,
+    cloud_root: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
-    preferred_provider: String,
 ) -> Element {
     let is_connected = vault.initialized && !vault.remote.is_empty();
     let status = if vault.dirty > 0 {
@@ -168,16 +212,14 @@ fn VaultPanel(
     } else {
         translate("vault-clean")
     };
-    let github_card_class = if preferred_provider == "github" {
-        "rounded-xl bg-background/35 p-4 ring-2 ring-inset ring-primary/35"
-    } else {
-        "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10"
-    };
-    let cloud_card_class = if preferred_provider == "cloud_folder" {
-        "rounded-xl bg-background/35 p-4 ring-2 ring-inset ring-primary/35"
-    } else {
-        "rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10"
-    };
+    let provider = selected_provider();
+    let authenticated = provider.is_some_and(|provider| {
+        if provider.is_github() {
+            !vault.github_owner.is_empty() && vault.repositories_loaded
+        } else {
+            !cloud_root().is_empty()
+        }
+    });
     let owner = selected_owner().unwrap_or_else(|| vault.github_owner.clone());
     let owner_items = vault
         .github_owners
@@ -261,51 +303,94 @@ fn VaultPanel(
                 }
             }
             if !is_connected {
-                div { class: "mt-5 grid gap-3 lg:grid-cols-2",
-                    div { class: "{github_card_class}",
-                        div { class: "flex items-start gap-3",
-                            svg { class: "mt-0.5 h-5 w-5 shrink-0 text-foreground/75", view_box: "0 0 24 24", fill: "currentColor",
-                                path { d: "M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.78-.25.78-.55v-2.16c-3.18.69-3.85-1.35-3.85-1.35-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.73-1.53-2.54-.29-5.21-1.27-5.21-5.65 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.11 1.17A10.8 10.8 0 0 1 12 5.93c.96 0 1.92.13 2.82.38 2.15-1.48 3.11-1.17 3.11-1.17.62 1.58.23 2.74.11 3.03.73.8 1.18 1.82 1.18 3.07 0 4.39-2.68 5.35-5.23 5.64.41.36.78 1.06.78 2.14v3.15c0 .3.21.66.79.55A11.3 11.3 0 0 0 12 .7Z" }
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "text-sm font-medium text-foreground", {translate("vault-github")} }
-                                div { class: "mt-0.5 text-xs text-muted-foreground/70", {translate("vault-github-description")} }
-                            }
-                            if vault.github_owner.is_empty() {
-                                ManagerButton {
-                                    variant: ManagerButtonVariant::Primary,
-                                    disabled: pending().is_some(),
-                                    onclick: move |_| send_action(
-                                        pending,
-                                        VaultAction::ConnectGithub,
-                                        String::new(),
-                                        true,
-                                    ),
-                                    if pending() == Some(VaultAction::ConnectGithub) {
-                                        span { class: "flex items-center gap-2",
-                                            span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
-                                            {translate("common-loading")}
-                                        }
+                div { class: "mt-5 flex flex-col gap-3",
+                    VaultStep { number: 1, active: true, complete: provider.is_some(),
+                        div { class: "grid gap-2 sm:grid-cols-2 lg:grid-cols-4",
+                            for option in RemoteProvider::ALL {
+                                button {
+                                    class: if provider == Some(option) {
+                                        "flex items-center gap-3 rounded-xl bg-primary/10 px-3 py-3 text-left text-foreground ring-2 ring-inset ring-primary/35"
                                     } else {
-                                        {translate("vault-connect-github")}
+                                        "flex items-center gap-3 rounded-xl bg-background/45 px-3 py-3 text-left text-muted-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.07] hover:text-foreground"
+                                    },
+                                    onclick: move |_| {
+                                        selected_provider.set(Some(option));
+                                        cloud_root.set(String::new());
+                                        selected_repository.set(None);
+                                        if !option.is_github() {
+                                            repository.set("vmux-vault".to_string());
+                                        }
+                                    },
+                                    ProviderIcon { provider: option }
+                                    span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{option.name()}" }
+                                    if provider == Some(option) {
+                                        svg { class: "h-3.5 w-3.5 shrink-0 text-primary", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
+                                            path { d: "m5 12 4 4L19 6" }
+                                        }
                                     }
                                 }
                             }
                         }
-                        if !vault.github_owner.is_empty() {
-                            div { class: "mt-3 flex items-center gap-2 text-[10px] text-emerald-700 dark:text-emerald-300",
-                                span {
-                                    {translate_with(
-                                        "vault-connected-as",
-                                        &[("name", TranslationValue::String(&vault.github_owner))],
-                                    )}
+                    }
+                    VaultStep { number: 2, active: provider.is_some(), complete: authenticated,
+                        if let Some(provider) = provider {
+                            div { class: "flex min-w-0 items-center gap-3",
+                                ProviderIcon { provider }
+                                div { class: "min-w-0 flex-1",
+                                    div { class: "text-xs font-medium text-foreground", "{provider.name()}" }
+                                    if provider.is_github() && !vault.github_owner.is_empty() {
+                                        div { class: "truncate text-[10px] text-emerald-700 dark:text-emerald-300",
+                                            {translate_with(
+                                                "vault-connected-as",
+                                                &[("name", TranslationValue::String(&vault.github_owner))],
+                                            )}
+                                        }
+                                    } else if !provider.is_github() && !cloud_root().is_empty() {
+                                        div { class: "truncate text-[10px] text-emerald-700 dark:text-emerald-300", "{cloud_root()}" }
+                                    } else {
+                                        div { class: "text-[10px] text-muted-foreground/60", {translate("vault-not-connected")} }
+                                    }
                                 }
-                                if pending() == Some(VaultAction::ConnectGithub) {
-                                    span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                if !authenticated {
+                                    ManagerButton {
+                                        variant: ManagerButtonVariant::Primary,
+                                        disabled: pending().is_some(),
+                                        onclick: move |_| send_action(
+                                            pending,
+                                            if provider.is_github() {
+                                                VaultAction::ConnectGithub
+                                            } else {
+                                                VaultAction::ConnectCloud
+                                            },
+                                            if provider.is_github() {
+                                                String::new()
+                                            } else {
+                                                provider.name().to_string()
+                                            },
+                                            true,
+                                        ),
+                                        if pending().is_some_and(|action| {
+                                            action == VaultAction::ConnectGithub
+                                                || action == VaultAction::ConnectCloud
+                                        }) {
+                                            span { class: "flex items-center gap-2",
+                                                span { class: "h-3 w-3 animate-spin rounded-full border-2 border-current/25 border-t-current" }
+                                                {translate("common-loading")}
+                                            }
+                                        } else {
+                                            {translate("vault-connect")}
+                                        }
+                                    }
                                 }
                             }
-                            if vault.repositories_loaded {
-                                div { class: "mt-3",
+                        } else {
+                            div { class: "py-1 text-xs text-muted-foreground/60", {translate("vault-connect")} }
+                        }
+                    }
+                    VaultStep { number: 3, active: authenticated, complete: false,
+                        if authenticated {
+                            if provider == Some(RemoteProvider::Github) {
+                                div { class: "mb-3",
                                     ManagerSelect {
                                         items: owner_items,
                                         value: Some(owner.clone()),
@@ -320,110 +405,111 @@ fn VaultPanel(
                                         },
                                     }
                                 }
+                                div { class: "grid gap-3 lg:grid-cols-2",
+                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
+                                        div { class: "flex gap-2",
+                                            div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/55 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
+                                                span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
+                                                input {
+                                                    class: "min-w-0 flex-1 bg-transparent py-2 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
+                                                    value: repository(),
+                                                    placeholder: translate("vault-repository-name"),
+                                                    oninput: move |event| repository.set(event.value()),
+                                                }
+                                            }
+                                            ManagerButton {
+                                                variant: ManagerButtonVariant::Primary,
+                                                disabled: pending().is_some() || owner.is_empty() || repository().trim().is_empty(),
+                                                onclick: move |_| send_action(
+                                                    pending,
+                                                    VaultAction::Create,
+                                                    format!("{owner}/{}", repository().trim()),
+                                                    private(),
+                                                ),
+                                                {translate("vault-create")}
+                                            }
+                                        }
+                                        label { class: "mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground",
+                                            input {
+                                                r#type: "checkbox",
+                                                checked: private(),
+                                                onchange: move |event| private.set(event.checked()),
+                                            }
+                                            {translate("vault-private")}
+                                        }
+                                        if !private() {
+                                            div { class: "mt-2 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
+                                        }
+                                    }
+                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-repository")} }
+                                        div { class: "flex gap-2",
+                                            div { class: "min-w-0 flex-1",
+                                                ManagerSelect {
+                                                    items: repository_items,
+                                                    value: selected_repository(),
+                                                    placeholder: translate("vault-choose-repository"),
+                                                    onselect: move |value| selected_repository.set(Some(value)),
+                                                }
+                                            }
+                                            ManagerButton {
+                                                variant: ManagerButtonVariant::Secondary,
+                                                disabled: pending().is_some() || selected_repository().is_none(),
+                                                onclick: move |_| send_action(
+                                                    pending,
+                                                    VaultAction::Connect,
+                                                    selected_repository().unwrap_or_default(),
+                                                    true,
+                                                ),
+                                                {translate("vault-use-repository")}
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
-                                div { class: "mt-3 flex items-center gap-2 rounded-xl bg-background/55 px-3 py-2 pr-4 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                    span { class: "h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current/25 border-t-current" }
-                                    span { class: "truncate", {translate("common-loading")} }
-                                }
-                            }
-                            div { class: "mt-4 rounded-xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07]",
-                                div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
-                                div { class: "flex gap-2",
-                                    div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/55 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
-                                        span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
-                                        input {
-                                            class: "min-w-0 flex-1 bg-transparent py-2 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
-                                            value: repository(),
-                                            placeholder: translate("vault-repository-name"),
-                                            oninput: move |event| repository.set(event.value()),
+                                div { class: "grid gap-3 lg:grid-cols-2",
+                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
+                                        div { class: "flex gap-2",
+                                            input {
+                                                class: "min-w-0 flex-1 rounded-xl bg-background/55 px-3 py-2 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-primary/40",
+                                                value: repository(),
+                                                placeholder: translate("vault-repository-name"),
+                                                oninput: move |event| repository.set(event.value()),
+                                            }
+                                            ManagerButton {
+                                                variant: ManagerButtonVariant::Primary,
+                                                disabled: pending().is_some() || repository().trim().is_empty(),
+                                                onclick: move |_| send_cloud_create(
+                                                    pending,
+                                                    &cloud_root(),
+                                                    repository().trim(),
+                                                ),
+                                                {translate("vault-create")}
+                                            }
                                         }
                                     }
-                                    ManagerButton {
-                                        variant: ManagerButtonVariant::Primary,
-                                        disabled: pending().is_some()
-                                            || !vault.repositories_loaded
-                                            || owner.is_empty()
-                                            || repository().trim().is_empty(),
-                                        onclick: move |_| send_action(
-                                            pending,
-                                            VaultAction::Create,
-                                            format!("{owner}/{}", repository().trim()),
-                                            private(),
-                                        ),
-                                        {translate("vault-create")}
-                                    }
-                                }
-                                label { class: "mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground",
-                                    input {
-                                        r#type: "checkbox",
-                                        checked: private(),
-                                        onchange: move |event| private.set(event.checked()),
-                                    }
-                                    {translate("vault-private")}
-                                }
-                                if !private() {
-                                    div { class: "mt-2 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
-                                }
-                            }
-                            div { class: "my-3 flex items-center gap-3",
-                                span { class: "h-px flex-1 bg-foreground/[0.07]" }
-                                span { class: "h-1 w-1 rounded-full bg-foreground/20" }
-                                span { class: "h-px flex-1 bg-foreground/[0.07]" }
-                            }
-                            div { class: "rounded-xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07]",
-                                div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-repository")} }
-                                div { class: "flex gap-2",
-                                if vault.repositories_loaded {
-                                    div { class: "min-w-0 flex-1",
-                                        ManagerSelect {
-                                            items: repository_items,
-                                            value: selected_repository(),
-                                            placeholder: translate("vault-choose-repository"),
-                                            onselect: move |value| selected_repository.set(Some(value)),
+                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-folder")} }
+                                        ManagerButton {
+                                            variant: ManagerButtonVariant::Secondary,
+                                            disabled: pending().is_some(),
+                                            onclick: move |_| send_action(
+                                                pending,
+                                                VaultAction::ChooseCloudFolder,
+                                                cloud_root(),
+                                                true,
+                                            ),
+                                            {translate("vault-choose-folder")}
                                         }
                                     }
-                                } else {
-                                    div { class: "flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-background/55 px-3 py-2 pr-4 text-xs text-muted-foreground ring-1 ring-inset ring-foreground/10",
-                                        span { class: "h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current/25 border-t-current" }
-                                        span { class: "truncate", {translate("common-loading")} }
-                                    }
-                                }
-                                ManagerButton {
-                                    variant: ManagerButtonVariant::Secondary,
-                                    disabled: pending().is_some() || selected_repository().is_none(),
-                                    onclick: move |_| send_action(
-                                        pending,
-                                        VaultAction::Connect,
-                                        selected_repository().unwrap_or_default(),
-                                        true,
-                                    ),
-                                    {translate("vault-use-repository")}
                                 }
                             }
-                            }
-                        }
-                    }
-                    div { class: "{cloud_card_class}",
-                        div { class: "flex items-start gap-3",
-                            svg { class: "mt-0.5 h-5 w-5 shrink-0 text-foreground/75", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                            }
-                            div { class: "min-w-0 flex-1",
-                                div { class: "text-sm font-medium text-foreground", {translate("vault-cloud-folder")} }
-                                div { class: "mt-0.5 text-xs text-muted-foreground/70", {translate("vault-cloud-folder-description")} }
-                            }
-                        }
-                        div { class: "mt-4",
-                            ManagerButton {
-                                variant: ManagerButtonVariant::Secondary,
-                                disabled: pending().is_some(),
-                                onclick: move |_| send_action(
-                                    pending,
-                                    VaultAction::ConnectFolder,
-                                    String::new(),
-                                    true,
-                                ),
-                                {translate("vault-choose-folder")}
+                        } else {
+                            div { class: "grid gap-3 lg:grid-cols-2",
+                                div { class: "rounded-xl bg-background/30 p-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 ring-1 ring-inset ring-foreground/[0.07]", {translate("vault-create")} }
+                                div { class: "rounded-xl bg-background/30 p-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 ring-1 ring-inset ring-foreground/[0.07]", {translate("vault-choose-folder")} }
                             }
                         }
                     }
@@ -439,6 +525,64 @@ fn VaultPanel(
                 }
             }
         }
+    }
+}
+
+#[component]
+fn VaultStep(number: u8, active: bool, complete: bool, children: Element) -> Element {
+    rsx! {
+        div { class: if active {
+                "rounded-2xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10 transition-opacity"
+            } else {
+                "pointer-events-none rounded-2xl bg-background/20 p-4 opacity-40 ring-1 ring-inset ring-foreground/[0.07]"
+            },
+            div { class: "flex items-start gap-3",
+                div { class: if complete {
+                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-700 ring-1 ring-inset ring-emerald-400/25 dark:text-emerald-300"
+                    } else if active {
+                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-inset ring-primary/25"
+                    } else {
+                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-foreground/[0.05] text-muted-foreground ring-1 ring-inset ring-foreground/10"
+                    },
+                    if complete {
+                        svg { class: "h-3.5 w-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
+                            path { d: "m5 12 4 4L19 6" }
+                        }
+                    } else {
+                        span { class: "text-[10px] font-semibold", "{number}" }
+                    }
+                }
+                div { class: "min-w-0 flex-1", {children} }
+            }
+        }
+    }
+}
+
+#[component]
+fn ProviderIcon(provider: RemoteProvider) -> Element {
+    match provider {
+        RemoteProvider::Github => rsx! {
+            svg { class: "h-5 w-5 shrink-0", view_box: "0 0 24 24", fill: "currentColor",
+                path { d: "M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.78-.25.78-.55v-2.16c-3.18.69-3.85-1.35-3.85-1.35-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.73-1.53-2.54-.29-5.21-1.27-5.21-5.65 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.11 1.17A10.8 10.8 0 0 1 12 5.93c.96 0 1.92.13 2.82.38 2.15-1.48 3.11-1.17 3.11-1.17.62 1.58.23 2.74.11 3.03.73.8 1.18 1.82 1.18 3.07 0 4.39-2.68 5.35-5.23 5.64.41.36.78 1.06.78 2.14v3.15c0 .3.21.66.79.55A11.3 11.3 0 0 0 12 .7Z" }
+            }
+        },
+        RemoteProvider::GoogleDrive => rsx! {
+            svg { class: "h-5 w-5 shrink-0", view_box: "0 0 24 24", fill: "none",
+                path { d: "M8.1 3h7.8l4 7h-7.8Z", fill: "#fbbc04" }
+                path { d: "m8.1 3 4 7-4.1 7H4Z", fill: "#34a853" }
+                path { d: "M8 17h8l3.9-7h-7.8Z", fill: "#4285f4" }
+            }
+        },
+        RemoteProvider::Dropbox => rsx! {
+            svg { class: "h-5 w-5 shrink-0 text-[#0061ff]", view_box: "0 0 24 24", fill: "currentColor",
+                path { d: "m6.5 3.5 5.5 3.4-5.5 3.5L1 6.9Zm11 0L23 6.9l-5.5 3.5L12 6.9Zm-11 8L12 15l-5.5 3.4L1 15Zm11 0L23 15l-5.5 3.4L12 15ZM6.6 19.6l5.4-3.4 5.4 3.4L12 23Z" }
+            }
+        },
+        RemoteProvider::OneDrive => rsx! {
+            svg { class: "h-5 w-5 shrink-0 text-[#0078d4]", view_box: "0 0 24 24", fill: "currentColor",
+                path { d: "M9.3 7.3A6 6 0 0 1 19.8 11a4.5 4.5 0 0 1-.3 9H6a5 5 0 0 1-.6-10A5.8 5.8 0 0 1 9.3 7.3Z" }
+            }
+        },
     }
 }
 
@@ -794,6 +938,17 @@ fn send_action(
     });
 }
 
+fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name: &str) {
+    pending.set(Some(VaultAction::CreateCloudFolder));
+    let _ = try_cef_bin_emit_rkyv(&VaultActionRequest {
+        action: VaultAction::CreateCloudFolder,
+        repository: root.to_string(),
+        private: true,
+        credential_id: name.to_string(),
+        prf_output: Vec::new(),
+    });
+}
+
 fn action_result_message(action: VaultAction) -> String {
     translate(match action {
         VaultAction::Create => "vault-result-created",
@@ -803,6 +958,10 @@ fn action_result_message(action: VaultAction) -> String {
         VaultAction::ConnectFolder => "vault-result-folder-connected",
         VaultAction::AddPasskey => "vault-result-created",
         VaultAction::UnlockPasskey => "vault-result-connected",
+        VaultAction::ConnectCloud => "vault-result-connected",
+        VaultAction::CreateCloudFolder | VaultAction::ChooseCloudFolder => {
+            "vault-result-folder-connected"
+        }
     })
 }
 

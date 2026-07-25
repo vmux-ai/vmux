@@ -1120,7 +1120,108 @@ async fn perform_vault_action(request: &VaultActionRequest) -> Result<String, St
             &request.credential_id,
             &request.prf_output,
         ),
+        VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
+        VaultAction::CreateCloudFolder => {
+            let folder = Path::new(&request.repository).join(&request.credential_id);
+            vmux_core::profile::vault::connect_folder(&folder)
+        }
+        VaultAction::ChooseCloudFolder => {
+            let mut dialog = rfd::AsyncFileDialog::new();
+            let root = Path::new(&request.repository);
+            if root.is_dir() {
+                dialog = dialog.set_directory(root);
+            }
+            let Some(folder) = dialog.pick_folder().await else {
+                return Err(String::new());
+            };
+            let remote = if folder
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "git")
+            {
+                folder.path().to_path_buf()
+            } else {
+                folder.path().join("vmux-vault.git")
+            };
+            if !remote.exists() {
+                return Err("selected folder does not contain a Vault".to_string());
+            }
+            vmux_core::profile::vault::connect_folder(folder.path())
+        }
     }
+}
+
+async fn connect_cloud_storage(provider: &str) -> Result<String, String> {
+    let roots = cloud_storage_roots(provider);
+    match roots.as_slice() {
+        [] => Err(format!("{provider} is not connected on this device")),
+        [root] => Ok(root.to_string_lossy().into_owned()),
+        roots => {
+            let initial = roots
+                .first()
+                .and_then(|root| root.parent())
+                .unwrap_or_else(|| roots[0].as_path());
+            let Some(folder) = rfd::AsyncFileDialog::new()
+                .set_directory(initial)
+                .pick_folder()
+                .await
+            else {
+                return Err(String::new());
+            };
+            let selected = folder
+                .path()
+                .canonicalize()
+                .map_err(|error| error.to_string())?;
+            if roots.iter().any(|root| {
+                root.canonicalize()
+                    .is_ok_and(|root| selected == root || selected.starts_with(root))
+            }) {
+                Ok(selected.to_string_lossy().into_owned())
+            } else {
+                Err(format!("selected folder is not in {provider}"))
+            }
+        }
+    }
+}
+
+fn cloud_storage_roots(provider: &str) -> Vec<std::path::PathBuf> {
+    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        return Vec::new();
+    };
+    let prefixes: &[&str] = match provider {
+        "Google Drive" => &["GoogleDrive"],
+        "Dropbox" => &["Dropbox"],
+        "OneDrive" => &["OneDrive"],
+        _ => return Vec::new(),
+    };
+    let mut roots = std::fs::read_dir(home.join("Library/CloudStorage"))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            prefixes.iter().any(|prefix| name.starts_with(prefix))
+        })
+        .map(|entry| {
+            let root = entry.path();
+            if provider == "Google Drive" && root.join("My Drive").is_dir() {
+                root.join("My Drive")
+            } else {
+                root
+            }
+        })
+        .collect::<Vec<_>>();
+    for fallback in prefixes.iter().map(|prefix| home.join(prefix)) {
+        if fallback.is_dir() {
+            roots.push(fallback);
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
 }
 
 fn import_provider(provider: ToolProvider, path: &str) -> Result<String, String> {
