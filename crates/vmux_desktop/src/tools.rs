@@ -534,6 +534,9 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
         root: status.root.to_string_lossy().into_owned(),
         initialized: status.initialized,
         encrypted: status.encrypted,
+        vault_id: status.vault_id,
+        passkey_credentials: status.passkey_credentials,
+        passkey_salt: status.passkey_salt,
         remote: status.remote,
         branch: status.branch,
         dirty: status.dirty,
@@ -1106,6 +1109,13 @@ async fn perform_vault_action(request: &VaultActionRequest) -> Result<String, St
             };
             vmux_core::profile::vault::connect_folder(folder.path())
         }
+        VaultAction::AddPasskey => {
+            vmux_core::profile::vault::add_passkey(&request.credential_id, &request.prf_output)
+        }
+        VaultAction::UnlockPasskey => vmux_core::profile::vault::unlock_with_passkey(
+            &request.credential_id,
+            &request.prf_output,
+        ),
     }
 }
 

@@ -48,6 +48,7 @@ use crate::browser_process::permission_handler::{
 };
 use crate::browser_process::renderer_handler::SharedDeviceScaleFactor;
 use crate::browser_process::request_handler::RequestHandlerBuilder;
+use crate::util::{VAULT_PASSKEY_HOST, VAULT_PASSKEY_SCHEME};
 pub use keyboard::*;
 
 /// Default CEF [`BrowserSettings::background_color`] ARGB.
@@ -343,7 +344,8 @@ impl Browsers {
                 ok_embedded, 1,
                 "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
             );
-            let mut files_factory = LocalSchemaHandlerBuilder::build(requester_for_global);
+            let mut files_factory =
+                LocalSchemaHandlerBuilder::build(requester_for_global.clone());
             let ok_files = register_scheme_handler_factory(
                 Some(&crate::util::FILES_SCHEME.into()),
                 None,
@@ -356,6 +358,17 @@ impl Browsers {
             assert_eq!(
                 ok_files, 1,
                 "cef_register_scheme_handler_factory(files scheme) failed with code {ok_files}"
+            );
+            let mut vault_passkey_factory =
+                LocalSchemaHandlerBuilder::build(requester_for_global);
+            let ok_vault_passkey = register_scheme_handler_factory(
+                Some(&VAULT_PASSKEY_SCHEME.into()),
+                Some(&VAULT_PASSKEY_HOST.into()),
+                Some(&mut vault_passkey_factory),
+            );
+            assert_eq!(
+                ok_vault_passkey, 1,
+                "cef_register_scheme_handler_factory(Vault passkey origin) failed with code {ok_vault_passkey}"
             );
         });
 
@@ -2021,6 +2034,11 @@ impl Browsers {
             context.register_scheme_handler_factory(
                 Some(&crate::util::FILES_SCHEME.into()),
                 None,
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            context.register_scheme_handler_factory(
+                Some(&VAULT_PASSKEY_SCHEME.into()),
+                Some(&VAULT_PASSKEY_HOST.into()),
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
         }
@@ -2054,6 +2072,11 @@ impl Browsers {
             context.register_scheme_handler_factory(
                 Some(&crate::util::FILES_SCHEME.into()),
                 None,
+                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
+            );
+            context.register_scheme_handler_factory(
+                Some(&VAULT_PASSKEY_SCHEME.into()),
+                Some(&VAULT_PASSKEY_HOST.into()),
                 Some(&mut LocalSchemaHandlerBuilder::build(requester)),
             );
         }

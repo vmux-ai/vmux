@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
+#[cfg(not(target_os = "macos"))]
+use std::sync::{Mutex, OnceLock};
 
 use ring::aead;
 use ring::digest;
@@ -10,15 +12,22 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 const FORMAT_VERSION: u32 = 1;
+const MANIFEST_VERSION: u32 = 2;
 const MANIFEST_FILE: &str = "vault.ron";
 const INDEX_FILE: &str = "index.enc";
 const OBJECTS_DIR: &str = "objects";
+const PASSKEYS_DIR: &str = "keys/passkeys";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
+const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
+const PASSKEY_KDF_PREFIX: &[u8] = b"vmux-vault-passkey-kdf-v1\0";
+const PASSKEY_PRF_PREFIX: &[u8] = b"vmux-vault-passkey-prf-v1\0";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
+#[cfg(not(target_os = "macos"))]
+static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
 const IGNORED_ROOTS: [&str; 8] = [
     "agents",
     "extensions",
@@ -35,6 +44,9 @@ pub struct VaultStatus {
     pub root: PathBuf,
     pub initialized: bool,
     pub encrypted: bool,
+    pub vault_id: String,
+    pub passkey_credentials: Vec<String>,
+    pub passkey_salt: Vec<u8>,
     pub remote: String,
     pub branch: String,
     pub dirty: u32,
@@ -114,6 +126,13 @@ struct RemoteManifest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct PasskeyEnvelope {
+    version: u32,
+    credential_id: String,
+    wrapped_key: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct EncryptedIndex {
     version: u32,
     files: Vec<EncryptedIndexEntry>,
@@ -151,6 +170,7 @@ struct LocalStateEntry {
 trait KeyStore {
     fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
     fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
+    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String>;
 }
 
 struct SystemKeyStore;
@@ -162,6 +182,10 @@ impl KeyStore for SystemKeyStore {
 
     fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
         create_system_key(vault_id)
+    }
+
+    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String> {
+        store_system_key(vault_id, key)
     }
 }
 
@@ -257,14 +281,51 @@ pub fn initialize() -> Result<(), String> {
     initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
 }
 
+pub fn add_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, String> {
+    add_passkey_paths(
+        &repository_dir(),
+        &SystemKeyStore,
+        credential_id,
+        prf_output,
+    )
+}
+
+pub fn unlock_with_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, String> {
+    unlock_with_passkey_paths(
+        &root_dir(),
+        &repository_dir(),
+        &SystemKeyStore,
+        credential_id,
+        prf_output,
+    )
+}
+
 fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
     let initialized = repository.join(".git").is_dir();
+    let manifest = initialized
+        .then(|| read_manifest(repository))
+        .transpose()
+        .ok()
+        .flatten();
     let mut status = VaultStatus {
         root: root.to_path_buf(),
         initialized,
-        encrypted: initialized && read_manifest(repository).is_ok(),
+        encrypted: manifest.is_some(),
         ..VaultStatus::default()
     };
+    if let Some(manifest) = manifest {
+        status.vault_id = manifest.vault_id.clone();
+        status.passkey_salt = passkey_salt(&manifest.vault_id).to_vec();
+        match read_passkey_envelopes(repository) {
+            Ok(envelopes) => {
+                status.passkey_credentials = envelopes
+                    .into_values()
+                    .map(|envelope| envelope.credential_id)
+                    .collect();
+            }
+            Err(error) => status.error = error,
+        }
+    }
     if initialized {
         status.remote = git_optional(repository, &["remote", "get-url", "origin"]);
         status.branch = git_optional(repository, &["branch", "--show-current"]);
@@ -397,7 +458,11 @@ fn connect_remote_paths<K: KeyStore>(
             Some(remote_branch) => {
                 validate_remote_history(vault_repository, &remote_branch)?;
                 let manifest = manifest_from_ref(vault_repository, &remote_branch)?;
-                let key = keys.load(&manifest.vault_id)?;
+                let key = match keys.load(&manifest.vault_id) {
+                    Ok(key) => Some(key),
+                    Err(_error) if remote_has_passkeys(vault_repository, &remote_branch)? => None,
+                    Err(error) => return Err(error),
+                };
                 let branch = remote_branch
                     .strip_prefix("origin/")
                     .unwrap_or(&remote_branch);
@@ -409,6 +474,9 @@ fn connect_remote_paths<K: KeyStore>(
                     vault_repository,
                     &["branch", "--set-upstream-to", &remote_branch],
                 )?;
+                let Some(key) = key else {
+                    return Ok(());
+                };
                 let (_, remote_files) = load_encrypted_snapshot(vault_repository, &key)?;
                 reconcile_local(root, &BTreeMap::new(), &remote_files)?;
                 let files = collect_local_files(root)?;
@@ -506,6 +574,158 @@ fn initialize_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Re
     let files = collect_local_files(root)?;
     write_encrypted_snapshot(repository, &vault_id, &key, &files, previous.as_ref())?;
     commit_changes(repository, "Initialize vmux Vault")
+}
+
+fn add_passkey_paths<K: KeyStore>(
+    repository: &Path,
+    keys: &K,
+    credential_id: &str,
+    prf_output: &[u8],
+) -> Result<String, String> {
+    validate_credential_id(credential_id)?;
+    let mut manifest = read_manifest(repository)?;
+    let key = keys.load(&manifest.vault_id)?;
+    let wrapping_key = derive_passkey_wrapping_key(prf_output, &manifest.vault_id, credential_id)?;
+    let wrapped_key = encrypt_bytes(
+        &wrapping_key,
+        &passkey_aad(&manifest.vault_id, credential_id),
+        &key,
+    )?;
+    let envelope = PasskeyEnvelope {
+        version: FORMAT_VERSION,
+        credential_id: credential_id.to_string(),
+        wrapped_key,
+    };
+    let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
+        .map_err(|error| error.to_string())?;
+    let directory = repository.join(PASSKEYS_DIR);
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    write_atomic(
+        &directory.join(passkey_envelope_name(credential_id)),
+        format!("{source}\n").as_bytes(),
+    )?;
+    manifest.version = MANIFEST_VERSION;
+    write_manifest(repository, &manifest)?;
+    validate_encrypted_worktree(repository)?;
+    commit_changes(repository, "Add Vault passkey")?;
+    if !git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
+        let branch = current_branch(repository)?;
+        git(repository, &["push", "-u", "origin", &branch])?;
+    }
+    Ok("Vault passkey added".to_string())
+}
+
+fn unlock_with_passkey_paths<K: KeyStore>(
+    root: &Path,
+    repository: &Path,
+    keys: &K,
+    credential_id: &str,
+    prf_output: &[u8],
+) -> Result<String, String> {
+    validate_credential_id(credential_id)?;
+    let manifest = read_manifest(repository)?;
+    let envelope = read_passkey_envelopes(repository)?
+        .remove(credential_id)
+        .ok_or_else(|| "This passkey is not authorized for the Vault".to_string())?;
+    let wrapping_key = derive_passkey_wrapping_key(prf_output, &manifest.vault_id, credential_id)?;
+    let key = Zeroizing::new(decrypt_bytes(
+        &wrapping_key,
+        &passkey_aad(&manifest.vault_id, credential_id),
+        &envelope.wrapped_key,
+    )?);
+    validate_key(&key)?;
+    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
+    keys.store(&manifest.vault_id, &key)?;
+    reconcile_local(root, &BTreeMap::new(), &remote_files)?;
+    write_local_state(root, repository)?;
+    Ok("Vault unlocked".to_string())
+}
+
+fn read_passkey_envelopes(repository: &Path) -> Result<BTreeMap<String, PasskeyEnvelope>, String> {
+    let directory = repository.join(PASSKEYS_DIR);
+    if !directory.exists() {
+        return Ok(BTreeMap::new());
+    }
+    let mut envelopes = BTreeMap::new();
+    for entry in std::fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
+            return Err("invalid Vault passkey recipient".to_string());
+        }
+        let source = std::fs::read_to_string(entry.path()).map_err(|error| error.to_string())?;
+        let envelope = ron::from_str::<PasskeyEnvelope>(&source)
+            .map_err(|error| format!("invalid Vault passkey recipient: {error}"))?;
+        if envelope.version != FORMAT_VERSION {
+            return Err("unsupported Vault passkey recipient".to_string());
+        }
+        validate_credential_id(&envelope.credential_id)?;
+        if entry.file_name().to_string_lossy() != passkey_envelope_name(&envelope.credential_id) {
+            return Err("Vault passkey recipient identifier mismatch".to_string());
+        }
+        if envelopes
+            .insert(envelope.credential_id.clone(), envelope)
+            .is_some()
+        {
+            return Err("duplicate Vault passkey recipient".to_string());
+        }
+    }
+    Ok(envelopes)
+}
+
+fn passkey_envelope_name(credential_id: &str) -> String {
+    format!(
+        "{}.ron",
+        hex(digest::digest(&digest::SHA256, credential_id.as_bytes()).as_ref())
+    )
+}
+
+fn passkey_salt(vault_id: &str) -> [u8; KEY_LEN] {
+    let mut input = Vec::with_capacity(PASSKEY_PRF_PREFIX.len() + vault_id.len());
+    input.extend_from_slice(PASSKEY_PRF_PREFIX);
+    input.extend_from_slice(vault_id.as_bytes());
+    let digest = digest::digest(&digest::SHA256, &input);
+    digest.as_ref().try_into().unwrap()
+}
+
+fn derive_passkey_wrapping_key(
+    prf_output: &[u8],
+    vault_id: &str,
+    credential_id: &str,
+) -> Result<[u8; KEY_LEN], String> {
+    if prf_output.len() != KEY_LEN {
+        return Err("passkey did not return an encryption-capable PRF result".to_string());
+    }
+    let key = hmac::Key::new(hmac::HMAC_SHA256, prf_output);
+    let mut input =
+        Vec::with_capacity(PASSKEY_KDF_PREFIX.len() + vault_id.len() + credential_id.len() + 1);
+    input.extend_from_slice(PASSKEY_KDF_PREFIX);
+    input.extend_from_slice(vault_id.as_bytes());
+    input.push(0);
+    input.extend_from_slice(credential_id.as_bytes());
+    Ok(hmac::sign(&key, &input).as_ref().try_into().unwrap())
+}
+
+fn passkey_aad(vault_id: &str, credential_id: &str) -> Vec<u8> {
+    let mut aad =
+        Vec::with_capacity(PASSKEY_AAD_PREFIX.len() + vault_id.len() + credential_id.len() + 1);
+    aad.extend_from_slice(PASSKEY_AAD_PREFIX);
+    aad.extend_from_slice(vault_id.as_bytes());
+    aad.push(0);
+    aad.extend_from_slice(credential_id.as_bytes());
+    aad
+}
+
+fn validate_credential_id(credential_id: &str) -> Result<(), String> {
+    if credential_id.is_empty()
+        || credential_id.len() > 4096
+        || !credential_id.len().is_multiple_of(2)
+        || !credential_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err("invalid Vault passkey credential".to_string());
+    }
+    Ok(())
 }
 
 fn validate_empty_vault_repository(repository: &Path) -> Result<(), String> {
@@ -807,6 +1027,7 @@ fn write_encrypted_snapshot(
     if previous.is_some_and(|previous| same_files(previous, files))
         && repository.join(MANIFEST_FILE).is_file()
         && repository.join(INDEX_FILE).is_file()
+        && read_manifest(repository).is_ok_and(|manifest| manifest.version == MANIFEST_VERSION)
     {
         return validate_encrypted_worktree(repository);
     }
@@ -854,17 +1075,12 @@ fn write_encrypted_snapshot(
     let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
     write_atomic(&repository.join(INDEX_FILE), &encrypted_index)?;
     let manifest = RemoteManifest {
-        version: FORMAT_VERSION,
+        version: MANIFEST_VERSION,
         cipher: "AES-256-GCM".to_string(),
         vault_id: vault_id.to_string(),
         index: INDEX_FILE.to_string(),
     };
-    let manifest_source = ron::ser::to_string_pretty(&manifest, ron::ser::PrettyConfig::new())
-        .map_err(|error| error.to_string())?;
-    write_atomic(
-        &repository.join(MANIFEST_FILE),
-        format!("{manifest_source}\n").as_bytes(),
-    )?;
+    write_manifest(repository, &manifest)?;
     validate_encrypted_worktree(repository)
 }
 
@@ -938,6 +1154,15 @@ fn read_manifest(repository: &Path) -> Result<RemoteManifest, String> {
     parse_manifest(&source)
 }
 
+fn write_manifest(repository: &Path, manifest: &RemoteManifest) -> Result<(), String> {
+    let source = ron::ser::to_string_pretty(manifest, ron::ser::PrettyConfig::new())
+        .map_err(|error| error.to_string())?;
+    write_atomic(
+        &repository.join(MANIFEST_FILE),
+        format!("{source}\n").as_bytes(),
+    )
+}
+
 fn manifest_from_ref(repository: &Path, branch: &str) -> Result<RemoteManifest, String> {
     let spec = format!("{branch}:{MANIFEST_FILE}");
     let source = git(repository, &["show", &spec])?;
@@ -949,7 +1174,7 @@ fn parse_manifest(source: &[u8]) -> Result<RemoteManifest, String> {
         .map_err(|error| format!("selected repository is not an encrypted vmux Vault: {error}"))?;
     let manifest = ron::from_str::<RemoteManifest>(source)
         .map_err(|error| format!("selected repository is not an encrypted vmux Vault: {error}"))?;
-    if manifest.version != FORMAT_VERSION
+    if !(FORMAT_VERSION..=MANIFEST_VERSION).contains(&manifest.version)
         || manifest.cipher != "AES-256-GCM"
         || manifest.index != INDEX_FILE
         || manifest.vault_id.is_empty()
@@ -974,6 +1199,7 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
                 || entry
                     .strip_prefix(&format!("{OBJECTS_DIR}/"))
                     .is_some_and(|name| name.len() == 64 && !name.contains('/'))
+                || valid_passkey_path(entry)
         });
     if !valid {
         return Err("selected repository contains plaintext or non-Vault history".to_string());
@@ -982,11 +1208,24 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
     Ok(())
 }
 
+fn remote_has_passkeys(repository: &Path, branch: &str) -> Result<bool, String> {
+    Ok(!git(
+        repository,
+        &["ls-tree", "-r", "--name-only", branch, PASSKEYS_DIR],
+    )?
+    .is_empty())
+}
+
 fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
     for entry in std::fs::read_dir(repository).map_err(|error| error.to_string())? {
         let entry = entry.map_err(|error| error.to_string())?;
         let name = entry.file_name();
-        if name != ".git" && name != MANIFEST_FILE && name != INDEX_FILE && name != OBJECTS_DIR {
+        if name != ".git"
+            && name != MANIFEST_FILE
+            && name != INDEX_FILE
+            && name != OBJECTS_DIR
+            && name != "keys"
+        {
             return Err(format!(
                 "Vault staging repository contains unencrypted file: {}",
                 name.to_string_lossy()
@@ -1008,7 +1247,34 @@ fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
             return Err(format!("invalid encrypted Vault object: {name}"));
         }
     }
+    let keys = repository.join("keys");
+    if keys.exists() {
+        let entries = std::fs::read_dir(&keys)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        if entries.len() != 1
+            || entries[0].file_name() != "passkeys"
+            || !entries[0]
+                .file_type()
+                .is_ok_and(|file_type| file_type.is_dir())
+        {
+            return Err("invalid encrypted Vault key recipients".to_string());
+        }
+        let _ = read_passkey_envelopes(repository)?;
+    }
     Ok(())
+}
+
+fn valid_passkey_path(path: &str) -> bool {
+    let Some(name) = path.strip_prefix(&format!("{PASSKEYS_DIR}/")) else {
+        return false;
+    };
+    name.len() == 68
+        && name.ends_with(".ron")
+        && name[..64]
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn encrypt_bytes(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
@@ -1224,12 +1490,12 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn keychain_options(vault_id: &str) -> security_framework::passwords::PasswordOptions {
+fn local_keychain_options(vault_id: &str) -> security_framework::passwords::PasswordOptions {
     let mut options = security_framework::passwords::PasswordOptions::new_generic_password(
         KEYCHAIN_SERVICE,
         vault_id,
     );
-    options.set_access_synchronized(Some(true));
+    options.set_access_synchronized(Some(false));
     options
 }
 
@@ -1238,44 +1504,85 @@ fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     use security_framework::passwords::generic_password;
     use security_framework_sys::base::errSecItemNotFound;
 
-    match generic_password(keychain_options(vault_id)) {
+    match generic_password(local_keychain_options(vault_id)) {
         Ok(key) => {
             validate_key(&key)?;
             Ok(Zeroizing::new(key))
         }
-        Err(error) if error.code() == errSecItemNotFound => Err(
-            "This Vault's encryption key is not available in iCloud Keychain. Enable Passwords & Keychain on the device that created it."
-                .to_string(),
-        ),
+        Err(error) if error.code() == errSecItemNotFound => load_legacy_synced_key(vault_id),
+        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn load_legacy_synced_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    use security_framework::passwords::{PasswordOptions, generic_password};
+    use security_framework_sys::base::errSecItemNotFound;
+
+    let mut options = PasswordOptions::new_generic_password(KEYCHAIN_SERVICE, vault_id);
+    options.set_access_synchronized(Some(true));
+    match generic_password(options) {
+        Ok(key) => {
+            validate_key(&key)?;
+            store_system_key(vault_id, &key)?;
+            Ok(Zeroizing::new(key))
+        }
+        Err(error) if error.code() == errSecItemNotFound => {
+            Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
+        }
         Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
     }
 }
 
 #[cfg(target_os = "macos")]
 fn create_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    use security_framework::passwords::{AccessControlOptions, set_generic_password_options};
-
     let mut key = Zeroizing::new(vec![0_u8; KEY_LEN]);
     SystemRandom::new()
         .fill(&mut key)
         .map_err(|_| "failed to generate Vault encryption key".to_string())?;
-    let mut protected = keychain_options(vault_id);
-    protected.set_access_control_options(AccessControlOptions::USER_PRESENCE);
-    if set_generic_password_options(&key, protected).is_err() {
-        set_generic_password_options(&key, keychain_options(vault_id))
-            .map_err(|error| format!("failed to store Vault key in iCloud Keychain: {error}"))?;
-    }
+    store_system_key(vault_id, &key)?;
     Ok(key)
 }
 
+#[cfg(target_os = "macos")]
+fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
+    use security_framework::passwords::{AccessControlOptions, set_generic_password_options};
+
+    validate_key(key)?;
+    let mut protected = local_keychain_options(vault_id);
+    protected.set_access_control_options(AccessControlOptions::USER_PRESENCE);
+    if set_generic_password_options(key, protected).is_err() {
+        set_generic_password_options(key, local_keychain_options(vault_id))
+            .map_err(|error| format!("failed to store Vault key in system Keychain: {error}"))?;
+    }
+    Ok(())
+}
+
 #[cfg(not(target_os = "macos"))]
-fn load_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    Err("Encrypted Vault key storage is not available on this platform".to_string())
+fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    SESSION_KEYS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(vault_id)
+        .map(|key| Zeroizing::new(key.to_vec()))
+        .ok_or_else(|| "This Vault is locked on this device. Unlock it with a passkey.".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
 fn create_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     Err("Encrypted Vault key storage is not available on this platform".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
+    validate_key(key)?;
+    SESSION_KEYS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(vault_id.to_string(), Zeroizing::new(key.to_vec()));
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -1526,6 +1833,7 @@ fn command_success(output: Output) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     struct FixedKeyStore {
         key: Vec<u8>,
@@ -1546,6 +1854,39 @@ mod tests {
 
         fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
             Ok(Zeroizing::new(self.key.clone()))
+        }
+
+        fn store(&self, _vault_id: &str, key: &[u8]) -> Result<(), String> {
+            if key == self.key {
+                Ok(())
+            } else {
+                Err("unexpected key".to_string())
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct MemoryKeyStore {
+        key: Mutex<Option<Vec<u8>>>,
+    }
+
+    impl KeyStore for MemoryKeyStore {
+        fn load(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+            self.key
+                .lock()
+                .unwrap()
+                .clone()
+                .map(Zeroizing::new)
+                .ok_or_else(|| "key unavailable".to_string())
+        }
+
+        fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+            Err("unexpected create".to_string())
+        }
+
+        fn store(&self, _vault_id: &str, key: &[u8]) -> Result<(), String> {
+            *self.key.lock().unwrap() = Some(key.to_vec());
+            Ok(())
         }
     }
 
@@ -1604,6 +1945,73 @@ mod tests {
         let mut tampered = encrypted;
         *tampered.last_mut().unwrap() ^= 1;
         assert!(decrypt_bytes(&key, b"path", &tampered).is_err());
+    }
+
+    #[test]
+    fn passkey_unlocks_a_fetched_vault_without_the_original_device_key() {
+        let first = tempfile::tempdir().unwrap();
+        std::fs::write(first.path().join("settings.ron"), "(shared: true)\n").unwrap();
+        let first_repository = prepare_repository(first.path());
+        let original_keys = FixedKeyStore::new(42);
+        initialize_paths(first.path(), &first_repository, &original_keys).unwrap();
+        let credential_id = "a1".repeat(32);
+        let prf_output = [9_u8; KEY_LEN];
+        add_passkey_paths(
+            &first_repository,
+            &original_keys,
+            &credential_id,
+            &prf_output,
+        )
+        .unwrap();
+
+        let remote = tempfile::tempdir().unwrap();
+        let remote_path = remote.path().join("vault.git");
+        create_bare_remote(&remote_path);
+        git(
+            &first_repository,
+            &["remote", "add", "origin", remote_path.to_str().unwrap()],
+        )
+        .unwrap();
+        git(&first_repository, &["push", "-u", "origin", "main"]).unwrap();
+
+        let second = tempfile::tempdir().unwrap();
+        let second_repository = prepare_repository(second.path());
+        let second_keys = MemoryKeyStore::default();
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote_path.to_str().unwrap(),
+            &second_keys,
+        )
+        .unwrap();
+        assert!(!second.path().join("settings.ron").exists());
+
+        unlock_with_passkey_paths(
+            second.path(),
+            &second_repository,
+            &second_keys,
+            &credential_id,
+            &prf_output,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(second.path().join("settings.ron")).unwrap(),
+            "(shared: true)\n"
+        );
+        assert_eq!(
+            second_keys.load("ignored").unwrap().as_slice(),
+            &[42; KEY_LEN]
+        );
+        assert!(
+            unlock_with_passkey_paths(
+                second.path(),
+                &second_repository,
+                &MemoryKeyStore::default(),
+                &credential_id,
+                &[8_u8; KEY_LEN],
+            )
+            .is_err()
+        );
     }
 
     #[test]

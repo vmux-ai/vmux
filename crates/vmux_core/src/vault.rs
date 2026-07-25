@@ -17,6 +17,9 @@ pub struct VaultSnapshot {
     pub root: String,
     pub initialized: bool,
     pub encrypted: bool,
+    pub vault_id: String,
+    pub passkey_credentials: Vec<String>,
+    pub passkey_salt: Vec<u8>,
     pub remote: String,
     pub branch: String,
     pub dirty: u32,
@@ -80,6 +83,8 @@ pub enum VaultAction {
     Sync,
     ConnectGithub,
     ConnectFolder,
+    AddPasskey,
+    UnlockPasskey,
 }
 
 #[derive(
@@ -97,6 +102,8 @@ pub struct VaultActionRequest {
     pub action: VaultAction,
     pub repository: String,
     pub private: bool,
+    pub credential_id: String,
+    pub prf_output: Vec<u8>,
 }
 
 #[derive(

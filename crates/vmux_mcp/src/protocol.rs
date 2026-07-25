@@ -181,6 +181,7 @@ fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
         "root": status.root,
         "connected": connected,
         "encrypted": status.encrypted,
+        "passkeys": status.passkey_credentials.len(),
         "provider": provider,
         "remote": status.remote,
         "branch": status.branch,
@@ -998,6 +999,7 @@ mod tests {
             root: "/Users/test/.vmux".into(),
             initialized: true,
             encrypted: true,
+            passkey_credentials: vec!["a1".repeat(32)],
             remote: "https://github.com/vmux-ai/vault.git".into(),
             branch: "main".into(),
             dirty: 2,
@@ -1010,6 +1012,7 @@ mod tests {
 
         assert_eq!(status["connected"], true);
         assert_eq!(status["encrypted"], true);
+        assert_eq!(status["passkeys"], 1);
         assert_eq!(status["provider"], "github");
         assert_eq!(status["localChanges"], 2);
         assert_eq!(status["ahead"], 1);

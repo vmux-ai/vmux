@@ -9903,6 +9903,7 @@ dependencies = [
  "vmux_ui",
  "vmux_wire",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
