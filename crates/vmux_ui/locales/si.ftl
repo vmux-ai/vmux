@@ -72,6 +72,7 @@ vault-passkey = පාස්කී
 vault-passkey-description = මුරපදයක් නොමැතිව වෙනත් උපාංගවල මෙම සුරක්ෂිතාගාරය අගුළු හරින්න.
 vault-passkey-add = මුරපදය එක් කරන්න
 vault-passkey-unlock = අගුළු හරින්න
+vault-passkey-provider-unsupported = මෙම මුරපදය සපයන්නා තවමත් සංකේතාත්මක වෝල්ට් අගුලු හැරීමට සහාය නොදක්වයි.
 vault-open = { common-open } Vault
 vault-description = Git සමඟින් සැකසීම්, මෙවලම්, dotfiles සහ දැනුම සමමුහුර්ත කරන්න.
 vault-sync = සමමුහුර්ත කරන්න

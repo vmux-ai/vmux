@@ -72,6 +72,7 @@ vault-passkey = Kunci pas
 vault-passkey-description = Buka kunci Vault ini di perangkat lain tanpa kata sandi.
 vault-passkey-add = Tambahkan kunci sandi
 vault-passkey-unlock = Membuka kunci
+vault-passkey-provider-unsupported = Penyedia kunci sandi ini belum mendukung pembukaan kunci Vault terenkripsi.
 vault-open = { common-open } Vault
 vault-description = Sinkronkan pengaturan, alat, dotfile, dan Pengetahuan dengan Git.
 vault-sync = Sinkronisasi

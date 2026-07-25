@@ -72,6 +72,7 @@ vault-passkey = Pasahitza
 vault-passkey-description = Desblokeatu Vault hau beste gailu batzuetan pasahitzik gabe.
 vault-passkey-add = Gehitu pasahitza
 vault-passkey-unlock = Desblokeatu
+vault-passkey-provider-unsupported = Pasahitza-hornitzaile honek ez du onartzen enkriptatutako Vault desblokeatzea oraindik.
 vault-open = { common-open } Vault
 vault-description = Sinkronizatu ezarpenak, tresnak, dotfiles eta Knowledge Git-ekin.
 vault-sync = Sinkronizatu

@@ -72,6 +72,7 @@ vault-passkey = Ieejas atslēga
 vault-passkey-description = Atbloķējiet šo Vault citās ierīcēs bez paroles.
 vault-passkey-add = Pievienojiet piekļuves atslēgu
 vault-passkey-unlock = Atbloķēt
+vault-passkey-provider-unsupported = Šis piekļuves atslēgas nodrošinātājs vēl neatbalsta šifrētu Vault atbloķēšanu.
 vault-open = { common-open } Vault
 vault-description = Sinhronizējiet iestatījumus, rīkus, punktu failus un zināšanas ar Git.
 vault-sync = Sinhronizēt

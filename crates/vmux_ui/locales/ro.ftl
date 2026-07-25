@@ -72,6 +72,7 @@ vault-passkey = Cheie de acces
 vault-passkey-description = Deblocați acest Vault pe alte dispozitive fără parolă.
 vault-passkey-add = Adăugați cheia de acces
 vault-passkey-unlock = Deblocați
+vault-passkey-provider-unsupported = Acest furnizor de chei de acces nu acceptă încă deblocarea criptată a seifului.
 vault-open = { common-open } Vault
 vault-description = Sincronizați setările, instrumentele, fișierele de puncte și cunoștințele cu Git.
 vault-sync = Sincronizare

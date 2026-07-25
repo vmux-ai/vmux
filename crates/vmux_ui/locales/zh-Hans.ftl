@@ -72,6 +72,7 @@ vault-passkey = 万能钥匙
 vault-passkey-description = 无需密码即可在其他设备上解锁此保管库。
 vault-passkey-add = 添加密钥
 vault-passkey-unlock = 开锁
+vault-passkey-provider-unsupported = 此密钥提供商尚不支持加密的保管库解锁。
 vault-open = { common-open } Vault
 vault-description = 使用 Git 同步设置、工具、点文件和知识。
 vault-sync = 同步

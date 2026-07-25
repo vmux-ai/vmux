@@ -72,6 +72,7 @@ vault-passkey = Adgangsnøgle
 vault-passkey-description = Lås denne Vault op på andre enheder uden en adgangskode.
 vault-passkey-add = Tilføj adgangsnøgle
 vault-passkey-unlock = Lås op
+vault-passkey-provider-unsupported = Denne adgangsnøgleudbyder understøtter endnu ikke krypteret Vault-oplåsning.
 vault-open = { common-open } Vault
 vault-description = Synkroniser indstillinger, værktøjer, dotfiler og viden med Git.
 vault-sync = Synkroniser

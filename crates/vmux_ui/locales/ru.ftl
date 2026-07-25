@@ -72,6 +72,7 @@ vault-passkey = Ключ доступа
 vault-passkey-description = Разблокируйте это хранилище на других устройствах без пароля.
 vault-passkey-add = Добавить ключ доступа
 vault-passkey-unlock = Разблокировать
+vault-passkey-provider-unsupported = Этот поставщик ключей доступа пока не поддерживает зашифрованную разблокировку Vault.
 vault-open = { common-open } Vault
 vault-description = Синхронизируйте настройки, инструменты, точечные файлы и знания с Git.
 vault-sync = Синхронизировать

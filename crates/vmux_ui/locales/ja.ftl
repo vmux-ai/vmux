@@ -69,6 +69,7 @@ vault-passkey = パスキー
 vault-passkey-description = パスワードを使用せずに他のデバイスでこの Vault のロックを解除します。
 vault-passkey-add = パスキーを追加する
 vault-passkey-unlock = ロックを解除する
+vault-passkey-provider-unsupported = このパスキー プロバイダーは、暗号化された Vault ロック解除をまだサポートしていません。
 vault-open = { common-open } Vault
 vault-description = 設定、ツール、ドットファイル、ナレッジを Git と同期します。
 vault-sync = 同期

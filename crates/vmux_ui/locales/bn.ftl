@@ -72,6 +72,7 @@ vault-passkey = পাসকি
 vault-passkey-description = পাসওয়ার্ড ছাড়াই অন্যান্য ডিভাইসে এই ভল্টটি আনলক করুন।
 vault-passkey-add = পাসকি যোগ করুন
 vault-passkey-unlock = আনলক করুন
+vault-passkey-provider-unsupported = এই পাসকি প্রদানকারী এখনও এনক্রিপ্ট করা ভল্ট আনলক সমর্থন করে না।
 vault-open = { common-open } Vault
 vault-description = সিঙ্ক সেটিংস, টুলস, ডটফাইলস এবং নলেজ গিটের সাথে।
 vault-sync = সিঙ্ক

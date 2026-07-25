@@ -72,6 +72,7 @@ vault-passkey = Құпия кілт
 vault-passkey-description = Құпия сөзсіз басқа құрылғыларда бұл қойманың құлпын ашыңыз.
 vault-passkey-add = Рұқсат кілтін қосыңыз
 vault-passkey-unlock = Құлыпты ашу
+vault-passkey-provider-unsupported = Бұл рұқсат кілті провайдері шифрланған Vault құлпын ашуды әлі қолдамайды.
 vault-open = { common-open } Vault
 vault-description = Параметрлерді, құралдарды, нүкте файлдарын және білімді Git-пен синхрондаңыз.
 vault-sync = Синхрондау

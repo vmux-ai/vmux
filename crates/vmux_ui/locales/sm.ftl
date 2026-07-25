@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Tatala lenei Vault i isi masini e aunoa ma se upu faataga.
 vault-passkey-add = Fa'aopoopo le passkey
 vault-passkey-unlock = Tatala
+vault-passkey-provider-unsupported = E le'o lagolagoina e lenei tagata e tu'uina atu passkey le tatalaina o le Vault.
 vault-open = { common-open } Vault
 vault-description = Fa'atonu fa'atulagaina, meafaigaluega, dotfiles, ma le Poto ma le Git.
 vault-sync = Fa'atasi

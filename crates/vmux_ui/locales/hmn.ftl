@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Xauv lub Vault no ntawm lwm yam khoom siv yam tsis muaj tus password.
 vault-passkey-add = Ntxiv tus password
 vault-passkey-unlock = Xauv
+vault-passkey-provider-unsupported = Tus neeg muab ntawv hla tebchaws no tseem tsis tau txhawb nqa encrypted Vault xauv tsis tau.
 vault-open = { common-open } Vault
 vault-description = Sync chaw, cuab yeej, dotfiles, thiab Kev Paub nrog Git.
 vault-sync = Sync

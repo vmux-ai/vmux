@@ -72,6 +72,7 @@ vault-passkey = Cead-siubhail
 vault-passkey-description = Fuasgail an Vault seo air innealan eile gun fhacal-faire.
 vault-passkey-add = Cuir a-steach pasgan
 vault-passkey-unlock = Fuasgail
+vault-passkey-provider-unsupported = Chan eil an solaraiche passkey seo a’ toirt taic do fhuasgladh crioptaichte Vault fhathast.
 vault-open = { common-open } Vault
 vault-description = Sioncronaich roghainnean, innealan, dotfiles, agus Eòlas le Git.
 vault-sync = Sioncronaich

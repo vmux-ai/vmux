@@ -72,6 +72,7 @@ vault-passkey = Wagsleutel
 vault-passkey-description = Ontsluit hierdie kluis op ander toestelle sonder 'n wagwoord.
 vault-passkey-add = Voeg wagwoord by
 vault-passkey-unlock = Ontsluit
+vault-passkey-provider-unsupported = Hierdie wagwoordverskaffer ondersteun nog nie geënkripteerde Vault-ontsluiting nie.
 vault-open = { common-open } Vault
 vault-description = Sinkroniseer instellings, gereedskap, puntlêers en kennis met Git.
 vault-sync = Sinkroniseer

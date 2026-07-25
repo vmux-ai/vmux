@@ -72,6 +72,7 @@ vault-passkey = Passschlëssel
 vault-passkey-description = Spär dës Vault op aneren Apparater ouni Passwuert op.
 vault-passkey-add = Passwuert dobäisetzen
 vault-passkey-unlock = Spär op
+vault-passkey-provider-unsupported = Dëse Passkey Provider ënnerstëtzt nach net verschlësselte Vault Spär.
 vault-open = { common-open } Vault
 vault-description = Synchroniséiert Astellungen, Tools, Dotfiles, a Wëssen mat Git.
 vault-sync = Synchroniséiert

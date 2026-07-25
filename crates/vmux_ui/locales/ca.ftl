@@ -72,6 +72,7 @@ vault-passkey = Clau d'accés
 vault-passkey-description = Desbloquegeu aquest Vault en altres dispositius sense contrasenya.
 vault-passkey-add = Afegeix la clau de pas
 vault-passkey-unlock = Desbloqueja
+vault-passkey-provider-unsupported = Aquest proveïdor de claus de contrasenya encara no admet el desbloqueig encriptat de Vault.
 vault-open = { common-open } Vault
 vault-description = Sincronitza la configuració, les eines, els fitxers de punts i el coneixement amb Git.
 vault-sync = Sincronització

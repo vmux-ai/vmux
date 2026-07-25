@@ -72,6 +72,7 @@ vault-passkey = የይለፍ ቁልፍ
 vault-passkey-description = ይህን ቮልት ያለይለፍ ቃል በሌሎች መሳሪያዎች ላይ ይክፈቱት።
 vault-passkey-add = የይለፍ ቁልፍ ጨምር
 vault-passkey-unlock = ክፈት
+vault-passkey-provider-unsupported = ይህ የይለፍ ቁልፍ አቅራቢ እስካሁን የተመሰጠረ የቮልት መክፈቻን አይደግፍም።
 vault-open = { common-open } Vault
 vault-description = ቅንጅቶችን፣ መሳሪያዎችን፣ ዶትፋይሎችን እና እውቀትን በGit ያመሳስሉ።
 vault-sync = አመሳስል

@@ -72,6 +72,7 @@ vault-passkey = លេខសម្ងាត់
 vault-passkey-description = ដោះសោ Vault នេះនៅលើឧបករណ៍ផ្សេងទៀតដោយគ្មានពាក្យសម្ងាត់។
 vault-passkey-add = បន្ថែមលេខសម្ងាត់
 vault-passkey-unlock = ដោះសោ
+vault-passkey-provider-unsupported = អ្នកផ្តល់លេខសម្ងាត់នេះមិនគាំទ្រការដោះសោរ Vault ដែលបានអ៊ិនគ្រីបនៅឡើយទេ។
 vault-open = { common-open } Vault
 vault-description = ការ​កំណត់​សមកាលកម្ម ឧបករណ៍ ឯកសារ dotfiles និង​ចំណេះដឹង​ជាមួយ Git ។
 vault-sync = ធ្វើសមកាលកម្ម

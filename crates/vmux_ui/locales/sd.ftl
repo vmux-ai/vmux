@@ -72,6 +72,7 @@ vault-passkey = پاسڪي
 vault-passkey-description = ھن والٽ کي ان لاڪ ڪريو ٻين ڊوائيسز تي بغير پاسورڊ جي.
 vault-passkey-add = پاسڪي شامل ڪريو
 vault-passkey-unlock = لاڪ
+vault-passkey-provider-unsupported = هي پاسڪي فراهم ڪندڙ اڃا تائين انڪريپٽ ٿيل والٽ انلاڪ کي سپورٽ نٿو ڪري.
 vault-open = { common-open } Vault
 vault-description = Git سان سيٽنگون، اوزار، ڊاٽ فائلون، ۽ علم هم وقت سازي ڪريو.
 vault-sync = هم وقت سازي

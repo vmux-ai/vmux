@@ -72,6 +72,7 @@ vault-passkey = Geslo
 vault-passkey-description = Odklenite ta trezor v drugih napravah brez gesla.
 vault-passkey-add = Dodaj geslo
 vault-passkey-unlock = Odkleni
+vault-passkey-provider-unsupported = Ta ponudnik gesel še ne podpira šifriranega odklepanja trezorja.
 vault-open = { common-open } Vault
 vault-description = Sinhronizirajte nastavitve, orodja, datoteke dot in znanje z Gitom.
 vault-sync = Sinhronizacija

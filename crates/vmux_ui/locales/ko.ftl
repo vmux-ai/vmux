@@ -72,6 +72,7 @@ vault-passkey = 곁쇠
 vault-passkey-description = 비밀번호 없이 다른 장치에서 이 Vault를 잠금 해제하세요.
 vault-passkey-add = 패스키 추가
 vault-passkey-unlock = 터놓다
+vault-passkey-provider-unsupported = 이 암호 키 제공업체는 아직 암호화된 Vault 잠금 해제를 지원하지 않습니다.
 vault-open = { common-open } Vault
 vault-description = 설정, 도구, 도트 파일, Knowledge를 Git과 동기화합니다.
 vault-sync = 동조

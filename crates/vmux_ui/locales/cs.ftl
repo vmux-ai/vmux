@@ -72,6 +72,7 @@ vault-passkey = Přístupový klíč
 vault-passkey-description = Odemkněte tento trezor na jiných zařízeních bez hesla.
 vault-passkey-add = Přidat přístupový klíč
 vault-passkey-unlock = Odemknout
+vault-passkey-provider-unsupported = Tento poskytovatel přístupového klíče zatím nepodporuje šifrované odemykání trezoru.
 vault-open = { common-open } Vault
 vault-description = Synchronizujte nastavení, nástroje, dotfiles a znalosti s Git.
 vault-sync = Synchronizovat

@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Notlolla Vault ena lisebelisoa tse ling ntle le senotlolo.
 vault-passkey-add = Kenya senotlolo
 vault-passkey-unlock = Notlolla
+vault-passkey-provider-unsupported = Mofani enoa oa senotlolo ha a tšehetse ho notlolla ha Vault e kentsoeng.
 vault-open = { common-open } Vault
 vault-description = Litlhophiso tsa sync, lisebelisoa, li-dotfiles, le Tsebo le Git.
 vault-sync = Sync

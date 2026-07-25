@@ -72,6 +72,7 @@ vault-passkey = پاسکی
 vault-passkey-description = دا والټ په نورو وسیلو کې پرته له پاسورډ خلاص کړئ.
 vault-passkey-add = پاسکی اضافه کړئ
 vault-passkey-unlock = خلاصول
+vault-passkey-provider-unsupported = دا پاسکي چمتو کونکی لاهم د کوډ شوي والټ انلاک ملاتړ نه کوي.
 vault-open = { common-open } Vault
 vault-description = د ګیټ سره تنظیمات ، اوزار ، ډاټ فایلونه او پوهه همغږي کړئ.
 vault-sync = همغږي

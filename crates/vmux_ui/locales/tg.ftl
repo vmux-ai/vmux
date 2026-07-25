@@ -72,6 +72,7 @@ vault-passkey = Калиди гузариш
 vault-passkey-description = Ин Vault-ро дар дигар дастгоҳҳо бе парол кушоед.
 vault-passkey-add = Калиди гузаришро илова кунед
 vault-passkey-unlock = Кушодан
+vault-passkey-provider-unsupported = Ин провайдери калиди гузариш кушодани Vault-и рамзгузоришударо ҳанӯз дастгирӣ намекунад.
 vault-open = { common-open } Vault
 vault-description = Танзимотҳо, асбобҳо, файлҳои нуқтаҳо ва донишро бо Git ҳамоҳанг созед.
 vault-sync = Синхронизатсия

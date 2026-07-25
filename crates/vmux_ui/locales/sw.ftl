@@ -72,6 +72,7 @@ vault-passkey = Nenosiri
 vault-passkey-description = Fungua Vault hii kwenye vifaa vingine bila nenosiri.
 vault-passkey-add = Ongeza nenosiri
 vault-passkey-unlock = Fungua
+vault-passkey-provider-unsupported = Mtoa huduma huyu wa nenosiri bado hatumii kufungua kwa Vault kwa njia fiche.
 vault-open = { common-open } Vault
 vault-description = Sawazisha mipangilio, zana, faili za nukta, na Knowledge na Git.
 vault-sync = Sawazisha

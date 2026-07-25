@@ -72,6 +72,7 @@ vault-passkey = ਪਾਸਕੀ
 vault-passkey-description = ਬਿਨਾਂ ਪਾਸਵਰਡ ਦੇ ਹੋਰ ਡਿਵਾਈਸਾਂ 'ਤੇ ਇਸ ਵਾਲਟ ਨੂੰ ਅਨਲੌਕ ਕਰੋ।
 vault-passkey-add = ਪਾਸਕੀ ਸ਼ਾਮਲ ਕਰੋ
 vault-passkey-unlock = ਅਨਲੌਕ ਕਰੋ
+vault-passkey-provider-unsupported = ਇਹ ਪਾਸਕੀ ਪ੍ਰਦਾਤਾ ਅਜੇ ਤੱਕ ਏਨਕ੍ਰਿਪਟ ਕੀਤੇ ਵਾਲਟ ਅਨਲੌਕ ਦਾ ਸਮਰਥਨ ਨਹੀਂ ਕਰਦਾ ਹੈ।
 vault-open = { common-open } Vault
 vault-description = ਗਿੱਟ ਨਾਲ ਸੈਟਿੰਗਾਂ, ਟੂਲ, ਡਾਟਫਾਈਲਾਂ ਅਤੇ ਗਿਆਨ ਨੂੰ ਸਿੰਕ ਕਰੋ।
 vault-sync = ਸਿੰਕ

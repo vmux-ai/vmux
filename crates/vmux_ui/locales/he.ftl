@@ -72,6 +72,7 @@ vault-passkey = מפתח סיסמה
 vault-passkey-description = בטל את נעילת הכספת הזו במכשירים אחרים ללא סיסמה.
 vault-passkey-add = הוסף מפתח
 vault-passkey-unlock = לִפְתוֹחַ
+vault-passkey-provider-unsupported = ספק מפתח סיסמה זה אינו תומך עדיין בפתיחת נעילה מוצפנת של Vault.
 vault-open = { common-open } Vault
 vault-description = סנכרון הגדרות, כלים, dotfiles ו- Knowledge עם Git.
 vault-sync = סנכרון

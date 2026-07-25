@@ -72,6 +72,7 @@ vault-passkey = ລະຫັດຜ່ານ
 vault-passkey-description = ປົດລັອກ Vault ນີ້ຢູ່ໃນອຸປະກອນອື່ນໂດຍບໍ່ມີການລະຫັດຜ່ານ.
 vault-passkey-add = ເພີ່ມລະຫັດຜ່ານ
 vault-passkey-unlock = ປົດລັອກ
+vault-passkey-provider-unsupported = ຜູ້ໃຫ້ບໍລິການລະຫັດຜ່ານນີ້ຍັງບໍ່ຮອງຮັບການປົດລັອກ Vault ທີ່ເຂົ້າລະຫັດເທື່ອ.
 vault-open = { common-open } Vault
 vault-description = ການຕັ້ງຄ່າການຊິງຄ໌, ເຄື່ອງມື, dotfiles, ແລະຄວາມຮູ້ກັບ Git.
 vault-sync = ຊິງຄ໌

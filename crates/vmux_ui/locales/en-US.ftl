@@ -84,6 +84,7 @@ vault-passkey = Passkey
 vault-passkey-description = Unlock this Vault on other devices without a password.
 vault-passkey-add = Add passkey
 vault-passkey-unlock = Unlock
+vault-passkey-provider-unsupported = This passkey provider doesn’t support encrypted Vault unlock yet.
 vault-open = { common-open } Vault
 vault-description = Sync settings, tools, dotfiles, and Knowledge with Git.
 vault-sync = Sync

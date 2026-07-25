@@ -72,6 +72,7 @@ vault-passkey = Keçid açarı
 vault-passkey-description = Parol olmadan digər cihazlarda bu Vault kilidini açın.
 vault-passkey-add = Keçid açarı əlavə edin
 vault-passkey-unlock = Kilidi aç
+vault-passkey-provider-unsupported = Bu açar provayderi hələ şifrələnmiş Vault kilidini açmağı dəstəkləmir.
 vault-open = { common-open } Vault
 vault-description = Parametrləri, alətləri, nöqtə fayllarını və Biliyi Git ilə sinxronlaşdırın.
 vault-sync = Sinxronizasiya

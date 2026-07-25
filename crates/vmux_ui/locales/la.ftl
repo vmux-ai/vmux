@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Hoc Cochleam recludam in aliis machinis sine tessera.
 vault-passkey-add = Add passkey
 vault-passkey-unlock = Basem
+vault-passkey-provider-unsupported = Hic provisor passkey encrypted Vault reserare adhuc non sustinet.
 vault-open = { common-open } Vault
 vault-description = Sync occasus, instrumenta, dotfiles, et scientia apud Git.
 vault-sync = Sync

@@ -72,6 +72,7 @@ vault-passkey = Αντικλείδι
 vault-passkey-description = Ξεκλειδώστε αυτό το Vault σε άλλες συσκευές χωρίς κωδικό πρόσβασης.
 vault-passkey-add = Προσθήκη κλειδιού πρόσβασης
 vault-passkey-unlock = Ξεκλειδώνω
+vault-passkey-provider-unsupported = Αυτός ο πάροχος κωδικών πρόσβασης δεν υποστηρίζει ακόμη το κρυπτογραφημένο ξεκλείδωμα του Vault.
 vault-open = { common-open } Vault
 vault-description = Συγχρονίστε ρυθμίσεις, εργαλεία, dotfiles και Knowledge με το Git.
 vault-sync = Συγχρονισμός

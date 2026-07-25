@@ -72,6 +72,7 @@ vault-passkey = Geçiş anahtarı
 vault-passkey-description = Bu Kasanın kilidini diğer cihazlarda şifre olmadan açın.
 vault-passkey-add = Şifre anahtarı ekle
 vault-passkey-unlock = Kilidi aç
+vault-passkey-provider-unsupported = Bu şifre anahtarı sağlayıcısı henüz şifreli Apps Kasası kilidini açmayı desteklemiyor.
 vault-open = { common-open } Vault
 vault-description = Ayarları, araçları, nokta dosyalarını ve Bilgiyi Git ile senkronize edin.
 vault-sync = Senkronizasyon

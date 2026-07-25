@@ -72,6 +72,7 @@ vault-passkey = ಪಾಸ್ಕೀ
 vault-passkey-description = ಪಾಸ್‌ವರ್ಡ್ ಇಲ್ಲದೆಯೇ ಇತರ ಸಾಧನಗಳಲ್ಲಿ ಈ ವಾಲ್ಟ್ ಅನ್ನು ಅನ್‌ಲಾಕ್ ಮಾಡಿ.
 vault-passkey-add = ಪಾಸ್‌ಕೀ ಸೇರಿಸಿ
 vault-passkey-unlock = ಅನ್ಲಾಕ್ ಮಾಡಿ
+vault-passkey-provider-unsupported = ಈ ಪಾಸ್‌ಕೀ ಪೂರೈಕೆದಾರರು ಇನ್ನೂ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಲಾದ ವಾಲ್ಟ್ ಅನ್‌ಲಾಕ್ ಅನ್ನು ಬೆಂಬಲಿಸುವುದಿಲ್ಲ.
 vault-open = { common-open } Vault
 vault-description = Git ಜೊತೆಗೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳು, ಪರಿಕರಗಳು, ಡಾಟ್‌ಫೈಲ್‌ಗಳು ಮತ್ತು ಜ್ಞಾನವನ್ನು ಸಿಂಕ್ ಮಾಡಿ.
 vault-sync = ಸಿಂಕ್ ಮಾಡಿ

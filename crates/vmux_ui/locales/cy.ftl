@@ -72,6 +72,7 @@ vault-passkey = Paskey
 vault-passkey-description = Datgloi'r Vault hwn ar ddyfeisiau eraill heb gyfrinair.
 vault-passkey-add = Ychwanegu cyfrinair
 vault-passkey-unlock = Datgloi
+vault-passkey-provider-unsupported = Nid yw'r darparwr cyfrinair hwn yn cefnogi datgloi Vault wedi'i amgryptio eto.
 vault-open = { common-open } Vault
 vault-description = Gosodiadau cysoni, offer, dotfiles, a Gwybodaeth gyda Git.
 vault-sync = Cysoni

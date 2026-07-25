@@ -72,6 +72,7 @@ vault-passkey = O'tish kaliti
 vault-passkey-description = Bu Vaultni boshqa qurilmalarda parolsiz oching.
 vault-passkey-add = O'tish kalitini qo'shing
 vault-passkey-unlock = Qulfni ochish
+vault-passkey-provider-unsupported = Bu kalit provayderi hali shifrlangan Vault qulfini ochishni qo‘llab-quvvatlamaydi.
 vault-open = { common-open } Vault
 vault-description = Sozlamalar, asboblar, nuqta fayllari va bilimlarni Git bilan sinxronlashtiring.
 vault-sync = Sinxronlash

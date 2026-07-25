@@ -72,6 +72,7 @@ vault-passkey = Llave maestra
 vault-passkey-description = Desbloquee esta Bóveda en otros dispositivos sin contraseña.
 vault-passkey-add = Agregar clave de acceso
 vault-passkey-unlock = Descubrir
+vault-passkey-provider-unsupported = Este proveedor de claves de acceso aún no admite el desbloqueo cifrado de Vault.
 vault-open = { common-open } Vault
 vault-description = Sincronice configuraciones, herramientas, archivos de puntos y conocimientos con Git.
 vault-sync = Sincronizar

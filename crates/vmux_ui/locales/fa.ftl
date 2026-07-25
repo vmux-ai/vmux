@@ -72,6 +72,7 @@ vault-passkey = کلید عبور
 vault-passkey-description = قفل این Vault را در دستگاه های دیگر بدون رمز عبور باز کنید.
 vault-passkey-add = کلید عبور را اضافه کنید
 vault-passkey-unlock = باز کردن قفل
+vault-passkey-provider-unsupported = این ارائه‌دهنده رمز عبور هنوز از باز کردن قفل Vault رمزگذاری شده پشتیبانی نمی‌کند.
 vault-open = { common-open } Vault
 vault-description = تنظیمات، ابزارها، dotfiles و Knowledge را با Git همگام کنید.
 vault-sync = همگام سازی

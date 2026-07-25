@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Buka konci Kolong ieu dina alat anu sanés tanpa kecap akses.
 vault-passkey-add = Tambahkeun kecap akses
 vault-passkey-unlock = Muka konci
+vault-passkey-provider-unsupported = Panyadia konci sandi ieu henteu ngadukung muka konci Vault énkripsi acan.
 vault-open = { common-open } Vault
 vault-description = Singkronkeun setélan, alat, dotfiles, sareng Pangaweruh sareng Git.
 vault-sync = Singkronkeun

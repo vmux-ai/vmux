@@ -72,6 +72,7 @@ vault-passkey = Паски
 vault-passkey-description = Бу Вальсны серсүзсез башка җайланмаларда ачу.
 vault-passkey-add = Паски өстәргә
 vault-passkey-unlock = Блокны ачу
+vault-passkey-provider-unsupported = Бу ачкыч провайдеры шифрланган Vault ачуны хупламый.
 vault-open = { common-open } Vault
 vault-description = Git белән көйләүләрне, коралларны, нокталарны һәм Белемне синхронлагыз.
 vault-sync = Синхронизация

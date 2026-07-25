@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Vê Vault-ê bêyî şîfreyek li ser cîhazên din vekin.
 vault-passkey-add = Passkey zêde bike
 vault-passkey-unlock = Vekirin
+vault-passkey-provider-unsupported = Vê dabînkerê şîfreya şîfrekirinê hîna vekirina Vault-a şîfrekirî piştgirî nake.
 vault-open = { common-open } Vault
 vault-description = Mîheng, amûr, dotfiles û Zanîn bi Git re hevdeng bikin.
 vault-sync = Sync

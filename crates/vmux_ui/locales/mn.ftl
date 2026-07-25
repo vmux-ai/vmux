@@ -72,6 +72,7 @@ vault-passkey = Нэвтрэх түлхүүр
 vault-passkey-description = Энэ Vault-н түгжээг нууц үггүйгээр бусад төхөөрөмж дээр тайл.
 vault-passkey-add = Нэвтрэх түлхүүр нэмнэ үү
 vault-passkey-unlock = Түгжээг тайлах
+vault-passkey-provider-unsupported = Энэ нэвтрэх түлхүүрийн үйлчилгээ үзүүлэгч нь шифрлэгдсэн Vault түгжээг тайлахыг хараахан дэмждэггүй.
 vault-open = { common-open } Vault
 vault-description = Тохиргоо, хэрэгсэл, цэгийн файлууд болон мэдлэгийг Git-тэй синк хийнэ үү.
 vault-sync = Синк хийх

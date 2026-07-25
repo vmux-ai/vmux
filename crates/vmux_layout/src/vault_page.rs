@@ -773,9 +773,11 @@ async fn create_passkey(vault_id: &str, salt: &[u8]) -> Result<(String, Vec<u8>)
     set_property(&options, "publicKey", public_key.as_ref())?;
     let credential = call_credentials("create", &options).await?;
     let credential_id = credential_id(&credential)?;
-    match prf_output(&credential) {
+    let extensions = client_extension_results(&credential)?;
+    match prf_output(&extensions) {
         Ok(output) => Ok((credential_id, output)),
-        Err(_) => get_passkey(&[credential_id], salt).await,
+        Err(_) if prf_enabled(&extensions) => get_passkey(&[credential_id], salt).await,
+        Err(message) => Err(message),
     }
 }
 
@@ -819,7 +821,8 @@ async fn get_passkey(credential_ids: &[String], salt: &[u8]) -> Result<(String, 
     let options = Object::new();
     set_property(&options, "publicKey", public_key.as_ref())?;
     let credential = call_credentials("get", &options).await?;
-    Ok((credential_id(&credential)?, prf_output(&credential)?))
+    let extensions = client_extension_results(&credential)?;
+    Ok((credential_id(&credential)?, prf_output(&extensions)?))
 }
 
 fn prf_create_extensions(salt: &[u8]) -> Result<Object, String> {
@@ -859,18 +862,47 @@ fn credential_id(credential: &JsValue) -> Result<String, String> {
     Ok(encode_hex(&bytes))
 }
 
-fn prf_output(credential: &JsValue) -> Result<Vec<u8>, String> {
+fn client_extension_results(credential: &JsValue) -> Result<JsValue, String> {
     let function = Reflect::get(credential, &JsValue::from_str("getClientExtensionResults"))
         .map_err(js_error)?
         .dyn_into::<Function>()
         .map_err(js_error)?;
     let extensions = function.call0(credential).map_err(js_error)?;
-    let prf = Reflect::get(&extensions, &JsValue::from_str("prf")).map_err(js_error)?;
+    if !extensions.is_object() {
+        return Err(translate("vault-passkey-provider-unsupported"));
+    }
+    Ok(extensions)
+}
+
+fn prf_enabled(extensions: &JsValue) -> bool {
+    let Ok(prf) = Reflect::get(extensions, &JsValue::from_str("prf")) else {
+        return false;
+    };
+    if !prf.is_object() {
+        return false;
+    }
+    Reflect::get(&prf, &JsValue::from_str("enabled"))
+        .ok()
+        .and_then(|enabled| enabled.as_bool())
+        .unwrap_or(false)
+}
+
+fn prf_output(extensions: &JsValue) -> Result<Vec<u8>, String> {
+    let prf = Reflect::get(extensions, &JsValue::from_str("prf")).map_err(js_error)?;
+    if !prf.is_object() {
+        return Err(translate("vault-passkey-provider-unsupported"));
+    }
     let results = Reflect::get(&prf, &JsValue::from_str("results")).map_err(js_error)?;
+    if !results.is_object() {
+        return Err(translate("vault-passkey-provider-unsupported"));
+    }
     let first = Reflect::get(&results, &JsValue::from_str("first")).map_err(js_error)?;
+    if first.is_null() || first.is_undefined() {
+        return Err(translate("vault-passkey-provider-unsupported"));
+    }
     let output = Uint8Array::new(&first).to_vec();
     if output.len() != 32 {
-        return Err("Passkey provider does not support encryption".to_string());
+        return Err(translate("vault-passkey-provider-unsupported"));
     }
     Ok(output)
 }
@@ -951,9 +983,11 @@ fn js_error(error: JsValue) -> String {
     error
         .as_string()
         .or_else(|| {
-            Reflect::get(&error, &JsValue::from_str("message"))
-                .ok()
-                .and_then(|message| message.as_string())
+            error.is_object().then(|| {
+                Reflect::get(&error, &JsValue::from_str("message"))
+                    .ok()
+                    .and_then(|message| message.as_string())
+            })?
         })
         .unwrap_or_else(|| "Passkey operation failed".to_string())
 }

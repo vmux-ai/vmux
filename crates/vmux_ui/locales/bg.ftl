@@ -72,6 +72,7 @@ vault-passkey = Ключ за достъп
 vault-passkey-description = Отключете този Vault на други устройства без парола.
 vault-passkey-add = Добавете парола
 vault-passkey-unlock = Отключи
+vault-passkey-provider-unsupported = Този доставчик на ключ за достъп все още не поддържа шифровано отключване на Vault.
 vault-open = { common-open } Vault
 vault-description = Синхронизирайте настройки, инструменти, dotfiles и знания с Git.
 vault-sync = Синхр

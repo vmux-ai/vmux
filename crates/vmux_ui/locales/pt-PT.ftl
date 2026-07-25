@@ -72,6 +72,7 @@ vault-passkey = Chave de acesso
 vault-passkey-description = Desbloqueie este Vault em outros dispositivos sem senha.
 vault-passkey-add = Adicionar chave de acesso
 vault-passkey-unlock = Desbloquear
+vault-passkey-provider-unsupported = Este provedor de senha ainda não oferece suporte ao desbloqueio criptografado do Vault.
 vault-open = { common-open } Vault
 vault-description = Sincronize configurações, ferramentas, dotfiles e conhecimentos com Git.
 vault-sync = Sincronizar

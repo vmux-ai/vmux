@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Ապակողպեք այս պահոցը այլ սարքերում առանց գաղտնաբառի:
 vault-passkey-add = Ավելացնել անցաբառ
 vault-passkey-unlock = Ապակողպել
+vault-passkey-provider-unsupported = Այս գաղտնաբառի մատակարարը դեռ չի աջակցում գաղտնագրված պահոցի ապակողպումը:
 vault-open = { common-open } Vault
 vault-description = Համաժամեցրեք կարգավորումները, գործիքները, dotfiles-ը և գիտելիքները Git-ի հետ:
 vault-sync = Համաժամեցում

@@ -72,6 +72,7 @@ vault-passkey = Isitshixo sokugqitha
 vault-passkey-description = Vula le Vault kwezinye izixhobo ngaphandle kwegama lokugqitha.
 vault-passkey-add = Yongeza isitshixo sokugqitha
 vault-passkey-unlock = Vula
+vault-passkey-provider-unsupported = Lo mboneleli wesitshixo sokugqitha akakuxhasi ukuvulwa kweVault efihliweyo okwangoku.
 vault-open = { common-open } Vault
 vault-description = Isetingi zongqamaniso, izixhobo, iifayile zamachaphaza, kunye nolwazi ngeGit.
 vault-sync = Ngqamanisa

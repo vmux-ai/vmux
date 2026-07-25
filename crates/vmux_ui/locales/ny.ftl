@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Tsegulani Vault iyi pazida zina popanda mawu achinsinsi.
 vault-passkey-add = Onjezani chinsinsi
 vault-passkey-unlock = Tsegulani
+vault-passkey-provider-unsupported = Wopereka makiyi achinsinsiwa sagwirizananso ndi encrypted Vault unlock panobe.
 vault-open = { common-open } Vault
 vault-description = Gwirizanitsani zosintha, zida, ma dotfiles, ndi Knowledge ndi Git.
 vault-sync = Kulunzanitsa

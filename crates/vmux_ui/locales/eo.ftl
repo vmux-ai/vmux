@@ -72,6 +72,7 @@ vault-passkey = Pasŝlosilo
 vault-passkey-description = Malŝlosu ĉi tiun Trezorejon sur aliaj aparatoj sen pasvorto.
 vault-passkey-add = Aldonu pasŝlosilon
 vault-passkey-unlock = Malŝlosu
+vault-passkey-provider-unsupported = Ĉi tiu pasilŝlosilprovizanto ankoraŭ ne subtenas ĉifritan Vault-malŝlosadon.
 vault-open = { common-open } Vault
 vault-description = Sinkronigi agordojn, ilojn, punktajn dosierojn kaj Scion kun Git.
 vault-sync = Sinkronigi

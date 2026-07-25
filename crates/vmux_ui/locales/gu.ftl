@@ -72,6 +72,7 @@ vault-passkey = પાસકી
 vault-passkey-description = પાસવર્ડ વિના અન્ય ઉપકરણો પર આ વૉલ્ટને અનલૉક કરો.
 vault-passkey-add = પાસકી ઉમેરો
 vault-passkey-unlock = અનલોક કરો
+vault-passkey-provider-unsupported = આ પાસકી પ્રદાતા હજી સુધી એન્ક્રિપ્ટેડ વૉલ્ટ અનલૉકને સપોર્ટ કરતું નથી.
 vault-open = { common-open } Vault
 vault-description = Git સાથે સેટિંગ, ટૂલ્સ, ડોટફાઈલ્સ અને નોલેજ સિંક કરો.
 vault-sync = સમન્વય

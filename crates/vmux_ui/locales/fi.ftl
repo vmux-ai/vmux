@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Avaa tämän Holvin lukitus muilla laitteilla ilman salasanaa.
 vault-passkey-add = Lisää salasana
 vault-passkey-unlock = Avata
+vault-passkey-provider-unsupported = Tämä salasanan tarjoaja ei tue vielä salattua Holvin lukituksen avausta.
 vault-open = { common-open } Vault
 vault-description = Synkronoi asetukset, työkalut, pistetiedostot ja Knowledge Gitin kanssa.
 vault-sync = Synkronoi

@@ -72,6 +72,7 @@ vault-passkey = Bọtini igbanu
 vault-passkey-description = Ṣii ifinkan yii sori awọn ẹrọ miiran laisi ọrọ igbaniwọle kan.
 vault-passkey-add = Fi bọtini iwọle kun
 vault-passkey-unlock = Ṣii silẹ
+vault-passkey-provider-unsupported = Olupese bọtini iwọle yii ko ṣe atilẹyin ṣiṣii Vault ti paroko sibẹsibẹ.
 vault-open = { common-open } Vault
 vault-description = Awọn eto amuṣiṣẹpọ, awọn irinṣẹ, awọn faili dotfiles, ati Imọ pẹlu Git.
 vault-sync = Amuṣiṣẹpọ

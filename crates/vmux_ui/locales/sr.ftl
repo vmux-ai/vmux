@@ -72,6 +72,7 @@ vault-passkey = Пасскеи
 vault-passkey-description = Откључајте овај трезор на другим уређајима без лозинке.
 vault-passkey-add = Додај приступни кључ
 vault-passkey-unlock = Откључај
+vault-passkey-provider-unsupported = Овај добављач приступних кључева још увек не подржава шифровано откључавање трезора.
 vault-open = { common-open } Vault
 vault-description = Синхронизујте подешавања, алатке, датотеке са тачкама и знање са Гитом.
 vault-sync = Синц

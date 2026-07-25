@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Fungura iyi Vault kubindi bikoresho udafite ijambo ryibanga.
 vault-passkey-add = Ongeraho passkey
 vault-passkey-unlock = Fungura
+vault-passkey-provider-unsupported = Uyu mutanga wa passkey ntabwo ashyigikiye ibanga rya Vault rifungura.
 vault-open = { common-open } Vault
 vault-description = Guhuza igenamiterere, ibikoresho, utudomo, nubumenyi hamwe na Git.
 vault-sync = Guhuza

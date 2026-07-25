@@ -72,6 +72,7 @@ vault-passkey = Klucz uniwersalny
 vault-passkey-description = Odblokuj tę Kryptę na innych urządzeniach bez hasła.
 vault-passkey-add = Dodaj hasło
 vault-passkey-unlock = Odblokować
+vault-passkey-provider-unsupported = Ten dostawca kluczy nie obsługuje jeszcze szyfrowanego odblokowywania Vault.
 vault-open = { common-open } Vault
 vault-description = Synchronizuj ustawienia, narzędzia, pliki dot i wiedzę z Git.
 vault-sync = Synchronizuj

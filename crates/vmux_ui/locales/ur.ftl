@@ -72,6 +72,7 @@ vault-passkey = پاسکی
 vault-passkey-description = پاس ورڈ کے بغیر دیگر آلات پر اس والٹ کو غیر مقفل کریں۔
 vault-passkey-add = پاسکی شامل کریں۔
 vault-passkey-unlock = غیر مقفل کریں۔
+vault-passkey-provider-unsupported = یہ پاسکی فراہم کنندہ ابھی تک انکرپٹڈ والٹ انلاک کو سپورٹ نہیں کرتا ہے۔
 vault-open = { common-open } Vault
 vault-description = سیٹنگز، ٹولز، ڈاٹ فائلز اور نالج کو Git کے ساتھ سنک کریں۔
 vault-sync = مطابقت پذیری

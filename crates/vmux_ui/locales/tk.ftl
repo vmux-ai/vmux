@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Bu Vault-y parolsyz beýleki enjamlarda açyň.
 vault-passkey-add = Passkey goş
 vault-passkey-unlock = Gulpy aç
+vault-passkey-provider-unsupported = Bu açar üpjün ediji entek kodlanan Vault gulpuny goldamaýar.
 vault-open = { common-open } Vault
 vault-description = Git bilen sazlamalary, gurallary, nokat faýllaryny we Bilimi sinhronlaň.
 vault-sync = Sinhronlamak

@@ -72,6 +72,7 @@ vault-passkey = Лозинка
 vault-passkey-description = Отклучете го овој сеф на други уреди без лозинка.
 vault-passkey-add = Додадете лозинка
 vault-passkey-unlock = Отклучи
+vault-passkey-provider-unsupported = Овој давател на лозинка сè уште не поддржува шифрирано отклучување на сефот.
 vault-open = { common-open } Vault
 vault-description = Синхронизирајте ги поставките, алатките, точките и знаењето со Git.
 vault-sync = Синхронизирај

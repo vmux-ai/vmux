@@ -72,6 +72,7 @@ vault-passkey = Lambar wucewa
 vault-passkey-description = Buɗe wannan Vault akan wasu na'urori ba tare da kalmar sirri ba.
 vault-passkey-add = Ƙara maɓallin wucewa
 vault-passkey-unlock = Buɗe
+vault-passkey-provider-unsupported = Wannan mai bada maɓalli ba ya goyan bayan buɗewar Vault ɗin da aka ɓoye tukuna.
 vault-open = { common-open } Vault
 vault-description = Saitunan daidaitawa, kayan aiki, dotfiles, da Ilimi tare da Git.
 vault-sync = Aiki tare

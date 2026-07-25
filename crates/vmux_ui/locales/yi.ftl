@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = ופשליסן דעם וואָלט אויף אנדערע דעוויסעס אָן אַ פּאַראָל.
 vault-passkey-add = לייג אַ פּאַראָל
 vault-passkey-unlock = ופשליסן
+vault-passkey-provider-unsupported = דער פּאַסקיי שפּייַזער שטיצט נאָך נישט ינקריפּטיד וואָלט ופשליסן.
 vault-open = { common-open } Vault
 vault-description = סינק סעטטינגס, מכשירים, דאָט טעקעס און וויסן מיט Git.
 vault-sync = סינק

@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Vhura iyi Vault pane mamwe maturusi pasina password.
 vault-passkey-add = Wedzera password
 vault-passkey-unlock = Kiinura
+vault-passkey-provider-unsupported = Uyu mupi wepasskey haatsigire encrypted Vault kiinura parizvino.
 vault-open = { common-open } Vault
 vault-description = Kubatanidza marongero, maturusi, dotfiles, uye Ruzivo neGit.
 vault-sync = Sync

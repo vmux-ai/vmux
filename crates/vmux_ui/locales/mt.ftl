@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Nisfrutta dan il-Vault fuq apparati oħra mingħajr password.
 vault-passkey-add = Żid passkey
 vault-passkey-unlock = Nisfruttaw
+vault-passkey-provider-unsupported = Dan il-fornitur tal-passkey għadu ma jappoġġjax il-ftuħ tal-Vault encrypted.
 vault-open = { common-open } Vault
 vault-description = Issinkronizza s-settings, l-għodod, il-dotfiles, u l-Għarfien ma’ Git.
 vault-sync = Sinkronizzazzjoni

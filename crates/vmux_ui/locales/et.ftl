@@ -72,6 +72,7 @@ vault-passkey = Pääsu
 vault-passkey-description = Avage see Vault teistes seadmetes ilma paroolita.
 vault-passkey-add = Lisa parool
 vault-passkey-unlock = Avage lukustus
+vault-passkey-provider-unsupported = See pääsukoodi pakkuja ei toeta veel krüptitud Vaulti avamist.
 vault-open = { common-open } Vault
 vault-description = Sünkroonige seaded, tööriistad, punktifailid ja teadmised Gitiga.
 vault-sync = Sünkroonimine

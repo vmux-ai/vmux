@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Сырсөзсүз башка түзмөктөрдө бул Vault кулпусун ачыңыз.
 vault-passkey-add = Кошуу ачкыч
 vault-passkey-unlock = Кулпуну ачуу
+vault-passkey-provider-unsupported = Бул ачкыч камсыздоочу шифрленген Vault кулпусун азырынча колдобойт.
 vault-open = { common-open } Vault
 vault-description = Орнотууларды, куралдарды, чекит файлдарын жана билимди Git менен шайкештирүү.
 vault-sync = Синхрондоштуруу

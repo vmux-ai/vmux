@@ -72,6 +72,7 @@ vault-passkey = പാസ്കീ
 vault-passkey-description = പാസ്‌വേഡ് ഇല്ലാതെ മറ്റ് ഉപകരണങ്ങളിൽ ഈ വോൾട്ട് അൺലോക്ക് ചെയ്യുക.
 vault-passkey-add = പാസ്കീ ചേർക്കുക
 vault-passkey-unlock = അൺലോക്ക് ചെയ്യുക
+vault-passkey-provider-unsupported = ഈ പാസ്‌കീ ദാതാവ് ഇതുവരെ എൻക്രിപ്റ്റ് ചെയ്ത വോൾട്ട് അൺലോക്കിനെ പിന്തുണയ്ക്കുന്നില്ല.
 vault-open = { common-open } Vault
 vault-description = ക്രമീകരണങ്ങൾ, ഉപകരണങ്ങൾ, ഡോട്ട്ഫയലുകൾ, അറിവ് എന്നിവ Git-മായി സമന്വയിപ്പിക്കുക.
 vault-sync = സമന്വയിപ്പിക്കുക

@@ -72,6 +72,7 @@ vault-passkey = Ukhiye wokungena
 vault-passkey-description = Vula le Vault kwamanye amadivayisi ngaphandle kwephasiwedi.
 vault-passkey-add = Engeza ukhiye wokudlula
 vault-passkey-unlock = Vula
+vault-passkey-provider-unsupported = Lo mhlinzeki wokhiye wokudlula akakusekeli i-Vault ebethelwe okwamanje.
 vault-open = { common-open } Vault
 vault-description = Vumelanisa izilungiselelo, amathuluzi, amachashazi, kanye nolwazi nge-Git.
 vault-sync = Vumelanisa

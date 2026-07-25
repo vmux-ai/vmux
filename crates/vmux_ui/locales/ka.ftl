@@ -72,6 +72,7 @@ vault-passkey = პაროლის გასაღები
 vault-passkey-description = განბლოკეთ ეს Vault სხვა მოწყობილობებზე პაროლის გარეშე.
 vault-passkey-add = პაროლის დამატება
 vault-passkey-unlock = განბლოკვა
+vault-passkey-provider-unsupported = პაროლის ამ პროვაიდერს ჯერ არ აქვს დაშიფრული Vault-ის განბლოკვის მხარდაჭერა.
 vault-open = { common-open } Vault
 vault-description = პარამეტრების, ხელსაწყოების, dotfiles და Knowledge სინქრონიზაცია Git-თან.
 vault-sync = სინქრონიზაცია

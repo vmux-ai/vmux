@@ -72,6 +72,7 @@ vault-passkey = Aðgangslykill
 vault-passkey-description = Opnaðu þessa Vault í öðrum tækjum án lykilorðs.
 vault-passkey-add = Bæta við lykilorði
 vault-passkey-unlock = Opnaðu
+vault-passkey-provider-unsupported = Þessi aðgangslyklaveita styður ekki dulkóðaða Vault-opnun ennþá.
 vault-open = { common-open } Vault
 vault-description = Samstilltu stillingar, verkfæri, punktaskrár og þekkingu með Git.
 vault-sync = Samstilla

@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Debloke Vault sa a sou lòt aparèy san yon modpas.
 vault-passkey-add = Ajoute passkey
 vault-passkey-unlock = Debloke
+vault-passkey-provider-unsupported = Founisè passkey sa a poko sipòte debloke Vault ki ankripte.
 vault-open = { common-open } Vault
 vault-description = Anviwònman senkronize, zouti, fichye pwen, ak Konesans ak Git.
 vault-sync = Senkronize

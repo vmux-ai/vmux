@@ -72,6 +72,7 @@ vault-passkey = पासकी
 vault-passkey-description = पासवर्डशिवाय इतर डिव्हाइसेसवर हा Vault अनलॉक करा.
 vault-passkey-add = पासकी जोडा
 vault-passkey-unlock = अनलॉक करा
+vault-passkey-provider-unsupported = हा पासकी प्रदाता अद्याप एनक्रिप्टेड व्हॉल्ट अनलॉकला समर्थन देत नाही.
 vault-open = { common-open } Vault
 vault-description = Git सह सेटिंग्ज, टूल्स, डॉटफाईल्स आणि नॉलेज सिंक करा.
 vault-sync = सिंक

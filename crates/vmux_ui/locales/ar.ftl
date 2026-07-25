@@ -72,6 +72,7 @@ vault-passkey = مفتاح المرور
 vault-passkey-description = قم بإلغاء قفل هذا Vault على الأجهزة الأخرى بدون كلمة مرور.
 vault-passkey-add = إضافة مفتاح المرور
 vault-passkey-unlock = فتح
+vault-passkey-provider-unsupported = لا يدعم موفر مفتاح المرور هذا فتح Vault المشفر حتى الآن.
 vault-open = { common-open } Vault
 vault-description = مزامنة الإعدادات والأدوات وملفات النقاط والمعرفة مع Git.
 vault-sync = مزامنة

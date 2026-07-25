@@ -72,6 +72,7 @@ vault-passkey = ପାସ୍କି |
 vault-passkey-description = ପାସୱାର୍ଡ ବିନା ଅନ୍ୟ ଡିଭାଇସରେ ଏହି ଭାଲ୍ଟକୁ ଅନଲକ୍ କରନ୍ତୁ |
 vault-passkey-add = ପାସ୍କି ଯୋଡନ୍ତୁ |
 vault-passkey-unlock = ଅନଲକ୍ କରନ୍ତୁ |
+vault-passkey-provider-unsupported = ଏହି ପାସ୍କି ପ୍ରଦାନକାରୀ ଏପର୍ଯ୍ୟନ୍ତ ଏନକ୍ରିପ୍ଟ ହୋଇଥିବା ଭାଲ୍ଟ ଅନଲକ୍ କୁ ସମର୍ଥନ କରେନାହିଁ |
 vault-open = { common-open } Vault
 vault-description = Git ସହିତ ସେଟିଂସମୂହ, ଉପକରଣ, ଡଟ୍ଫାଇଲ୍ ଏବଂ ଜ୍ଞାନ ସିଙ୍କ କରନ୍ତୁ |
 vault-sync = ସିଙ୍କ୍ କରନ୍ତୁ |

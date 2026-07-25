@@ -72,6 +72,7 @@ vault-passkey = กุญแจผี
 vault-passkey-description = ปลดล็อคห้องนิรภัยนี้บนอุปกรณ์อื่นโดยไม่ต้องใช้รหัสผ่าน
 vault-passkey-add = เพิ่มรหัสผ่าน
 vault-passkey-unlock = ปลดล็อค
+vault-passkey-provider-unsupported = ผู้ให้บริการรหัสผ่านรายนี้ยังไม่รองรับการปลดล็อกห้องนิรภัยที่เข้ารหัส
 vault-open = { common-open } Vault
 vault-description = ซิงค์การตั้งค่า เครื่องมือ dotfiles และความรู้กับ Git
 vault-sync = ซิงค์

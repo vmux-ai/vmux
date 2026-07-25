@@ -72,6 +72,7 @@ vault-passkey = Pas eochair
 vault-passkey-description = Díghlasáil an cruinneachán seo ar ghléasanna eile gan pasfhocal.
 vault-passkey-add = Cuir pasfhocal leis
 vault-passkey-unlock = Díghlasáil
+vault-passkey-provider-unsupported = Ní thacaíonn an soláthraí pas-eochair seo le díghlasáil Vault criptithe go fóill.
 vault-open = { common-open } Vault
 vault-description = Sioncronaigh socruithe, uirlisí, poncchomhaid, agus Eolas le Git.
 vault-sync = Sioncrónaigh

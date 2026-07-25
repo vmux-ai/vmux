@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Jelszó nélkül oldja fel a Széf zárolását más eszközökön.
 vault-passkey-add = Adjon hozzá jelszót
 vault-passkey-unlock = Kinyit
+vault-passkey-provider-unsupported = Ez a jelszószolgáltató még nem támogatja a titkosított Vault feloldást.
 vault-open = { common-open } Vault
 vault-description = Szinkronizálja a beállításokat, eszközöket, pontfájlokat és a tudást a Git segítségével.
 vault-sync = Szinkronizál

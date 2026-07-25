@@ -72,6 +72,7 @@ vault-passkey = Kupuhipa
 vault-passkey-description = Wewetehia tenei Vault ki etahi atu taputapu kaore he kupuhipa.
 vault-passkey-add = Tāpiri kupuhipa
 vault-passkey-unlock = Wewete
+vault-passkey-provider-unsupported = Ko tenei kaiwhakarato kupuhipa kaore i te tautoko i te iriti Vault whakamunatia.
 vault-open = { common-open } Vault
 vault-description = Tukutahi tautuhinga, taputapu, dotfiles, me te Matauranga ki a Git.
 vault-sync = Tukutahi

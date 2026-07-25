@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Atrakinkite šią saugyklą kituose įrenginiuose be slaptažodžio.
 vault-passkey-add = Pridėti prieigos raktą
 vault-passkey-unlock = Atrakinti
+vault-passkey-provider-unsupported = Šis slaptažodžio teikėjas dar nepalaiko šifruoto Vault atrakinimo.
 vault-open = { common-open } Vault
 vault-description = Sinchronizuokite nustatymus, įrankius, taškinius failus ir žinias su „Git“.
 vault-sync = Sinchronizuoti

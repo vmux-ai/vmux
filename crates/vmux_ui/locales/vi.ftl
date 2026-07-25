@@ -72,6 +72,7 @@ vault-passkey = Mật mã
 vault-passkey-description = Mở khóa Vault này trên các thiết bị khác mà không cần mật khẩu.
 vault-passkey-add = Thêm mật mã
 vault-passkey-unlock = Mở khóa
+vault-passkey-provider-unsupported = Nhà cung cấp mã khóa này chưa hỗ trợ mở khóa Vault được mã hóa.
 vault-open = { common-open } Vault
 vault-description = Đồng bộ hóa cài đặt, công cụ, tệp dotfile và Kiến thức với Git.
 vault-sync = Đồng bộ hóa

@@ -72,6 +72,7 @@ vault-passkey = பாஸ்கி
 vault-passkey-description = கடவுச்சொல் இல்லாத பிற சாதனங்களில் இந்த வால்ட்டைத் திறக்கவும்.
 vault-passkey-add = கடவுச் சாவியைச் சேர்க்கவும்
 vault-passkey-unlock = திறக்கவும்
+vault-passkey-provider-unsupported = இந்த பாஸ்கீ வழங்குநர் இன்னும் என்க்ரிப்ட் செய்யப்பட்ட வால்ட் அன்லாக்கை ஆதரிக்கவில்லை.
 vault-open = { common-open } Vault
 vault-description = அமைப்புகள், கருவிகள், டாட்ஃபைல்கள் மற்றும் அறிவை Git உடன் ஒத்திசைக்கவும்.
 vault-sync = ஒத்திசை

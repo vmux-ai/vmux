@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Sblocca stu Vault in altri dispositi senza password.
 vault-passkey-add = Aggiungi passkey
 vault-passkey-unlock = Sbloccare
+vault-passkey-provider-unsupported = Stu fornitore di passkey ùn sustene ancu u sbloccare Vault criptatu.
 vault-open = { common-open } Vault
 vault-description = Sincronizza paràmetri, arnesi, dotfiles è Cunniscenza cù Git.
 vault-sync = Sincronizza

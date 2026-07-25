@@ -72,6 +72,7 @@ vault-passkey = သော့တံ
 vault-passkey-description = စကားဝှက်မပါဘဲ အခြားစက်များတွင် ဤ Vault ကို လော့ခ်ဖွင့်ပါ။
 vault-passkey-add = သော့တံထည့်ပါ။
 vault-passkey-unlock = သော့ဖွင့်ပါ။
+vault-passkey-provider-unsupported = ဤသော့ခတ်ပေးသူသည် ကုဒ်ဝှက်ထားသော Vault လော့ခ်ဖွင့်ခြင်းကို မပံ့ပိုးနိုင်သေးပါ။
 vault-open = { common-open } Vault
 vault-description = ဆက်တင်များ၊ ကိရိယာများ၊ dotfiles နှင့် Knowledge ကို Git ဖြင့် စင့်ခ်လုပ်ပါ။
 vault-sync = ထပ်တူကျသည်။

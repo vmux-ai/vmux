@@ -72,6 +72,7 @@ vault-passkey = Hauptschlüssel
 vault-passkey-description = Entsperren Sie diesen Tresor auf anderen Geräten ohne Passwort.
 vault-passkey-add = Passschlüssel hinzufügen
 vault-passkey-unlock = Entsperren
+vault-passkey-provider-unsupported = Dieser Passkey-Anbieter unterstützt die verschlüsselte Vault-Entsperrung noch nicht.
 vault-open = { common-open } Vault
 vault-description = Synchronisieren Sie Einstellungen, Tools, Dotfiles und Wissen mit Git.
 vault-sync = Synchronisieren

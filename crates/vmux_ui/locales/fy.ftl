@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Untskoattelje dizze Vault op oare apparaten sûnder wachtwurd.
 vault-passkey-add = Foegje wachtwurd ta
 vault-passkey-unlock = Untskoattelje
+vault-passkey-provider-unsupported = Dizze passkey-provider stipet noch gjin fersifere Vault-ûntskoatteljen.
 vault-open = { common-open } Vault
 vault-description = Syngronisearje ynstellings, ark, dotfiles en kennis mei Git.
 vault-sync = Syngronisearje

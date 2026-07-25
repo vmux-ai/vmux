@@ -72,6 +72,7 @@ vault-passkey = Kunci laluan
 vault-passkey-description = Buka kunci Bilik Kebal ini pada peranti lain tanpa kata laluan.
 vault-passkey-add = Tambah kunci laluan
 vault-passkey-unlock = Buka kunci
+vault-passkey-provider-unsupported = Pembekal kunci laluan ini belum menyokong buka kunci Vault yang disulitkan lagi.
 vault-open = { common-open } Vault
 vault-description = Segerakkan tetapan, alatan, dotfiles dan Pengetahuan dengan Git.
 vault-sync = Segerakkan

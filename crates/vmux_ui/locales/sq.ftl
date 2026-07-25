@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Zhbllokoni këtë Vault në pajisje të tjera pa fjalëkalim.
 vault-passkey-add = Shto çelësin e kalimit
 vault-passkey-unlock = Zhblloko
+vault-passkey-provider-unsupported = Ky ofrues i fjalëkalimit nuk e mbështet ende shkyçjen e koduar të "Veult".
 vault-open = { common-open } Vault
 vault-description = Sinkronizoni cilësimet, veglat, skedarët me pika dhe njohuritë me Git.
 vault-sync = Sinkronizimi

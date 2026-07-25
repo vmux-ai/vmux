@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = پارولسىز باشقا ئۈسكۈنىلەردە بۇ Vault نى ئېچىڭ.
 vault-passkey-add = Passkey نى قوشۇڭ
 vault-passkey-unlock = قۇلۇپ ئېچىش
+vault-passkey-provider-unsupported = بۇ پاسپورت تەمىنلىگۈچى شىفىرلانغان Vault قۇلۇپىنى تېخى قوللىمايدۇ.
 vault-open = { common-open } Vault
 vault-description = تەڭشەك ، قورال ، چېكىت ۋە بىلىملەرنى Git بىلەن ماسقەدەملەڭ.
 vault-sync = ماسقەدەملەش

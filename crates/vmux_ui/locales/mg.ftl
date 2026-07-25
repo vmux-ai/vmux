@@ -72,6 +72,7 @@ vault-passkey = Passkey
 vault-passkey-description = Sokafy ity Vault ity amin'ny fitaovana hafa tsy misy tenimiafina.
 vault-passkey-add = Ampio passkey
 vault-passkey-unlock = hamaha
+vault-passkey-provider-unsupported = Ity mpanome passkey ity dia tsy mbola manohana ny fanokafana Vault voahafina.
 vault-open = { common-open } Vault
 vault-description = Ampifanaraho amin'ny Git ny fika, fitaovana, dotfiles ary fahalalana.
 vault-sync = mifandrindra

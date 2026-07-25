@@ -72,6 +72,7 @@ vault-passkey = Chiave di accesso
 vault-passkey-description = Sblocca questa Cassaforte su altri dispositivi senza password.
 vault-passkey-add = Aggiungi chiave di accesso
 vault-passkey-unlock = Sbloccare
+vault-passkey-provider-unsupported = Questo fornitore di passkey non supporta ancora lo sblocco crittografato del Vault.
 vault-open = { common-open } Vault
 vault-description = Sincronizza impostazioni, strumenti, dotfile e Knowledge con Git.
 vault-sync = Sincronizzazione

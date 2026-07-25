@@ -72,6 +72,7 @@ vault-passkey = Akara mbanye
 vault-passkey-description = Mepee Vault a na ngwaọrụ ndị ọzọ na-enweghị paswọọdụ.
 vault-passkey-add = Tinye igodo mbanye
 vault-passkey-unlock = Mepee
+vault-passkey-provider-unsupported = Onye na-eweta paswọọdụ akwadoghị mkpọghe Vault ezoro ezo.
 vault-open = { common-open } Vault
 vault-description = Ntọala mmekọrịta, ngwaọrụ, dotfiles na Ọmụma na Git.
 vault-sync = Mmekọrịta

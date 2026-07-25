@@ -72,6 +72,7 @@ vault-passkey = Furaha furaha
 vault-passkey-description = Ku fur Vault-kan aaladaha kale bilaa sirta ah.
 vault-passkey-add = Ku dar furaha furaha
 vault-passkey-unlock = Fur
+vault-passkey-provider-unsupported = Bixiyaha furaha furaha weli ma taageerayo furaha Vault sir ah weli.
 vault-open = { common-open } Vault
 vault-description = Isku-dubarid dejinta, agabka, dotfiles, iyo aqoonta Git.
 vault-sync = Isku xidh

@@ -72,6 +72,7 @@ vault-passkey = Kīwī
 vault-passkey-description = Wehe i kēia Vault ma nā polokalamu ʻē aʻe me ka ʻole o ka ʻōlelo huna.
 vault-passkey-add = Pākuʻi passkey
 vault-passkey-unlock = Wehe
+vault-passkey-provider-unsupported = ʻAʻole kākoʻo kēia mea hāʻawi passkey i ka wehe ʻana o Vault i hoʻopili ʻia.
 vault-open = { common-open } Vault
 vault-description = Hoʻonohonoho i nā hoʻonohonoho, nā mea hana, nā dotfiles, a me ka ʻike me Git.
 vault-sync = Hoʻopili

@@ -72,6 +72,7 @@ vault-passkey = Clé d'accès
 vault-passkey-description = Déverrouillez ce coffre-fort sur d'autres appareils sans mot de passe.
 vault-passkey-add = Ajouter un mot de passe
 vault-passkey-unlock = Ouvrir
+vault-passkey-provider-unsupported = Ce fournisseur de clé d'accès ne prend pas encore en charge le déverrouillage crypté du coffre-fort.
 vault-open = { common-open } Vault
 vault-description = Synchronisez les paramètres, les outils, les fichiers dot et les connaissances avec Git.
 vault-sync = Synchroniser
