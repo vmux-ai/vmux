@@ -9935,6 +9935,7 @@ name = "vmux_profile"
 version = "0.0.29"
 dependencies = [
  "ring",
+ "ron 0.8.1",
  "security-framework",
  "security-framework-sys",
  "serde",

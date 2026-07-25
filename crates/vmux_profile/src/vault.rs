@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 const FORMAT_VERSION: u32 = 1;
-const MANIFEST_FILE: &str = "vmux-vault.json";
-const INDEX_FILE: &str = "index.vmx";
+const MANIFEST_FILE: &str = "vault.ron";
+const INDEX_FILE: &str = "index.enc";
 const OBJECTS_DIR: &str = "objects";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
@@ -661,10 +661,7 @@ fn ignored_path(relative: &Path) -> bool {
             _ => None,
         });
     first.is_some_and(|name| {
-        name == ".git"
-            || name == ".vmux-vault"
-            || name == ".vmux-vault-state.json"
-            || IGNORED_ROOTS.contains(&name)
+        name == ".git" || name == ".vmux-vault" || IGNORED_ROOTS.contains(&name)
     })
 }
 
@@ -820,8 +817,8 @@ fn write_encrypted_snapshot(
     for (path, entry) in files {
         validate_relative_path(path)?;
         let object = object_id(key, path);
-        retained.insert(format!("{object}.vmux"));
-        let object_path = objects.join(format!("{object}.vmux"));
+        retained.insert(object.clone());
+        let object_path = objects.join(&object);
         let unchanged = previous
             .and_then(|files| files.get(path))
             .is_some_and(|old| same_entry(Some(old), Some(entry)))
@@ -851,7 +848,9 @@ fn write_encrypted_snapshot(
         version: FORMAT_VERSION,
         files: index_files,
     };
-    let index_source = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
+    let index_source = ron::ser::to_string(&index)
+        .map_err(|error| error.to_string())?
+        .into_bytes();
     let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
     write_atomic(&repository.join(INDEX_FILE), &encrypted_index)?;
     let manifest = RemoteManifest {
@@ -860,9 +859,12 @@ fn write_encrypted_snapshot(
         vault_id: vault_id.to_string(),
         index: INDEX_FILE.to_string(),
     };
-    let manifest_source =
-        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
-    write_atomic(&repository.join(MANIFEST_FILE), &manifest_source)?;
+    let manifest_source = ron::ser::to_string_pretty(&manifest, ron::ser::PrettyConfig::new())
+        .map_err(|error| error.to_string())?;
+    write_atomic(
+        &repository.join(MANIFEST_FILE),
+        format!("{manifest_source}\n").as_bytes(),
+    )?;
     validate_encrypted_worktree(repository)
 }
 
@@ -882,7 +884,9 @@ fn load_encrypted_snapshot(
     let encrypted_index = std::fs::read(repository.join(&manifest.index))
         .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
     let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;
-    let index = serde_json::from_slice::<EncryptedIndex>(&index_source)
+    let index_source = std::str::from_utf8(&index_source)
+        .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
+    let index = ron::from_str::<EncryptedIndex>(index_source)
         .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
     if index.version != FORMAT_VERSION {
         return Err(format!(
@@ -897,12 +901,8 @@ fn load_encrypted_snapshot(
         if file.object != expected_object {
             return Err(format!("encrypted Vault object mismatch for {}", file.path));
         }
-        let encrypted = std::fs::read(
-            repository
-                .join(OBJECTS_DIR)
-                .join(format!("{}.vmux", file.object)),
-        )
-        .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
+        let encrypted = std::fs::read(repository.join(OBJECTS_DIR).join(&file.object))
+            .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
         let data = decrypt_bytes(key, &object_aad(&file.path), &encrypted)?;
         let actual_digest = entry_digest(file.kind, file.mode, &data);
         if actual_digest != file.digest {
@@ -945,7 +945,9 @@ fn manifest_from_ref(repository: &Path, branch: &str) -> Result<RemoteManifest, 
 }
 
 fn parse_manifest(source: &[u8]) -> Result<RemoteManifest, String> {
-    let manifest = serde_json::from_slice::<RemoteManifest>(source)
+    let source = std::str::from_utf8(source)
+        .map_err(|error| format!("selected repository is not an encrypted vmux Vault: {error}"))?;
+    let manifest = ron::from_str::<RemoteManifest>(source)
         .map_err(|error| format!("selected repository is not an encrypted vmux Vault: {error}"))?;
     if manifest.version != FORMAT_VERSION
         || manifest.cipher != "AES-256-GCM"
@@ -971,7 +973,7 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
                 || entry == INDEX_FILE
                 || entry
                     .strip_prefix(&format!("{OBJECTS_DIR}/"))
-                    .is_some_and(|name| name.ends_with(".vmux") && !name.contains('/'))
+                    .is_some_and(|name| name.len() == 64 && !name.contains('/'))
         });
     if !valid {
         return Err("selected repository contains plaintext or non-Vault history".to_string());
@@ -996,10 +998,12 @@ fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
     {
         let entry = entry.map_err(|error| error.to_string())?;
         let name = entry.file_name().to_string_lossy().into_owned();
-        let id = name.strip_suffix(".vmux").unwrap_or_default();
+        let id = name.as_str();
         if !entry.file_type().is_ok_and(|file_type| file_type.is_file())
             || id.len() != 64
-            || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         {
             return Err(format!("invalid encrypted Vault object: {name}"));
         }
@@ -1109,8 +1113,8 @@ fn write_local_state(root: &Path, repository: &Path) -> Result<(), String> {
             })
             .collect(),
     };
-    let source = serde_json::to_vec(&state).map_err(|error| error.to_string())?;
-    write_atomic(&state_path(repository), &source)
+    let source = ron::ser::to_string(&state).map_err(|error| error.to_string())?;
+    write_atomic(&state_path(repository), source.as_bytes())
 }
 
 fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {
@@ -1143,7 +1147,8 @@ fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {
 
 fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
     let source = std::fs::read(state_path(repository)).map_err(|error| error.to_string())?;
-    let state = serde_json::from_slice::<LocalState>(&source).map_err(|error| error.to_string())?;
+    let source = std::str::from_utf8(&source).map_err(|error| error.to_string())?;
+    let state = ron::from_str::<LocalState>(source).map_err(|error| error.to_string())?;
     if state.version != FORMAT_VERSION {
         return Err("unsupported Vault local state".to_string());
     }
@@ -1175,7 +1180,7 @@ fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, Str
 }
 
 fn state_path(repository: &Path) -> PathBuf {
-    repository.join(".git").join("vmux-state.json")
+    repository.join(".git").join("vmux-state.ron")
 }
 
 fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {

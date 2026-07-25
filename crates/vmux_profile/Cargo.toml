@@ -10,6 +10,7 @@ build = "build.rs"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ring = "0.17"
+ron = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
