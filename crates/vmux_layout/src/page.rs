@@ -1227,7 +1227,7 @@ fn KnowledgeCard(
                                 input {
                                     r#type: "search",
                                     value: "{query}",
-                                    placeholder: "Search Knowledge",
+                                    placeholder: translate("knowledge-search"),
                                     class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground",
                                     oninput: move |event| {
                                         let value = event.value();
@@ -1239,7 +1239,7 @@ fn KnowledgeCard(
                             if !query().is_empty() {
                                 div { class: "flex max-h-64 flex-col gap-0.5 overflow-y-auto",
                                     if search.matches.is_empty() {
-                                        div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("extensions-no-match")} }
+                                        div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("knowledge-no-match")} }
                                     }
                                     for result in search.matches.iter() {
                                         {

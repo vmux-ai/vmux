@@ -254,6 +254,7 @@ pub fn markdown_metadata(text: &str) -> MarkdownMetadata {
     let mut title_line = None;
     let mut index = 0;
     while index < close {
+        let key_index = index;
         let value = frontmatter[index].trim_end_matches(['\r', '\n']);
         if value.trim().is_empty() || value.trim_start().starts_with('#') || value.starts_with(' ')
         {
@@ -296,7 +297,7 @@ pub fn markdown_metadata(text: &str) -> MarkdownMetadata {
         }
         if title.is_empty() && key.eq_ignore_ascii_case("title") {
             title = values.first().cloned().unwrap_or_default();
-            title_line = Some(index.saturating_sub(values.len().saturating_sub(1)) as u32 + 1);
+            title_line = Some(key_index as u32 + 1);
         }
         if key.eq_ignore_ascii_case("alias") || key.eq_ignore_ascii_case("aliases") {
             aliases.extend(values.iter().cloned());
@@ -447,7 +448,7 @@ fn property_source(
         }
         KnowledgePropertyKind::Date => {
             let value = clean.first().cloned().unwrap_or_default();
-            format!("{key}: {value}\n")
+            format!("{key}: {}\n", yaml_scalar(&value))
         }
         KnowledgePropertyKind::Link => {
             let value = clean.first().cloned().unwrap_or_default();
@@ -456,7 +457,7 @@ fn property_source(
             } else {
                 format!("[[{value}]]")
             };
-            format!("{key}: {value}\n")
+            format!("{key}: {}\n", yaml_scalar(&value))
         }
         KnowledgePropertyKind::Text => {
             let value = clean.first().cloned().unwrap_or_default();
@@ -1068,6 +1069,13 @@ mod tests {
     }
 
     #[test]
+    fn inline_list_title_keeps_the_title_source_line() {
+        let metadata = markdown_metadata("---\nstatus: draft\ntitle: [Primary, Alias]\n---\n");
+        assert_eq!(metadata.title, "Primary");
+        assert_eq!(metadata.title_line, Some(2));
+    }
+
+    #[test]
     fn ignores_incomplete_or_non_frontmatter_metadata() {
         assert_eq!(markdown_metadata("# Title\n"), MarkdownMetadata::default());
         assert_eq!(
@@ -1141,6 +1149,44 @@ mod tests {
             )
             .is_err()
         );
+
+        let with_link = edit_markdown_property(
+            &renamed,
+            &crate::event::FilePropertyEdit {
+                original_key: String::new(),
+                key: "related".into(),
+                kind: KnowledgePropertyKind::Link,
+                values: vec!["Roadmap".into()],
+                remove: false,
+            },
+        )
+        .unwrap();
+        let with_date = edit_markdown_property(
+            &with_link,
+            &crate::event::FilePropertyEdit {
+                original_key: String::new(),
+                key: "due".into(),
+                kind: KnowledgePropertyKind::Date,
+                values: vec!["2026-07-25".into()],
+                remove: false,
+            },
+        )
+        .unwrap();
+        let metadata = markdown_metadata(&with_date);
+        let related = metadata
+            .properties
+            .iter()
+            .find(|property| property.key == "related")
+            .unwrap();
+        assert_eq!(related.kind, KnowledgePropertyKind::Link);
+        assert_eq!(related.values, ["[[Roadmap]]"]);
+        let due = metadata
+            .properties
+            .iter()
+            .find(|property| property.key == "due")
+            .unwrap();
+        assert_eq!(due.kind, KnowledgePropertyKind::Date);
+        assert_eq!(due.values, ["2026-07-25"]);
     }
 
     #[test]

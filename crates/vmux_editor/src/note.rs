@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
 use vmux_ui::hooks::try_cef_bin_emit_rkyv;
+use vmux_ui::i18n::translate;
 
 use crate::page_model::{heading_class, span_style, table_align_style};
 
@@ -184,7 +185,7 @@ fn render_inline(inline: &MdInline, key: usize) -> Element {
                     key: "{key}",
                     r#type: "button",
                     disabled,
-                    title: if *exists { "Open linked note" } else { "Create linked note" },
+                    title: if *exists { translate("knowledge-open-linked-note") } else { translate("knowledge-create-linked-note") },
                     class: if *exists {
                         "inline cursor-pointer rounded px-0.5 text-primary underline decoration-primary/35 underline-offset-2 hover:bg-primary/10 hover:decoration-primary"
                     } else {

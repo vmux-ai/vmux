@@ -12,6 +12,35 @@ enum Group {
     Other,
 }
 
+fn translated_caret_after_replace(old: &str, new: &str, caret: usize) -> usize {
+    let old = old.chars().collect::<Vec<_>>();
+    let new = new.chars().collect::<Vec<_>>();
+    let prefix = old
+        .iter()
+        .zip(&new)
+        .take_while(|(left, right)| left == right)
+        .count();
+    if caret <= prefix {
+        return caret.min(new.len());
+    }
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(new[prefix..].iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count();
+    let old_suffix = old.len().saturating_sub(suffix);
+    let new_suffix = new.len().saturating_sub(suffix);
+    if caret >= old_suffix {
+        return (new_suffix + caret.saturating_sub(old_suffix)).min(new.len());
+    }
+    (prefix
+        + caret
+            .saturating_sub(prefix)
+            .min(new_suffix.saturating_sub(prefix)))
+    .min(new.len())
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditOutcome {
     pub text_changed: bool,
@@ -288,10 +317,11 @@ impl EditCore {
             EditCommand::InsertText(t) => text_changed = self.insert_text(&t),
             EditCommand::ReplaceText(t) => {
                 let caret = self.primary().head;
+                let next_caret = translated_caret_after_replace(&self.buffer.text(), &t, caret);
                 self.checkpoint(Group::Other);
                 self.buffer.remove(0..self.buffer.len_chars());
                 self.buffer.insert(0, &t);
-                self.set_caret(caret.min(self.buffer.len_chars()));
+                self.set_caret(next_caret);
                 text_changed = true;
             }
             EditCommand::InsertTab => text_changed = self.insert_text("\t"),
@@ -649,6 +679,16 @@ mod tests {
         assert_eq!(c.primary().head, 2);
         c.apply(EditCommand::Undo);
         assert_eq!(text_of(&c), "old");
+    }
+
+    #[test]
+    fn replace_text_preserves_caret_in_an_unchanged_body() {
+        let old = "---\ntitle: Old\n---\nBody text";
+        let new = "---\ntitle: Old\ntags:\n  - note\n---\nBody text";
+        let mut c = core(old);
+        c.set_caret(old.find("text").unwrap());
+        c.apply(EditCommand::ReplaceText(new.into()));
+        assert_eq!(c.primary().head, new.find("text").unwrap());
     }
 
     #[test]

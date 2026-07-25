@@ -23,6 +23,7 @@ struct KnowledgeNote {
     title: String,
     aliases: Vec<String>,
     text: String,
+    lowercase_text: String,
     headings: HashMap<String, u32>,
     blocks: HashMap<String, u32>,
     links: Vec<IndexedLink>,
@@ -159,15 +160,14 @@ fn anchors(text: &str) -> (HashMap<String, u32>, HashMap<String, u32>) {
                 headings.entry(normalized(heading)).or_insert(line as u32);
             }
         }
-        if let Some((_, block)) = value.rsplit_once('^') {
-            let block = block.trim();
-            if !block.is_empty()
-                && block.chars().all(|character| {
-                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
-                })
-            {
-                blocks.entry(normalized(block)).or_insert(line as u32);
-            }
+        if let Some((prefix, block)) = value.rsplit_once('^')
+            && prefix.chars().next_back().is_some_and(char::is_whitespace)
+            && !block.is_empty()
+            && block.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_')
+            })
+        {
+            blocks.entry(normalized(block)).or_insert(line as u32);
         }
     }
     (headings, blocks)
@@ -297,6 +297,7 @@ impl KnowledgeIndex {
             let title = note_title(&path, &metadata, &text);
             let relative = relative_without_extension(&root, &path);
             let (headings, blocks) = anchors(&text);
+            let lowercase_text = text.to_lowercase();
             let links = wiki_links(&text)
                 .into_iter()
                 .map(|link| {
@@ -314,6 +315,7 @@ impl KnowledgeIndex {
                 title,
                 aliases: metadata.aliases,
                 text,
+                lowercase_text,
                 headings,
                 blocks,
                 links,
@@ -517,7 +519,7 @@ impl KnowledgeIndex {
                 .iter()
                 .map(|alias| alias.to_lowercase())
                 .collect::<Vec<_>>();
-            let body = note.text.to_lowercase();
+            let body = &note.lowercase_text;
             if !terms.iter().all(|term| {
                 title.contains(term)
                     || relative.contains(term)
@@ -802,6 +804,12 @@ mod tests {
             missing.path,
             normalized_path(&temp.path().join("projects/Missing Note.md"))
         );
+    }
+
+    #[test]
+    fn block_anchors_require_a_terminal_whitespace_delimited_identifier() {
+        let (_, blocks) = anchors("valid ^block-id\n2^10\nx ^ y\n`code ^bad`\n");
+        assert_eq!(blocks, HashMap::from([("block-id".to_string(), 0)]));
     }
 
     #[test]

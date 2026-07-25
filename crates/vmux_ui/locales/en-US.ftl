@@ -500,6 +500,10 @@ layout-tab = Tab
 layout-no-stacks = No stacks
 layout-loading = Loading…
 layout-no-markdown-files = No Markdown files
+knowledge-search = Search Knowledge
+knowledge-no-match = No matching notes
+knowledge-open-linked-note = Open linked note
+knowledge-create-linked-note = Create linked note
 layout-empty-folder = Empty folder
 layout-worktree = worktree
 layout-folder-name = Folder name
@@ -634,6 +638,23 @@ editor-references = { $count ->
     [one] 1 reference
    *[other] { $count } references
 }
+editor-properties = Properties
+editor-no-properties = No properties
+editor-add-tags = Add tags
+editor-add-property = Add property
+editor-change-property-type = Change property type
+editor-add-tag = Add tag
+editor-add-item = Add item
+editor-linked-note = Linked note
+editor-property-value = Value
+editor-delete-property = Delete property
+editor-property-kind-text = Text
+editor-property-kind-number = Number
+editor-property-kind-checkbox = Checkbox
+editor-property-kind-date = Date
+editor-property-kind-list = List
+editor-property-kind-link = Link
+editor-property-kind-tags = Tags
 editor-lsp-starting = { $server } starting…
 editor-lsp-not-installed = { $server } — not installed
 editor-explorer = Explorer

@@ -1984,6 +1984,9 @@ fn on_file_property_edit(
     let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
+    if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
+        return;
+    }
     let text = edit.core.buffer.text();
     let updated =
         match vmux_core::knowledge::edit_markdown_property(&text, &trigger.event().payload) {
@@ -2636,17 +2639,19 @@ fn run_explorer_mutation(
                 .to_path_buf();
             let next_path = path.with_file_name(&name);
             let knowledge_root = vmux_core::knowledge::knowledge_dir();
-            let rename_plan = (root.canonicalize().ok() == knowledge_root.canonicalize().ok())
-                .then(|| {
-                    vmux_core::knowledge::KnowledgeIndex::build(&root)
-                        .map(|index| {
-                            vmux_core::knowledge::KnowledgeRenamePlan::build(
-                                &index, &path, &next_path,
-                            )
-                        })
-                        .map_err(|error| error.to_string())
-                })
-                .transpose()?;
+            let rename_plan = (root
+                .canonicalize()
+                .ok()
+                .zip(knowledge_root.canonicalize().ok())
+                .is_some_and(|(root, knowledge_root)| root == knowledge_root))
+            .then(|| {
+                vmux_core::knowledge::KnowledgeIndex::build(&root)
+                    .map(|index| {
+                        vmux_core::knowledge::KnowledgeRenamePlan::build(&index, &path, &next_path)
+                    })
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?;
             let (changed_path, was_dir) = crate::explorer_fs::rename_entry(&root, &path, &name)?;
             if let Some(plan) = rename_plan {
                 plan.apply().map_err(|error| error.to_string())?;
@@ -3360,7 +3365,9 @@ impl Plugin for EditorPlugin {
                 (
                     mark_notes_on_knowledge_change,
                     mark_note_dirty,
-                    send_note.after(mark_note_dirty),
+                    send_note
+                        .after(mark_note_dirty)
+                        .after(mark_notes_on_knowledge_change),
                 ),
             )
             .add_systems(Update, (drain_explorer_dir_loads, drain_explorer_mutations))

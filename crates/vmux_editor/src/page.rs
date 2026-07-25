@@ -354,15 +354,15 @@ fn emit_property_edit(
     });
 }
 
-fn property_kind_label(kind: KnowledgePropertyKind) -> &'static str {
+fn property_kind_label(kind: KnowledgePropertyKind) -> String {
     match kind {
-        KnowledgePropertyKind::Text => "Text",
-        KnowledgePropertyKind::Number => "Number",
-        KnowledgePropertyKind::Checkbox => "Checkbox",
-        KnowledgePropertyKind::Date => "Date",
-        KnowledgePropertyKind::List => "List",
-        KnowledgePropertyKind::Link => "Link",
-        KnowledgePropertyKind::Tags => "Tags",
+        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
+        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
+        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
+        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
+        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
+        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
+        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
     }
 }
 
@@ -402,7 +402,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
             }
             button {
                 r#type: "button",
-                title: "Change property type",
+                title: translate("editor-change-property-type"),
                 class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
                 onclick: {
                     let values = values.clone();
@@ -438,7 +438,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                                     button {
                                         key: "{index}:{value}",
                                         r#type: "button",
-                                        title: "Remove",
+                                        title: translate("common-remove"),
                                         class: if kind == KnowledgePropertyKind::Tags { "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary hover:bg-destructive/10 hover:text-destructive" } else { "rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/75 hover:bg-destructive/10 hover:text-destructive" },
                                         onclick: move |_| {
                                             let mut next = remove_values.clone();
@@ -453,7 +453,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                         }
                         input {
                             value: "{item}",
-                            placeholder: if kind == KnowledgePropertyKind::Tags { "Add tag" } else { "Add item" },
+                            placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
                             class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
                             oninput: move |event| item.set(event.value()),
                             onkeydown: {
@@ -486,7 +486,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
                             _ => "text",
                         },
                         value: "{scalar}",
-                        placeholder: if kind == KnowledgePropertyKind::Link { "Linked note" } else { "Value" },
+                        placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
                         class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
                         oninput: move |event| scalar.set(event.value()),
                         onblur: {
@@ -498,7 +498,7 @@ fn NotePropertyRow(property: KnowledgeProperty) -> Element {
             }
             button {
                 r#type: "button",
-                title: "Delete property",
+                title: translate("editor-delete-property"),
                 class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
                 onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
                 Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
@@ -538,14 +538,14 @@ fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                     class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
                     onclick: move |_| open.toggle(),
                     Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
-                    span { "Properties" }
+                    span { {translate("editor-properties")} }
                     if !properties.is_empty() {
                         span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
                     }
                 }
                 button {
                     r#type: "button",
-                    title: "Add tags",
+                    title: translate("editor-add-tags"),
                     disabled: has_tags,
                     class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
                     onclick: move |_| {
@@ -562,7 +562,7 @@ fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
                 }
                 button {
                     r#type: "button",
-                    title: "Add property",
+                    title: translate("editor-add-property"),
                     class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
                     onclick: move |_| {
                         open.set(true);
@@ -580,7 +580,7 @@ fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
             if open() {
                 div { class: "border-t border-foreground/[0.06] px-1 py-1",
                     if properties.is_empty() {
-                        div { class: "px-3 py-2 text-xs text-muted-foreground", "No properties" }
+                        div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
                     }
                     for property in properties {
                         NotePropertyRow {
