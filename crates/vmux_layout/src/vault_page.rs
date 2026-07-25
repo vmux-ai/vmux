@@ -24,6 +24,12 @@ enum RemoteProvider {
     OneDrive,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VaultDestination {
+    Create,
+    Existing,
+}
+
 impl RemoteProvider {
     const ALL: [Self; 4] = [
         Self::Github,
@@ -215,6 +221,7 @@ fn VaultPanel(
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
 ) -> Element {
+    let mut destination = use_signal(|| VaultDestination::Create);
     let is_connected = vault.initialized && !vault.remote.is_empty();
     let status = if vault.dirty > 0 {
         translate_with(
@@ -263,19 +270,25 @@ fn VaultPanel(
             kind: ManagerSelectItemKind::Default,
         })
         .collect::<Vec<_>>();
+    let connecting = pending().is_some_and(|action| {
+        action == VaultAction::ConnectGithub || action == VaultAction::ConnectCloud
+    }) || provider
+        .is_some_and(|provider| provider.is_github() && repositories_requested());
     rsx! {
-        div { class: "rounded-2xl bg-foreground/[0.035] p-5 ring-1 ring-inset ring-foreground/10",
-            div { class: "flex items-start gap-4",
-                div { class: "grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-500/10 text-violet-700 ring-1 ring-inset ring-violet-500/20 dark:text-violet-300",
-                    svg { class: "h-5 w-5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+        div { class: "relative overflow-hidden rounded-[28px] bg-foreground/[0.03] p-6 shadow-2xl shadow-black/[0.06] ring-1 ring-inset ring-foreground/10 backdrop-blur-2xl",
+            div { class: "pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-cyan-400/[0.08] blur-3xl motion-safe:animate-pulse [animation-duration:7s]" }
+            div { class: "pointer-events-none absolute -bottom-36 -left-24 h-72 w-72 rounded-full bg-violet-400/[0.07] blur-3xl motion-safe:animate-pulse [animation-delay:-2.5s] [animation-duration:7s]" }
+            div { class: "relative flex items-start gap-4",
+                div { class: "grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-violet-500/10 text-violet-700 shadow-lg shadow-violet-500/10 ring-1 ring-inset ring-violet-500/20 dark:text-violet-300",
+                    svg { class: "h-5.5 w-5.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                         path { d: "M12 3 4.5 6v5.5c0 4.7 3.2 8.1 7.5 9.5 4.3-1.4 7.5-4.8 7.5-9.5V6Z" }
                         path { d: "m9 12 2 2 4-4" }
                     }
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: "font-medium text-foreground/95", {translate("vault-title")} }
+                    div { class: "text-base font-semibold tracking-tight text-foreground/95", {translate("vault-title")} }
                     if !is_connected || vault.encrypted {
-                        div { class: "mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground/70",
+                        div { class: "mt-1 flex items-center gap-1.5 text-xs text-muted-foreground/70",
                             svg { class: "h-3 w-3 shrink-0", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
                                 rect { x: "5", y: "11", width: "14", height: "10", rx: "2" }
                                 path { d: "M8 11V7a4 4 0 0 1 8 0v4" }
@@ -284,8 +297,8 @@ fn VaultPanel(
                         }
                     }
                     if is_connected {
-                        div { class: "truncate text-xs text-muted-foreground/70", "{vault.remote}" }
-                        div { class: "mt-1 flex gap-2 text-[10px] text-muted-foreground/60",
+                        div { class: "mt-1 truncate text-xs text-muted-foreground/70", "{vault.remote}" }
+                        div { class: "mt-1.5 flex gap-2 text-[10px] text-muted-foreground/60",
                             if !vault.branch.is_empty() {
                                 span { "{vault.branch}" }
                             }
@@ -298,8 +311,8 @@ fn VaultPanel(
                             }
                         }
                     } else {
-                        div { class: "text-xs text-muted-foreground/70", {translate("vault-description")} }
-                        div { class: "mt-1 truncate text-[10px] text-muted-foreground/55", "{vault.root}" }
+                        div { class: "mt-1 text-xs text-muted-foreground/70", {translate("vault-description")} }
+                        div { class: "mt-1.5 truncate font-mono text-[10px] text-muted-foreground/50", "{vault.root}" }
                     }
                 }
                 if is_connected {
@@ -317,217 +330,257 @@ fn VaultPanel(
                 }
             }
             if !is_connected {
-                div { class: "mt-5 flex flex-col gap-3",
-                    VaultStep { number: 1, active: true, complete: provider.is_some(),
-                        div { class: "flex flex-wrap items-center justify-center gap-2",
-                            for option in RemoteProvider::ALL {
-                                button {
-                                    class: if provider == Some(option) {
-                                        "grid h-11 w-11 place-items-center rounded-xl bg-cyan-400/12 text-foreground ring-1 ring-inset ring-cyan-400/40 shadow-sm shadow-cyan-400/10"
-                                    } else {
-                                        "grid h-11 w-11 place-items-center rounded-xl bg-foreground/[0.04] text-muted-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
-                                    },
-                                    title: option.name(),
-                                    aria_label: option.name(),
-                                    onclick: move |_| {
-                                        selected_provider.set(Some(option));
-                                        github_device_code.set(String::new());
-                                        cloud_root.set(String::new());
-                                        selected_repository.set(None);
-                                        notice.set(None);
-                                        if option.is_github() {
-                                            if !github_connected {
-                                                repositories_requested.set(false);
-                                                send_action(
-                                                    pending,
-                                                    VaultAction::ConnectGithub,
-                                                    String::new(),
-                                                    true,
-                                                );
-                                            } else if !github_repositories_loaded
-                                                && !repositories_requested()
-                                            {
-                                                repositories_requested.set(true);
-                                                request_snapshot(true);
-                                            }
-                                        } else {
-                                            repository.set("vmux-vault".to_string());
+                div { class: "relative mt-6 overflow-hidden rounded-[24px] bg-background/35 p-4 shadow-inner ring-1 ring-inset ring-foreground/[0.08]",
+                    div { class: "mx-auto flex w-fit flex-wrap items-center justify-center gap-1.5 rounded-2xl bg-foreground/[0.035] p-1.5 ring-1 ring-inset ring-foreground/[0.07]",
+                        for option in RemoteProvider::ALL {
+                            button {
+                                class: if provider == Some(option) {
+                                    "grid h-12 w-12 scale-105 place-items-center rounded-xl bg-background text-foreground shadow-lg shadow-black/10 ring-1 ring-inset ring-cyan-400/40 transition-all duration-300 ease-out"
+                                } else {
+                                    "grid h-12 w-12 place-items-center rounded-xl text-muted-foreground transition-all duration-300 ease-out hover:-translate-y-0.5 hover:scale-105 hover:bg-foreground/[0.06] hover:text-foreground active:scale-95"
+                                },
+                                title: option.name(),
+                                aria_label: option.name(),
+                                onclick: move |_| {
+                                    selected_provider.set(Some(option));
+                                    github_device_code.set(String::new());
+                                    cloud_root.set(String::new());
+                                    selected_repository.set(None);
+                                    destination.set(VaultDestination::Create);
+                                    notice.set(None);
+                                    if option.is_github() {
+                                        if !github_connected {
+                                            repositories_requested.set(false);
                                             send_action(
                                                 pending,
-                                                VaultAction::ConnectCloud,
-                                                option.name().to_string(),
+                                                VaultAction::ConnectGithub,
+                                                String::new(),
                                                 true,
                                             );
+                                        } else if !github_repositories_loaded
+                                            && !repositories_requested()
+                                        {
+                                            repositories_requested.set(true);
+                                            request_snapshot(true);
                                         }
-                                    },
-                                    ProviderIcon { provider: option }
-                                }
+                                    } else {
+                                        repository.set("vmux-vault".to_string());
+                                        send_action(
+                                            pending,
+                                            VaultAction::ConnectCloud,
+                                            option.name().to_string(),
+                                            true,
+                                        );
+                                    }
+                                },
+                                ProviderIcon { provider: option }
                             }
                         }
                     }
-                    VaultStep { number: 2, active: provider.is_some(), complete: authenticated,
-                        if let Some(provider) = provider {
-                            div { class: "flex min-w-0 flex-wrap items-center justify-center gap-3",
-                                ProviderIcon { provider }
-                                div { class: "min-w-0",
-                                    if provider.is_github() && !vault.github_owner.is_empty() {
-                                        div { class: "truncate text-xs text-emerald-700 dark:text-emerald-300",
-                                            {translate_with(
-                                                "vault-connected-as",
-                                                &[("name", TranslationValue::String(&vault.github_owner))],
-                                            )}
-                                        }
-                                    } else if !provider.is_github() && !cloud_root().is_empty() {
-                                        div { class: "truncate text-xs text-emerald-700 dark:text-emerald-300", "{cloud_root()}" }
+                    if let Some(provider) = provider {
+                        if !authenticated {
+                            div {
+                                key: "connect-{provider.name()}",
+                                class: "flex min-h-52 flex-col items-center justify-center px-5 py-8 text-center transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                div { class: "relative grid h-20 w-20 place-items-center",
+                                    div { class: "absolute inset-0 rounded-[26px] bg-cyan-400/15 blur-xl motion-safe:animate-pulse [animation-duration:2.4s]" }
+                                    div { class: "relative grid h-16 w-16 place-items-center rounded-[22px] bg-background/80 text-foreground shadow-xl shadow-black/10 ring-1 ring-inset ring-foreground/10",
+                                        ProviderIcon { provider, large: true }
+                                    }
+                                }
+                                div { class: "mt-4 text-sm font-medium text-foreground/90",
+                                    if connecting {
+                                        {translate("common-loading")}
                                     } else {
-                                        div { class: "text-xs text-muted-foreground/60", {translate("vault-not-connected")} }
+                                        {translate("vault-not-connected")}
                                     }
                                 }
                                 if provider.is_github() && !github_device_code().is_empty() {
-                                    code { class: "shrink-0 rounded-lg bg-foreground/[0.06] px-3 py-1.5 font-mono text-sm font-semibold tracking-[0.16em] text-foreground ring-1 ring-inset ring-foreground/10",
+                                    code { class: "mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 font-mono text-base font-semibold tracking-[0.2em] text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform] duration-300 ease-out starting:scale-90 starting:opacity-0",
                                         {github_device_code()}
                                     }
                                 }
-                                if pending().is_some_and(|action| {
-                                    action == VaultAction::ConnectGithub
-                                        || action == VaultAction::ConnectCloud
-                                }) || (provider.is_github() && repositories_requested()) {
-                                    span { class: "h-3.5 w-3.5 animate-spin rounded-full border-2 border-foreground/20 border-t-foreground/70" }
+                                if connecting {
+                                    div { class: "mt-5 flex items-center gap-1.5",
+                                        span { class: "h-1.5 w-1.5 rounded-full bg-cyan-500/70 motion-safe:animate-bounce [animation-duration:1.15s]" }
+                                        span { class: "h-1.5 w-1.5 rounded-full bg-cyan-500/70 motion-safe:animate-bounce [animation-delay:120ms] [animation-duration:1.15s]" }
+                                        span { class: "h-1.5 w-1.5 rounded-full bg-cyan-500/70 motion-safe:animate-bounce [animation-delay:240ms] [animation-duration:1.15s]" }
+                                    }
                                 }
                             }
                         } else {
-                            div { class: "py-1 text-xs text-muted-foreground/60", {translate("vault-connect")} }
-                        }
-                    }
-                    VaultStep { number: 3, active: authenticated, complete: false,
-                        if authenticated {
-                            if provider == Some(RemoteProvider::Github) {
-                                div { class: "mb-3",
-                                    ManagerSelect {
-                                        items: owner_items,
-                                        value: Some(owner.clone()),
-                                        placeholder: vault.github_owner.clone(),
-                                        onselect: move |value: String| {
-                                            repository.set(suggested_repository_name(
-                                                &value,
-                                                &vault.repositories,
-                                            ));
-                                            selected_owner.set(Some(value));
-                                            selected_repository.set(None);
+                            div {
+                                key: "destination-{provider.name()}",
+                                class: "pt-5 transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                div { class: "flex items-center justify-center gap-2 text-xs text-emerald-700 dark:text-emerald-300",
+                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-emerald-400/15 ring-1 ring-inset ring-emerald-400/25",
+                                        svg { class: "h-3 w-3", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
+                                            path { d: "m5 12 4 4L19 6" }
+                                        }
+                                    }
+                                    if provider.is_github() {
+                                        {translate_with(
+                                            "vault-connected-as",
+                                            &[("name", TranslationValue::String(&vault.github_owner))],
+                                        )}
+                                    } else {
+                                        span { class: "max-w-md truncate", "{cloud_root()}" }
+                                    }
+                                }
+                                if provider == RemoteProvider::Github {
+                                    div { class: "mx-auto mt-4 max-w-md",
+                                        ManagerSelect {
+                                            items: owner_items,
+                                            value: Some(owner.clone()),
+                                            placeholder: vault.github_owner.clone(),
+                                            onselect: move |value: String| {
+                                                repository.set(suggested_repository_name(
+                                                    &value,
+                                                    &vault.repositories,
+                                                ));
+                                                selected_owner.set(Some(value));
+                                                selected_repository.set(None);
+                                            },
+                                        }
+                                    }
+                                }
+                                div { class: "mx-auto mt-4 grid max-w-md grid-cols-2 gap-1 rounded-xl bg-foreground/[0.04] p-1 ring-1 ring-inset ring-foreground/[0.07]",
+                                    button {
+                                        class: if destination() == VaultDestination::Create {
+                                            "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
+                                        } else {
+                                            "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
                                         },
+                                        onclick: move |_| destination.set(VaultDestination::Create),
+                                        {translate("vault-create")}
                                     }
-                                }
-                                div { class: "grid gap-3 lg:grid-cols-2",
-                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
-                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
-                                        div { class: "flex gap-2",
-                                            div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/55 ring-1 ring-inset ring-foreground/10 focus-within:ring-primary/40",
-                                                span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
-                                                input {
-                                                    class: "min-w-0 flex-1 bg-transparent py-2 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
-                                                    value: repository(),
-                                                    placeholder: translate("vault-repository-name"),
-                                                    oninput: move |event| repository.set(event.value()),
-                                                }
-                                            }
-                                            ManagerButton {
-                                                variant: ManagerButtonVariant::Primary,
-                                                disabled: pending().is_some() || owner.is_empty() || repository().trim().is_empty(),
-                                                onclick: move |_| send_action(
-                                                    pending,
-                                                    VaultAction::Create,
-                                                    format!("{owner}/{}", repository().trim()),
-                                                    private(),
-                                                ),
-                                                {translate("vault-create")}
-                                            }
-                                        }
-                                        label { class: "mt-3 flex cursor-pointer items-center gap-2 text-xs text-muted-foreground",
-                                            input {
-                                                r#type: "checkbox",
-                                                checked: private(),
-                                                onchange: move |event| private.set(event.checked()),
-                                            }
-                                            {translate("vault-private")}
-                                        }
-                                        if !private() {
-                                            div { class: "mt-2 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
-                                        }
-                                    }
-                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
-                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-repository")} }
-                                        div { class: "flex gap-2",
-                                            div { class: "min-w-0 flex-1",
-                                                ManagerSelect {
-                                                    items: repository_items,
-                                                    value: selected_repository(),
-                                                    placeholder: translate("vault-choose-repository"),
-                                                    onselect: move |value| selected_repository.set(Some(value)),
-                                                }
-                                            }
-                                            ManagerButton {
-                                                variant: ManagerButtonVariant::Secondary,
-                                                disabled: pending().is_some() || selected_repository().is_none(),
-                                                onclick: move |_| send_action(
-                                                    pending,
-                                                    VaultAction::Connect,
-                                                    selected_repository().unwrap_or_default(),
-                                                    true,
-                                                ),
-                                                {translate("vault-use-repository")}
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                div { class: "grid gap-3 lg:grid-cols-2",
-                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
-                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-create")} }
-                                        div { class: "flex gap-2",
-                                            input {
-                                                class: "min-w-0 flex-1 rounded-xl bg-background/55 px-3 py-2 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-primary/40",
-                                                value: repository(),
-                                                placeholder: translate("vault-repository-name"),
-                                                oninput: move |event| repository.set(event.value()),
-                                            }
-                                            ManagerButton {
-                                                variant: ManagerButtonVariant::Primary,
-                                                disabled: pending().is_some() || repository().trim().is_empty(),
-                                                onclick: move |_| send_cloud_create(
-                                                    pending,
-                                                    &cloud_root(),
-                                                    repository().trim(),
-                                                ),
-                                                {translate("vault-create")}
-                                            }
-                                        }
-                                    }
-                                    div { class: "rounded-xl bg-background/45 p-3 ring-1 ring-inset ring-foreground/10",
-                                        div { class: "mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60", {translate("vault-choose-folder")} }
-                                        ManagerButton {
-                                            variant: ManagerButtonVariant::Secondary,
-                                            disabled: pending().is_some(),
-                                            onclick: move |_| send_action(
-                                                pending,
-                                                VaultAction::ChooseCloudFolder,
-                                                cloud_root(),
-                                                true,
-                                            ),
+                                    button {
+                                        class: if destination() == VaultDestination::Existing {
+                                            "rounded-lg bg-background px-4 py-2 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/[0.08] transition-all duration-200"
+                                        } else {
+                                            "rounded-lg px-4 py-2 text-xs font-medium text-muted-foreground transition-all duration-200 hover:text-foreground"
+                                        },
+                                        onclick: move |_| destination.set(VaultDestination::Existing),
+                                        if provider == RemoteProvider::Github {
+                                            {translate("vault-choose-repository")}
+                                        } else {
                                             {translate("vault-choose-folder")}
                                         }
                                     }
                                 }
+                                div { class: "mx-auto max-w-md py-4",
+                                    if destination() == VaultDestination::Create {
+                                        div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                            div { class: "flex gap-2",
+                                                if provider == RemoteProvider::Github {
+                                                    div { class: "flex min-w-0 flex-1 items-center rounded-xl bg-background/60 ring-1 ring-inset ring-foreground/10 focus-within:ring-cyan-400/40",
+                                                        span { class: "shrink-0 pl-3 text-xs text-muted-foreground/60", "{owner}/" }
+                                                        input {
+                                                            class: "min-w-0 flex-1 bg-transparent py-2.5 pl-0.5 pr-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/50",
+                                                            value: repository(),
+                                                            placeholder: translate("vault-repository-name"),
+                                                            oninput: move |event| repository.set(event.value()),
+                                                        }
+                                                    }
+                                                } else {
+                                                    input {
+                                                        class: "min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 text-sm text-foreground outline-none ring-1 ring-inset ring-foreground/10 placeholder:text-muted-foreground/50 focus:ring-cyan-400/40",
+                                                        value: repository(),
+                                                        placeholder: translate("vault-repository-name"),
+                                                        oninput: move |event| repository.set(event.value()),
+                                                    }
+                                                }
+                                                ManagerButton {
+                                                    variant: ManagerButtonVariant::Primary,
+                                                    disabled: pending().is_some() || repository().trim().is_empty() || (provider == RemoteProvider::Github && owner.is_empty()),
+                                                    onclick: move |_| {
+                                                        if provider == RemoteProvider::Github {
+                                                            send_action(
+                                                                pending,
+                                                                VaultAction::Create,
+                                                                format!("{owner}/{}", repository().trim()),
+                                                                private(),
+                                                            );
+                                                        } else {
+                                                            send_cloud_create(
+                                                                pending,
+                                                                &cloud_root(),
+                                                                repository().trim(),
+                                                            );
+                                                        }
+                                                    },
+                                                    {translate("vault-create")}
+                                                }
+                                            }
+                                            if provider == RemoteProvider::Github {
+                                                label { class: "mt-3 flex cursor-pointer items-center gap-2 px-1 text-xs text-muted-foreground",
+                                                    input {
+                                                        r#type: "checkbox",
+                                                        checked: private(),
+                                                        onchange: move |event| private.set(event.checked()),
+                                                    }
+                                                    {translate("vault-private")}
+                                                }
+                                                if !private() {
+                                                    div { class: "mt-2 px-1 text-[10px] text-amber-600 dark:text-amber-300", {translate("vault-public-warning")} }
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        div { class: "rounded-2xl bg-foreground/[0.025] p-3 ring-1 ring-inset ring-foreground/[0.07] transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                                            if provider == RemoteProvider::Github {
+                                                div { class: "flex gap-2",
+                                                    div { class: "min-w-0 flex-1",
+                                                        ManagerSelect {
+                                                            items: repository_items,
+                                                            value: selected_repository(),
+                                                            placeholder: translate("vault-choose-repository"),
+                                                            onselect: move |value| selected_repository.set(Some(value)),
+                                                        }
+                                                    }
+                                                    ManagerButton {
+                                                        variant: ManagerButtonVariant::Primary,
+                                                        disabled: pending().is_some() || selected_repository().is_none(),
+                                                        onclick: move |_| send_action(
+                                                            pending,
+                                                            VaultAction::Connect,
+                                                            selected_repository().unwrap_or_default(),
+                                                            true,
+                                                        ),
+                                                        {translate("vault-use-repository")}
+                                                    }
+                                                }
+                                            } else {
+                                                button {
+                                                    class: "flex w-full items-center justify-center gap-2 rounded-xl bg-background/60 px-4 py-3 text-xs font-medium text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-all duration-200 hover:-translate-y-0.5 hover:bg-foreground/[0.07] active:translate-y-0",
+                                                    disabled: pending().is_some(),
+                                                    onclick: move |_| send_action(
+                                                        pending,
+                                                        VaultAction::ChooseCloudFolder,
+                                                        cloud_root(),
+                                                        true,
+                                                    ),
+                                                    svg { class: "h-4 w-4", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                                                        path { d: "M3 7h5l2 2h11v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }
+                                                        path { d: "M3 7V5a2 2 0 0 1 2-2h3l2 2h4" }
+                                                    }
+                                                    {translate("vault-choose-folder")}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        } else {
-                            div { class: "grid gap-3 lg:grid-cols-2",
-                                div { class: "rounded-xl bg-background/30 p-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 ring-1 ring-inset ring-foreground/[0.07]", {translate("vault-create")} }
-                                div { class: "rounded-xl bg-background/30 p-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/50 ring-1 ring-inset ring-foreground/[0.07]", {translate("vault-choose-folder")} }
-                            }
+                        }
+                    } else {
+                        div { class: "flex min-h-52 flex-col items-center justify-center px-5 py-10 text-center transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
+                            div { class: "text-sm font-medium text-foreground/85", {translate("vault-connect")} }
+                            div { class: "mt-1 max-w-sm text-xs leading-relaxed text-muted-foreground/60", {translate("vault-description")} }
                         }
                     }
                 }
                 if !vault.error.is_empty() {
-                    div { class: "mt-3 text-[10px] text-amber-600 dark:text-amber-300", "{vault.error}" }
+                    div { class: "relative mt-3 text-center text-[10px] text-amber-600 dark:text-amber-300", "{vault.error}" }
                 }
             } else {
                 PasskeyCard {
@@ -541,57 +594,32 @@ fn VaultPanel(
 }
 
 #[component]
-fn VaultStep(number: u8, active: bool, complete: bool, children: Element) -> Element {
-    rsx! {
-        div { class: if active {
-                "rounded-xl bg-foreground/[0.025] p-3.5 ring-1 ring-inset ring-foreground/[0.08] transition-opacity"
-            } else {
-                "pointer-events-none rounded-xl bg-foreground/[0.02] p-3.5 opacity-40 ring-1 ring-inset ring-foreground/[0.06]"
-            },
-            div { class: "flex items-start gap-3",
-                div { class: if complete {
-                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-emerald-400/15 text-emerald-700 ring-1 ring-inset ring-emerald-400/25 dark:text-emerald-300"
-                    } else if active {
-                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-primary/10 text-primary ring-1 ring-inset ring-primary/25"
-                    } else {
-                        "grid h-6 w-6 shrink-0 place-items-center rounded-full bg-foreground/[0.05] text-muted-foreground ring-1 ring-inset ring-foreground/10"
-                    },
-                    if complete {
-                        svg { class: "h-3.5 w-3.5", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
-                            path { d: "m5 12 4 4L19 6" }
-                        }
-                    } else {
-                        span { class: "text-[10px] font-semibold", "{number}" }
-                    }
-                }
-                div { class: "min-w-0 flex-1", {children} }
-            }
-        }
-    }
-}
-
-#[component]
-fn ProviderIcon(provider: RemoteProvider) -> Element {
+fn ProviderIcon(provider: RemoteProvider, #[props(default)] large: bool) -> Element {
+    let class = if large {
+        "h-8 w-8 shrink-0"
+    } else {
+        "h-5 w-5 shrink-0"
+    };
     match provider {
         RemoteProvider::Github => rsx! {
-            svg { class: "h-5 w-5 shrink-0", view_box: "0 0 24 24", fill: "currentColor",
+            svg { class, view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "M12 .7a11.3 11.3 0 0 0-3.57 22.02c.57.1.78-.25.78-.55v-2.16c-3.18.69-3.85-1.35-3.85-1.35-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.75 1.18 1.75 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.73-1.53-2.54-.29-5.21-1.27-5.21-5.65 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.45.11-3.03 0 0 .96-.31 3.11 1.17A10.8 10.8 0 0 1 12 5.93c.96 0 1.92.13 2.82.38 2.15-1.48 3.11-1.17 3.11-1.17.62 1.58.23 2.74.11 3.03.73.8 1.18 1.82 1.18 3.07 0 4.39-2.68 5.35-5.23 5.64.41.36.78 1.06.78 2.14v3.15c0 .3.21.66.79.55A11.3 11.3 0 0 0 12 .7Z" }
             }
         },
         RemoteProvider::GoogleDrive => rsx! {
-            svg { class: "h-5 w-5 shrink-0", view_box: "0 0 24 24", fill: "none",
+            svg { class, view_box: "0 0 24 24", fill: "none",
                 path { d: "M8.1 3h7.8l4 7h-7.8Z", fill: "#fbbc04" }
                 path { d: "m8.1 3 4 7-4.1 7H4Z", fill: "#34a853" }
                 path { d: "M8 17h8l3.9-7h-7.8Z", fill: "#4285f4" }
             }
         },
         RemoteProvider::Dropbox => rsx! {
-            svg { class: "h-5 w-5 shrink-0 text-[#0061ff]", view_box: "0 0 24 24", fill: "currentColor",
+            svg { class: "{class} text-[#0061ff]", view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "m6.5 3.5 5.5 3.4-5.5 3.5L1 6.9Zm11 0L23 6.9l-5.5 3.5L12 6.9Zm-11 8L12 15l-5.5 3.4L1 15Zm11 0L23 15l-5.5 3.4L12 15ZM6.6 19.6l5.4-3.4 5.4 3.4L12 23Z" }
             }
         },
         RemoteProvider::OneDrive => rsx! {
-            svg { class: "h-5 w-5 shrink-0 text-[#0078d4]", view_box: "0 0 24 24", fill: "currentColor",
+            svg { class: "{class} text-[#0078d4]", view_box: "0 0 24 24", fill: "currentColor",
                 path { d: "M9.3 7.3A6 6 0 0 1 19.8 11a4.5 4.5 0 0 1-.3 9H6a5 5 0 0 1-.6-10A5.8 5.8 0 0 1 9.3 7.3Z" }
             }
         },
