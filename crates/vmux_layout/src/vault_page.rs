@@ -317,14 +317,16 @@ fn VaultPanel(
             if !is_connected {
                 div { class: "mt-5 flex flex-col gap-3",
                     VaultStep { number: 1, active: true, complete: provider.is_some(),
-                        div { class: "grid gap-2 sm:grid-cols-2 lg:grid-cols-4",
+                        div { class: "flex flex-wrap items-center gap-2",
                             for option in RemoteProvider::ALL {
                                 button {
                                     class: if provider == Some(option) {
-                                        "flex items-center gap-3 rounded-xl bg-primary/10 px-3 py-3 text-left text-foreground ring-2 ring-inset ring-primary/35"
+                                        "grid h-11 w-11 place-items-center rounded-xl bg-cyan-400/12 text-foreground ring-1 ring-inset ring-cyan-400/40 shadow-sm shadow-cyan-400/10"
                                     } else {
-                                        "flex items-center gap-3 rounded-xl bg-background/45 px-3 py-3 text-left text-muted-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.07] hover:text-foreground"
+                                        "grid h-11 w-11 place-items-center rounded-xl bg-foreground/[0.04] text-muted-foreground ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.08] hover:text-foreground"
                                     },
+                                    title: option.name(),
+                                    aria_label: option.name(),
                                     onclick: move |_| {
                                         selected_provider.set(Some(option));
                                         github_device_code.set(String::new());
@@ -342,12 +344,6 @@ fn VaultPanel(
                                         }
                                     },
                                     ProviderIcon { provider: option }
-                                    span { class: "min-w-0 flex-1 truncate text-xs font-medium", "{option.name()}" }
-                                    if provider == Some(option) {
-                                        svg { class: "h-3.5 w-3.5 shrink-0 text-primary", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
-                                            path { d: "m5 12 4 4L19 6" }
-                                        }
-                                    }
                                 }
                             }
                         }
@@ -357,22 +353,21 @@ fn VaultPanel(
                             div { class: "flex min-w-0 items-center gap-3",
                                 ProviderIcon { provider }
                                 div { class: "min-w-0 flex-1",
-                                    div { class: "text-xs font-medium text-foreground", "{provider.name()}" }
                                     if provider.is_github() && !vault.github_owner.is_empty() {
-                                        div { class: "truncate text-[10px] text-emerald-700 dark:text-emerald-300",
+                                        div { class: "truncate text-xs text-emerald-700 dark:text-emerald-300",
                                             {translate_with(
                                                 "vault-connected-as",
                                                 &[("name", TranslationValue::String(&vault.github_owner))],
                                             )}
                                         }
                                     } else if !provider.is_github() && !cloud_root().is_empty() {
-                                        div { class: "truncate text-[10px] text-emerald-700 dark:text-emerald-300", "{cloud_root()}" }
+                                        div { class: "truncate text-xs text-emerald-700 dark:text-emerald-300", "{cloud_root()}" }
                                     } else {
-                                        div { class: "text-[10px] text-muted-foreground/60", {translate("vault-not-connected")} }
+                                        div { class: "text-xs text-muted-foreground/60", {translate("vault-not-connected")} }
                                     }
                                 }
                                 if provider.is_github() && !github_device_code().is_empty() {
-                                    code { class: "shrink-0 rounded-lg bg-foreground/[0.07] px-2.5 py-1.5 font-mono text-xs font-semibold tracking-widest text-foreground ring-1 ring-inset ring-foreground/10",
+                                    code { class: "shrink-0 rounded-lg bg-foreground/[0.06] px-3 py-1.5 font-mono text-sm font-semibold tracking-[0.16em] text-foreground ring-1 ring-inset ring-foreground/10",
                                         {github_device_code()}
                                     }
                                 }
@@ -567,9 +562,9 @@ fn VaultPanel(
 fn VaultStep(number: u8, active: bool, complete: bool, children: Element) -> Element {
     rsx! {
         div { class: if active {
-                "rounded-2xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10 transition-opacity"
+                "rounded-xl bg-foreground/[0.025] p-3.5 ring-1 ring-inset ring-foreground/[0.08] transition-opacity"
             } else {
-                "pointer-events-none rounded-2xl bg-background/20 p-4 opacity-40 ring-1 ring-inset ring-foreground/[0.07]"
+                "pointer-events-none rounded-xl bg-foreground/[0.02] p-3.5 opacity-40 ring-1 ring-inset ring-foreground/[0.06]"
             },
             div { class: "flex items-start gap-3",
                 div { class: if complete {
