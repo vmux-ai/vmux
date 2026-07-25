@@ -1,24 +1,40 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 
-use serde::Deserialize;
+use ring::aead;
+use ring::digest;
+use ring::hmac;
+use ring::rand::{SecureRandom, SystemRandom};
+use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
-const REQUIRED_IGNORES: [&str; 8] = [
-    ".DS_Store",
-    "/agents/",
-    "/extensions/",
-    "/lsp/",
-    "/local/",
-    "/profiles/",
-    "/spaces/",
-    "/worktrees/",
+const FORMAT_VERSION: u32 = 1;
+const MANIFEST_FILE: &str = "vmux-vault.json";
+const INDEX_FILE: &str = "index.vmx";
+const OBJECTS_DIR: &str = "objects";
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
+const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
+const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
+const KEY_LEN: usize = 32;
+const NONCE_LEN: usize = 12;
+const IGNORED_ROOTS: [&str; 8] = [
+    "agents",
+    "extensions",
+    "lsp",
+    "local",
+    "profiles",
+    "spaces",
+    "workspace",
+    "worktrees",
 ];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VaultStatus {
     pub root: PathBuf,
     pub initialized: bool,
+    pub encrypted: bool,
     pub remote: String,
     pub branch: String,
     pub dirty: u32,
@@ -62,12 +78,103 @@ struct GhAuthAccount {
     login: String,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EntryKind {
+    File,
+    Symlink,
+}
+
+#[derive(Clone, Debug)]
+struct LocalEntry {
+    kind: EntryKind,
+    mode: u32,
+    size: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+    data: Vec<u8>,
+    digest: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalFingerprint {
+    kind: EntryKind,
+    mode: u32,
+    size: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RemoteManifest {
+    version: u32,
+    cipher: String,
+    vault_id: String,
+    index: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct EncryptedIndex {
+    version: u32,
+    files: Vec<EncryptedIndexEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct EncryptedIndexEntry {
+    path: String,
+    object: String,
+    digest: String,
+    kind: EntryKind,
+    mode: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LocalState {
+    version: u32,
+    files: Vec<LocalStateEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LocalStateEntry {
+    path: String,
+    digest: String,
+    kind: EntryKind,
+    mode: u32,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    modified_secs: u64,
+    #[serde(default)]
+    modified_nanos: u32,
+}
+
+trait KeyStore {
+    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
+    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
+}
+
+struct SystemKeyStore;
+
+impl KeyStore for SystemKeyStore {
+    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        load_system_key(vault_id)
+    }
+
+    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        create_system_key(vault_id)
+    }
+}
+
 pub fn root_dir() -> PathBuf {
     super::config_dir()
 }
 
+pub fn repository_dir() -> PathBuf {
+    super::application_data_dir().join("vault")
+}
+
 pub fn status() -> VaultStatus {
-    status_in(&root_dir())
+    status_paths(&root_dir(), &repository_dir())
 }
 
 pub fn status_with_repositories() -> VaultStatus {
@@ -116,20 +223,79 @@ pub fn connect_github() -> Result<String, String> {
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
-    let login = command_success(
+    command_success(
         gh_command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
-    )?;
-    Ok(login)
+    )
 }
 
 pub fn connect_folder(folder: &Path) -> Result<String, String> {
-    connect_folder_in(&root_dir(), folder)
+    connect_folder_paths(&root_dir(), &repository_dir(), folder, &SystemKeyStore)
 }
 
-pub fn connect_folder_in(root: &Path, folder: &Path) -> Result<String, String> {
+pub fn create_remote(repository: &str, visibility: RepositoryVisibility) -> Result<String, String> {
+    create_remote_paths(
+        &root_dir(),
+        &repository_dir(),
+        repository,
+        visibility,
+        &SystemKeyStore,
+    )
+}
+
+pub fn connect_remote(repository: &str) -> Result<String, String> {
+    connect_remote_paths(&root_dir(), &repository_dir(), repository, &SystemKeyStore)
+}
+
+pub fn sync() -> Result<String, String> {
+    sync_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
+}
+
+pub fn initialize() -> Result<(), String> {
+    initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
+}
+
+fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
+    let initialized = repository.join(".git").is_dir();
+    let mut status = VaultStatus {
+        root: root.to_path_buf(),
+        initialized,
+        encrypted: initialized && read_manifest(repository).is_ok(),
+        ..VaultStatus::default()
+    };
+    if initialized {
+        status.remote = git_optional(repository, &["remote", "get-url", "origin"]);
+        status.branch = git_optional(repository, &["branch", "--show-current"]);
+        status.dirty = local_change_count(root, repository).unwrap_or(0);
+        if !status.remote.is_empty() {
+            let counts = git_optional(
+                repository,
+                &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+            );
+            let mut values = counts.split_whitespace();
+            status.ahead = values
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+            status.behind = values
+                .next()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(0);
+        }
+    } else if root.join(".git").is_dir() {
+        status.error = "A legacy plaintext Vault was found. Create a new encrypted repository; reusing its remote would leave plaintext in Git history.".to_string();
+    }
+    status
+}
+
+fn connect_folder_paths<K: KeyStore>(
+    root: &Path,
+    repository: &Path,
+    folder: &Path,
+    keys: &K,
+) -> Result<String, String> {
     let remote = if folder
         .extension()
         .is_some_and(|extension| extension == "git")
@@ -164,71 +330,34 @@ pub fn connect_folder_in(root: &Path, folder: &Path) -> Result<String, String> {
                 .map_err(|error| format!("failed to run git: {error}"))?,
         )?;
     }
-    connect_remote_in(root, &remote.to_string_lossy())?;
+    connect_remote_paths(root, repository, &remote.to_string_lossy(), keys)?;
     Ok(remote.to_string_lossy().into_owned())
 }
 
-pub fn status_in(root: &Path) -> VaultStatus {
-    let initialized = root.join(".git").is_dir();
-    let mut status = VaultStatus {
-        root: root.to_path_buf(),
-        initialized,
-        ..VaultStatus::default()
-    };
-    if initialized {
-        status.remote = git_optional(root, &["remote", "get-url", "origin"]);
-        status.branch = git_optional(root, &["branch", "--show-current"]);
-        status.dirty = git_optional(root, &["status", "--porcelain"])
-            .lines()
-            .count() as u32;
-        if !status.remote.is_empty() {
-            let counts = git_optional(
-                root,
-                &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
-            );
-            let mut values = counts.split_whitespace();
-            status.ahead = values
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-            status.behind = values
-                .next()
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(0);
-        }
-    }
-    status
-}
-
-pub fn create_remote(repository: &str, visibility: RepositoryVisibility) -> Result<String, String> {
-    create_remote_in(&root_dir(), repository, visibility)
-}
-
-pub fn create_remote_in(
+fn create_remote_paths<K: KeyStore>(
     root: &Path,
+    vault_repository: &Path,
     repository: &str,
     visibility: RepositoryVisibility,
+    keys: &K,
 ) -> Result<String, String> {
     let repository = if repository.trim().is_empty() {
         "vmux-vault"
     } else {
         repository.trim()
     };
-    if visibility == RepositoryVisibility::Public {
-        validate_public_manifest(root)?;
-    }
-    initialize_in(root)?;
-    if !git_optional(root, &["remote", "get-url", "origin"]).is_empty() {
+    initialize_paths(root, vault_repository, keys)?;
+    if !git_optional(vault_repository, &["remote", "get-url", "origin"]).is_empty() {
         return Err("Vault already has an origin remote".to_string());
     }
-    let root_arg = root.to_string_lossy().into_owned();
+    let root_arg = vault_repository.to_string_lossy().into_owned();
     let visibility = match visibility {
         RepositoryVisibility::Private => "--private",
         RepositoryVisibility::Public => "--public",
     };
     command_success(
         gh_command()?
-            .current_dir(root)
+            .current_dir(vault_repository)
             .args([
                 "repo", "create", repository, visibility, "--source", &root_arg, "--remote",
                 "origin", "--push",
@@ -236,122 +365,962 @@ pub fn create_remote_in(
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )?;
+    write_local_state(root, vault_repository)?;
     Ok(repository.to_string())
 }
 
-pub fn connect_remote(repository: &str) -> Result<String, String> {
-    connect_remote_in(&root_dir(), repository)
-}
-
-pub fn connect_remote_in(root: &Path, repository: &str) -> Result<String, String> {
+fn connect_remote_paths<K: KeyStore>(
+    root: &Path,
+    vault_repository: &Path,
+    repository: &str,
+    keys: &K,
+) -> Result<String, String> {
     let repository = repository.trim();
     if repository.is_empty() {
         return Err("repository is required".to_string());
     }
-    initialize_in(root)?;
+    ensure_repository(vault_repository)?;
     let url = resolve_remote_url(repository)?;
-    let previous_remote = git_optional(root, &["remote", "get-url", "origin"]);
+    let previous_remote = git_optional(vault_repository, &["remote", "get-url", "origin"]);
     if !previous_remote.is_empty() {
-        git(root, &["remote", "set-url", "origin", &url])?;
+        git(vault_repository, &["remote", "set-url", "origin", &url])?;
     } else {
-        git(root, &["remote", "add", "origin", &url])?;
+        git(vault_repository, &["remote", "add", "origin", &url])?;
     }
     let result = (|| {
-        git(root, &["fetch", "origin"])?;
-        let _ = git(root, &["remote", "set-head", "origin", "--auto"]);
-        match remote_branch(root) {
+        git(vault_repository, &["fetch", "origin"])?;
+        let _ = git(
+            vault_repository,
+            &["remote", "set-head", "origin", "--auto"],
+        );
+        match remote_branch(vault_repository) {
             Some(remote_branch) => {
-                if git(root, &["merge-base", "HEAD", &remote_branch]).is_err() {
-                    validate_remote_tree(root, &remote_branch)?;
-                    if let Err(error) = git(root, &["rebase", "--onto", &remote_branch, "--root"]) {
-                        let _ = git(root, &["rebase", "--abort"]);
-                        return Err(format!(
-                            "existing Vault conflicts with local files: {error}"
-                        ));
-                    }
-                }
-                let remote_branch_name = remote_branch
+                validate_remote_history(vault_repository, &remote_branch)?;
+                let manifest = manifest_from_ref(vault_repository, &remote_branch)?;
+                let key = keys.load(&manifest.vault_id)?;
+                let branch = remote_branch
                     .strip_prefix("origin/")
                     .unwrap_or(&remote_branch);
-                if current_branch(root)? != remote_branch_name {
-                    git(root, &["branch", "--move", remote_branch_name])?;
-                }
-                git(root, &["branch", "--set-upstream-to", &remote_branch])?;
-                sync_in(root)?;
+                git(
+                    vault_repository,
+                    &["checkout", "-B", branch, &remote_branch],
+                )?;
+                git(
+                    vault_repository,
+                    &["branch", "--set-upstream-to", &remote_branch],
+                )?;
+                let (_, remote_files) = load_encrypted_snapshot(vault_repository, &key)?;
+                reconcile_local(root, &BTreeMap::new(), &remote_files)?;
+                let files = collect_local_files(root)?;
+                write_encrypted_snapshot(
+                    vault_repository,
+                    &manifest.vault_id,
+                    &key,
+                    &files,
+                    Some(&remote_files),
+                )?;
+                commit_changes(vault_repository, "Connect vmux Vault")?;
+                git(vault_repository, &["push", "-u", "origin", branch])?;
             }
             None => {
-                let branch = current_branch(root)?;
-                git(root, &["push", "-u", "origin", &branch])?;
+                initialize_paths(root, vault_repository, keys)?;
+                let branch = current_branch(vault_repository)?;
+                git(vault_repository, &["push", "-u", "origin", &branch])?;
             }
         }
-        Ok(())
+        write_local_state(root, vault_repository)
     })();
     if let Err(error) = result {
         if previous_remote.is_empty() {
-            let _ = git(root, &["remote", "remove", "origin"]);
+            let _ = git(vault_repository, &["remote", "remove", "origin"]);
         } else {
-            let _ = git(root, &["remote", "set-url", "origin", &previous_remote]);
+            let _ = git(
+                vault_repository,
+                &["remote", "set-url", "origin", &previous_remote],
+            );
         }
         return Err(error);
     }
     Ok(url)
 }
 
-pub fn sync() -> Result<String, String> {
-    sync_in(&root_dir())
-}
-
-pub fn sync_in(root: &Path) -> Result<String, String> {
-    if !root.join(".git").is_dir() {
+fn sync_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Result<String, String> {
+    if !repository.join(".git").is_dir() {
         return Err("Vault is not connected to Git".to_string());
     }
-    if git_optional(root, &["remote", "get-url", "origin"]).is_empty() {
+    if git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
         return Err("Vault has no origin remote".to_string());
     }
-    ensure_gitignore(root)?;
-    commit_changes(root, "Sync vmux Vault")?;
-    git(root, &["fetch", "origin"])?;
-    let branch = current_branch(root)?;
-    if let Some(remote_branch) = remote_branch(root) {
-        if git(root, &["merge-base", "HEAD", &remote_branch]).is_err() {
+    let manifest = read_manifest(repository)?;
+    let key = keys.load(&manifest.vault_id)?;
+    let baseline = baseline_files(repository).unwrap_or_else(|_| {
+        load_encrypted_snapshot(repository, &key)
+            .map(|(_, files)| files)
+            .unwrap_or_default()
+    });
+    git(repository, &["fetch", "origin"])?;
+    let branch = current_branch(repository)?;
+    if let Some(remote_branch) = remote_branch(repository) {
+        validate_remote_history(repository, &remote_branch)?;
+        if git(repository, &["merge-base", "HEAD", &remote_branch]).is_err() {
             return Err("Vault remote has unrelated history".to_string());
         }
-        if let Err(error) = git(root, &["rebase", &remote_branch]) {
-            let _ = git(root, &["rebase", "--abort"]);
+        if let Err(error) = git(repository, &["rebase", &remote_branch]) {
+            let _ = git(repository, &["rebase", "--abort"]);
             return Err(format!("Vault has sync conflicts: {error}"));
         }
     }
-    git(root, &["push", "-u", "origin", &branch])?;
+    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
+    reconcile_local(root, &baseline, &remote_files)?;
+    let files = collect_local_files(root)?;
+    write_encrypted_snapshot(
+        repository,
+        &manifest.vault_id,
+        &key,
+        &files,
+        Some(&remote_files),
+    )?;
+    commit_changes(repository, "Sync vmux Vault")?;
+    git(repository, &["push", "-u", "origin", &branch])?;
+    write_local_state(root, repository)?;
     Ok("Vault synced".to_string())
 }
 
-pub fn initialize() -> Result<(), String> {
-    initialize_in(&root_dir())
+fn initialize_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Result<(), String> {
+    ensure_repository(repository)?;
+    let (vault_id, key, previous) = match read_manifest(repository) {
+        Ok(manifest) => {
+            let key = keys.load(&manifest.vault_id)?;
+            let previous = load_encrypted_snapshot(repository, &key)
+                .ok()
+                .map(|(_, files)| files);
+            (manifest.vault_id, key, previous)
+        }
+        Err(_) => {
+            validate_empty_vault_repository(repository)?;
+            let vault_id = random_hex(16)?;
+            let key = keys.create(&vault_id)?;
+            (vault_id, key, None)
+        }
+    };
+    let files = collect_local_files(root)?;
+    write_encrypted_snapshot(repository, &vault_id, &key, &files, previous.as_ref())?;
+    commit_changes(repository, "Initialize vmux Vault")
 }
 
-pub fn initialize_in(root: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
-    ensure_gitignore(root)?;
-    if !root.join(".git").is_dir() {
-        git(root, &["init", "-b", "main"])?;
+fn validate_empty_vault_repository(repository: &Path) -> Result<(), String> {
+    if git(repository, &["rev-parse", "--verify", "HEAD"]).is_ok() {
+        return Err("Vault staging repository contains unsupported history".to_string());
     }
-    commit_changes(root, "Initialize vmux Vault")
+    let unexpected = std::fs::read_dir(repository)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .any(|name| name != ".git");
+    if unexpected {
+        Err("Vault staging repository contains unencrypted files".to_string())
+    } else {
+        Ok(())
+    }
 }
 
-fn ensure_gitignore(root: &Path) -> Result<(), String> {
-    let path = root.join(".gitignore");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut source = existing.trim_end().to_string();
-    for entry in REQUIRED_IGNORES {
-        if !existing.lines().any(|line| line.trim() == entry) {
-            if !source.is_empty() {
-                source.push('\n');
-            }
-            source.push_str(entry);
+fn ensure_repository(repository: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(repository).map_err(|error| error.to_string())?;
+    if !repository.join(".git").is_dir() {
+        git(repository, &["init", "-b", "main"])?;
+    }
+    Ok(())
+}
+
+fn collect_local_files(root: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
+    let mut files = BTreeMap::new();
+    if !root.exists() {
+        return Ok(files);
+    }
+    collect_directory(root, root, &mut files)?;
+    Ok(files)
+}
+
+fn collect_directory(
+    root: &Path,
+    directory: &Path,
+    files: &mut BTreeMap<String, LocalEntry>,
+) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(directory)
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+        if ignored_path(relative) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_dir() {
+            collect_directory(root, &path, files)?;
+            continue;
+        }
+        let kind = if metadata.file_type().is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.file_type().is_file() {
+            EntryKind::File
+        } else {
+            continue;
+        };
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        validate_relative_path(&relative)?;
+        let data = match kind {
+            EntryKind::File => std::fs::read(&path).map_err(|error| error.to_string())?,
+            EntryKind::Symlink => symlink_target_bytes(&path)?,
+        };
+        let mode = file_mode(&metadata);
+        let (modified_secs, modified_nanos) = modified_time(&metadata);
+        let digest = entry_digest(kind, mode, &data);
+        files.insert(
+            relative,
+            LocalEntry {
+                kind,
+                mode,
+                size: metadata.len(),
+                modified_secs,
+                modified_nanos,
+                data,
+                digest,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn collect_local_fingerprints(root: &Path) -> Result<BTreeMap<String, LocalFingerprint>, String> {
+    let mut files = BTreeMap::new();
+    if root.exists() {
+        collect_fingerprint_directory(root, root, &mut files)?;
+    }
+    Ok(files)
+}
+
+fn collect_fingerprint_directory(
+    root: &Path,
+    directory: &Path,
+    files: &mut BTreeMap<String, LocalFingerprint>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let relative = path.strip_prefix(root).map_err(|error| error.to_string())?;
+        if ignored_path(relative) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.file_type().is_dir() {
+            collect_fingerprint_directory(root, &path, files)?;
+            continue;
+        }
+        let kind = if metadata.file_type().is_symlink() {
+            EntryKind::Symlink
+        } else if metadata.file_type().is_file() {
+            EntryKind::File
+        } else {
+            continue;
+        };
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| "Vault paths must be valid UTF-8".to_string())?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        validate_relative_path(&relative)?;
+        let (modified_secs, modified_nanos) = modified_time(&metadata);
+        files.insert(
+            relative,
+            LocalFingerprint {
+                kind,
+                mode: file_mode(&metadata),
+                size: metadata.len(),
+                modified_secs,
+                modified_nanos,
+            },
+        );
+    }
+    Ok(())
+}
+
+fn ignored_path(relative: &Path) -> bool {
+    if relative.file_name().is_some_and(|name| name == ".DS_Store") {
+        return true;
+    }
+    let first = relative
+        .components()
+        .next()
+        .and_then(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        });
+    first.is_some_and(|name| {
+        name == ".git"
+            || name == ".vmux-vault"
+            || name == ".vmux-vault-state.json"
+            || IGNORED_ROOTS.contains(&name)
+    })
+}
+
+fn reconcile_local(
+    root: &Path,
+    baseline: &BTreeMap<String, LocalEntry>,
+    remote: &BTreeMap<String, LocalEntry>,
+) -> Result<(), String> {
+    let local = collect_local_files(root)?;
+    let paths = baseline
+        .keys()
+        .chain(local.keys())
+        .chain(remote.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let mut updates = Vec::new();
+    let mut conflicts = Vec::new();
+    for path in paths {
+        let baseline_entry = baseline.get(&path);
+        let local_entry = local.get(&path);
+        let remote_entry = remote.get(&path);
+        let local_changed = !same_entry(local_entry, baseline_entry);
+        let remote_changed = !same_entry(remote_entry, baseline_entry);
+        if local_changed && remote_changed && !same_entry(local_entry, remote_entry) {
+            conflicts.push(path);
+        } else if remote_changed && !local_changed {
+            updates.push((path, remote_entry.cloned()));
         }
     }
-    source.push('\n');
-    std::fs::write(path, source).map_err(|error| error.to_string())
+    if !conflicts.is_empty() {
+        let visible = conflicts
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "Vault has local and remote changes to the same files: {visible}"
+        ));
+    }
+    let mut merged = local.clone();
+    for (path, entry) in &updates {
+        if let Some(entry) = entry {
+            merged.insert(path.clone(), entry.clone());
+        } else {
+            merged.remove(path);
+        }
+    }
+    validate_file_tree(&merged)?;
+    for (path, entry) in updates {
+        apply_local_entry(root, &path, entry.as_ref())?;
+    }
+    Ok(())
+}
+
+fn validate_file_tree(files: &BTreeMap<String, LocalEntry>) -> Result<(), String> {
+    for path in files.keys() {
+        let mut parent = Path::new(path).parent();
+        while let Some(candidate) = parent {
+            if let Some(candidate) = candidate.to_str()
+                && files.contains_key(candidate)
+            {
+                return Err(format!(
+                    "Vault has incompatible file and directory changes: {candidate}, {path}"
+                ));
+            }
+            parent = candidate.parent();
+        }
+    }
+    Ok(())
+}
+
+fn same_entry(left: Option<&LocalEntry>, right: Option<&LocalEntry>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => {
+            left.digest == right.digest && left.kind == right.kind && left.mode == right.mode
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn apply_local_entry(
+    root: &Path,
+    relative: &str,
+    entry: Option<&LocalEntry>,
+) -> Result<(), String> {
+    validate_relative_path(relative)?;
+    let path = root.join(relative);
+    match entry {
+        Some(entry) => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            }
+            remove_existing_path(&path)?;
+            match entry.kind {
+                EntryKind::File => {
+                    write_atomic(&path, &entry.data)?;
+                    set_file_mode(&path, entry.mode)?;
+                }
+                EntryKind::Symlink => create_symlink(&path, &entry.data)?,
+            }
+        }
+        None => {
+            remove_existing_path(&path)?;
+            prune_empty_parents(root, path.parent());
+        }
+    }
+    Ok(())
+}
+
+fn remove_existing_path(path: &Path) -> Result<(), String> {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+        std::fs::remove_dir_all(path).map_err(|error| error.to_string())
+    } else {
+        std::fs::remove_file(path).map_err(|error| error.to_string())
+    }
+}
+
+fn prune_empty_parents(root: &Path, mut parent: Option<&Path>) {
+    while let Some(directory) = parent {
+        if directory == root || !directory.starts_with(root) {
+            break;
+        }
+        if std::fs::remove_dir(directory).is_err() {
+            break;
+        }
+        parent = directory.parent();
+    }
+}
+
+fn write_encrypted_snapshot(
+    repository: &Path,
+    vault_id: &str,
+    key: &[u8],
+    files: &BTreeMap<String, LocalEntry>,
+    previous: Option<&BTreeMap<String, LocalEntry>>,
+) -> Result<(), String> {
+    validate_key(key)?;
+    if previous.is_some_and(|previous| same_files(previous, files))
+        && repository.join(MANIFEST_FILE).is_file()
+        && repository.join(INDEX_FILE).is_file()
+    {
+        return validate_encrypted_worktree(repository);
+    }
+    let objects = repository.join(OBJECTS_DIR);
+    std::fs::create_dir_all(&objects).map_err(|error| error.to_string())?;
+    let mut index_files = Vec::with_capacity(files.len());
+    let mut retained = BTreeSet::new();
+    for (path, entry) in files {
+        validate_relative_path(path)?;
+        let object = object_id(key, path);
+        retained.insert(format!("{object}.vmux"));
+        let object_path = objects.join(format!("{object}.vmux"));
+        let unchanged = previous
+            .and_then(|files| files.get(path))
+            .is_some_and(|old| same_entry(Some(old), Some(entry)))
+            && object_path.is_file();
+        if !unchanged {
+            let encrypted = encrypt_bytes(key, &object_aad(path), &entry.data)?;
+            write_atomic(&object_path, &encrypted)?;
+        }
+        index_files.push(EncryptedIndexEntry {
+            path: path.clone(),
+            object,
+            digest: entry.digest.clone(),
+            kind: entry.kind,
+            mode: entry.mode,
+        });
+    }
+    for entry in std::fs::read_dir(&objects)
+        .map_err(|error| error.to_string())?
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !retained.contains(&name) {
+            remove_existing_path(&entry.path())?;
+        }
+    }
+    let index = EncryptedIndex {
+        version: FORMAT_VERSION,
+        files: index_files,
+    };
+    let index_source = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
+    let encrypted_index = encrypt_bytes(key, INDEX_AAD, &index_source)?;
+    write_atomic(&repository.join(INDEX_FILE), &encrypted_index)?;
+    let manifest = RemoteManifest {
+        version: FORMAT_VERSION,
+        cipher: "AES-256-GCM".to_string(),
+        vault_id: vault_id.to_string(),
+        index: INDEX_FILE.to_string(),
+    };
+    let manifest_source =
+        serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
+    write_atomic(&repository.join(MANIFEST_FILE), &manifest_source)?;
+    validate_encrypted_worktree(repository)
+}
+
+fn same_files(left: &BTreeMap<String, LocalEntry>, right: &BTreeMap<String, LocalEntry>) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .all(|(path, entry)| same_entry(Some(entry), right.get(path)))
+}
+
+fn load_encrypted_snapshot(
+    repository: &Path,
+    key: &[u8],
+) -> Result<(RemoteManifest, BTreeMap<String, LocalEntry>), String> {
+    validate_key(key)?;
+    let manifest = read_manifest(repository)?;
+    let encrypted_index = std::fs::read(repository.join(&manifest.index))
+        .map_err(|error| format!("failed to read encrypted Vault index: {error}"))?;
+    let index_source = decrypt_bytes(key, INDEX_AAD, &encrypted_index)?;
+    let index = serde_json::from_slice::<EncryptedIndex>(&index_source)
+        .map_err(|error| format!("invalid encrypted Vault index: {error}"))?;
+    if index.version != FORMAT_VERSION {
+        return Err(format!(
+            "unsupported encrypted Vault index {}",
+            index.version
+        ));
+    }
+    let mut files = BTreeMap::new();
+    for file in index.files {
+        validate_relative_path(&file.path)?;
+        let expected_object = object_id(key, &file.path);
+        if file.object != expected_object {
+            return Err(format!("encrypted Vault object mismatch for {}", file.path));
+        }
+        let encrypted = std::fs::read(
+            repository
+                .join(OBJECTS_DIR)
+                .join(format!("{}.vmux", file.object)),
+        )
+        .map_err(|error| format!("missing encrypted Vault object: {error}"))?;
+        let data = decrypt_bytes(key, &object_aad(&file.path), &encrypted)?;
+        let actual_digest = entry_digest(file.kind, file.mode, &data);
+        if actual_digest != file.digest {
+            return Err(format!(
+                "encrypted Vault object failed integrity check: {}",
+                file.path
+            ));
+        }
+        if files
+            .insert(
+                file.path.clone(),
+                LocalEntry {
+                    kind: file.kind,
+                    mode: file.mode,
+                    size: data.len() as u64,
+                    modified_secs: 0,
+                    modified_nanos: 0,
+                    data,
+                    digest: file.digest,
+                },
+            )
+            .is_some()
+        {
+            return Err(format!("duplicate encrypted Vault path: {}", file.path));
+        }
+    }
+    Ok((manifest, files))
+}
+
+fn read_manifest(repository: &Path) -> Result<RemoteManifest, String> {
+    let source = std::fs::read(repository.join(MANIFEST_FILE))
+        .map_err(|error| format!("failed to read encrypted Vault manifest: {error}"))?;
+    parse_manifest(&source)
+}
+
+fn manifest_from_ref(repository: &Path, branch: &str) -> Result<RemoteManifest, String> {
+    let spec = format!("{branch}:{MANIFEST_FILE}");
+    let source = git(repository, &["show", &spec])?;
+    parse_manifest(source.as_bytes())
+}
+
+fn parse_manifest(source: &[u8]) -> Result<RemoteManifest, String> {
+    let manifest = serde_json::from_slice::<RemoteManifest>(source)
+        .map_err(|error| format!("selected repository is not an encrypted vmux Vault: {error}"))?;
+    if manifest.version != FORMAT_VERSION
+        || manifest.cipher != "AES-256-GCM"
+        || manifest.index != INDEX_FILE
+        || manifest.vault_id.is_empty()
+    {
+        return Err("selected repository uses an unsupported Vault encryption format".to_string());
+    }
+    Ok(manifest)
+}
+
+fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String> {
+    let entries = git(
+        repository,
+        &["log", branch, "--name-only", "--pretty=format:"],
+    )?;
+    let valid = entries
+        .lines()
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .all(|entry| {
+            entry == MANIFEST_FILE
+                || entry == INDEX_FILE
+                || entry
+                    .strip_prefix(&format!("{OBJECTS_DIR}/"))
+                    .is_some_and(|name| name.ends_with(".vmux") && !name.contains('/'))
+        });
+    if !valid {
+        return Err("selected repository contains plaintext or non-Vault history".to_string());
+    }
+    let _ = manifest_from_ref(repository, branch)?;
+    Ok(())
+}
+
+fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
+    for entry in std::fs::read_dir(repository).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name();
+        if name != ".git" && name != MANIFEST_FILE && name != INDEX_FILE && name != OBJECTS_DIR {
+            return Err(format!(
+                "Vault staging repository contains unencrypted file: {}",
+                name.to_string_lossy()
+            ));
+        }
+    }
+    for entry in
+        std::fs::read_dir(repository.join(OBJECTS_DIR)).map_err(|error| error.to_string())?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let id = name.strip_suffix(".vmux").unwrap_or_default();
+        if !entry.file_type().is_ok_and(|file_type| file_type.is_file())
+            || id.len() != 64
+            || !id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(format!("invalid encrypted Vault object: {name}"));
+        }
+    }
+    Ok(())
+}
+
+fn encrypt_bytes(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    validate_key(key)?;
+    let mut nonce = [0_u8; NONCE_LEN];
+    SystemRandom::new()
+        .fill(&mut nonce)
+        .map_err(|_| "failed to generate Vault nonce".to_string())?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, key)
+        .map_err(|_| "invalid Vault encryption key".to_string())?;
+    let key = aead::LessSafeKey::new(unbound);
+    let mut encrypted = plaintext.to_vec();
+    key.seal_in_place_append_tag(
+        aead::Nonce::assume_unique_for_key(nonce),
+        aead::Aad::from(aad),
+        &mut encrypted,
+    )
+    .map_err(|_| "failed to encrypt Vault data".to_string())?;
+    let mut output = nonce.to_vec();
+    output.extend_from_slice(&encrypted);
+    Ok(output)
+}
+
+fn decrypt_bytes(key: &[u8], aad: &[u8], encrypted: &[u8]) -> Result<Vec<u8>, String> {
+    validate_key(key)?;
+    if encrypted.len() < NONCE_LEN + aead::AES_256_GCM.tag_len() {
+        return Err("encrypted Vault data is truncated".to_string());
+    }
+    let nonce = <[u8; NONCE_LEN]>::try_from(&encrypted[..NONCE_LEN])
+        .map_err(|_| "invalid Vault nonce".to_string())?;
+    let unbound = aead::UnboundKey::new(&aead::AES_256_GCM, key)
+        .map_err(|_| "invalid Vault encryption key".to_string())?;
+    let key = aead::LessSafeKey::new(unbound);
+    let mut data = encrypted[NONCE_LEN..].to_vec();
+    let plaintext = key
+        .open_in_place(
+            aead::Nonce::assume_unique_for_key(nonce),
+            aead::Aad::from(aad),
+            &mut data,
+        )
+        .map_err(|_| "Vault data could not be decrypted or was modified".to_string())?;
+    Ok(plaintext.to_vec())
+}
+
+fn object_id(key: &[u8], path: &str) -> String {
+    let key = hmac::Key::new(hmac::HMAC_SHA256, key);
+    hex(hmac::sign(&key, path.as_bytes()).as_ref())
+}
+
+fn object_aad(path: &str) -> Vec<u8> {
+    let mut aad = OBJECT_AAD_PREFIX.to_vec();
+    aad.extend_from_slice(path.as_bytes());
+    aad
+}
+
+fn entry_digest(kind: EntryKind, mode: u32, data: &[u8]) -> String {
+    let mut context = digest::Context::new(&digest::SHA256);
+    context.update(match kind {
+        EntryKind::File => b"file\0",
+        EntryKind::Symlink => b"symlink\0",
+    });
+    context.update(&mode.to_be_bytes());
+    context.update(data);
+    hex(context.finish().as_ref())
+}
+
+fn validate_key(key: &[u8]) -> Result<(), String> {
+    if key.len() == KEY_LEN {
+        Ok(())
+    } else {
+        Err("Vault encryption key has an invalid length".to_string())
+    }
+}
+
+fn validate_relative_path(path: &str) -> Result<(), String> {
+    let path = Path::new(path);
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err("encrypted Vault contains an unsafe path".to_string());
+    }
+    Ok(())
+}
+
+fn write_local_state(root: &Path, repository: &Path) -> Result<(), String> {
+    let files = collect_local_files(root)?;
+    let state = LocalState {
+        version: FORMAT_VERSION,
+        files: files
+            .into_iter()
+            .map(|(path, entry)| LocalStateEntry {
+                path,
+                digest: entry.digest,
+                kind: entry.kind,
+                mode: entry.mode,
+                size: entry.size,
+                modified_secs: entry.modified_secs,
+                modified_nanos: entry.modified_nanos,
+            })
+            .collect(),
+    };
+    let source = serde_json::to_vec(&state).map_err(|error| error.to_string())?;
+    write_atomic(&state_path(repository), &source)
+}
+
+fn local_change_count(root: &Path, repository: &Path) -> Result<u32, String> {
+    let local = collect_local_fingerprints(root)?;
+    let state = read_local_state(repository).unwrap_or_default();
+    let paths = local
+        .keys()
+        .chain(state.keys())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    Ok(paths
+        .into_iter()
+        .filter(|path| {
+            let local = local.get(path);
+            let state = state.get(path);
+            match (local, state) {
+                (Some(local), Some(state)) => {
+                    local.kind != state.kind
+                        || local.mode != state.mode
+                        || local.size != state.size
+                        || local.modified_secs != state.modified_secs
+                        || local.modified_nanos != state.modified_nanos
+                }
+                (None, None) => false,
+                _ => true,
+            }
+        })
+        .count() as u32)
+}
+
+fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntry>, String> {
+    let source = std::fs::read(state_path(repository)).map_err(|error| error.to_string())?;
+    let state = serde_json::from_slice::<LocalState>(&source).map_err(|error| error.to_string())?;
+    if state.version != FORMAT_VERSION {
+        return Err("unsupported Vault local state".to_string());
+    }
+    Ok(state
+        .files
+        .into_iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect())
+}
+
+fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
+    Ok(read_local_state(repository)?
+        .into_iter()
+        .map(|(path, entry)| {
+            (
+                path,
+                LocalEntry {
+                    kind: entry.kind,
+                    mode: entry.mode,
+                    size: entry.size,
+                    modified_secs: entry.modified_secs,
+                    modified_nanos: entry.modified_nanos,
+                    data: Vec::new(),
+                    digest: entry.digest,
+                },
+            )
+        })
+        .collect())
+}
+
+fn state_path(repository: &Path) -> PathBuf {
+    repository.join(".git").join("vmux-state.json")
+}
+
+fn write_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("vault");
+    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", random_hex(8)?));
+    std::fs::write(&temporary, data).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, path).map_err(|error| error.to_string())
+}
+
+fn random_hex(bytes: usize) -> Result<String, String> {
+    let mut value = vec![0_u8; bytes];
+    SystemRandom::new()
+        .fill(&mut value)
+        .map_err(|_| "failed to generate secure random data".to_string())?;
+    Ok(hex(&value))
+}
+
+fn modified_time(metadata: &std::fs::Metadata) -> (u64, u32) {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| (duration.as_secs(), duration.subsec_nanos()))
+        .unwrap_or_default()
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_options(vault_id: &str) -> security_framework::passwords::PasswordOptions {
+    let mut options = security_framework::passwords::PasswordOptions::new_generic_password(
+        KEYCHAIN_SERVICE,
+        vault_id,
+    );
+    options.set_access_synchronized(Some(true));
+    options
+}
+
+#[cfg(target_os = "macos")]
+fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    use security_framework::passwords::generic_password;
+    use security_framework_sys::base::errSecItemNotFound;
+
+    match generic_password(keychain_options(vault_id)) {
+        Ok(key) => {
+            validate_key(&key)?;
+            Ok(Zeroizing::new(key))
+        }
+        Err(error) if error.code() == errSecItemNotFound => Err(
+            "This Vault's encryption key is not available in iCloud Keychain. Enable Passwords & Keychain on the device that created it."
+                .to_string(),
+        ),
+        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn create_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    use security_framework::passwords::{AccessControlOptions, set_generic_password_options};
+
+    let mut key = Zeroizing::new(vec![0_u8; KEY_LEN]);
+    SystemRandom::new()
+        .fill(&mut key)
+        .map_err(|_| "failed to generate Vault encryption key".to_string())?;
+    let mut protected = keychain_options(vault_id);
+    protected.set_access_control_options(AccessControlOptions::USER_PRESENCE);
+    if set_generic_password_options(&key, protected).is_err() {
+        set_generic_password_options(&key, keychain_options(vault_id))
+            .map_err(|error| format!("failed to store Vault key in iCloud Keychain: {error}"))?;
+    }
+    Ok(key)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn load_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    Err("Encrypted Vault key storage is not available on this platform".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn create_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    Err("Encrypted Vault key storage is not available on this platform".to_string())
+}
+
+#[cfg(unix)]
+fn file_mode(metadata: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o777
+}
+
+#[cfg(not(unix))]
+fn file_mode(_metadata: &std::fs::Metadata) -> u32 {
+    0
+}
+
+#[cfg(unix)]
+fn set_file_mode(path: &Path, mode: u32) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(unix))]
+fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn symlink_target_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    use std::os::unix::ffi::OsStrExt;
+    Ok(std::fs::read_link(path)
+        .map_err(|error| error.to_string())?
+        .as_os_str()
+        .as_bytes()
+        .to_vec())
+}
+
+#[cfg(not(unix))]
+fn symlink_target_bytes(_path: &Path) -> Result<Vec<u8>, String> {
+    Err("Vault symlinks are not supported on this platform".to_string())
+}
+
+#[cfg(unix)]
+fn create_symlink(path: &Path, target: &[u8]) -> Result<(), String> {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    std::os::unix::fs::symlink(OsStr::from_bytes(target), path).map_err(|error| error.to_string())
+}
+
+#[cfg(not(unix))]
+fn create_symlink(_path: &Path, _target: &[u8]) -> Result<(), String> {
+    Err("Vault symlinks are not supported on this platform".to_string())
 }
 
 fn commit_changes(root: &Path, message: &str) -> Result<(), String> {
@@ -407,29 +1376,6 @@ fn remote_branch(root: &Path) -> Option<String> {
     }
 }
 
-fn validate_remote_tree(root: &Path, branch: &str) -> Result<(), String> {
-    let entries = git(root, &["ls-tree", "--name-only", branch])?;
-    let allowed = [
-        ".gitignore",
-        "README.md",
-        "settings.ron",
-        "knowledge",
-        "tools",
-        "locales",
-        "dev",
-    ];
-    if entries
-        .lines()
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .all(|entry| allowed.contains(&entry))
-    {
-        Ok(())
-    } else {
-        Err("selected repository does not look like a vmux Vault".to_string())
-    }
-}
-
 fn resolve_remote_url(repository: &str) -> Result<String, String> {
     if repository.contains("://")
         || repository.starts_with("git@")
@@ -437,13 +1383,14 @@ fn resolve_remote_url(repository: &str) -> Result<String, String> {
     {
         return Ok(repository.to_string());
     }
-    let output = gh_command()?
-        .args([
-            "repo", "view", repository, "--json", "sshUrl", "--jq", ".sshUrl",
-        ])
-        .output()
-        .map_err(|error| format!("failed to run gh: {error}"))?;
-    command_success(output)
+    command_success(
+        gh_command()?
+            .args([
+                "repo", "view", repository, "--json", "sshUrl", "--jq", ".sshUrl",
+            ])
+            .output()
+            .map_err(|error| format!("failed to run gh: {error}"))?,
+    )
 }
 
 fn github_identity_and_repositories() -> Result<(String, Vec<VaultRepository>), String> {
@@ -526,34 +1473,6 @@ fn gh_command() -> Result<Command, String> {
     Ok(Command::new(executable))
 }
 
-fn validate_public_manifest(root: &Path) -> Result<(), String> {
-    let manifest = super::tools::load_manifest_from(&root.join("tools/tools.toml"))?;
-    for (name, server) in manifest.mcp.servers {
-        for key in server.env.keys() {
-            let normalized = key.to_ascii_uppercase();
-            if ["TOKEN", "SECRET", "PASSWORD", "API_KEY", "PRIVATE_KEY"]
-                .iter()
-                .any(|needle| normalized.contains(needle))
-            {
-                return Err(format!(
-                    "MCP server {name} contains a literal credential in {key}; use an environment reference before creating a public Vault"
-                ));
-            }
-        }
-        if server.headers.keys().any(|key| {
-            matches!(
-                key.to_ascii_lowercase().as_str(),
-                "authorization" | "cookie" | "x-api-key"
-            )
-        }) {
-            return Err(format!(
-                "MCP server {name} contains a literal credential header; use header_env before creating a public Vault"
-            ));
-        }
-    }
-    Ok(())
-}
-
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
     let mut command = Command::new("git");
     command
@@ -603,10 +1522,53 @@ fn command_success(output: Output) -> Result<String, String> {
 mod tests {
     use super::*;
 
+    struct FixedKeyStore {
+        key: Vec<u8>,
+    }
+
+    impl FixedKeyStore {
+        fn new(byte: u8) -> Self {
+            Self {
+                key: vec![byte; KEY_LEN],
+            }
+        }
+    }
+
+    impl KeyStore for FixedKeyStore {
+        fn load(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+            Ok(Zeroizing::new(self.key.clone()))
+        }
+
+        fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+            Ok(Zeroizing::new(self.key.clone()))
+        }
+    }
+
+    fn repository(root: &Path) -> PathBuf {
+        root.join(".vmux-vault")
+    }
+
     fn configure_identity(root: &Path) {
         git(root, &["config", "user.name", "Vmux Test"]).unwrap();
         git(root, &["config", "user.email", "vmux@example.com"]).unwrap();
         git(root, &["config", "commit.gpgSign", "false"]).unwrap();
+    }
+
+    fn prepare_repository(root: &Path) -> PathBuf {
+        let repository = repository(root);
+        ensure_repository(&repository).unwrap();
+        configure_identity(&repository);
+        repository
+    }
+
+    fn create_bare_remote(path: &Path) {
+        command_success(
+            Command::new("git")
+                .args(["init", "--bare", path.to_string_lossy().as_ref()])
+                .output()
+                .unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -627,157 +1589,265 @@ mod tests {
     }
 
     #[test]
-    fn initialization_preserves_gitignore_and_commits_portable_files() {
-        let root = tempfile::tempdir().unwrap();
-        std::fs::write(root.path().join(".gitignore"), "custom\n").unwrap();
-        std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
-        git(root.path(), &["init", "-b", "main"]).unwrap();
-        configure_identity(root.path());
+    fn encrypted_data_rejects_wrong_keys_and_tampering() {
+        let key = vec![7; KEY_LEN];
+        let wrong_key = vec![8; KEY_LEN];
+        let encrypted = encrypt_bytes(&key, b"path", b"secret").unwrap();
 
-        initialize_in(root.path()).unwrap();
-
-        let ignore = std::fs::read_to_string(root.path().join(".gitignore")).unwrap();
-        assert!(ignore.lines().any(|line| line == "custom"));
-        for entry in REQUIRED_IGNORES {
-            assert!(ignore.lines().any(|line| line == entry));
-        }
-        assert_eq!(
-            git(root.path(), &["rev-list", "--count", "HEAD"]).unwrap(),
-            "1"
-        );
+        assert_eq!(decrypt_bytes(&key, b"path", &encrypted).unwrap(), b"secret");
+        assert!(decrypt_bytes(&wrong_key, b"path", &encrypted).is_err());
+        let mut tampered = encrypted;
+        *tampered.last_mut().unwrap() ^= 1;
+        assert!(decrypt_bytes(&key, b"path", &tampered).is_err());
     }
 
     #[test]
-    fn empty_remote_receives_initial_and_followup_syncs() {
+    fn initialization_commits_only_encrypted_paths_and_content() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        std::fs::create_dir_all(root.path().join("workspace/project")).unwrap();
+        std::fs::write(root.path().join("settings.ron"), "(secret: true)\n").unwrap();
+        std::fs::write(root.path().join("knowledge/private.md"), "# Private\n").unwrap();
+        std::fs::write(
+            root.path().join("workspace/project/secret.txt"),
+            "ignored\n",
+        )
+        .unwrap();
+        let repository = prepare_repository(root.path());
+        let keys = FixedKeyStore::new(3);
+
+        initialize_paths(root.path(), &repository, &keys).unwrap();
+
+        let tree = git(&repository, &["ls-tree", "-r", "--name-only", "HEAD"]).unwrap();
+        assert!(tree.lines().any(|path| path == MANIFEST_FILE));
+        assert!(tree.lines().any(|path| path == INDEX_FILE));
+        assert!(tree.lines().any(|path| path.starts_with("objects/")));
+        assert!(!tree.contains("settings.ron"));
+        assert!(!tree.contains("private.md"));
+        let repository_bytes = std::fs::read(repository.join(INDEX_FILE)).unwrap();
+        assert!(
+            !repository_bytes
+                .windows(7)
+                .any(|window| window == b"Private")
+        );
+        let manifest = read_manifest(&repository).unwrap();
+        let key = keys.load(&manifest.vault_id).unwrap();
+        let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+        assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
+        assert_eq!(files["knowledge/private.md"].data, b"# Private\n");
+        assert!(!files.contains_key("workspace/project/secret.txt"));
+    }
+
+    #[test]
+    fn initialization_rejects_unencrypted_staging_files() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = prepare_repository(root.path());
+        std::fs::write(repository.join("plaintext.txt"), "secret\n").unwrap();
+
+        let error =
+            initialize_paths(root.path(), &repository, &FixedKeyStore::new(11)).unwrap_err();
+
+        assert!(error.contains("unencrypted"));
+        assert!(git(&repository, &["rev-parse", "--verify", "HEAD"]).is_err());
+    }
+
+    #[test]
+    fn empty_remote_receives_encrypted_initial_and_followup_syncs() {
         let root = tempfile::tempdir().unwrap();
         let remote_parent = tempfile::tempdir().unwrap();
         let remote = remote_parent.path().join("vault.git");
-        command_success(
-            Command::new("git")
-                .args(["init", "--bare", remote.to_string_lossy().as_ref()])
-                .output()
-                .unwrap(),
+        create_bare_remote(&remote);
+        std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
+        let repository = prepare_repository(root.path());
+        let keys = FixedKeyStore::new(4);
+
+        connect_remote_paths(
+            root.path(),
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
         )
         .unwrap();
-        std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
-        git(root.path(), &["init", "-b", "main"]).unwrap();
-        configure_identity(root.path());
-
-        connect_remote_in(root.path(), remote.to_string_lossy().as_ref()).unwrap();
         std::fs::write(root.path().join("settings.ron"), "(changed: true)\n").unwrap();
-        sync_in(root.path()).unwrap();
+        sync_paths(root.path(), &repository, &keys).unwrap();
 
         assert_eq!(
-            git(root.path(), &["rev-list", "--count", "origin/main"]).unwrap(),
+            git(&repository, &["rev-list", "--count", "origin/main"]).unwrap(),
             "2"
         );
-        assert!(
-            git(root.path(), &["status", "--porcelain"])
-                .unwrap()
-                .is_empty()
-        );
+        assert_eq!(local_change_count(root.path(), &repository).unwrap(), 0);
+        let tree = git(
+            &repository,
+            &["ls-tree", "-r", "--name-only", "origin/main"],
+        )
+        .unwrap();
+        assert!(!tree.contains("settings.ron"));
     }
 
     #[test]
-    fn cloud_folder_creates_and_connects_a_bare_vault_repository() {
+    fn existing_encrypted_vault_merges_non_conflicting_local_files() {
+        let seed = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
-        let cloud = tempfile::tempdir().unwrap();
-        git(root.path(), &["init", "-b", "main"]).unwrap();
-        configure_identity(root.path());
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(5);
+        std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+        let seed_repository = prepare_repository(seed.path());
+        connect_remote_paths(
+            seed.path(),
+            &seed_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
+        std::fs::write(root.path().join("knowledge/local.md"), "# Local\n").unwrap();
+        let repository = prepare_repository(root.path());
 
-        let remote = connect_folder_in(root.path(), cloud.path()).unwrap();
+        connect_remote_paths(
+            root.path(),
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
 
         assert_eq!(
-            git(root.path(), &["remote", "get-url", "origin"]).unwrap(),
-            remote
+            std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
+            "(remote: true)\n"
         );
+        let manifest = read_manifest(&repository).unwrap();
+        let key = keys.load(&manifest.vault_id).unwrap();
+        let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+        assert!(files.contains_key("settings.ron"));
+        assert!(files.contains_key("knowledge/local.md"));
+    }
+
+    #[test]
+    fn existing_encrypted_vault_rejects_same_path_conflicts() {
+        let seed = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(6);
+        std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+        let seed_repository = prepare_repository(seed.path());
+        connect_remote_paths(
+            seed.path(),
+            &seed_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(root.path().join("settings.ron"), "(local: true)\n").unwrap();
+        let repository = prepare_repository(root.path());
+
+        let error = connect_remote_paths(
+            root.path(),
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("same files"));
         assert_eq!(
-            command_success(
-                Command::new("git")
-                    .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository",])
-                    .output()
-                    .unwrap(),
-            )
-            .unwrap(),
-            "true"
-        );
-        assert_eq!(
-            git(root.path(), &["rev-list", "--count", "origin/main"]).unwrap(),
-            "1"
+            std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
+            "(local: true)\n"
         );
     }
 
     #[test]
-    fn existing_vault_history_becomes_the_base_without_losing_local_files() {
+    fn repeated_sync_preserves_a_detected_conflict() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(10);
+        std::fs::write(first.path().join("settings.ron"), "(value: 1)\n").unwrap();
+        let first_repository = prepare_repository(first.path());
+        connect_remote_paths(
+            first.path(),
+            &first_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        let second_repository = prepare_repository(second.path());
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(first.path().join("settings.ron"), "(value: 2)\n").unwrap();
+        sync_paths(first.path(), &first_repository, &keys).unwrap();
+        std::fs::write(second.path().join("settings.ron"), "(value: 3)\n").unwrap();
+
+        let first_error = sync_paths(second.path(), &second_repository, &keys).unwrap_err();
+        let second_error = sync_paths(second.path(), &second_repository, &keys).unwrap_err();
+
+        assert!(first_error.contains("same files"));
+        assert!(second_error.contains("same files"));
+        assert_eq!(
+            std::fs::read_to_string(second.path().join("settings.ron")).unwrap(),
+            "(value: 3)\n"
+        );
+    }
+
+    #[test]
+    fn plaintext_remote_history_is_rejected() {
         let root = tempfile::tempdir().unwrap();
         let seed = tempfile::tempdir().unwrap();
         let remote_parent = tempfile::tempdir().unwrap();
         let remote = remote_parent.path().join("vault.git");
-        command_success(
-            Command::new("git")
-                .args(["init", "--bare", remote.to_string_lossy().as_ref()])
-                .output()
-                .unwrap(),
-        )
-        .unwrap();
-
+        create_bare_remote(&remote);
         git(seed.path(), &["init", "-b", "main"]).unwrap();
         configure_identity(seed.path());
-        std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
+        std::fs::write(seed.path().join("settings.ron"), "()\n").unwrap();
         git(seed.path(), &["add", "--all"]).unwrap();
-        git(seed.path(), &["commit", "-m", "Remote Vault"]).unwrap();
+        git(seed.path(), &["commit", "-m", "Plaintext"]).unwrap();
         git(
             seed.path(),
             &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
         )
         .unwrap();
         git(seed.path(), &["push", "-u", "origin", "main"]).unwrap();
+        let repository = prepare_repository(root.path());
 
-        std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
-        std::fs::write(root.path().join("knowledge/local.md"), "# Local\n").unwrap();
-        git(root.path(), &["init", "-b", "main"]).unwrap();
-        configure_identity(root.path());
-
-        connect_remote_in(root.path(), remote.to_string_lossy().as_ref()).unwrap();
-
-        let tree = git(
+        let error = connect_remote_paths(
             root.path(),
-            &["ls-tree", "-r", "--name-only", "origin/main"],
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &FixedKeyStore::new(7),
         )
-        .unwrap();
-        assert!(tree.lines().any(|entry| entry == "settings.ron"));
-        assert!(tree.lines().any(|entry| entry == "knowledge/local.md"));
-        assert_eq!(
-            git(root.path(), &["rev-list", "--count", "origin/main"]).unwrap(),
-            "2"
-        );
+        .unwrap_err();
+
+        assert!(error.contains("plaintext"));
     }
 
     #[test]
     fn existing_vault_uses_the_remote_default_branch() {
-        let root = tempfile::tempdir().unwrap();
         let seed = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
         let remote_parent = tempfile::tempdir().unwrap();
         let remote = remote_parent.path().join("vault.git");
-        command_success(
-            Command::new("git")
-                .args(["init", "--bare", remote.to_string_lossy().as_ref()])
-                .output()
-                .unwrap(),
-        )
-        .unwrap();
-
-        git(seed.path(), &["init", "-b", "trunk"]).unwrap();
-        configure_identity(seed.path());
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(8);
         std::fs::write(seed.path().join("settings.ron"), "(remote: true)\n").unwrap();
-        git(seed.path(), &["add", "--all"]).unwrap();
-        git(seed.path(), &["commit", "-m", "Remote Vault"]).unwrap();
+        let seed_repository = prepare_repository(seed.path());
+        initialize_paths(seed.path(), &seed_repository, &keys).unwrap();
+        git(&seed_repository, &["branch", "--move", "trunk"]).unwrap();
         git(
-            seed.path(),
+            &seed_repository,
             &["remote", "add", "origin", remote.to_string_lossy().as_ref()],
         )
         .unwrap();
-        git(seed.path(), &["push", "-u", "origin", "trunk"]).unwrap();
+        git(&seed_repository, &["push", "-u", "origin", "trunk"]).unwrap();
         command_success(
             Command::new("git")
                 .args([
@@ -791,18 +1861,57 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
+        let repository = prepare_repository(root.path());
 
-        std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
-        std::fs::write(root.path().join("knowledge/local.md"), "# Local\n").unwrap();
-        git(root.path(), &["init", "-b", "main"]).unwrap();
-        configure_identity(root.path());
+        connect_remote_paths(
+            root.path(),
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
 
-        connect_remote_in(root.path(), remote.to_string_lossy().as_ref()).unwrap();
-
-        assert_eq!(current_branch(root.path()).unwrap(), "trunk");
+        assert_eq!(current_branch(&repository).unwrap(), "trunk");
         assert_eq!(
-            git(root.path(), &["rev-list", "--count", "origin/trunk"]).unwrap(),
-            "2"
+            git(&repository, &["rev-list", "--count", "origin/trunk"]).unwrap(),
+            "1"
         );
+    }
+
+    #[test]
+    fn cloud_folder_creates_an_encrypted_bare_vault_repository() {
+        let root = tempfile::tempdir().unwrap();
+        let cloud = tempfile::tempdir().unwrap();
+        let repository = prepare_repository(root.path());
+        std::fs::write(root.path().join("settings.ron"), "()\n").unwrap();
+
+        let remote = connect_folder_paths(
+            root.path(),
+            &repository,
+            cloud.path(),
+            &FixedKeyStore::new(9),
+        )
+        .unwrap();
+
+        assert_eq!(
+            git(&repository, &["remote", "get-url", "origin"]).unwrap(),
+            remote
+        );
+        assert_eq!(
+            command_success(
+                Command::new("git")
+                    .args(["--git-dir", &remote, "rev-parse", "--is-bare-repository"])
+                    .output()
+                    .unwrap(),
+            )
+            .unwrap(),
+            "true"
+        );
+        let tree = git(
+            &repository,
+            &["ls-tree", "-r", "--name-only", "origin/main"],
+        )
+        .unwrap();
+        assert!(!tree.contains("settings.ron"));
     }
 }

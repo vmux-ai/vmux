@@ -533,6 +533,7 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
     let mut snapshot = VaultSnapshot {
         root: status.root.to_string_lossy().into_owned(),
         initialized: status.initialized,
+        encrypted: status.encrypted,
         remote: status.remote,
         branch: status.branch,
         dirty: status.dirty,

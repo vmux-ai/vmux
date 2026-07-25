@@ -9934,10 +9934,14 @@ dependencies = [
 name = "vmux_profile"
 version = "0.0.29"
 dependencies = [
+ "ring",
+ "security-framework",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "tempfile",
  "toml",
+ "zeroize",
 ]
 
 [[package]]

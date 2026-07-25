@@ -147,6 +147,15 @@ fn VaultPanel(
                 }
                 div { class: "min-w-0 flex-1",
                     div { class: "font-medium text-foreground/95", {translate("vault-title")} }
+                    if !is_connected || vault.encrypted {
+                        div { class: "mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground/70",
+                            svg { class: "h-3 w-3 shrink-0", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
+                                rect { x: "5", y: "11", width: "14", height: "10", rx: "2" }
+                                path { d: "M8 11V7a4 4 0 0 1 8 0v4" }
+                            }
+                            {translate("vault-encrypted")}
+                        }
+                    }
                     if is_connected {
                         div { class: "truncate text-xs text-muted-foreground/70", "{vault.remote}" }
                         div { class: "mt-1 flex gap-2 text-[10px] text-muted-foreground/60",

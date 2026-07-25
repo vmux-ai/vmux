@@ -180,6 +180,7 @@ fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
     let state = json!({
         "root": status.root,
         "connected": connected,
+        "encrypted": status.encrypted,
         "provider": provider,
         "remote": status.remote,
         "branch": status.branch,
@@ -996,6 +997,7 @@ mod tests {
         let response = vault_status_response(vmux_profile::vault::VaultStatus {
             root: "/Users/test/.vmux".into(),
             initialized: true,
+            encrypted: true,
             remote: "https://github.com/vmux-ai/vault.git".into(),
             branch: "main".into(),
             dirty: 2,
@@ -1007,6 +1009,7 @@ mod tests {
             serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
 
         assert_eq!(status["connected"], true);
+        assert_eq!(status["encrypted"], true);
         assert_eq!(status["provider"], "github");
         assert_eq!(status["localChanges"], 2);
         assert_eq!(status["ahead"], 1);

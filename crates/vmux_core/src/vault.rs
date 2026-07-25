@@ -16,6 +16,7 @@ pub const VAULT_ACTION_RESULT_EVENT: &str = "vault-action-result";
 pub struct VaultSnapshot {
     pub root: String,
     pub initialized: bool,
+    pub encrypted: bool,
     pub remote: String,
     pub branch: String,
     pub dirty: u32,
