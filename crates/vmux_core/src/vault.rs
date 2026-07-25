@@ -1,5 +1,6 @@
 pub const VAULT_SNAPSHOT_EVENT: &str = "vault-snapshot";
 pub const VAULT_ACTION_RESULT_EVENT: &str = "vault-action-result";
+pub const VAULT_AUTH_PROGRESS_EVENT: &str = "vault-auth-progress";
 
 #[derive(
     Clone,
@@ -126,4 +127,20 @@ pub struct VaultActionResult {
     pub action: VaultAction,
     pub success: bool,
     pub message: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct VaultAuthProgress {
+    pub code: String,
+    pub url: String,
 }

@@ -1,8 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::sync::mpsc;
 #[cfg(not(target_os = "macos"))]
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 
 use ring::aead;
 use ring::digest;
@@ -246,7 +249,10 @@ pub fn status_with_repositories() -> VaultStatus {
     status
 }
 
-pub fn connect_github() -> Result<String, String> {
+pub fn connect_github_with_progress<F>(mut progress: F) -> Result<String, String>
+where
+    F: FnMut(String),
+{
     let has_saved_account = github_has_saved_account()?;
     let mut command = gh_command()?;
     if has_saved_account {
@@ -271,17 +277,87 @@ pub fn connect_github() -> Result<String, String> {
             "--skip-ssh-key",
         ]);
     }
-    command_success(
-        command
-            .output()
-            .map_err(|error| format!("failed to run gh: {error}"))?,
-    )?;
+    run_github_auth(&mut command, &mut progress)?;
     command_success(
         gh_command()?
             .args(["api", "user", "--jq", ".login"])
             .output()
             .map_err(|error| format!("failed to run gh: {error}"))?,
     )
+}
+
+fn run_github_auth<F>(command: &mut Command, progress: &mut F) -> Result<(), String>
+where
+    F: FnMut(String),
+{
+    let mut child = command
+        .env("BROWSER", "/usr/bin/true")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("failed to run gh: {error}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to read gh output".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to read gh errors".to_string())?;
+    let (sender, receiver) = mpsc::channel();
+    let stdout_reader = spawn_line_reader(stdout, sender.clone());
+    let stderr_reader = spawn_line_reader(stderr, sender);
+    let mut lines = Vec::new();
+    let mut reported_code = false;
+    while let Ok(line) = receiver.recv() {
+        if !reported_code && let Some(code) = github_device_code(&line) {
+            progress(code);
+            reported_code = true;
+        }
+        lines.push(line);
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for gh: {error}"))?;
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
+    if status.success() {
+        Ok(())
+    } else {
+        let message = lines
+            .into_iter()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or_else(|| "GitHub authorization failed".to_string());
+        Err(message)
+    }
+}
+
+fn spawn_line_reader<R>(reader: R, sender: mpsc::Sender<String>) -> thread::JoinHandle<()>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        for line in BufReader::new(reader).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    })
+}
+
+fn github_device_code(line: &str) -> Option<String> {
+    line.split(|character: char| !(character.is_ascii_alphanumeric() || character == '-'))
+        .find(|token| {
+            let bytes = token.as_bytes();
+            bytes.len() == 9
+                && bytes[4] == b'-'
+                && bytes.iter().enumerate().all(|(index, byte)| {
+                    index == 4 || byte.is_ascii_uppercase() || byte.is_ascii_digit()
+                })
+        })
+        .map(str::to_string)
 }
 
 pub fn connect_folder(folder: &Path) -> Result<String, String> {
@@ -2072,6 +2148,33 @@ mod tests {
                 vec!["octocat".to_string(), "writable-org".to_string()]
             )
         );
+    }
+
+    #[test]
+    fn github_device_code_is_extracted_from_cli_progress() {
+        assert_eq!(
+            github_device_code("! First, copy your one-time code: ABCD-1234"),
+            Some("ABCD-1234".to_string())
+        );
+        assert_eq!(
+            github_device_code("One-time code (WXYZ-9876) copied to clipboard"),
+            Some("WXYZ-9876".to_string())
+        );
+        assert_eq!(github_device_code("authentication pending"), None);
+    }
+
+    #[test]
+    fn github_auth_streams_the_device_code() {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            "printf 'One-time code (ABCD-1234) copied to clipboard\\n' >&2",
+        ]);
+        let mut codes = Vec::new();
+
+        run_github_auth(&mut command, &mut |code| codes.push(code)).unwrap();
+
+        assert_eq!(codes, vec!["ABCD-1234"]);
     }
 
     #[test]

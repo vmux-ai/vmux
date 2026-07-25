@@ -28,7 +28,7 @@ The side sheet and dedicated Vault page expose setup and status.
 Setup is a progressive three-step flow:
 
 1. Pick remote storage: GitHub, Google Drive, Dropbox, or OneDrive.
-2. Connect the account. GitHub opens GitHub.com browser authorization through `gh`; cloud folders use the provider's signed-in desktop sync client.
+2. Connect the account. GitHub opens GitHub.com device authorization in a new vmux stack, copies and displays the one-time code, then waits for approval through `gh`; cloud folders use the provider's signed-in desktop sync client.
 3. Create a new remote location or choose an existing repository/folder.
 
 - Create a GitHub repository. Default name: `vmux-vault`.

@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolsSnapshot};
 use vmux_core::vault::{
-    VAULT_ACTION_RESULT_EVENT, VaultAction, VaultActionRequest, VaultActionResult,
-    VaultRefreshRequest, VaultSnapshot,
+    VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
+    VaultActionResult, VaultAuthProgress, VaultRefreshRequest, VaultSnapshot,
 };
 use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
@@ -53,6 +53,7 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultActionResult>);
+    let mut github_device_code = use_signal(String::new);
     let mut repositories_requested = use_signal(|| false);
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
@@ -103,6 +104,9 @@ pub fn Page() -> Element {
         });
     let _action_listener =
         use_bin_event_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |result| {
+            if result.action == VaultAction::ConnectGithub {
+                github_device_code.set(String::new());
+            }
             if result.action == VaultAction::ConnectCloud && result.success {
                 cloud_root.set(result.message);
                 pending.set(None);
@@ -121,6 +125,10 @@ pub fn Page() -> Element {
                 notice.set(Some(result));
             }
         });
+    let _auth_progress_listener = use_bin_event_listener::<VaultAuthProgress, _>(
+        VAULT_AUTH_PROGRESS_EVENT,
+        move |progress| github_device_code.set(progress.code),
+    );
 
     use_effect(move || {
         locale();
@@ -181,6 +189,7 @@ pub fn Page() -> Element {
                         selected_repository,
                         selected_provider,
                         repositories_requested,
+                        github_device_code,
                         cloud_root,
                         private,
                         pending,
@@ -200,6 +209,7 @@ fn VaultPanel(
     selected_repository: Signal<Option<String>>,
     selected_provider: Signal<Option<RemoteProvider>>,
     repositories_requested: Signal<bool>,
+    github_device_code: Signal<String>,
     cloud_root: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
@@ -317,6 +327,7 @@ fn VaultPanel(
                                     },
                                     onclick: move |_| {
                                         selected_provider.set(Some(option));
+                                        github_device_code.set(String::new());
                                         cloud_root.set(String::new());
                                         selected_repository.set(None);
                                         if option.is_github() {
@@ -360,25 +371,35 @@ fn VaultPanel(
                                         div { class: "text-[10px] text-muted-foreground/60", {translate("vault-not-connected")} }
                                     }
                                 }
+                                if provider.is_github() && !github_device_code().is_empty() {
+                                    code { class: "shrink-0 rounded-lg bg-foreground/[0.07] px-2.5 py-1.5 font-mono text-xs font-semibold tracking-widest text-foreground ring-1 ring-inset ring-foreground/10",
+                                        {github_device_code()}
+                                    }
+                                }
                                 if !authenticated {
                                     ManagerButton {
                                         variant: ManagerButtonVariant::Primary,
                                         disabled: pending().is_some()
                                             || (provider.is_github() && repositories_requested()),
-                                        onclick: move |_| send_action(
-                                            pending,
+                                        onclick: move |_| {
                                             if provider.is_github() {
-                                                VaultAction::ConnectGithub
-                                            } else {
-                                                VaultAction::ConnectCloud
-                                            },
-                                            if provider.is_github() {
-                                                String::new()
-                                            } else {
-                                                provider.name().to_string()
-                                            },
-                                            true,
-                                        ),
+                                                github_device_code.set(String::new());
+                                            }
+                                            send_action(
+                                                pending,
+                                                if provider.is_github() {
+                                                    VaultAction::ConnectGithub
+                                                } else {
+                                                    VaultAction::ConnectCloud
+                                                },
+                                                if provider.is_github() {
+                                                    String::new()
+                                                } else {
+                                                    provider.name().to_string()
+                                                },
+                                                true,
+                                            );
+                                        },
                                         if pending().is_some_and(|action| {
                                             action == VaultAction::ConnectGithub
                                                 || action == VaultAction::ConnectCloud

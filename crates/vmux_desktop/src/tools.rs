@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::process::{Command, Output};
+use std::sync::mpsc;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
 use vmux_core::profile::tools::{self as manifest_store, ToolsManifest};
@@ -14,8 +16,8 @@ use vmux_core::tools::{
     ToolsRefreshRequest, ToolsSnapshot,
 };
 use vmux_core::vault::{
-    VAULT_ACTION_RESULT_EVENT, VaultAction, VaultActionRequest, VaultActionResult,
-    VaultRefreshRequest, VaultRepository, VaultSnapshot,
+    VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
+    VaultActionResult, VaultAuthProgress, VaultRefreshRequest, VaultRepository, VaultSnapshot,
 };
 use vmux_layout::LayoutCef;
 
@@ -89,6 +91,7 @@ struct VaultActionTask {
     target: Entity,
     request: VaultActionRequest,
     task: Task<Result<String, String>>,
+    progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
 }
 
 #[derive(Resource, Default)]
@@ -258,10 +261,19 @@ fn start_vault_action(
         return;
     };
     let task_request = request.clone();
-    let wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let completion_wake = proxy.as_deref().map(|proxy| (**proxy).clone());
+    let progress_wake = completion_wake.clone();
+    let (progress_sender, progress_receiver) = mpsc::channel();
     let task = IoTaskPool::get().spawn(async move {
-        let result = perform_vault_action(&task_request).await;
-        if let Some(wake) = wake {
+        let result = perform_vault_action(&task_request, move |progress| {
+            if progress_sender.send(progress).is_ok()
+                && let Some(wake) = &progress_wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        })
+        .await;
+        if let Some(wake) = completion_wake {
             let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
         }
         result
@@ -270,6 +282,7 @@ fn start_vault_action(
         target,
         request,
         task,
+        progress: Mutex::new(progress_receiver),
     });
 }
 
@@ -377,9 +390,24 @@ fn drain_vault_actions(
     mut tasks: Query<(Entity, &mut VaultActionTask)>,
     mut state: ResMut<ToolsState>,
     browsers: NonSend<Browsers>,
+    mut app_commands: MessageWriter<AppCommand>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
+        while let Ok(progress) = task.progress.get_mut().try_recv() {
+            if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
+                app_commands.write(AppCommand::Browser(BrowserCommand::Open(
+                    OpenCommand::InNewStack {
+                        url: Some(progress.url.clone()),
+                    },
+                )));
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    task.target,
+                    VAULT_AUTH_PROGRESS_EVENT,
+                    &progress,
+                ));
+            }
+        }
         let Some(result) = future::block_on(future::poll_once(&mut task.task)) else {
             continue;
         };
@@ -1085,7 +1113,13 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
     }
 }
 
-async fn perform_vault_action(request: &VaultActionRequest) -> Result<String, String> {
+async fn perform_vault_action<F>(
+    request: &VaultActionRequest,
+    progress: F,
+) -> Result<String, String>
+where
+    F: Fn(VaultAuthProgress),
+{
     match request.action {
         VaultAction::Create => vmux_core::profile::vault::create_remote(
             &request.repository,
@@ -1097,7 +1131,14 @@ async fn perform_vault_action(request: &VaultActionRequest) -> Result<String, St
         ),
         VaultAction::Connect => vmux_core::profile::vault::connect_remote(&request.repository),
         VaultAction::Sync => vmux_core::profile::vault::sync(),
-        VaultAction::ConnectGithub => vmux_core::profile::vault::connect_github(),
+        VaultAction::ConnectGithub => {
+            vmux_core::profile::vault::connect_github_with_progress(|code| {
+                progress(VaultAuthProgress {
+                    code,
+                    url: "https://github.com/login/device".to_string(),
+                });
+            })
+        }
         VaultAction::ConnectFolder => {
             let initial_dir = std::env::var_os("HOME")
                 .map(std::path::PathBuf::from)
