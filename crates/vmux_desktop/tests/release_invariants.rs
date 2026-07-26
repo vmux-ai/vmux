@@ -397,6 +397,7 @@ fn cef_injection_uses_ci_cached_framework_path() {
 fn local_signing_uses_stable_codesigning_identity() {
     let signing_script = include_str!("../../../scripts/ensure-local-codesign-identity.sh");
     let build_script = include_str!("../../../scripts/build-mac-release.sh");
+    let notarize_script = include_str!("../../../scripts/sign-and-notarize.sh");
     let makefile = include_str!("../../../Makefile");
 
     assert!(signing_script.contains("Vmux Dev"));
@@ -414,6 +415,7 @@ fn local_signing_uses_stable_codesigning_identity() {
     assert!(signing_script.contains("security find-identity -v -p codesigning"));
     assert!(build_script.contains("ensure-local-codesign-identity.sh"));
     assert!(build_script.contains("SKIP_NOTARIZE=\"${SKIP_NOTARIZE:-1}\""));
+    assert!(notarize_script.contains("vmux)         printf 'ai.vmux.cli'"));
     assert!(
         makefile.contains("build-local: ensure-mac-deps ensure-package-deps ensure-codesign-deps")
     );

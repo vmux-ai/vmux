@@ -1190,6 +1190,7 @@ where
         VaultAction::AddPasskey => {
             vmux_core::profile::vault::add_passkey(&request.credential_id, &request.prf_output)
         }
+        VaultAction::PreparePasskey => vmux_core::profile::vault::prepare_passkey(),
         VaultAction::UnlockPasskey => vmux_core::profile::vault::unlock_with_passkey(
             &request.credential_id,
             &request.prf_output,

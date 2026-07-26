@@ -59,6 +59,7 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultActionResult>);
+    let mut passkey_setup_blocked = use_signal(|| false);
     let mut github_device_code = use_signal(String::new);
     let mut repositories_requested = use_signal(|| false);
     let mut repository = use_signal(|| "vmux-vault".to_string());
@@ -113,7 +114,19 @@ pub fn Page() -> Element {
             if result.action == VaultAction::ConnectGithub {
                 github_device_code.set(String::new());
             }
-            if result.action == VaultAction::ConnectCloud && result.success {
+            if !result.success && is_vault_key_locked(&result.message) {
+                passkey_setup_blocked.set(true);
+            }
+            if result.action == VaultAction::PreparePasskey {
+                pending.set(None);
+                if result.success {
+                    passkey_setup_blocked.set(false);
+                    start_passkey(VaultAction::AddPasskey, snapshot().vault, pending, notice);
+                } else {
+                    passkey_setup_blocked.set(true);
+                    notice.set(Some(result));
+                }
+            } else if result.action == VaultAction::ConnectCloud && result.success {
                 cloud_root.set(result.message);
                 pending.set(None);
                 notice.set(None);
@@ -200,6 +213,7 @@ pub fn Page() -> Element {
                         private,
                         pending,
                         notice,
+                        passkey_setup_blocked,
                     }
                 }
             }
@@ -220,6 +234,7 @@ fn VaultPanel(
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
+    passkey_setup_blocked: Signal<bool>,
 ) -> Element {
     let mut destination = use_signal(|| VaultDestination::Create);
     let is_connected = vault.initialized && !vault.remote.is_empty();
@@ -587,6 +602,7 @@ fn VaultPanel(
                     vault,
                     pending,
                     notice,
+                    passkey_setup_blocked,
                 }
             }
         }
@@ -631,8 +647,8 @@ fn PasskeyCard(
     vault: VaultSnapshot,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
+    passkey_setup_blocked: Signal<bool>,
 ) -> Element {
-    let add_vault = vault.clone();
     let unlock_vault = vault.clone();
     rsx! {
         div { class: "mt-4 rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
@@ -660,16 +676,18 @@ fn PasskeyCard(
                         {translate("vault-passkey-unlock")}
                     }
                 }
-                ManagerButton {
-                    variant: ManagerButtonVariant::Secondary,
-                    disabled: pending().is_some(),
-                    onclick: move |_| start_passkey(
-                        VaultAction::AddPasskey,
-                        add_vault.clone(),
-                        pending,
-                        notice,
-                    ),
-                    {translate("vault-passkey-add")}
+                if !passkey_setup_blocked() {
+                    ManagerButton {
+                        variant: ManagerButtonVariant::Secondary,
+                        disabled: pending().is_some(),
+                        onclick: move |_| send_action(
+                            pending,
+                            VaultAction::PreparePasskey,
+                            String::new(),
+                            true,
+                        ),
+                        {translate("vault-passkey-add")}
+                    }
                 }
             }
         }
@@ -1031,12 +1049,17 @@ fn action_result_message(action: VaultAction) -> String {
         VaultAction::ConnectGithub => "vault-result-github-connected",
         VaultAction::ConnectFolder => "vault-result-folder-connected",
         VaultAction::AddPasskey => "vault-result-created",
+        VaultAction::PreparePasskey => "vault-result-connected",
         VaultAction::UnlockPasskey => "vault-result-connected",
         VaultAction::ConnectCloud => "vault-result-connected",
         VaultAction::CreateCloudFolder | VaultAction::ChooseCloudFolder => {
             "vault-result-folder-connected"
         }
     })
+}
+
+fn is_vault_key_locked(message: &str) -> bool {
+    message.starts_with("This Vault is locked on this device.")
 }
 
 fn suggested_repository_name(

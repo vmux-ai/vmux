@@ -7,6 +7,7 @@ pub mod notify_turn_end;
 pub mod open;
 pub mod service;
 pub mod tools;
+pub mod vault_key;
 
 #[derive(Debug, Parser)]
 #[command(name = "vmux", version, about = "Vmux command-line interface")]
@@ -50,4 +51,6 @@ pub enum Command {
     },
     Tools(tools::ToolsArgs),
     Service(service::ServiceArgs),
+    #[command(hide = true)]
+    VaultKey(vault_key::VaultKeyArgs),
 }

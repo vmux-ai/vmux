@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -23,6 +23,8 @@ const OBJECTS_DIR: &str = "objects";
 const PASSKEYS_DIR: &str = "keys/passkeys";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
+#[cfg(target_os = "macos")]
+const KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v1";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
@@ -427,6 +429,14 @@ pub fn add_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, Str
         credential_id,
         prf_output,
     )
+}
+
+pub fn prepare_passkey() -> Result<String, String> {
+    let repository = repository_dir();
+    let manifest = read_manifest(&repository)?;
+    let key = SystemKeyStore.load(&manifest.vault_id)?;
+    load_encrypted_snapshot(&repository, &key)?;
+    Ok("Vault unlocked".to_string())
 }
 
 pub fn unlock_with_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, String> {
@@ -1629,48 +1639,144 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(target_os = "macos")]
-fn local_keychain_options(vault_id: &str) -> security_framework::passwords::PasswordOptions {
-    let mut options = security_framework::passwords::PasswordOptions::new_generic_password(
-        KEYCHAIN_SERVICE,
-        vault_id,
-    );
-    options.set_access_synchronized(Some(false));
+fn keychain_options(
+    service: &str,
+    vault_id: &str,
+    synchronized: bool,
+) -> security_framework::passwords::PasswordOptions {
+    let mut options =
+        security_framework::passwords::PasswordOptions::new_generic_password(service, vault_id);
+    options.set_access_synchronized(Some(synchronized));
     options
 }
 
 #[cfg(target_os = "macos")]
-fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+#[doc(hidden)]
+pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
     use security_framework::passwords::generic_password;
     use security_framework_sys::base::errSecItemNotFound;
 
-    match generic_password(local_keychain_options(vault_id)) {
+    match generic_password(keychain_options(KEY_BROKER_SERVICE, vault_id, false)) {
         Ok(key) => {
             validate_key(&key)?;
-            Ok(Zeroizing::new(key))
+            Ok(Some(hex(&key)))
         }
-        Err(error) if error.code() == errSecItemNotFound => load_legacy_synced_key(vault_id),
-        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
+        Err(error) if error.code() == errSecItemNotFound => Ok(None),
+        Err(error) => Err(format!("failed to unlock Vault key: {error}")),
     }
 }
 
 #[cfg(target_os = "macos")]
-fn load_legacy_synced_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    use security_framework::passwords::{PasswordOptions, generic_password};
+#[doc(hidden)]
+pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
+    let key = decode_key_hex(encoded_key)?;
+    store_keychain_key(KEY_BROKER_SERVICE, vault_id, &key)
+}
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub fn migrate_legacy_key(vault_id: &str) -> Result<bool, String> {
+    let Some(key) = load_legacy_key(vault_id)? else {
+        return Ok(false);
+    };
+    if key_broker_path().is_none() {
+        return Err("Vault key broker is missing".to_string());
+    }
+    store_key_with_broker(vault_id, &key)?;
+    Ok(true)
+}
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
+pub fn authorize_key_broker_parent() -> Result<(), String> {
+    use security_framework::os::macos::code_signing::{
+        Flags, GuestAttributes, SecCode, SecRequirement,
+    };
+    use std::str::FromStr;
+
+    let parent_pid = unsafe { libc::getppid() };
+    let mut attributes = GuestAttributes::new();
+    attributes.set_pid(parent_pid);
+    let parent = SecCode::copy_guest_with_attribues(None, &attributes, Flags::NONE)
+        .map_err(|error| format!("failed to identify Vault key broker caller: {error}"))?;
+    let broker = std::env::current_exe().map_err(|error| error.to_string())?;
+    let certificate = signing_leaf_hash(&broker)?;
+    let requirement =
+        SecRequirement::from_str(&format!("certificate leaf = H\"{certificate}\""))
+            .map_err(|error| format!("failed to create Vault key broker requirement: {error}"))?;
+    parent
+        .check_validity(Flags::BASIC_VALIDATE_ONLY, &requirement)
+        .map_err(|_| "Vault key broker rejected its caller".to_string())?;
+
+    let expected = broker
+        .parent()
+        .ok_or_else(|| "Vault key broker has no parent directory".to_string())?
+        .join("vmux_desktop")
+        .canonicalize()
+        .map_err(|error| format!("failed to locate vmux desktop: {error}"))?;
+    let actual = parent_process_path(parent_pid)?
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve Vault key broker caller: {error}"))?;
+    if actual != expected {
+        return Err("Vault key broker rejected its caller".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[doc(hidden)]
+pub fn key_broker_load(_vault_id: &str) -> Result<Option<String>, String> {
+    Err("Vault key broker is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[doc(hidden)]
+pub fn key_broker_store(_vault_id: &str, _encoded_key: &str) -> Result<(), String> {
+    Err("Vault key broker is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[doc(hidden)]
+pub fn migrate_legacy_key(_vault_id: &str) -> Result<bool, String> {
+    Err("Legacy Vault keys are only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[doc(hidden)]
+pub fn authorize_key_broker_parent() -> Result<(), String> {
+    Err("Vault key broker is only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn load_legacy_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    use security_framework::passwords::generic_password;
     use security_framework_sys::base::errSecItemNotFound;
 
-    let mut options = PasswordOptions::new_generic_password(KEYCHAIN_SERVICE, vault_id);
-    options.set_access_synchronized(Some(true));
-    match generic_password(options) {
-        Ok(key) => {
-            validate_key(&key)?;
-            store_system_key(vault_id, &key)?;
-            Ok(Zeroizing::new(key))
+    for synchronized in [false, true] {
+        match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, synchronized)) {
+            Ok(key) => {
+                validate_key(&key)?;
+                return Ok(Some(Zeroizing::new(key)));
+            }
+            Err(error) if error.code() == errSecItemNotFound => {}
+            Err(error) => return Err(format!("failed to unlock Vault encryption key: {error}")),
         }
-        Err(error) if error.code() == errSecItemNotFound => {
-            Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
-        }
-        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
     }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    if let Some(key) = load_key_from_broker(vault_id)? {
+        return Ok(key);
+    }
+    let Some(key) = load_legacy_key(vault_id)? else {
+        return Err("This Vault is locked on this device. Unlock it with a passkey.".to_string());
+    };
+    if key_broker_path().is_some() {
+        store_key_with_broker(vault_id, &key)?;
+    }
+    Ok(key)
 }
 
 #[cfg(target_os = "macos")]
@@ -1685,16 +1791,178 @@ fn create_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
 
 #[cfg(target_os = "macos")]
 fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
+    if key_broker_path().is_some() {
+        return store_key_with_broker(vault_id, key);
+    }
+    store_keychain_key(KEYCHAIN_SERVICE, vault_id, key)
+}
+
+#[cfg(target_os = "macos")]
+fn store_keychain_key(service: &str, vault_id: &str, key: &[u8]) -> Result<(), String> {
     use security_framework::passwords::{AccessControlOptions, set_generic_password_options};
 
     validate_key(key)?;
-    let mut protected = local_keychain_options(vault_id);
+    let mut protected = keychain_options(service, vault_id, false);
     protected.set_access_control_options(AccessControlOptions::USER_PRESENCE);
     if set_generic_password_options(key, protected).is_err() {
-        set_generic_password_options(key, local_keychain_options(vault_id))
+        set_generic_password_options(key, keychain_options(service, vault_id, false))
             .map_err(|error| format!("failed to store Vault key in system Keychain: {error}"))?;
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn key_broker_path() -> Option<PathBuf> {
+    if super::build_profile() == "dev" {
+        return None;
+    }
+    let path = std::env::current_exe().ok()?.parent()?.join("vmux");
+    path.is_file().then_some(path)
+}
+
+#[cfg(target_os = "macos")]
+fn parent_process_path(pid: libc::pid_t) -> Result<PathBuf, String> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    let length = unsafe {
+        libc::proc_pidpath(
+            pid,
+            buffer.as_mut_ptr().cast(),
+            buffer.len().try_into().unwrap_or(u32::MAX),
+        )
+    };
+    if length <= 0 {
+        return Err("failed to locate Vault key broker caller".to_string());
+    }
+    buffer.truncate(length as usize);
+    Ok(PathBuf::from(std::ffi::OsString::from_vec(buffer)))
+}
+
+#[cfg(target_os = "macos")]
+fn signing_leaf_hash(path: &Path) -> Result<String, String> {
+    let prefix = std::env::temp_dir().join(format!("vmux-vault-certificate-{}-", random_hex(16)?));
+    let output = Command::new("/usr/bin/codesign")
+        .args(["--display", "--extract-certificates"])
+        .arg(&prefix)
+        .arg(path)
+        .output()
+        .map_err(|error| format!("failed to inspect Vault key broker signature: {error}"))?;
+    let certificate_path = PathBuf::from(format!("{}0", prefix.to_string_lossy()));
+    let result = if output.status.success() {
+        std::fs::read(&certificate_path)
+            .map(|certificate| {
+                hex(
+                    ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, &certificate)
+                        .as_ref(),
+                )
+            })
+            .map_err(|error| format!("failed to read Vault key broker certificate: {error}"))
+    } else {
+        Err("Vault key broker is not signed with a certificate".to_string())
+    };
+    for index in 0..4 {
+        let _ = std::fs::remove_file(format!("{}{}", prefix.to_string_lossy(), index));
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn run_key_broker(
+    action: &str,
+    vault_id: &str,
+    input: Option<&str>,
+) -> Result<Option<Output>, String> {
+    let Some(path) = key_broker_path() else {
+        return Ok(None);
+    };
+    let mut command = Command::new(path);
+    command
+        .args(["vault-key", action, "--vault-id", vault_id])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if input.is_none() {
+        return command
+            .output()
+            .map(Some)
+            .map_err(|error| format!("failed to run Vault key broker: {error}"));
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("failed to run Vault key broker: {error}"))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| "failed to open Vault key broker input".to_string())?
+        .write_all(input.unwrap_or_default().as_bytes())
+        .map_err(|error| format!("failed to send key to Vault key broker: {error}"))?;
+    child
+        .wait_with_output()
+        .map(Some)
+        .map_err(|error| format!("failed to wait for Vault key broker: {error}"))
+}
+
+#[cfg(target_os = "macos")]
+fn load_key_from_broker(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    let Some(output) = run_key_broker("load", vault_id, None)? else {
+        return Ok(None);
+    };
+    if output.status.success() {
+        let key = decode_key_hex(String::from_utf8_lossy(&output.stdout).trim())?;
+        return Ok(Some(Zeroizing::new(key)));
+    }
+    if output.status.code() == Some(2) {
+        return Ok(None);
+    }
+    Err(key_broker_error(&output))
+}
+
+#[cfg(target_os = "macos")]
+fn store_key_with_broker(vault_id: &str, key: &[u8]) -> Result<(), String> {
+    let encoded = Zeroizing::new(hex(key));
+    let Some(output) = run_key_broker("store", vault_id, Some(&encoded))? else {
+        return store_keychain_key(KEYCHAIN_SERVICE, vault_id, key);
+    };
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(key_broker_error(&output))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn key_broker_error(output: &Output) -> String {
+    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if error.is_empty() {
+        "Vault key broker failed".to_string()
+    } else {
+        error
+    }
+}
+
+fn decode_key_hex(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() != KEY_LEN * 2 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Vault encryption key has an invalid encoding".to_string());
+    }
+    let bytes = value.as_bytes();
+    let mut key = Vec::with_capacity(KEY_LEN);
+    for pair in bytes.chunks_exact(2) {
+        let high = hex_value(pair[0])?;
+        let low = hex_value(pair[1])?;
+        key.push((high << 4) | low);
+    }
+    validate_key(&key)?;
+    Ok(key)
+}
+
+fn hex_value(byte: u8) -> Result<u8, String> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err("Vault encryption key has an invalid encoding".to_string()),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -2059,6 +2327,15 @@ fn command_success(output: Output) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn vault_key_broker_encoding_round_trips() {
+        let key = (0..KEY_LEN).map(|value| value as u8).collect::<Vec<_>>();
+
+        assert_eq!(decode_key_hex(&hex(&key)), Ok(key));
+        assert!(decode_key_hex("00").is_err());
+        assert!(decode_key_hex(&"z".repeat(KEY_LEN * 2)).is_err());
+    }
 
     struct FixedKeyStore {
         key: Vec<u8>,

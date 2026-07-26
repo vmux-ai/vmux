@@ -91,6 +91,7 @@ pub enum VaultAction {
     ConnectCloud,
     CreateCloudFolder,
     ChooseCloudFolder,
+    PreparePasskey,
 }
 
 #[derive(

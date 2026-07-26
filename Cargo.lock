@@ -9935,6 +9935,7 @@ dependencies = [
 name = "vmux_profile"
 version = "0.0.29"
 dependencies = [
+ "libc",
  "ring",
  "ron 0.8.1",
  "security-framework",
