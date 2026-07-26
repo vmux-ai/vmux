@@ -44,6 +44,7 @@ const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
 };
 
 const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
+const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
 
 pub struct ToolsPlugin;
 
@@ -111,12 +112,14 @@ struct VaultWatch {
     rx: mpsc::Receiver<notify::Result<notify::Event>>,
     debounce_tx: mpsc::Sender<()>,
     ready_rx: mpsc::Receiver<()>,
+    remote_rx: mpsc::Receiver<()>,
 }
 
 #[derive(Resource, Default)]
 struct VaultAutoSync {
     requested: bool,
     initial_scan_complete: bool,
+    remote_check: bool,
 }
 
 #[derive(Resource, Default)]
@@ -146,6 +149,7 @@ impl Plugin for ToolsPlugin {
             .get_resource::<bevy::winit::EventLoopProxyWrapper>()
             .map(|wrapper| (**wrapper).clone());
         let debounce_wake = watch_wake.clone();
+        let remote_wake = watch_wake.clone();
         match notify::recommended_watcher(move |result| {
             if watch_tx.send(result).is_ok()
                 && let Some(wake) = &watch_wake
@@ -164,6 +168,7 @@ impl Plugin for ToolsPlugin {
                 {
                     let (debounce_tx, debounce_rx) = mpsc::channel();
                     let (ready_tx, ready_rx) = mpsc::channel();
+                    let (remote_tx, remote_rx) = mpsc::channel();
                     if let Err(error) = std::thread::Builder::new()
                         .name("vmux-vault-auto-sync".to_string())
                         .spawn(move || {
@@ -192,11 +197,28 @@ impl Plugin for ToolsPlugin {
                     {
                         bevy::log::warn!("Vault auto-sync worker init failed: {error}");
                     }
+                    if let Err(error) = std::thread::Builder::new()
+                        .name("vmux-vault-remote-sync".to_string())
+                        .spawn(move || {
+                            loop {
+                                std::thread::sleep(VAULT_REMOTE_SYNC_INTERVAL);
+                                if remote_tx.send(()).is_err() {
+                                    return;
+                                }
+                                if let Some(wake) = &remote_wake {
+                                    let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+                                }
+                            }
+                        })
+                    {
+                        bevy::log::warn!("Vault remote-sync worker init failed: {error}");
+                    }
                     app.insert_non_send(VaultWatch {
                         _watcher: watcher,
                         rx: watch_rx,
                         debounce_tx,
                         ready_rx,
+                        remote_rx,
                     });
                 }
             }
@@ -345,6 +367,10 @@ fn drain_vault_watch(
     let Some(watcher) = watcher else {
         return;
     };
+    if watcher.remote_rx.try_iter().next().is_some() {
+        auto_sync.requested = true;
+        auto_sync.remote_check = true;
+    }
     let mut changed = false;
     for result in watcher.rx.try_iter() {
         changed |= vault_event_requests_sync(&result);
@@ -358,6 +384,7 @@ fn drain_vault_watch(
     state.dirty = true;
     state.generation = state.generation.wrapping_add(1);
     auto_sync.requested = false;
+    auto_sync.remote_check = false;
     let _ = watcher.ready_rx.try_iter().count();
     let _ = watcher.debounce_tx.send(());
 }
@@ -373,9 +400,11 @@ fn queue_vault_auto_sync(
         return;
     }
     let vault = &state.snapshot.vault;
-    let sync_needed = vault.dirty > 0 || vault.ahead > 0 || vault.behind > 0;
+    let sync_needed =
+        auto_sync.remote_check || vault.dirty > 0 || vault.ahead > 0 || vault.behind > 0;
     if !vault.initialized || !vault.unlocked || vault.remote.is_empty() || !sync_needed {
         auto_sync.requested = false;
+        auto_sync.remote_check = false;
         return;
     }
     if tasks
@@ -387,6 +416,7 @@ fn queue_vault_auto_sync(
             .any(|(_, request)| request.action == VaultAction::Sync)
     {
         auto_sync.requested = false;
+        auto_sync.remote_check = false;
         return;
     }
     queue.0.push_back((
@@ -401,6 +431,7 @@ fn queue_vault_auto_sync(
         },
     ));
     auto_sync.requested = false;
+    auto_sync.remote_check = false;
 }
 
 fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
@@ -1831,7 +1862,7 @@ mod tests {
 
     #[test]
     fn automatic_backup_queues_only_unlocked_vaults_needing_sync() {
-        fn queued(vault: VaultSnapshot) -> usize {
+        fn queued(vault: VaultSnapshot, remote_check: bool) -> usize {
             let mut app = App::new();
             app.init_resource::<ToolsState>()
                 .init_resource::<VaultAutoSync>()
@@ -1843,7 +1874,9 @@ mod tests {
                 state.dirty = false;
                 state.snapshot.vault = vault;
             }
-            app.world_mut().resource_mut::<VaultAutoSync>().requested = true;
+            let mut auto_sync = app.world_mut().resource_mut::<VaultAutoSync>();
+            auto_sync.requested = true;
+            auto_sync.remote_check = remote_check;
 
             app.update();
 
@@ -1857,28 +1890,47 @@ mod tests {
             dirty: 1,
             ..Default::default()
         };
-        assert_eq!(queued(connected.clone()), 1);
+        assert_eq!(queued(connected.clone(), false), 1);
         assert_eq!(
-            queued(VaultSnapshot {
-                unlocked: false,
-                ..connected.clone()
-            }),
+            queued(
+                VaultSnapshot {
+                    unlocked: false,
+                    ..connected.clone()
+                },
+                false
+            ),
             0
         );
         assert_eq!(
-            queued(VaultSnapshot {
-                dirty: 0,
-                ahead: 1,
-                ..connected.clone()
-            }),
+            queued(
+                VaultSnapshot {
+                    dirty: 0,
+                    ahead: 1,
+                    ..connected.clone()
+                },
+                false
+            ),
             1
         );
         assert_eq!(
-            queued(VaultSnapshot {
-                dirty: 0,
-                ..connected
-            }),
+            queued(
+                VaultSnapshot {
+                    dirty: 0,
+                    ..connected.clone()
+                },
+                false
+            ),
             0
+        );
+        assert_eq!(
+            queued(
+                VaultSnapshot {
+                    dirty: 0,
+                    ..connected
+                },
+                true,
+            ),
+            1
         );
     }
 }

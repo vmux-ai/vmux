@@ -219,11 +219,25 @@ struct LocalStateEntry {
     kind: EntryKind,
     mode: u32,
     #[serde(default)]
+    data: Option<Vec<u8>>,
+    #[serde(default)]
     size: u64,
     #[serde(default)]
     modified_secs: u64,
     #[serde(default)]
     modified_nanos: u32,
+}
+
+#[derive(Default)]
+struct ReconcileOutcome {
+    automatic_merges: usize,
+    conflict_copies: usize,
+}
+
+#[derive(Clone, Copy)]
+enum TextMergeStrategy {
+    Local,
+    Union,
 }
 
 trait KeyStore {
@@ -727,32 +741,70 @@ fn sync_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Result<S
             .map(|(_, files)| files)
             .unwrap_or_default()
     });
-    git(repository, &["fetch", "origin"])?;
     let branch = current_branch(repository)?;
-    if let Some(remote_branch) = remote_branch(repository) {
-        validate_remote_history(repository, &remote_branch)?;
-        if git(repository, &["merge-base", "HEAD", &remote_branch]).is_err() {
-            return Err("Vault remote has unrelated history".to_string());
+    for attempt in 0..3 {
+        git(repository, &["fetch", "origin"])?;
+        if let Some(remote_branch) = remote_branch(repository) {
+            validate_remote_history(repository, &remote_branch)?;
+            if git(repository, &["merge-base", "HEAD", &remote_branch]).is_err() {
+                return Err("Vault remote has unrelated history".to_string());
+            }
+            git(repository, &["reset", "--hard", &remote_branch])?;
         }
-        if let Err(error) = git(repository, &["rebase", &remote_branch]) {
-            let _ = git(repository, &["rebase", "--abort"]);
-            return Err(format!("Vault has sync conflicts: {error}"));
+        let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
+        let outcome = reconcile_local(root, &baseline, &remote_files)?;
+        let files = collect_local_files(root)?;
+        write_encrypted_snapshot(
+            repository,
+            &manifest.vault_id,
+            &key,
+            &files,
+            Some(&remote_files),
+        )?;
+        commit_changes(repository, "Sync vmux Vault")?;
+        match git(repository, &["push", "-u", "origin", &branch]) {
+            Ok(_) => {
+                write_local_state(root, repository)?;
+                return Ok(sync_message(&outcome));
+            }
+            Err(error) if attempt < 2 && push_rejected_for_remote_change(&error) => {}
+            Err(error) => return Err(error),
         }
     }
-    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
-    reconcile_local(root, &baseline, &remote_files)?;
-    let files = collect_local_files(root)?;
-    write_encrypted_snapshot(
-        repository,
-        &manifest.vault_id,
-        &key,
-        &files,
-        Some(&remote_files),
-    )?;
-    commit_changes(repository, "Sync vmux Vault")?;
-    git(repository, &["push", "-u", "origin", &branch])?;
-    write_local_state(root, repository)?;
-    Ok("Vault synced".to_string())
+    Err("Vault remote kept changing during sync".to_string())
+}
+
+fn push_rejected_for_remote_change(error: &str) -> bool {
+    let error = error.to_ascii_lowercase();
+    error.contains("non-fast-forward")
+        || error.contains("fetch first")
+        || error.contains("failed to push some refs")
+}
+
+fn sync_message(outcome: &ReconcileOutcome) -> String {
+    if outcome.conflict_copies > 0 {
+        format!(
+            "Vault synced with {} conflicted {}",
+            outcome.conflict_copies,
+            if outcome.conflict_copies == 1 {
+                "copy"
+            } else {
+                "copies"
+            }
+        )
+    } else if outcome.automatic_merges > 0 {
+        format!(
+            "Vault synced with {} automatic {}",
+            outcome.automatic_merges,
+            if outcome.automatic_merges == 1 {
+                "merge"
+            } else {
+                "merges"
+            }
+        )
+    } else {
+        "Vault synced".to_string()
+    }
 }
 
 fn initialize_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Result<(), String> {
@@ -1245,7 +1297,7 @@ fn reconcile_local(
     root: &Path,
     baseline: &BTreeMap<String, LocalEntry>,
     remote: &BTreeMap<String, LocalEntry>,
-) -> Result<(), String> {
+) -> Result<ReconcileOutcome, String> {
     let local = collect_local_files(root)?;
     let paths = baseline
         .keys()
@@ -1254,7 +1306,8 @@ fn reconcile_local(
         .cloned()
         .collect::<BTreeSet<_>>();
     let mut updates = Vec::new();
-    let mut conflicts = Vec::new();
+    let mut occupied = paths.clone();
+    let mut outcome = ReconcileOutcome::default();
     for path in paths {
         let baseline_entry = baseline.get(&path);
         let local_entry = local.get(&path);
@@ -1262,21 +1315,22 @@ fn reconcile_local(
         let local_changed = !same_entry(local_entry, baseline_entry);
         let remote_changed = !same_entry(remote_entry, baseline_entry);
         if local_changed && remote_changed && !same_entry(local_entry, remote_entry) {
-            conflicts.push(path);
+            if let Some(entry) =
+                merge_changed_file(&path, baseline_entry, local_entry, remote_entry)?
+            {
+                updates.push((path, Some(entry)));
+                outcome.automatic_merges += 1;
+                continue;
+            }
+            updates.push((path.clone(), remote_entry.cloned()));
+            if let Some(local_entry) = local_entry {
+                let copy_path = conflict_copy_path(&path, &mut occupied)?;
+                updates.push((copy_path, Some(local_entry.clone())));
+                outcome.conflict_copies += 1;
+            }
         } else if remote_changed && !local_changed {
             updates.push((path, remote_entry.cloned()));
         }
-    }
-    if !conflicts.is_empty() {
-        let visible = conflicts
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!(
-            "Vault has local and remote changes to the same files: {visible}"
-        ));
     }
     let mut merged = local.clone();
     for (path, entry) in &updates {
@@ -1290,7 +1344,427 @@ fn reconcile_local(
     for (path, entry) in updates {
         apply_local_entry(root, &path, entry.as_ref())?;
     }
-    Ok(())
+    Ok(outcome)
+}
+
+fn merge_changed_file(
+    path: &str,
+    baseline: Option<&LocalEntry>,
+    local: Option<&LocalEntry>,
+    remote: Option<&LocalEntry>,
+) -> Result<Option<LocalEntry>, String> {
+    let (Some(local), Some(remote)) = (local, remote) else {
+        return Ok(None);
+    };
+    if local.kind != EntryKind::File || remote.kind != EntryKind::File {
+        return Ok(None);
+    }
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let baseline_data = baseline
+        .filter(|entry| entry.kind == EntryKind::File)
+        .map(|entry| entry.data.as_slice())
+        .unwrap_or_default();
+    let data = match extension.as_str() {
+        "md" | "markdown" => {
+            if [baseline_data, local.data.as_slice(), remote.data.as_slice()]
+                .into_iter()
+                .any(|data| std::str::from_utf8(data).is_err())
+            {
+                return Ok(None);
+            }
+            merge_text(
+                baseline_data,
+                &local.data,
+                &remote.data,
+                TextMergeStrategy::Union,
+            )?
+        }
+        "ron" => {
+            if [baseline_data, local.data.as_slice(), remote.data.as_slice()]
+                .into_iter()
+                .any(|data| std::str::from_utf8(data).is_err())
+            {
+                return Ok(None);
+            }
+            let ron_baseline = if baseline.is_none() {
+                b"{}".as_slice()
+            } else {
+                baseline_data
+            };
+            let merged = match merge_ron(ron_baseline, &local.data, &remote.data)? {
+                Some(merged) => merged,
+                None => merge_text(
+                    baseline_data,
+                    &local.data,
+                    &remote.data,
+                    TextMergeStrategy::Local,
+                )?,
+            };
+            let source = std::str::from_utf8(&merged).ok();
+            if source.is_none_or(|source| ron::from_str::<serde::de::IgnoredAny>(source).is_err()) {
+                return Ok(None);
+            }
+            merged
+        }
+        "toml" => {
+            let Some(merged) = merge_toml(baseline_data, &local.data, &remote.data)? else {
+                return Ok(None);
+            };
+            merged
+        }
+        "json" => {
+            let json_baseline = if baseline.is_none() {
+                b"{}".as_slice()
+            } else {
+                baseline_data
+            };
+            let Some(merged) = merge_json(json_baseline, &local.data, &remote.data)? else {
+                return Ok(None);
+            };
+            merged
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(entry_with_data(local, data)))
+}
+
+fn entry_with_data(template: &LocalEntry, data: Vec<u8>) -> LocalEntry {
+    let mut entry = template.clone();
+    entry.size = data.len() as u64;
+    entry.modified_secs = 0;
+    entry.modified_nanos = 0;
+    entry.digest = entry_digest(entry.kind, entry.mode, &data);
+    entry.data = data;
+    entry
+}
+
+fn merge_text(
+    baseline: &[u8],
+    local: &[u8],
+    remote: &[u8],
+    strategy: TextMergeStrategy,
+) -> Result<Vec<u8>, String> {
+    if std::str::from_utf8(baseline).is_err()
+        || std::str::from_utf8(local).is_err()
+        || std::str::from_utf8(remote).is_err()
+    {
+        return Err("Vault text merge requires UTF-8 files".to_string());
+    }
+    let directory = std::env::temp_dir().join(format!("vmux-vault-merge-{}", random_hex(8)?));
+    std::fs::create_dir(&directory).map_err(|error| error.to_string())?;
+    let baseline_path = directory.join("baseline");
+    let local_path = directory.join("local");
+    let remote_path = directory.join("remote");
+    let result = (|| {
+        std::fs::write(&baseline_path, baseline).map_err(|error| error.to_string())?;
+        std::fs::write(&local_path, local).map_err(|error| error.to_string())?;
+        std::fs::write(&remote_path, remote).map_err(|error| error.to_string())?;
+        let strategy = match strategy {
+            TextMergeStrategy::Local => "--ours",
+            TextMergeStrategy::Union => "--union",
+        };
+        let output = Command::new("git")
+            .arg("merge-file")
+            .arg(strategy)
+            .arg("--stdout")
+            .arg(&local_path)
+            .arg(&baseline_path)
+            .arg(&remote_path)
+            .output()
+            .map_err(|error| format!("failed to merge Vault text: {error}"))?;
+        if output.status.code().is_some_and(|code| code <= 127) {
+            Ok(output.stdout)
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        }
+    })();
+    let _ = std::fs::remove_dir_all(directory);
+    result
+}
+
+fn merge_toml(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let Ok(baseline) = std::str::from_utf8(baseline) else {
+        return Ok(None);
+    };
+    let Ok(local) = std::str::from_utf8(local) else {
+        return Ok(None);
+    };
+    let Ok(remote) = std::str::from_utf8(remote) else {
+        return Ok(None);
+    };
+    let Ok(baseline) = toml::from_str::<toml::Value>(baseline) else {
+        return Ok(None);
+    };
+    let Ok(local) = toml::from_str::<toml::Value>(local) else {
+        return Ok(None);
+    };
+    let Ok(remote) = toml::from_str::<toml::Value>(remote) else {
+        return Ok(None);
+    };
+    let Some(merged) = merge_toml_value(Some(&baseline), Some(&local), Some(&remote)) else {
+        return Ok(None);
+    };
+    Ok(Some(
+        toml::to_string_pretty(&merged)
+            .map_err(|error| error.to_string())?
+            .into_bytes(),
+    ))
+}
+
+fn merge_ron(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let Ok(baseline) = ron::from_str::<ron::Value>(std::str::from_utf8(baseline).unwrap_or(""))
+    else {
+        return Ok(None);
+    };
+    let Ok(local) = ron::from_str::<ron::Value>(std::str::from_utf8(local).unwrap_or("")) else {
+        return Ok(None);
+    };
+    let Ok(remote) = ron::from_str::<ron::Value>(std::str::from_utf8(remote).unwrap_or("")) else {
+        return Ok(None);
+    };
+    let Some(merged) = merge_ron_value(Some(&baseline), Some(&local), Some(&remote)) else {
+        return Ok(None);
+    };
+    let mut output = ron::ser::to_string_pretty(&merged, ron::ser::PrettyConfig::new())
+        .map_err(|error| error.to_string())?
+        .into_bytes();
+    output.push(b'\n');
+    Ok(Some(output))
+}
+
+fn merge_ron_value(
+    baseline: Option<&ron::Value>,
+    local: Option<&ron::Value>,
+    remote: Option<&ron::Value>,
+) -> Option<ron::Value> {
+    if ron_value_options_equal(local, remote) {
+        return local.cloned();
+    }
+    if ron_value_options_equal(local, baseline) {
+        return remote.cloned();
+    }
+    if ron_value_options_equal(remote, baseline) {
+        return local.cloned();
+    }
+    match (baseline, local, remote) {
+        (
+            Some(ron::Value::Map(baseline)),
+            Some(ron::Value::Map(local)),
+            Some(ron::Value::Map(remote)),
+        ) => {
+            let keys = baseline
+                .keys()
+                .chain(local.keys())
+                .chain(remote.keys())
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            Some(ron::Value::Map(
+                keys.into_iter()
+                    .filter_map(|key| {
+                        merge_ron_value(
+                            ron_map_get(baseline, &key),
+                            ron_map_get(local, &key),
+                            ron_map_get(remote, &key),
+                        )
+                        .map(|value| (key, value))
+                    })
+                    .collect(),
+            ))
+        }
+        _ => local.cloned(),
+    }
+}
+
+fn ron_value_options_equal(left: Option<&ron::Value>, right: Option<&ron::Value>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => ron_values_equal(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn ron_values_equal(left: &ron::Value, right: &ron::Value) -> bool {
+    match (left, right) {
+        (ron::Value::Map(left), ron::Value::Map(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, value)| {
+                    ron_map_get(right, key).is_some_and(|other| ron_values_equal(value, other))
+                })
+        }
+        (ron::Value::Seq(left), ron::Value::Seq(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| ron_values_equal(left, right))
+        }
+        (ron::Value::Option(left), ron::Value::Option(right)) => {
+            ron_value_options_equal(left.as_deref(), right.as_deref())
+        }
+        _ => left == right,
+    }
+}
+
+fn ron_map_get<'a>(map: &'a ron::value::Map, key: &ron::Value) -> Option<&'a ron::Value> {
+    map.iter()
+        .find_map(|(candidate, value)| (candidate == key).then_some(value))
+}
+
+fn merge_toml_value(
+    baseline: Option<&toml::Value>,
+    local: Option<&toml::Value>,
+    remote: Option<&toml::Value>,
+) -> Option<toml::Value> {
+    if local == remote {
+        return local.cloned();
+    }
+    if local == baseline {
+        return remote.cloned();
+    }
+    if remote == baseline {
+        return local.cloned();
+    }
+    match (baseline, local, remote) {
+        (
+            Some(toml::Value::Table(baseline)),
+            Some(toml::Value::Table(local)),
+            Some(toml::Value::Table(remote)),
+        ) => {
+            let keys = baseline
+                .keys()
+                .chain(local.keys())
+                .chain(remote.keys())
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            Some(toml::Value::Table(
+                keys.into_iter()
+                    .filter_map(|key| {
+                        merge_toml_value(baseline.get(&key), local.get(&key), remote.get(&key))
+                            .map(|value| (key, value))
+                    })
+                    .collect(),
+            ))
+        }
+        _ => local.cloned(),
+    }
+}
+
+fn merge_json(baseline: &[u8], local: &[u8], remote: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let Ok(baseline) = serde_json::from_slice::<serde_json::Value>(baseline) else {
+        return Ok(None);
+    };
+    let Ok(local) = serde_json::from_slice::<serde_json::Value>(local) else {
+        return Ok(None);
+    };
+    let Ok(remote) = serde_json::from_slice::<serde_json::Value>(remote) else {
+        return Ok(None);
+    };
+    let Some(merged) = merge_json_value(Some(&baseline), Some(&local), Some(&remote)) else {
+        return Ok(None);
+    };
+    let mut output = serde_json::to_vec_pretty(&merged).map_err(|error| error.to_string())?;
+    output.push(b'\n');
+    Ok(Some(output))
+}
+
+fn merge_json_value(
+    baseline: Option<&serde_json::Value>,
+    local: Option<&serde_json::Value>,
+    remote: Option<&serde_json::Value>,
+) -> Option<serde_json::Value> {
+    if local == remote {
+        return local.cloned();
+    }
+    if local == baseline {
+        return remote.cloned();
+    }
+    if remote == baseline {
+        return local.cloned();
+    }
+    match (baseline, local, remote) {
+        (
+            Some(serde_json::Value::Object(baseline)),
+            Some(serde_json::Value::Object(local)),
+            Some(serde_json::Value::Object(remote)),
+        ) => {
+            let keys = baseline
+                .keys()
+                .chain(local.keys())
+                .chain(remote.keys())
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            Some(serde_json::Value::Object(
+                keys.into_iter()
+                    .filter_map(|key| {
+                        merge_json_value(baseline.get(&key), local.get(&key), remote.get(&key))
+                            .map(|value| (key, value))
+                    })
+                    .collect(),
+            ))
+        }
+        _ => local.cloned(),
+    }
+}
+
+fn conflict_copy_path(path: &str, occupied: &mut BTreeSet<String>) -> Result<String, String> {
+    let path = Path::new(path);
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("file");
+    let extension = path.extension().and_then(|extension| extension.to_str());
+    let label = conflict_copy_label();
+    for index in 1..=u16::MAX {
+        let suffix = if index == 1 {
+            String::new()
+        } else {
+            format!(" {index}")
+        };
+        let file_name = match extension {
+            Some(extension) => {
+                format!("{stem} (Conflicted copy {label}){suffix}.{extension}")
+            }
+            None => format!("{stem} (Conflicted copy {label}){suffix}"),
+        };
+        let candidate = parent.join(file_name).to_string_lossy().replace('\\', "/");
+        validate_relative_path(&candidate)?;
+        if occupied.insert(candidate.clone()) {
+            return Ok(candidate);
+        }
+    }
+    Err("failed to allocate Vault conflict copy".to_string())
+}
+
+fn conflict_copy_label() -> String {
+    let device = Command::new("/bin/hostname")
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|device| !device.is_empty())
+        .unwrap_or_else(|| "device".to_string());
+    let device = device
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let device = device.trim_matches('-');
+    let device = if device.is_empty() { "device" } else { device };
+    format!(
+        "{} {}",
+        device,
+        chrono::Local::now().format("%Y-%m-%d %H-%M-%S")
+    )
 }
 
 fn validate_file_tree(files: &BTreeMap<String, LocalEntry>) -> Result<(), String> {
@@ -1748,6 +2222,7 @@ fn write_local_state(root: &Path, repository: &Path) -> Result<(), String> {
                 digest: entry.digest,
                 kind: entry.kind,
                 mode: entry.mode,
+                data: Some(entry.data),
                 size: entry.size,
                 modified_secs: entry.modified_secs,
                 modified_nanos: entry.modified_nanos,
@@ -1801,10 +2276,13 @@ fn read_local_state(repository: &Path) -> Result<BTreeMap<String, LocalStateEntr
 }
 
 fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, String> {
-    Ok(read_local_state(repository)?
+    read_local_state(repository)?
         .into_iter()
         .map(|(path, entry)| {
-            (
+            let data = entry
+                .data
+                .ok_or_else(|| "Vault baseline needs refresh".to_string())?;
+            Ok((
                 path,
                 LocalEntry {
                     kind: entry.kind,
@@ -1812,12 +2290,12 @@ fn baseline_files(repository: &Path) -> Result<BTreeMap<String, LocalEntry>, Str
                     size: entry.size,
                     modified_secs: entry.modified_secs,
                     modified_nanos: entry.modified_nanos,
-                    data: Vec::new(),
+                    data,
                     digest: entry.digest,
                 },
-            )
+            ))
         })
-        .collect())
+        .collect::<Result<_, String>>()
 }
 
 fn state_path(repository: &Path) -> PathBuf {
@@ -3131,6 +3609,37 @@ mod tests {
     }
 
     #[test]
+    fn stale_encrypted_commit_is_discarded_and_regenerated_from_plaintext() {
+        let root = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let path = root.path().join("settings.ron");
+        std::fs::write(&path, "(value: 1)\n").unwrap();
+        let repository = prepare_repository(root.path());
+        let keys = FixedKeyStore::new(15);
+        connect_remote_paths(
+            root.path(),
+            &repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(&path, "(value: 2)\n").unwrap();
+        std::fs::write(repository.join(INDEX_FILE), b"stale encrypted commit").unwrap();
+        git(&repository, &["add", INDEX_FILE]).unwrap();
+        git(&repository, &["commit", "-m", "Stale local snapshot"]).unwrap();
+
+        sync_paths(root.path(), &repository, &keys).unwrap();
+
+        let manifest = read_manifest(&repository).unwrap();
+        let key = keys.load(&manifest.vault_id).unwrap();
+        let (_, files) = load_encrypted_snapshot(&repository, &key).unwrap();
+        assert_eq!(files["settings.ron"].data, b"(value: 2)\n");
+        assert_eq!(git(&repository, &["status", "--short"]).unwrap(), "");
+    }
+
+    #[test]
     fn existing_encrypted_vault_merges_non_conflicting_local_files() {
         let seed = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
@@ -3171,7 +3680,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_encrypted_vault_rejects_same_path_conflicts() {
+    fn existing_encrypted_vault_merges_structured_files_by_key() {
         let seed = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let remote_parent = tempfile::tempdir().unwrap();
@@ -3190,23 +3699,30 @@ mod tests {
         std::fs::write(root.path().join("settings.ron"), "(local: true)\n").unwrap();
         let repository = prepare_repository(root.path());
 
-        let error = connect_remote_paths(
+        connect_remote_paths(
             root.path(),
             &repository,
             remote.to_string_lossy().as_ref(),
             &keys,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error.contains("same files"));
+        let source = std::fs::read_to_string(root.path().join("settings.ron")).unwrap();
+        let ron::Value::Map(settings) = ron::from_str::<ron::Value>(&source).unwrap() else {
+            panic!("settings must remain a RON map");
+        };
         assert_eq!(
-            std::fs::read_to_string(root.path().join("settings.ron")).unwrap(),
-            "(local: true)\n"
+            ron_map_get(&settings, &ron::Value::String("local".to_string())),
+            Some(&ron::Value::Bool(true))
+        );
+        assert_eq!(
+            ron_map_get(&settings, &ron::Value::String("remote".to_string())),
+            Some(&ron::Value::Bool(true))
         );
     }
 
     #[test]
-    fn repeated_sync_preserves_a_detected_conflict() {
+    fn same_structured_key_prefers_the_local_value() {
         let first = tempfile::tempdir().unwrap();
         let second = tempfile::tempdir().unwrap();
         let remote_parent = tempfile::tempdir().unwrap();
@@ -3234,15 +3750,171 @@ mod tests {
         sync_paths(first.path(), &first_repository, &keys).unwrap();
         std::fs::write(second.path().join("settings.ron"), "(value: 3)\n").unwrap();
 
-        let first_error = sync_paths(second.path(), &second_repository, &keys).unwrap_err();
-        let second_error = sync_paths(second.path(), &second_repository, &keys).unwrap_err();
+        let result = sync_paths(second.path(), &second_repository, &keys).unwrap();
+        sync_paths(second.path(), &second_repository, &keys).unwrap();
 
-        assert!(first_error.contains("same files"));
-        assert!(second_error.contains("same files"));
+        assert!(result.contains("automatic merge"));
+        let source = std::fs::read_to_string(second.path().join("settings.ron")).unwrap();
+        let ron::Value::Map(settings) = ron::from_str::<ron::Value>(&source).unwrap() else {
+            panic!("settings must remain a RON map");
+        };
         assert_eq!(
-            std::fs::read_to_string(second.path().join("settings.ron")).unwrap(),
-            "(value: 3)\n"
+            ron_map_get(&settings, &ron::Value::String("value".to_string())),
+            Some(&ron::Value::Number(ron::value::Number::Integer(3)))
         );
+    }
+
+    #[test]
+    fn markdown_changes_from_two_devices_merge_automatically() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(12);
+        std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+        std::fs::write(
+            first.path().join("knowledge/note.md"),
+            "# Note\n\nAlpha\n\nOmega\n",
+        )
+        .unwrap();
+        let first_repository = prepare_repository(first.path());
+        connect_remote_paths(
+            first.path(),
+            &first_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        let second_repository = prepare_repository(second.path());
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(
+            first.path().join("knowledge/note.md"),
+            "# Note\n\nAlpha from first\n\nOmega\n",
+        )
+        .unwrap();
+        sync_paths(first.path(), &first_repository, &keys).unwrap();
+        std::fs::write(
+            second.path().join("knowledge/note.md"),
+            "# Note\n\nAlpha\n\nOmega from second\n",
+        )
+        .unwrap();
+
+        let result = sync_paths(second.path(), &second_repository, &keys).unwrap();
+
+        assert!(result.contains("automatic merge"));
+        assert_eq!(
+            std::fs::read_to_string(second.path().join("knowledge/note.md")).unwrap(),
+            "# Note\n\nAlpha from first\n\nOmega from second\n"
+        );
+    }
+
+    #[test]
+    fn toml_changes_from_two_devices_merge_by_key() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(13);
+        std::fs::create_dir_all(first.path().join("tools")).unwrap();
+        std::fs::write(
+            first.path().join("tools/tools.toml"),
+            "[values]\nfirst = 1\nsecond = 1\n",
+        )
+        .unwrap();
+        let first_repository = prepare_repository(first.path());
+        connect_remote_paths(
+            first.path(),
+            &first_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        let second_repository = prepare_repository(second.path());
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(
+            first.path().join("tools/tools.toml"),
+            "[values]\nfirst = 2\nsecond = 1\n",
+        )
+        .unwrap();
+        sync_paths(first.path(), &first_repository, &keys).unwrap();
+        std::fs::write(
+            second.path().join("tools/tools.toml"),
+            "[values]\nfirst = 1\nsecond = 2\n",
+        )
+        .unwrap();
+
+        sync_paths(second.path(), &second_repository, &keys).unwrap();
+
+        let merged = toml::from_str::<toml::Value>(
+            &std::fs::read_to_string(second.path().join("tools/tools.toml")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(merged["values"]["first"].as_integer(), Some(2));
+        assert_eq!(merged["values"]["second"].as_integer(), Some(2));
+    }
+
+    #[test]
+    fn opaque_conflicts_keep_remote_and_create_one_local_copy() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let remote_parent = tempfile::tempdir().unwrap();
+        let remote = remote_parent.path().join("vault.git");
+        create_bare_remote(&remote);
+        let keys = FixedKeyStore::new(14);
+        std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+        std::fs::write(first.path().join("knowledge/data.bin"), b"baseline").unwrap();
+        let first_repository = prepare_repository(first.path());
+        connect_remote_paths(
+            first.path(),
+            &first_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        let second_repository = prepare_repository(second.path());
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote.to_string_lossy().as_ref(),
+            &keys,
+        )
+        .unwrap();
+        std::fs::write(first.path().join("knowledge/data.bin"), b"remote").unwrap();
+        sync_paths(first.path(), &first_repository, &keys).unwrap();
+        std::fs::write(second.path().join("knowledge/data.bin"), b"local").unwrap();
+
+        let result = sync_paths(second.path(), &second_repository, &keys).unwrap();
+        sync_paths(second.path(), &second_repository, &keys).unwrap();
+
+        assert!(result.contains("1 conflicted copy"));
+        assert_eq!(
+            std::fs::read(second.path().join("knowledge/data.bin")).unwrap(),
+            b"remote"
+        );
+        let copies = std::fs::read_dir(second.path().join("knowledge"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.starts_with("data (Conflicted copy ") && name.ends_with(".bin")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(copies.len(), 1);
+        assert_eq!(std::fs::read(copies[0].path()).unwrap(), b"local");
     }
 
     #[test]
