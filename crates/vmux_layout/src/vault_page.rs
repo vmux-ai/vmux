@@ -30,6 +30,8 @@ enum VaultDestination {
     Existing,
 }
 
+const PASSKEY_UI_ENABLED: bool = false;
+
 impl RemoteProvider {
     const ALL: [Self; 4] = [
         Self::Github,
@@ -66,6 +68,7 @@ pub fn Page() -> Element {
     let mut recovery_key_input = use_signal(String::new);
     let mut recovery_upload_pending = use_signal(|| false);
     let mut github_device_code = use_signal(String::new);
+    let mut github_device_code_copied = use_signal(|| false);
     let mut repositories_requested = use_signal(|| false);
     let mut repository = use_signal(|| "vmux-vault".to_string());
     let mut selected_owner = use_signal(|| None::<String>);
@@ -119,6 +122,7 @@ pub fn Page() -> Element {
         move |mut result| {
             if result.action == VaultAction::ConnectGithub {
                 github_device_code.set(String::new());
+                github_device_code_copied.set(false);
             }
             if result.action == VaultAction::Sync && result.success {
                 recovery_upload_pending.set(false);
@@ -193,7 +197,10 @@ pub fn Page() -> Element {
     );
     let _auth_progress_listener = use_bin_event_listener::<VaultAuthProgress, _>(
         VAULT_AUTH_PROGRESS_EVENT,
-        move |progress| github_device_code.set(progress.code),
+        move |progress| {
+            github_device_code_copied.set(false);
+            github_device_code.set(progress.code);
+        },
     );
 
     use_effect(move || {
@@ -256,6 +263,7 @@ pub fn Page() -> Element {
                         selected_provider,
                         repositories_requested,
                         github_device_code,
+                        github_device_code_copied,
                         cloud_root,
                         private,
                         pending,
@@ -282,6 +290,7 @@ fn VaultPanel(
     selected_provider: Signal<Option<RemoteProvider>>,
     repositories_requested: Signal<bool>,
     github_device_code: Signal<String>,
+    github_device_code_copied: Signal<bool>,
     cloud_root: Signal<String>,
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
@@ -477,8 +486,28 @@ fn VaultPanel(
                                     }
                                 }
                                 if provider.is_github() && !github_device_code().is_empty() {
-                                    code { class: "mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 font-mono text-base font-semibold tracking-[0.2em] text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform] duration-300 ease-out starting:scale-90 starting:opacity-0",
-                                        {github_device_code()}
+                                    button {
+                                        r#type: "button",
+                                        class: "group mt-4 rounded-xl bg-foreground/[0.06] px-4 py-2.5 text-foreground shadow-sm ring-1 ring-inset ring-foreground/10 transition-[opacity,transform,background-color] duration-200 ease-out hover:bg-foreground/[0.09] active:scale-[0.98] starting:scale-90 starting:opacity-0",
+                                        title: translate("common-copy"),
+                                        aria_label: translate("common-copy"),
+                                        onclick: move |_| copy_text(
+                                            github_device_code(),
+                                            github_device_code_copied,
+                                        ),
+                                        code { class: "font-mono text-base font-semibold tracking-[0.2em]", {github_device_code()} }
+                                    }
+                                    div {
+                                        class: if github_device_code_copied() {
+                                            "mt-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                                        } else {
+                                            "mt-2 text-[10px] text-muted-foreground/60"
+                                        },
+                                        if github_device_code_copied() {
+                                            {translate("vault-recovery-key-copied")}
+                                        } else {
+                                            {translate("vault-recovery-key-copy-hint")}
+                                        }
                                     }
                                 }
                                 if connecting {
@@ -674,7 +703,9 @@ fn VaultPanel(
                     recovery_upload_pending,
                     notice,
                 }
-                if !passkey_setup_blocked() || !vault.passkey_credentials.is_empty() {
+                if PASSKEY_UI_ENABLED
+                    && (!passkey_setup_blocked() || !vault.passkey_credentials.is_empty())
+                {
                     PasskeyCard {
                         vault,
                         pending,
