@@ -40,9 +40,10 @@ KEYCHAIN=""
 ORIGINAL_KEYCHAINS=()
 
 while IFS= read -r keychain; do
+    keychain="${keychain#"${keychain%%[![:space:]]*}"}"
     keychain="${keychain#\"}"
     keychain="${keychain%\"}"
-    ORIGINAL_KEYCHAINS+=("$keychain")
+    [[ -n "$keychain" ]] && ORIGINAL_KEYCHAINS+=("$keychain")
 done < <(security list-keychains -d user)
 
 cleanup() {
@@ -95,3 +96,25 @@ fi
 
 cd "$ROOT"
 "$ROOT/scripts/package.sh" "$PROFILE"
+
+source "$ROOT/scripts/cargo-target-paths.sh"
+RELEASE_DIR="$(vmux_cargo_profile_dir "$ROOT" release)"
+case "$PROFILE" in
+    local) APP_BUNDLE="$RELEASE_DIR/Vmux ($(git -C "$ROOT" rev-parse --short=7 HEAD)).app" ;;
+    release) APP_BUNDLE="$RELEASE_DIR/Vmux.app" ;;
+esac
+
+codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+VERIFY_DIR="$(mktemp -d -t vmux-signature-check)"
+if ! (cd "$VERIFY_DIR" && codesign --display --extract-certificates \
+    "$APP_BUNDLE/Contents/MacOS/vmux" >/dev/null 2>&1); then
+    rm -rf "$VERIFY_DIR"
+    echo "Error: packaged Vault key broker is not certificate-signed." >&2
+    exit 1
+fi
+if [[ ! -s "$VERIFY_DIR/codesign0" ]]; then
+    rm -rf "$VERIFY_DIR"
+    echo "Error: packaged Vault key broker has no signing certificate." >&2
+    exit 1
+fi
+rm -rf "$VERIFY_DIR"
