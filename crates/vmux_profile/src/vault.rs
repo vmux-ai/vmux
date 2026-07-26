@@ -3,7 +3,6 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
-#[cfg(not(target_os = "macos"))]
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
@@ -38,7 +37,6 @@ const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-#[cfg(not(target_os = "macos"))]
 static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
 const IGNORED_ROOTS: [&str; 8] = [
     "agents",
@@ -265,7 +263,7 @@ pub fn is_managed_local_path(path: &Path) -> bool {
 }
 
 pub fn status() -> VaultStatus {
-    status_paths(&root_dir(), &repository_dir())
+    status_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
 }
 
 pub fn status_with_repositories() -> VaultStatus {
@@ -493,18 +491,21 @@ pub fn unlock_with_recovery_key(recovery_key: &str) -> Result<String, String> {
     )
 }
 
-fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
+fn status_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> VaultStatus {
     let initialized = repository.join(".git").is_dir();
     let manifest = initialized
         .then(|| read_manifest(repository))
         .transpose()
         .ok()
         .flatten();
+    let unlocked = manifest.as_ref().is_some_and(|manifest| {
+        state_path(repository).is_file() && keys.load(&manifest.vault_id).is_ok()
+    });
     let mut status = VaultStatus {
         root: root.to_path_buf(),
         initialized,
         encrypted: manifest.is_some(),
-        unlocked: initialized && state_path(repository).is_file(),
+        unlocked,
         ..VaultStatus::default()
     };
     if let Some(manifest) = manifest {
@@ -2025,7 +2026,11 @@ fn load_legacy_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String>
 
 #[cfg(target_os = "macos")]
 fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    if let Some(key) = load_session_key(vault_id)? {
+        return Ok(key);
+    }
     if let Some(key) = load_key_from_broker(vault_id)? {
+        store_session_key(vault_id, &key)?;
         return Ok(key);
     }
     let Some(key) = load_legacy_key(vault_id)? else {
@@ -2034,6 +2039,7 @@ fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     if key_broker_path().is_some() {
         store_key_with_broker(vault_id, &key)?;
     }
+    store_session_key(vault_id, &key)?;
     Ok(key)
 }
 
@@ -2050,9 +2056,11 @@ fn create_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
 #[cfg(target_os = "macos")]
 fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
     if key_broker_path().is_some() {
-        return store_key_with_broker(vault_id, key);
+        store_key_with_broker(vault_id, key)?;
+    } else {
+        store_keychain_key(KEYCHAIN_SERVICE, vault_id, key)?;
     }
-    store_keychain_key(KEYCHAIN_SERVICE, vault_id, key)
+    store_session_key(vault_id, key)
 }
 
 #[cfg(target_os = "macos")]
@@ -2226,12 +2234,7 @@ fn hex_value(byte: u8) -> Result<u8, String> {
 
 #[cfg(not(target_os = "macos"))]
 fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    SESSION_KEYS
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(vault_id)
-        .map(|key| Zeroizing::new(key.to_vec()))
+    load_session_key(vault_id)?
         .ok_or_else(|| "This Vault is locked on this device. Unlock it with a passkey.".to_string())
 }
 
@@ -2242,6 +2245,19 @@ fn create_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
 
 #[cfg(not(target_os = "macos"))]
 fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
+    store_session_key(vault_id, key)
+}
+
+fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    Ok(SESSION_KEYS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(vault_id)
+        .map(|key| Zeroizing::new(key.to_vec())))
+}
+
+fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
     validate_key(key)?;
     SESSION_KEYS
         .get_or_init(Default::default)
@@ -2700,6 +2716,18 @@ mod tests {
             load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
             "key unavailable"
         );
+    }
+
+    #[test]
+    fn vault_status_requires_an_accessible_encryption_key() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = prepare_repository(root.path());
+        let keys = FixedKeyStore::new(47);
+        initialize_paths(root.path(), &repository, &keys).unwrap();
+        write_local_state(root.path(), &repository).unwrap();
+
+        assert!(status_paths(root.path(), &repository, &keys).unlocked);
+        assert!(!status_paths(root.path(), &repository, &MemoryKeyStore::default()).unlocked);
     }
 
     fn repository(root: &Path) -> PathBuf {
