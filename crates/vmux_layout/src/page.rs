@@ -1298,14 +1298,20 @@ fn open_vault(pane_id: u64) {
 
 #[component]
 fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool) -> Element {
+    let pending = vault
+        .dirty
+        .saturating_add(vault.ahead)
+        .saturating_add(vault.behind);
     let detail = if !loaded {
         translate("common-loading")
     } else if !vault.initialized || vault.remote.is_empty() {
         translate("vault-not-connected")
-    } else if vault.dirty > 0 {
+    } else if vault.sync_failed {
+        translate("vault-backup-failed")
+    } else if pending > 0 {
         translate_with(
             "vault-change-count",
-            &[("count", TranslationValue::Number(vault.dirty as i64))],
+            &[("count", TranslationValue::Number(pending as i64))],
         )
     } else {
         translate("vault-clean")
@@ -1327,7 +1333,9 @@ fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool)
                 div { class: "truncate text-[10px] text-foreground/65", "{detail}" }
             }
             if loaded && vault.initialized && !vault.remote.is_empty() {
-                span { class: if vault.dirty > 0 {
+                span { class: if vault.sync_failed {
+                        "size-1.5 rounded-full bg-ansi-1"
+                    } else if pending > 0 {
                         "size-1.5 rounded-full bg-amber-500"
                     } else {
                         "size-1.5 rounded-full bg-emerald-500"

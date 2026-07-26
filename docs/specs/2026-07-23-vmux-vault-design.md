@@ -35,6 +35,8 @@ Setup is a progressive three-step flow:
 - New repositories are private by default; public is an explicit option with a warning.
 - Connect an existing GitHub repository or Git URL.
 - Sync stages and commits Vault changes, fetches, rebases, and pushes.
+- After initial connection, authored Vault changes are debounced and backed up automatically.
+- The explicit Sync action remains available for immediate retry and conflict resolution.
 - Rebase conflicts abort without modifying remote history.
 - Existing Vault repositories become the base and local files are replayed on top.
 - Unrelated repositories that do not match the Vault layout are rejected rather than overwritten.
@@ -75,12 +77,20 @@ vault.ron
 index.enc
 objects/<path-hmac>
 keys/passkeys/<credential-hash>.ron
+keys/recovery/default.ron
 ```
 
 Passkey recipient files contain only a public credential identifier and an AES-GCM-wrapped master
 key. Multiple Bitwarden, Apple Passwords, Google Password Manager, or other PRF-capable passkeys can
 wrap the same master key. Providers without PRF support are rejected for encryption rather than
 silently creating an unusable recipient.
+
+Every Vault may also create one portable 256-bit Recovery Key. Vmux generates and displays it before
+changing the remote; only after the user confirms it was saved in Bitwarden or another password
+manager does Vmux derive a Vault-specific wrapping key and commit the wrapped master key. A new
+device can connect the remote, paste the Recovery Key, validate
+the encrypted snapshot, store the master key in its local system key store, and materialize
+Knowledge and Tools without an additional Vmux password.
 
 GitHub authentication and repository creation use the installed `gh` CLI with a vmux-owned `GH_CONFIG_DIR` in Application Support. The browser authorization is separate from the user's global `gh` login. Git credentials remain outside the Vault.
 

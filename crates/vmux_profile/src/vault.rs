@@ -10,17 +10,20 @@ use std::time::Duration;
 
 use ring::aead;
 use ring::digest;
+use ring::hkdf;
 use ring::hmac;
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
 const FORMAT_VERSION: u32 = 1;
-const MANIFEST_VERSION: u32 = 2;
+const MANIFEST_VERSION: u32 = 3;
 const MANIFEST_FILE: &str = "vault.ron";
 const INDEX_FILE: &str = "index.enc";
 const OBJECTS_DIR: &str = "objects";
 const PASSKEYS_DIR: &str = "keys/passkeys";
+const RECOVERY_DIR: &str = "keys/recovery";
+const RECOVERY_FILE: &str = "default.ron";
 #[cfg(target_os = "macos")]
 const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 #[cfg(target_os = "macos")]
@@ -30,6 +33,8 @@ const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
 const PASSKEY_KDF_PREFIX: &[u8] = b"vmux-vault-passkey-kdf-v1\0";
 const PASSKEY_PRF_PREFIX: &[u8] = b"vmux-vault-passkey-prf-v1\0";
+const RECOVERY_AAD_PREFIX: &[u8] = b"vmux-vault-recovery-v1\0";
+const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
@@ -51,9 +56,11 @@ pub struct VaultStatus {
     pub root: PathBuf,
     pub initialized: bool,
     pub encrypted: bool,
+    pub unlocked: bool,
     pub vault_id: String,
     pub passkey_credentials: Vec<String>,
     pub passkey_salt: Vec<u8>,
+    pub recovery_enabled: bool,
     pub remote: String,
     pub branch: String,
     pub dirty: u32,
@@ -153,7 +160,7 @@ struct LocalFingerprint {
     modified_nanos: u32,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct RemoteManifest {
     version: u32,
     cipher: String,
@@ -166,6 +173,24 @@ struct PasskeyEnvelope {
     version: u32,
     credential_id: String,
     wrapped_key: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RecoveryEnvelope {
+    version: u32,
+    wrapped_key: Vec<u8>,
+}
+
+struct RecoveryKeyLength;
+
+pub struct RecoveryKeyCreation {
+    pub pending_upload: bool,
+}
+
+impl hkdf::KeyType for RecoveryKeyLength {
+    fn len(&self) -> usize {
+        KEY_LEN
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -231,6 +256,12 @@ pub fn root_dir() -> PathBuf {
 
 pub fn repository_dir() -> PathBuf {
     super::application_data_dir().join("vault")
+}
+
+pub fn is_managed_local_path(path: &Path) -> bool {
+    path.strip_prefix(root_dir())
+        .ok()
+        .is_some_and(|relative| !relative.as_os_str().is_empty() && !ignored_path(relative))
 }
 
 pub fn status() -> VaultStatus {
@@ -449,6 +480,19 @@ pub fn unlock_with_passkey(credential_id: &str, prf_output: &[u8]) -> Result<Str
     )
 }
 
+pub fn create_recovery_key(recovery_key: &str) -> Result<RecoveryKeyCreation, String> {
+    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, recovery_key)
+}
+
+pub fn unlock_with_recovery_key(recovery_key: &str) -> Result<String, String> {
+    unlock_with_recovery_key_paths(
+        &root_dir(),
+        &repository_dir(),
+        &SystemKeyStore,
+        recovery_key,
+    )
+}
+
 fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
     let initialized = repository.join(".git").is_dir();
     let manifest = initialized
@@ -460,6 +504,7 @@ fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
         root: root.to_path_buf(),
         initialized,
         encrypted: manifest.is_some(),
+        unlocked: initialized && state_path(repository).is_file(),
         ..VaultStatus::default()
     };
     if let Some(manifest) = manifest {
@@ -472,6 +517,10 @@ fn status_paths(root: &Path, repository: &Path) -> VaultStatus {
                     .map(|envelope| envelope.credential_id)
                     .collect();
             }
+            Err(error) => status.error = error,
+        }
+        match read_recovery_envelope(repository) {
+            Ok(envelope) => status.recovery_enabled = envelope.is_some(),
             Err(error) => status.error = error,
         }
     }
@@ -609,7 +658,9 @@ fn connect_remote_paths<K: KeyStore>(
                 let manifest = manifest_from_ref(vault_repository, &remote_branch)?;
                 let key = match keys.load(&manifest.vault_id) {
                     Ok(key) => Some(key),
-                    Err(_error) if remote_has_passkeys(vault_repository, &remote_branch)? => None,
+                    Err(_error) if remote_has_key_recipients(vault_repository, &remote_branch)? => {
+                        None
+                    }
                     Err(error) => return Err(error),
                 };
                 let branch = remote_branch
@@ -790,6 +841,77 @@ fn unlock_with_passkey_paths<K: KeyStore>(
     Ok("Vault unlocked".to_string())
 }
 
+fn create_recovery_key_paths<K: KeyStore>(
+    repository: &Path,
+    keys: &K,
+    recovery_key: &str,
+) -> Result<RecoveryKeyCreation, String> {
+    if read_recovery_envelope(repository)?.is_some() {
+        return Err("This Vault already has a Recovery Key".to_string());
+    }
+    let mut manifest = read_manifest(repository)?;
+    let previous_manifest = manifest.clone();
+    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
+    let recovery_key = parse_recovery_key(recovery_key)?;
+    let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
+    let envelope = RecoveryEnvelope {
+        version: FORMAT_VERSION,
+        wrapped_key: encrypt_bytes(&wrapping_key, &recovery_aad(&manifest.vault_id), &key)?,
+    };
+    let source = ron::ser::to_string_pretty(&envelope, ron::ser::PrettyConfig::new())
+        .map_err(|error| error.to_string())?;
+    let directory = repository.join(RECOVERY_DIR);
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    write_atomic(
+        &directory.join(RECOVERY_FILE),
+        format!("{source}\n").as_bytes(),
+    )?;
+    let finalization = (|| {
+        manifest.version = MANIFEST_VERSION;
+        write_manifest(repository, &manifest)?;
+        validate_encrypted_worktree(repository)?;
+        commit_changes(repository, "Add Vault Recovery Key")
+    })();
+    if let Err(error) = finalization {
+        let _ = std::fs::remove_file(directory.join(RECOVERY_FILE));
+        let _ = std::fs::remove_dir(&directory);
+        let _ = write_manifest(repository, &previous_manifest);
+        let _ = git(repository, &["reset"]);
+        return Err(error);
+    }
+    let mut pending_upload = false;
+    if !git_optional(repository, &["remote", "get-url", "origin"]).is_empty() {
+        pending_upload = current_branch(repository)
+            .and_then(|branch| git(repository, &["push", "-u", "origin", &branch]))
+            .is_err();
+    }
+    Ok(RecoveryKeyCreation { pending_upload })
+}
+
+fn unlock_with_recovery_key_paths<K: KeyStore>(
+    root: &Path,
+    repository: &Path,
+    keys: &K,
+    recovery_key: &str,
+) -> Result<String, String> {
+    let recovery_key = parse_recovery_key(recovery_key)?;
+    let manifest = read_manifest(repository)?;
+    let envelope = read_recovery_envelope(repository)?
+        .ok_or_else(|| "This Vault has no Recovery Key".to_string())?;
+    let wrapping_key = derive_recovery_wrapping_key(&recovery_key, &manifest.vault_id)?;
+    let key = Zeroizing::new(decrypt_bytes(
+        &wrapping_key,
+        &recovery_aad(&manifest.vault_id),
+        &envelope.wrapped_key,
+    )?);
+    validate_key(&key)?;
+    let (_, remote_files) = load_encrypted_snapshot(repository, &key)?;
+    keys.store(&manifest.vault_id, &key)?;
+    reconcile_local(root, &BTreeMap::new(), &remote_files)?;
+    write_local_state(root, repository)?;
+    Ok("Vault unlocked".to_string())
+}
+
 fn read_passkey_envelopes(repository: &Path) -> Result<BTreeMap<String, PasskeyEnvelope>, String> {
     let directory = repository.join(PASSKEYS_DIR);
     if !directory.exists() {
@@ -821,14 +943,31 @@ fn read_passkey_envelopes(repository: &Path) -> Result<BTreeMap<String, PasskeyE
     Ok(envelopes)
 }
 
+fn read_recovery_envelope(repository: &Path) -> Result<Option<RecoveryEnvelope>, String> {
+    let path = repository.join(RECOVERY_DIR).join(RECOVERY_FILE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let envelope = ron::from_str::<RecoveryEnvelope>(&source)
+        .map_err(|error| format!("invalid Vault Recovery Key recipient: {error}"))?;
+    if envelope.version != FORMAT_VERSION {
+        return Err("unsupported Vault Recovery Key recipient".to_string());
+    }
+    Ok(Some(envelope))
+}
+
 fn load_repository_key<K: KeyStore>(
     repository: &Path,
     keys: &K,
     vault_id: &str,
 ) -> Result<Zeroizing<Vec<u8>>, String> {
     keys.load(vault_id).map_err(|error| {
-        if read_passkey_envelopes(repository).is_ok_and(|envelopes| envelopes.is_empty()) {
-            "This Vault is locked on this device. No passkey is registered. Open it on a device that can already unlock it, then add a passkey."
+        let has_passkey = read_passkey_envelopes(repository)
+            .is_ok_and(|envelopes| !envelopes.is_empty());
+        let has_recovery = read_recovery_envelope(repository).is_ok_and(|envelope| envelope.is_some());
+        if !has_passkey && !has_recovery {
+            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key or passkey."
                 .to_string()
         } else {
             error
@@ -877,6 +1016,58 @@ fn passkey_aad(vault_id: &str, credential_id: &str) -> Vec<u8> {
     aad.push(0);
     aad.extend_from_slice(credential_id.as_bytes());
     aad
+}
+
+fn derive_recovery_wrapping_key(
+    recovery_key: &[u8],
+    vault_id: &str,
+) -> Result<[u8; KEY_LEN], String> {
+    validate_key(recovery_key)?;
+    let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, vault_id.as_bytes());
+    let prk = salt.extract(recovery_key);
+    let info = [RECOVERY_KDF_PREFIX];
+    let output = prk
+        .expand(&info, RecoveryKeyLength)
+        .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
+    let mut key = [0_u8; KEY_LEN];
+    output
+        .fill(&mut key)
+        .map_err(|_| "failed to derive Vault Recovery Key".to_string())?;
+    Ok(key)
+}
+
+fn recovery_aad(vault_id: &str) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(RECOVERY_AAD_PREFIX.len() + vault_id.len());
+    aad.extend_from_slice(RECOVERY_AAD_PREFIX);
+    aad.extend_from_slice(vault_id.as_bytes());
+    aad
+}
+
+#[cfg(test)]
+fn format_recovery_key(key: &[u8]) -> String {
+    let encoded = hex(key);
+    let groups = encoded
+        .as_bytes()
+        .chunks(4)
+        .map(|group| std::str::from_utf8(group).unwrap())
+        .collect::<Vec<_>>();
+    format!("vmux-{}", groups.join("-"))
+}
+
+fn parse_recovery_key(source: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+    let compact = source
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace() && *character != '-')
+        .collect::<String>();
+    let encoded = compact.strip_prefix("vmux").unwrap_or(&compact);
+    if encoded.len() != KEY_LEN * 2 {
+        return Err("Invalid Vault Recovery Key".to_string());
+    }
+    let key = decode_hex(encoded).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
+    validate_key(&key).map_err(|_| "Invalid Vault Recovery Key".to_string())?;
+    Ok(Zeroizing::new(key))
 }
 
 fn validate_credential_id(credential_id: &str) -> Result<(), String> {
@@ -1364,6 +1555,7 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
                     .strip_prefix(&format!("{OBJECTS_DIR}/"))
                     .is_some_and(|name| name.len() == 64 && !name.contains('/'))
                 || valid_passkey_path(entry)
+                || valid_recovery_path(entry)
         });
     if !valid {
         return Err("selected repository contains plaintext or non-Vault history".to_string());
@@ -1372,10 +1564,10 @@ fn validate_remote_history(repository: &Path, branch: &str) -> Result<(), String
     Ok(())
 }
 
-fn remote_has_passkeys(repository: &Path, branch: &str) -> Result<bool, String> {
+fn remote_has_key_recipients(repository: &Path, branch: &str) -> Result<bool, String> {
     Ok(!git(
         repository,
-        &["ls-tree", "-r", "--name-only", branch, PASSKEYS_DIR],
+        &["ls-tree", "-r", "--name-only", branch, "keys"],
     )?
     .is_empty())
 }
@@ -1413,19 +1605,33 @@ fn validate_encrypted_worktree(repository: &Path) -> Result<(), String> {
     }
     let keys = repository.join("keys");
     if keys.exists() {
-        let entries = std::fs::read_dir(&keys)
-            .map_err(|error| error.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| error.to_string())?;
-        if entries.len() != 1
-            || entries[0].file_name() != "passkeys"
-            || !entries[0]
-                .file_type()
-                .is_ok_and(|file_type| file_type.is_dir())
-        {
-            return Err("invalid encrypted Vault key recipients".to_string());
+        for entry in std::fs::read_dir(&keys).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if !entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+                return Err("invalid encrypted Vault key recipients".to_string());
+            }
+            match entry.file_name().to_str() {
+                Some("passkeys") => {
+                    let _ = read_passkey_envelopes(repository)?;
+                }
+                Some("recovery") => {
+                    let entries = std::fs::read_dir(entry.path())
+                        .map_err(|error| error.to_string())?
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|error| error.to_string())?;
+                    if entries.len() != 1
+                        || entries[0].file_name() != RECOVERY_FILE
+                        || !entries[0]
+                            .file_type()
+                            .is_ok_and(|file_type| file_type.is_file())
+                    {
+                        return Err("invalid Vault Recovery Key recipients".to_string());
+                    }
+                    let _ = read_recovery_envelope(repository)?;
+                }
+                _ => return Err("invalid encrypted Vault key recipients".to_string()),
+            }
         }
-        let _ = read_passkey_envelopes(repository)?;
     }
     Ok(())
 }
@@ -1439,6 +1645,10 @@ fn valid_passkey_path(path: &str) -> bool {
         && name[..64]
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn valid_recovery_path(path: &str) -> bool {
+    path == format!("{RECOVERY_DIR}/{RECOVERY_FILE}")
 }
 
 fn encrypt_bytes(key: &[u8], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>, String> {
@@ -1651,6 +1861,29 @@ fn hex(bytes: &[u8]) -> String {
         output.push(HEX[(byte & 0x0f) as usize] as char);
     }
     output
+}
+
+fn decode_hex(source: &str) -> Result<Vec<u8>, String> {
+    if !source.len().is_multiple_of(2) {
+        return Err("invalid hexadecimal data".to_string());
+    }
+    source
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = decode_hex_digit(pair[0])?;
+            let low = decode_hex_digit(pair[1])?;
+            Ok((high << 4) | low)
+        })
+        .collect()
+}
+
+fn decode_hex_digit(byte: u8) -> Result<u8, String> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        _ => Err("invalid hexadecimal data".to_string()),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -2440,13 +2673,13 @@ mod tests {
     }
 
     #[test]
-    fn missing_vault_key_distinguishes_recoverable_passkeys() {
+    fn missing_vault_key_distinguishes_registered_recovery_methods() {
         let repository = tempfile::tempdir().unwrap();
         let keys = MemoryKeyStore::default();
 
         assert_eq!(
             load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
-            "This Vault is locked on this device. No passkey is registered. Open it on a device that can already unlock it, then add a passkey."
+            "This Vault is locked on this device. No recovery method is registered. Open it on a device that can already unlock it, then add a Recovery Key or passkey."
         );
 
         let credential_id = "00";
@@ -2668,6 +2901,111 @@ mod tests {
     }
 
     #[test]
+    fn recovery_key_unlocks_knowledge_and_tools_on_a_new_device() {
+        let first = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(first.path().join("knowledge")).unwrap();
+        std::fs::create_dir_all(first.path().join("tools")).unwrap();
+        std::fs::write(first.path().join("knowledge/private.md"), "# Private\n").unwrap();
+        std::fs::write(
+            first.path().join("tools/tools.toml"),
+            "version = 1\n[homebrew]\npackages = [\"ripgrep\"]\n",
+        )
+        .unwrap();
+        std::fs::write(first.path().join("tools/Brewfile"), "brew \"ripgrep\"\n").unwrap();
+        let first_repository = prepare_repository(first.path());
+        let original_keys = FixedKeyStore::new(43);
+        initialize_paths(first.path(), &first_repository, &original_keys).unwrap();
+        let recovery_key = format_recovery_key(&[45; KEY_LEN]);
+        let recovery =
+            create_recovery_key_paths(&first_repository, &original_keys, &recovery_key).unwrap();
+        assert!(!recovery.pending_upload);
+        assert_eq!(parse_recovery_key(&recovery_key).unwrap().len(), KEY_LEN);
+        assert!(read_recovery_envelope(&first_repository).unwrap().is_some());
+
+        let remote = tempfile::tempdir().unwrap();
+        let remote_path = remote.path().join("vault.git");
+        create_bare_remote(&remote_path);
+        git(
+            &first_repository,
+            &["remote", "add", "origin", remote_path.to_str().unwrap()],
+        )
+        .unwrap();
+        git(&first_repository, &["push", "-u", "origin", "main"]).unwrap();
+
+        let second = tempfile::tempdir().unwrap();
+        let second_repository = prepare_repository(second.path());
+        let second_keys = MemoryKeyStore::default();
+        connect_remote_paths(
+            second.path(),
+            &second_repository,
+            remote_path.to_str().unwrap(),
+            &second_keys,
+        )
+        .unwrap();
+        assert!(!second.path().join("knowledge/private.md").exists());
+
+        unlock_with_recovery_key_paths(
+            second.path(),
+            &second_repository,
+            &second_keys,
+            &recovery_key,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(second.path().join("knowledge/private.md")).unwrap(),
+            "# Private\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(second.path().join("tools/Brewfile")).unwrap(),
+            "brew \"ripgrep\"\n"
+        );
+        assert_eq!(
+            second_keys.load("ignored").unwrap().as_slice(),
+            &[43; KEY_LEN]
+        );
+        assert!(
+            unlock_with_recovery_key_paths(
+                second.path(),
+                &second_repository,
+                &MemoryKeyStore::default(),
+                "vmux-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000-0000",
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn recovery_key_format_round_trips_and_rejects_invalid_input() {
+        let key = [0xab; KEY_LEN];
+        let encoded = format_recovery_key(&key);
+
+        assert!(encoded.starts_with("vmux-abab-"));
+        assert_eq!(parse_recovery_key(&encoded).unwrap().as_slice(), &key);
+        assert!(parse_recovery_key("vmux-not-a-key").is_err());
+    }
+
+    #[test]
+    fn recovery_key_creation_survives_remote_upload_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let repository = prepare_repository(root.path());
+        let keys = FixedKeyStore::new(44);
+        initialize_paths(root.path(), &repository, &keys).unwrap();
+        let unavailable = root.path().join("missing-remote.git");
+        git(
+            &repository,
+            &["remote", "add", "origin", unavailable.to_str().unwrap()],
+        )
+        .unwrap();
+
+        let recovery_key = format_recovery_key(&[46; KEY_LEN]);
+        let recovery = create_recovery_key_paths(&repository, &keys, &recovery_key).unwrap();
+
+        assert!(recovery.pending_upload);
+        assert_eq!(parse_recovery_key(&recovery_key).unwrap().len(), KEY_LEN);
+        assert!(read_recovery_envelope(&repository).unwrap().is_some());
+    }
+
+    #[test]
     fn initialization_commits_only_encrypted_paths_and_content() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("knowledge")).unwrap();
@@ -2702,6 +3040,20 @@ mod tests {
         assert_eq!(files["settings.ron"].data, b"(secret: true)\n");
         assert_eq!(files["knowledge/private.md"].data, b"# Private\n");
         assert!(!files.contains_key("workspace/project/secret.txt"));
+    }
+
+    #[test]
+    fn managed_path_filter_includes_authored_vault_content_only() {
+        let root = root_dir();
+
+        assert!(is_managed_local_path(&root.join("settings.ron")));
+        assert!(is_managed_local_path(&root.join("knowledge/note.md")));
+        assert!(is_managed_local_path(&root.join("tools/Brewfile")));
+        assert!(!is_managed_local_path(&root.join("workspace/repo/file.rs")));
+        assert!(!is_managed_local_path(
+            &root.join("profiles/personal/store.ron")
+        ));
+        assert!(!is_managed_local_path(&root.join("knowledge/.DS_Store")));
     }
 
     #[test]

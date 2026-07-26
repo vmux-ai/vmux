@@ -4,10 +4,12 @@ use std::process::{Command, Output};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::Mutex;
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
 use vmux_core::page::{PageManifest, PageReady, PrewarmPage};
@@ -40,6 +42,8 @@ const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
     icon: Some(vmux_core::BuiltinIcon::Vault),
     command_bar: true,
 };
+
+const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
 
 pub struct ToolsPlugin;
 
@@ -92,9 +96,27 @@ struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
 struct VaultActionTask {
     target: Entity,
     request: VaultActionRequest,
-    task: Task<Result<String, String>>,
+    task: Task<Result<VaultActionOutput, String>>,
     progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
     canceled: Arc<AtomicBool>,
+}
+
+struct VaultActionOutput {
+    message: String,
+    pending_upload: bool,
+}
+
+struct VaultWatch {
+    _watcher: RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    debounce_tx: mpsc::Sender<()>,
+    ready_rx: mpsc::Receiver<()>,
+}
+
+#[derive(Resource, Default)]
+struct VaultAutoSync {
+    requested: bool,
+    initial_scan_complete: bool,
 }
 
 #[derive(Resource, Default)]
@@ -112,6 +134,74 @@ struct InventoryItem {
 
 impl Plugin for ToolsPlugin {
     fn build(&self, app: &mut App) {
+        let vault_root = vmux_core::profile::vault::root_dir();
+        let _ = std::fs::create_dir_all(&vault_root);
+        let knowledge_root = vault_root.join("knowledge");
+        let tools_root = vault_root.join("tools");
+        let _ = std::fs::create_dir_all(&knowledge_root);
+        let _ = std::fs::create_dir_all(&tools_root);
+        let (watch_tx, watch_rx) = mpsc::channel();
+        let watch_wake = app
+            .world()
+            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+            .map(|wrapper| (**wrapper).clone());
+        let debounce_wake = watch_wake.clone();
+        match notify::recommended_watcher(move |result| {
+            if watch_tx.send(result).is_ok()
+                && let Some(wake) = &watch_wake
+            {
+                let _ = wake.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }) {
+            Ok(mut watcher) => {
+                if watcher
+                    .watch(&vault_root, RecursiveMode::NonRecursive)
+                    .is_ok()
+                    && watcher
+                        .watch(&knowledge_root, RecursiveMode::Recursive)
+                        .is_ok()
+                    && watcher.watch(&tools_root, RecursiveMode::Recursive).is_ok()
+                {
+                    let (debounce_tx, debounce_rx) = mpsc::channel();
+                    let (ready_tx, ready_rx) = mpsc::channel();
+                    if let Err(error) = std::thread::Builder::new()
+                        .name("vmux-vault-auto-sync".to_string())
+                        .spawn(move || {
+                            loop {
+                                if debounce_rx.recv().is_err() {
+                                    return;
+                                }
+                                loop {
+                                    match debounce_rx.recv_timeout(VAULT_AUTO_SYNC_DELAY) {
+                                        Ok(()) => {}
+                                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                                            if ready_tx.send(()).is_ok()
+                                                && let Some(wake) = &debounce_wake
+                                            {
+                                                let _ = wake.send_event(
+                                                    bevy::winit::WinitUserEvent::WakeUp,
+                                                );
+                                            }
+                                            break;
+                                        }
+                                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                                    }
+                                }
+                            }
+                        })
+                    {
+                        bevy::log::warn!("Vault auto-sync worker init failed: {error}");
+                    }
+                    app.insert_non_send(VaultWatch {
+                        _watcher: watcher,
+                        rx: watch_rx,
+                        debounce_tx,
+                        ready_rx,
+                    });
+                }
+            }
+            Err(error) => bevy::log::warn!("Vault watcher init failed: {error}"),
+        }
         app.world_mut().spawn((
             PAGE_MANIFEST,
             PrewarmPage {
@@ -135,6 +225,7 @@ impl Plugin for ToolsPlugin {
         app.init_resource::<ToolsState>()
             .init_resource::<ToolActionQueue>()
             .init_resource::<VaultActionQueue>()
+            .init_resource::<VaultAutoSync>()
             .add_plugins(BinEventEmitterPlugin::<(
                 ToolsRefreshRequest,
                 ToolActionRequest,
@@ -150,8 +241,10 @@ impl Plugin for ToolsPlugin {
             .add_systems(
                 Update,
                 (
+                    drain_vault_watch,
                     start_tools_scan,
                     drain_tools_scan,
+                    queue_vault_auto_sync,
                     start_tool_action,
                     drain_tool_actions,
                     start_vault_action,
@@ -242,6 +335,82 @@ fn on_vault_refresh_request(
     state.full_scan |= !state.loaded;
     state.load_vault_repositories |= trigger.event().payload.load_repositories;
     state.generation = state.generation.wrapping_add(1);
+}
+
+fn drain_vault_watch(
+    watcher: Option<NonSendMut<VaultWatch>>,
+    mut auto_sync: ResMut<VaultAutoSync>,
+    mut state: ResMut<ToolsState>,
+) {
+    let Some(watcher) = watcher else {
+        return;
+    };
+    let mut changed = false;
+    for result in watcher.rx.try_iter() {
+        changed |= vault_event_requests_sync(&result);
+    }
+    if !changed {
+        if watcher.ready_rx.try_iter().next().is_some() {
+            auto_sync.requested = true;
+        }
+        return;
+    }
+    state.dirty = true;
+    state.generation = state.generation.wrapping_add(1);
+    auto_sync.requested = false;
+    let _ = watcher.ready_rx.try_iter().count();
+    let _ = watcher.debounce_tx.send(());
+}
+
+fn queue_vault_auto_sync(
+    mut auto_sync: ResMut<VaultAutoSync>,
+    state: Res<ToolsState>,
+    scans: Query<(), With<ToolsScanTask>>,
+    tasks: Query<&VaultActionTask>,
+    mut queue: ResMut<VaultActionQueue>,
+) {
+    if !auto_sync.requested || state.dirty || !state.loaded || !scans.is_empty() {
+        return;
+    }
+    let vault = &state.snapshot.vault;
+    let sync_needed = vault.dirty > 0 || vault.ahead > 0 || vault.behind > 0;
+    if !vault.initialized || !vault.unlocked || vault.remote.is_empty() || !sync_needed {
+        auto_sync.requested = false;
+        return;
+    }
+    if tasks
+        .iter()
+        .any(|task| task.request.action == VaultAction::Sync)
+        || queue
+            .0
+            .iter()
+            .any(|(_, request)| request.action == VaultAction::Sync)
+    {
+        auto_sync.requested = false;
+        return;
+    }
+    queue.0.push_back((
+        Entity::PLACEHOLDER,
+        VaultActionRequest {
+            action: VaultAction::Sync,
+            repository: String::new(),
+            private: true,
+            credential_id: String::new(),
+            prf_output: Vec::new(),
+            recovery_key: String::new(),
+        },
+    ));
+    auto_sync.requested = false;
+}
+
+fn vault_event_requests_sync(result: &notify::Result<notify::Event>) -> bool {
+    result.as_ref().is_ok_and(|event| {
+        !matches!(event.kind, notify::EventKind::Access(_))
+            && event
+                .paths
+                .iter()
+                .any(|path| vmux_core::profile::vault::is_managed_local_path(path))
+    })
 }
 
 fn start_tool_action(
@@ -359,6 +528,7 @@ fn start_tools_scan(
 fn drain_tools_scan(
     mut tasks: Query<(Entity, &mut ToolsScanTask)>,
     mut state: ResMut<ToolsState>,
+    mut auto_sync: ResMut<VaultAutoSync>,
     mut commands: Commands,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -373,6 +543,14 @@ fn drain_tools_scan(
         state.snapshot = snapshot;
         state.loaded = true;
         state.revision = state.revision.wrapping_add(1);
+        if !auto_sync.initial_scan_complete {
+            let vault = &state.snapshot.vault;
+            auto_sync.requested = vault.initialized
+                && vault.unlocked
+                && !vault.remote.is_empty()
+                && (vault.dirty > 0 || vault.ahead > 0 || vault.behind > 0);
+            auto_sync.initial_scan_complete = true;
+        }
     }
 }
 
@@ -442,15 +620,23 @@ fn drain_vault_actions(
         if task.canceled.load(Ordering::Relaxed) {
             continue;
         }
-        let (success, message) = match result {
-            Ok(message) => (true, message),
-            Err(message) => (false, message),
+        let (success, message, pending_upload) = match result {
+            Ok(output) => (true, output.message, output.pending_upload),
+            Err(message) => (false, message, false),
         };
         let event = VaultActionResult {
             action: task.request.action,
             success,
             message,
+            pending_upload,
         };
+        if task.request.action == VaultAction::Sync {
+            state.snapshot.vault.sync_failed = !success;
+            state.revision = state.revision.wrapping_add(1);
+            if task.target == Entity::PLACEHOLDER && !success {
+                continue;
+            }
+        }
         if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 task.target,
@@ -592,14 +778,17 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
         root: status.root.to_string_lossy().into_owned(),
         initialized: status.initialized,
         encrypted: status.encrypted,
+        unlocked: status.unlocked,
         vault_id: status.vault_id,
         passkey_credentials: status.passkey_credentials,
         passkey_salt: status.passkey_salt,
+        recovery_enabled: status.recovery_enabled,
         remote: status.remote,
         branch: status.branch,
         dirty: status.dirty,
         ahead: status.ahead,
         behind: status.behind,
+        sync_failed: previous.sync_failed,
         github_owner: status.github_owner,
         github_owners: status.github_owners,
         repositories: status
@@ -1147,12 +1336,19 @@ async fn perform_vault_action<F, C>(
     request: &VaultActionRequest,
     progress: F,
     canceled: C,
-) -> Result<String, String>
+) -> Result<VaultActionOutput, String>
 where
     F: Fn(VaultAuthProgress),
     C: Fn() -> bool,
 {
-    match request.action {
+    if request.action == VaultAction::CreateRecoveryKey {
+        let recovery = vmux_core::profile::vault::create_recovery_key(&request.recovery_key)?;
+        return Ok(VaultActionOutput {
+            message: String::new(),
+            pending_upload: recovery.pending_upload,
+        });
+    }
+    let message = match request.action {
         VaultAction::Create => vmux_core::profile::vault::create_remote(
             &request.repository,
             if request.private {
@@ -1195,6 +1391,10 @@ where
             &request.credential_id,
             &request.prf_output,
         ),
+        VaultAction::CreateRecoveryKey => unreachable!(),
+        VaultAction::UnlockRecoveryKey => {
+            vmux_core::profile::vault::unlock_with_recovery_key(&request.recovery_key)
+        }
         VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
         VaultAction::CreateCloudFolder => {
             let folder = Path::new(&request.repository).join(&request.credential_id);
@@ -1223,7 +1423,11 @@ where
             }
             vmux_core::profile::vault::connect_folder(folder.path())
         }
-    }
+    }?;
+    Ok(VaultActionOutput {
+        message,
+        pending_upload: false,
+    })
 }
 
 async fn connect_cloud_storage(provider: &str) -> Result<String, String> {
@@ -1606,6 +1810,75 @@ mod tests {
         assert_eq!(
             package_actions(ToolStatus::Outdated, true, true),
             [ToolAction::Update, ToolAction::Uninstall]
+        );
+    }
+
+    #[test]
+    fn vault_backup_watcher_ignores_runtime_and_access_events() {
+        let root = vmux_core::profile::vault::root_dir();
+        let knowledge =
+            notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
+                .add_path(root.join("knowledge/note.md"));
+        let runtime = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Any))
+            .add_path(root.join("workspace/repo/file.rs"));
+        let access = notify::Event::new(notify::EventKind::Access(notify::event::AccessKind::Any))
+            .add_path(root.join("tools/tools.toml"));
+
+        assert!(vault_event_requests_sync(&Ok(knowledge)));
+        assert!(!vault_event_requests_sync(&Ok(runtime)));
+        assert!(!vault_event_requests_sync(&Ok(access)));
+    }
+
+    #[test]
+    fn automatic_backup_queues_only_unlocked_vaults_needing_sync() {
+        fn queued(vault: VaultSnapshot) -> usize {
+            let mut app = App::new();
+            app.init_resource::<ToolsState>()
+                .init_resource::<VaultAutoSync>()
+                .init_resource::<VaultActionQueue>()
+                .add_systems(Update, queue_vault_auto_sync);
+            {
+                let mut state = app.world_mut().resource_mut::<ToolsState>();
+                state.loaded = true;
+                state.dirty = false;
+                state.snapshot.vault = vault;
+            }
+            app.world_mut().resource_mut::<VaultAutoSync>().requested = true;
+
+            app.update();
+
+            app.world().resource::<VaultActionQueue>().0.len()
+        }
+
+        let connected = VaultSnapshot {
+            initialized: true,
+            unlocked: true,
+            remote: "https://example.com/vault.git".to_string(),
+            dirty: 1,
+            ..Default::default()
+        };
+        assert_eq!(queued(connected.clone()), 1);
+        assert_eq!(
+            queued(VaultSnapshot {
+                unlocked: false,
+                ..connected.clone()
+            }),
+            0
+        );
+        assert_eq!(
+            queued(VaultSnapshot {
+                dirty: 0,
+                ahead: 1,
+                ..connected.clone()
+            }),
+            1
+        );
+        assert_eq!(
+            queued(VaultSnapshot {
+                dirty: 0,
+                ..connected
+            }),
+            0
         );
     }
 }
