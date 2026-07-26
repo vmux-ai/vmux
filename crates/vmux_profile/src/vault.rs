@@ -1704,9 +1704,7 @@ pub fn authorize_key_broker_parent() -> Result<(), String> {
     let requirement =
         SecRequirement::from_str(&format!("certificate leaf = H\"{certificate}\""))
             .map_err(|error| format!("failed to create Vault key broker requirement: {error}"))?;
-    parent
-        .check_validity(Flags::BASIC_VALIDATE_ONLY, &requirement)
-        .map_err(|_| "Vault key broker rejected its caller".to_string())?;
+    validate_key_broker_caller(&parent, &requirement)?;
 
     let expected = broker
         .parent()
@@ -1721,6 +1719,18 @@ pub fn authorize_key_broker_parent() -> Result<(), String> {
         return Err("Vault key broker rejected its caller".to_string());
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn validate_key_broker_caller(
+    caller: &security_framework::os::macos::code_signing::SecCode,
+    requirement: &security_framework::os::macos::code_signing::SecRequirement,
+) -> Result<(), String> {
+    use security_framework::os::macos::code_signing::Flags;
+
+    caller
+        .check_validity(Flags::NONE, requirement)
+        .map_err(|_| "Vault key broker rejected its caller".to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -2345,6 +2355,18 @@ mod tests {
 
         assert_eq!(hash.len(), 40);
         assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn vault_key_broker_validates_running_callers() {
+        use security_framework::os::macos::code_signing::{Flags, SecCode, SecRequirement};
+        use std::str::FromStr;
+
+        let caller = SecCode::for_self(Flags::NONE).unwrap();
+        let requirement = SecRequirement::from_str("true").unwrap();
+
+        validate_key_broker_caller(&caller, &requirement).unwrap();
     }
 
     struct FixedKeyStore {
