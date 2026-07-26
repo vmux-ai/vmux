@@ -1351,12 +1351,7 @@ fn perform_action(request: &ToolActionRequest) -> Result<String, String> {
             if request.provider != ToolProvider::Dotfiles {
                 return Err("unlink is only valid for dotfiles".to_string());
             }
-            let removed = match manifest_store::unlink_dotfile_package(&request.id) {
-                Ok(removed) => removed,
-                Err(error) if error.contains("does not exist") => 0,
-                Err(error) => return Err(error),
-            };
-            set_manifest_entry(request.provider, &request.id, false)?;
+            let removed = manifest_store::disable_and_unlink_dotfile_package(&request.id)?;
             Ok(format!("unlinked {removed} file(s)"))
         }
         ToolAction::Apply | ToolAction::Import => unreachable!(),

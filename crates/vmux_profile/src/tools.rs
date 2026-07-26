@@ -832,6 +832,65 @@ pub fn unlink_dotfile_package(package: &str) -> Result<usize, String> {
     unlink_dotfile_package_in(&dotfiles_dir(), &home_dir(), package)
 }
 
+/// Disables one dotfile package and removes its links as one rollback-capable operation.
+pub fn disable_and_unlink_dotfile_package(package: &str) -> Result<usize, String> {
+    migrate_legacy_storage()?;
+    disable_and_unlink_dotfile_package_in(&manifest_path(), &dotfiles_dir(), &home_dir(), package)
+}
+
+fn disable_and_unlink_dotfile_package_in(
+    manifest_path: &Path,
+    dotfiles_root: &Path,
+    home: &Path,
+    package: &str,
+) -> Result<usize, String> {
+    validate_package_name(package)?;
+    let mut manifest = load_manifest_from(manifest_path)?;
+    let links = if dotfiles_root.join(package).is_dir() {
+        plan_dotfile_package_in(dotfiles_root, home, package)?
+            .links
+            .into_iter()
+            .filter(|link| link.state == DotfileLinkState::Linked)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let mut removed = Vec::new();
+    for link in links {
+        if let Err(error) = std::fs::remove_file(&link.target) {
+            let rollback = restore_dotfile_links(&removed);
+            return Err(match rollback {
+                Ok(()) => error.to_string(),
+                Err(rollback) => format!("{error}; failed to restore dotfile links: {rollback}"),
+            });
+        }
+        removed.push(link);
+    }
+    manifest.set_dotfile_package(package, false);
+    if let Err(error) = write_manifest_to(manifest_path, &manifest) {
+        let rollback = restore_dotfile_links(&removed);
+        return Err(match rollback {
+            Ok(()) => error,
+            Err(rollback) => format!("{error}; failed to restore dotfile links: {rollback}"),
+        });
+    }
+    Ok(removed.len())
+}
+
+fn restore_dotfile_links(links: &[DotfileLink]) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for link in links.iter().rev() {
+        if let Err(error) = create_relative_symlink(&link.source, &link.target) {
+            errors.push(format!("{}: {error}", link.target.display()));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join(", "))
+    }
+}
+
 /// Removes links owned by one dotfile package with explicit roots.
 pub fn unlink_dotfile_package_in(
     dotfiles_root: &Path,
@@ -1555,6 +1614,35 @@ command = "vmux"
             1
         );
         assert!(!target.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn disable_and_unlink_dotfile_package_updates_links_and_manifest() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let dotfiles = temp.path().join("tools/dotfiles");
+        let manifest_path = temp.path().join("tools/tools.toml");
+        std::fs::create_dir_all(dotfiles.join("shell")).unwrap();
+        std::fs::write(dotfiles.join("shell/.zshrc"), "managed").unwrap();
+        let mut manifest = ToolsManifest::default();
+        manifest.set_dotfile_package("shell", true);
+        write_manifest_to(&manifest_path, &manifest).unwrap();
+        apply_dotfile_package_in(&dotfiles, &home, "shell").unwrap();
+
+        assert_eq!(
+            disable_and_unlink_dotfile_package_in(&manifest_path, &dotfiles, &home, "shell")
+                .unwrap(),
+            1
+        );
+        assert!(!home.join(".zshrc").exists());
+        assert!(
+            load_manifest_from(&manifest_path)
+                .unwrap()
+                .dotfiles
+                .packages
+                .is_empty()
+        );
     }
 
     #[cfg(unix)]

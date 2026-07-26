@@ -43,6 +43,7 @@ fn acp_server(name: String, server: McpServerManifest) -> ManagedMcpServer {
         command: server.command,
         args: server.args,
         env: server.env.into_iter().collect(),
+        cwd: server.cwd,
         url: server.url,
         headers,
     }
@@ -162,7 +163,7 @@ mod tests {
             command: Some("npx".to_string()),
             args: vec!["-y".to_string(), "server".to_string()],
             env: BTreeMap::from([("MODE".to_string(), "local".to_string())]),
-            cwd: None,
+            cwd: Some("/tmp/project".to_string()),
             url: None,
             headers: BTreeMap::new(),
             header_env: BTreeMap::new(),
@@ -177,6 +178,7 @@ mod tests {
                 command: Some("npx".to_string()),
                 args: vec!["-y".to_string(), "server".to_string()],
                 env: vec![("MODE".to_string(), "local".to_string())],
+                cwd: Some("/tmp/project".to_string()),
                 url: None,
                 headers: Vec::new(),
             }

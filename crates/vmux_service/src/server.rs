@@ -45,6 +45,13 @@ fn to_acp_mcp_server(
         EnvVariable, HttpHeader, McpServer, McpServerHttp, McpServerSse, McpServerStdio,
     };
 
+    if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
+        bevy::log::warn!(
+            "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
+            server.name
+        );
+        return None;
+    }
     let headers = server
         .headers
         .into_iter()
@@ -1090,6 +1097,23 @@ mod tests {
 
         assert!(prompt.contains("resume"));
         assert_eq!(crate::protocol::extract_display_prompt(&prompt), Some(""));
+    }
+
+    #[test]
+    fn acp_rejects_stdio_mcp_server_with_working_directory() {
+        assert!(
+            to_acp_mcp_server(ManagedMcpServer {
+                name: "local".into(),
+                transport: ManagedMcpTransport::Stdio,
+                command: Some("server".into()),
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: Some("/tmp/project".into()),
+                url: None,
+                headers: Vec::new(),
+            })
+            .is_none()
+        );
     }
 
     #[test]

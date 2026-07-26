@@ -52,6 +52,7 @@ pub struct ManagedMcpServer {
     pub command: Option<String>,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    pub cwd: Option<String>,
     pub url: Option<String>,
     pub headers: Vec<(String, String)>,
 }
@@ -1706,12 +1707,33 @@ mod tests {
                 command: None,
                 args: Vec::new(),
                 env: Vec::new(),
+                cwd: None,
                 url: Some("https://example.com/mcp".into()),
                 headers: Vec::new(),
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
-        rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
+        let ClientMessage::SpawnAcpAgent {
+            managed_mcp_servers,
+            ..
+        } = decoded
+        else {
+            panic!("expected SpawnAcpAgent");
+        };
+        assert_eq!(
+            managed_mcp_servers,
+            vec![ManagedMcpServer {
+                name: "docs".into(),
+                transport: ManagedMcpTransport::Http,
+                command: None,
+                args: Vec::new(),
+                env: Vec::new(),
+                cwd: None,
+                url: Some("https://example.com/mcp".into()),
+                headers: Vec::new(),
+            }]
+        );
 
         let services = [
             ServiceMessage::AcpTerminalCreated {

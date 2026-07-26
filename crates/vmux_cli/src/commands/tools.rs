@@ -52,10 +52,8 @@ pub fn run(args: ToolsArgs) -> io::Result<()> {
             Ok(())
         }
         ToolsCommand::Unlink { package } => {
-            let removed = tools::unlink_dotfile_package(&package).map_err(io::Error::other)?;
-            let mut manifest = tools::load_manifest().map_err(io::Error::other)?;
-            manifest.set_dotfile_package(&package, false);
-            tools::write_manifest(&manifest).map_err(io::Error::other)?;
+            let removed =
+                tools::disable_and_unlink_dotfile_package(&package).map_err(io::Error::other)?;
             println!("unlinked {removed} file(s)");
             Ok(())
         }

@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+use std::io::Write;
 
 use ring::aead;
 use ring::digest;
@@ -2686,6 +2689,7 @@ fn key_broker_error(output: &Output) -> String {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn decode_key_hex(value: &str) -> Result<Vec<u8>, String> {
     if value.len() != KEY_LEN * 2 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err("Vault encryption key has an invalid encoding".to_string());
@@ -2701,6 +2705,7 @@ fn decode_key_hex(value: &str) -> Result<Vec<u8>, String> {
     Ok(key)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn hex_value(byte: u8) -> Result<u8, String> {
     match byte {
         b'0'..=b'9' => Ok(byte - b'0'),
