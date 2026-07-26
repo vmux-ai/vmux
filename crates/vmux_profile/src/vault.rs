@@ -1841,14 +1841,17 @@ fn parent_process_path(pid: libc::pid_t) -> Result<PathBuf, String> {
 
 #[cfg(target_os = "macos")]
 fn signing_leaf_hash(path: &Path) -> Result<String, String> {
-    let prefix = std::env::temp_dir().join(format!("vmux-vault-certificate-{}-", random_hex(16)?));
+    let directory =
+        std::env::temp_dir().join(format!("vmux-vault-certificate-{}", random_hex(16)?));
+    std::fs::create_dir(&directory)
+        .map_err(|error| format!("failed to prepare Vault certificate check: {error}"))?;
     let output = Command::new("/usr/bin/codesign")
         .args(["--display", "--extract-certificates"])
-        .arg(&prefix)
         .arg(path)
+        .current_dir(&directory)
         .output()
         .map_err(|error| format!("failed to inspect Vault key broker signature: {error}"))?;
-    let certificate_path = PathBuf::from(format!("{}0", prefix.to_string_lossy()));
+    let certificate_path = directory.join("codesign0");
     let result = if output.status.success() {
         std::fs::read(&certificate_path)
             .map(|certificate| {
@@ -1861,9 +1864,7 @@ fn signing_leaf_hash(path: &Path) -> Result<String, String> {
     } else {
         Err("Vault key broker is not signed with a certificate".to_string())
     };
-    for index in 0..4 {
-        let _ = std::fs::remove_file(format!("{}{}", prefix.to_string_lossy(), index));
-    }
+    let _ = std::fs::remove_dir_all(directory);
     result
 }
 
@@ -2335,6 +2336,15 @@ mod tests {
         assert_eq!(decode_key_hex(&hex(&key)), Ok(key));
         assert!(decode_key_hex("00").is_err());
         assert!(decode_key_hex(&"z".repeat(KEY_LEN * 2)).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn vault_key_broker_reads_signing_leaf_certificate() {
+        let hash = signing_leaf_hash(Path::new("/usr/bin/codesign")).unwrap();
+
+        assert_eq!(hash.len(), 40);
+        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
     }
 
     struct FixedKeyStore {
