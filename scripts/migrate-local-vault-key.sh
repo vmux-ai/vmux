@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPOSITORY_ROOT="$(cd "$(git -C "$ROOT" rev-parse --git-common-dir)/.." && pwd)"
 APP_BUNDLE="${1:-}"
 MANIFEST="${HOME}/Library/Application Support/Vmux/vault/vault.ron"
 ENTITLEMENTS="$ROOT/packaging/macos/Vmux.entitlements"
@@ -44,7 +45,13 @@ while IFS= read -r OLD_APP; do
     if [[ $STATUS -ne 2 ]]; then
         exit "$STATUS"
     fi
-done < <(find "$ROOT/target/release" -maxdepth 1 -type d -name 'Vmux (*.app)' -print | sort -r)
+done < <(
+    {
+        find "$ROOT/target/release" -maxdepth 1 -type d -name 'Vmux (*).app' -print
+        find "$REPOSITORY_ROOT/target/release" -maxdepth 1 -type d -name 'Vmux (*).app' -print
+        find "$REPOSITORY_ROOT/.worktrees" -mindepth 4 -maxdepth 4 -type d -name 'Vmux (*).app' -print
+    } | sort -ru
+)
 
 echo "No matching local Vmux build could access this Vault key." >&2
 exit 2

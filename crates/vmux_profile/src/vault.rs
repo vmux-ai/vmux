@@ -434,7 +434,7 @@ pub fn add_passkey(credential_id: &str, prf_output: &[u8]) -> Result<String, Str
 pub fn prepare_passkey() -> Result<String, String> {
     let repository = repository_dir();
     let manifest = read_manifest(&repository)?;
-    let key = SystemKeyStore.load(&manifest.vault_id)?;
+    let key = load_repository_key(&repository, &SystemKeyStore, &manifest.vault_id)?;
     load_encrypted_snapshot(&repository, &key)?;
     Ok("Vault unlocked".to_string())
 }
@@ -669,7 +669,7 @@ fn sync_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Result<S
         return Err("Vault has no origin remote".to_string());
     }
     let manifest = read_manifest(repository)?;
-    let key = keys.load(&manifest.vault_id)?;
+    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
     let baseline = baseline_files(repository).unwrap_or_else(|_| {
         load_encrypted_snapshot(repository, &key)
             .map(|(_, files)| files)
@@ -707,7 +707,7 @@ fn initialize_paths<K: KeyStore>(root: &Path, repository: &Path, keys: &K) -> Re
     ensure_repository(repository)?;
     let (vault_id, key, previous) = match read_manifest(repository) {
         Ok(manifest) => {
-            let key = keys.load(&manifest.vault_id)?;
+            let key = load_repository_key(repository, keys, &manifest.vault_id)?;
             let previous = load_encrypted_snapshot(repository, &key)
                 .ok()
                 .map(|(_, files)| files);
@@ -733,7 +733,7 @@ fn add_passkey_paths<K: KeyStore>(
 ) -> Result<String, String> {
     validate_credential_id(credential_id)?;
     let mut manifest = read_manifest(repository)?;
-    let key = keys.load(&manifest.vault_id)?;
+    let key = load_repository_key(repository, keys, &manifest.vault_id)?;
     let wrapping_key = derive_passkey_wrapping_key(prf_output, &manifest.vault_id, credential_id)?;
     let wrapped_key = encrypt_bytes(
         &wrapping_key,
@@ -819,6 +819,21 @@ fn read_passkey_envelopes(repository: &Path) -> Result<BTreeMap<String, PasskeyE
         }
     }
     Ok(envelopes)
+}
+
+fn load_repository_key<K: KeyStore>(
+    repository: &Path,
+    keys: &K,
+    vault_id: &str,
+) -> Result<Zeroizing<Vec<u8>>, String> {
+    keys.load(vault_id).map_err(|error| {
+        if read_passkey_envelopes(repository).is_ok_and(|envelopes| envelopes.is_empty()) {
+            "This Vault is locked on this device. No passkey is registered. Open it on a device that can already unlock it, then add a passkey."
+                .to_string()
+        } else {
+            error
+        }
+    })
 }
 
 fn passkey_envelope_name(credential_id: &str) -> String {
@@ -2422,6 +2437,36 @@ mod tests {
             *self.key.lock().unwrap() = Some(key.to_vec());
             Ok(())
         }
+    }
+
+    #[test]
+    fn missing_vault_key_distinguishes_recoverable_passkeys() {
+        let repository = tempfile::tempdir().unwrap();
+        let keys = MemoryKeyStore::default();
+
+        assert_eq!(
+            load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
+            "This Vault is locked on this device. No passkey is registered. Open it on a device that can already unlock it, then add a passkey."
+        );
+
+        let credential_id = "00";
+        let envelope = PasskeyEnvelope {
+            version: FORMAT_VERSION,
+            credential_id: credential_id.to_string(),
+            wrapped_key: vec![1, 2, 3],
+        };
+        let directory = repository.path().join(PASSKEYS_DIR);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join(passkey_envelope_name(credential_id)),
+            ron::to_string(&envelope).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            load_repository_key(repository.path(), &keys, "vault").unwrap_err(),
+            "key unavailable"
+        );
     }
 
     fn repository(root: &Path) -> PathBuf {

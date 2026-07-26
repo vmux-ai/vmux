@@ -114,7 +114,17 @@ pub fn Page() -> Element {
             if result.action == VaultAction::ConnectGithub {
                 github_device_code.set(String::new());
             }
-            if !result.success && is_vault_key_locked(&result.message) {
+            if result.success
+                && matches!(
+                    result.action,
+                    VaultAction::Sync
+                        | VaultAction::PreparePasskey
+                        | VaultAction::AddPasskey
+                        | VaultAction::UnlockPasskey
+                )
+            {
+                passkey_setup_blocked.set(false);
+            } else if !result.success && is_vault_key_locked(&result.message) {
                 passkey_setup_blocked.set(true);
             }
             if result.action == VaultAction::PreparePasskey {
@@ -598,11 +608,13 @@ fn VaultPanel(
                     div { class: "relative mt-3 text-center text-[10px] text-amber-600 dark:text-amber-300", "{vault.error}" }
                 }
             } else {
-                PasskeyCard {
-                    vault,
-                    pending,
-                    notice,
-                    passkey_setup_blocked,
+                if !passkey_setup_blocked() || !vault.passkey_credentials.is_empty() {
+                    PasskeyCard {
+                        vault,
+                        pending,
+                        notice,
+                        passkey_setup_blocked,
+                    }
                 }
             }
         }
