@@ -61,6 +61,8 @@ pub fn Page() -> Element {
     let mut notice = use_signal(|| None::<VaultActionResult>);
     let mut passkey_setup_blocked = use_signal(|| false);
     let mut generated_recovery_key = use_signal(String::new);
+    let mut recovery_key_confirmation = use_signal(String::new);
+    let mut recovery_key_copied = use_signal(|| false);
     let mut recovery_key_input = use_signal(String::new);
     let mut recovery_upload_pending = use_signal(|| false);
     let mut github_device_code = use_signal(String::new);
@@ -161,6 +163,8 @@ pub fn Page() -> Element {
                 }
             } else if result.action == VaultAction::CreateRecoveryKey && result.success {
                 generated_recovery_key.set(String::new());
+                recovery_key_confirmation.set(String::new());
+                recovery_key_copied.set(false);
                 recovery_upload_pending.set(result.pending_upload);
                 pending.set(None);
                 notice.set(None);
@@ -258,6 +262,8 @@ pub fn Page() -> Element {
                         notice,
                         passkey_setup_blocked,
                         generated_recovery_key,
+                        recovery_key_confirmation,
+                        recovery_key_copied,
                         recovery_key_input,
                         recovery_upload_pending,
                     }
@@ -282,6 +288,8 @@ fn VaultPanel(
     notice: Signal<Option<VaultActionResult>>,
     passkey_setup_blocked: Signal<bool>,
     generated_recovery_key: Signal<String>,
+    recovery_key_confirmation: Signal<String>,
+    recovery_key_copied: Signal<bool>,
     recovery_key_input: Signal<String>,
     recovery_upload_pending: Signal<bool>,
 ) -> Element {
@@ -292,7 +300,7 @@ fn VaultPanel(
         .saturating_add(vault.ahead)
         .saturating_add(vault.behind);
     let status = if vault.sync_failed {
-        translate("vault-backup-failed")
+        translate("vault-backup-failed-short")
     } else if pending_changes > 0 {
         translate_with(
             "vault-change-count",
@@ -373,7 +381,9 @@ fn VaultPanel(
                                 span { "{vault.branch}" }
                             }
                             span { class: if vault.sync_failed { "text-ansi-1" } else { "" }, "{status}" }
-                            span { {translate("vault-auto-sync")} }
+                            if !vault.sync_failed {
+                                span { {translate("vault-auto-sync")} }
+                            }
                             if vault.ahead > 0 {
                                 span { "↑{vault.ahead}" }
                             }
@@ -398,11 +408,6 @@ fn VaultPanel(
                         ),
                         {translate("vault-sync")}
                     }
-                }
-            }
-            if is_connected && vault.sync_failed {
-                div { class: "relative mt-4 rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20",
-                    {translate("vault-backup-failed")}
                 }
             }
             if !is_connected {
@@ -663,6 +668,8 @@ fn VaultPanel(
                     vault: vault.clone(),
                     pending,
                     generated_recovery_key,
+                    recovery_key_confirmation,
+                    recovery_key_copied,
                     recovery_key_input,
                     recovery_upload_pending,
                     notice,
@@ -718,11 +725,16 @@ fn RecoveryCard(
     vault: VaultSnapshot,
     pending: Signal<Option<VaultAction>>,
     mut generated_recovery_key: Signal<String>,
+    mut recovery_key_confirmation: Signal<String>,
+    mut recovery_key_copied: Signal<bool>,
     mut recovery_key_input: Signal<String>,
     recovery_upload_pending: Signal<bool>,
     mut notice: Signal<Option<VaultActionResult>>,
 ) -> Element {
     let generated = generated_recovery_key();
+    let confirmation = recovery_key_confirmation();
+    let confirmation_complete = recovery_key_complete(&confirmation);
+    let confirmation_matches = recovery_keys_match(&generated, &confirmation);
     rsx! {
         div { class: "mt-4 rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
             div { class: "flex items-start gap-3",
@@ -736,13 +748,15 @@ fn RecoveryCard(
                     div { class: "text-sm font-medium text-foreground", {translate("vault-recovery-key")} }
                     div { class: "mt-0.5 text-xs leading-relaxed text-muted-foreground/70", {translate("vault-recovery-key-description")} }
                 }
-                if vault.unlocked && !vault.recovery_enabled {
+                if vault.unlocked && !vault.recovery_enabled && generated.is_empty() {
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         disabled: pending().is_some() || !generated.is_empty(),
                         onclick: move |_| match generate_recovery_key() {
                             Ok(key) => {
                                 generated_recovery_key.set(key);
+                                recovery_key_confirmation.set(String::new());
+                                recovery_key_copied.set(false);
                                 notice.set(None);
                             }
                             Err(_) => notice.set(Some(VaultActionResult {
@@ -757,48 +771,99 @@ fn RecoveryCard(
                 }
             }
             if !generated.is_empty() {
-                div { class: "mt-4 rounded-xl bg-amber-400/10 p-3 ring-1 ring-inset ring-amber-400/25",
-                    div { class: "text-xs font-medium text-amber-800 dark:text-amber-200", {translate("vault-recovery-key-save")} }
-                    div { class: "mt-2 select-all break-all rounded-lg bg-background/70 px-3 py-2 font-mono text-[11px] leading-relaxed text-foreground ring-1 ring-inset ring-foreground/10", "{generated}" }
-                    if recovery_upload_pending() {
-                        div { class: "mt-2 text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/80", {translate("vault-recovery-key-upload-pending")} }
+                div { class: "mt-4 space-y-3 transition-[opacity,transform] duration-300 ease-out starting:translate-y-1 starting:opacity-0",
+                    button {
+                        r#type: "button",
+                        title: translate("vault-recovery-key-copy-hint"),
+                        class: if recovery_key_copied() {
+                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-emerald-400/[0.08] px-3 py-3 text-left ring-1 ring-inset ring-emerald-400/25 transition-colors hover:bg-emerald-400/[0.12]"
+                        } else {
+                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-3 text-left ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.07]"
+                        },
+                        onclick: move |_| {
+                            recovery_key_copied.set(false);
+                            copy_text(generated_recovery_key(), recovery_key_copied);
+                        },
+                        code { class: "min-w-0 flex-1 break-all font-mono text-[11px] leading-relaxed text-foreground",
+                            if recovery_key_copied() {
+                                "vmux-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••-••••"
+                            } else {
+                                "{generated}"
+                            }
+                        }
+                        span { class: if recovery_key_copied() {
+                                "shrink-0 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                            } else {
+                                "shrink-0 text-[11px] text-muted-foreground/60"
+                            },
+                            if recovery_key_copied() {
+                                {translate("vault-recovery-key-copied")}
+                            } else {
+                                {translate("vault-recovery-key-copy-hint")}
+                            }
+                        }
                     }
-                    div { class: "mt-3 flex justify-end gap-2",
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Secondary,
-                            onclick: move |_| copy_text(generated_recovery_key()),
-                            {translate("common-copy")}
+                    if recovery_key_copied() {
+                        div { class: "space-y-2 transition-[opacity,transform] duration-300 ease-out starting:translate-y-1 starting:opacity-0",
+                            div { class: "text-xs leading-relaxed text-muted-foreground/70", {translate("vault-recovery-key-verify")} }
+                            input {
+                                autofocus: true,
+                                class: if confirmation_complete && !confirmation_matches {
+                                    "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-ansi-1/45 transition focus:ring-ansi-1/65"
+                                } else {
+                                    "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition focus:ring-cyan-400/50"
+                                },
+                                r#type: "password",
+                                value: "{confirmation}",
+                                placeholder: translate("vault-recovery-key-verify-placeholder"),
+                                disabled: pending().is_some(),
+                                oninput: move |event| {
+                                    let value = event.value();
+                                    recovery_key_confirmation.set(value.clone());
+                                    if pending().is_none()
+                                        && recovery_keys_match(&generated_recovery_key(), &value)
+                                    {
+                                        send_recovery_action(
+                                            pending,
+                                            VaultAction::CreateRecoveryKey,
+                                            generated_recovery_key(),
+                                        );
+                                    }
+                                },
+                            }
+                            if pending() == Some(VaultAction::CreateRecoveryKey) {
+                                div { class: "text-[11px] text-cyan-700 dark:text-cyan-300", {translate("common-loading")} }
+                            } else if confirmation_complete && !confirmation_matches {
+                                div { class: "text-[11px] text-ansi-1", {translate("vault-recovery-key-mismatch")} }
+                            }
                         }
-                        ManagerButton {
-                            variant: ManagerButtonVariant::Primary,
-                            disabled: pending().is_some(),
-                            onclick: move |_| send_recovery_action(
-                                pending,
-                                VaultAction::CreateRecoveryKey,
-                                generated_recovery_key(),
-                            ),
-                            {translate("vault-recovery-key-saved")}
-                        }
+                    }
+                    if recovery_upload_pending() {
+                        div { class: "text-[11px] leading-relaxed text-amber-700 dark:text-amber-300", {translate("vault-recovery-key-upload-pending")} }
                     }
                 }
             } else if !vault.unlocked && vault.recovery_enabled {
-                div { class: "mt-4 flex items-center gap-2",
+                div { class: "mt-4 space-y-2",
                     input {
-                        class: "min-w-0 flex-1 rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition focus:ring-cyan-400/50",
+                        class: "w-full rounded-xl bg-background/60 px-3 py-2.5 font-mono text-xs text-foreground outline-none ring-1 ring-inset ring-foreground/10 transition focus:ring-cyan-400/50",
                         r#type: "password",
                         value: "{recovery_key_input}",
                         placeholder: translate("vault-recovery-key-placeholder"),
-                        oninput: move |event| recovery_key_input.set(event.value()),
+                        disabled: pending().is_some(),
+                        oninput: move |event| {
+                            let value = event.value();
+                            recovery_key_input.set(value.clone());
+                            if pending().is_none() && recovery_key_complete(&value) {
+                                send_recovery_action(
+                                    pending,
+                                    VaultAction::UnlockRecoveryKey,
+                                    value,
+                                );
+                            }
+                        },
                     }
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Primary,
-                        disabled: pending().is_some() || recovery_key_input().trim().is_empty(),
-                        onclick: move |_| send_recovery_action(
-                            pending,
-                            VaultAction::UnlockRecoveryKey,
-                            recovery_key_input(),
-                        ),
-                        {translate("vault-recovery-key-unlock")}
+                    if pending() == Some(VaultAction::UnlockRecoveryKey) {
+                        div { class: "text-[11px] text-cyan-700 dark:text-cyan-300", {translate("common-loading")} }
                     }
                 }
             } else if vault.recovery_enabled {
@@ -893,7 +958,25 @@ fn generate_recovery_key() -> Result<String, String> {
     Ok(format!("vmux-{}", groups.join("-")))
 }
 
-fn copy_text(value: String) {
+fn normalized_recovery_key(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| !character.is_ascii_whitespace() && *character != '-')
+        .collect()
+}
+
+fn recovery_key_complete(value: &str) -> bool {
+    normalized_recovery_key(value).len() == 68
+}
+
+fn recovery_keys_match(expected: &str, actual: &str) -> bool {
+    recovery_key_complete(actual)
+        && normalized_recovery_key(expected) == normalized_recovery_key(actual)
+}
+
+fn copy_text(value: String, mut copied: Signal<bool>) {
     spawn(async move {
         let Some(window) = web_sys::window() else {
             return;
@@ -915,7 +998,9 @@ fn copy_text(value: String) {
         else {
             return;
         };
-        let _ = JsFuture::from(promise).await;
+        if JsFuture::from(promise).await.is_ok() {
+            copied.set(true);
+        }
     });
 }
 
