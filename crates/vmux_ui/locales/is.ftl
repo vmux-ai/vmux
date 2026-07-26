@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } atriði
    *[other] { $count } atriði
 }
+
+tools-title = Verkfæri
+tools-search = Leita að pökkum, fulltrúum, MCP, LSP og stillingarskrám…
+tools-open = Opna verkfæri
+tools-fold = Fella verkfæri saman
+tools-unfold = Fella verkfæri út
+tools-scanning = Skanna staðbundin verkfæri…
+tools-no-installed = Engin verkfæri uppsett
+tools-empty = Engin samsvarandi verkfæri
+tools-empty-detail = Settu upp pakka eða bættu við stillingarskrápakka í Stow-stíl.
+tools-apply = Beita
+tools-homebrew = Homebrew
+tools-homebrew-sync = Uppsettar formúlur og forrit samstillast sjálfkrafa.
+tools-open-brewfile = Opna Brewfile
+tools-managed = stýrt
+tools-provider-homebrew-formulae = Homebrew-formúlur
+tools-provider-homebrew-casks = Homebrew-forrit
+tools-provider-npm = NPM-pakkar
+tools-provider-acp-agents = ACP-fulltrúar
+tools-provider-lsp-servers = LSP-þjónar
+tools-provider-mcp-servers = MCP-þjónar
+tools-provider-dotfiles = Stillingarskrár
+tools-status-available = Tiltækt
+tools-status-missing = Vantar
+tools-status-conflict = Árekstur
+tools-forget = Gleyma
+tools-manage = Stjórna
+tools-link = Tengja
+tools-unlink = Aftengja
+tools-import = Flytja inn
+tools-update-count = { $count ->
+    [one] 1 uppfærsla
+   *[other] { $count } uppfærslur
+}
+tools-conflict-count = { $count ->
+    [one] 1 árekstur
+   *[other] { $count } árekstrar
+}
+tools-result-applied = Verkfærum beitt
+tools-result-imported = Verkfæri flutt inn
+tools-result-installed = { $name } sett upp
+tools-result-updated = { $name } uppfært
+tools-result-uninstalled = { $name } fjarlægt
+tools-result-forgotten = { $name } gleymt
+tools-result-managed = { $name } er nú stýrt
+tools-result-linked = { $name } tengt
+tools-result-unlinked = { $name } aftengt
+vault-title = Vault
+vault-encrypted = Dulkóðað frá enda til enda
+vault-passkey = Aðgangslykill
+vault-passkey-description = Opnaðu þessa Vault í öðrum tækjum án lykilorðs.
+vault-passkey-add = Bæta við lykilorði
+vault-passkey-unlock = Opnaðu
+vault-passkey-provider-unsupported = Þessi aðgangslyklaveita styður ekki dulkóðaða Vault-opnun ennþá.
+vault-recovery-key = Endurheimtarlykill
+vault-recovery-key-description = Vistaðu einn lykil í Bitwarden eða öðrum lykilorðastjóra til að endurheimta þessa hvelfingu á nýju tæki.
+vault-recovery-key-create = Búa til lykil
+vault-recovery-key-create-failed = Ekki tókst að búa til endurheimtarlykil.
+vault-recovery-key-save = Vista þennan lykil núna. Vmux getur ekki sýnt það aftur.
+vault-recovery-key-saved = Ég vistaði það
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Opna
+vault-recovery-key-invalid = Þessi endurheimtarlykill getur ekki opnað Vault.
+vault-recovery-key-ready = Endurheimtarlykill stilltur
+vault-recovery-key-upload-pending = Lykillinn er vistaður á staðnum en upphleðsla mistókst. Hafðu það öruggt og ýttu á Sync til að reyna aftur.
+vault-auto-sync = Sjálfvirk öryggisafrit
+vault-backup-failed = Sjálfvirk öryggisafritun mistókst. Ýttu á Sync til að reyna aftur.
+vault-backup-failed-short = Afritun mistókst
+vault-recovery-key-copy-hint = Smelltu til að afrita
+vault-recovery-key-copied = Afritað
+vault-recovery-key-verify = Vistaðu það í lykilorðastjóranum þínum og límdu það síðan hér að neðan til að staðfesta.
+vault-recovery-key-verify-placeholder = Límdu vistaðan endurheimtarlykil
+vault-recovery-key-mismatch = Endurheimtarlykill passar ekki.
+vault-open = { common-open } Vault
+vault-description = Samstilltu stillingar, verkfæri, punktaskrár og þekkingu með Git.
+vault-sync = Samstilla
+vault-create = Búa til
+vault-connect = Tengdu
+vault-github = GitHub
+vault-github-description = Búðu til einkageymsla eða veldu núverandi Vault.
+vault-connect-github = Tengdu GitHub
+vault-connected-as = Tengdur sem { $name }
+vault-use-repository = Notaðu
+vault-repository-name = Heiti geymslu
+vault-cloud-folder = Cloud mappa
+vault-cloud-folder-description = Notaðu möppu frá Google Drive, iCloud Drive, Dropbox eða OneDrive.
+vault-choose-folder = Veldu möppu
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mappa · { common-done }
+vault-private = Einkageymsla
+vault-public-warning = Saga geymslunnar og dulkóðuð gögn verða opinber.
+vault-choose-repository = Veldu geymslu…
+vault-empty = tómt
+vault-clean = Uppfært
+vault-not-connected = Ekki tengdur
+vault-change-count = Breytingar: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Byrja
 start-tagline = Ein fyrirmæli. Allt klárt.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bókamerkja í { $folder }
 common-cancel = Hætta við
 common-delete = Eyða
 common-save = Vista
+common-copy = Copy
 common-rename = Endurnefna
 common-expand = Stækka
 common-collapse = Fella saman

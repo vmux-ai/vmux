@@ -57,7 +57,10 @@ use vmux_layout::{
         UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed, first_stack_in_pane},
-    side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
+    side_sheet::{
+        SideSheet, SideSheetPaneExpanded, SideSheetPosition, SideSheetSectionsExpanded,
+        SideSheetWidth,
+    },
     stack::{
         ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
         stack_bundle,
@@ -3449,9 +3452,10 @@ fn push_pane_tree_emit(
     new_stack_ctx: Res<vmux_layout::NewStackContext>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
+    tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
+    expanded_panes: Query<(), With<SideSheetPaneExpanded>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -3474,6 +3478,7 @@ fn push_pane_tree_emit(
     if !tab_q.contains(tab_e) {
         return;
     }
+    let sections = tab_sections.get(tab_e).copied().unwrap_or_default();
     let mut tab_leaf_panes = Vec::new();
     collect_leaf_panes(tab_e, &all_children, &leaf_pane_q, &mut tab_leaf_panes);
 
@@ -3537,7 +3542,11 @@ fn push_pane_tree_emit(
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
-            collapsed: collapsed_panes.contains(pane_entity),
+            collapsed: !expanded_panes.contains(pane_entity),
+            projects_expanded: sections.projects,
+            bookmarks_expanded: sections.bookmarks,
+            knowledge_expanded: sections.knowledge,
+            tools_expanded: sections.tools,
             stacks,
         });
     }
@@ -4202,6 +4211,9 @@ fn on_side_sheet_command_emit(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
+    child_of: Query<&ChildOf>,
+    tabs: Query<(), With<Tab>>,
+    section_states: Query<&SideSheetSectionsExpanded, With<Tab>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
@@ -4258,12 +4270,51 @@ fn on_side_sheet_command_emit(
             messages.write(cmd);
         }
         "collapse_card" => {
-            commands.entity(target_pane).insert(SideSheetCardCollapsed);
+            commands
+                .entity(target_pane)
+                .remove::<SideSheetCardCollapsed>()
+                .remove::<SideSheetPaneExpanded>();
         }
         "expand_card" => {
             commands
                 .entity(target_pane)
-                .remove::<SideSheetCardCollapsed>();
+                .remove::<SideSheetCardCollapsed>()
+                .insert(SideSheetPaneExpanded);
+        }
+        "collapse_section" | "expand_section" => {
+            let expanded = evt.command == "expand_section";
+            if evt.path == "pane" {
+                let mut pane = commands.entity(target_pane);
+                pane.remove::<SideSheetCardCollapsed>();
+                if expanded {
+                    pane.insert(SideSheetPaneExpanded);
+                } else {
+                    pane.remove::<SideSheetPaneExpanded>();
+                }
+                return;
+            }
+            let mut current = target_pane;
+            let tab = loop {
+                if tabs.contains(current) {
+                    break Some(current);
+                }
+                let Ok(parent) = child_of.get(current) else {
+                    break None;
+                };
+                current = parent.parent();
+            };
+            let Some(tab) = tab else {
+                return;
+            };
+            let mut state = section_states.get(tab).copied().unwrap_or_default();
+            if !state.set(&evt.path, expanded) {
+                return;
+            }
+            if state.is_empty() {
+                commands.entity(tab).remove::<SideSheetSectionsExpanded>();
+            } else {
+                commands.entity(tab).insert(state);
+            }
         }
         "open_knowledge_path" => {
             let Some(url) =
@@ -4274,6 +4325,28 @@ fn on_side_sheet_command_emit(
             commands.entity(target_pane).insert(LastActivatedAt::now());
             let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
                 url: Some(url),
+            }));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
+        }
+        "open_tools" => {
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                url: Some("vmux://tools/".to_string()),
+            }));
+            issued.write(vmux_command::CommandIssued {
+                caller,
+                command: cmd.clone(),
+            });
+            messages.write(cmd);
+        }
+        "open_vault" => {
+            commands.entity(target_pane).insert(LastActivatedAt::now());
+            let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
+                url: Some("vmux://vault/".to_string()),
             }));
             issued.write(vmux_command::CommandIssued {
                 caller,

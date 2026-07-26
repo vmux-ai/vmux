@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementov
 }
+
+tools-title = Orodja
+tools-search = Iskanje paketov, agentov, MCP, LSP in nastavitvenih datotek…
+tools-open = Odpri orodja
+tools-fold = Strni orodja
+tools-unfold = Razširi orodja
+tools-scanning = Pregledovanje lokalnih orodij…
+tools-no-installed = Ni nameščenih orodij
+tools-empty = Ni ustreznih orodij
+tools-empty-detail = Namestite paket ali dodajte paket nastavitvenih datotek v slogu Stow.
+tools-apply = Uporabi
+tools-homebrew = Homebrew
+tools-homebrew-sync = Nameščene formule in aplikacije se samodejno sinhronizirajo.
+tools-open-brewfile = Odpri Brewfile
+tools-managed = upravljano
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplikacije Homebrew
+tools-provider-npm = Paketi NPM
+tools-provider-acp-agents = Agenti ACP
+tools-provider-lsp-servers = Strežniki LSP
+tools-provider-mcp-servers = Strežniki MCP
+tools-provider-dotfiles = Nastavitvene datoteke
+tools-status-available = Na voljo
+tools-status-missing = Manjka
+tools-status-conflict = Spor
+tools-forget = Pozabi
+tools-manage = Upravljaj
+tools-link = Poveži
+tools-unlink = Prekini povezavo
+tools-import = Uvozi
+tools-update-count = { $count ->
+    [one] 1 posodobitev
+   *[other] { $count } posodobitev
+}
+tools-conflict-count = { $count ->
+    [one] 1 spor
+   *[other] { $count } sporov
+}
+tools-result-applied = Orodja uporabljena
+tools-result-imported = Orodja uvožena
+tools-result-installed = { $name } nameščen
+tools-result-updated = { $name } posodobljen
+tools-result-uninstalled = { $name } odstranjen
+tools-result-forgotten = { $name } pozabljen
+tools-result-managed = { $name } je zdaj upravljan
+tools-result-linked = { $name } povezan
+tools-result-unlinked = Povezava z { $name } prekinjena
+vault-title = Vault
+vault-encrypted = Šifrirano od konca do konca
+vault-passkey = Geslo
+vault-passkey-description = Odklenite ta trezor v drugih napravah brez gesla.
+vault-passkey-add = Dodaj geslo
+vault-passkey-unlock = Odkleni
+vault-passkey-provider-unsupported = Ta ponudnik gesel še ne podpira šifriranega odklepanja trezorja.
+vault-recovery-key = Ključ za obnovitev
+vault-recovery-key-description = Shranite en ključ v Bitwarden ali drug upravitelj gesel, da obnovite ta trezor v novi napravi.
+vault-recovery-key-create = Ustvari ključ
+vault-recovery-key-create-failed = Ključa za obnovitev ni bilo mogoče ustvariti.
+vault-recovery-key-save = Shranite ta ključ zdaj. Vmux tega ne more več prikazati.
+vault-recovery-key-saved = Shranil sem ga
+vault-recovery-key-placeholder = Prilepi ključ za obnovitev
+vault-recovery-key-unlock = Odkleni
+vault-recovery-key-invalid = Ta ključ za obnovitev ne more odkleniti trezorja.
+vault-recovery-key-ready = Ključ za obnovitev konfiguriran
+vault-recovery-key-upload-pending = Ključ je shranjen lokalno, vendar nalaganje ni uspelo. Shranite ga na varno in pritisnite Sinhroniziraj, da poskusite znova.
+vault-auto-sync = Samodejno varnostno kopiranje
+vault-backup-failed = Samodejno varnostno kopiranje ni uspelo. Pritisnite Sync za ponovni poskus.
+vault-backup-failed-short = Varnostno kopiranje ni uspelo
+vault-recovery-key-copy-hint = Kliknite za kopiranje
+vault-recovery-key-copied = Kopirano
+vault-recovery-key-verify = Shranite ga v upravitelju gesel in ga prilepite spodaj, da preverite.
+vault-recovery-key-verify-placeholder = Prilepite shranjen obnovitveni ključ
+vault-recovery-key-mismatch = Ključ za obnovitev se ne ujema.
+vault-open = { common-open } Vault
+vault-description = Sinhronizirajte nastavitve, orodja, datoteke dot in znanje z Gitom.
+vault-sync = Sinhronizacija
+vault-create = Ustvari
+vault-connect = Povežite se
+vault-github = GitHub
+vault-github-description = Ustvarite zasebno skladišče ali izberite obstoječi trezor.
+vault-connect-github = Povežite GitHub
+vault-connected-as = Povezan kot { $name }
+vault-use-repository = Uporaba
+vault-repository-name = Ime repozitorija
+vault-cloud-folder = Mapa v oblaku
+vault-cloud-folder-description = Uporabite mapo iz Google Drive, iCloud Drive, Dropbox ali OneDrive.
+vault-choose-folder = Izberite mapo
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mapa · { common-done }
+vault-private = Zasebno skladišče
+vault-public-warning = Zgodovina repozitorija in šifrirani podatki bodo javni.
+vault-choose-repository = Izberite skladišče ...
+vault-empty = prazno
+vault-clean = Ažurno
+vault-not-connected = Ni povezano
+vault-change-count = Spremembe: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Začetek
 start-tagline = En prompt. Vse opravljeno.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Zaznamek v { $folder }
 common-cancel = Prekliči
 common-delete = Izbriši
 common-save = Shrani
+common-copy = Copy
 common-rename = Preimenuj
 common-expand = Razširi
 common-collapse = Strni

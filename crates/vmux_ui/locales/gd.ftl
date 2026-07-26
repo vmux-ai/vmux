@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } nì
    *[other] { $count } nithean
 }
+
+tools-title = Innealan
+tools-search = Lorg pacaidean, àidseantan, MCP, LSP agus faidhlichean rèiteachaidh…
+tools-open = Fosgail na h-innealan
+tools-fold = Paisg na h-innealan
+tools-unfold = Leudaich na h-innealan
+tools-scanning = A’ sganadh innealan ionadail…
+tools-no-installed = Chan eil inneal air a stàladh
+tools-empty = Chan eil inneal co-ionnan ann
+tools-empty-detail = Stàlaich pacaid no cuir pacaid fhaidhlichean rèiteachaidh ann an stoidhle Stow ris.
+tools-apply = Cuir an sàs
+tools-homebrew = Homebrew
+tools-homebrew-sync = Sioncronaichidh foirmlean agus aplacaidean stàlaichte gu fèin-obrachail.
+tools-open-brewfile = Fosgail Brewfile
+tools-managed = air a stiùireadh
+tools-provider-homebrew-formulae = Foirmlean Homebrew
+tools-provider-homebrew-casks = Aplacaidean Homebrew
+tools-provider-npm = Pacaidean NPM
+tools-provider-acp-agents = Àidseantan ACP
+tools-provider-lsp-servers = Frithealaichean LSP
+tools-provider-mcp-servers = Frithealaichean MCP
+tools-provider-dotfiles = Faidhlichean rèiteachaidh
+tools-status-available = Ri fhaighinn
+tools-status-missing = A dhìth
+tools-status-conflict = Còmhstri
+tools-forget = Dìochuimhnich
+tools-manage = Stiùirich
+tools-link = Ceangail
+tools-unlink = Dì-cheangail
+tools-import = Ion-phortaich
+tools-update-count = { $count ->
+    [one] 1 ùrachadh
+   *[other] { $count } ùrachaidhean
+}
+tools-conflict-count = { $count ->
+    [one] 1 chòmhstri
+   *[other] { $count } còmhstrithean
+}
+tools-result-applied = Innealan air an cur an sàs
+tools-result-imported = Innealan air an ion-phortadh
+tools-result-installed = { $name } air a stàladh
+tools-result-updated = { $name } air ùrachadh
+tools-result-uninstalled = { $name } air a dhì-stàladh
+tools-result-forgotten = { $name } air a dhìochuimhneachadh
+tools-result-managed = Tha { $name } ga stiùireadh a-nis
+tools-result-linked = { $name } air a cheangal
+tools-result-unlinked = { $name } air a dhì-cheangal
+vault-title = Vault
+vault-encrypted = Crioptaichte ceann gu ceann
+vault-passkey = Cead-siubhail
+vault-passkey-description = Fuasgail an Vault seo air innealan eile gun fhacal-faire.
+vault-passkey-add = Cuir a-steach pasgan
+vault-passkey-unlock = Fuasgail
+vault-passkey-provider-unsupported = Chan eil an solaraiche passkey seo a’ toirt taic do fhuasgladh crioptaichte Vault fhathast.
+vault-recovery-key = Iuchair Ath-bheothachaidh
+vault-recovery-key-description = Sàbhail aon iuchair ann am Bitwarden no manaidsear facal-faire eile gus an Vault seo fhaighinn air ais air inneal ùr.
+vault-recovery-key-create = Cruthaich iuchair
+vault-recovery-key-create-failed = Cha b' urrainn dhuinn an iuchair ath-bheothachaidh a chruthachadh.
+vault-recovery-key-save = Sàbhail an iuchair seo an-dràsta. Chan urrainn dha Vmux a shealltainn a-rithist.
+vault-recovery-key-saved = Shàbhail mi e
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Fuasgail
+vault-recovery-key-invalid = Chan urrainn dhan iuchair ath-bheothachaidh seo an Vault fhosgladh.
+vault-recovery-key-ready = Iuchair ath-bheothachaidh air a rèiteachadh
+vault-recovery-key-upload-pending = Tha an iuchair air a shàbhaladh gu h-ionadail, ach dh'fhàillig an luchdadh suas. Cùm e sàbhailte agus brùth Sync gus feuchainn a-rithist.
+vault-auto-sync = Cùl-taic fèin-ghluasadach
+vault-backup-failed = Dh'fhàillig lethbhreac-glèidhidh fèin-obrachail. Brùth Sync gus feuchainn a-rithist.
+vault-backup-failed-short = Dh'fhàillig lethbhreac-glèidhidh
+vault-recovery-key-copy-hint = Cliog gus lethbhreac a dhèanamh
+vault-recovery-key-copied = Rinn lethbhreac
+vault-recovery-key-verify = Sàbhail e sa mhanaidsear facal-faire agad, an uairsin cuir a-steach e gu h-ìosal gus dearbhadh.
+vault-recovery-key-verify-placeholder = Cuir a-steach an iuchair ath-bheothachaidh a chaidh a shàbhaladh
+vault-recovery-key-mismatch = Chan eil an iuchair ath-bheothachaidh a' freagairt.
+vault-open = { common-open } Vault
+vault-description = Sioncronaich roghainnean, innealan, dotfiles, agus Eòlas le Git.
+vault-sync = Sioncronaich
+vault-create = Cruthaich
+vault-connect = Ceangail
+vault-github = GitHub
+vault-github-description = Cruthaich stòr prìobhaideach no tagh Vault a tha ann mu thràth.
+vault-connect-github = Ceangail GitHub
+vault-connected-as = Ceangailte mar { $name }
+vault-use-repository = Cleachd
+vault-repository-name = Ainm an stòrais
+vault-cloud-folder = Pasgan sgòthan
+vault-cloud-folder-description = Cleachd pasgan bho Google Drive, iCloud Drive, Dropbox, no OneDrive.
+vault-choose-folder = Tagh pasgan
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Fillte · { common-done }
+vault-private = Taigh-tasgaidh prìobhaideach
+vault-public-warning = Bidh eachdraidh an ionaid-tasgaidh agus an dàta crioptaichte poblach.
+vault-choose-repository = Tagh stòr…
+vault-empty = falamh
+vault-clean = Làn-fhiosrach
+vault-not-connected = Gun cheangal
+vault-change-count = Atharrachaidhean: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tòisich
 start-tagline = Aon phrompt. Rud sam bith, dèanta.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Comharra-lìn ann an { $folder }
 common-cancel = Sguir dheth
 common-delete = Sguab às
 common-save = Sàbhail
+common-copy = Copy
 common-rename = Ath-ainmich
 common-expand = Leudaich
 common-collapse = Co-theannaich

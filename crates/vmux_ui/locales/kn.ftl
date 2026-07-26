@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ಐಟಂ
    *[other] { $count } ಐಟಂಗಳು
 }
+
+tools-title = ಉಪಕರಣಗಳು
+tools-search = ಪ್ಯಾಕೇಜ್‌ಗಳು, ಏಜೆಂಟ್‌ಗಳು, MCP, LSP ಮತ್ತು ಸಂರಚನಾ ಕಡತಗಳನ್ನು ಹುಡುಕಿ…
+tools-open = ಉಪಕರಣಗಳನ್ನು ತೆರೆಯಿರಿ
+tools-fold = ಉಪಕರಣಗಳನ್ನು ಮಡಿಸಿ
+tools-unfold = ಉಪಕರಣಗಳನ್ನು ವಿಸ್ತರಿಸಿ
+tools-scanning = ಸ್ಥಳೀಯ ಉಪಕರಣಗಳನ್ನು ಸ್ಕ್ಯಾನ್ ಮಾಡಲಾಗುತ್ತಿದೆ…
+tools-no-installed = ಯಾವುದೇ ಉಪಕರಣ ಸ್ಥಾಪಿಸಲಾಗಿಲ್ಲ
+tools-empty = ಹೊಂದಿಕೆಯಾಗುವ ಉಪಕರಣಗಳಿಲ್ಲ
+tools-empty-detail = ಪ್ಯಾಕೇಜ್ ಸ್ಥಾಪಿಸಿ ಅಥವಾ Stow-ಶೈಲಿಯ ಸಂರಚನಾ ಕಡತಗಳ ಪ್ಯಾಕೇಜ್ ಸೇರಿಸಿ.
+tools-apply = ಅನ್ವಯಿಸಿ
+tools-homebrew = Homebrew
+tools-homebrew-sync = ಸ್ಥಾಪಿಸಲಾದ ಸೂತ್ರಗಳು ಮತ್ತು ಅನ್ವಯಗಳು ಸ್ವಯಂಚಾಲಿತವಾಗಿ ಸಿಂಕ್ ಆಗುತ್ತವೆ.
+tools-open-brewfile = Brewfile ತೆರೆಯಿರಿ
+tools-managed = ನಿರ್ವಹಿಸಲಾಗಿದೆ
+tools-provider-homebrew-formulae = Homebrew ಸೂತ್ರಗಳು
+tools-provider-homebrew-casks = Homebrew ಅನ್ವಯಗಳು
+tools-provider-npm = NPM ಪ್ಯಾಕೇಜ್‌ಗಳು
+tools-provider-acp-agents = ACP ಏಜೆಂಟ್‌ಗಳು
+tools-provider-lsp-servers = LSP ಸರ್ವರ್‌ಗಳು
+tools-provider-mcp-servers = MCP ಸರ್ವರ್‌ಗಳು
+tools-provider-dotfiles = ಸಂರಚನಾ ಕಡತಗಳು
+tools-status-available = ಲಭ್ಯ
+tools-status-missing = ಕಾಣೆಯಾಗಿದೆ
+tools-status-conflict = ಸಂಘರ್ಷ
+tools-forget = ಮರೆತುಬಿಡಿ
+tools-manage = ನಿರ್ವಹಿಸಿ
+tools-link = ಸಂಪರ್ಕಿಸಿ
+tools-unlink = ಸಂಪರ್ಕ ತೆಗೆದುಹಾಕಿ
+tools-import = ಆಮದು ಮಾಡಿ
+tools-update-count = { $count ->
+    [one] 1 ನವೀಕರಣ
+   *[other] { $count } ನವೀಕರಣಗಳು
+}
+tools-conflict-count = { $count ->
+    [one] 1 ಸಂಘರ್ಷ
+   *[other] { $count } ಸಂಘರ್ಷಗಳು
+}
+tools-result-applied = ಉಪಕರಣಗಳನ್ನು ಅನ್ವಯಿಸಲಾಗಿದೆ
+tools-result-imported = ಉಪಕರಣಗಳನ್ನು ಆಮದು ಮಾಡಲಾಗಿದೆ
+tools-result-installed = { $name } ಸ್ಥಾಪಿಸಲಾಗಿದೆ
+tools-result-updated = { $name } ನವೀಕರಿಸಲಾಗಿದೆ
+tools-result-uninstalled = { $name } ಅಸ್ಥಾಪಿಸಲಾಗಿದೆ
+tools-result-forgotten = { $name } ಮರೆತುಬಿಡಲಾಗಿದೆ
+tools-result-managed = { $name } ಅನ್ನು ಈಗ ನಿರ್ವಹಿಸಲಾಗುತ್ತಿದೆ
+tools-result-linked = { $name } ಸಂಪರ್ಕಿಸಲಾಗಿದೆ
+tools-result-unlinked = { $name } ಸಂಪರ್ಕ ತೆಗೆದುಹಾಕಲಾಗಿದೆ
+vault-title = Vault
+vault-encrypted = ಎಂಡ್-ಟು-ಎಂಡ್ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಲಾಗಿದೆ
+vault-passkey = ಪಾಸ್ಕೀ
+vault-passkey-description = ಪಾಸ್‌ವರ್ಡ್ ಇಲ್ಲದೆಯೇ ಇತರ ಸಾಧನಗಳಲ್ಲಿ ಈ ವಾಲ್ಟ್ ಅನ್ನು ಅನ್‌ಲಾಕ್ ಮಾಡಿ.
+vault-passkey-add = ಪಾಸ್‌ಕೀ ಸೇರಿಸಿ
+vault-passkey-unlock = ಅನ್ಲಾಕ್ ಮಾಡಿ
+vault-passkey-provider-unsupported = ಈ ಪಾಸ್‌ಕೀ ಪೂರೈಕೆದಾರರು ಇನ್ನೂ ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಲಾದ ವಾಲ್ಟ್ ಅನ್‌ಲಾಕ್ ಅನ್ನು ಬೆಂಬಲಿಸುವುದಿಲ್ಲ.
+vault-recovery-key = ಮರುಪ್ರಾಪ್ತಿ ಕೀ
+vault-recovery-key-description = ಹೊಸ ಸಾಧನದಲ್ಲಿ ಈ ವಾಲ್ಟ್ ಅನ್ನು ಮರುಪಡೆಯಲು ಒಂದು ಕೀಲಿಯನ್ನು ಬಿಟ್‌ವಾರ್ಡನ್ ಅಥವಾ ಇನ್ನೊಂದು ಪಾಸ್‌ವರ್ಡ್ ನಿರ್ವಾಹಕದಲ್ಲಿ ಉಳಿಸಿ.
+vault-recovery-key-create = ಕೀಲಿಯನ್ನು ರಚಿಸಿ
+vault-recovery-key-create-failed = ಮರುಪ್ರಾಪ್ತಿ ಕೀಯನ್ನು ರಚಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ.
+vault-recovery-key-save = ಈ ಕೀಲಿಯನ್ನು ಈಗ ಉಳಿಸಿ. Vmux ಅದನ್ನು ಮತ್ತೆ ತೋರಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ.
+vault-recovery-key-saved = ನಾನು ಅದನ್ನು ಉಳಿಸಿದ್ದೇನೆ
+vault-recovery-key-placeholder = ಪೇಸ್ಟ್ ರಿಕವರಿ ಕೀ
+vault-recovery-key-unlock = ಅನ್ಲಾಕ್
+vault-recovery-key-invalid = ಈ ರಿಕವರಿ ಕೀ ವಾಲ್ಟ್ ಅನ್ನು ಅನ್‌ಲಾಕ್ ಮಾಡಲು ಸಾಧ್ಯವಿಲ್ಲ.
+vault-recovery-key-ready = ರಿಕವರಿ ಕೀಯನ್ನು ಕಾನ್ಫಿಗರ್ ಮಾಡಲಾಗಿದೆ
+vault-recovery-key-upload-pending = ಕೀಯನ್ನು ಸ್ಥಳೀಯವಾಗಿ ಉಳಿಸಲಾಗಿದೆ, ಆದರೆ ಅಪ್‌ಲೋಡ್ ವಿಫಲವಾಗಿದೆ. ಅದನ್ನು ಸುರಕ್ಷಿತವಾಗಿರಿಸಿ ಮತ್ತು ಮರುಪ್ರಯತ್ನಿಸಲು ಸಿಂಕ್ ಒತ್ತಿರಿ.
+vault-auto-sync = ಸ್ವಯಂಚಾಲಿತ ಬ್ಯಾಕಪ್
+vault-backup-failed = ಸ್ವಯಂಚಾಲಿತ ಬ್ಯಾಕಪ್ ವಿಫಲವಾಗಿದೆ. ಮರುಪ್ರಯತ್ನಿಸಲು ಸಿಂಕ್ ಒತ್ತಿರಿ.
+vault-backup-failed-short = ಬ್ಯಾಕಪ್ ವಿಫಲವಾಗಿದೆ
+vault-recovery-key-copy-hint = ನಕಲಿಸಲು ಕ್ಲಿಕ್ ಮಾಡಿ
+vault-recovery-key-copied = ನಕಲು ಮಾಡಲಾಗಿದೆ
+vault-recovery-key-verify = ಅದನ್ನು ನಿಮ್ಮ ಪಾಸ್‌ವರ್ಡ್ ನಿರ್ವಾಹಕದಲ್ಲಿ ಉಳಿಸಿ, ನಂತರ ಪರಿಶೀಲಿಸಲು ಅದನ್ನು ಕೆಳಗೆ ಅಂಟಿಸಿ.
+vault-recovery-key-verify-placeholder = ಉಳಿಸಿದ ರಿಕವರಿ ಕೀಯನ್ನು ಅಂಟಿಸಿ
+vault-recovery-key-mismatch = ರಿಕವರಿ ಕೀ ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ.
+vault-open = { common-open } Vault
+vault-description = Git ಜೊತೆಗೆ ಸೆಟ್ಟಿಂಗ್‌ಗಳು, ಪರಿಕರಗಳು, ಡಾಟ್‌ಫೈಲ್‌ಗಳು ಮತ್ತು ಜ್ಞಾನವನ್ನು ಸಿಂಕ್ ಮಾಡಿ.
+vault-sync = ಸಿಂಕ್ ಮಾಡಿ
+vault-create = ರಚಿಸಿ
+vault-connect = ಸಂಪರ್ಕಿಸಿ
+vault-github = GitHub
+vault-github-description = ಖಾಸಗಿ ರೆಪೊಸಿಟರಿಯನ್ನು ರಚಿಸಿ ಅಥವಾ ಅಸ್ತಿತ್ವದಲ್ಲಿರುವ ವಾಲ್ಟ್ ಅನ್ನು ಆಯ್ಕೆಮಾಡಿ.
+vault-connect-github = GitHub ಅನ್ನು ಸಂಪರ್ಕಿಸಿ
+vault-connected-as = { $name } ನಂತೆ ಸಂಪರ್ಕಿಸಲಾಗಿದೆ
+vault-use-repository = ಬಳಸಿ
+vault-repository-name = ರೆಪೊಸಿಟರಿ ಹೆಸರು
+vault-cloud-folder = ಮೇಘ ಫೋಲ್ಡರ್
+vault-cloud-folder-description = Google ಡ್ರೈವ್, iCloud ಡ್ರೈವ್, ಡ್ರಾಪ್‌ಬಾಕ್ಸ್ ಅಥವಾ OneDrive ನಿಂದ ಫೋಲ್ಡರ್ ಬಳಸಿ.
+vault-choose-folder = ಫೋಲ್ಡರ್ ಆಯ್ಕೆಮಾಡಿ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ಫೋಲ್ಡರ್ · { common-done }
+vault-private = ಖಾಸಗಿ ರೆಪೊಸಿಟರಿ
+vault-public-warning = ರೆಪೊಸಿಟರಿ ಇತಿಹಾಸ ಮತ್ತು ಎನ್‌ಕ್ರಿಪ್ಟ್ ಮಾಡಿದ ಡೇಟಾ ಸಾರ್ವಜನಿಕವಾಗಿರುತ್ತದೆ.
+vault-choose-repository = ರೆಪೊಸಿಟರಿಯನ್ನು ಆಯ್ಕೆಮಾಡಿ...
+vault-empty = ಖಾಲಿ
+vault-clean = ನವೀಕೃತವಾಗಿದೆ
+vault-not-connected = ಸಂಪರ್ಕಗೊಂಡಿಲ್ಲ
+vault-change-count = ಬದಲಾವಣೆಗಳು: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ಪ್ರಾರಂಭ
 start-tagline = ಒಂದೇ prompt. ಏನು ಬೇಕಾದರೂ, ಮುಗಿದಂತೇ.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ನಲ್ಲಿ ಬುಕ್‌ಮಾರ್ಕ�
 common-cancel = ರದ್ದುಮಾಡಿ
 common-delete = ಅಳಿಸಿ
 common-save = ಉಳಿಸಿ
+common-copy = Copy
 common-rename = ಮರುಹೆಸರಿಸಿ
 common-expand = ವಿಸ್ತರಿಸಿ
 common-collapse = ಕುಗ್ಗಿಸಿ

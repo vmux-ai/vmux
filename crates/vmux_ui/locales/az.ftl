@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } element
 }
+
+tools-title = Alətlər
+tools-search = Paketlər, agentlər, MCP, LSP və konfiqurasiya fayllarında axtar…
+tools-open = Alətləri aç
+tools-fold = Alətləri yığ
+tools-unfold = Alətləri genişləndir
+tools-scanning = Yerli alətlər yoxlanılır…
+tools-no-installed = Quraşdırılmış alət yoxdur
+tools-empty = Uyğun alət yoxdur
+tools-empty-detail = Paket quraşdırın və ya Stow üslublu konfiqurasiya faylları paketi əlavə edin.
+tools-apply = Tətbiq et
+tools-homebrew = Homebrew
+tools-homebrew-sync = Quraşdırılmış formulalar və tətbiq paketləri avtomatik sinxronlaşdırılır.
+tools-open-brewfile = Brewfile-ı aç
+tools-managed = idarə olunan
+tools-provider-homebrew-formulae = Homebrew formulaları
+tools-provider-homebrew-casks = Homebrew tətbiq paketləri
+tools-provider-npm = NPM paketləri
+tools-provider-acp-agents = ACP agentləri
+tools-provider-lsp-servers = LSP serverləri
+tools-provider-mcp-servers = MCP serverləri
+tools-provider-dotfiles = Konfiqurasiya faylları
+tools-status-available = Mövcuddur
+tools-status-missing = Çatışmır
+tools-status-conflict = Ziddiyyət
+tools-forget = Unut
+tools-manage = İdarə et
+tools-link = Əlaqələndir
+tools-unlink = Əlaqəni kəs
+tools-import = İdxal et
+tools-update-count = { $count ->
+    [one] 1 yeniləmə
+   *[other] { $count } yeniləmə
+}
+tools-conflict-count = { $count ->
+    [one] 1 ziddiyyət
+   *[other] { $count } ziddiyyət
+}
+tools-result-applied = Alətlər tətbiq edildi
+tools-result-imported = Alətlər idxal edildi
+tools-result-installed = { $name } quraşdırıldı
+tools-result-updated = { $name } yeniləndi
+tools-result-uninstalled = { $name } silindi
+tools-result-forgotten = { $name } unuduldu
+tools-result-managed = { $name } artıq idarə olunur
+tools-result-linked = { $name } əlaqələndirildi
+tools-result-unlinked = { $name } əlaqədən çıxarıldı
+vault-title = Vault
+vault-encrypted = Başdan-başa şifrələnib
+vault-passkey = Keçid açarı
+vault-passkey-description = Parol olmadan digər cihazlarda bu Vault kilidini açın.
+vault-passkey-add = Keçid açarı əlavə edin
+vault-passkey-unlock = Kilidi aç
+vault-passkey-provider-unsupported = Bu açar provayderi hələ şifrələnmiş Vault kilidini açmağı dəstəkləmir.
+vault-recovery-key = Bərpa Açarı
+vault-recovery-key-description = Bu Vault-u yeni cihazda bərpa etmək üçün bir açarı Bitwarden-də və ya başqa parol menecerində saxlayın.
+vault-recovery-key-create = Açar yarat
+vault-recovery-key-create-failed = Bərpa Açarı yaratmaq mümkün olmadı.
+vault-recovery-key-save = Bu açarı indi yadda saxlayın. Vmux onu bir daha göstərə bilməz.
+vault-recovery-key-saved = Mən onu saxladım
+vault-recovery-key-placeholder = Yapışdırıb Bərpa Açarı
+vault-recovery-key-unlock = Kilidini aç
+vault-recovery-key-invalid = Bu Bərpa Açarı Vault kilidini aça bilməz.
+vault-recovery-key-ready = Bərpa Açarı konfiqurasiya edilmişdir
+vault-recovery-key-upload-pending = Açar yerli olaraq saxlanılır, lakin yükləmə uğursuz oldu. Onu təhlükəsiz saxlayın və yenidən cəhd etmək üçün Sinxronizasiya düyməsini basın.
+vault-auto-sync = Avtomatik ehtiyat nüsxəsi
+vault-backup-failed = Avtomatik yedəkləmə uğursuz oldu. Yenidən cəhd etmək üçün Sinxronizasiya düyməsini basın.
+vault-backup-failed-short = Yedəkləmə alınmadı
+vault-recovery-key-copy-hint = Kopyalamaq üçün klikləyin
+vault-recovery-key-copied = Kopyalandı
+vault-recovery-key-verify = Onu parol menecerinizdə saxlayın, sonra doğrulamaq üçün aşağıya yapışdırın.
+vault-recovery-key-verify-placeholder = Yadda saxlanmış Bərpa Açarını yapışdırın
+vault-recovery-key-mismatch = Bərpa Açarı uyğun gəlmir.
+vault-open = { common-open } Vault
+vault-description = Parametrləri, alətləri, nöqtə fayllarını və Biliyi Git ilə sinxronlaşdırın.
+vault-sync = Sinxronizasiya
+vault-create = Yaradın
+vault-connect = Qoşun
+vault-github = GitHub
+vault-github-description = Şəxsi depo yaradın və ya mövcud Vault seçin.
+vault-connect-github = GitHub-a qoşulun
+vault-connected-as = { $name } kimi qoşulub
+vault-use-repository = istifadə edin
+vault-repository-name = Repozitor adı
+vault-cloud-folder = Bulud qovluğu
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox və ya OneDrive-dan qovluqdan istifadə edin.
+vault-choose-folder = Qovluq seçin
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Qovluq · { common-done }
+vault-private = Şəxsi depo
+vault-public-warning = Repozitoriya tarixçəsi və şifrələnmiş məlumatlar açıq olacaq.
+vault-choose-repository = Repozitor seçin...
+vault-empty = boş
+vault-clean = Bu günə qədər
+vault-not-connected = Qoşulmayıb
+vault-change-count = Dəyişikliklər: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Başlanğıc
 start-tagline = Bir prompt. Hər şey hazır.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } içində əlfəcinlə
 common-cancel = Ləğv et
 common-delete = Sil
 common-save = Yadda saxla
+common-copy = Copy
 common-rename = Adını dəyiş
 common-expand = Genişləndir
 common-collapse = Yığ

@@ -50,7 +50,7 @@ aux_identifier() {
     case "$name" in
         "Vmux Service") printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
         vmux_service) printf 'ai.vmux.service%s' "$IDENT_SUFFIX" ;;
-        vmux)         printf 'ai.vmux.cli%s'     "$IDENT_SUFFIX" ;;
+        vmux)         printf 'ai.vmux.cli'                         ;;
         *)            printf 'ai.vmux.%s%s' "$name" "$IDENT_SUFFIX" ;;
     esac
 }

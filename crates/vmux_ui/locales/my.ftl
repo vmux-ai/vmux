@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ခု
    *[other] { $count } ခု
 }
+
+tools-title = ကိရိယာများ
+tools-search = ပက်ကေ့ချ်များ၊ အေးဂျင့်များ၊ MCP၊ LSPနှင့် သတ်မှတ်ချက်ဖိုင်များကို ရှာရန်…
+tools-open = ကိရိယာများကို ဖွင့်ရန်
+tools-fold = ကိရိယာများကို ခေါက်ရန်
+tools-unfold = ကိရိယာများကို ဖြန့်ရန်
+tools-scanning = စက်တွင်းကိရိယာများကို စစ်ဆေးနေသည်…
+tools-no-installed = ထည့်သွင်းထားသော ကိရိယာမရှိပါ
+tools-empty = ကိုက်ညီသော ကိရိယာမရှိပါ
+tools-empty-detail = ပက်ကေ့ချ်တစ်ခု ထည့်သွင်းပါ သို့မဟုတ် Stow ပုံစံ သတ်မှတ်ချက်ဖိုင်ပက်ကေ့ချ်တစ်ခု ထည့်ပါ။
+tools-apply = အသုံးပြုရန်
+tools-homebrew = Homebrew
+tools-homebrew-sync = ထည့်သွင်းထားသော ဖော်မြူလာများနှင့် အက်ပ်များသည် အလိုအလျောက် တစ်ပြေးညီဖြစ်သည်။
+tools-open-brewfile = Brewfile ကို ဖွင့်ရန်
+tools-managed = စီမံထားသည်
+tools-provider-homebrew-formulae = Homebrew ဖော်မြူလာများ
+tools-provider-homebrew-casks = Homebrew အက်ပ်များ
+tools-provider-npm = NPM ပက်ကေ့ချ်များ
+tools-provider-acp-agents = ACP အေးဂျင့်များ
+tools-provider-lsp-servers = LSP ဆာဗာများ
+tools-provider-mcp-servers = MCP ဆာဗာများ
+tools-provider-dotfiles = သတ်မှတ်ချက်ဖိုင်များ
+tools-status-available = ရရှိနိုင်သည်
+tools-status-missing = မရှိပါ
+tools-status-conflict = ပဋိပက္ခ
+tools-forget = မေ့ရန်
+tools-manage = စီမံရန်
+tools-link = ချိတ်ဆက်ရန်
+tools-unlink = ချိတ်ဆက်မှုဖြုတ်ရန်
+tools-import = တင်သွင်းရန်
+tools-update-count = { $count ->
+    [one] အပ်ဒိတ် 1 ခု
+   *[other] အပ်ဒိတ် { $count } ခု
+}
+tools-conflict-count = { $count ->
+    [one] ပဋိပက္ခ 1 ခု
+   *[other] ပဋိပက္ခ { $count } ခု
+}
+tools-result-applied = ကိရိယာများကို အသုံးပြုပြီးပါပြီ
+tools-result-imported = ကိရိယာများကို တင်သွင်းပြီးပါပြီ
+tools-result-installed = { $name } ကို ထည့်သွင်းပြီးပါပြီ
+tools-result-updated = { $name } ကို အပ်ဒိတ်လုပ်ပြီးပါပြီ
+tools-result-uninstalled = { $name } ကို ဖြုတ်ပြီးပါပြီ
+tools-result-forgotten = { $name } ကို မေ့လိုက်ပါပြီ
+tools-result-managed = { $name } ကို ယခု စီမံထားပါသည်
+tools-result-linked = { $name } ကို ချိတ်ဆက်ပြီးပါပြီ
+tools-result-unlinked = { $name } ၏ ချိတ်ဆက်မှုကို ဖြုတ်ပြီးပါပြီ
+vault-title = Vault
+vault-encrypted = အစမှအဆုံး ကုဒ်ဝှက်ထားသည်
+vault-passkey = သော့တံ
+vault-passkey-description = စကားဝှက်မပါဘဲ အခြားစက်များတွင် ဤ Vault ကို လော့ခ်ဖွင့်ပါ။
+vault-passkey-add = သော့တံထည့်ပါ။
+vault-passkey-unlock = သော့ဖွင့်ပါ။
+vault-passkey-provider-unsupported = ဤသော့ခတ်ပေးသူသည် ကုဒ်ဝှက်ထားသော Vault လော့ခ်ဖွင့်ခြင်းကို မပံ့ပိုးနိုင်သေးပါ။
+vault-recovery-key = ပြန်လည်ရယူရေးကီး
+vault-recovery-key-description = စက်ပစ္စည်းအသစ်တွင် ဤ Vault ကို ပြန်လည်ရယူရန် Bitwarden သို့မဟုတ် အခြားသော စကားဝှက်မန်နေဂျာတွင် သော့တစ်ခုကို သိမ်းဆည်းပါ။
+vault-recovery-key-create = သော့ဖန်တီး
+vault-recovery-key-create-failed = ပြန်လည်ရယူရေးကီးကို ဖန်တီး၍မရပါ။
+vault-recovery-key-save = ဤကီးကို ယခု သိမ်းဆည်းပါ။ Vmux ကို ထပ်မပြနိုင်ပါ။
+vault-recovery-key-saved = ငါသိမ်းထားပြီ
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Unlock
+vault-recovery-key-invalid = ဤပြန်လည်ရယူရေးကီးသည် Vault ကို လော့ခ်ဖွင့်၍မရပါ။
+vault-recovery-key-ready = ပြန်လည်ရယူရေးကီးကို စီစဉ်သတ်မှတ်ထားသည်။
+vault-recovery-key-upload-pending = သော့ကို စက်တွင်းတွင် သိမ်းဆည်းထားသော်လည်း အပ်လုဒ် မအောင်မြင်ပါ။ ၎င်းကို ဘေးကင်းစွာ သိမ်းထားပြီး ထပ်စမ်းကြည့်ရန် Sync ကို နှိပ်ပါ။
+vault-auto-sync = အလိုအလျောက်အရန်ကူးယူခြင်း
+vault-backup-failed = အလိုအလျောက် အရန်ကူးခြင်း မအောင်မြင်ပါ။ ထပ်စမ်းကြည့်ရန် Sync ကိုနှိပ်ပါ။
+vault-backup-failed-short = အရန်သိမ်းခြင်း မအောင်မြင်ပါ။
+vault-recovery-key-copy-hint = ကူးယူရန် နှိပ်ပါ။
+vault-recovery-key-copied = ကူးယူသည်။
+vault-recovery-key-verify = ၎င်းကို သင့်စကားဝှက်မန်နေဂျာတွင် သိမ်းဆည်းပြီး အတည်ပြုရန် အောက်တွင် ၎င်းကို ကူးထည့်ပါ။
+vault-recovery-key-verify-placeholder = သိမ်းဆည်းထားသော Recovery Key ကိုကူးထည့်ပါ။
+vault-recovery-key-mismatch = Recovery Key နှင့် မကိုက်ညီပါ။
+vault-open = { common-open } Vault
+vault-description = ဆက်တင်များ၊ ကိရိယာများ၊ dotfiles နှင့် Knowledge ကို Git ဖြင့် စင့်ခ်လုပ်ပါ။
+vault-sync = ထပ်တူကျသည်။
+vault-create = ဖန်တီးပါ။
+vault-connect = ချိတ်ဆက်ပါ။
+vault-github = GitHub
+vault-github-description = သီးသန့်သိုလှောင်ခန်းတစ်ခု ဖန်တီးပါ သို့မဟုတ် ရှိပြီးသား Vault တစ်ခုကို ရွေးချယ်ပါ။
+vault-connect-github = GitHub ကိုချိတ်ဆက်ပါ။
+vault-connected-as = { $name } အဖြစ် ချိတ်ဆက်ထားသည်
+vault-use-repository = သုံးပါ။
+vault-repository-name = သိုလှောင်ခန်းအမည်
+vault-cloud-folder = တိမ်တိုက်ဖိုဒါ
+vault-cloud-folder-description = Google Drive၊ iCloud Drive၊ Dropbox သို့မဟုတ် OneDrive မှ ဖိုင်တွဲတစ်ခုကို အသုံးပြုပါ။
+vault-choose-folder = ဖိုင်တွဲကို ရွေးပါ။
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ဖိုလ် · { common-done }
+vault-private = သီးသန့်သိုလှောင်ခန်း
+vault-public-warning = သိုလှောင်ရာ၏ မှတ်တမ်းနှင့် ကုဒ်ဝှက်ထားသော ဒေတာကို အများပြည်သူ မြင်နိုင်မည်။
+vault-choose-repository = သိုလှောင်ခန်းကို ရွေးပါ...
+vault-empty = ဗလာ
+vault-clean = နောက်ဆုံးပေါ်
+vault-not-connected = မချိတ်ဆက်ပါ။
+vault-change-count = အပြောင်းအလဲများ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = စတင်ရန်
 start-tagline = prompt တစ်ခုတည်းနဲ့ ဘာမဆို ပြီးစီးစေပါ။
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } တွင် Bookmark လုပ်ရန်
 common-cancel = မလုပ်တော့
 common-delete = ဖျက်
 common-save = သိမ်း
+common-copy = Copy
 common-rename = အမည်ပြောင်း
 common-expand = ဖြန့်
 common-collapse = ခေါက်

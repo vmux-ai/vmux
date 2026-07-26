@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ଆଇଟମ୍
    *[other] { $count } ଆଇଟମ୍
 }
+
+tools-title = ଉପକରଣ
+tools-search = ପ୍ୟାକେଜ୍, ଏଜେଣ୍ଟ, MCP, LSP ଏବଂ ବିନ୍ୟାସ ଫାଇଲ୍ ଖୋଜନ୍ତୁ…
+tools-open = ଉପକରଣ ଖୋଲନ୍ତୁ
+tools-fold = ଉପକରଣ ସଙ୍କୁଚିତ କରନ୍ତୁ
+tools-unfold = ଉପକରଣ ବିସ୍ତାର କରନ୍ତୁ
+tools-scanning = ସ୍ଥାନୀୟ ଉପକରଣ ସ୍କାନ୍ ହେଉଛି…
+tools-no-installed = କୌଣସି ଉପକରଣ ସଂସ୍ଥାପିତ ନାହିଁ
+tools-empty = କୌଣସି ମେଳ ଖାଉଥିବା ଉପକରଣ ନାହିଁ
+tools-empty-detail = ଏକ ପ୍ୟାକେଜ୍ ସଂସ୍ଥାପନ କରନ୍ତୁ କିମ୍ବା Stow-ଶୈଳୀର ବିନ୍ୟାସ ଫାଇଲ୍ ପ୍ୟାକେଜ୍ ଯୋଡ଼ନ୍ତୁ।
+tools-apply = ପ୍ରୟୋଗ କରନ୍ତୁ
+tools-homebrew = Homebrew
+tools-homebrew-sync = ସଂସ୍ଥାପିତ ସୂତ୍ର ଏବଂ ଅନୁପ୍ରୟୋଗଗୁଡ଼ିକ ସ୍ୱୟଂଚାଳିତ ଭାବେ ସମନ୍ୱୟ ହୁଏ।
+tools-open-brewfile = Brewfile ଖୋଲନ୍ତୁ
+tools-managed = ପରିଚାଳିତ
+tools-provider-homebrew-formulae = Homebrew ସୂତ୍ର
+tools-provider-homebrew-casks = Homebrew ଅନୁପ୍ରୟୋଗ
+tools-provider-npm = NPM ପ୍ୟାକେଜ୍
+tools-provider-acp-agents = ACP ଏଜେଣ୍ଟ
+tools-provider-lsp-servers = LSP ସର୍ଭର
+tools-provider-mcp-servers = MCP ସର୍ଭର
+tools-provider-dotfiles = ବିନ୍ୟାସ ଫାଇଲ୍
+tools-status-available = ଉପଲବ୍ଧ
+tools-status-missing = ଅନୁପସ୍ଥିତ
+tools-status-conflict = ବିରୋଧ
+tools-forget = ଭୁଲିଯାଆନ୍ତୁ
+tools-manage = ପରିଚାଳନା କରନ୍ତୁ
+tools-link = ସଂଯୋଗ କରନ୍ତୁ
+tools-unlink = ସଂଯୋଗ ହଟାନ୍ତୁ
+tools-import = ଆମଦାନୀ କରନ୍ତୁ
+tools-update-count = { $count ->
+    [one] 1 ଅଦ୍ୟତନ
+   *[other] { $count } ଅଦ୍ୟତନ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ବିରୋଧ
+   *[other] { $count } ବିରୋଧ
+}
+tools-result-applied = ଉପକରଣ ପ୍ରୟୋଗ କରାଗଲା
+tools-result-imported = ଉପକରଣ ଆମଦାନୀ କରାଗଲା
+tools-result-installed = { $name } ସଂସ୍ଥାପିତ ହେଲା
+tools-result-updated = { $name } ଅଦ୍ୟତନ ହେଲା
+tools-result-uninstalled = { $name } ଅସଂସ୍ଥାପିତ ହେଲା
+tools-result-forgotten = { $name } ଭୁଲି ଦିଆଗଲା
+tools-result-managed = { $name } ଏବେ ପରିଚାଳିତ
+tools-result-linked = { $name } ସଂଯୁକ୍ତ ହେଲା
+tools-result-unlinked = { $name }ର ସଂଯୋଗ ହଟାଗଲା
+vault-title = Vault
+vault-encrypted = ଏଣ୍ଡ-ଟୁ-ଏଣ୍ଡ ଏନ୍‌କ୍ରିପ୍ଟ ହୋଇଛି
+vault-passkey = ପାସ୍କି |
+vault-passkey-description = ପାସୱାର୍ଡ ବିନା ଅନ୍ୟ ଡିଭାଇସରେ ଏହି ଭାଲ୍ଟକୁ ଅନଲକ୍ କରନ୍ତୁ |
+vault-passkey-add = ପାସ୍କି ଯୋଡନ୍ତୁ |
+vault-passkey-unlock = ଅନଲକ୍ କରନ୍ତୁ |
+vault-passkey-provider-unsupported = ଏହି ପାସ୍କି ପ୍ରଦାନକାରୀ ଏପର୍ଯ୍ୟନ୍ତ ଏନକ୍ରିପ୍ଟ ହୋଇଥିବା ଭାଲ୍ଟ ଅନଲକ୍ କୁ ସମର୍ଥନ କରେନାହିଁ |
+vault-recovery-key = ପୁନରୁଦ୍ଧାର କି
+vault-recovery-key-description = ଏକ ନୂତନ ଡିଭାଇସରେ ଏହି ଭାଲ୍ଟ ପୁନରୁଦ୍ଧାର ପାଇଁ ବିଟୱାର୍ଡନ୍ କିମ୍ବା ଅନ୍ୟ ପାସୱାର୍ଡ ମ୍ୟାନେଜର୍ ରେ ଗୋଟିଏ ଚାବି ସଞ୍ଚୟ କରନ୍ତୁ |
+vault-recovery-key-create = ଚାବି ସୃଷ୍ଟି କରନ୍ତୁ |
+vault-recovery-key-create-failed = ପୁନରୁଦ୍ଧାର କୀ ସୃଷ୍ଟି ହୋଇପାରିଲା ନାହିଁ |
+vault-recovery-key-save = ଏହି ଚାବିକୁ ବର୍ତ୍ତମାନ ସେଭ୍ କରନ୍ତୁ | Vmux ଏହାକୁ ଆଉ ଦେଖାଇ ପାରିବ ନାହିଁ |
+vault-recovery-key-saved = ମୁଁ ଏହାକୁ ସେଭ୍ କଲି |
+vault-recovery-key-placeholder = ପୁନରୁଦ୍ଧାର କୀ ଲେପନ କରନ୍ତୁ |
+vault-recovery-key-unlock = ଅନଲକ୍ କରନ୍ତୁ |
+vault-recovery-key-invalid = ଏହି ପୁନରୁଦ୍ଧାର କୀ ଭାଲ୍ଟକୁ ଅନଲକ୍ କରିପାରିବ ନାହିଁ |
+vault-recovery-key-ready = ପୁନରୁଦ୍ଧାର କି ବିନ୍ୟାସିତ |
+vault-recovery-key-upload-pending = ଚାବି ସ୍ଥାନୀୟ ଭାବରେ ସଞ୍ଚୟ ହୋଇଛି, କିନ୍ତୁ ଅପଲୋଡ୍ ବିଫଳ ହୋଇଛି | ଏହାକୁ ସୁରକ୍ଷିତ ରଖନ୍ତୁ ଏବଂ ପୁନ ry ଚେଷ୍ଟା କରିବାକୁ ସିଙ୍କ ଦବାନ୍ତୁ |
+vault-auto-sync = ସ୍ୱୟଂଚାଳିତ ବ୍ୟାକଅପ୍ |
+vault-backup-failed = ସ୍ୱୟଂଚାଳିତ ବ୍ୟାକଅପ୍ ବିଫଳ ହେଲା | ପୁନ ry ଚେଷ୍ଟା କରିବାକୁ ସିଙ୍କ୍ ଦବାନ୍ତୁ |
+vault-backup-failed-short = ବ୍ୟାକଅପ୍ ବିଫଳ ହେଲା |
+vault-recovery-key-copy-hint = କପି କରିବାକୁ କ୍ଲିକ୍ କରନ୍ତୁ |
+vault-recovery-key-copied = କପି ହୋଇଛି |
+vault-recovery-key-verify = ଏହାକୁ ଆପଣଙ୍କର ପାସୱାର୍ଡ ମ୍ୟାନେଜର୍ ରେ ସେଭ୍ କରନ୍ତୁ, ତାପରେ ଯାଞ୍ଚ କରିବାକୁ ଏହାକୁ ତଳେ ଲେପନ କରନ୍ତୁ |
+vault-recovery-key-verify-placeholder = ପୁନରୁଦ୍ଧାର କୀ ଲେପନ କରନ୍ତୁ |
+vault-recovery-key-mismatch = ପୁନରୁଦ୍ଧାର କି ମେଳ ଖାଉ ନାହିଁ |
+vault-open = { common-open } Vault
+vault-description = Git ସହିତ ସେଟିଂସମୂହ, ଉପକରଣ, ଡଟ୍ଫାଇଲ୍ ଏବଂ ଜ୍ଞାନ ସିଙ୍କ କରନ୍ତୁ |
+vault-sync = ସିଙ୍କ୍ କରନ୍ତୁ |
+vault-create = ସୃଷ୍ଟି କରନ୍ତୁ |
+vault-connect = ସଂଯୋଗ କରନ୍ତୁ |
+vault-github = GitHub
+vault-github-description = ଏକ ବ୍ୟକ୍ତିଗତ ସଂଗ୍ରହାଳୟ ସୃଷ୍ଟି କରନ୍ତୁ କିମ୍ବା ଏକ ବିଦ୍ୟମାନ ଭାଲ୍ଟ ବାଛନ୍ତୁ |
+vault-connect-github = GitHub କୁ ସଂଯୋଗ କରନ୍ତୁ |
+vault-connected-as = { $name } ଭାବରେ ସଂଯୁକ୍ତ |
+vault-use-repository = ବ୍ୟବହାର କରନ୍ତୁ |
+vault-repository-name = ସଂଗ୍ରହାଳୟ ନାମ
+vault-cloud-folder = କ୍ଲାଉଡ୍ ଫୋଲ୍ଡର୍ |
+vault-cloud-folder-description = ଗୁଗୁଲ୍ ଡ୍ରାଇଭ୍, iCloud ଡ୍ରାଇଭ୍, ଡ୍ରପ୍ ବକ୍ସ, କିମ୍ବା OneDrive ରୁ ଏକ ଫୋଲ୍ଡର ବ୍ୟବହାର କରନ୍ତୁ |
+vault-choose-folder = ଫୋଲ୍ଡର ବାଛନ୍ତୁ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ଫୋଲ୍ଡର · { common-done }
+vault-private = ବ୍ୟକ୍ତିଗତ ସଂଗ୍ରହାଳୟ
+vault-public-warning = ରିପୋଜିଟୋରି ଇତିହାସ ଏବଂ ଏନ୍‌କ୍ରିପ୍ଟ ହୋଇଥିବା ଡାଟା ସାର୍ବଜନୀନ ହେବ।
+vault-choose-repository = ଏକ ସଂଗ୍ରହାଳୟ ବାଛନ୍ତୁ…
+vault-empty = ଖାଲି
+vault-clean = ଅଦ୍ୟାବଧି
+vault-not-connected = ସଂଯୁକ୍ତ ନୁହେଁ |
+vault-change-count = ପରିବର୍ତ୍ତନ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ଆରମ୍ଭ
 start-tagline = ଗୋଟିଏ ପ୍ରମ୍ପ୍ଟ। ଯେକୌଣସି କାମ, ସରିଗଲା।
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ରେ ବୁକ୍‌ମାର୍କ କରନ
 common-cancel = ବାତିଲ
 common-delete = ଡିଲିଟ୍
 common-save = ସେଭ୍
+common-copy = Copy
 common-rename = ନାମ ବଦଳାନ୍ତୁ
 common-expand = ବିସ୍ତାର କରନ୍ତୁ
 common-collapse = ସଙ୍କୋଚନ କରନ୍ତୁ

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } shay
    *[other] { $count } shay
 }
+
+tools-title = Qalab
+tools-search = Raadi xirmooyinka, wakiillada, MCP, LSP iyo faylasha habaynta…
+tools-open = Fur qalabka
+tools-fold = Laab qalabka
+tools-unfold = Kala bixi qalabka
+tools-scanning = Baaraya qalabka maxalliga ah…
+tools-no-installed = Qalab rakiban ma jiro
+tools-empty = Qalab ku habboon ma jiro
+tools-empty-detail = Rakib xirmo ama ku dar xirmo faylal habayn ah oo qaabka Stow ah.
+tools-apply = Dhaqan geli
+tools-homebrew = Homebrew
+tools-homebrew-sync = Qaacidooyinka iyo barnaamijyada rakiban si toos ah ayay isu waafajiyaan.
+tools-open-brewfile = Fur Brewfile
+tools-managed = la maamulo
+tools-provider-homebrew-formulae = Qaacidooyinka Homebrew
+tools-provider-homebrew-casks = Barnaamijyada Homebrew
+tools-provider-npm = Xirmooyinka NPM
+tools-provider-acp-agents = Wakiillada ACP
+tools-provider-lsp-servers = Adeegayaasha LSP
+tools-provider-mcp-servers = Adeegayaasha MCP
+tools-provider-dotfiles = Faylasha habaynta
+tools-status-available = La heli karo
+tools-status-missing = Maqan
+tools-status-conflict = Iskahorimaad
+tools-forget = Illow
+tools-manage = Maamul
+tools-link = Xiriiri
+tools-unlink = Xiriirka ka saar
+tools-import = Soo dejiso
+tools-update-count = { $count ->
+    [one] 1 cusboonaysiin
+   *[other] { $count } cusboonaysiin
+}
+tools-conflict-count = { $count ->
+    [one] 1 iskahorimaad
+   *[other] { $count } iskahorimaad
+}
+tools-result-applied = Qalabka waa la dhaqan geliyey
+tools-result-imported = Qalabka waa la soo dejiyey
+tools-result-installed = { $name } waa la rakibay
+tools-result-updated = { $name } waa la cusboonaysiiyey
+tools-result-uninstalled = { $name } waa la saaray
+tools-result-forgotten = { $name } waa la illoobay
+tools-result-managed = { $name } hadda waa la maamulaa
+tools-result-linked = { $name } waa la xiriiriyey
+tools-result-unlinked = Xiriirka { $name } waa la saaray
+vault-title = Vault
+vault-encrypted = Si dhammaad-ilaa-dhammaad ah loo siray
+vault-passkey = Furaha furaha
+vault-passkey-description = Ku fur Vault-kan aaladaha kale bilaa sirta ah.
+vault-passkey-add = Ku dar furaha furaha
+vault-passkey-unlock = Fur
+vault-passkey-provider-unsupported = Bixiyaha furaha furaha weli ma taageerayo furaha Vault sir ah weli.
+vault-recovery-key = Furaha Soo kabashada
+vault-recovery-key-description = Ku keydi hal fure Bitwarden ama maamule sirta ah si aad ugu soo ceshato Vault-kan qalab cusub.
+vault-recovery-key-create = Abuur furaha
+vault-recovery-key-create-failed = Furaha soo kabashada lama abuuri karo
+vault-recovery-key-save = Keydi furahaan hadda Vmux mar kale ma muujin karto.
+vault-recovery-key-saved = waan badbaadiyay
+vault-recovery-key-placeholder = Ku dheji furaha soo kabashada
+vault-recovery-key-unlock = Fur
+vault-recovery-key-invalid = Furaha Soo-kabashada ma furi karo Vault-ka.
+vault-recovery-key-ready = Furaha soo kabashada waa la habeeyey
+vault-recovery-key-upload-pending = Furaha waxaa lagu keydiyay gudaha, laakiin soo gelinta waa guuldareystay. Ilaali oo taabo Sync si aad dib isugu daydo.
+vault-auto-sync = Kaabsi toos ah
+vault-backup-failed = Kaabista tooska ah ayaa fashilantay Riix Sync si aad dib isugu daydo.
+vault-backup-failed-short = Kaabta ayaa fashilantay
+vault-recovery-key-copy-hint = Guji si aad u koobiyeeyso
+vault-recovery-key-copied = la guuriyay
+vault-recovery-key-verify = Ku kaydi maamulaha eraygaaga sirta ah, dabadeed ku dheji hoosta si aad u xaqiijiso.
+vault-recovery-key-verify-placeholder = Ku dheji furaha soo kabashada ee kaydsan
+vault-recovery-key-mismatch = Furaha soo kabashada kuma dhigma
+vault-open = { common-open } Vault
+vault-description = Isku-dubarid dejinta, agabka, dotfiles, iyo aqoonta Git.
+vault-sync = Isku xidh
+vault-create = Abuur
+vault-connect = Ku xidhnow
+vault-github = GitHub
+vault-github-description = Samee kayd gaar ah ama door Vault jira.
+vault-connect-github = Ku xidh GitHub
+vault-connected-as = Ku xidhan sida { $name }
+vault-use-repository = Isticmaal
+vault-repository-name = Magaca kaydka
+vault-cloud-folder = Galka daruuraha
+vault-cloud-folder-description = Isticmaal galka Google Drive, iCloud Drive, Dropbox, ama OneDrive.
+vault-choose-folder = Dooro gal
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Kaydka gaarka ah
+vault-public-warning = Taariikhda kaydka iyo xogta la siray waxay noqon doonaan dadweyne.
+vault-choose-repository = Dooro kayd…
+vault-empty = madhan
+vault-clean = Ilaa hadda
+vault-not-connected = Ma xidhna
+vault-change-count = Isbeddellada: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Bilow
 start-tagline = Hal amar. Wax kasta, waa dhammaaday.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Ku calaamadee { $folder }
 common-cancel = Jooji
 common-delete = Tirtir
 common-save = Kaydi
+common-copy = Copy
 common-rename = Magac beddel
 common-expand = Ballaadhi
 common-collapse = Isku laab

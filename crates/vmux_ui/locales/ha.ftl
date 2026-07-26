@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] abu { $count }
    *[other] abubuwa { $count }
 }
+
+tools-title = Kayan aiki
+tools-search = Nemi fakiti, wakilai, MCP, LSP da fayilolin saiti…
+tools-open = Buɗe kayan aiki
+tools-fold = Naɗe kayan aiki
+tools-unfold = Buɗe kayan aiki
+tools-scanning = Ana binciken kayan aikin gida…
+tools-no-installed = Babu kayan aiki da aka girka
+tools-empty = Babu kayan aiki da ya dace
+tools-empty-detail = Girka fakiti ko ƙara fakitin fayilolin saiti irin na Stow.
+tools-apply = Aiwatar
+tools-homebrew = Homebrew
+tools-homebrew-sync = Tsare-tsare da manhajojin da aka girka suna daidaituwa ta atomatik.
+tools-open-brewfile = Buɗe Brewfile
+tools-managed = ana sarrafawa
+tools-provider-homebrew-formulae = Tsare-tsaren Homebrew
+tools-provider-homebrew-casks = Manhajojin Homebrew
+tools-provider-npm = Fakitin NPM
+tools-provider-acp-agents = Wakilan ACP
+tools-provider-lsp-servers = Sabar LSP
+tools-provider-mcp-servers = Sabar MCP
+tools-provider-dotfiles = Fayilolin saiti
+tools-status-available = Akwai
+tools-status-missing = Babu
+tools-status-conflict = Saɓani
+tools-forget = Manta
+tools-manage = Sarrafa
+tools-link = Haɗa
+tools-unlink = Cire haɗi
+tools-import = Shigo da
+tools-update-count = { $count ->
+    [one] Sabuntawa 1
+   *[other] Sabuntawa { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Saɓani 1
+   *[other] Saɓani { $count }
+}
+tools-result-applied = An aiwatar da kayan aiki
+tools-result-imported = An shigo da kayan aiki
+tools-result-installed = An girka { $name }
+tools-result-updated = An sabunta { $name }
+tools-result-uninstalled = An cire { $name }
+tools-result-forgotten = An manta da { $name }
+tools-result-managed = Yanzu ana sarrafa { $name }
+tools-result-linked = An haɗa { $name }
+tools-result-unlinked = An cire haɗin { $name }
+vault-title = Vault
+vault-encrypted = An ɓoye daga farko zuwa ƙarshe
+vault-passkey = Lambar wucewa
+vault-passkey-description = Buɗe wannan Vault akan wasu na'urori ba tare da kalmar sirri ba.
+vault-passkey-add = Ƙara maɓallin wucewa
+vault-passkey-unlock = Buɗe
+vault-passkey-provider-unsupported = Wannan mai bada maɓalli ba ya goyan bayan buɗewar Vault ɗin da aka ɓoye tukuna.
+vault-recovery-key = Maɓallin farfadowa da na'ura
+vault-recovery-key-description = Ajiye maɓalli ɗaya a cikin Bitwarden ko wani manajan kalmar sirri don dawo da wannan Vault akan sabuwar na'ura.
+vault-recovery-key-create = Ƙirƙiri maɓalli
+vault-recovery-key-create-failed = An kasa ƙirƙira maɓallin farfadowa.
+vault-recovery-key-save = Ajiye wannan maɓallin yanzu. Vmux ba zai iya sake nuna shi ba.
+vault-recovery-key-saved = Na ajiye shi
+vault-recovery-key-placeholder = Manna Maɓallin Farko
+vault-recovery-key-unlock = Buɗe
+vault-recovery-key-invalid = Wannan Maɓalli na Farko ba zai iya buɗe Vault ba.
+vault-recovery-key-ready = An saita maɓallin farfadowa
+vault-recovery-key-upload-pending = Ana ajiye maɓalli a gida, amma ƙaddamarwa ya kasa. Ajiye shi kuma danna Sync don sake gwadawa.
+vault-auto-sync = Ajiyayyen atomatik
+vault-backup-failed = Ajiyayyen atomatik ya kasa. Danna Sync don sake gwadawa.
+vault-backup-failed-short = Ajiyayyen ya kasa
+vault-recovery-key-copy-hint = Danna don kwafa
+vault-recovery-key-copied = Kwafi
+vault-recovery-key-verify = Ajiye shi a cikin manajan kalmar sirri, sannan liƙa shi a ƙasa don tabbatarwa.
+vault-recovery-key-verify-placeholder = Manna maɓallan farfadowa da aka adana
+vault-recovery-key-mismatch = Makullin farfadowa bai dace ba.
+vault-open = { common-open } Vault
+vault-description = Saitunan daidaitawa, kayan aiki, dotfiles, da Ilimi tare da Git.
+vault-sync = Aiki tare
+vault-create = Ƙirƙiri
+vault-connect = Haɗa
+vault-github = GitHub
+vault-github-description = Ƙirƙiri ma'ajiyar sirri ko zaɓi Vault data kasance.
+vault-connect-github = Haɗa GitHub
+vault-connected-as = An haɗa shi azaman { $name }
+vault-use-repository = Amfani
+vault-repository-name = Sunan wurin ajiya
+vault-cloud-folder = Cloud babban fayil
+vault-cloud-folder-description = Yi amfani da babban fayil daga Google Drive, iCloud Drive, Dropbox, ko OneDrive.
+vault-choose-folder = Zaɓi babban fayil
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Jaka · { common-done }
+vault-private = Ma'ajiyar sirri
+vault-public-warning = Tarihin ma'ajiyar da bayanan da aka ɓoye za su kasance a bainar jama'a.
+vault-choose-repository = Zaɓi wurin ajiya…
+vault-empty = fanko
+vault-clean = Na zamani
+vault-not-connected = Ba a haɗa
+vault-change-count = Canje-canje: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Fara
 start-tagline = Umurni ɗaya. Komai ya gama.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Saka alamar shafi a { $folder }
 common-cancel = Soke
 common-delete = Share
 common-save = Ajiye
+common-copy = Copy
 common-rename = Sake suna
 common-expand = Faɗaɗa
 common-collapse = Naɗe

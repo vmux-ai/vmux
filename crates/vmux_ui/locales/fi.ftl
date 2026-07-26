@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } kohde
    *[other] { $count } kohdetta
 }
+
+tools-title = Työkalut
+tools-search = Hae paketteja, agentteja, MCP:tä, LSP ja määritystiedostoja…
+tools-open = Avaa työkalut
+tools-fold = Kutista työkalut
+tools-unfold = Laajenna työkalut
+tools-scanning = Tarkistetaan paikallisia työkaluja…
+tools-no-installed = Ei asennettuja työkaluja
+tools-empty = Ei vastaavia työkaluja
+tools-empty-detail = Asenna paketti tai lisää Stow-tyylinen määritystiedostopaketti.
+tools-apply = Käytä
+tools-homebrew = Homebrew
+tools-homebrew-sync = Asennetut kaavat ja sovellukset synkronoidaan automaattisesti.
+tools-open-brewfile = Avaa Brewfile
+tools-managed = hallinnoitu
+tools-provider-homebrew-formulae = Homebrew-kaavat
+tools-provider-homebrew-casks = Homebrew-sovellukset
+tools-provider-npm = NPM-paketit
+tools-provider-acp-agents = ACP-agentit
+tools-provider-lsp-servers = LSP-palvelimet
+tools-provider-mcp-servers = MCP-palvelimet
+tools-provider-dotfiles = Määritystiedostot
+tools-status-available = Saatavilla
+tools-status-missing = Puuttuu
+tools-status-conflict = Ristiriita
+tools-forget = Unohda
+tools-manage = Hallinnoi
+tools-link = Linkitä
+tools-unlink = Poista linkitys
+tools-import = Tuo
+tools-update-count = { $count ->
+    [one] 1 päivitys
+   *[other] { $count } päivitystä
+}
+tools-conflict-count = { $count ->
+    [one] 1 ristiriita
+   *[other] { $count } ristiriitaa
+}
+tools-result-applied = Työkalut otettu käyttöön
+tools-result-imported = Työkalut tuotu
+tools-result-installed = { $name } asennettu
+tools-result-updated = { $name } päivitetty
+tools-result-uninstalled = { $name } poistettu
+tools-result-forgotten = { $name } unohdettu
+tools-result-managed = { $name } on nyt hallinnoitu
+tools-result-linked = { $name } linkitetty
+tools-result-unlinked = Kohteen { $name } linkitys poistettu
+vault-title = Vault
+vault-encrypted = Päästä päähän salattu
+vault-passkey = Passkey
+vault-passkey-description = Avaa tämän Holvin lukitus muilla laitteilla ilman salasanaa.
+vault-passkey-add = Lisää salasana
+vault-passkey-unlock = Avata
+vault-passkey-provider-unsupported = Tämä salasanan tarjoaja ei tue vielä salattua Holvin lukituksen avausta.
+vault-recovery-key = Palautusavain
+vault-recovery-key-description = Tallenna yksi avain Bitwardeniin tai toiseen salasanojen hallintaan palauttaaksesi tämän Holvin uuteen laitteeseen.
+vault-recovery-key-create = Luo avain
+vault-recovery-key-create-failed = Palautusavainta ei voitu luoda.
+vault-recovery-key-save = Tallenna tämä avain nyt. Vmux ei voi näyttää sitä uudelleen.
+vault-recovery-key-saved = Tallensin sen
+vault-recovery-key-placeholder = Liitä palautusavain
+vault-recovery-key-unlock = Avaa
+vault-recovery-key-invalid = Tämä palautusavain ei voi avata Holvin lukitusta.
+vault-recovery-key-ready = Palautusavain määritetty
+vault-recovery-key-upload-pending = Avain on tallennettu paikallisesti, mutta lataus epäonnistui. Pidä se turvassa ja yritä uudelleen painamalla Synkronoi.
+vault-auto-sync = Automaattinen varmuuskopiointi
+vault-backup-failed = Automaattinen varmuuskopiointi epäonnistui. Paina Synkronoi yrittääksesi uudelleen.
+vault-backup-failed-short = Varmuuskopiointi epäonnistui
+vault-recovery-key-copy-hint = Napsauta kopioidaksesi
+vault-recovery-key-copied = Kopioitu
+vault-recovery-key-verify = Tallenna se salasanan hallintaan ja vahvista se liittämällä se alle.
+vault-recovery-key-verify-placeholder = Liitä tallennettu palautusavain
+vault-recovery-key-mismatch = Palautusavain ei täsmää.
+vault-open = { common-open } Vault
+vault-description = Synkronoi asetukset, työkalut, pistetiedostot ja Knowledge Gitin kanssa.
+vault-sync = Synkronoi
+vault-create = Luoda
+vault-connect = Yhdistä
+vault-github = GitHub
+vault-github-description = Luo yksityinen arkisto tai valitse olemassa oleva Holvi.
+vault-connect-github = Yhdistä GitHub
+vault-connected-as = Yhdistetty nimellä { $name }
+vault-use-repository = Käyttää
+vault-repository-name = Arkiston nimi
+vault-cloud-folder = Pilvi-kansio
+vault-cloud-folder-description = Käytä kansiota Google Drivesta, iCloud Drivesta, Dropboxista tai OneDrivesta.
+vault-choose-folder = Valitse kansio
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Kansio · { common-done }
+vault-private = Yksityinen arkisto
+vault-public-warning = Tietovaraston historia ja salatut tiedot ovat julkisia.
+vault-choose-repository = Valitse arkisto…
+vault-empty = tyhjä
+vault-clean = Ajan tasalla
+vault-not-connected = Ei yhdistetty
+vault-change-count = Muutokset: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Aloita
 start-tagline = Yksi kehote. Kaikki hoituu.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Lisää kirjanmerkki kansioon { $folder }
 common-cancel = Peruuta
 common-delete = Poista
 common-save = Tallenna
+common-copy = Copy
 common-rename = Nimeä uudelleen
 common-expand = Laajenna
 common-collapse = Supista

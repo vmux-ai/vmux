@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } 项
    *[other] { $count } 项
 }
+
+tools-title = 工具
+tools-search = 搜索软件包、代理、MCP、LSP和配置文件…
+tools-open = 打开工具
+tools-fold = 收起工具
+tools-unfold = 展开工具
+tools-scanning = 正在扫描本地工具…
+tools-no-installed = 没有已安装的工具
+tools-empty = 没有匹配的工具
+tools-empty-detail = 安装软件包或添加 Stow 风格的配置文件包。
+tools-apply = 应用
+tools-homebrew = Homebrew
+tools-homebrew-sync = 已安装的配方和应用会自动同步。
+tools-open-brewfile = 打开 Brewfile
+tools-managed = 已管理
+tools-provider-homebrew-formulae = Homebrew 配方
+tools-provider-homebrew-casks = Homebrew 应用
+tools-provider-npm = NPM 软件包
+tools-provider-acp-agents = ACP 代理
+tools-provider-lsp-servers = LSP 服务器
+tools-provider-mcp-servers = MCP 服务器
+tools-provider-dotfiles = 配置文件
+tools-status-available = 可用
+tools-status-missing = 缺失
+tools-status-conflict = 冲突
+tools-forget = 移除记录
+tools-manage = 管理
+tools-link = 链接
+tools-unlink = 取消链接
+tools-import = 导入
+tools-update-count = { $count ->
+    [one] 1 项更新
+   *[other] { $count } 项更新
+}
+tools-conflict-count = { $count ->
+    [one] 1 项冲突
+   *[other] { $count } 项冲突
+}
+tools-result-applied = 已应用工具
+tools-result-imported = 已导入工具
+tools-result-installed = 已安装 { $name }
+tools-result-updated = 已更新 { $name }
+tools-result-uninstalled = 已卸载 { $name }
+tools-result-forgotten = 已移除 { $name } 的记录
+tools-result-managed = { $name } 现已纳入管理
+tools-result-linked = 已链接 { $name }
+tools-result-unlinked = 已取消链接 { $name }
+vault-title = Vault
+vault-encrypted = 端到端加密
+vault-passkey = 万能钥匙
+vault-passkey-description = 无需密码即可在其他设备上解锁此保管库。
+vault-passkey-add = 添加密钥
+vault-passkey-unlock = 开锁
+vault-passkey-provider-unsupported = 此密钥提供商尚不支持加密的保管库解锁。
+vault-recovery-key = 恢复密钥
+vault-recovery-key-description = 在 Bitwarden 或其他密码管理器中保存一个密钥，以便在新设备上恢复此保管库。
+vault-recovery-key-create = 创建密钥
+vault-recovery-key-create-failed = 无法创建恢复密钥。
+vault-recovery-key-save = 立即保存此密钥。 Vmux 无法再次显示它。
+vault-recovery-key-saved = 我保存了
+vault-recovery-key-placeholder = 粘贴恢复密钥
+vault-recovery-key-unlock = 开锁
+vault-recovery-key-invalid = 此恢复密钥无法解锁保管库。
+vault-recovery-key-ready = 已配置恢复密钥
+vault-recovery-key-upload-pending = 密钥保存在本地，但上传失败。确保安全并按“同步”重试。
+vault-auto-sync = 自动备份
+vault-backup-failed = 自动备份失败。按“同步”重试。
+vault-backup-failed-short = 备份失败
+vault-recovery-key-copy-hint = 点击复制
+vault-recovery-key-copied = 已复制
+vault-recovery-key-verify = 将其保存在密码管理器中，然后将其粘贴到下面进行验证。
+vault-recovery-key-verify-placeholder = 粘贴保存的恢复密钥
+vault-recovery-key-mismatch = 恢复密钥不匹配。
+vault-open = { common-open } Vault
+vault-description = 使用 Git 同步设置、工具、点文件和知识。
+vault-sync = 同步
+vault-create = 创造
+vault-connect = 连接
+vault-github = GitHub
+vault-github-description = 创建私有存储库或选择现有的保管库。
+vault-connect-github = 连接 GitHub
+vault-connected-as = 连接为 { $name }
+vault-use-repository = 使用
+vault-repository-name = 存储库名称
+vault-cloud-folder = 云文件夹
+vault-cloud-folder-description = 使用 Google Drive、iCloud Drive、Dropbox 或 OneDrive 中的文件夹。
+vault-choose-folder = 选择文件夹
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = 文件夹 · { common-done }
+vault-private = 私有仓库
+vault-public-warning = 存储库历史记录和加密数据将公开。
+vault-choose-repository = 选择一个存储库...
+vault-empty = 空的
+vault-clean = 最新
+vault-not-connected = 未连接
+vault-change-count = 变化: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = 开始
 start-tagline = 一句提示，万事搞定。
 
@@ -299,6 +399,7 @@ layout-bookmark-in = 在 { $folder } 中添加书签
 common-cancel = 取消
 common-delete = 删除
 common-save = 保存
+common-copy = Copy
 common-rename = 重命名
 common-expand = 展开
 common-collapse = 折叠

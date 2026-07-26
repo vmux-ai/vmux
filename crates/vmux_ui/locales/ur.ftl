@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } آئٹم
    *[other] { $count } آئٹمز
 }
+
+tools-title = اوزار
+tools-search = پیکج، ایجنٹ، MCP، LSP اور ترتیب کی فائلیں تلاش کریں…
+tools-open = اوزار کھولیں
+tools-fold = اوزار سمیٹیں
+tools-unfold = اوزار پھیلائیں
+tools-scanning = مقامی اوزار اسکین کیے جا رہے ہیں…
+tools-no-installed = کوئی اوزار نصب نہیں
+tools-empty = کوئی مماثل اوزار نہیں
+tools-empty-detail = کوئی پیکج نصب کریں یا Stow طرز کا ترتیب فائلوں کا پیکج شامل کریں۔
+tools-apply = لاگو کریں
+tools-homebrew = Homebrew
+tools-homebrew-sync = نصب شدہ فارمولے اور ایپلی کیشنز خودکار طور پر ہم وقت ہو جاتے ہیں۔
+tools-open-brewfile = Brewfile کھولیں
+tools-managed = زیر انتظام
+tools-provider-homebrew-formulae = Homebrew فارمولے
+tools-provider-homebrew-casks = Homebrew ایپلی کیشنز
+tools-provider-npm = NPM پیکج
+tools-provider-acp-agents = ACP ایجنٹ
+tools-provider-lsp-servers = LSP سرور
+tools-provider-mcp-servers = MCP سرور
+tools-provider-dotfiles = ترتیب کی فائلیں
+tools-status-available = دستیاب
+tools-status-missing = غائب
+tools-status-conflict = تصادم
+tools-forget = بھولیں
+tools-manage = انتظام کریں
+tools-link = منسلک کریں
+tools-unlink = ربط ہٹائیں
+tools-import = درآمد کریں
+tools-update-count = { $count ->
+    [one] 1 تازہ کاری
+   *[other] { $count } تازہ کاریاں
+}
+tools-conflict-count = { $count ->
+    [one] 1 تصادم
+   *[other] { $count } تصادم
+}
+tools-result-applied = اوزار لاگو ہو گئے
+tools-result-imported = اوزار درآمد ہو گئے
+tools-result-installed = { $name } نصب ہو گیا
+tools-result-updated = { $name } تازہ ہو گیا
+tools-result-uninstalled = { $name } ہٹا دیا گیا
+tools-result-forgotten = { $name } بھلا دیا گیا
+tools-result-managed = { $name } اب زیر انتظام ہے
+tools-result-linked = { $name } منسلک ہو گیا
+tools-result-unlinked = { $name } کا ربط ہٹا دیا گیا
+vault-title = Vault
+vault-encrypted = اینڈ ٹو اینڈ مرموز
+vault-passkey = پاسکی
+vault-passkey-description = پاس ورڈ کے بغیر دیگر آلات پر اس والٹ کو غیر مقفل کریں۔
+vault-passkey-add = پاسکی شامل کریں۔
+vault-passkey-unlock = غیر مقفل کریں۔
+vault-passkey-provider-unsupported = یہ پاسکی فراہم کنندہ ابھی تک انکرپٹڈ والٹ انلاک کو سپورٹ نہیں کرتا ہے۔
+vault-recovery-key = ریکوری کلید
+vault-recovery-key-description = اس والٹ کو نئے آلے پر بازیافت کرنے کے لیے بٹ وارڈن یا دوسرے پاس ورڈ مینیجر میں ایک کلید محفوظ کریں۔
+vault-recovery-key-create = کلید بنائیں
+vault-recovery-key-create-failed = بازیابی کلید نہیں بن سکی۔
+vault-recovery-key-save = اب اس کلید کو محفوظ کریں۔ Vmux اسے دوبارہ نہیں دکھا سکتا۔
+vault-recovery-key-saved = میں نے اسے بچا لیا۔
+vault-recovery-key-placeholder = ریکوری کلید چسپاں کریں۔
+vault-recovery-key-unlock = غیر مقفل کریں۔
+vault-recovery-key-invalid = یہ ریکوری کلید والٹ کو غیر مقفل نہیں کر سکتی۔
+vault-recovery-key-ready = ریکوری کلید کنفیگر ہو گئی۔
+vault-recovery-key-upload-pending = کلید مقامی طور پر محفوظ ہے، لیکن اپ لوڈ ناکام ہو گیا۔ اسے محفوظ رکھیں اور دوبارہ کوشش کرنے کے لیے Sync کو دبائیں۔
+vault-auto-sync = خودکار بیک اپ
+vault-backup-failed = خودکار بیک اپ ناکام ہوگیا۔ دوبارہ کوشش کرنے کے لیے Sync کو دبائیں۔
+vault-backup-failed-short = بیک اپ ناکام ہو گیا۔
+vault-recovery-key-copy-hint = کاپی کرنے کے لیے کلک کریں۔
+vault-recovery-key-copied = کاپی
+vault-recovery-key-verify = اسے اپنے پاس ورڈ مینیجر میں محفوظ کریں، پھر تصدیق کے لیے اسے نیچے چسپاں کریں۔
+vault-recovery-key-verify-placeholder = محفوظ کردہ ریکوری کلید چسپاں کریں۔
+vault-recovery-key-mismatch = بازیابی کلید مماثل نہیں ہے۔
+vault-open = { common-open } Vault
+vault-description = سیٹنگز، ٹولز، ڈاٹ فائلز اور نالج کو Git کے ساتھ سنک کریں۔
+vault-sync = مطابقت پذیری
+vault-create = بنائیں
+vault-connect = جڑیں۔
+vault-github = GitHub
+vault-github-description = ایک نجی ذخیرہ بنائیں یا موجودہ والٹ کا انتخاب کریں۔
+vault-connect-github = GitHub کو مربوط کریں۔
+vault-connected-as = { $name } کے بطور منسلک
+vault-use-repository = استعمال کریں۔
+vault-repository-name = مخزن کا نام
+vault-cloud-folder = کلاؤڈ فولڈر
+vault-cloud-folder-description = Google Drive، iCloud Drive، Dropbox، یا OneDrive سے فولڈر استعمال کریں۔
+vault-choose-folder = فولڈر کا انتخاب کریں۔
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = فولڈر · { common-done }
+vault-private = نجی ذخیرہ
+vault-public-warning = ذخیرے کی تاریخ اور مرموز ڈیٹا عوامی ہوں گے۔
+vault-choose-repository = ایک ذخیرہ منتخب کریں…
+vault-empty = خالی
+vault-clean = تازہ ترین
+vault-not-connected = منسلک نہیں
+vault-change-count = تبدیلیاں: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع کریں
 start-tagline = ایک پرامپٹ۔ ہر کام مکمل۔
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } میں بک مارک کریں
 common-cancel = منسوخ کریں
 common-delete = حذف کریں
 common-save = محفوظ کریں
+common-copy = Copy
 common-rename = نام بدلیں
 common-expand = پھیلائیں
 common-collapse = سمیٹیں

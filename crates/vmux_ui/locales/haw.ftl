@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } mea
    *[other] { $count } mea
 }
+
+tools-title = Nā mea hana
+tools-search = Huli i nā pūʻolo, nā ʻelele, MCP, LSP a me nā waihona hoʻonohonoho…
+tools-open = E wehe i nā mea hana
+tools-fold = E pelu i nā mea hana
+tools-unfold = E wehe aʻe i nā mea hana
+tools-scanning = Ke nānā nei i nā mea hana kūloko…
+tools-no-installed = ʻAʻohe mea hana i hoʻouka ʻia
+tools-empty = ʻAʻohe mea hana kūpono
+tools-empty-detail = E hoʻouka i pūʻolo a i ʻole e hoʻohui i pūʻolo waihona hoʻonohonoho ʻano Stow.
+tools-apply = Hoʻohana
+tools-homebrew = Homebrew
+tools-homebrew-sync = Hoʻopili ʻakomi ʻia nā kumumanaʻo a me nā polokalamu i hoʻouka ʻia.
+tools-open-brewfile = E wehe i ka Brewfile
+tools-managed = mālama ʻia
+tools-provider-homebrew-formulae = Nā kumumanaʻo Homebrew
+tools-provider-homebrew-casks = Nā polokalamu Homebrew
+tools-provider-npm = Nā pūʻolo NPM
+tools-provider-acp-agents = Nā ʻelele ACP
+tools-provider-lsp-servers = Nā kikowaena LSP
+tools-provider-mcp-servers = Nā kikowaena MCP
+tools-provider-dotfiles = Nā waihona hoʻonohonoho
+tools-status-available = Loaʻa
+tools-status-missing = Nalo
+tools-status-conflict = Kūʻē
+tools-forget = Poina
+tools-manage = Hoʻoponopono
+tools-link = Hoʻohui
+tools-unlink = Wehe i ka hoʻohui
+tools-import = Hoʻokomo mai
+tools-update-count = { $count ->
+    [one] 1 hōʻano hou
+   *[other] { $count } hōʻano hou
+}
+tools-conflict-count = { $count ->
+    [one] 1 kūʻē
+   *[other] { $count } kūʻē
+}
+tools-result-applied = Ua hoʻohana ʻia nā mea hana
+tools-result-imported = Ua hoʻokomo ʻia nā mea hana
+tools-result-installed = Ua hoʻouka ʻia { $name }
+tools-result-updated = Ua hōʻano hou ʻia { $name }
+tools-result-uninstalled = Ua wehe ʻia { $name }
+tools-result-forgotten = Ua poina ʻia { $name }
+tools-result-managed = Ke mālama ʻia nei { $name }
+tools-result-linked = Ua hoʻohui ʻia { $name }
+tools-result-unlinked = Ua wehe ʻia ka hoʻohui o { $name }
+vault-title = Vault
+vault-encrypted = Hoʻopāʻālua ʻia mai kekahi ʻaoʻao a i kekahi
+vault-passkey = Kīwī
+vault-passkey-description = Wehe i kēia Vault ma nā polokalamu ʻē aʻe me ka ʻole o ka ʻōlelo huna.
+vault-passkey-add = Pākuʻi passkey
+vault-passkey-unlock = Wehe
+vault-passkey-provider-unsupported = ʻAʻole kākoʻo kēia mea hāʻawi passkey i ka wehe ʻana o Vault i hoʻopili ʻia.
+vault-recovery-key = Kī Hoʻihoʻi
+vault-recovery-key-description = E mālama i hoʻokahi kī ma Bitwarden a i ʻole ka luna ʻōlelo huna e hoʻihoʻi i kēia Vault ma kahi mea hou.
+vault-recovery-key-create = E hana i ke kī
+vault-recovery-key-create-failed = ʻAʻole hiki ke hana ʻia ke kī hoʻihoʻi.
+vault-recovery-key-save = E mālama i kēia kī i kēia manawa. ʻAʻole hiki iā Vmux ke hōʻike hou.
+vault-recovery-key-saved = Ua mālama au iā
+vault-recovery-key-placeholder = Hoʻopili i ke kī hoʻihoʻi
+vault-recovery-key-unlock = Wehe i ka
+vault-recovery-key-invalid = ʻAʻole hiki i kēia kī hoʻihoʻi ke wehe i ka Vault.
+vault-recovery-key-ready = Hoʻonohonoho ʻia ke kī hoʻihoʻi
+vault-recovery-key-upload-pending = Mālama ʻia ke kī ma ka ʻāina, akā ʻaʻole i hoʻouka ʻia. E mālama pono a pēhi iā Sync e hoʻāʻo hou.
+vault-auto-sync = Hoʻihoʻi aunoa
+vault-backup-failed = Ua hāʻule ka hoʻihoʻi ʻakomi. E kaomi iā Sync e hoʻāʻo hou.
+vault-backup-failed-short = ʻAʻole i hoʻopaʻa ʻia
+vault-recovery-key-copy-hint = Kaomi e kope
+vault-recovery-key-copied = Kope ʻia
+vault-recovery-key-verify = E mālama iā ia i loko o kāu luna ʻōlelo huna, a laila e hoʻopili ma lalo e hōʻoia.
+vault-recovery-key-verify-placeholder = Hoʻopili i ke kī hoʻihoʻi i mālama ʻia
+vault-recovery-key-mismatch = ʻAʻole like ke kī hoʻihoʻi.
+vault-open = { common-open } Vault
+vault-description = Hoʻonohonoho i nā hoʻonohonoho, nā mea hana, nā dotfiles, a me ka ʻike me Git.
+vault-sync = Hoʻopili
+vault-create = Hana
+vault-connect = Hoʻohui
+vault-github = GitHub
+vault-github-description = E hana i kahi waihona pilikino a koho paha i kahi Vault e kū nei.
+vault-connect-github = Hoʻohui iā GitHub
+vault-connected-as = Hoʻohui ʻia ʻo { $name }
+vault-use-repository = Hoʻohana
+vault-repository-name = Ka inoa waihona
+vault-cloud-folder = waihona kapua
+vault-cloud-folder-description = E hoʻohana i kahi waihona mai Google Drive, iCloud Drive, Dropbox, a i ʻole OneDrive.
+vault-choose-folder = E koho i ka waihona
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = waihona · { common-done }
+vault-private = Waihona pilikino
+vault-public-warning = E loaʻa i ka lehulehu ka mōʻaukala o ka waihona a me ka ʻikepili i hoʻopāʻālua ʻia.
+vault-choose-repository = E koho i kahi waihona…
+vault-empty = nele
+vault-clean = ʻikepili hou āpau
+vault-not-connected = ʻAʻole pili
+vault-change-count = Nā hoʻololi: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Hoʻomaka
 start-tagline = Hoʻokahi prompt. Pau nā mea a pau.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Lepe puke ma { $folder }
 common-cancel = Hoʻopau
 common-delete = Holoi
 common-save = Mālama
+common-copy = Copy
 common-rename = Kapa hou
 common-expand = Hoʻonui
 common-collapse = Hoʻēmi

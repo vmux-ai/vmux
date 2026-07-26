@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] අයිතම { $count }
    *[other] අයිතම { $count }
 }
+
+tools-title = මෙවලම්
+tools-search = පැකේජ, නියෝජිත, MCP, LSP සහ වින්‍යාස ගොනු සොයන්න…
+tools-open = මෙවලම් විවෘත කරන්න
+tools-fold = මෙවලම් හකුළන්න
+tools-unfold = මෙවලම් දිගහරින්න
+tools-scanning = ස්ථානීය මෙවලම් පරිලෝකනය වෙමින්…
+tools-no-installed = ස්ථාපිත මෙවලම් නැත
+tools-empty = ගැළපෙන මෙවලම් නැත
+tools-empty-detail = පැකේජයක් ස්ථාපනය කරන්න හෝ Stow ආකාරයේ වින්‍යාස ගොනු පැකේජයක් එක් කරන්න.
+tools-apply = යොදන්න
+tools-homebrew = Homebrew
+tools-homebrew-sync = ස්ථාපිත සූත්‍ර සහ යෙදුම් ස්වයංක්‍රීයව සමමුහුර්ත වේ.
+tools-open-brewfile = Brewfile විවෘත කරන්න
+tools-managed = කළමනාකරණය කෙරේ
+tools-provider-homebrew-formulae = Homebrew සූත්‍ර
+tools-provider-homebrew-casks = Homebrew යෙදුම්
+tools-provider-npm = NPM පැකේජ
+tools-provider-acp-agents = ACP නියෝජිත
+tools-provider-lsp-servers = LSP සේවාදායක
+tools-provider-mcp-servers = MCP සේවාදායක
+tools-provider-dotfiles = වින්‍යාස ගොනු
+tools-status-available = පවතී
+tools-status-missing = අස්ථානගතයි
+tools-status-conflict = ගැටුම
+tools-forget = අමතක කරන්න
+tools-manage = කළමනාකරණය කරන්න
+tools-link = සම්බන්ධ කරන්න
+tools-unlink = සම්බන්ධතාව ඉවත් කරන්න
+tools-import = ආයාත කරන්න
+tools-update-count = { $count ->
+    [one] යාවත්කාලීන 1
+   *[other] යාවත්කාලීන { $count }
+}
+tools-conflict-count = { $count ->
+    [one] ගැටුම් 1
+   *[other] ගැටුම් { $count }
+}
+tools-result-applied = මෙවලම් යොදන ලදී
+tools-result-imported = මෙවලම් ආයාත කරන ලදී
+tools-result-installed = { $name } ස්ථාපනය කරන ලදී
+tools-result-updated = { $name } යාවත්කාලීන කරන ලදී
+tools-result-uninstalled = { $name } අස්ථාපනය කරන ලදී
+tools-result-forgotten = { $name } අමතක කරන ලදී
+tools-result-managed = { $name } දැන් කළමනාකරණය කෙරේ
+tools-result-linked = { $name } සම්බන්ධ කරන ලදී
+tools-result-unlinked = { $name } සම්බන්ධතාව ඉවත් කරන ලදී
+vault-title = Vault
+vault-encrypted = අන්තයෙන් අන්තයට සංකේතනය කර ඇත
+vault-passkey = පාස්කී
+vault-passkey-description = මුරපදයක් නොමැතිව වෙනත් උපාංගවල මෙම සුරක්ෂිතාගාරය අගුළු හරින්න.
+vault-passkey-add = මුරපදය එක් කරන්න
+vault-passkey-unlock = අගුළු හරින්න
+vault-passkey-provider-unsupported = මෙම මුරපදය සපයන්නා තවමත් සංකේතාත්මක වෝල්ට් අගුලු හැරීමට සහාය නොදක්වයි.
+vault-recovery-key = ප්‍රතිසාධන යතුර
+vault-recovery-key-description = නව උපාංගයක මෙම සුරක්ෂිතාගාරය ප්‍රතිසාධනය කිරීමට එක් යතුරක් Bitwarden හෝ වෙනත් මුරපද කළමනාකරුවෙකු තුළ සුරකින්න.
+vault-recovery-key-create = යතුර සාදන්න
+vault-recovery-key-create-failed = ප්‍රතිසාධන යතුර සෑදිය නොහැක.
+vault-recovery-key-save = මෙම යතුර දැන් සුරකින්න. Vmux හට එය නැවත පෙන්විය නොහැක.
+vault-recovery-key-saved = මම ඒක බේරගත්තා
+vault-recovery-key-placeholder = ප්‍රතිසාධන යතුර අලවන්න
+vault-recovery-key-unlock = අගුළු හරින්න
+vault-recovery-key-invalid = මෙම ප්‍රතිසාධන යතුරට සුරක්ෂිතාගාරය අගුළු හැරිය නොහැක.
+vault-recovery-key-ready = ප්‍රතිසාධන යතුර වින්‍යාස කර ඇත
+vault-recovery-key-upload-pending = යතුර දේශීයව සුරකින ලද නමුත් උඩුගත කිරීම අසාර්ථක විය. එය ආරක්ෂිතව තබා නැවත උත්සාහ කිරීමට සමමුහුර්ත කරන්න ඔබන්න.
+vault-auto-sync = ස්වයංක්‍රීය උපස්ථය
+vault-backup-failed = ස්වයංක්‍රීය උපස්ථය අසාර්ථක විය. නැවත උත්සාහ කිරීමට සමමුහුර්ත කරන්න ඔබන්න.
+vault-backup-failed-short = උපස්ථ කිරීම අසාර්ථක විය
+vault-recovery-key-copy-hint = පිටපත් කිරීමට ක්ලික් කරන්න
+vault-recovery-key-copied = පිටපත් කර ඇත
+vault-recovery-key-verify = එය ඔබගේ මුරපද කළමනාකරු තුළ සුරකින්න, පසුව සත්‍යාපනය කිරීමට එය පහත අලවන්න.
+vault-recovery-key-verify-placeholder = සුරකින ලද ප්‍රතිසාධන යතුර අලවන්න
+vault-recovery-key-mismatch = ප්‍රතිසාධන යතුර නොගැලපේ.
+vault-open = { common-open } Vault
+vault-description = Git සමඟින් සැකසීම්, මෙවලම්, dotfiles සහ දැනුම සමමුහුර්ත කරන්න.
+vault-sync = සමමුහුර්ත කරන්න
+vault-create = නිර්මාණය කරන්න
+vault-connect = සම්බන්ධ කරන්න
+vault-github = GitHub
+vault-github-description = පුද්ගලික ගබඩාවක් සාදන්න හෝ පවතින සුරක්ෂිතාගාරයක් තෝරන්න.
+vault-connect-github = GitHub සම්බන්ධ කරන්න
+vault-connected-as = { $name } ලෙස සම්බන්ධ විය
+vault-use-repository = භාවිතා කරන්න
+vault-repository-name = ගබඩා නාමය
+vault-cloud-folder = වලාකුළු ෆෝල්ඩරය
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox, හෝ OneDrive වෙතින් ෆෝල්ඩරයක් භාවිතා කරන්න.
+vault-choose-folder = ෆෝල්ඩරය තෝරන්න
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ෆෝල්ඩරය · { common-done }
+vault-private = පුද්ගලික ගබඩාව
+vault-public-warning = ගබඩා ඉතිහාසය සහ සංකේතනය කළ දත්ත පොදු වනු ඇත.
+vault-choose-repository = ගබඩාවක් තෝරන්න...
+vault-empty = හිස්
+vault-clean = යාවත්කාලීනව
+vault-not-connected = සම්බන්ධ වී නැත
+vault-change-count = වෙනස්කම්: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ආරම්භය
 start-tagline = එක් prompt එකක්. ඕනෑම දෙයක්, කරලා ඉවරයි.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } තුළ පොත්සලකුණු කර
 common-cancel = අවලංගු කරන්න
 common-delete = මකන්න
 common-save = සුරකින්න
+common-copy = Copy
 common-rename = නම වෙනස් කරන්න
 common-expand = විහිදුවන්න
 common-collapse = හකුළන්න

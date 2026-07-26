@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Alat
+tools-search = Cari pakej, ejen, MCP, LSP dan fail konfigurasi…
+tools-open = Buka Alat
+tools-fold = Kuncupkan alat
+tools-unfold = Kembangkan alat
+tools-scanning = Mengimbas alat setempat…
+tools-no-installed = Tiada alat dipasang
+tools-empty = Tiada alat yang sepadan
+tools-empty-detail = Pasang pakej atau tambah pakej fail konfigurasi gaya Stow.
+tools-apply = Guna
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula dan aplikasi yang dipasang disegerakkan secara automatik.
+tools-open-brewfile = Buka Brewfile
+tools-managed = diurus
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Pakej NPM
+tools-provider-acp-agents = Ejen ACP
+tools-provider-lsp-servers = Pelayan LSP
+tools-provider-mcp-servers = Pelayan MCP
+tools-provider-dotfiles = Fail konfigurasi
+tools-status-available = Tersedia
+tools-status-missing = Tiada
+tools-status-conflict = Konflik
+tools-forget = Lupakan
+tools-manage = Urus
+tools-link = Pautkan
+tools-unlink = Nyahpaut
+tools-import = Bawa masuk
+tools-update-count = { $count ->
+    [one] 1 kemas kini
+   *[other] { $count } kemas kini
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflik
+}
+tools-result-applied = Alat digunakan
+tools-result-imported = Alat diimport
+tools-result-installed = { $name } dipasang
+tools-result-updated = { $name } dikemas kini
+tools-result-uninstalled = { $name } dinyahpasang
+tools-result-forgotten = { $name } dilupakan
+tools-result-managed = { $name } kini diurus
+tools-result-linked = { $name } dipautkan
+tools-result-unlinked = { $name } dinyahpaut
+vault-title = Vault
+vault-encrypted = Disulitkan hujung ke hujung
+vault-passkey = Kunci laluan
+vault-passkey-description = Buka kunci Bilik Kebal ini pada peranti lain tanpa kata laluan.
+vault-passkey-add = Tambah kunci laluan
+vault-passkey-unlock = Buka kunci
+vault-passkey-provider-unsupported = Pembekal kunci laluan ini belum menyokong buka kunci Vault yang disulitkan lagi.
+vault-recovery-key = Kunci Pemulihan
+vault-recovery-key-description = Simpan satu kunci dalam Bitwarden atau pengurus kata laluan lain untuk memulihkan Bilik Kebal ini pada peranti baharu.
+vault-recovery-key-create = Cipta kunci
+vault-recovery-key-create-failed = Kunci Pemulihan tidak dapat dibuat.
+vault-recovery-key-save = Simpan kunci ini sekarang. Vmux tidak boleh menunjukkannya lagi.
+vault-recovery-key-saved = Saya menyimpannya
+vault-recovery-key-placeholder = Tampal Kunci Pemulihan
+vault-recovery-key-unlock = Buka Kunci
+vault-recovery-key-invalid = Kunci Pemulihan ini tidak boleh membuka kunci Bilik Kebal.
+vault-recovery-key-ready = Kunci Pemulihan dikonfigurasikan
+vault-recovery-key-upload-pending = Kunci disimpan secara setempat, tetapi muat naik gagal. Pastikan ia selamat dan tekan Segerak untuk mencuba semula.
+vault-auto-sync = Sandaran automatik
+vault-backup-failed = Sandaran automatik gagal. Tekan Sync untuk mencuba semula.
+vault-backup-failed-short = Sandaran gagal
+vault-recovery-key-copy-hint = Klik untuk menyalin
+vault-recovery-key-copied = disalin
+vault-recovery-key-verify = Simpannya dalam pengurus kata laluan anda, kemudian tampalkannya di bawah untuk mengesahkan.
+vault-recovery-key-verify-placeholder = Tampalkan Kunci Pemulihan yang disimpan
+vault-recovery-key-mismatch = Kunci Pemulihan tidak sepadan.
+vault-open = { common-open } Vault
+vault-description = Segerakkan tetapan, alatan, dotfiles dan Pengetahuan dengan Git.
+vault-sync = Segerakkan
+vault-create = Buat
+vault-connect = Sambung
+vault-github = GitHub
+vault-github-description = Buat repositori peribadi atau pilih Vault sedia ada.
+vault-connect-github = Sambungkan GitHub
+vault-connected-as = Disambungkan sebagai { $name }
+vault-use-repository = guna
+vault-repository-name = Nama repositori
+vault-cloud-folder = Folder awan
+vault-cloud-folder-description = Gunakan folder daripada Google Drive, iCloud Drive, Dropbox atau OneDrive.
+vault-choose-folder = Pilih folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = folder · { common-done }
+vault-private = Repositori peribadi
+vault-public-warning = Sejarah repositori dan data yang disulitkan akan menjadi umum.
+vault-choose-repository = Pilih repositori…
+vault-empty = kosong
+vault-clean = Terkini
+vault-not-connected = Tidak bersambung
+vault-change-count = Perubahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Mula
 start-tagline = Satu prompt. Apa-apa pun siap.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Penanda buku dalam { $folder }
 common-cancel = Batal
 common-delete = Padam
 common-save = Simpan
+common-copy = Copy
 common-rename = Namakan Semula
 common-expand = Kembangkan
 common-collapse = Runtuhkan

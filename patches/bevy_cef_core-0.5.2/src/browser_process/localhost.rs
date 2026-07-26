@@ -20,7 +20,10 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::util::{CefEmbeddedPageConfig, resolved_cef_embedded_page_config, webview_debug_log};
+use crate::util::{
+    CefEmbeddedPageConfig, VAULT_PASSKEY_ORIGIN, resolved_cef_embedded_page_config,
+    webview_debug_log,
+};
 
 /// Map navigated custom-scheme URLs to a Bevy [`AssetServer`] load path.
 ///
@@ -82,6 +85,30 @@ pub(crate) fn asset_load_path_from_request_url_with(
     const CEF_LOCAL: &str = concat!("cef", "://", "localhost", "/");
     const EMBEDDED_LEAF: &str = "embedded/";
     const EMBEDDED_SCHEME: &str = "embedded://";
+
+    if let Some(rest) = url.strip_prefix(VAULT_PASSKEY_ORIGIN)
+        && (rest.is_empty() || rest.starts_with(['/', '?', '#']))
+    {
+        let tail = rest
+            .trim_start_matches('/')
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("");
+        if let Some(entry) = cfg.hosts.entry_for_host("vault") {
+            if tail.is_empty() || !tail_has_extension(tail) {
+                return format!("{EMBEDDED_SCHEME}{}", entry.default_document);
+            }
+            let base = Path::new(entry.default_document.as_str())
+                .parent()
+                .and_then(|path| path.to_str())
+                .map(str::trim)
+                .filter(|path| !path.is_empty() && *path != ".");
+            return match base {
+                Some(base) => format!("{EMBEDDED_SCHEME}{}/{tail}", base.trim_matches(['/', '\\'])),
+                None => format!("{EMBEDDED_SCHEME}{tail}"),
+            };
+        }
+    }
 
     // We override the built-in `file` scheme: the editor SPA is addressed as
     // `file:///abs/path`. Serve the app's own assets (`/wasm/*`, `/assets/*`) same-scheme
@@ -515,6 +542,32 @@ mod custom_scheme_url_tests {
         assert_eq!(
             asset_load_path_from_request_url_with(&format!("{p}help/topic.html"), &cfg),
             "embedded://help/topic.html"
+        );
+    }
+
+    #[test]
+    fn vault_https_origin_uses_the_bundled_vault_page() {
+        let cfg = CefEmbeddedPageConfig::new(
+            test_scheme(),
+            CefEmbeddedHosts(vec![CefEmbeddedHost {
+                host: "vault".to_string(),
+                default_document: "vault/index.html".to_string(),
+            }]),
+        );
+        assert_eq!(
+            asset_load_path_from_request_url_with("https://vault.vmux.ai/", &cfg),
+            "embedded://vault/index.html"
+        );
+        assert_eq!(
+            asset_load_path_from_request_url_with(
+                "https://vault.vmux.ai/wasm/vmux_server_bg.wasm",
+                &cfg,
+            ),
+            "embedded://vault/wasm/vmux_server_bg.wasm"
+        );
+        assert_eq!(
+            asset_load_path_from_request_url_with("https://vault.vmux.ai.evil.test/", &cfg),
+            ""
         );
     }
 

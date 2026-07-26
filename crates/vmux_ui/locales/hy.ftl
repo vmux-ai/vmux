@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } տարր
    *[other] { $count } տարր
 }
+
+tools-title = Գործիքներ
+tools-search = Փնտրել փաթեթներ, գործակալներ, MCP, LSP և կազմաձևման ֆայլեր…
+tools-open = Բացել գործիքները
+tools-fold = Ծալել գործիքները
+tools-unfold = Բացել գործիքների ցանկը
+tools-scanning = Տեղային գործիքների սկանավորում…
+tools-no-installed = Տեղադրված գործիքներ չկան
+tools-empty = Համապատասխան գործիքներ չկան
+tools-empty-detail = Տեղադրեք փաթեթ կամ ավելացրեք Stow ոճի կազմաձևման ֆայլերի փաթեթ։
+tools-apply = Կիրառել
+tools-homebrew = Homebrew
+tools-homebrew-sync = Տեղադրված բանաձևերն ու հավելվածները ինքնաբերաբար համաժամացվում են։
+tools-open-brewfile = Բացել Brewfile-ը
+tools-managed = կառավարվող
+tools-provider-homebrew-formulae = Homebrew բանաձևեր
+tools-provider-homebrew-casks = Homebrew հավելվածներ
+tools-provider-npm = NPM փաթեթներ
+tools-provider-acp-agents = ACP գործակալներ
+tools-provider-lsp-servers = LSP սերվերներ
+tools-provider-mcp-servers = MCP սերվերներ
+tools-provider-dotfiles = Կազմաձևման ֆայլեր
+tools-status-available = Հասանելի
+tools-status-missing = Բացակայում է
+tools-status-conflict = Հակասություն
+tools-forget = Մոռանալ
+tools-manage = Կառավարել
+tools-link = Կապել
+tools-unlink = Անջատել
+tools-import = Ներմուծել
+tools-update-count = { $count ->
+    [one] 1 թարմացում
+   *[other] { $count } թարմացում
+}
+tools-conflict-count = { $count ->
+    [one] 1 հակասություն
+   *[other] { $count } հակասություն
+}
+tools-result-applied = Գործիքները կիրառվեցին
+tools-result-imported = Գործիքները ներմուծվեցին
+tools-result-installed = { $name }-ը տեղադրվեց
+tools-result-updated = { $name }-ը թարմացվեց
+tools-result-uninstalled = { $name }-ը հեռացվեց
+tools-result-forgotten = { $name }-ը մոռացվեց
+tools-result-managed = { $name }-ն այժմ կառավարվում է
+tools-result-linked = { $name }-ը կապվեց
+tools-result-unlinked = { $name }-ն անջատվեց
+vault-title = Vault
+vault-encrypted = Ծայրից ծայր գաղտնագրված
+vault-passkey = Passkey
+vault-passkey-description = Ապակողպեք այս պահոցը այլ սարքերում առանց գաղտնաբառի:
+vault-passkey-add = Ավելացնել անցաբառ
+vault-passkey-unlock = Ապակողպել
+vault-passkey-provider-unsupported = Այս գաղտնաբառի մատակարարը դեռ չի աջակցում գաղտնագրված պահոցի ապակողպումը:
+vault-recovery-key = Վերականգնման բանալի
+vault-recovery-key-description = Պահպանեք մեկ բանալի Bitwarden-ում կամ մեկ այլ գաղտնաբառի կառավարիչում՝ այս պահոցը նոր սարքում վերականգնելու համար:
+vault-recovery-key-create = Ստեղծել բանալի
+vault-recovery-key-create-failed = Վերականգնման բանալին չհաջողվեց ստեղծել:
+vault-recovery-key-save = Պահպանեք այս բանալին հիմա: Vmux-ը չի կարող նորից ցույց տալ:
+vault-recovery-key-saved = Ես պահել եմ այն ​​
+vault-recovery-key-placeholder = Մածուկի վերականգնման բանալի
+vault-recovery-key-unlock = Բացել
+vault-recovery-key-invalid = Վերականգնման այս բանալին չի կարող ապակողպել պահոցը:
+vault-recovery-key-ready = Վերականգնման բանալին կազմաձևված է
+vault-recovery-key-upload-pending = Բանալին պահվում է տեղում, բայց վերբեռնումը ձախողվեց: Պահպանեք այն անվտանգ և սեղմեք Sync-ը՝ նորից փորձելու համար:
+vault-auto-sync = Ավտոմատ կրկնօրինակում
+vault-backup-failed = Ավտոմատ կրկնօրինակումը ձախողվեց: Կրկին փորձելու համար սեղմեք Sync-ը:
+vault-backup-failed-short = Պահուստավորումը ձախողվեց
+vault-recovery-key-copy-hint = Սեղմեք պատճենելու համար
+vault-recovery-key-copied = Պատճենվել է
+vault-recovery-key-verify = Պահպանեք այն ձեր գաղտնաբառերի կառավարիչում, այնուհետև տեղադրեք այն ստորև՝ հաստատելու համար:
+vault-recovery-key-verify-placeholder = Տեղադրեք պահպանված վերականգնման բանալին
+vault-recovery-key-mismatch = Վերականգնման բանալին չի համընկնում:
+vault-open = { common-open } Vault
+vault-description = Համաժամեցրեք կարգավորումները, գործիքները, dotfiles-ը և գիտելիքները Git-ի հետ:
+vault-sync = Համաժամեցում
+vault-create = Ստեղծել
+vault-connect = Միացնել
+vault-github = GitHub
+vault-github-description = Ստեղծեք մասնավոր պահոց կամ ընտրեք գոյություն ունեցող պահոց:
+vault-connect-github = Միացրեք GitHub-ը
+vault-connected-as = Միացված է որպես { $name }
+vault-use-repository = Օգտագործեք
+vault-repository-name = Պահեստի անվանումը
+vault-cloud-folder = Ամպային թղթապանակ
+vault-cloud-folder-description = Օգտագործեք թղթապանակ Google Drive-ից, iCloud Drive-ից, Dropbox-ից կամ OneDrive-ից:
+vault-choose-folder = Ընտրեք թղթապանակ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Թղթապանակ · { common-done }
+vault-private = Մասնավոր պահոց
+vault-public-warning = Շտեմարանի պատմությունը և գաղտնագրված տվյալները հանրային կլինեն։
+vault-choose-repository = Ընտրեք պահեստ…
+vault-empty = դատարկ
+vault-clean = Թարմ
+vault-not-connected = Միացված չէ
+vault-change-count = Փոփոխություններ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Սկիզբ
 start-tagline = Մեկ prompt, և ամեն ինչ՝ պատրաստ։
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Էջանիշ՝ { $folder }-ում
 common-cancel = Չեղարկել
 common-delete = Ջնջել
 common-save = Պահել
+common-copy = Copy
 common-rename = Վերանվանել
 common-expand = Բացել
 common-collapse = Ծալել

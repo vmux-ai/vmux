@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } tūemi
    *[other] { $count } tūemi
 }
+
+tools-title = Ngā utauta
+tools-search = Rapua ngā mōkihi, ngā māngai, MCP, LSP me ngā kōnae whirihora…
+tools-open = Huakina ngā utauta
+tools-fold = Whakapikoa ngā utauta
+tools-unfold = Whakawhānuitia ngā utauta
+tools-scanning = E matawai ana i ngā utauta paetata…
+tools-no-installed = Kāore he utauta kua tāutatia
+tools-empty = Kāore he utauta e hāngai ana
+tools-empty-detail = Tāutahia he mōkihi, tāpirihia rānei he mōkihi kōnae whirihora āhua Stow.
+tools-apply = Hoatu
+tools-homebrew = Homebrew
+tools-homebrew-sync = Ka tukutahi aunoa ngā tātai me ngā taupānga kua tāutatia.
+tools-open-brewfile = Huakina te Brewfile
+tools-managed = whakahaeretia
+tools-provider-homebrew-formulae = Ngā tātai Homebrew
+tools-provider-homebrew-casks = Ngā taupānga Homebrew
+tools-provider-npm = Ngā mōkihi NPM
+tools-provider-acp-agents = Ngā māngai ACP
+tools-provider-lsp-servers = Ngā tūmau LSP
+tools-provider-mcp-servers = Ngā tūmau MCP
+tools-provider-dotfiles = Ngā kōnae whirihora
+tools-status-available = Kei te wātea
+tools-status-missing = Kei te ngaro
+tools-status-conflict = Papā
+tools-forget = Wareware
+tools-manage = Whakahaere
+tools-link = Hono
+tools-unlink = Momotu
+tools-import = Kawemai
+tools-update-count = { $count ->
+    [one] 1 whakahou
+   *[other] { $count } whakahou
+}
+tools-conflict-count = { $count ->
+    [one] 1 papā
+   *[other] { $count } papā
+}
+tools-result-applied = Kua hoatu ngā utauta
+tools-result-imported = Kua kawemai ngā utauta
+tools-result-installed = Kua tāutahia a { $name }
+tools-result-updated = Kua whakahoutia a { $name }
+tools-result-uninstalled = Kua tango a { $name }
+tools-result-forgotten = Kua warewaretia a { $name }
+tools-result-managed = Kei te whakahaeretia a { $name } ināianei
+tools-result-linked = Kua honoa a { $name }
+tools-result-unlinked = Kua momotuhia a { $name }
+vault-title = Vault
+vault-encrypted = Kua whakamunatia mai i tētahi pito ki tētahi
+vault-passkey = Kupuhipa
+vault-passkey-description = Wewetehia tenei Vault ki etahi atu taputapu kaore he kupuhipa.
+vault-passkey-add = Tāpiri kupuhipa
+vault-passkey-unlock = Wewete
+vault-passkey-provider-unsupported = Ko tenei kaiwhakarato kupuhipa kaore i te tautoko i te iriti Vault whakamunatia.
+vault-recovery-key = Kī Whakaora
+vault-recovery-key-description = Tiakina tetahi kī ki Bitwarden, ki tetahi atu kaiwhakahaere kupuhipa ranei hei whakaora i tenei Vault i runga i tetahi taputapu hou.
+vault-recovery-key-create = Waihanga kī
+vault-recovery-key-create-failed = Kī Whakaora kāore i taea te waihanga.
+vault-recovery-key-save = Tiakina tēnei kī ināianei. Kaore e taea e Vmux te whakaatu ano.
+vault-recovery-key-saved = I tiakina e ahau
+vault-recovery-key-placeholder = Whakapiri Whakaora Kī
+vault-recovery-key-unlock = Wewete
+vault-recovery-key-invalid = Kaore e taea e tenei Kī Whakaora te iriti i te Vault.
+vault-recovery-key-ready = Kua whirihorahia te Kī Whakaora
+vault-recovery-key-upload-pending = Ka tiakina te kī i te rohe, engari i rahua te tuku. Purihia kia haumaru ka pehi i te Tukutahi hei ngana ano.
+vault-auto-sync = Pūrua Aunoa
+vault-backup-failed = I rahua te tārua aunoa. Patohia te Tukutahi hei ngana ano.
+vault-backup-failed-short = I rahua te tārua
+vault-recovery-key-copy-hint = Pāwhiri ki te tārua
+vault-recovery-key-copied = Kua kapea
+vault-recovery-key-verify = Tiakina ki to kaiwhakahaere kupuhipa, ka whakapiri ki raro hei manatoko.
+vault-recovery-key-verify-placeholder = Whakapirihia te Kī Whakaora kua tiakina
+vault-recovery-key-mismatch = Kī Whakaora kāore i te ōrite.
+vault-open = { common-open } Vault
+vault-description = Tukutahi tautuhinga, taputapu, dotfiles, me te Matauranga ki a Git.
+vault-sync = Tukutahi
+vault-create = Waihanga
+vault-connect = Tūhono
+vault-github = GitHub
+vault-github-description = Waihangahia he putunga motuhake, kowhiria ranei he Vault.
+vault-connect-github = Honoa GitHub
+vault-connected-as = Kua honoa hei { $name }
+vault-use-repository = Whakamahi
+vault-repository-name = Ingoa putunga
+vault-cloud-folder = kōpaki kapua
+vault-cloud-folder-description = Whakamahia he kōpaki mai i Google Drive, iCloud Drive, Dropbox, OneDrive ranei.
+vault-choose-folder = Kōwhiri kōpaki
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Kōpaki · { common-done }
+vault-private = Whare putunga motuhake
+vault-public-warning = Ka noho tūmatanui te hītori o te putunga me ngā raraunga whakamuna.
+vault-choose-repository = Kōwhiria he putunga...
+vault-empty = takoto kau
+vault-clean = Ko nga mea hou
+vault-not-connected = Kaore i hono
+vault-change-count = Huringa: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tīmata
 start-tagline = Kotahi te tohutohu. Ka oti te katoa.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Tohuwāhi ki { $folder }
 common-cancel = Whakakore
 common-delete = Muku
 common-save = Tiaki
+common-copy = Copy
 common-rename = Whakaingoa anō
 common-expand = Whakaroha
 common-collapse = Tiango

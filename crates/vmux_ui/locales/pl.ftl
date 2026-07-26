@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementów
 }
+
+tools-title = Narzędzia
+tools-search = Szukaj pakietów, agentów, MCP, LSP i plików konfiguracyjnych…
+tools-open = Otwórz Narzędzia
+tools-fold = Zwiń narzędzia
+tools-unfold = Rozwiń narzędzia
+tools-scanning = Skanowanie lokalnych narzędzi…
+tools-no-installed = Brak zainstalowanych narzędzi
+tools-empty = Brak pasujących narzędzi
+tools-empty-detail = Zainstaluj pakiet lub dodaj pakiet plików konfiguracyjnych w stylu Stow.
+tools-apply = Zastosuj
+tools-homebrew = Homebrew
+tools-homebrew-sync = Zainstalowane formuły i aplikacje synchronizują się automatycznie.
+tools-open-brewfile = Otwórz Brewfile
+tools-managed = zarządzane
+tools-provider-homebrew-formulae = Formuły Homebrew
+tools-provider-homebrew-casks = Aplikacje Homebrew
+tools-provider-npm = Pakiety NPM
+tools-provider-acp-agents = Agenci ACP
+tools-provider-lsp-servers = Serwery LSP
+tools-provider-mcp-servers = Serwery MCP
+tools-provider-dotfiles = Pliki konfiguracyjne
+tools-status-available = Dostępne
+tools-status-missing = Brakujące
+tools-status-conflict = Konflikt
+tools-forget = Zapomnij
+tools-manage = Zarządzaj
+tools-link = Połącz
+tools-unlink = Rozłącz
+tools-import = Importuj
+tools-update-count = { $count ->
+    [one] 1 aktualizacja
+   *[other] { $count } aktualizacji
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konfliktów
+}
+tools-result-applied = Narzędzia zastosowane
+tools-result-imported = Narzędzia zaimportowane
+tools-result-installed = Zainstalowano { $name }
+tools-result-updated = Zaktualizowano { $name }
+tools-result-uninstalled = Odinstalowano { $name }
+tools-result-forgotten = Zapomniano { $name }
+tools-result-managed = { $name } jest teraz zarządzane
+tools-result-linked = Połączono { $name }
+tools-result-unlinked = Rozłączono { $name }
+vault-title = Vault
+vault-encrypted = Szyfrowanie kompleksowe
+vault-passkey = Klucz uniwersalny
+vault-passkey-description = Odblokuj tę Kryptę na innych urządzeniach bez hasła.
+vault-passkey-add = Dodaj hasło
+vault-passkey-unlock = Odblokować
+vault-passkey-provider-unsupported = Ten dostawca kluczy nie obsługuje jeszcze szyfrowanego odblokowywania Vault.
+vault-recovery-key = Klucz odzyskiwania
+vault-recovery-key-description = Zapisz jeden klucz w Bitwarden lub innym menedżerze haseł, aby odzyskać ten skarbiec na nowym urządzeniu.
+vault-recovery-key-create = Utwórz klucz
+vault-recovery-key-create-failed = Nie można utworzyć klucza odzyskiwania.
+vault-recovery-key-save = Zapisz teraz ten klucz. Vmux nie może pokazać tego ponownie.
+vault-recovery-key-saved = Zachowałem to
+vault-recovery-key-placeholder = Wklej klucz odzyskiwania
+vault-recovery-key-unlock = Odblokować
+vault-recovery-key-invalid = Ten klucz odzyskiwania nie może odblokować skarbca.
+vault-recovery-key-ready = Skonfigurowano klucz odzyskiwania
+vault-recovery-key-upload-pending = Klucz został zapisany lokalnie, ale przesyłanie nie powiodło się. Zachowaj je w bezpiecznym miejscu i naciśnij przycisk Synchronizuj, aby spróbować ponownie.
+vault-auto-sync = Automatyczna kopia zapasowa
+vault-backup-failed = Automatyczna kopia zapasowa nie powiodła się. Naciśnij Synchronizuj, aby spróbować ponownie.
+vault-backup-failed-short = Tworzenie kopii zapasowej nie powiodło się
+vault-recovery-key-copy-hint = Kliknij, aby skopiować
+vault-recovery-key-copied = Skopiowano
+vault-recovery-key-verify = Zapisz go w menedżerze haseł, a następnie wklej poniżej, aby zweryfikować.
+vault-recovery-key-verify-placeholder = Wklej zapisany klucz odzyskiwania
+vault-recovery-key-mismatch = Klucz odzyskiwania nie pasuje.
+vault-open = { common-open } Vault
+vault-description = Synchronizuj ustawienia, narzędzia, pliki dot i wiedzę z Git.
+vault-sync = Synchronizuj
+vault-create = Tworzyć
+vault-connect = Łączyć
+vault-github = GitHub
+vault-github-description = Utwórz prywatne repozytorium lub wybierz istniejący Vault.
+vault-connect-github = Połącz GitHuba
+vault-connected-as = Połączono jako { $name }
+vault-use-repository = Używać
+vault-repository-name = Nazwa repozytorium
+vault-cloud-folder = Folder w chmurze
+vault-cloud-folder-description = Użyj folderu z Dysku Google, iCloud Drive, Dropbox lub OneDrive.
+vault-choose-folder = Wybierz folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Falcówka · { common-done }
+vault-private = Prywatne repozytorium
+vault-public-warning = Historia repozytorium i zaszyfrowane dane będą publiczne.
+vault-choose-repository = Wybierz repozytorium…
+vault-empty = pusty
+vault-clean = Aktualne
+vault-not-connected = Nie podłączony
+vault-change-count = Zmiany: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Jeden prompt. Wszystko załatwione.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Dodaj zakładkę w { $folder }
 common-cancel = Anuluj
 common-delete = Usuń
 common-save = Zapisz
+common-copy = Copy
 common-rename = Zmień nazwę
 common-expand = Rozwiń
 common-collapse = Zwiń

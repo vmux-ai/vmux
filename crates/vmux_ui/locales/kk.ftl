@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } элемент
    *[other] { $count } элемент
 }
+
+tools-title = Құралдар
+tools-search = Пакеттерді, агенттерді, MCP, LSPн және конфигурация файлдарын іздеу…
+tools-open = Құралдарды ашу
+tools-fold = Құралдарды жинау
+tools-unfold = Құралдарды жаю
+tools-scanning = Жергілікті құралдар сканерленуде…
+tools-no-installed = Орнатылған құралдар жоқ
+tools-empty = Сәйкес құралдар жоқ
+tools-empty-detail = Пакет орнатыңыз немесе Stow үлгісіндегі конфигурация файлдары пакетін қосыңыз.
+tools-apply = Қолдану
+tools-homebrew = Homebrew
+tools-homebrew-sync = Орнатылған формулалар мен қолданбалар автоматты түрде синхрондалады.
+tools-open-brewfile = Brewfile файлын ашу
+tools-managed = басқарылатын
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew қолданбалары
+tools-provider-npm = NPM пакеттері
+tools-provider-acp-agents = ACP агенттері
+tools-provider-lsp-servers = LSP серверлері
+tools-provider-mcp-servers = MCP серверлері
+tools-provider-dotfiles = Конфигурация файлдары
+tools-status-available = Қолжетімді
+tools-status-missing = Жоқ
+tools-status-conflict = Қайшылық
+tools-forget = Ұмыту
+tools-manage = Басқару
+tools-link = Байланыстыру
+tools-unlink = Байланысты үзу
+tools-import = Импорттау
+tools-update-count = { $count ->
+    [one] 1 жаңарту
+   *[other] { $count } жаңарту
+}
+tools-conflict-count = { $count ->
+    [one] 1 қайшылық
+   *[other] { $count } қайшылық
+}
+tools-result-applied = Құралдар қолданылды
+tools-result-imported = Құралдар импортталды
+tools-result-installed = { $name } орнатылды
+tools-result-updated = { $name } жаңартылды
+tools-result-uninstalled = { $name } жойылды
+tools-result-forgotten = { $name } ұмытылды
+tools-result-managed = { $name } енді басқарылады
+tools-result-linked = { $name } байланыстырылды
+tools-result-unlinked = { $name } байланысы үзілді
+vault-title = Vault
+vault-encrypted = Басынан аяғына дейін шифрланған
+vault-passkey = Құпия кілт
+vault-passkey-description = Құпия сөзсіз басқа құрылғыларда бұл қойманың құлпын ашыңыз.
+vault-passkey-add = Рұқсат кілтін қосыңыз
+vault-passkey-unlock = Құлыпты ашу
+vault-passkey-provider-unsupported = Бұл рұқсат кілті провайдері шифрланған Vault құлпын ашуды әлі қолдамайды.
+vault-recovery-key = Қалпына келтіру кілті
+vault-recovery-key-description = Бұл қойманы жаңа құрылғыда қалпына келтіру үшін Bitwarden қолданбасында бір кілтті немесе басқа құпия сөз реттеушісінде сақтаңыз.
+vault-recovery-key-create = Кілтті жасау
+vault-recovery-key-create-failed = Қалпына келтіру кілтін жасау мүмкін болмады.
+vault-recovery-key-save = Осы кілтті қазір сақтаңыз. Vmux оны қайтадан көрсете алмайды.
+vault-recovery-key-saved = Мен оны сақтадым
+vault-recovery-key-placeholder = Қоюды қалпына келтіру кілті
+vault-recovery-key-unlock = құлпын ашу
+vault-recovery-key-invalid = Бұл қалпына келтіру кілті қойманың құлпын аша алмайды.
+vault-recovery-key-ready = Қалпына келтіру кілті конфигурацияланды
+vault-recovery-key-upload-pending = Кілт жергілікті түрде сақталады, бірақ жүктеп салу сәтсіз аяқталды. Оны қауіпсіз сақтаңыз және әрекетті қайталау үшін Синхрондау түймесін басыңыз.
+vault-auto-sync = Автоматты сақтық көшірме
+vault-backup-failed = Автоматты сақтық көшірме жасалмады. Қайталау үшін Синхрондау түймесін басыңыз.
+vault-backup-failed-short = Сақтық көшірме жасалмады
+vault-recovery-key-copy-hint = Көшіру үшін басыңыз
+vault-recovery-key-copied = Көшірілген
+vault-recovery-key-verify = Оны құпия сөз реттеушісіне сақтап, растау үшін төменде қойыңыз.
+vault-recovery-key-verify-placeholder = Сақталған қалпына келтіру кілтін қойыңыз
+vault-recovery-key-mismatch = Қалпына келтіру кілті сәйкес келмейді.
+vault-open = { common-open } Vault
+vault-description = Параметрлерді, құралдарды, нүкте файлдарын және білімді Git-пен синхрондаңыз.
+vault-sync = Синхрондау
+vault-create = Жасау
+vault-connect = Қосылу
+vault-github = GitHub
+vault-github-description = Жеке репозиторий жасаңыз немесе бұрыннан бар қойманы таңдаңыз.
+vault-connect-github = GitHub қосыңыз
+vault-connected-as = { $name } ретінде қосылған
+vault-use-repository = Қолдану
+vault-repository-name = Репозиторий атауы
+vault-cloud-folder = Бұлтты қалта
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox немесе OneDrive қалтаны пайдаланыңыз.
+vault-choose-folder = Қалтаны таңдаңыз
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Қалта · { common-done }
+vault-private = Жеке репозиторий
+vault-public-warning = Репозиторий тарихы мен шифрланған деректер жалпыға қолжетімді болады.
+vault-choose-repository = Репозиторийді таңдаңыз…
+vault-empty = бос
+vault-clean = Жаңартылған
+vault-not-connected = Қосылмаған
+vault-change-count = Өзгерістер: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Бастау
 start-tagline = Бір prompt. Кез келген іс — дайын.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ішіне бетбелгілеу
 common-cancel = Бас тарту
 common-delete = Жою
 common-save = Сақтау
+common-copy = Copy
 common-rename = Атын өзгерту
 common-expand = Жаю
 common-collapse = Жию

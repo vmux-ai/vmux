@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } Element
    *[other] { $count } Elementer
 }
+
+tools-title = Instrumenter
+tools-search = Sich no Packagen, Agenten, MCP, LSP a Konfiguratiounsdateien…
+tools-open = Tools opmaachen
+tools-fold = Tools zouklappen
+tools-unfold = Tools opklappen
+tools-scanning = Lokal Tools ginn duerchsicht…
+tools-no-installed = Keng Tools installéiert
+tools-empty = Keng passend Tools
+tools-empty-detail = Installéiert e Package oder füügt e Stow-ähnleche Package mat Konfiguratiounsdateien derbäi.
+tools-apply = Uwenden
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installéiert Formelen an Applikatioune ginn automatesch synchroniséiert.
+tools-open-brewfile = Brewfile opmaachen
+tools-managed = verwalt
+tools-provider-homebrew-formulae = Homebrew-Formelen
+tools-provider-homebrew-casks = Homebrew-Applikatiounen
+tools-provider-npm = NPM-Packagen
+tools-provider-acp-agents = ACP-Agenten
+tools-provider-lsp-servers = LSP-Serveren
+tools-provider-mcp-servers = MCP-Serveren
+tools-provider-dotfiles = Konfiguratiounsdateien
+tools-status-available = Verfügbar
+tools-status-missing = Feelt
+tools-status-conflict = Konflikt
+tools-forget = Vergiessen
+tools-manage = Verwalten
+tools-link = Verknëppen
+tools-unlink = Verknëppung léisen
+tools-import = Importéieren
+tools-update-count = { $count ->
+    [one] 1 Aktualiséierung
+   *[other] { $count } Aktualiséierungen
+}
+tools-conflict-count = { $count ->
+    [one] 1 Konflikt
+   *[other] { $count } Konflikter
+}
+tools-result-applied = Tools ugewannt
+tools-result-imported = Tools importéiert
+tools-result-installed = { $name } installéiert
+tools-result-updated = { $name } aktualiséiert
+tools-result-uninstalled = { $name } deinstalléiert
+tools-result-forgotten = { $name } vergiess
+tools-result-managed = { $name } gëtt elo verwalt
+tools-result-linked = { $name } verknëppt
+tools-result-unlinked = { $name } net méi verknëppt
+vault-title = Vault
+vault-encrypted = Enn-zu-Enn verschlësselt
+vault-passkey = Passschlëssel
+vault-passkey-description = Spär dës Vault op aneren Apparater ouni Passwuert op.
+vault-passkey-add = Passwuert dobäisetzen
+vault-passkey-unlock = Spär op
+vault-passkey-provider-unsupported = Dëse Passkey Provider ënnerstëtzt nach net verschlësselte Vault Spär.
+vault-recovery-key = Erhuelung Schlëssel
+vault-recovery-key-description = Späichert ee Schlëssel am Bitwarden oder engem anere Passwuertmanager fir dës Vault op engem neien Apparat ze recuperéieren.
+vault-recovery-key-create = Erstellt Schlëssel
+vault-recovery-key-create-failed = Erhuelungsschlëssel konnt net erstallt ginn.
+vault-recovery-key-save = Späichert dëse Schlëssel elo. Vmux kann et net erëm weisen.
+vault-recovery-key-saved = Ech hunn et gespäichert
+vault-recovery-key-placeholder = Paste Erhuelung Schlëssel
+vault-recovery-key-unlock = Spär
+vault-recovery-key-invalid = Dësen Erhuelungsschlëssel kann d'Vault net opmaachen.
+vault-recovery-key-ready = Erhuelung Schlëssel konfiguréiert
+vault-recovery-key-upload-pending = De Schlëssel gëtt lokal gespäichert, awer den Eroplueden ass gescheitert. Halt et sécher an dréckt Sync fir erëm ze probéieren.
+vault-auto-sync = Automatesch Backupsatellit
+vault-backup-failed = Automatesch Backupsatellit gescheitert. Dréckt Sync fir erëm ze probéieren.
+vault-backup-failed-short = Backup ass gescheitert
+vault-recovery-key-copy-hint = Klickt fir ze kopéieren
+vault-recovery-key-copied = Kopéiert
+vault-recovery-key-verify = Späichert et an Ärem Passwuertmanager, paste se dann hei ënnen fir z'iwwerpréiwen.
+vault-recovery-key-verify-placeholder = Paste gespäichert Erhuelung Schlëssel
+vault-recovery-key-mismatch = Erhuelung Schlëssel passt net.
+vault-open = { common-open } Vault
+vault-description = Synchroniséiert Astellungen, Tools, Dotfiles, a Wëssen mat Git.
+vault-sync = Synchroniséiert
+vault-create = Schafen
+vault-connect = Connect
+vault-github = GitHub
+vault-github-description = Erstellt e private Repository oder wielt e bestehend Vault.
+vault-connect-github = Connect GitHub
+vault-connected-as = Verbonne als { $name }
+vault-use-repository = Benotzt
+vault-repository-name = Numm vum Repository
+vault-cloud-folder = Cloud Dossier
+vault-cloud-folder-description = Benotzt en Dossier vu Google Drive, iCloud Drive, Dropbox oder OneDrive.
+vault-choose-folder = Wielt Dossier
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Dossier · { common-done }
+vault-private = Privat Repository
+vault-public-warning = D'Versiounsgeschicht vum Repository an déi verschlësselt Donnéeë wäerten ëffentlech sinn.
+vault-choose-repository = Wielt e Repository ...
+vault-empty = eidel
+vault-clean = Aktuell
+vault-not-connected = Net ugeschloss
+vault-change-count = Ännerungen: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Eng Uweisung. Alles gemaach.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Als Lieszeechen an { $folder } späicheren
 common-cancel = Ofbriechen
 common-delete = Läschen
 common-save = Späicheren
+common-copy = Copy
 common-rename = Ëmbenennen
 common-expand = Ausklappen
 common-collapse = Zesummeklappen

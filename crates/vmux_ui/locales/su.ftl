@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Pakakas
+tools-search = Téangan pakét, agén, MCP, LSP jeung berkas konfigurasi…
+tools-open = Buka pakakas
+tools-fold = Tilep pakakas
+tools-unfold = Legakeun pakakas
+tools-scanning = Nyeken pakakas lokal…
+tools-no-installed = Teu aya pakakas nu dipasang
+tools-empty = Teu aya pakakas nu cocog
+tools-empty-detail = Pasang pakét atawa tambahkeun pakét berkas konfigurasi gaya Stow.
+tools-apply = Larapkeun
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula jeung aplikasi nu dipasang disingkronkeun sacara otomatis.
+tools-open-brewfile = Buka Brewfile
+tools-managed = dikokolakeun
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Pakét NPM
+tools-provider-acp-agents = Agén ACP
+tools-provider-lsp-servers = Pangladén LSP
+tools-provider-mcp-servers = Pangladén MCP
+tools-provider-dotfiles = Berkas konfigurasi
+tools-status-available = Aya
+tools-status-missing = Leungit
+tools-status-conflict = Bentrok
+tools-forget = Poho
+tools-manage = Kokola
+tools-link = Sambungkeun
+tools-unlink = Pegatkeun
+tools-import = Impor
+tools-update-count = { $count ->
+    [one] 1 pamutahiran
+   *[other] { $count } pamutahiran
+}
+tools-conflict-count = { $count ->
+    [one] 1 bentrok
+   *[other] { $count } bentrok
+}
+tools-result-applied = Pakakas geus dilarapkeun
+tools-result-imported = Pakakas geus diimpor
+tools-result-installed = { $name } geus dipasang
+tools-result-updated = { $name } geus dimutahirkeun
+tools-result-uninstalled = { $name } geus dicabut
+tools-result-forgotten = { $name } geus dipopohokeun
+tools-result-managed = { $name } ayeuna dikokolakeun
+tools-result-linked = { $name } geus disambungkeun
+tools-result-unlinked = { $name } geus dipegatkeun
+vault-title = Vault
+vault-encrypted = Énkripsi tungtung-ka-tungtung
+vault-passkey = Passkey
+vault-passkey-description = Buka konci Kolong ieu dina alat anu sanés tanpa kecap akses.
+vault-passkey-add = Tambahkeun kecap akses
+vault-passkey-unlock = Muka konci
+vault-passkey-provider-unsupported = Panyadia konci sandi ieu henteu ngadukung muka konci Vault énkripsi acan.
+vault-recovery-key = Pamulihan Key
+vault-recovery-key-description = Simpen hiji konci dina Bitwarden atanapi manajer sandi anu sanés pikeun ngabalikeun Vault ieu dina alat énggal.
+vault-recovery-key-create = Jieun konci
+vault-recovery-key-create-failed = Pamulihan Key teu bisa dijieun.
+vault-recovery-key-save = Simpen konci ieu ayeuna. Vmux teu tiasa nunjukkeun deui.
+vault-recovery-key-saved = Kuring disimpen
+vault-recovery-key-placeholder = Témpél Pamulihan Key
+vault-recovery-key-unlock = Muka konci
+vault-recovery-key-invalid = Konci Pamulihan ieu teu tiasa muka konci Kolong.
+vault-recovery-key-ready = Pamulihan Key ngonpigurasi
+vault-recovery-key-upload-pending = Koncina disimpen sacara lokal, tapi unggah gagal. Tetep aman terus pencét Singkronkeun pikeun nyobaan deui.
+vault-auto-sync = Nyadangkeun otomatis
+vault-backup-failed = Nyadangkeun otomatis gagal. Pencét Singkronkeun pikeun nyobaan deui.
+vault-backup-failed-short = Nyadangkeun gagal
+vault-recovery-key-copy-hint = Klik pikeun nyalin
+vault-recovery-key-copied = Disalin
+vault-recovery-key-verify = Simpen dina manajer sandi anjeun, teras tempelkeun di handap pikeun pariksa.
+vault-recovery-key-verify-placeholder = Témpél disimpen Pamulihan Key
+vault-recovery-key-mismatch = Pamulihan Key teu cocog.
+vault-open = { common-open } Vault
+vault-description = Singkronkeun setélan, alat, dotfiles, sareng Pangaweruh sareng Git.
+vault-sync = Singkronkeun
+vault-create = Nyiptakeun
+vault-connect = Nyambung
+vault-github = GitHub
+vault-github-description = Jieun gudang pribadi atawa pilih Vault nu geus aya.
+vault-connect-github = Sambungkeun GitHub
+vault-connected-as = Dihubungkeun salaku { $name }
+vault-use-repository = Paké
+vault-repository-name = Ngaran Repository
+vault-cloud-folder = Polder awan
+vault-cloud-folder-description = Anggo polder ti Google Drive, iCloud Drive, Dropbox, atanapi OneDrive.
+vault-choose-folder = Pilih folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = polder · { common-done }
+vault-private = gudang swasta
+vault-public-warning = Riwayat repositori sareng data anu énkripsi bakal umum.
+vault-choose-repository = Pilih gudang…
+vault-empty = kosong
+vault-clean = Paling énggal
+vault-not-connected = Teu nyambung
+vault-change-count = Parobahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Mimiti
 start-tagline = Hiji prompt. Naon waé, réngsé.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Tetengger dina { $folder }
 common-cancel = Batal
 common-delete = Pupus
 common-save = Simpen
+common-copy = Copy
 common-rename = Ganti ngaran
 common-expand = Bukakeun
 common-collapse = Ciutkeun

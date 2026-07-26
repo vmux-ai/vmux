@@ -10,6 +10,7 @@ common-remove = Remove
 common-cancel = Cancel
 common-delete = Delete
 common-save = Save
+common-copy = Copy
 common-rename = Rename
 common-expand = Expand
 common-collapse = Collapse
@@ -31,6 +32,105 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Tools
+tools-search = Search packages, agents, MCP, LSP, dotfiles…
+tools-open = Open Tools
+tools-fold = Fold tools
+tools-unfold = Unfold tools
+tools-scanning = Scanning local tools…
+tools-no-installed = No installed tools
+tools-empty = No matching tools
+tools-empty-detail = Install a package or add a Stow-style dotfile package.
+tools-apply = Apply
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installed formulae and casks sync automatically.
+tools-open-brewfile = Open Brewfile
+tools-managed = managed
+tools-provider-homebrew-formulae = Homebrew Formulae
+tools-provider-homebrew-casks = Homebrew Casks
+tools-provider-npm = NPM Packages
+tools-provider-acp-agents = ACP Agents
+tools-provider-lsp-servers = LSP Servers
+tools-provider-mcp-servers = MCP Servers
+tools-provider-dotfiles = Dotfiles
+tools-status-available = Available
+tools-status-missing = Missing
+tools-status-conflict = Conflict
+tools-forget = Forget
+tools-manage = Manage
+tools-link = Link
+tools-unlink = Unlink
+tools-import = Import
+tools-update-count = { $count ->
+    [one] 1 update
+   *[other] { $count } updates
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicts
+}
+tools-result-applied = Tools applied
+tools-result-imported = Tools imported
+tools-result-installed = { $name } installed
+tools-result-updated = { $name } updated
+tools-result-uninstalled = { $name } uninstalled
+tools-result-forgotten = { $name } forgotten
+tools-result-managed = { $name } is now managed
+tools-result-linked = { $name } linked
+tools-result-unlinked = { $name } unlinked
+vault-title = Vault
+vault-encrypted = End-to-end encrypted
+vault-passkey = Passkey
+vault-passkey-description = Unlock this Vault on other devices without a password.
+vault-passkey-add = Add passkey
+vault-passkey-unlock = Unlock
+vault-passkey-provider-unsupported = This passkey provider doesn’t support encrypted Vault unlock yet.
+vault-recovery-key = Recovery Key
+vault-recovery-key-description = Save one key in Bitwarden or another password manager to recover this Vault on a new device.
+vault-recovery-key-create = Create key
+vault-recovery-key-create-failed = Recovery Key could not be created.
+vault-recovery-key-save = Save this key now. Vmux cannot show it again.
+vault-recovery-key-saved = I saved it
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Unlock
+vault-recovery-key-invalid = This Recovery Key cannot unlock the Vault.
+vault-recovery-key-ready = Recovery Key configured
+vault-recovery-key-upload-pending = The key is saved locally, but upload failed. Keep it safe and press Sync to retry.
+vault-auto-sync = Automatic backup
+vault-backup-failed = Automatic backup failed. Press Sync to retry.
+vault-backup-failed-short = Backup failed
+vault-recovery-key-copy-hint = Click to copy
+vault-recovery-key-copied = Copied
+vault-recovery-key-verify = Save it in your password manager, then paste it below to verify.
+vault-recovery-key-verify-placeholder = Paste saved Recovery Key
+vault-recovery-key-mismatch = Recovery Key does not match.
+vault-open = { common-open } Vault
+vault-description = Sync settings, tools, dotfiles, and Knowledge with Git.
+vault-sync = Sync
+vault-create = Create
+vault-connect = Connect
+vault-github = GitHub
+vault-github-description = Create a private repository or choose an existing Vault.
+vault-connect-github = Connect GitHub
+vault-connected-as = Connected as { $name }
+vault-use-repository = Use
+vault-repository-name = Repository name
+vault-cloud-folder = Cloud folder
+vault-cloud-folder-description = Use a folder from Google Drive, iCloud Drive, Dropbox, or OneDrive.
+vault-choose-folder = Choose folder
+vault-private = Private repository
+vault-public-warning = Repository history and encrypted data will be public.
+vault-choose-repository = Choose a repository…
+vault-empty = empty
+vault-clean = Up to date
+vault-not-connected = Not connected
+vault-change-count = Changes: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
 start-title = Start
 start-tagline = One prompt. Anything, done.
 

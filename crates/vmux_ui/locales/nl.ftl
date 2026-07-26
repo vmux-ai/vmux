@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Hulpmiddelen
+tools-search = Zoeken naar pakketten, agenten, MCP, LSP en configuratiebestanden…
+tools-open = Hulpmiddelen openen
+tools-fold = Hulpmiddelen invouwen
+tools-unfold = Hulpmiddelen uitvouwen
+tools-scanning = Lokale hulpmiddelen scannen…
+tools-no-installed = Geen hulpmiddelen geïnstalleerd
+tools-empty = Geen overeenkomende hulpmiddelen
+tools-empty-detail = Installeer een pakket of voeg een configuratiebestandenpakket in Stow-stijl toe.
+tools-apply = Toepassen
+tools-homebrew = Homebrew
+tools-homebrew-sync = Geïnstalleerde formules en toepassingen worden automatisch gesynchroniseerd.
+tools-open-brewfile = Brewfile openen
+tools-managed = beheerd
+tools-provider-homebrew-formulae = Homebrew-formules
+tools-provider-homebrew-casks = Homebrew-toepassingen
+tools-provider-npm = NPM-pakketten
+tools-provider-acp-agents = ACP-agenten
+tools-provider-lsp-servers = LSP-servers
+tools-provider-mcp-servers = MCP-servers
+tools-provider-dotfiles = Configuratiebestanden
+tools-status-available = Beschikbaar
+tools-status-missing = Ontbreekt
+tools-status-conflict = Tegenstrijdigheid
+tools-forget = Vergeten
+tools-manage = Beheren
+tools-link = Koppelen
+tools-unlink = Ontkoppelen
+tools-import = Importeren
+tools-update-count = { $count ->
+    [one] 1 update
+   *[other] { $count } updates
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicten
+}
+tools-result-applied = Hulpmiddelen toegepast
+tools-result-imported = Hulpmiddelen geïmporteerd
+tools-result-installed = { $name } geïnstalleerd
+tools-result-updated = { $name } bijgewerkt
+tools-result-uninstalled = { $name } verwijderd
+tools-result-forgotten = { $name } vergeten
+tools-result-managed = { $name } wordt nu beheerd
+tools-result-linked = { $name } gekoppeld
+tools-result-unlinked = { $name } ontkoppeld
+vault-title = Vault
+vault-encrypted = End-to-end versleuteld
+vault-passkey = Wachtwoord
+vault-passkey-description = Ontgrendel deze kluis op andere apparaten zonder wachtwoord.
+vault-passkey-add = Wachtwoord toevoegen
+vault-passkey-unlock = Ontgrendelen
+vault-passkey-provider-unsupported = Deze toegangssleutelprovider ondersteunt nog geen gecodeerde ontgrendeling van de kluis.
+vault-recovery-key = Herstelsleutel
+vault-recovery-key-description = Bewaar één sleutel in Bitwarden of een andere wachtwoordbeheerder om deze kluis op een nieuw apparaat te herstellen.
+vault-recovery-key-create = Sleutel maken
+vault-recovery-key-create-failed = Herstelsleutel kan niet worden gemaakt.
+vault-recovery-key-save = Sla deze sleutel nu op. Vmux kan het niet opnieuw tonen.
+vault-recovery-key-saved = Ik heb het opgeslagen
+vault-recovery-key-placeholder = Herstelsleutel plakken
+vault-recovery-key-unlock = Ontgrendel
+vault-recovery-key-invalid = Deze herstelsleutel kan de kluis niet ontgrendelen.
+vault-recovery-key-ready = Herstelsleutel geconfigureerd
+vault-recovery-key-upload-pending = De sleutel wordt lokaal opgeslagen, maar het uploaden is mislukt. Bewaar het op een veilige plaats en druk op Synchroniseren om het opnieuw te proberen.
+vault-auto-sync = Automatische back-up
+vault-backup-failed = Automatische back-up mislukt. Druk op Synchroniseren om het opnieuw te proberen.
+vault-backup-failed-short = Back-up mislukt
+vault-recovery-key-copy-hint = Klik om te kopiëren
+vault-recovery-key-copied = Gekopieerd
+vault-recovery-key-verify = Sla het op in uw wachtwoordbeheerder en plak het hieronder om het te verifiëren.
+vault-recovery-key-verify-placeholder = Plak de opgeslagen herstelsleutel
+vault-recovery-key-mismatch = Herstelsleutel komt niet overeen.
+vault-open = { common-open } Vault
+vault-description = Synchroniseer instellingen, tools, dotfiles en Knowledge met Git.
+vault-sync = Synchroniseren
+vault-create = Creëren
+vault-connect = Verbinden
+vault-github = GitHub
+vault-github-description = Maak een privérepository of kies een bestaande kluis.
+vault-connect-github = Verbind GitHub
+vault-connected-as = Verbonden als { $name }
+vault-use-repository = Gebruik
+vault-repository-name = Naam van opslagplaats
+vault-cloud-folder = Wolkenmap
+vault-cloud-folder-description = Gebruik een map uit Google Drive, iCloud Drive, Dropbox of OneDrive.
+vault-choose-folder = Kies map
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Map · { common-done }
+vault-private = Privé-opslagplaats
+vault-public-warning = De repositorygeschiedenis en versleutelde gegevens worden openbaar.
+vault-choose-repository = Kies een opslagplaats…
+vault-empty = leeg
+vault-clean = Up-to-date
+vault-not-connected = Niet verbonden
+vault-change-count = Veranderingen: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Eén prompt. Alles geregeld.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bladwijzer in { $folder }
 common-cancel = Annuleer
 common-delete = Verwijder
 common-save = Bewaar
+common-copy = Copy
 common-rename = Hernoem
 common-expand = Vouw uit
 common-collapse = Vouw samen

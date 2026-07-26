@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } అంశం
    *[other] { $count } అంశాలు
 }
+
+tools-title = సాధనాలు
+tools-search = ప్యాకేజీలు, ఏజెంట్లు, MCP, LSP మరియు కాన్ఫిగరేషన్ ఫైళ్లను వెతకండి…
+tools-open = సాధనాలను తెరవండి
+tools-fold = సాధనాలను మడవండి
+tools-unfold = సాధనాలను విస్తరించండి
+tools-scanning = స్థానిక సాధనాలను స్కాన్ చేస్తోంది…
+tools-no-installed = ఇన్‌స్టాల్ చేసిన సాధనాలు లేవు
+tools-empty = సరిపోలే సాధనాలు లేవు
+tools-empty-detail = ప్యాకేజీని ఇన్‌స్టాల్ చేయండి లేదా Stow-శైలి కాన్ఫిగరేషన్ ఫైళ్ల ప్యాకేజీని జోడించండి.
+tools-apply = వర్తింపజేయండి
+tools-homebrew = Homebrew
+tools-homebrew-sync = ఇన్‌స్టాల్ చేసిన ఫార్ములాలు మరియు అనువర్తనాలు స్వయంచాలకంగా సమకాలీకరించబడతాయి.
+tools-open-brewfile = Brewfile తెరవండి
+tools-managed = నిర్వహించబడుతోంది
+tools-provider-homebrew-formulae = Homebrew ఫార్ములాలు
+tools-provider-homebrew-casks = Homebrew అనువర్తనాలు
+tools-provider-npm = NPM ప్యాకేజీలు
+tools-provider-acp-agents = ACP ఏజెంట్లు
+tools-provider-lsp-servers = LSP సర్వర్లు
+tools-provider-mcp-servers = MCP సర్వర్లు
+tools-provider-dotfiles = కాన్ఫిగరేషన్ ఫైళ్లు
+tools-status-available = అందుబాటులో ఉంది
+tools-status-missing = లేదు
+tools-status-conflict = వైరుధ్యం
+tools-forget = మర్చిపోండి
+tools-manage = నిర్వహించండి
+tools-link = లింక్ చేయండి
+tools-unlink = లింక్ తొలగించండి
+tools-import = దిగుమతి చేయండి
+tools-update-count = { $count ->
+    [one] 1 నవీకరణ
+   *[other] { $count } నవీకరణలు
+}
+tools-conflict-count = { $count ->
+    [one] 1 వైరుధ్యం
+   *[other] { $count } వైరుధ్యాలు
+}
+tools-result-applied = సాధనాలు వర్తింపజేయబడ్డాయి
+tools-result-imported = సాధనాలు దిగుమతి చేయబడ్డాయి
+tools-result-installed = { $name } ఇన్‌స్టాల్ చేయబడింది
+tools-result-updated = { $name } నవీకరించబడింది
+tools-result-uninstalled = { $name } అన్‌ఇన్‌స్టాల్ చేయబడింది
+tools-result-forgotten = { $name } మర్చిపోబడింది
+tools-result-managed = { $name } ఇప్పుడు నిర్వహించబడుతోంది
+tools-result-linked = { $name } లింక్ చేయబడింది
+tools-result-unlinked = { $name } లింక్ తొలగించబడింది
+vault-title = Vault
+vault-encrypted = ఎండ్-టు-ఎండ్ ఎన్‌క్రిప్ట్ చేయబడింది
+vault-passkey = పాస్కీ
+vault-passkey-description = పాస్‌వర్డ్ లేకుండా ఇతర పరికరాలలో ఈ వాల్ట్‌ని అన్‌లాక్ చేయండి.
+vault-passkey-add = పాస్‌కీని జోడించండి
+vault-passkey-unlock = అన్‌లాక్ చేయండి
+vault-passkey-provider-unsupported = ఈ పాస్‌కీ ప్రొవైడర్ ఎన్‌క్రిప్టెడ్ వాల్ట్ అన్‌లాక్‌కి ఇంకా మద్దతు ఇవ్వలేదు.
+vault-recovery-key = రికవరీ కీ
+vault-recovery-key-description = కొత్త పరికరంలో ఈ వాల్ట్‌ని రికవర్ చేయడానికి ఒక కీని బిట్‌వార్డెన్‌లో లేదా మరొక పాస్‌వర్డ్ మేనేజర్‌లో సేవ్ చేయండి.
+vault-recovery-key-create = కీని సృష్టించండి
+vault-recovery-key-create-failed = రికవరీ కీని సృష్టించడం సాధ్యపడలేదు.
+vault-recovery-key-save = ఈ కీని ఇప్పుడు సేవ్ చేయండి. Vmux దీన్ని మళ్లీ చూపలేదు.
+vault-recovery-key-saved = నేను దానిని సేవ్ చేసాను
+vault-recovery-key-placeholder = రికవరీ కీని అతికించండి
+vault-recovery-key-unlock = అన్‌లాక్ చేయండి
+vault-recovery-key-invalid = ఈ రికవరీ కీ వాల్ట్‌ని అన్‌లాక్ చేయలేదు.
+vault-recovery-key-ready = రికవరీ కీ కాన్ఫిగర్ చేయబడింది
+vault-recovery-key-upload-pending = కీ స్థానికంగా సేవ్ చేయబడింది, కానీ అప్‌లోడ్ విఫలమైంది. దాన్ని సురక్షితంగా ఉంచండి మరియు మళ్లీ ప్రయత్నించడానికి సమకాలీకరణను నొక్కండి.
+vault-auto-sync = స్వయంచాలక బ్యాకప్
+vault-backup-failed = స్వయంచాలక బ్యాకప్ విఫలమైంది. మళ్లీ ప్రయత్నించడానికి సమకాలీకరణను నొక్కండి.
+vault-backup-failed-short = బ్యాకప్ విఫలమైంది
+vault-recovery-key-copy-hint = కాపీ చేయడానికి క్లిక్ చేయండి
+vault-recovery-key-copied = కాపీ చేయబడింది
+vault-recovery-key-verify = దీన్ని మీ పాస్‌వర్డ్ మేనేజర్‌లో సేవ్ చేసి, ధృవీకరించడానికి దిగువన అతికించండి.
+vault-recovery-key-verify-placeholder = సేవ్ చేయబడిన రికవరీ కీని అతికించండి
+vault-recovery-key-mismatch = రికవరీ కీ సరిపోలలేదు.
+vault-open = { common-open } Vault
+vault-description = Gitతో సెట్టింగ్‌లు, సాధనాలు, డాట్‌ఫైల్‌లు మరియు జ్ఞానాన్ని సమకాలీకరించండి.
+vault-sync = సమకాలీకరించు
+vault-create = సృష్టించు
+vault-connect = కనెక్ట్ చేయండి
+vault-github = GitHub
+vault-github-description = ప్రైవేట్ రిపోజిటరీని సృష్టించండి లేదా ఇప్పటికే ఉన్న వాల్ట్‌ని ఎంచుకోండి.
+vault-connect-github = GitHubని కనెక్ట్ చేయండి
+vault-connected-as = { $name }గా కనెక్ట్ చేయబడింది
+vault-use-repository = ఉపయోగించండి
+vault-repository-name = రిపోజిటరీ పేరు
+vault-cloud-folder = క్లౌడ్ ఫోల్డర్
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox లేదా OneDrive నుండి ఫోల్డర్‌ని ఉపయోగించండి.
+vault-choose-folder = ఫోల్డర్‌ని ఎంచుకోండి
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ఫోల్డర్ · { common-done }
+vault-private = ప్రైవేట్ రిపోజిటరీ
+vault-public-warning = రిపోజిటరీ చరిత్ర మరియు ఎన్‌క్రిప్ట్ చేసిన డేటా పబ్లిక్‌గా ఉంటాయి.
+vault-choose-repository = రిపోజిటరీని ఎంచుకోండి...
+vault-empty = ఖాళీ
+vault-clean = తాజాగా ఉంది
+vault-not-connected = కనెక్ట్ కాలేదు
+vault-change-count = మార్పులు: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ప్రారంభం
 start-tagline = ఒక్క ప్రాంప్ట్. ఏదైనా — పూర్తిగా.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder }లో బుక్‌మార్క్ చే�
 common-cancel = రద్దు
 common-delete = తొలగించు
 common-save = సేవ్ చేయి
+common-copy = Copy
 common-rename = పేరు మార్చు
 common-expand = విస్తరించు
 common-collapse = ముడుచు

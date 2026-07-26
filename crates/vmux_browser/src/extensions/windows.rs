@@ -550,7 +550,7 @@ fn resolve_window_id(
     model: &ChromeModel,
     windows: &ExtensionWindows,
 ) -> Result<i32, ChromeError> {
-    if id == WINDOW_ID_CURRENT {
+    if matches!(id, WINDOW_ID_NONE | WINDOW_ID_CURRENT) {
         return current_window_id(caller, model, windows)
             .ok_or_else(|| ChromeError::new("window_not_found", "current window is unavailable"));
     }
@@ -1170,6 +1170,24 @@ mod tests {
 
         assert_eq!(result.result["id"], 1);
         assert_eq!(result.result["left"], 10);
+        assert_eq!(result.result["tabs"][0]["id"], 7);
+    }
+
+    #[test]
+    fn get_maps_window_id_none_to_current_window_with_geometry() {
+        let result = dispatch(
+            &request("get", json!([WINDOW_ID_NONE, { "populate": true }])),
+            &model(),
+            &mut ExtensionWindows::default(),
+            &BridgeAuthorization::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.result["id"], 1);
+        assert_eq!(result.result["left"], 10);
+        assert_eq!(result.result["top"], 20);
+        assert_eq!(result.result["width"], 1200);
+        assert_eq!(result.result["height"], 800);
         assert_eq!(result.result["tabs"][0]["id"], 7);
     }
 

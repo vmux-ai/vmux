@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } รายการ
    *[other] { $count } รายการ
 }
+
+tools-title = เครื่องมือ
+tools-search = ค้นหาแพ็กเกจ เอเจนต์ MCP LSP และไฟล์กำหนดค่า…
+tools-open = เปิดเครื่องมือ
+tools-fold = ย่อเครื่องมือ
+tools-unfold = ขยายเครื่องมือ
+tools-scanning = กำลังสแกนเครื่องมือในเครื่อง…
+tools-no-installed = ไม่มีเครื่องมือที่ติดตั้งไว้
+tools-empty = ไม่มีเครื่องมือที่ตรงกัน
+tools-empty-detail = ติดตั้งแพ็กเกจหรือเพิ่มแพ็กเกจไฟล์กำหนดค่าแบบ Stow
+tools-apply = นำไปใช้
+tools-homebrew = Homebrew
+tools-homebrew-sync = สูตรและแอปพลิเคชันที่ติดตั้งไว้จะซิงค์โดยอัตโนมัติ
+tools-open-brewfile = เปิด Brewfile
+tools-managed = จัดการอยู่
+tools-provider-homebrew-formulae = สูตร Homebrew
+tools-provider-homebrew-casks = แอปพลิเคชัน Homebrew
+tools-provider-npm = แพ็กเกจ NPM
+tools-provider-acp-agents = เอเจนต์ ACP
+tools-provider-lsp-servers = เซิร์ฟเวอร์ LSP
+tools-provider-mcp-servers = เซิร์ฟเวอร์ MCP
+tools-provider-dotfiles = ไฟล์กำหนดค่า
+tools-status-available = พร้อมใช้
+tools-status-missing = ไม่มี
+tools-status-conflict = ขัดแย้ง
+tools-forget = ลืม
+tools-manage = จัดการ
+tools-link = เชื่อมโยง
+tools-unlink = ยกเลิกการเชื่อมโยง
+tools-import = นำเข้า
+tools-update-count = { $count ->
+    [one] อัปเดต 1 รายการ
+   *[other] อัปเดต { $count } รายการ
+}
+tools-conflict-count = { $count ->
+    [one] ข้อขัดแย้ง 1 รายการ
+   *[other] ข้อขัดแย้ง { $count } รายการ
+}
+tools-result-applied = นำเครื่องมือไปใช้แล้ว
+tools-result-imported = นำเข้าเครื่องมือแล้ว
+tools-result-installed = ติดตั้ง { $name } แล้ว
+tools-result-updated = อัปเดต { $name } แล้ว
+tools-result-uninstalled = ถอนการติดตั้ง { $name } แล้ว
+tools-result-forgotten = ลืม { $name } แล้ว
+tools-result-managed = ขณะนี้กำลังจัดการ { $name }
+tools-result-linked = เชื่อมโยง { $name } แล้ว
+tools-result-unlinked = ยกเลิกการเชื่อมโยง { $name } แล้ว
+vault-title = Vault
+vault-encrypted = เข้ารหัสตั้งแต่ต้นทางถึงปลายทาง
+vault-passkey = กุญแจผี
+vault-passkey-description = ปลดล็อคห้องนิรภัยนี้บนอุปกรณ์อื่นโดยไม่ต้องใช้รหัสผ่าน
+vault-passkey-add = เพิ่มรหัสผ่าน
+vault-passkey-unlock = ปลดล็อค
+vault-passkey-provider-unsupported = ผู้ให้บริการรหัสผ่านรายนี้ยังไม่รองรับการปลดล็อกห้องนิรภัยที่เข้ารหัส
+vault-recovery-key = รหัสการกู้คืน
+vault-recovery-key-description = บันทึกหนึ่งคีย์ใน Bitwarden หรือตัวจัดการรหัสผ่านอื่นเพื่อกู้คืน Vault นี้บนอุปกรณ์ใหม่
+vault-recovery-key-create = สร้างคีย์
+vault-recovery-key-create-failed = ไม่สามารถสร้างคีย์การกู้คืนได้
+vault-recovery-key-save = บันทึกคีย์นี้ทันที Vmux ไม่สามารถแสดงได้อีก
+vault-recovery-key-saved = ฉันบันทึกไว้แล้ว
+vault-recovery-key-placeholder = วางคีย์การกู้คืน
+vault-recovery-key-unlock = ปลดล็อค
+vault-recovery-key-invalid = คีย์การกู้คืนนี้ไม่สามารถปลดล็อกห้องนิรภัยได้
+vault-recovery-key-ready = กำหนดค่าคีย์การกู้คืนแล้ว
+vault-recovery-key-upload-pending = คีย์ถูกบันทึกไว้ในเครื่อง แต่การอัปโหลดล้มเหลว เก็บไว้อย่างปลอดภัยแล้วกดซิงค์เพื่อลองอีกครั้ง
+vault-auto-sync = สำรองข้อมูลอัตโนมัติ
+vault-backup-failed = การสำรองข้อมูลอัตโนมัติล้มเหลว กดซิงค์เพื่อลองอีกครั้ง
+vault-backup-failed-short = การสำรองข้อมูลล้มเหลว
+vault-recovery-key-copy-hint = คลิกเพื่อคัดลอก
+vault-recovery-key-copied = คัดลอกแล้ว
+vault-recovery-key-verify = บันทึกไว้ในตัวจัดการรหัสผ่านของคุณ จากนั้นวางด้านล่างเพื่อยืนยัน
+vault-recovery-key-verify-placeholder = วางคีย์การกู้คืนที่บันทึกไว้
+vault-recovery-key-mismatch = รหัสการกู้คืนไม่ตรงกัน
+vault-open = { common-open } Vault
+vault-description = ซิงค์การตั้งค่า เครื่องมือ dotfiles และความรู้กับ Git
+vault-sync = ซิงค์
+vault-create = สร้าง
+vault-connect = เชื่อมต่อ
+vault-github = GitHub
+vault-github-description = สร้างพื้นที่เก็บข้อมูลส่วนตัวหรือเลือกห้องนิรภัยที่มีอยู่
+vault-connect-github = เชื่อมต่อ GitHub
+vault-connected-as = เชื่อมต่อในชื่อ { $name }
+vault-use-repository = ใช้
+vault-repository-name = ชื่อพื้นที่เก็บข้อมูล
+vault-cloud-folder = โฟลเดอร์คลาวด์
+vault-cloud-folder-description = ใช้โฟลเดอร์จาก Google Drive, iCloud Drive, Dropbox หรือ OneDrive
+vault-choose-folder = เลือกโฟลเดอร์
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = โฟลเดอร์ · { common-done }
+vault-private = พื้นที่เก็บข้อมูลส่วนตัว
+vault-public-warning = ประวัติของที่เก็บและข้อมูลที่เข้ารหัสจะเป็นสาธารณะ
+vault-choose-repository = เลือกพื้นที่เก็บข้อมูล...
+vault-empty = ว่างเปล่า
+vault-clean = ถึงวันที่
+vault-not-connected = ไม่ได้เชื่อมต่อ
+vault-change-count = การเปลี่ยนแปลง: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = เริ่มต้น
 start-tagline = พรอมป์เดียว ทำได้ทุกอย่าง
 
@@ -299,6 +399,7 @@ layout-bookmark-in = คั่นหน้าใน { $folder }
 common-cancel = ยกเลิก
 common-delete = ลบ
 common-save = บันทึก
+common-copy = Copy
 common-rename = เปลี่ยนชื่อ
 common-expand = ขยาย
 common-collapse = ยุบ

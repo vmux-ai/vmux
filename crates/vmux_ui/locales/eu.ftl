@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] elementu { $count }
    *[other] { $count } elementu
 }
+
+tools-title = Tresnak
+tools-search = Bilatu paketeak, agenteak, MCP, LSP eta konfigurazio-fitxategiak…
+tools-open = Ireki tresnak
+tools-fold = Tolestu tresnak
+tools-unfold = Zabaldu tresnak
+tools-scanning = Tresna lokalak aztertzen…
+tools-no-installed = Ez dago instalatutako tresnarik
+tools-empty = Ez dago bat datorren tresnarik
+tools-empty-detail = Instalatu pakete bat edo gehitu Stow estiloko konfigurazio-fitxategien pakete bat.
+tools-apply = Aplikatu
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalatutako formulak eta aplikazioak automatikoki sinkronizatzen dira.
+tools-open-brewfile = Ireki Brewfile
+tools-managed = kudeatuta
+tools-provider-homebrew-formulae = Homebrew formulak
+tools-provider-homebrew-casks = Homebrew aplikazioak
+tools-provider-npm = NPM paketeak
+tools-provider-acp-agents = ACP agenteak
+tools-provider-lsp-servers = LSP zerbitzariak
+tools-provider-mcp-servers = MCP zerbitzariak
+tools-provider-dotfiles = Konfigurazio-fitxategiak
+tools-status-available = Eskuragarri
+tools-status-missing = Falta da
+tools-status-conflict = Gatazka
+tools-forget = Ahaztu
+tools-manage = Kudeatu
+tools-link = Lotu
+tools-unlink = Askatu
+tools-import = Inportatu
+tools-update-count = { $count ->
+    [one] Eguneratze 1
+   *[other] { $count } eguneratze
+}
+tools-conflict-count = { $count ->
+    [one] Gatazka 1
+   *[other] { $count } gatazka
+}
+tools-result-applied = Tresnak aplikatu dira
+tools-result-imported = Tresnak inportatu dira
+tools-result-installed = { $name } instalatu da
+tools-result-updated = { $name } eguneratu da
+tools-result-uninstalled = { $name } desinstalatu da
+tools-result-forgotten = { $name } ahaztu da
+tools-result-managed = { $name } kudeatuta dago orain
+tools-result-linked = { $name } lotu da
+tools-result-unlinked = { $name } askatu da
+vault-title = Vault
+vault-encrypted = Muturretik muturrera zifratuta
+vault-passkey = Pasahitza
+vault-passkey-description = Desblokeatu Vault hau beste gailu batzuetan pasahitzik gabe.
+vault-passkey-add = Gehitu pasahitza
+vault-passkey-unlock = Desblokeatu
+vault-passkey-provider-unsupported = Pasahitza-hornitzaile honek ez du onartzen enkriptatutako Vault desblokeatzea oraindik.
+vault-recovery-key = Berreskuratzeko gakoa
+vault-recovery-key-description = Gorde gako bat Bitwarden-en edo beste pasahitz-kudeatzaile batean, Bóta hau gailu berri batean berreskuratzeko.
+vault-recovery-key-create = Sortu gakoa
+vault-recovery-key-create-failed = Ezin izan da sortu berreskuratzeko gakoa.
+vault-recovery-key-save = Gorde gako hau orain. Vmux-ek ezin du berriro erakutsi.
+vault-recovery-key-saved = Gorde dut
+vault-recovery-key-placeholder = Itsatsi berreskuratzeko gakoa
+vault-recovery-key-unlock = Desblokeatu
+vault-recovery-key-invalid = Berreskuratze-gako honek ezin du desblokeatu ganga.
+vault-recovery-key-ready = Berreskuratzeko gakoa konfiguratuta
+vault-recovery-key-upload-pending = Gakoa lokalean gordetzen da, baina huts egin du kargatu. Mantendu seguru eta sakatu Sinkronizatu berriro saiatzeko.
+vault-auto-sync = Babeskopia automatikoa
+vault-backup-failed = Babeskopia automatikoak huts egin du. Sakatu Sinkronizatu berriro saiatzeko.
+vault-backup-failed-short = Babeskopia egiteak huts egin du
+vault-recovery-key-copy-hint = Egin klik kopiatzeko
+vault-recovery-key-copied = Kopiatua
+vault-recovery-key-verify = Gorde pasahitz-kudeatzailean, eta itsatsi behean egiaztatzeko.
+vault-recovery-key-verify-placeholder = Itsatsi gordetako berreskuratzeko gakoa
+vault-recovery-key-mismatch = Berreskuratzeko gakoa ez dator bat.
+vault-open = { common-open } Vault
+vault-description = Sinkronizatu ezarpenak, tresnak, dotfiles eta Knowledge Git-ekin.
+vault-sync = Sinkronizatu
+vault-create = Sortu
+vault-connect = Konektatu
+vault-github = GitHub
+vault-github-description = Sortu biltegi pribatu bat edo aukeratu lehendik dagoen ganga.
+vault-connect-github = Konektatu GitHub
+vault-connected-as = { $name } gisa konektatuta
+vault-use-repository = Erabili
+vault-repository-name = Biltegiaren izena
+vault-cloud-folder = Hodeiko karpeta
+vault-cloud-folder-description = Erabili Google Drive, iCloud Drive, Dropbox edo OneDrive-ko ​​karpeta bat.
+vault-choose-folder = Aukeratu karpeta
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Karpeta · { common-done }
+vault-private = Biltegi pribatua
+vault-public-warning = Biltegiaren historia eta zifratutako datuak publikoak izango dira.
+vault-choose-repository = Aukeratu biltegi bat...
+vault-empty = hutsa
+vault-clean = Egunekoak
+vault-not-connected = Ez dago konektatuta
+vault-change-count = Aldaketak: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Hasi
 start-tagline = Prompt bakarra. Edozer, eginda.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Laster-marka hemen: { $folder }
 common-cancel = Utzi
 common-delete = Ezabatu
 common-save = Gorde
+common-copy = Copy
 common-rename = Aldatu izena
 common-expand = Zabaldu
 common-collapse = Tolestu

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ставка
    *[other] { $count } ставки
 }
+
+tools-title = Алатки
+tools-search = Пребарај пакети, агенти, MCP, LSP и конфигурациски датотеки…
+tools-open = Отвори ги алатките
+tools-fold = Собери ги алатките
+tools-unfold = Прошири ги алатките
+tools-scanning = Скенирање локални алатки…
+tools-no-installed = Нема инсталирани алатки
+tools-empty = Нема соодветни алатки
+tools-empty-detail = Инсталирајте пакет или додајте пакет со конфигурациски датотеки во стилот на Stow.
+tools-apply = Примени
+tools-homebrew = Homebrew
+tools-homebrew-sync = Инсталираните формули и апликации автоматски се синхронизираат.
+tools-open-brewfile = Отвори го Brewfile
+tools-managed = управувано
+tools-provider-homebrew-formulae = Формули на Homebrew
+tools-provider-homebrew-casks = Апликации на Homebrew
+tools-provider-npm = Пакети на NPM
+tools-provider-acp-agents = Агенти на ACP
+tools-provider-lsp-servers = Сервери на LSP
+tools-provider-mcp-servers = Сервери на MCP
+tools-provider-dotfiles = Конфигурациски датотеки
+tools-status-available = Достапно
+tools-status-missing = Недостасува
+tools-status-conflict = Конфликт
+tools-forget = Заборави
+tools-manage = Управувај
+tools-link = Поврзи
+tools-unlink = Прекини врска
+tools-import = Увези
+tools-update-count = { $count ->
+    [one] 1 ажурирање
+   *[other] { $count } ажурирања
+}
+tools-conflict-count = { $count ->
+    [one] 1 конфликт
+   *[other] { $count } конфликти
+}
+tools-result-applied = Алатките се применети
+tools-result-imported = Алатките се увезени
+tools-result-installed = { $name } е инсталиран
+tools-result-updated = { $name } е ажуриран
+tools-result-uninstalled = { $name } е деинсталиран
+tools-result-forgotten = { $name } е заборавен
+tools-result-managed = { $name } сега се управува
+tools-result-linked = { $name } е поврзан
+tools-result-unlinked = Врската со { $name } е прекината
+vault-title = Vault
+vault-encrypted = Шифрирано од крај до крај
+vault-passkey = Лозинка
+vault-passkey-description = Отклучете го овој сеф на други уреди без лозинка.
+vault-passkey-add = Додадете лозинка
+vault-passkey-unlock = Отклучи
+vault-passkey-provider-unsupported = Овој давател на лозинка сè уште не поддржува шифрирано отклучување на сефот.
+vault-recovery-key = Клуч за обновување
+vault-recovery-key-description = Зачувајте еден клуч во Bitwarden или друг менаџер за лозинки за да го вратите овој сеф на нов уред.
+vault-recovery-key-create = Креирај клуч
+vault-recovery-key-create-failed = Клучот за враќање не може да се создаде.
+vault-recovery-key-save = Зачувај го овој клуч сега. Vmux не може да го прикаже повторно.
+vault-recovery-key-saved = Го зачував
+vault-recovery-key-placeholder = Клуч за враќање на паста
+vault-recovery-key-unlock = Отклучи
+vault-recovery-key-invalid = Овој клуч за враќање не може да го отклучи сефот.
+vault-recovery-key-ready = Клучот за обновување е конфигуриран
+vault-recovery-key-upload-pending = Клучот е зачуван локално, но поставувањето не успеа. Чувајте го безбедно и притиснете „Синхронизирај“ за да се обидете повторно.
+vault-auto-sync = Автоматска резервна копија
+vault-backup-failed = Автоматската резервна копија не успеа. Притиснете Синхронизација за да се обидете повторно.
+vault-backup-failed-short = Резервната копија не успеа
+vault-recovery-key-copy-hint = Кликнете за да копирате
+vault-recovery-key-copied = Копирано
+vault-recovery-key-verify = Зачувајте го во вашиот управувач со лозинки, а потоа залепете го подолу за да потврдите.
+vault-recovery-key-verify-placeholder = Залепете го зачуваниот клуч за враќање
+vault-recovery-key-mismatch = Клучот за враќање не се совпаѓа.
+vault-open = { common-open } Vault
+vault-description = Синхронизирајте ги поставките, алатките, точките и знаењето со Git.
+vault-sync = Синхронизирај
+vault-create = Креирај
+vault-connect = Поврзете се
+vault-github = GitHub
+vault-github-description = Создадете приватно складиште или изберете постоечки Vault.
+vault-connect-github = Поврзете го GitHub
+vault-connected-as = Поврзан како { $name }
+vault-use-repository = Користете
+vault-repository-name = Име на складиштето
+vault-cloud-folder = Облак папка
+vault-cloud-folder-description = Користете папка од Google Drive, iCloud Drive, Dropbox или OneDrive.
+vault-choose-folder = Изберете папка
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Папка · { common-done }
+vault-private = Приватно складиште
+vault-public-warning = Историјата на складиштето и шифрираните податоци ќе бидат јавни.
+vault-choose-repository = Изберете складиште…
+vault-empty = празен
+vault-clean = Ажурирано
+vault-not-connected = Не е поврзано
+vault-change-count = Промени: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Почеток
 start-tagline = Едно упатство. Сè е завршено.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Обележи во { $folder }
 common-cancel = Откажи
 common-delete = Избриши
 common-save = Зачувај
+common-copy = Copy
 common-rename = Преименувај
 common-expand = Прошири
 common-collapse = Собери

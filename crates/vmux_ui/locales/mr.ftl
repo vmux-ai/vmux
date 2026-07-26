@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } आयटम
    *[other] { $count } आयटम
 }
+
+tools-title = साधने
+tools-search = पॅकेज, एजंट, MCP, LSP आणि संरचना फाइल शोधा…
+tools-open = साधने उघडा
+tools-fold = साधने संकुचित करा
+tools-unfold = साधने विस्तृत करा
+tools-scanning = स्थानिक साधने स्कॅन केली जात आहेत…
+tools-no-installed = कोणतीही साधने स्थापित नाहीत
+tools-empty = जुळणारी साधने नाहीत
+tools-empty-detail = पॅकेज स्थापित करा किंवा Stow-शैलीचे संरचना फाइल पॅकेज जोडा.
+tools-apply = लागू करा
+tools-homebrew = Homebrew
+tools-homebrew-sync = स्थापित केलेली सूत्रे आणि अनुप्रयोग आपोआप समक्रमित होतात.
+tools-open-brewfile = Brewfile उघडा
+tools-managed = व्यवस्थापित
+tools-provider-homebrew-formulae = Homebrew सूत्रे
+tools-provider-homebrew-casks = Homebrew अनुप्रयोग
+tools-provider-npm = NPM पॅकेज
+tools-provider-acp-agents = ACP एजंट
+tools-provider-lsp-servers = LSP सर्व्हर
+tools-provider-mcp-servers = MCP सर्व्हर
+tools-provider-dotfiles = संरचना फाइल
+tools-status-available = उपलब्ध
+tools-status-missing = अनुपस्थित
+tools-status-conflict = संघर्ष
+tools-forget = विसरा
+tools-manage = व्यवस्थापित करा
+tools-link = जोडा
+tools-unlink = दुवा काढा
+tools-import = आयात करा
+tools-update-count = { $count ->
+    [one] 1 अद्यतन
+   *[other] { $count } अद्यतने
+}
+tools-conflict-count = { $count ->
+    [one] 1 संघर्ष
+   *[other] { $count } संघर्ष
+}
+tools-result-applied = साधने लागू केली
+tools-result-imported = साधने आयात केली
+tools-result-installed = { $name } स्थापित केले
+tools-result-updated = { $name } अद्यतनित केले
+tools-result-uninstalled = { $name } विस्थापित केले
+tools-result-forgotten = { $name } विसरले
+tools-result-managed = { $name } आता व्यवस्थापित आहे
+tools-result-linked = { $name } जोडले
+tools-result-unlinked = { $name }चा दुवा काढला
+vault-title = Vault
+vault-encrypted = एंड-टू-एंड एन्क्रिप्ट केलेले
+vault-passkey = पासकी
+vault-passkey-description = पासवर्डशिवाय इतर डिव्हाइसेसवर हा Vault अनलॉक करा.
+vault-passkey-add = पासकी जोडा
+vault-passkey-unlock = अनलॉक करा
+vault-passkey-provider-unsupported = हा पासकी प्रदाता अद्याप एनक्रिप्टेड व्हॉल्ट अनलॉकला समर्थन देत नाही.
+vault-recovery-key = रिकव्हरी की
+vault-recovery-key-description = ही व्हॉल्ट नवीन डिव्हाइसवर रिकव्हर करण्यासाठी बिटवर्डन किंवा दुसऱ्या पासवर्ड मॅनेजरमध्ये एक की जतन करा.
+vault-recovery-key-create = की तयार करा
+vault-recovery-key-create-failed = पुनर्प्राप्ती की तयार करता आली नाही.
+vault-recovery-key-save = ही की आता जतन करा. Vmux ते पुन्हा दाखवू शकत नाही.
+vault-recovery-key-saved = मी ते जतन केले
+vault-recovery-key-placeholder = पेस्ट पुनर्प्राप्ती की
+vault-recovery-key-unlock = अनलॉक
+vault-recovery-key-invalid = ही पुनर्प्राप्ती की व्हॉल्ट अनलॉक करू शकत नाही.
+vault-recovery-key-ready = पुनर्प्राप्ती की कॉन्फिगर केली
+vault-recovery-key-upload-pending = की स्थानिकरित्या जतन केली आहे, परंतु अपलोड अयशस्वी. ते सुरक्षित ठेवा आणि पुन्हा प्रयत्न करण्यासाठी सिंक दाबा.
+vault-auto-sync = स्वयंचलित बॅकअप
+vault-backup-failed = स्वयंचलित बॅकअप अयशस्वी. पुन्हा प्रयत्न करण्यासाठी सिंक दाबा.
+vault-backup-failed-short = बॅकअप अयशस्वी
+vault-recovery-key-copy-hint = कॉपी करण्यासाठी क्लिक करा
+vault-recovery-key-copied = कॉपी केले
+vault-recovery-key-verify = तो तुमच्या पासवर्ड मॅनेजरमध्ये सेव्ह करा, नंतर पडताळणी करण्यासाठी खाली पेस्ट करा.
+vault-recovery-key-verify-placeholder = जतन केलेली पुनर्प्राप्ती की पेस्ट करा
+vault-recovery-key-mismatch = पुनर्प्राप्ती की जुळत नाही.
+vault-open = { common-open } Vault
+vault-description = Git सह सेटिंग्ज, टूल्स, डॉटफाईल्स आणि नॉलेज सिंक करा.
+vault-sync = सिंक
+vault-create = तयार करा
+vault-connect = कनेक्ट करा
+vault-github = GitHub
+vault-github-description = खाजगी भांडार तयार करा किंवा विद्यमान व्हॉल्ट निवडा.
+vault-connect-github = GitHub कनेक्ट करा
+vault-connected-as = { $name } म्हणून कनेक्ट केलेले
+vault-use-repository = वापरा
+vault-repository-name = भांडाराचे नाव
+vault-cloud-folder = मेघ फोल्डर
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox किंवा OneDrive मधील फोल्डर वापरा.
+vault-choose-folder = फोल्डर निवडा
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = फोल्डर · { common-done }
+vault-private = खाजगी भांडार
+vault-public-warning = रिपॉझिटरीचा इतिहास आणि एन्क्रिप्ट केलेला डेटा सार्वजनिक असेल.
+vault-choose-repository = एक भांडार निवडा...
+vault-empty = रिक्त
+vault-clean = अद्ययावत
+vault-not-connected = जोडलेले नाही
+vault-change-count = बदल: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = सुरुवात
 start-tagline = एक प्रॉम्प्ट. काहीही काम पूर्ण.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } मध्ये बुकमार्क कर
 common-cancel = रद्द करा
 common-delete = हटवा
 common-save = जतन करा
+common-copy = Copy
 common-rename = नाव बदला
 common-expand = विस्तृत करा
 common-collapse = आकुंचित करा

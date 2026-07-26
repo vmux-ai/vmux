@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } artikull
    *[other] { $count } artikuj
 }
+
+tools-title = Mjete
+tools-search = Kërko paketa, agjentë, MCP, LSP dhe skedarë konfigurimi…
+tools-open = Hap Mjetet
+tools-fold = Palos mjetet
+tools-unfold = Shpalos mjetet
+tools-scanning = Po skanohen mjetet vendore…
+tools-no-installed = Nuk ka mjete të instaluara
+tools-empty = Nuk ka mjete që përputhen
+tools-empty-detail = Instaloni një paketë ose shtoni një paketë skedarësh konfigurimi në stilin Stow.
+tools-apply = Zbato
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulat dhe aplikacionet e instaluara sinkronizohen automatikisht.
+tools-open-brewfile = Hap Brewfile
+tools-managed = i menaxhuar
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikacione Homebrew
+tools-provider-npm = Paketa NPM
+tools-provider-acp-agents = Agjentë ACP
+tools-provider-lsp-servers = Serverë LSP
+tools-provider-mcp-servers = Serverë MCP
+tools-provider-dotfiles = Skedarë konfigurimi
+tools-status-available = I disponueshëm
+tools-status-missing = Mungon
+tools-status-conflict = Konflikt
+tools-forget = Harro
+tools-manage = Menaxho
+tools-link = Lidh
+tools-unlink = Shkëput
+tools-import = Importo
+tools-update-count = { $count ->
+    [one] 1 përditësim
+   *[other] { $count } përditësime
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikte
+}
+tools-result-applied = Mjetet u zbatuan
+tools-result-imported = Mjetet u importuan
+tools-result-installed = { $name } u instalua
+tools-result-updated = { $name } u përditësua
+tools-result-uninstalled = { $name } u çinstalua
+tools-result-forgotten = { $name } u harrua
+tools-result-managed = { $name } tani menaxhohet
+tools-result-linked = { $name } u lidh
+tools-result-unlinked = { $name } u shkëput
+vault-title = Vault
+vault-encrypted = I enkriptuar skaj më skaj
+vault-passkey = Passkey
+vault-passkey-description = Zhbllokoni këtë Vault në pajisje të tjera pa fjalëkalim.
+vault-passkey-add = Shto çelësin e kalimit
+vault-passkey-unlock = Zhblloko
+vault-passkey-provider-unsupported = Ky ofrues i fjalëkalimit nuk e mbështet ende shkyçjen e koduar të "Veult".
+vault-recovery-key = Çelësi i rikuperimit
+vault-recovery-key-description = Ruani një çelës në Bitwarden ose një menaxher tjetër fjalëkalimi për të rikuperuar këtë Vault në një pajisje të re.
+vault-recovery-key-create = Krijo çelës
+vault-recovery-key-create-failed = Çelësi i rikuperimit nuk mund të krijohej.
+vault-recovery-key-save = Ruaje këtë çelës tani. Vmux nuk mund ta shfaqë përsëri.
+vault-recovery-key-saved = E ruajta
+vault-recovery-key-placeholder = Çelësi i rikuperimit të ngjitjes
+vault-recovery-key-unlock = Zhblloko
+vault-recovery-key-invalid = Ky çelës rikuperimi nuk mund të zhbllokojë Kasafortën.
+vault-recovery-key-ready = Çelësi i rikuperimit është konfiguruar
+vault-recovery-key-upload-pending = Çelësi ruhet në nivel lokal, por ngarkimi dështoi. Mbaje të sigurt dhe shtyp Sync për të riprovuar.
+vault-auto-sync = Rezervimi automatik
+vault-backup-failed = Rezervimi automatik dështoi. Shtypni Sync për të riprovuar.
+vault-backup-failed-short = Rezervimi dështoi
+vault-recovery-key-copy-hint = Klikoni për të kopjuar
+vault-recovery-key-copied = E kopjuar
+vault-recovery-key-verify = Ruaje atë në menaxherin e fjalëkalimit, më pas ngjite më poshtë për ta verifikuar.
+vault-recovery-key-verify-placeholder = Ngjit çelësin e rikuperimit të ruajtur
+vault-recovery-key-mismatch = Çelësi i rikuperimit nuk përputhet.
+vault-open = { common-open } Vault
+vault-description = Sinkronizoni cilësimet, veglat, skedarët me pika dhe njohuritë me Git.
+vault-sync = Sinkronizimi
+vault-create = Krijo
+vault-connect = Lidheni
+vault-github = GitHub
+vault-github-description = Krijoni një depo private ose zgjidhni një Vault ekzistues.
+vault-connect-github = Lidhni GitHub
+vault-connected-as = Lidhur si { $name }
+vault-use-repository = Përdorni
+vault-repository-name = Emri i depove
+vault-cloud-folder = Dosja e resë
+vault-cloud-folder-description = Përdorni një dosje nga Google Drive, iCloud Drive, Dropbox ose OneDrive.
+vault-choose-folder = Zgjidhni dosjen
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Dosja · { common-done }
+vault-private = Depo private
+vault-public-warning = Historiku i depos dhe të dhënat e enkriptuara do të jenë publike.
+vault-choose-repository = Zgjidhni një depo…
+vault-empty = bosh
+vault-clean = Të përditësuar
+vault-not-connected = Nuk është i lidhur
+vault-change-count = Ndryshimet: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Fillo
 start-tagline = Një prompt. Çdo gjë, e kryer.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Faqeshënues te { $folder }
 common-cancel = Anulo
 common-delete = Fshi
 common-save = Ruaj
+common-copy = Copy
 common-rename = Riemërto
 common-expand = Zgjero
 common-collapse = Palos

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] פריט אחד
    *[other] { $count } פריטים
 }
+
+tools-title = כלים
+tools-search = חיפוש חבילות, סוכנים, MCP, LSP וקובצי תצורה…
+tools-open = פתיחת כלים
+tools-fold = כיווץ הכלים
+tools-unfold = הרחבת הכלים
+tools-scanning = סריקת כלים מקומיים…
+tools-no-installed = אין כלים מותקנים
+tools-empty = אין כלים תואמים
+tools-empty-detail = התקינו חבילה או הוסיפו חבילת קובצי תצורה בסגנון Stow.
+tools-apply = החלה
+tools-homebrew = Homebrew
+tools-homebrew-sync = נוסחאות ויישומים מותקנים מסתנכרנים אוטומטית.
+tools-open-brewfile = פתיחת Brewfile
+tools-managed = מנוהל
+tools-provider-homebrew-formulae = נוסחאות Homebrew
+tools-provider-homebrew-casks = יישומי Homebrew
+tools-provider-npm = חבילות NPM
+tools-provider-acp-agents = סוכני ACP
+tools-provider-lsp-servers = שרתי LSP
+tools-provider-mcp-servers = שרתי MCP
+tools-provider-dotfiles = קובצי תצורה
+tools-status-available = זמין
+tools-status-missing = חסר
+tools-status-conflict = התנגשות
+tools-forget = שכחה
+tools-manage = ניהול
+tools-link = קישור
+tools-unlink = ביטול קישור
+tools-import = ייבוא
+tools-update-count = { $count ->
+    [one] עדכון אחד
+   *[other] { $count } עדכונים
+}
+tools-conflict-count = { $count ->
+    [one] התנגשות אחת
+   *[other] { $count } התנגשויות
+}
+tools-result-applied = הכלים הוחלו
+tools-result-imported = הכלים יובאו
+tools-result-installed = { $name } הותקן
+tools-result-updated = { $name } עודכן
+tools-result-uninstalled = { $name } הוסר
+tools-result-forgotten = { $name } נשכח
+tools-result-managed = { $name } מנוהל כעת
+tools-result-linked = { $name } קושר
+tools-result-unlinked = הקישור של { $name } בוטל
+vault-title = Vault
+vault-encrypted = מוצפן מקצה לקצה
+vault-passkey = מפתח סיסמה
+vault-passkey-description = בטל את נעילת הכספת הזו במכשירים אחרים ללא סיסמה.
+vault-passkey-add = הוסף מפתח
+vault-passkey-unlock = לִפְתוֹחַ
+vault-passkey-provider-unsupported = ספק מפתח סיסמה זה אינו תומך עדיין בפתיחת נעילה מוצפנת של Vault.
+vault-recovery-key = מפתח שחזור
+vault-recovery-key-description = שמור מפתח אחד ב-Bitwarden או במנהל סיסמאות אחר כדי לשחזר את הכספת הזו במכשיר חדש.
+vault-recovery-key-create = צור מפתח
+vault-recovery-key-create-failed = לא ניתן ליצור מפתח שחזור.
+vault-recovery-key-save = שמור מפתח זה כעת. Vmux לא יכול להציג את זה שוב.
+vault-recovery-key-saved = שמרתי אותו
+vault-recovery-key-placeholder = מפתח שחזור הדבק
+vault-recovery-key-unlock = ביטול נעילת
+vault-recovery-key-invalid = מפתח השחזור הזה לא יכול לפתוח את הכספת.
+vault-recovery-key-ready = מפתח שחזור מוגדר
+vault-recovery-key-upload-pending = המפתח נשמר באופן מקומי, אך ההעלאה נכשלה. שמור על זה ולחץ על סנכרון כדי לנסות שוב.
+vault-auto-sync = גיבוי אוטומטי
+vault-backup-failed = הגיבוי האוטומטי נכשל. לחץ על סנכרון כדי לנסות שוב.
+vault-backup-failed-short = הגיבוי נכשל
+vault-recovery-key-copy-hint = לחץ כדי להעתיק
+vault-recovery-key-copied = מוּעֲתָק
+vault-recovery-key-verify = שמור אותו במנהל הסיסמאות שלך ולאחר מכן הדבק אותו למטה כדי לאמת.
+vault-recovery-key-verify-placeholder = הדבק מפתח שחזור שמור
+vault-recovery-key-mismatch = מפתח השחזור אינו תואם.
+vault-open = { common-open } Vault
+vault-description = סנכרון הגדרות, כלים, dotfiles ו- Knowledge עם Git.
+vault-sync = סנכרון
+vault-create = לִיצוֹר
+vault-connect = לְחַבֵּר
+vault-github = GitHub
+vault-github-description = צור מאגר פרטי או בחר כספת קיימת.
+vault-connect-github = חבר את GitHub
+vault-connected-as = מחובר בתור { $name }
+vault-use-repository = לְהִשְׁתַמֵשׁ
+vault-repository-name = שם המאגר
+vault-cloud-folder = תיקיית ענן
+vault-cloud-folder-description = השתמש בתיקייה מ-Google Drive, iCloud Drive, Dropbox או OneDrive.
+vault-choose-folder = בחר תיקיה
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = תיקיה · { common-done }
+vault-private = מאגר פרטי
+vault-public-warning = היסטוריית המאגר והנתונים המוצפנים יהיו ציבוריים.
+vault-choose-repository = בחר מאגר...
+vault-empty = רֵיק
+vault-clean = מעודכן
+vault-not-connected = לא מחובר
+vault-change-count = שינויים: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = התחלה
 start-tagline = הנחיה אחת. כל משימה, סגורה.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = סימנייה ב{ $folder }
 common-cancel = ביטול
 common-delete = מחיקה
 common-save = שמירה
+common-copy = Copy
 common-rename = שינוי שם
 common-expand = הרחבה
 common-collapse = כיווץ

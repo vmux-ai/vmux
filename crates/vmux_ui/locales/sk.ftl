@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } položka
    *[other] { $count } položiek
 }
+
+tools-title = Nástroje
+tools-search = Hľadať balíky, agentov, MCP, LSP a konfiguračné súbory…
+tools-open = Otvoriť nástroje
+tools-fold = Zbaliť nástroje
+tools-unfold = Rozbaliť nástroje
+tools-scanning = Prehľadávajú sa miestne nástroje…
+tools-no-installed = Nie sú nainštalované žiadne nástroje
+tools-empty = Žiadne zodpovedajúce nástroje
+tools-empty-detail = Nainštalujte balík alebo pridajte balík konfiguračných súborov v štýle Stow.
+tools-apply = Použiť
+tools-homebrew = Homebrew
+tools-homebrew-sync = Nainštalované formule a aplikácie sa synchronizujú automaticky.
+tools-open-brewfile = Otvoriť Brewfile
+tools-managed = spravované
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplikácie Homebrew
+tools-provider-npm = Balíky NPM
+tools-provider-acp-agents = Agenti ACP
+tools-provider-lsp-servers = Servery LSP
+tools-provider-mcp-servers = Servery MCP
+tools-provider-dotfiles = Konfiguračné súbory
+tools-status-available = Dostupné
+tools-status-missing = Chýba
+tools-status-conflict = Konflikt
+tools-forget = Zabudnúť
+tools-manage = Spravovať
+tools-link = Prepojiť
+tools-unlink = Odpojiť
+tools-import = Importovať
+tools-update-count = { $count ->
+    [one] 1 aktualizácia
+   *[other] { $count } aktualizácií
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konfliktov
+}
+tools-result-applied = Nástroje boli použité
+tools-result-imported = Nástroje boli importované
+tools-result-installed = { $name } bol nainštalovaný
+tools-result-updated = { $name } bol aktualizovaný
+tools-result-uninstalled = { $name } bol odinštalovaný
+tools-result-forgotten = { $name } bol zabudnutý
+tools-result-managed = { $name } je teraz spravovaný
+tools-result-linked = { $name } bol prepojený
+tools-result-unlinked = { $name } bol odpojený
+vault-title = Vault
+vault-encrypted = Šifrované medzi koncovými bodmi
+vault-passkey = Prístupový kľúč
+vault-passkey-description = Odomknite tento trezor na iných zariadeniach bez hesla.
+vault-passkey-add = Pridať prístupový kľúč
+vault-passkey-unlock = Odomknúť
+vault-passkey-provider-unsupported = Tento poskytovateľ prístupového kľúča zatiaľ nepodporuje šifrované odomknutie trezoru.
+vault-recovery-key = Obnovovací kľúč
+vault-recovery-key-description = Uložte si jeden kľúč do Bitwarden alebo iného správcu hesiel, aby ste obnovili tento trezor na novom zariadení.
+vault-recovery-key-create = Vytvoriť kľúč
+vault-recovery-key-create-failed = Obnovovací kľúč sa nepodarilo vytvoriť.
+vault-recovery-key-save = Teraz si tento kľúč uložte. Vmux to nemôže znova zobraziť.
+vault-recovery-key-saved = Uložil som to
+vault-recovery-key-placeholder = Prilepte kľúč na obnovenie
+vault-recovery-key-unlock = Odomknúť
+vault-recovery-key-invalid = Tento obnovovací kľúč nedokáže odomknúť trezor.
+vault-recovery-key-ready = Obnovovací kľúč je nakonfigurovaný
+vault-recovery-key-upload-pending = Kľúč je uložený lokálne, ale odovzdanie zlyhalo. Uchovajte to a stlačením tlačidla Synchronizovať to skúste znova.
+vault-auto-sync = Automatické zálohovanie
+vault-backup-failed = Automatické zálohovanie zlyhalo. Stlačením Sync to skúste znova.
+vault-backup-failed-short = Zálohovanie zlyhalo
+vault-recovery-key-copy-hint = Kliknutím skopírujete
+vault-recovery-key-copied = Skopírované
+vault-recovery-key-verify = Uložte ho do správcu hesiel a potom ho prilepte nižšie na overenie.
+vault-recovery-key-verify-placeholder = Prilepte uložený kľúč na obnovenie
+vault-recovery-key-mismatch = Obnovovací kľúč sa nezhoduje.
+vault-open = { common-open } Vault
+vault-description = Synchronizujte nastavenia, nástroje, dotfiles a znalosti s Git.
+vault-sync = Synchronizovať
+vault-create = Vytvorte
+vault-connect = Pripojte sa
+vault-github = GitHub
+vault-github-description = Vytvorte súkromné ​​úložisko alebo vyberte existujúci trezor.
+vault-connect-github = Pripojte GitHub
+vault-connected-as = Pripojené ako { $name }
+vault-use-repository = Použite
+vault-repository-name = Názov úložiska
+vault-cloud-folder = Cloudový priečinok
+vault-cloud-folder-description = Použite priečinok z Disku Google, iCloud Drive, Dropbox alebo OneDrive.
+vault-choose-folder = Vyberte priečinok
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Priečinok · { common-done }
+vault-private = Súkromné ​​úložisko
+vault-public-warning = História úložiska a šifrované údaje budú verejné.
+vault-choose-repository = Vyberte úložisko…
+vault-empty = prázdny
+vault-clean = Aktuálne
+vault-not-connected = Nepripojené
+vault-change-count = Zmeny: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Štart
 start-tagline = Jeden prompt. Hotové čokoľvek.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Záložka v priečinku { $folder }
 common-cancel = Zrušiť
 common-delete = Odstrániť
 common-save = Uložiť
+common-copy = Copy
 common-rename = Premenovať
 common-expand = Rozbaliť
 common-collapse = Zbaliť

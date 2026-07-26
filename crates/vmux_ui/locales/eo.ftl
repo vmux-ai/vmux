@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ero
    *[other] { $count } eroj
 }
+
+tools-title = Iloj
+tools-search = Serĉi pakaĵojn, agentojn, MCP, LSP kaj agordajn dosierojn…
+tools-open = Malfermi ilojn
+tools-fold = Faldi ilojn
+tools-unfold = Malfaldi ilojn
+tools-scanning = Skanado de lokaj iloj…
+tools-no-installed = Neniuj instalitaj iloj
+tools-empty = Neniuj kongruaj iloj
+tools-empty-detail = Instalu pakaĵon aŭ aldonu Stow-stilan pakaĵon de agordaj dosieroj.
+tools-apply = Apliki
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalitaj formuloj kaj aplikaĵoj aŭtomate sinkroniĝas.
+tools-open-brewfile = Malfermi Brewfile
+tools-managed = administrata
+tools-provider-homebrew-formulae = Homebrew-formuloj
+tools-provider-homebrew-casks = Homebrew-aplikaĵoj
+tools-provider-npm = NPM-pakaĵoj
+tools-provider-acp-agents = ACP-agentoj
+tools-provider-lsp-servers = LSP-serviloj
+tools-provider-mcp-servers = MCP-serviloj
+tools-provider-dotfiles = Agordaj dosieroj
+tools-status-available = Disponebla
+tools-status-missing = Mankas
+tools-status-conflict = Konflikto
+tools-forget = Forgesi
+tools-manage = Administri
+tools-link = Ligi
+tools-unlink = Malligi
+tools-import = Importi
+tools-update-count = { $count ->
+    [one] 1 ĝisdatigo
+   *[other] { $count } ĝisdatigoj
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikto
+   *[other] { $count } konfliktoj
+}
+tools-result-applied = Iloj aplikitaj
+tools-result-imported = Iloj importitaj
+tools-result-installed = { $name } instalita
+tools-result-updated = { $name } ĝisdatigita
+tools-result-uninstalled = { $name } malinstalita
+tools-result-forgotten = { $name } forgesita
+tools-result-managed = { $name } nun estas administrata
+tools-result-linked = { $name } ligita
+tools-result-unlinked = { $name } malligita
+vault-title = Vault
+vault-encrypted = Ĉifrita de komenco ĝis fino
+vault-passkey = Pasŝlosilo
+vault-passkey-description = Malŝlosu ĉi tiun Trezorejon sur aliaj aparatoj sen pasvorto.
+vault-passkey-add = Aldonu pasŝlosilon
+vault-passkey-unlock = Malŝlosu
+vault-passkey-provider-unsupported = Ĉi tiu pasilŝlosilprovizanto ankoraŭ ne subtenas ĉifritan Vault-malŝlosadon.
+vault-recovery-key = Reakira Ŝlosilo
+vault-recovery-key-description = Konservu unu ŝlosilon en Bitwarden aŭ en alia pasvorta administranto por reakiri ĉi tiun Trezorejon sur nova aparato.
+vault-recovery-key-create = Krei ŝlosilon
+vault-recovery-key-create-failed = Reakira Ŝlosilo ne povus esti kreita.
+vault-recovery-key-save = Konservu ĉi tiun ŝlosilon nun. Vmux ne povas montri ĝin denove.
+vault-recovery-key-saved = Mi konservis ĝin
+vault-recovery-key-placeholder = Algluu Reakira Ŝlosilon
+vault-recovery-key-unlock = Malŝlosu
+vault-recovery-key-invalid = Ĉi tiu Reakira Ŝlosilo ne povas malŝlosi la Trezorejon.
+vault-recovery-key-ready = Reakira Ŝlosilo agordita
+vault-recovery-key-upload-pending = La ŝlosilo estas konservita loke, sed alŝuto malsukcesis. Konservu ĝin sekura kaj premu Sinkronigi por reprovi.
+vault-auto-sync = Aŭtomata sekurkopio
+vault-backup-failed = Aŭtomata sekurkopio malsukcesis. Premu Sinkronigi por reprovi.
+vault-backup-failed-short = Rezervo malsukcesis
+vault-recovery-key-copy-hint = Klaku por kopii
+vault-recovery-key-copied = Kopiita
+vault-recovery-key-verify = Konservu ĝin en via pasvortmanaĝero, tiam algluu ĝin sube por kontroli.
+vault-recovery-key-verify-placeholder = Algluu konservitan Reakira Ŝlosilon
+vault-recovery-key-mismatch = Reakira Ŝlosilo ne kongruas.
+vault-open = { common-open } Vault
+vault-description = Sinkronigi agordojn, ilojn, punktajn dosierojn kaj Scion kun Git.
+vault-sync = Sinkronigi
+vault-create = Krei
+vault-connect = Konekti
+vault-github = GitHub
+vault-github-description = Kreu privatan deponejon aŭ elektu ekzistantan Trezorejon.
+vault-connect-github = Konektu GitHub
+vault-connected-as = Konektita kiel { $name }
+vault-use-repository = Uzu
+vault-repository-name = Deponejo nomo
+vault-cloud-folder = Nuba dosierujo
+vault-cloud-folder-description = Uzu dosierujon de Google Drive, iCloud Drive, Dropbox aŭ OneDrive.
+vault-choose-folder = Elektu dosierujon
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Dosierujo · { common-done }
+vault-private = Privata deponejo
+vault-public-warning = La historio de la deponejo kaj la ĉifritaj datumoj estos publikaj.
+vault-choose-repository = Elektu deponejon...
+vault-empty = malplena
+vault-clean = Ĝisdata
+vault-not-connected = Ne konektita
+vault-change-count = Ŝanĝoj: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Komenco
 start-tagline = Unu invito. Ĉio farita.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Legosigni en { $folder }
 common-cancel = Nuligi
 common-delete = Forigi
 common-save = Konservi
+common-copy = Copy
 common-rename = Renomi
 common-expand = Etendi
 common-collapse = Maletendi

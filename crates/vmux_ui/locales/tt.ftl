@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } элемент
    *[other] { $count } элемент
 }
+
+tools-title = Кораллар
+tools-search = Пакетлар, агентлар, MCP, LSP һәм көйләү файлларын эзләү…
+tools-open = Коралларны ачу
+tools-fold = Коралларны җыю
+tools-unfold = Коралларны җәю
+tools-scanning = Җирле кораллар тикшерелә…
+tools-no-installed = Урнаштырылган кораллар юк
+tools-empty = Туры килгән кораллар юк
+tools-empty-detail = Пакет урнаштырыгыз яки Stow рәвешендәге көйләү файллары пакетын өстәгез.
+tools-apply = Куллану
+tools-homebrew = Homebrew
+tools-homebrew-sync = Урнаштырылган формулалар һәм кушымталар автоматик рәвештә синхронлаша.
+tools-open-brewfile = Brewfile ачу
+tools-managed = идарә ителә
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew кушымталары
+tools-provider-npm = NPM пакетлары
+tools-provider-acp-agents = ACP агентлары
+tools-provider-lsp-servers = LSP серверлары
+tools-provider-mcp-servers = MCP серверлары
+tools-provider-dotfiles = Көйләү файллары
+tools-status-available = Кулланырга мөмкин
+tools-status-missing = Юк
+tools-status-conflict = Каршылык
+tools-forget = Онытырга
+tools-manage = Идарә итәргә
+tools-link = Бәйләргә
+tools-unlink = Бәйләнешне өзәргә
+tools-import = Импортларга
+tools-update-count = { $count ->
+    [one] 1 яңарту
+   *[other] { $count } яңарту
+}
+tools-conflict-count = { $count ->
+    [one] 1 каршылык
+   *[other] { $count } каршылык
+}
+tools-result-applied = Кораллар кулланылды
+tools-result-imported = Кораллар импортланды
+tools-result-installed = { $name } урнаштырылды
+tools-result-updated = { $name } яңартылды
+tools-result-uninstalled = { $name } бетерелде
+tools-result-forgotten = { $name } онытылды
+tools-result-managed = { $name } хәзер идарә ителә
+tools-result-linked = { $name } бәйләнде
+tools-result-unlinked = { $name } бәйләнеше өзелде
+vault-title = Vault
+vault-encrypted = Очтан-очка шифрланган
+vault-passkey = Паски
+vault-passkey-description = Бу Вальсны серсүзсез башка җайланмаларда ачу.
+vault-passkey-add = Паски өстәргә
+vault-passkey-unlock = Блокны ачу
+vault-passkey-provider-unsupported = Бу ачкыч провайдеры шифрланган Vault ачуны хупламый.
+vault-recovery-key = Реставрация ачкычы
+vault-recovery-key-description = Бу җайланманы яңа җайланмада торгызу өчен Bitwarden яки бер серсүз менеджерында бер ачкычны саклагыз.
+vault-recovery-key-create = Ачкыч яса
+vault-recovery-key-create-failed = Реставрация ачкычы булдырылмады.
+vault-recovery-key-save = Бу ачкычны хәзер саклагыз. Vmux аны кабат күрсәтә алмый.
+vault-recovery-key-saved = Мин аны сакладым
+vault-recovery-key-placeholder = Реставрация ачкычын куегыз
+vault-recovery-key-unlock = Блокны ачу
+vault-recovery-key-invalid = Бу торгызу ачкычы Vaultны ача алмый.
+vault-recovery-key-ready = Реставрация ачкычы конфигурацияләнгән
+vault-recovery-key-upload-pending = Ачкыч җирле сакланган, ләкин йөкләү уңышсыз. Аны саклагыз һәм кабат карау өчен Sync басыгыз.
+vault-auto-sync = Автоматик резерв
+vault-backup-failed = Автоматик резерв эшләмәде. Кабатлау өчен Sync басыгыз.
+vault-backup-failed-short = Резервлау уңышсыз
+vault-recovery-key-copy-hint = Күчерү өчен басыгыз
+vault-recovery-key-copied = Күчерелгән
+vault-recovery-key-verify = Серсүз менеджерыгызда саклагыз, аннары тикшерү өчен астына ябыштырыгыз.
+vault-recovery-key-verify-placeholder = Сакланган торгызу ачкычын куегыз
+vault-recovery-key-mismatch = Реставрация ачкычы туры килми.
+vault-open = { common-open } Vault
+vault-description = Git белән көйләүләрне, коралларны, нокталарны һәм Белемне синхронлагыз.
+vault-sync = Синхронизация
+vault-create = Ярат
+vault-connect = Бәйләнегез
+vault-github = GitHub
+vault-github-description = Шәхси склад булдырыгыз яки булган Vault-ны сайлагыз.
+vault-connect-github = GitHub тоташтырыгыз
+vault-connected-as = { $name } итеп тоташтырылган
+vault-use-repository = Кулланыгыз
+vault-repository-name = Репозитарий исеме
+vault-cloud-folder = Болыт папкасы
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox яки OneDrive папкасын кулланыгыз.
+vault-choose-folder = Папканы сайлагыз
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Папка · { common-done }
+vault-private = Шәхси саклагыч
+vault-public-warning = Репозиторий тарихы һәм шифрланган мәгълүматлар ачык булачак.
+vault-choose-repository = Резервуарны сайлагыз ...
+vault-empty = буш
+vault-clean = Бүгенге көнгә кадәр
+vault-not-connected = Бәйләнмәгән
+vault-change-count = Esзгәрешләр: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Башлау
 start-tagline = Бер prompt. Теләсә нәрсә — әзер.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } эченә кыстыргычлау
 common-cancel = Баш тарту
 common-delete = Бетерү
 common-save = Саклау
+common-copy = Copy
 common-rename = Исемен үзгәртү
 common-expand = Җәю
 common-collapse = Җыю

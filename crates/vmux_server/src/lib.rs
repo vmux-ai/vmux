@@ -118,6 +118,8 @@ web_pages! {
     render_agents: "agents" => vmux_agent::agents_page::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
+    render_tools: "tools" => vmux_layout::tools_page::Page,
+    render_vault: "vault" => vmux_layout::vault_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,
     render_start: "start" => StartAgentPage,
 }
@@ -148,6 +150,8 @@ fn current_host() -> String {
 fn host_for(protocol: &str, host: &str) -> String {
     if protocol == "file:" {
         "files".to_string()
+    } else if protocol == "https:" && host == "vault.vmux.ai" {
+        "vault".to_string()
     } else {
         host.to_string()
     }
@@ -162,6 +166,7 @@ mod host_tests {
         assert_eq!(host_for("file:", ""), "files");
         assert_eq!(host_for("vmux:", "terminal"), "terminal");
         assert_eq!(host_for("https:", "example.com"), "example.com");
+        assert_eq!(host_for("https:", "vault.vmux.ai"), "vault");
     }
 }
 

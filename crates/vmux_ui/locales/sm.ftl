@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } aitema
    *[other] { $count } aitema
 }
+
+tools-title = Meafaigaluega
+tools-search = Suʻe afifi, sui, MCP, LSP ma faila faatulagaina…
+tools-open = Tatala meafaigaluega
+tools-fold = Gaugau meafaigaluega
+tools-unfold = Tatala faalautele meafaigaluega
+tools-scanning = O loo siaki meafaigaluega i le masini…
+tools-no-installed = E leai ni meafaigaluega ua faapipii
+tools-empty = E leai ni meafaigaluega e fetaui
+tools-empty-detail = Faapipii se afifi pe faaopoopo se afifi faila faatulagaina i le faiga Stow.
+tools-apply = Faaaoga
+tools-homebrew = Homebrew
+tools-homebrew-sync = E otometi ona ogatasi fua ma polokalame ua faapipii.
+tools-open-brewfile = Tatala Brewfile
+tools-managed = pulea
+tools-provider-homebrew-formulae = Fua Homebrew
+tools-provider-homebrew-casks = Polokalame Homebrew
+tools-provider-npm = Afifi NPM
+tools-provider-acp-agents = Sui ACP
+tools-provider-lsp-servers = Sava LSP
+tools-provider-mcp-servers = Sava MCP
+tools-provider-dotfiles = Faila faatulagaina
+tools-status-available = Avanoa
+tools-status-missing = Leiloa
+tools-status-conflict = Feteenaʻiga
+tools-forget = Faagalo
+tools-manage = Pulea
+tools-link = Fesootaʻi
+tools-unlink = Tatala le sootaga
+tools-import = Aumai i totonu
+tools-update-count = { $count ->
+    [one] 1 faafouga
+   *[other] { $count } faafouga
+}
+tools-conflict-count = { $count ->
+    [one] 1 feteenaʻiga
+   *[other] { $count } feteenaʻiga
+}
+tools-result-applied = Ua faaaoga meafaigaluega
+tools-result-imported = Ua aumai i totonu meafaigaluega
+tools-result-installed = Ua faapipii { $name }
+tools-result-updated = Ua faafou { $name }
+tools-result-uninstalled = Ua aveese { $name }
+tools-result-forgotten = Ua faagalo { $name }
+tools-result-managed = Ua pulea nei { $name }
+tools-result-linked = Ua fesootaʻi { $name }
+tools-result-unlinked = Ua tatala le sootaga o { $name }
+vault-title = Vault
+vault-encrypted = Fa'ailoga faalilolilo mai le amataga i le fa'ai'uga
+vault-passkey = Passkey
+vault-passkey-description = Tatala lenei Vault i isi masini e aunoa ma se upu faataga.
+vault-passkey-add = Fa'aopoopo le passkey
+vault-passkey-unlock = Tatala
+vault-passkey-provider-unsupported = E le'o lagolagoina e lenei tagata e tu'uina atu passkey le tatalaina o le Vault.
+vault-recovery-key = Toe Fa'aleleia Ki
+vault-recovery-key-description = Faasaoina se tasi ki i Bitwarden poʻo se isi pule faʻaupuga e toe faʻaleleia ai lenei Vault i luga o se masini fou.
+vault-recovery-key-create = Fausia ki
+vault-recovery-key-create-failed = E le mafai ona faia le ki o le Toe Fa'aleleia.
+vault-recovery-key-save = Sefe le ki nei. E le mafai e Vmux ona toe fa'aalia.
+vault-recovery-key-saved = Sa ou faasaoina
+vault-recovery-key-placeholder = Fa'apipi'i le Ki
+vault-recovery-key-unlock = Tatala
+vault-recovery-key-invalid = E le mafai e lenei ki o le Toe Fa'aleleia ona tatala le Vault.
+vault-recovery-key-ready = Toe fa'aleleia Ki fa'atonu
+vault-recovery-key-upload-pending = O lo'o fa'asaoina le ki i totonu o le atunu'u, ae le'i fa'auluina. Taofi saogalemu ma omi le Sync e toe taumafai.
+vault-auto-sync = Fa'asao otometi
+vault-backup-failed = Ua le manuia le faaleoleo otometi. Oomi le Sync e toe taumafai.
+vault-backup-failed-short = Ua le manuia le faaleoleo
+vault-recovery-key-copy-hint = Kiliki e kopi
+vault-recovery-key-copied = Kopi
+vault-recovery-key-verify = Fa'asaoina i totonu o lau password manager, ona faapipii lea i lalo e fa'amaonia ai.
+vault-recovery-key-verify-placeholder = Fa'apipi'i le ki o le Toe Fa'aleleia
+vault-recovery-key-mismatch = E le fetaui le Recovery Key.
+vault-open = { common-open } Vault
+vault-description = Fa'atonu fa'atulagaina, meafaigaluega, dotfiles, ma le Poto ma le Git.
+vault-sync = Fa'atasi
+vault-create = Fausia
+vault-connect = Feso'ota'i
+vault-github = GitHub
+vault-github-description = Fausia se faleteuoloa tumaoti pe filifili se Vault o iai.
+vault-connect-github = Fesootai GitHub
+vault-connected-as = Feso'ota'i o { $name }
+vault-use-repository = Fa'aoga
+vault-repository-name = Igoa faleteuoloa
+vault-cloud-folder = Cloud folder
+vault-cloud-folder-description = Fa'aoga se faila mai le Google Drive, iCloud Drive, Dropbox, po'o le OneDrive.
+vault-choose-folder = Filifili faila
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = faila · { common-done }
+vault-private = fale teu oloa tumaoti
+vault-public-warning = O le tala'aga o le faleteuoloa ma fa'amaumauga fa'ailoga faalilolilo o le a fa'alaua'itele.
+vault-choose-repository = Filifili se faleteuoloa…
+vault-empty = gaogao
+vault-clean = Faailoa mai
+vault-not-connected = Le feso'ota'i
+vault-change-count = Suiga: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Amata
 start-tagline = Tasi le faatonuga. Uma ona fai.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Fa'ailoga tusi i { $folder }
 common-cancel = Fa‘aleaogā
 common-delete = Tape
 common-save = Sefe
+common-copy = Copy
 common-rename = Toe fa‘aigoa
 common-expand = Fa‘alautele
 common-collapse = Gaugau

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } مورد
    *[other] { $count } مورد
 }
+
+tools-title = ابزارها
+tools-search = جست‌وجوی بسته‌ها، عامل‌ها، MCP، LSP و پرونده‌های پیکربندی…
+tools-open = باز کردن ابزارها
+tools-fold = جمع کردن ابزارها
+tools-unfold = باز کردن ابزارها
+tools-scanning = در حال بررسی ابزارهای محلی…
+tools-no-installed = هیچ ابزاری نصب نشده است
+tools-empty = هیچ ابزار منطبقی وجود ندارد
+tools-empty-detail = یک بسته نصب کنید یا بسته‌ای از پرونده‌های پیکربندی به سبک Stow بیفزایید.
+tools-apply = اعمال
+tools-homebrew = Homebrew
+tools-homebrew-sync = فرمول‌ها و برنامه‌های نصب‌شده به‌طور خودکار همگام می‌شوند.
+tools-open-brewfile = باز کردن Brewfile
+tools-managed = مدیریت‌شده
+tools-provider-homebrew-formulae = فرمول‌های Homebrew
+tools-provider-homebrew-casks = برنامه‌های Homebrew
+tools-provider-npm = بسته‌های NPM
+tools-provider-acp-agents = عامل‌های ACP
+tools-provider-lsp-servers = سرورهای LSP
+tools-provider-mcp-servers = سرورهای MCP
+tools-provider-dotfiles = پرونده‌های پیکربندی
+tools-status-available = در دسترس
+tools-status-missing = موجود نیست
+tools-status-conflict = تداخل
+tools-forget = فراموش کردن
+tools-manage = مدیریت
+tools-link = پیوند دادن
+tools-unlink = برداشتن پیوند
+tools-import = وارد کردن
+tools-update-count = { $count ->
+    [one] ۱ به‌روزرسانی
+   *[other] { $count } به‌روزرسانی
+}
+tools-conflict-count = { $count ->
+    [one] ۱ تداخل
+   *[other] { $count } تداخل
+}
+tools-result-applied = ابزارها اعمال شدند
+tools-result-imported = ابزارها وارد شدند
+tools-result-installed = { $name } نصب شد
+tools-result-updated = { $name } به‌روزرسانی شد
+tools-result-uninstalled = { $name } حذف شد
+tools-result-forgotten = { $name } فراموش شد
+tools-result-managed = { $name } اکنون مدیریت می‌شود
+tools-result-linked = { $name } پیوند داده شد
+tools-result-unlinked = پیوند { $name } برداشته شد
+vault-title = Vault
+vault-encrypted = رمزگذاری سرتاسری
+vault-passkey = کلید عبور
+vault-passkey-description = قفل این Vault را در دستگاه های دیگر بدون رمز عبور باز کنید.
+vault-passkey-add = کلید عبور را اضافه کنید
+vault-passkey-unlock = باز کردن قفل
+vault-passkey-provider-unsupported = این ارائه‌دهنده رمز عبور هنوز از باز کردن قفل Vault رمزگذاری شده پشتیبانی نمی‌کند.
+vault-recovery-key = Recovery Key
+vault-recovery-key-description = برای بازیابی این Vault در دستگاه جدید، یک کلید را در Bitwarden یا مدیر رمز دیگری ذخیره کنید.
+vault-recovery-key-create = ایجاد کلید
+vault-recovery-key-create-failed = کلید بازیابی ایجاد نشد.
+vault-recovery-key-save = اکنون این کلید را ذخیره کنید. Vmux نمی تواند دوباره آن را نشان دهد.
+vault-recovery-key-saved = من آن را ذخیره کردم
+vault-recovery-key-placeholder = کلید بازیابی چسباندن
+vault-recovery-key-unlock = باز کردن قفل
+vault-recovery-key-invalid = این کلید بازیابی نمی تواند قفل Vault را باز کند.
+vault-recovery-key-ready = کلید بازیابی پیکربندی شد
+vault-recovery-key-upload-pending = کلید به صورت محلی ذخیره شده است، اما آپلود انجام نشد. آن را ایمن نگه دارید و برای امتحان مجدد، همگام سازی را فشار دهید.
+vault-auto-sync = پشتیبان گیری خودکار
+vault-backup-failed = پشتیبان گیری خودکار انجام نشد. برای امتحان مجدد، همگام سازی را فشار دهید.
+vault-backup-failed-short = پشتیبان گیری انجام نشد
+vault-recovery-key-copy-hint = برای کپی کلیک کنید
+vault-recovery-key-copied = کپی شده است
+vault-recovery-key-verify = آن را در مدیریت رمز عبور خود ذخیره کنید، سپس برای تأیید آن را در زیر قرار دهید.
+vault-recovery-key-verify-placeholder = کلید بازیابی ذخیره شده را جایگذاری کنید
+vault-recovery-key-mismatch = کلید بازیابی مطابقت ندارد.
+vault-open = { common-open } Vault
+vault-description = تنظیمات، ابزارها، dotfiles و Knowledge را با Git همگام کنید.
+vault-sync = همگام سازی
+vault-create = ایجاد کنید
+vault-connect = اتصال
+vault-github = GitHub
+vault-github-description = یک مخزن خصوصی ایجاد کنید یا یک Vault موجود را انتخاب کنید.
+vault-connect-github = GitHub را وصل کنید
+vault-connected-as = متصل به عنوان { $name }
+vault-use-repository = استفاده کنید
+vault-repository-name = نام مخزن
+vault-cloud-folder = پوشه ابری
+vault-cloud-folder-description = از پوشه ای از Google Drive، iCloud Drive، Dropbox یا OneDrive استفاده کنید.
+vault-choose-folder = پوشه را انتخاب کنید
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = پوشه · { common-done }
+vault-private = مخزن خصوصی
+vault-public-warning = تاریخچهٔ مخزن و داده‌های رمزگذاری‌شده عمومی خواهند بود.
+vault-choose-repository = انتخاب یک مخزن…
+vault-empty = خالی
+vault-clean = به روز
+vault-not-connected = متصل نیست
+vault-change-count = تغییرات: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع
 start-tagline = یک پرامپت. هر کاری، انجام می‌شود.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = نشانک‌گذاری در { $folder }
 common-cancel = لغو
 common-delete = حذف
 common-save = ذخیره
+common-copy = Copy
 common-rename = تغییر نام
 common-expand = باز کردن
 common-collapse = بستن

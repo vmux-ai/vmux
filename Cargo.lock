@@ -9650,8 +9650,10 @@ dependencies = [
  "clap",
  "predicates",
  "serde_json",
+ "tempfile",
  "tokio",
  "vmux_mcp",
+ "vmux_profile",
  "vmux_service_client",
 ]
 
@@ -9722,6 +9724,7 @@ dependencies = [
  "libc",
  "moonshine-save",
  "muda",
+ "notify 6.1.1",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-av-foundation",
@@ -9737,6 +9740,7 @@ dependencies = [
  "objc2-user-notifications 0.3.2",
  "parking_lot",
  "raw-window-handle",
+ "rfd",
  "ron 0.8.1",
  "semver",
  "serde",
@@ -9900,6 +9904,7 @@ dependencies = [
  "vmux_ui",
  "vmux_wire",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -9923,6 +9928,7 @@ dependencies = [
  "tokio",
  "vmux_command_mcp",
  "vmux_macro",
+ "vmux_profile",
  "vmux_service_client",
 ]
 
@@ -9930,7 +9936,17 @@ dependencies = [
 name = "vmux_profile"
 version = "0.0.29"
 dependencies = [
+ "chrono",
+ "libc",
+ "ring",
+ "ron 0.8.1",
+ "security-framework",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
  "tempfile",
+ "toml",
+ "zeroize",
 ]
 
 [[package]]

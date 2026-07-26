@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementer
 }
+
+tools-title = Værktøjer
+tools-search = Søg efter pakker, agenter, MCP, LSP og konfigurationsfiler…
+tools-open = Åbn Værktøjer
+tools-fold = Fold værktøjer sammen
+tools-unfold = Fold værktøjer ud
+tools-scanning = Scanner lokale værktøjer…
+tools-no-installed = Ingen installerede værktøjer
+tools-empty = Ingen matchende værktøjer
+tools-empty-detail = Installer en pakke, eller tilføj en konfigurationsfilpakke i Stow-stil.
+tools-apply = Anvend
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installerede formler og programmer synkroniseres automatisk.
+tools-open-brewfile = Åbn Brewfile
+tools-managed = administreret
+tools-provider-homebrew-formulae = Homebrew-formler
+tools-provider-homebrew-casks = Homebrew-programmer
+tools-provider-npm = NPM-pakker
+tools-provider-acp-agents = ACP-agenter
+tools-provider-lsp-servers = LSP-servere
+tools-provider-mcp-servers = MCP-servere
+tools-provider-dotfiles = Konfigurationsfiler
+tools-status-available = Tilgængelig
+tools-status-missing = Mangler
+tools-status-conflict = Konflikt
+tools-forget = Glem
+tools-manage = Administrer
+tools-link = Tilknyt
+tools-unlink = Fjern tilknytning
+tools-import = Importer
+tools-update-count = { $count ->
+    [one] 1 opdatering
+   *[other] { $count } opdateringer
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikter
+}
+tools-result-applied = Værktøjer anvendt
+tools-result-imported = Værktøjer importeret
+tools-result-installed = { $name } installeret
+tools-result-updated = { $name } opdateret
+tools-result-uninstalled = { $name } afinstalleret
+tools-result-forgotten = { $name } glemt
+tools-result-managed = { $name } administreres nu
+tools-result-linked = { $name } tilknyttet
+tools-result-unlinked = Tilknytningen til { $name } er fjernet
+vault-title = Vault
+vault-encrypted = End-to-end-krypteret
+vault-passkey = Adgangsnøgle
+vault-passkey-description = Lås denne Vault op på andre enheder uden en adgangskode.
+vault-passkey-add = Tilføj adgangsnøgle
+vault-passkey-unlock = Lås op
+vault-passkey-provider-unsupported = Denne adgangsnøgleudbyder understøtter endnu ikke krypteret Vault-oplåsning.
+vault-recovery-key = Gendannelsesnøgle
+vault-recovery-key-description = Gem én nøgle i Bitwarden eller en anden adgangskodeadministrator for at gendanne denne Vault på en ny enhed.
+vault-recovery-key-create = Opret nøgle
+vault-recovery-key-create-failed = Gendannelsesnøgle kunne ikke oprettes.
+vault-recovery-key-save = Gem denne nøgle nu. Vmux kan ikke vise det igen.
+vault-recovery-key-saved = Jeg gemte det
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Lås
+vault-recovery-key-invalid = Denne gendannelsesnøgle kan ikke låse Vault op.
+vault-recovery-key-ready = Gendannelsesnøgle konfigureret
+vault-recovery-key-upload-pending = Nøglen gemmes lokalt, men upload mislykkedes. Hold det sikkert, og tryk på Synkroniser for at prøve igen.
+vault-auto-sync = op Automatisk backup
+vault-backup-failed = Automatisk sikkerhedskopiering mislykkedes. Tryk på Synkroniser for at prøve igen.
+vault-backup-failed-short = Sikkerhedskopiering mislykkedes
+vault-recovery-key-copy-hint = Klik for at kopiere
+vault-recovery-key-copied = Kopieret
+vault-recovery-key-verify = Gem det i din adgangskodeadministrator, og indsæt det derefter nedenfor for at bekræfte.
+vault-recovery-key-verify-placeholder = Indsæt gemt gendannelsesnøgle
+vault-recovery-key-mismatch = Gendannelsesnøglen stemmer ikke overens.
+vault-open = { common-open } Vault
+vault-description = Synkroniser indstillinger, værktøjer, dotfiler og viden med Git.
+vault-sync = Synkroniser
+vault-create = Skabe
+vault-connect = Forbinde
+vault-github = GitHub
+vault-github-description = Opret et privat lager, eller vælg en eksisterende Vault.
+vault-connect-github = Tilslut GitHub
+vault-connected-as = Forbundet som { $name }
+vault-use-repository = Bruge
+vault-repository-name = Depotnavn
+vault-cloud-folder = Cloud mappe
+vault-cloud-folder-description = Brug en mappe fra Google Drev, iCloud Drive, Dropbox eller OneDrive.
+vault-choose-folder = Vælg mappe
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Privat depot
+vault-public-warning = Lagerhistorik og krypterede data vil være offentlige.
+vault-choose-repository = Vælg et lager...
+vault-empty = tom
+vault-clean = Op til dato
+vault-not-connected = Ikke forbundet
+vault-change-count = Ændringer: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Ét prompt. Alt bliver klaret.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bogmærk i { $folder }
 common-cancel = Annuller
 common-delete = Slet
 common-save = Gem
+common-copy = Copy
 common-rename = Omdøb
 common-expand = Udvid
 common-collapse = Skjul

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } öğe
    *[other] { $count } öğe
 }
+
+tools-title = Araçlar
+tools-search = Paketleri, aracıları, MCP'yi, LSPnı ve yapılandırma dosyalarını ara…
+tools-open = Araçları aç
+tools-fold = Araçları daralt
+tools-unfold = Araçları genişlet
+tools-scanning = Yerel araçlar taranıyor…
+tools-no-installed = Yüklü araç yok
+tools-empty = Eşleşen araç yok
+tools-empty-detail = Bir paket yükleyin veya Stow tarzı bir yapılandırma dosyaları paketi ekleyin.
+tools-apply = Uygula
+tools-homebrew = Homebrew
+tools-homebrew-sync = Yüklü formüller ve uygulamalar otomatik olarak eşitlenir.
+tools-open-brewfile = Brewfile'ı aç
+tools-managed = yönetiliyor
+tools-provider-homebrew-formulae = Homebrew formülleri
+tools-provider-homebrew-casks = Homebrew uygulamaları
+tools-provider-npm = NPM paketleri
+tools-provider-acp-agents = ACP aracıları
+tools-provider-lsp-servers = LSP sunucuları
+tools-provider-mcp-servers = MCP sunucuları
+tools-provider-dotfiles = Yapılandırma dosyaları
+tools-status-available = Kullanılabilir
+tools-status-missing = Eksik
+tools-status-conflict = Çakışma
+tools-forget = Unut
+tools-manage = Yönet
+tools-link = Bağla
+tools-unlink = Bağlantıyı kaldır
+tools-import = İçe aktar
+tools-update-count = { $count ->
+    [one] 1 güncelleme
+   *[other] { $count } güncelleme
+}
+tools-conflict-count = { $count ->
+    [one] 1 çakışma
+   *[other] { $count } çakışma
+}
+tools-result-applied = Araçlar uygulandı
+tools-result-imported = Araçlar içe aktarıldı
+tools-result-installed = { $name } yüklendi
+tools-result-updated = { $name } güncellendi
+tools-result-uninstalled = { $name } kaldırıldı
+tools-result-forgotten = { $name } unutuldu
+tools-result-managed = { $name } artık yönetiliyor
+tools-result-linked = { $name } bağlandı
+tools-result-unlinked = { $name } bağlantısı kaldırıldı
+vault-title = Vault
+vault-encrypted = Uçtan uca şifreli
+vault-passkey = Geçiş anahtarı
+vault-passkey-description = Bu Kasanın kilidini diğer cihazlarda şifre olmadan açın.
+vault-passkey-add = Şifre anahtarı ekle
+vault-passkey-unlock = Kilidi aç
+vault-passkey-provider-unsupported = Bu şifre anahtarı sağlayıcısı henüz şifreli Apps Kasası kilidini açmayı desteklemiyor.
+vault-recovery-key = Kurtarma Anahtarı
+vault-recovery-key-description = Bu Kasayı yeni bir cihazda kurtarmak için bir anahtarı Bitwarden'a veya başka bir şifre yöneticisine kaydedin.
+vault-recovery-key-create = Anahtar oluştur
+vault-recovery-key-create-failed = Kurtarma Anahtarı oluşturulamadı.
+vault-recovery-key-save = Bu anahtarı şimdi kaydedin. Vmux bunu tekrar gösteremez.
+vault-recovery-key-saved = onu sakladım
+vault-recovery-key-placeholder = Kurtarma Anahtarını Yapıştır
+vault-recovery-key-unlock = Kilidi aç
+vault-recovery-key-invalid = Bu Kurtarma Anahtarı Kasanın kilidini açamaz.
+vault-recovery-key-ready = Kurtarma Anahtarı yapılandırıldı
+vault-recovery-key-upload-pending = Anahtar yerel olarak kaydedildi ancak yükleme başarısız oldu. Güvende tutun ve yeniden denemek için Senkronizasyon'a basın.
+vault-auto-sync = Otomatik yedekleme
+vault-backup-failed = Otomatik yedekleme başarısız oldu. Yeniden denemek için Senkronizasyon'a basın.
+vault-backup-failed-short = Yedekleme başarısız oldu
+vault-recovery-key-copy-hint = Kopyalamak için tıklayın
+vault-recovery-key-copied = Kopyalandı
+vault-recovery-key-verify = Parola yöneticinize kaydedin ve doğrulamak için aşağıya yapıştırın.
+vault-recovery-key-verify-placeholder = Kaydedilen Kurtarma Anahtarını yapıştırın
+vault-recovery-key-mismatch = Kurtarma Anahtarı eşleşmiyor.
+vault-open = { common-open } Vault
+vault-description = Ayarları, araçları, nokta dosyalarını ve Bilgiyi Git ile senkronize edin.
+vault-sync = Senkronizasyon
+vault-create = Yaratmak
+vault-connect = Bağlamak
+vault-github = GitHub
+vault-github-description = Özel bir depo oluşturun veya mevcut bir Kasayı seçin.
+vault-connect-github = GitHub'u bağlayın
+vault-connected-as = { $name } olarak bağlanıldı
+vault-use-repository = Kullanmak
+vault-repository-name = Depo adı
+vault-cloud-folder = Bulut klasörü
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox veya OneDrive'dan bir klasör kullanın.
+vault-choose-folder = Klasör seç
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Dosya · { common-done }
+vault-private = Özel depo
+vault-public-warning = Depo geçmişi ve şifrelenmiş veriler herkese açık olacaktır.
+vault-choose-repository = Bir depo seçin…
+vault-empty = boş
+vault-clean = Güncel
+vault-not-connected = Bağlı değil
+vault-change-count = Değişiklikler: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Başlat
 start-tagline = Tek prompt. Her şey hazır.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } içine yer imi ekle
 common-cancel = İptal
 common-delete = Sil
 common-save = Kaydet
+common-copy = Copy
 common-rename = Yeniden adlandır
 common-expand = Genişlet
 common-collapse = Daralt

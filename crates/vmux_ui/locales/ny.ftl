@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] chinthu { $count }
    *[other] zinthu { $count }
 }
+
+tools-title = Zida
+tools-search = Sakani mapaketi, othandizira, MCP, LSP ndi mafayilo a kasinthidwe…
+tools-open = Tsegulani zida
+tools-fold = Pindani zida
+tools-unfold = Tambasulani zida
+tools-scanning = Kusanthula zida zapafupi…
+tools-no-installed = Palibe zida zoyikidwa
+tools-empty = Palibe zida zogwirizana
+tools-empty-detail = Ikani paketi kapena onjezani paketi ya mafayilo a kasinthidwe ya mtundu wa Stow.
+tools-apply = Gwiritsani ntchito
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mafomula ndi mapulogalamu omwe ayikidwa amalumikizana okha.
+tools-open-brewfile = Tsegulani Brewfile
+tools-managed = yoyendetsedwa
+tools-provider-homebrew-formulae = Mafomula a Homebrew
+tools-provider-homebrew-casks = Mapulogalamu a Homebrew
+tools-provider-npm = Mapaketi a NPM
+tools-provider-acp-agents = Othandizira a ACP
+tools-provider-lsp-servers = Ma seva a LSP
+tools-provider-mcp-servers = Ma seva a MCP
+tools-provider-dotfiles = Mafayilo a kasinthidwe
+tools-status-available = Zilipo
+tools-status-missing = Zikusowa
+tools-status-conflict = Kusagwirizana
+tools-forget = Iwalani
+tools-manage = Yendetsani
+tools-link = Lumikizani
+tools-unlink = Chotsani ulalo
+tools-import = Lowetsani
+tools-update-count = { $count ->
+    [one] Kusintha 1
+   *[other] Zosintha { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Kusagwirizana 1
+   *[other] Kusagwirizana { $count }
+}
+tools-result-applied = Zida zagwiritsidwa ntchito
+tools-result-imported = Zida zalowetsedwa
+tools-result-installed = { $name } yayikidwa
+tools-result-updated = { $name } yasinthidwa
+tools-result-uninstalled = { $name } yachotsedwa
+tools-result-forgotten = { $name } yaiwalidwa
+tools-result-managed = { $name } tsopano ikuyendetsedwa
+tools-result-linked = { $name } yalumikizidwa
+tools-result-unlinked = Ulalo wa { $name } wachotsedwa
+vault-title = Vault
+vault-encrypted = Zotetezedwa kuchokera kumapeto mpaka kumapeto
+vault-passkey = Passkey
+vault-passkey-description = Tsegulani Vault iyi pazida zina popanda mawu achinsinsi.
+vault-passkey-add = Onjezani chinsinsi
+vault-passkey-unlock = Tsegulani
+vault-passkey-provider-unsupported = Wopereka makiyi achinsinsiwa sagwirizananso ndi encrypted Vault unlock panobe.
+vault-recovery-key = Recovery Key
+vault-recovery-key-description = Sungani kiyi imodzi mu Bitwarden kapena manejala wina wachinsinsi kuti mubwezeretse Vault iyi pachida chatsopano.
+vault-recovery-key-create = Pangani kiyi
+vault-recovery-key-create-failed = Recovery Key sinapangidwe.
+vault-recovery-key-save = Sungani kiyi iyi tsopano. Vmux sangathe kuwonetsanso.
+vault-recovery-key-saved = Ndidasunga
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Tsegulani
+vault-recovery-key-invalid = Kiyi Yobwezeretsa iyi siyingatsegule Vault.
+vault-recovery-key-ready = Kiyi yobwezeretsa yakhazikitsidwa
+vault-recovery-key-upload-pending = Kiyi imasungidwa kwanuko, koma kutsitsa kwalephera. Sungani bwino ndikudina Sync kuti muyesenso.
+vault-auto-sync = Zosunga zobwezeretsera
+vault-backup-failed = Kusunga zosunga zobwezeretsera kwalephera. Dinani Sync kuti muyesenso.
+vault-backup-failed-short = Kusunga zosunga zobwezeretsera kwalephera
+vault-recovery-key-copy-hint = Dinani kuti mukopere
+vault-recovery-key-copied = Zokopedwa
+vault-recovery-key-verify = Isungeni mumanejala anu achinsinsi, ndikuyiyika pansipa kuti mutsimikizire.
+vault-recovery-key-verify-placeholder = Matani Kiyi Yobwezeretsa yosungidwa
+vault-recovery-key-mismatch = Kubwezeretsa Key sikufanana.
+vault-open = { common-open } Vault
+vault-description = Gwirizanitsani zosintha, zida, ma dotfiles, ndi Knowledge ndi Git.
+vault-sync = Kulunzanitsa
+vault-create = Pangani
+vault-connect = Lumikizani
+vault-github = GitHub
+vault-github-description = Pangani nkhokwe yachinsinsi kapena sankhani Vault yomwe ilipo.
+vault-connect-github = Lumikizani GitHub
+vault-connected-as = Wolumikizidwa ngati { $name }
+vault-use-repository = Gwiritsani ntchito
+vault-repository-name = Dzina lanyumba
+vault-cloud-folder = Foda yamtambo
+vault-cloud-folder-description = Gwiritsani ntchito chikwatu kuchokera ku Google Drive, iCloud Drive, Dropbox, kapena OneDrive.
+vault-choose-folder = Sankhani chikwatu
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Foda · { common-done }
+vault-private = Malo achinsinsi
+vault-public-warning = Mbiri ya malo osungira ndi deta yotetezedwa zidzakhala zapagulu.
+vault-choose-repository = Sankhani nkhokwe…
+vault-empty = opanda kanthu
+vault-clean = Zaposachedwa
+vault-not-connected = Osalumikizidwa
+vault-change-count = Zosintha: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Yambani
 start-tagline = Lamulo limodzi. Chilichonse chitheka.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Sungani tsamba mu { $folder }
 common-cancel = Letsani
 common-delete = Chotsani
 common-save = Sungani
+common-copy = Copy
 common-rename = Sinthani dzina
 common-expand = Kulitsa
 common-collapse = Pinda

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ഇനം
    *[other] { $count } ഇനങ്ങൾ
 }
+
+tools-title = ഉപകരണങ്ങൾ
+tools-search = പാക്കേജുകൾ, ഏജന്റുകൾ, MCP, LSP, ക്രമീകരണ ഫയലുകൾ എന്നിവ തിരയുക…
+tools-open = ഉപകരണങ്ങൾ തുറക്കുക
+tools-fold = ഉപകരണങ്ങൾ മടക്കുക
+tools-unfold = ഉപകരണങ്ങൾ വികസിപ്പിക്കുക
+tools-scanning = പ്രാദേശിക ഉപകരണങ്ങൾ സ്കാൻ ചെയ്യുന്നു…
+tools-no-installed = ഇൻസ്റ്റാൾ ചെയ്ത ഉപകരണങ്ങളൊന്നുമില്ല
+tools-empty = പൊരുത്തപ്പെടുന്ന ഉപകരണങ്ങളൊന്നുമില്ല
+tools-empty-detail = ഒരു പാക്കേജ് ഇൻസ്റ്റാൾ ചെയ്യുക അല്ലെങ്കിൽ Stow രീതിയിലുള്ള ക്രമീകരണ ഫയൽ പാക്കേജ് ചേർക്കുക.
+tools-apply = പ്രയോഗിക്കുക
+tools-homebrew = Homebrew
+tools-homebrew-sync = ഇൻസ്റ്റാൾ ചെയ്ത ഫോർമുലകളും ആപ്പുകളും സ്വയമേവ സമന്വയിപ്പിക്കും.
+tools-open-brewfile = Brewfile തുറക്കുക
+tools-managed = നിയന്ത്രിക്കുന്നത്
+tools-provider-homebrew-formulae = Homebrew ഫോർമുലകൾ
+tools-provider-homebrew-casks = Homebrew ആപ്പുകൾ
+tools-provider-npm = NPM പാക്കേജുകൾ
+tools-provider-acp-agents = ACP ഏജന്റുകൾ
+tools-provider-lsp-servers = LSP സെർവറുകൾ
+tools-provider-mcp-servers = MCP സെർവറുകൾ
+tools-provider-dotfiles = ക്രമീകരണ ഫയലുകൾ
+tools-status-available = ലഭ്യം
+tools-status-missing = കാണാനില്ല
+tools-status-conflict = വൈരുദ്ധ്യം
+tools-forget = മറക്കുക
+tools-manage = നിയന്ത്രിക്കുക
+tools-link = ബന്ധിപ്പിക്കുക
+tools-unlink = ബന്ധം നീക്കുക
+tools-import = ഇറക്കുമതി ചെയ്യുക
+tools-update-count = { $count ->
+    [one] 1 പുതുക്കൽ
+   *[other] { $count } പുതുക്കലുകൾ
+}
+tools-conflict-count = { $count ->
+    [one] 1 വൈരുദ്ധ്യം
+   *[other] { $count } വൈരുദ്ധ്യങ്ങൾ
+}
+tools-result-applied = ഉപകരണങ്ങൾ പ്രയോഗിച്ചു
+tools-result-imported = ഉപകരണങ്ങൾ ഇറക്കുമതി ചെയ്തു
+tools-result-installed = { $name } ഇൻസ്റ്റാൾ ചെയ്തു
+tools-result-updated = { $name } പുതുക്കി
+tools-result-uninstalled = { $name } അൺഇൻസ്റ്റാൾ ചെയ്തു
+tools-result-forgotten = { $name } മറന്നു
+tools-result-managed = { $name } ഇപ്പോൾ നിയന്ത്രിക്കുന്നു
+tools-result-linked = { $name } ബന്ധിപ്പിച്ചു
+tools-result-unlinked = { $name }-ന്റെ ബന്ധം നീക്കി
+vault-title = Vault
+vault-encrypted = എൻഡ്-ടു-എൻഡ് എൻക്രിപ്റ്റ് ചെയ്‌തത്
+vault-passkey = പാസ്കീ
+vault-passkey-description = പാസ്‌വേഡ് ഇല്ലാതെ മറ്റ് ഉപകരണങ്ങളിൽ ഈ വോൾട്ട് അൺലോക്ക് ചെയ്യുക.
+vault-passkey-add = പാസ്കീ ചേർക്കുക
+vault-passkey-unlock = അൺലോക്ക് ചെയ്യുക
+vault-passkey-provider-unsupported = ഈ പാസ്‌കീ ദാതാവ് ഇതുവരെ എൻക്രിപ്റ്റ് ചെയ്ത വോൾട്ട് അൺലോക്കിനെ പിന്തുണയ്ക്കുന്നില്ല.
+vault-recovery-key = വീണ്ടെടുക്കൽ കീ
+vault-recovery-key-description = ഒരു പുതിയ ഉപകരണത്തിൽ ഈ വോൾട്ട് വീണ്ടെടുക്കാൻ ഒരു കീ ബിറ്റ്വാർഡനിൽ അല്ലെങ്കിൽ മറ്റൊരു പാസ്‌വേഡ് മാനേജറിൽ സംരക്ഷിക്കുക.
+vault-recovery-key-create = കീ സൃഷ്ടിക്കുക
+vault-recovery-key-create-failed = വീണ്ടെടുക്കൽ കീ സൃഷ്ടിക്കാൻ കഴിഞ്ഞില്ല.
+vault-recovery-key-save = ഈ കീ ഇപ്പോൾ സേവ് ചെയ്യുക. Vmux-ന് അത് വീണ്ടും കാണിക്കാൻ കഴിയില്ല.
+vault-recovery-key-saved = ഞാനത് സംരക്ഷിച്ചു
+vault-recovery-key-placeholder = റിക്കവറി കീ ഒട്ടിക്കുക
+vault-recovery-key-unlock = അൺലോക്ക് ചെയ്യുക
+vault-recovery-key-invalid = ഈ റിക്കവറി കീക്ക് വോൾട്ട് അൺലോക്ക് ചെയ്യാൻ കഴിയില്ല.
+vault-recovery-key-ready = വീണ്ടെടുക്കൽ കീ ക്രമീകരിച്ചു
+vault-recovery-key-upload-pending = കീ ലോക്കലായി സംരക്ഷിച്ചെങ്കിലും അപ്‌ലോഡ് പരാജയപ്പെട്ടു. ഇത് സുരക്ഷിതമായി സൂക്ഷിച്ച് വീണ്ടും ശ്രമിക്കാൻ സമന്വയം അമർത്തുക.
+vault-auto-sync = യാന്ത്രിക ബാക്കപ്പ്
+vault-backup-failed = സ്വയമേവയുള്ള ബാക്കപ്പ് പരാജയപ്പെട്ടു. വീണ്ടും ശ്രമിക്കാൻ സമന്വയം അമർത്തുക.
+vault-backup-failed-short = ബാക്കപ്പ് പരാജയപ്പെട്ടു
+vault-recovery-key-copy-hint = പകർത്താൻ ക്ലിക്ക് ചെയ്യുക
+vault-recovery-key-copied = പകർത്തി
+vault-recovery-key-verify = ഇത് നിങ്ങളുടെ പാസ്‌വേഡ് മാനേജറിൽ സംരക്ഷിക്കുക, തുടർന്ന് പരിശോധിച്ചുറപ്പിക്കാൻ താഴെ ഒട്ടിക്കുക.
+vault-recovery-key-verify-placeholder = സംരക്ഷിച്ച വീണ്ടെടുക്കൽ കീ ഒട്ടിക്കുക
+vault-recovery-key-mismatch = വീണ്ടെടുക്കൽ കീ പൊരുത്തപ്പെടുന്നില്ല.
+vault-open = { common-open } Vault
+vault-description = ക്രമീകരണങ്ങൾ, ഉപകരണങ്ങൾ, ഡോട്ട്ഫയലുകൾ, അറിവ് എന്നിവ Git-മായി സമന്വയിപ്പിക്കുക.
+vault-sync = സമന്വയിപ്പിക്കുക
+vault-create = സൃഷ്ടിക്കുക
+vault-connect = ബന്ധിപ്പിക്കുക
+vault-github = GitHub
+vault-github-description = ഒരു സ്വകാര്യ ശേഖരം സൃഷ്ടിക്കുക അല്ലെങ്കിൽ നിലവിലുള്ള ഒരു വോൾട്ട് തിരഞ്ഞെടുക്കുക.
+vault-connect-github = GitHub ബന്ധിപ്പിക്കുക
+vault-connected-as = { $name } ആയി ബന്ധിപ്പിച്ചു
+vault-use-repository = ഉപയോഗിക്കുക
+vault-repository-name = സംഭരണിയുടെ പേര്
+vault-cloud-folder = ക്ലൗഡ് ഫോൾഡർ
+vault-cloud-folder-description = Google ഡ്രൈവ്, iCloud ഡ്രൈവ്, ഡ്രോപ്പ്ബോക്സ് അല്ലെങ്കിൽ OneDrive എന്നിവയിൽ നിന്നുള്ള ഒരു ഫോൾഡർ ഉപയോഗിക്കുക.
+vault-choose-folder = ഫോൾഡർ തിരഞ്ഞെടുക്കുക
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ഫോൾഡർ · { common-done }
+vault-private = സ്വകാര്യ ശേഖരം
+vault-public-warning = റിപ്പോസിറ്ററി ചരിത്രവും എൻക്രിപ്റ്റ് ചെയ്‌ത ഡാറ്റയും പൊതുവായിരിക്കും.
+vault-choose-repository = ഒരു ശേഖരം തിരഞ്ഞെടുക്കുക...
+vault-empty = ശൂന്യം
+vault-clean = കാലികമാണ്
+vault-not-connected = ബന്ധിപ്പിച്ചിട്ടില്ല
+vault-change-count = മാറ്റങ്ങൾ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = തുടങ്ങുക
 start-tagline = ഒരു prompt. എന്തും പൂർത്തിയാക്കാം.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder }-ൽ ബുക്ക്‌മാർക്ക് 
 common-cancel = റദ്ദാക്കുക
 common-delete = ഇല്ലാതാക്കുക
 common-save = സംരക്ഷിക്കുക
+common-copy = Copy
 common-rename = പേരുമാറ്റുക
 common-expand = വികസിപ്പിക്കുക
 common-collapse = ചുരുക്കുക

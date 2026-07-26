@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ntho
    *[other] dintho tse { $count }
 }
+
+tools-title = Lisebelisoa
+tools-search = Batla liphutheloana, baemeli, MCP, LSP le lifaele tsa tlhophiso…
+tools-open = Bula lisebelisoa
+tools-fold = Mena lisebelisoa
+tools-unfold = Atolosa lisebelisoa
+tools-scanning = Ho hlahlojoa lisebelisoa tsa lehae…
+tools-no-installed = Ha ho lisebelisoa tse kentsoeng
+tools-empty = Ha ho lisebelisoa tse tsamaellanang
+tools-empty-detail = Kenya sephutheloana kapa u kenye sephutheloana sa lifaele tsa tlhophiso sa mofuta oa Stow.
+tools-apply = Sebelisa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Mefuta le mananeo a kentsoeng li ikamahanya ka bo eona.
+tools-open-brewfile = Bula Brewfile
+tools-managed = laoloa
+tools-provider-homebrew-formulae = Mefuta ea Homebrew
+tools-provider-homebrew-casks = Mananeo a Homebrew
+tools-provider-npm = Liphutheloana tsa NPM
+tools-provider-acp-agents = Baemeli ba ACP
+tools-provider-lsp-servers = Li-server tsa LSP
+tools-provider-mcp-servers = Li-server tsa MCP
+tools-provider-dotfiles = Lifaele tsa tlhophiso
+tools-status-available = E teng
+tools-status-missing = E sieo
+tools-status-conflict = Khohlano
+tools-forget = Lebala
+tools-manage = Laola
+tools-link = Hokela
+tools-unlink = Hakolla
+tools-import = Kenya ho tsoa kantle
+tools-update-count = { $count ->
+    [one] Ntlafatso e 1
+   *[other] Lintlafatso tse { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Khohlano e 1
+   *[other] Likhohlano tse { $count }
+}
+tools-result-applied = Lisebelisoa li sebelisitsoe
+tools-result-imported = Lisebelisoa li kentsoe ho tsoa kantle
+tools-result-installed = { $name } e kentsoe
+tools-result-updated = { $name } e ntlafalitsoe
+tools-result-uninstalled = { $name } e tlositsoe
+tools-result-forgotten = { $name } e lebetsoe
+tools-result-managed = { $name } joale ea laoloa
+tools-result-linked = { $name } e hoketsoe
+tools-result-unlinked = { $name } e hakolotsoe
+vault-title = Vault
+vault-encrypted = E patilwe ho tloha qalong ho isa qetellong
+vault-passkey = Passkey
+vault-passkey-description = Notlolla Vault ena lisebelisoa tse ling ntle le senotlolo.
+vault-passkey-add = Kenya senotlolo
+vault-passkey-unlock = Notlolla
+vault-passkey-provider-unsupported = Mofani enoa oa senotlolo ha a tšehetse ho notlolla ha Vault e kentsoeng.
+vault-recovery-key = Senotlolo sa ho hlaphoheloa
+vault-recovery-key-description = Boloka senotlolo se le seng ho Bitwarden kapa molaoli e mong oa password ho khutlisa Vault ena sesebelisoa se secha.
+vault-recovery-key-create = Etsa senotlolo
+vault-recovery-key-create-failed = Recovery Key ha e khonehe.
+vault-recovery-key-save = Boloka senotlolo sena hona joale. Vmux ha e khone ho e bontša hape.
+vault-recovery-key-saved = Ke e bolokile
+vault-recovery-key-placeholder = Beha Senotlolo sa ho Khutlisa
+vault-recovery-key-unlock = Notlolla
+vault-recovery-key-invalid = Senotlolo sena sa ho Pholosa ha se khone ho notlolla Vault.
+vault-recovery-key-ready = Recovery Key e hlophisitsoe
+vault-recovery-key-upload-pending = Senotlolo se bolokoa sebakeng sa heno, empa ho hloleha ho kenya. E boloke e bolokehile ebe o tobetsa Sync ho leka hape.
+vault-auto-sync = Backup e iketsang
+vault-backup-failed = Ho boloka bekapo ho hlolehile. Tobetsa Sync ho leka hape.
+vault-backup-failed-short = Ho boloka bekapo e hlolehile
+vault-recovery-key-copy-hint = Tobetsa ho kopitsa
+vault-recovery-key-copied = E qopisitsoe
+vault-recovery-key-verify = E boloke ho molaoli oa password ea hau, ebe u e beha ka tlase ho netefatsa.
+vault-recovery-key-verify-placeholder = Beha Senotlolo sa ho Fumana se bolokiloeng
+vault-recovery-key-mismatch = Recovery Key ha e tsamaellane.
+vault-open = { common-open } Vault
+vault-description = Litlhophiso tsa sync, lisebelisoa, li-dotfiles, le Tsebo le Git.
+vault-sync = Sync
+vault-create = Theha
+vault-connect = Hokela
+vault-github = GitHub
+vault-github-description = Theha polokelo ea poraefete kapa khetha Vault e teng.
+vault-connect-github = Kopanya GitHub
+vault-connected-as = Hokahane joalo ka { $name }
+vault-use-repository = Sebelisa
+vault-repository-name = Lebitso la polokelo
+vault-cloud-folder = Sephutheli sa leru
+vault-cloud-folder-description = Sebelisa foldara ho tsoa ho Google Drive, iCloud Drive, Dropbox, kapa OneDrive.
+vault-choose-folder = Khetha foldara
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Sephutheli · { common-done }
+vault-private = Sebaka sa polokelo ea poraefete
+vault-public-warning = Nalane ea polokelo le data e patiloeng li tla ba phatlalatsa.
+vault-choose-repository = Khetha sebaka sa polokelo…
+vault-empty = se nang letho
+vault-clean = E maemong
+vault-not-connected = Ha e kopane
+vault-change-count = Liphetoho: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Qala
 start-tagline = Prompt e le nngwe. Eng kapa eng, e phethilwe.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Tshwaya leqephe ho { $folder }
 common-cancel = Hlakola
 common-delete = Hlakola
 common-save = Boloka
+common-copy = Copy
 common-rename = Reha lebitso bocha
 common-expand = Atolosa
 common-collapse = Meneha

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ንጥል
    *[other] { $count } ንጥሎች
 }
+
+tools-title = መሣሪያዎች
+tools-search = ጥቅሎችን፣ ወኪሎችን፣ MCPን፣ LSPን እና የውቅር ፋይሎችን ፈልግ…
+tools-open = መሣሪያዎችን ክፈት
+tools-fold = መሣሪያዎችን ሰብስብ
+tools-unfold = መሣሪያዎችን ዘርጋ
+tools-scanning = አካባቢያዊ መሣሪያዎችን በመፈተሽ ላይ…
+tools-no-installed = ምንም የተጫነ መሣሪያ የለም
+tools-empty = የሚዛመድ መሣሪያ የለም
+tools-empty-detail = ጥቅል ይጫኑ ወይም የStow ቅጥ ያለው የውቅር ፋይል ጥቅል ያክሉ።
+tools-apply = ተግብር
+tools-homebrew = Homebrew
+tools-homebrew-sync = የተጫኑ ቀመሮችና መተግበሪያዎች በራስ-ሰር ይመሳሰላሉ።
+tools-open-brewfile = Brewfileን ክፈት
+tools-managed = የሚተዳደር
+tools-provider-homebrew-formulae = የHomebrew ቀመሮች
+tools-provider-homebrew-casks = የHomebrew መተግበሪያዎች
+tools-provider-npm = የNPM ጥቅሎች
+tools-provider-acp-agents = የACP ወኪሎች
+tools-provider-lsp-servers = የLSP አገልጋዮች
+tools-provider-mcp-servers = የMCP አገልጋዮች
+tools-provider-dotfiles = የውቅር ፋይሎች
+tools-status-available = ይገኛል
+tools-status-missing = የለም
+tools-status-conflict = ግጭት
+tools-forget = እርሳ
+tools-manage = አስተዳድር
+tools-link = አገናኝ
+tools-unlink = ግንኙነት አቋርጥ
+tools-import = አስገባ
+tools-update-count = { $count ->
+    [one] 1 ዝማኔ
+   *[other] { $count } ዝማኔዎች
+}
+tools-conflict-count = { $count ->
+    [one] 1 ግጭት
+   *[other] { $count } ግጭቶች
+}
+tools-result-applied = መሣሪያዎች ተተግብረዋል
+tools-result-imported = መሣሪያዎች ገብተዋል
+tools-result-installed = { $name } ተጭኗል
+tools-result-updated = { $name } ዘምኗል
+tools-result-uninstalled = { $name } ተወግዷል
+tools-result-forgotten = { $name } ተረስቷል
+tools-result-managed = { $name } አሁን ይተዳደራል
+tools-result-linked = { $name } ተገናኝቷል
+tools-result-unlinked = { $name } ግንኙነቱ ተቋርጧል
+vault-title = Vault
+vault-encrypted = ከጫፍ እስከ ጫፍ የተመሰጠረ
+vault-passkey = የይለፍ ቁልፍ
+vault-passkey-description = ይህን ቮልት ያለይለፍ ቃል በሌሎች መሳሪያዎች ላይ ይክፈቱት።
+vault-passkey-add = የይለፍ ቁልፍ ጨምር
+vault-passkey-unlock = ክፈት
+vault-passkey-provider-unsupported = ይህ የይለፍ ቁልፍ አቅራቢ እስካሁን የተመሰጠረ የቮልት መክፈቻን አይደግፍም።
+vault-recovery-key = የመልሶ ማግኛ ቁልፍ
+vault-recovery-key-description = ይህንን ቮልት በአዲስ መሳሪያ ላይ ለማግኘት አንድ ቁልፍ በ Bitwarden ወይም ሌላ የይለፍ ቃል አስተዳዳሪ ያስቀምጡ።
+vault-recovery-key-create = ቁልፍ ፍጠር
+vault-recovery-key-create-failed = የመልሶ ማግኛ ቁልፍ ሊፈጠር አልቻለም።
+vault-recovery-key-save = ይህን ቁልፍ አሁን ያስቀምጡ። Vmux እንደገና ሊያሳየው አይችልም።
+vault-recovery-key-saved = አስቀምጬዋለሁ
+vault-recovery-key-placeholder = የመልሶ ማግኛ ቁልፍን ለጥፍ
+vault-recovery-key-unlock = ክፈት
+vault-recovery-key-invalid = ይህ የመልሶ ማግኛ ቁልፍ ቮልቱን መክፈት አይችልም።
+vault-recovery-key-ready = የመልሶ ማግኛ ቁልፍ ተዋቅሯል።
+vault-recovery-key-upload-pending = ቁልፉ በአካባቢው ተቀምጧል፣ ግን ሰቀላው አልተሳካም። ደህንነቱ እንደተጠበቀ ያቆዩት እና እንደገና ለመሞከር አመሳስልን ይጫኑ።
+vault-auto-sync = ራስ-ሰር ምትኬ
+vault-backup-failed = ራስ-ሰር ምትኬ አልተሳካም። እንደገና ለመሞከር ማመሳሰልን ይጫኑ።
+vault-backup-failed-short = ምትኬ አልተሳካም።
+vault-recovery-key-copy-hint = ለመቅዳት ጠቅ ያድርጉ
+vault-recovery-key-copied = ተገልብጧል
+vault-recovery-key-verify = በይለፍ ቃል አስተዳዳሪዎ ውስጥ ያስቀምጡት፣ ከዚያ ለማረጋገጥ ከታች ይለጥፉት።
+vault-recovery-key-verify-placeholder = የተቀመጠ የመልሶ ማግኛ ቁልፍ ለጥፍ
+vault-recovery-key-mismatch = የመልሶ ማግኛ ቁልፍ አይዛመድም።
+vault-open = { common-open } Vault
+vault-description = ቅንጅቶችን፣ መሳሪያዎችን፣ ዶትፋይሎችን እና እውቀትን በGit ያመሳስሉ።
+vault-sync = አመሳስል
+vault-create = ፍጠር
+vault-connect = ተገናኝ
+vault-github = GitHub
+vault-github-description = የግል ማከማቻ ይፍጠሩ ወይም ያለውን ቮልት ይምረጡ።
+vault-connect-github = GitHubን ያገናኙ
+vault-connected-as = እንደ { $name } ተገናኝቷል
+vault-use-repository = ተጠቀም
+vault-repository-name = የማከማቻ ስም
+vault-cloud-folder = የደመና አቃፊ
+vault-cloud-folder-description = ከGoogle Drive፣ iCloud Drive፣ Dropbox ወይም OneDrive አቃፊ ይጠቀሙ።
+vault-choose-folder = አቃፊ ይምረጡ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = አቃፊ · { common-done }
+vault-private = የግል ማከማቻ
+vault-public-warning = የማከማቻው ታሪክ እና የተመሰጠረ ውሂብ ይፋዊ ይሆናሉ።
+vault-choose-repository = ማከማቻ ምረጥ…
+vault-empty = ባዶ
+vault-clean = የዘመነ
+vault-not-connected = አልተገናኘም።
+vault-change-count = ለውጦች: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ጀምር
 start-tagline = አንድ prompt። ማንኛውም ስራ፣ ተጠናቋል።
 
@@ -299,6 +399,7 @@ layout-bookmark-in = በ{ $folder } ውስጥ ዕልባት አድርግ
 common-cancel = ሰርዝ
 common-delete = ሰርዝ
 common-save = አስቀምጥ
+common-copy = Copy
 common-rename = ስም ቀይር
 common-expand = ዘርጋ
 common-collapse = ሰብስብ

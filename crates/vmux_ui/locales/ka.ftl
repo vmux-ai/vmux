@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ელემენტი
    *[other] { $count } ელემენტი
 }
+
+tools-title = ხელსაწყოები
+tools-search = პაკეტების, აგენტების, MCP-ის, LSPსა და კონფიგურაციის ფაილების ძიება…
+tools-open = ხელსაწყოების გახსნა
+tools-fold = ხელსაწყოების აკეცვა
+tools-unfold = ხელსაწყოების გაშლა
+tools-scanning = ადგილობრივი ხელსაწყოების სკანირება…
+tools-no-installed = დაინსტალირებული ხელსაწყოები არ არის
+tools-empty = შესაბამისი ხელსაწყოები არ არის
+tools-empty-detail = დააინსტალირეთ პაკეტი ან დაამატეთ Stow-ის სტილის კონფიგურაციის ფაილების პაკეტი.
+tools-apply = გამოყენება
+tools-homebrew = Homebrew
+tools-homebrew-sync = დაინსტალირებული ფორმულები და პროგრამები ავტომატურად სინქრონდება.
+tools-open-brewfile = Brewfile-ის გახსნა
+tools-managed = მართული
+tools-provider-homebrew-formulae = Homebrew-ის ფორმულები
+tools-provider-homebrew-casks = Homebrew-ის პროგრამები
+tools-provider-npm = NPM-ის პაკეტები
+tools-provider-acp-agents = ACP-ის აგენტები
+tools-provider-lsp-servers = LSP-ის სერვერები
+tools-provider-mcp-servers = MCP-ის სერვერები
+tools-provider-dotfiles = კონფიგურაციის ფაილები
+tools-status-available = ხელმისაწვდომია
+tools-status-missing = აკლია
+tools-status-conflict = კონფლიქტი
+tools-forget = დავიწყება
+tools-manage = მართვა
+tools-link = დაკავშირება
+tools-unlink = კავშირის გაუქმება
+tools-import = იმპორტი
+tools-update-count = { $count ->
+    [one] 1 განახლება
+   *[other] { $count } განახლება
+}
+tools-conflict-count = { $count ->
+    [one] 1 კონფლიქტი
+   *[other] { $count } კონფლიქტი
+}
+tools-result-applied = ხელსაწყოები გამოყენებულია
+tools-result-imported = ხელსაწყოები იმპორტირებულია
+tools-result-installed = { $name } დაინსტალირდა
+tools-result-updated = { $name } განახლდა
+tools-result-uninstalled = { $name } წაიშალა
+tools-result-forgotten = { $name } დავიწყებულია
+tools-result-managed = { $name } ახლა იმართება
+tools-result-linked = { $name } დაკავშირებულია
+tools-result-unlinked = { $name }-თან კავშირი გაუქმებულია
+vault-title = Vault
+vault-encrypted = ბოლოდან ბოლომდე დაშიფრული
+vault-passkey = პაროლის გასაღები
+vault-passkey-description = განბლოკეთ ეს Vault სხვა მოწყობილობებზე პაროლის გარეშე.
+vault-passkey-add = პაროლის დამატება
+vault-passkey-unlock = განბლოკვა
+vault-passkey-provider-unsupported = პაროლის ამ პროვაიდერს ჯერ არ აქვს დაშიფრული Vault-ის განბლოკვის მხარდაჭერა.
+vault-recovery-key = აღდგენის გასაღები
+vault-recovery-key-description = შეინახეთ ერთი გასაღები Bitwarden-ში ან პაროლის სხვა მენეჯერში, რათა აღადგინოთ ეს Vault ახალ მოწყობილობაზე.
+vault-recovery-key-create = გასაღების შექმნა
+vault-recovery-key-create-failed = აღდგენის გასაღები ვერ შეიქმნა.
+vault-recovery-key-save = შეინახეთ ეს გასაღები ახლავე. Vmux ვერ აჩვენებს მას.
+vault-recovery-key-saved = მე შევინახე
+vault-recovery-key-placeholder = პასტის აღდგენის გასაღები
+vault-recovery-key-unlock = განბლოკვა
+vault-recovery-key-invalid = აღდგენის ეს გასაღები ვერ განბლოკავს Vault-ს.
+vault-recovery-key-ready = აღდგენის გასაღები კონფიგურირებულია
+vault-recovery-key-upload-pending = გასაღები შენახულია ადგილობრივად, მაგრამ ატვირთვა ვერ მოხერხდა. შეინახეთ უსაფრთხოდ და ხელახლა საცდელად დააჭირეთ სინქრონიზაციას.
+vault-auto-sync = ავტომატური სარეზერვო ასლი
+vault-backup-failed = ავტომატური სარეზერვო ასლის შექმნა ვერ მოხერხდა. ხელახლა საცდელად დააჭირეთ სინქრონიზაციას.
+vault-backup-failed-short = სარეზერვო ასლის შექმნა ვერ მოხერხდა
+vault-recovery-key-copy-hint = დააწკაპუნეთ კოპირებისთვის
+vault-recovery-key-copied = კოპირებულია
+vault-recovery-key-verify = შეინახეთ პაროლის მენეჯერში, შემდეგ ჩასვით ქვემოთ დასადასტურებლად.
+vault-recovery-key-verify-placeholder = ჩასვით შენახული აღდგენის გასაღები
+vault-recovery-key-mismatch = აღდგენის გასაღები არ ემთხვევა.
+vault-open = { common-open } Vault
+vault-description = პარამეტრების, ხელსაწყოების, dotfiles და Knowledge სინქრონიზაცია Git-თან.
+vault-sync = სინქრონიზაცია
+vault-create = შექმნა
+vault-connect = დაკავშირება
+vault-github = GitHub
+vault-github-description = შექმენით პირადი საცავი ან აირჩიეთ არსებული Vault.
+vault-connect-github = დააკავშირეთ GitHub
+vault-connected-as = დაკავშირებულია როგორც { $name }
+vault-use-repository = გამოყენება
+vault-repository-name = საცავის სახელი
+vault-cloud-folder = ღრუბლოვანი საქაღალდე
+vault-cloud-folder-description = გამოიყენეთ საქაღალდე Google Drive-დან, iCloud Drive-დან, Dropbox-დან ან OneDrive-დან.
+vault-choose-folder = აირჩიეთ საქაღალდე
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = საქაღალდე · { common-done }
+vault-private = პირადი საცავი
+vault-public-warning = რეპოზიტორიის ისტორია და დაშიფრული მონაცემები საჯარო იქნება.
+vault-choose-repository = აირჩიეთ საცავი…
+vault-empty = ცარიელი
+vault-clean = განახლებული
+vault-not-connected = არ არის დაკავშირებული
+vault-change-count = ცვლილებები: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = დაწყება
 start-tagline = ერთი პრომპტი. ყველაფერი მზად.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = სანიშნე საქაღალდეში { $
 common-cancel = გაუქმება
 common-delete = წაშლა
 common-save = შენახვა
+common-copy = Copy
 common-rename = სახელის შეცვლა
 common-expand = გაშლა
 common-collapse = აკეცვა

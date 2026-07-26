@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] 항목 { $count }개
    *[other] 항목 { $count }개
 }
+
+tools-title = 도구
+tools-search = 패키지, 에이전트, MCP, LSP, 설정 파일 검색…
+tools-open = 도구 열기
+tools-fold = 도구 접기
+tools-unfold = 도구 펼치기
+tools-scanning = 로컬 도구 검색 중…
+tools-no-installed = 설치된 도구 없음
+tools-empty = 일치하는 도구 없음
+tools-empty-detail = 패키지를 설치하거나 Stow 방식의 설정 파일 패키지를 추가하세요.
+tools-apply = 적용
+tools-homebrew = Homebrew
+tools-homebrew-sync = 설치된 포뮬러와 애플리케이션은 자동으로 동기화됩니다.
+tools-open-brewfile = Brewfile 열기
+tools-managed = 관리됨
+tools-provider-homebrew-formulae = Homebrew 포뮬러
+tools-provider-homebrew-casks = Homebrew 애플리케이션
+tools-provider-npm = NPM 패키지
+tools-provider-acp-agents = ACP 에이전트
+tools-provider-lsp-servers = LSP 서버
+tools-provider-mcp-servers = MCP 서버
+tools-provider-dotfiles = 설정 파일
+tools-status-available = 사용 가능
+tools-status-missing = 누락
+tools-status-conflict = 충돌
+tools-forget = 잊기
+tools-manage = 관리
+tools-link = 연결
+tools-unlink = 연결 해제
+tools-import = 가져오기
+tools-update-count = { $count ->
+    [one] 업데이트 1개
+   *[other] 업데이트 { $count }개
+}
+tools-conflict-count = { $count ->
+    [one] 충돌 1개
+   *[other] 충돌 { $count }개
+}
+tools-result-applied = 도구 적용됨
+tools-result-imported = 도구 가져옴
+tools-result-installed = { $name } 설치됨
+tools-result-updated = { $name } 업데이트됨
+tools-result-uninstalled = { $name } 제거됨
+tools-result-forgotten = { $name } 잊음
+tools-result-managed = { $name } 관리 시작됨
+tools-result-linked = { $name } 연결됨
+tools-result-unlinked = { $name } 연결 해제됨
+vault-title = Vault
+vault-encrypted = 종단 간 암호화됨
+vault-passkey = 곁쇠
+vault-passkey-description = 비밀번호 없이 다른 장치에서 이 Vault를 잠금 해제하세요.
+vault-passkey-add = 패스키 추가
+vault-passkey-unlock = 터놓다
+vault-passkey-provider-unsupported = 이 암호 키 제공업체는 아직 암호화된 Vault 잠금 해제를 지원하지 않습니다.
+vault-recovery-key = 복구 키
+vault-recovery-key-description = Bitwarden 또는 다른 비밀번호 관리자에 하나의 키를 저장하여 새 장치에서 이 Vault를 복구하세요.
+vault-recovery-key-create = 키 생성
+vault-recovery-key-create-failed = 복구 키를 생성할 수 없습니다.
+vault-recovery-key-save = 지금 이 키를 저장하세요. Vmux는 이를 다시 표시할 수 없습니다.
+vault-recovery-key-saved = 저장했습니다.
+vault-recovery-key-placeholder = 복구 키 붙여넣기
+vault-recovery-key-unlock = 잠금 해제
+vault-recovery-key-invalid = 이 복구 키는 Vault를 잠금 해제할 수 없습니다.
+vault-recovery-key-ready = 복구 키가 구성됨
+vault-recovery-key-upload-pending = 키가 로컬에 저장되었지만 업로드에 실패했습니다. 안전하게 보관하고 동기화를 눌러 다시 시도하세요.
+vault-auto-sync = 자동 백업
+vault-backup-failed = 자동 백업에 실패했습니다. 다시 시도하려면 동기화를 누르세요.
+vault-backup-failed-short = 백업 실패
+vault-recovery-key-copy-hint = 복사하려면 클릭하세요.
+vault-recovery-key-copied = 복사됨
+vault-recovery-key-verify = 비밀번호 관리자에 저장한 후 아래에 붙여넣어 확인하세요.
+vault-recovery-key-verify-placeholder = 저장된 복구 키 붙여넣기
+vault-recovery-key-mismatch = 복구 키가 일치하지 않습니다.
+vault-open = { common-open } Vault
+vault-description = 설정, 도구, 도트 파일, Knowledge를 Git과 동기화합니다.
+vault-sync = 동조
+vault-create = 만들다
+vault-connect = 연결하다
+vault-github = GitHub
+vault-github-description = 개인 저장소를 생성하거나 기존 Vault를 선택하세요.
+vault-connect-github = GitHub 연결
+vault-connected-as = { $name }(으)로 연결됨
+vault-use-repository = 사용
+vault-repository-name = 저장소 이름
+vault-cloud-folder = 클라우드 폴더
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox 또는 OneDrive의 폴더를 사용하세요.
+vault-choose-folder = 폴더 선택
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = 접는 사람 · { common-done }
+vault-private = 개인 저장소
+vault-public-warning = 저장소 기록과 암호화된 데이터가 공개됩니다.
+vault-choose-repository = 저장소를 선택하세요…
+vault-empty = 비어 있는
+vault-clean = 최신
+vault-not-connected = 연결되지 않음
+vault-change-count = 변경 사항: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = 시작
 start-tagline = 프롬프트 하나로 무엇이든 완료하세요.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder }에 북마크
 common-cancel = 취소
 common-delete = 삭제
 common-save = 저장
+common-copy = Copy
 common-rename = 이름 변경
 common-expand = 펼치기
 common-collapse = 접기

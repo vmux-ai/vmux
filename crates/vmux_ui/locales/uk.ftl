@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } елемент
    *[other] { $count } елементів
 }
+
+tools-title = Інструменти
+tools-search = Пошук пакетів, агентів, MCP, LSP і файлів конфігурації…
+tools-open = Відкрити інструменти
+tools-fold = Згорнути інструменти
+tools-unfold = Розгорнути інструменти
+tools-scanning = Сканування локальних інструментів…
+tools-no-installed = Немає встановлених інструментів
+tools-empty = Відповідних інструментів немає
+tools-empty-detail = Установіть пакет або додайте пакет файлів конфігурації у стилі Stow.
+tools-apply = Застосувати
+tools-homebrew = Homebrew
+tools-homebrew-sync = Установлені формули й застосунки синхронізуються автоматично.
+tools-open-brewfile = Відкрити Brewfile
+tools-managed = керується
+tools-provider-homebrew-formulae = Формули Homebrew
+tools-provider-homebrew-casks = Застосунки Homebrew
+tools-provider-npm = Пакети NPM
+tools-provider-acp-agents = Агенти ACP
+tools-provider-lsp-servers = Сервери LSP
+tools-provider-mcp-servers = Сервери MCP
+tools-provider-dotfiles = Файли конфігурації
+tools-status-available = Доступно
+tools-status-missing = Відсутнє
+tools-status-conflict = Конфлікт
+tools-forget = Забути
+tools-manage = Керувати
+tools-link = Зв’язати
+tools-unlink = Відв’язати
+tools-import = Імпортувати
+tools-update-count = { $count ->
+    [one] 1 оновлення
+   *[other] { $count } оновлень
+}
+tools-conflict-count = { $count ->
+    [one] 1 конфлікт
+   *[other] { $count } конфліктів
+}
+tools-result-applied = Інструменти застосовано
+tools-result-imported = Інструменти імпортовано
+tools-result-installed = { $name } установлено
+tools-result-updated = { $name } оновлено
+tools-result-uninstalled = { $name } видалено
+tools-result-forgotten = { $name } забуто
+tools-result-managed = { $name } тепер керується
+tools-result-linked = { $name } зв’язано
+tools-result-unlinked = { $name } відв’язано
+vault-title = Vault
+vault-encrypted = Наскрізне шифрування
+vault-passkey = Ключ доступу
+vault-passkey-description = Розблокуйте це сховище на інших пристроях без пароля.
+vault-passkey-add = Додати ключ доступу
+vault-passkey-unlock = Розблокувати
+vault-passkey-provider-unsupported = Цей постачальник ключів доступу ще не підтримує розблокування зашифрованого сховища.
+vault-recovery-key = Ключ відновлення
+vault-recovery-key-description = Збережіть один ключ у Bitwarden або іншому менеджері паролів, щоб відновити це сховище на новому пристрої.
+vault-recovery-key-create = Створити ключ
+vault-recovery-key-create-failed = Не вдалося створити ключ відновлення.
+vault-recovery-key-save = Збережіть цей ключ зараз. Vmux не може показати це знову.
+vault-recovery-key-saved = Я зберіг його
+vault-recovery-key-placeholder = Вставте ключ відновлення
+vault-recovery-key-unlock = Розблокувати
+vault-recovery-key-invalid = Цей ключ відновлення не може розблокувати сховище.
+vault-recovery-key-ready = Ключ відновлення налаштовано
+vault-recovery-key-upload-pending = Ключ збережено локально, але завантажити не вдалося. Збережіть його та натисніть «Синхронізувати», щоб повторити спробу.
+vault-auto-sync = Автоматичне резервне копіювання
+vault-backup-failed = Помилка автоматичного резервного копіювання. Натисніть «Синхронізувати», щоб повторити спробу.
+vault-backup-failed-short = Помилка резервного копіювання
+vault-recovery-key-copy-hint = Натисніть, щоб скопіювати
+vault-recovery-key-copied = Скопійовано
+vault-recovery-key-verify = Збережіть його в менеджері паролів, а потім вставте нижче, щоб перевірити.
+vault-recovery-key-verify-placeholder = Вставте збережений ключ відновлення
+vault-recovery-key-mismatch = Ключ відновлення не збігається.
+vault-open = { common-open } Vault
+vault-description = Синхронізуйте налаштування, інструменти, dot-файли та знання з Git.
+vault-sync = Синхронізувати
+vault-create = Створити
+vault-connect = Підключитися
+vault-github = GitHub
+vault-github-description = Створіть приватне сховище або виберіть наявне сховище.
+vault-connect-github = Підключіть GitHub
+vault-connected-as = Підключено як { $name }
+vault-use-repository = використання
+vault-repository-name = Назва сховища
+vault-cloud-folder = Хмарна папка
+vault-cloud-folder-description = Використовуйте папку з Google Drive, iCloud Drive, Dropbox або OneDrive.
+vault-choose-folder = Виберіть папку
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Папка · { common-done }
+vault-private = Приватне сховище
+vault-public-warning = Історія репозиторію та зашифровані дані будуть загальнодоступними.
+vault-choose-repository = Виберіть сховище…
+vault-empty = порожній
+vault-clean = В актуальному стані
+vault-not-connected = Не підключено
+vault-change-count = Зміни: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Початок
 start-tagline = Один prompt — і все готово.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Додати закладку в { $folder }
 common-cancel = Скасувати
 common-delete = Видалити
 common-save = Зберегти
+common-copy = Copy
 common-rename = Перейменувати
 common-expand = Розгорнути
 common-collapse = Згорнути

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ລາຍການ
    *[other] { $count } ລາຍການ
 }
+
+tools-title = ເຄື່ອງມື
+tools-search = ຄົ້ນຫາແພັກເກດ, ຕົວແທນ, MCP, LSP ແລະ ໄຟລ໌ກຳນົດຄ່າ…
+tools-open = ເປີດເຄື່ອງມື
+tools-fold = ພັບເຄື່ອງມື
+tools-unfold = ຂະຫຍາຍເຄື່ອງມື
+tools-scanning = ກຳລັງສະແກນເຄື່ອງມືໃນເຄື່ອງ…
+tools-no-installed = ບໍ່ມີເຄື່ອງມືທີ່ຕິດຕັ້ງ
+tools-empty = ບໍ່ມີເຄື່ອງມືທີ່ກົງກັນ
+tools-empty-detail = ຕິດຕັ້ງແພັກເກດ ຫຼື ເພີ່ມແພັກເກດໄຟລ໌ກຳນົດຄ່າແບບ Stow.
+tools-apply = ນຳໃຊ້
+tools-homebrew = Homebrew
+tools-homebrew-sync = ສູດ ແລະ ແອັບພລິເຄຊັນທີ່ຕິດຕັ້ງຈະຊິງຄ໌ອັດຕະໂນມັດ.
+tools-open-brewfile = ເປີດ Brewfile
+tools-managed = ຖືກຈັດການ
+tools-provider-homebrew-formulae = ສູດ Homebrew
+tools-provider-homebrew-casks = ແອັບພລິເຄຊັນ Homebrew
+tools-provider-npm = ແພັກເກດ NPM
+tools-provider-acp-agents = ຕົວແທນ ACP
+tools-provider-lsp-servers = ເຊີບເວີ LSP
+tools-provider-mcp-servers = ເຊີບເວີ MCP
+tools-provider-dotfiles = ໄຟລ໌ກຳນົດຄ່າ
+tools-status-available = ມີໃຫ້ໃຊ້
+tools-status-missing = ຂາດຫາຍ
+tools-status-conflict = ຂັດແຍ່ງ
+tools-forget = ລືມ
+tools-manage = ຈັດການ
+tools-link = ເຊື່ອມຕໍ່
+tools-unlink = ຍົກເລີກການເຊື່ອມຕໍ່
+tools-import = ນຳເຂົ້າ
+tools-update-count = { $count ->
+    [one] 1 ການອັບເດດ
+   *[other] { $count } ການອັບເດດ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ຂໍ້ຂັດແຍ່ງ
+   *[other] { $count } ຂໍ້ຂັດແຍ່ງ
+}
+tools-result-applied = ນຳໃຊ້ເຄື່ອງມືແລ້ວ
+tools-result-imported = ນຳເຂົ້າເຄື່ອງມືແລ້ວ
+tools-result-installed = ຕິດຕັ້ງ { $name } ແລ້ວ
+tools-result-updated = ອັບເດດ { $name } ແລ້ວ
+tools-result-uninstalled = ຖອນການຕິດຕັ້ງ { $name } ແລ້ວ
+tools-result-forgotten = ລືມ { $name } ແລ້ວ
+tools-result-managed = ຕອນນີ້ { $name } ຖືກຈັດການ
+tools-result-linked = ເຊື່ອມຕໍ່ { $name } ແລ້ວ
+tools-result-unlinked = ຍົກເລີກການເຊື່ອມຕໍ່ { $name } ແລ້ວ
+vault-title = Vault
+vault-encrypted = ເຂົ້າລະຫັດແບບຕົ້ນທາງຫາປາຍທາງ
+vault-passkey = ລະຫັດຜ່ານ
+vault-passkey-description = ປົດລັອກ Vault ນີ້ຢູ່ໃນອຸປະກອນອື່ນໂດຍບໍ່ມີການລະຫັດຜ່ານ.
+vault-passkey-add = ເພີ່ມລະຫັດຜ່ານ
+vault-passkey-unlock = ປົດລັອກ
+vault-passkey-provider-unsupported = ຜູ້ໃຫ້ບໍລິການລະຫັດຜ່ານນີ້ຍັງບໍ່ຮອງຮັບການປົດລັອກ Vault ທີ່ເຂົ້າລະຫັດເທື່ອ.
+vault-recovery-key = ລະຫັດການກູ້ຂໍ້ມູນ
+vault-recovery-key-description = ບັນທຶກກະແຈອັນໜຶ່ງໄວ້ໃນ Bitwarden ຫຼືຕົວຈັດການລະຫັດຜ່ານອື່ນເພື່ອກູ້ Vault ນີ້ຢູ່ໃນອຸປະກອນໃໝ່.
+vault-recovery-key-create = ສ້າງກະແຈ
+vault-recovery-key-create-failed = ບໍ່ສາມາດສ້າງລະຫັດກູ້ຂໍ້ມູນໄດ້.
+vault-recovery-key-save = ບັນທຶກກະແຈນີ້ດຽວນີ້. Vmux ບໍ່ສາມາດສະແດງມັນໄດ້ອີກ.
+vault-recovery-key-saved = ຂ້ອຍບັນທຶກມັນໄວ້
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = ປົດລັອກ
+vault-recovery-key-invalid = ກະແຈການກູ້ຂໍ້ມູນນີ້ບໍ່ສາມາດປົດລັອກຕູ້ນິລະໄພໄດ້.
+vault-recovery-key-ready = ຕັ້ງຄ່າກະແຈກູ້ຂໍ້ມູນແລ້ວ
+vault-recovery-key-upload-pending = ກະແຈຖືກບັນທຶກໄວ້ໃນເຄື່ອງ, ແຕ່ການອັບໂຫລດລົ້ມເຫລວ. ຮັກສາມັນໃຫ້ປອດໄພ ແລະກົດ Sync ເພື່ອລອງໃໝ່.
+vault-auto-sync = ສໍາຮອງຂໍ້ມູນອັດຕະໂນມັດ
+vault-backup-failed = ການສຳຮອງຂໍ້ມູນອັດຕະໂນມັດລົ້ມເຫລວ. ກົດ Sync ເພື່ອລອງໃໝ່.
+vault-backup-failed-short = ການສຳຮອງຂໍ້ມູນລົ້ມເຫລວ
+vault-recovery-key-copy-hint = ຄລິກເພື່ອສຳເນົາ
+vault-recovery-key-copied = ສຳເນົາແລ້ວ
+vault-recovery-key-verify = ບັນທຶກມັນໄວ້ໃນຕົວຈັດການລະຫັດຜ່ານຂອງທ່ານ, ຈາກນັ້ນວາງມັນໄວ້ດ້ານລຸ່ມເພື່ອກວດສອບ.
+vault-recovery-key-verify-placeholder = ວາງລະຫັດການຟື້ນຕົວທີ່ບັນທຶກໄວ້
+vault-recovery-key-mismatch = ລະຫັດກູ້ຂໍ້ມູນບໍ່ກົງກັນ.
+vault-open = { common-open } Vault
+vault-description = ການຕັ້ງຄ່າການຊິງຄ໌, ເຄື່ອງມື, dotfiles, ແລະຄວາມຮູ້ກັບ Git.
+vault-sync = ຊິງຄ໌
+vault-create = ສ້າງ
+vault-connect = ເຊື່ອມຕໍ່
+vault-github = GitHub
+vault-github-description = ສ້າງບ່ອນເກັບມ້ຽນສ່ວນຕົວຫຼືເລືອກ Vault ທີ່ມີຢູ່ແລ້ວ.
+vault-connect-github = ເຊື່ອມຕໍ່ GitHub
+vault-connected-as = ເຊື່ອມຕໍ່ເປັນ { $name }
+vault-use-repository = ໃຊ້
+vault-repository-name = ຊື່ບ່ອນເກັບມ້ຽນ
+vault-cloud-folder = ໂຟນເດີຄລາວ
+vault-cloud-folder-description = ໃຊ້ໂຟນເດີຈາກ Google Drive, iCloud Drive, Dropbox, ຫຼື OneDrive.
+vault-choose-folder = ເລືອກໂຟນເດີ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ໂຟນເດີ · { common-done }
+vault-private = ຄັງ​ເກັບ​ຮັກ​ສາ​ສ່ວນ​ຕົວ​
+vault-public-warning = ປະຫວັດຄັງເກັບ ແລະຂໍ້ມູນທີ່ເຂົ້າລະຫັດຈະເປັນສາທາລະນະ.
+vault-choose-repository = ເລືອກບ່ອນເກັບມ້ຽນ...
+vault-empty = ຫວ່າງເປົ່າ
+vault-clean = ເຖິງວັນທີ
+vault-not-connected = ບໍ່ໄດ້ເຊື່ອມຕໍ່
+vault-change-count = ການປ່ຽນແປງ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ເລີ່ມຕົ້ນ
 start-tagline = ສັ່ງຄັ້ງດຽວ. ເຮັດຫຍັງກໍໄດ້ໃຫ້ສຳເລັດ.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = ບຸກມາກໃນ { $folder }
 common-cancel = ຍົກເລີກ
 common-delete = ລຶບ
 common-save = ບັນທຶກ
+common-copy = Copy
 common-rename = ປ່ຽນຊື່
 common-expand = ຂະຫຍາຍ
 common-collapse = ຫຍໍ້

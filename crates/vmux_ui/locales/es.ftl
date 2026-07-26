@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } elemento
    *[other] { $count } elementos
 }
+
+tools-title = Herramientas
+tools-search = Buscar paquetes, agentes, MCP, LSP y archivos de configuración…
+tools-open = Abrir Herramientas
+tools-fold = Plegar herramientas
+tools-unfold = Desplegar herramientas
+tools-scanning = Analizando herramientas locales…
+tools-no-installed = No hay herramientas instaladas
+tools-empty = No hay herramientas coincidentes
+tools-empty-detail = Instala un paquete o añade un paquete de archivos de configuración al estilo Stow.
+tools-apply = Aplicar
+tools-homebrew = Homebrew
+tools-homebrew-sync = Las fórmulas y aplicaciones instaladas se sincronizan automáticamente.
+tools-open-brewfile = Abrir Brewfile
+tools-managed = gestionado
+tools-provider-homebrew-formulae = Fórmulas de Homebrew
+tools-provider-homebrew-casks = Aplicaciones de Homebrew
+tools-provider-npm = Paquetes NPM
+tools-provider-acp-agents = Agentes ACP
+tools-provider-lsp-servers = Servidores LSP
+tools-provider-mcp-servers = Servidores MCP
+tools-provider-dotfiles = Archivos de configuración
+tools-status-available = Disponible
+tools-status-missing = Falta
+tools-status-conflict = Conflicto
+tools-forget = Olvidar
+tools-manage = Gestionar
+tools-link = Vincular
+tools-unlink = Desvincular
+tools-import = Importar
+tools-update-count = { $count ->
+    [one] 1 actualización
+   *[other] { $count } actualizaciones
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflicto
+   *[other] { $count } conflictos
+}
+tools-result-applied = Herramientas aplicadas
+tools-result-imported = Herramientas importadas
+tools-result-installed = { $name } instalado
+tools-result-updated = { $name } actualizado
+tools-result-uninstalled = { $name } desinstalado
+tools-result-forgotten = { $name } olvidado
+tools-result-managed = { $name } ahora está gestionado
+tools-result-linked = { $name } vinculado
+tools-result-unlinked = { $name } desvinculado
+vault-title = Vault
+vault-encrypted = Cifrado de extremo a extremo
+vault-passkey = Llave maestra
+vault-passkey-description = Desbloquee esta Bóveda en otros dispositivos sin contraseña.
+vault-passkey-add = Agregar clave de acceso
+vault-passkey-unlock = Descubrir
+vault-passkey-provider-unsupported = Este proveedor de claves de acceso aún no admite el desbloqueo cifrado de Vault.
+vault-recovery-key = Clave de recuperación
+vault-recovery-key-description = Guarde una clave en Bitwarden u otro administrador de contraseñas para recuperar esta Bóveda en un nuevo dispositivo.
+vault-recovery-key-create = Crear clave
+vault-recovery-key-create-failed = No se pudo crear la clave de recuperación.
+vault-recovery-key-save = Guarde esta clave ahora. Vmux no puede volver a mostrarlo.
+vault-recovery-key-saved = Lo guardé
+vault-recovery-key-placeholder = Pegar clave de recuperación
+vault-recovery-key-unlock = Desbloquear
+vault-recovery-key-invalid = Esta clave de recuperación no puede desbloquear la bóveda.
+vault-recovery-key-ready = Clave de recuperación configurada
+vault-recovery-key-upload-pending = La clave se guarda localmente, pero la carga falló. Mantenlo seguro y presiona Sincronizar para volver a intentarlo.
+vault-auto-sync = Copia de seguridad automática
+vault-backup-failed = Error en la copia de seguridad automática. Presione Sincronizar para volver a intentarlo.
+vault-backup-failed-short = Error en la copia de seguridad
+vault-recovery-key-copy-hint = Haga clic para copiar
+vault-recovery-key-copied = copiado
+vault-recovery-key-verify = Guárdelo en su administrador de contraseñas y luego péguelo a continuación para verificarlo.
+vault-recovery-key-verify-placeholder = Pegar la clave de recuperación guardada
+vault-recovery-key-mismatch = La clave de recuperación no coincide.
+vault-open = { common-open } Vault
+vault-description = Sincronice configuraciones, herramientas, archivos de puntos y conocimientos con Git.
+vault-sync = Sincronizar
+vault-create = Crear
+vault-connect = Conectar
+vault-github = GitHub
+vault-github-description = Cree un repositorio privado o elija una bóveda existente.
+vault-connect-github = Conectar GitHub
+vault-connected-as = Conectado como { $name }
+vault-use-repository = Usar
+vault-repository-name = Nombre del repositorio
+vault-cloud-folder = Carpeta en la nube
+vault-cloud-folder-description = Utilice una carpeta de Google Drive, iCloud Drive, Dropbox o OneDrive.
+vault-choose-folder = Elige carpeta
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Carpeta · { common-done }
+vault-private = repositorio privado
+vault-public-warning = El historial del repositorio y los datos cifrados serán públicos.
+vault-choose-repository = Elija un repositorio…
+vault-empty = vacío
+vault-clean = A hoy
+vault-not-connected = No conectado
+vault-change-count = Cambios: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Inicio
 start-tagline = Un prompt. Cualquier cosa, hecha.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Marcador en { $folder }
 common-cancel = Cancelar
 common-delete = Eliminar
 common-save = Guardar
+common-copy = Copy
 common-rename = Renombrar
 common-expand = Expandir
 common-collapse = Contraer

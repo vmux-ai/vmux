@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } üksus
    *[other] { $count } üksust
 }
+
+tools-title = Tööriistad
+tools-search = Otsi pakette, agente, MCP-d, LSP ja seadistusfaile…
+tools-open = Ava tööriistad
+tools-fold = Ahenda tööriistad
+tools-unfold = Laienda tööriistad
+tools-scanning = Kohalike tööriistade skannimine…
+tools-no-installed = Installitud tööriistu pole
+tools-empty = Sobivaid tööriistu pole
+tools-empty-detail = Installi pakett või lisa Stow-laadis seadistusfailide pakett.
+tools-apply = Rakenda
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installitud valemid ja rakendused sünkroonitakse automaatselt.
+tools-open-brewfile = Ava Brewfile
+tools-managed = hallatud
+tools-provider-homebrew-formulae = Homebrew’ valemid
+tools-provider-homebrew-casks = Homebrew’ rakendused
+tools-provider-npm = NPM-paketid
+tools-provider-acp-agents = ACP-agendid
+tools-provider-lsp-servers = LSP-serverid
+tools-provider-mcp-servers = MCP-serverid
+tools-provider-dotfiles = Seadistusfailid
+tools-status-available = Saadaval
+tools-status-missing = Puudub
+tools-status-conflict = Konflikt
+tools-forget = Unusta
+tools-manage = Halda
+tools-link = Lingi
+tools-unlink = Eemalda link
+tools-import = Impordi
+tools-update-count = { $count ->
+    [one] 1 värskendus
+   *[other] { $count } värskendust
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikti
+}
+tools-result-applied = Tööriistad rakendatud
+tools-result-imported = Tööriistad imporditud
+tools-result-installed = { $name } installitud
+tools-result-updated = { $name } värskendatud
+tools-result-uninstalled = { $name } desinstallitud
+tools-result-forgotten = { $name } unustatud
+tools-result-managed = { $name } on nüüd hallatud
+tools-result-linked = { $name } lingitud
+tools-result-unlinked = { $name } link eemaldatud
+vault-title = Vault
+vault-encrypted = Otspunktkrüptega
+vault-passkey = Pääsu
+vault-passkey-description = Avage see Vault teistes seadmetes ilma paroolita.
+vault-passkey-add = Lisa parool
+vault-passkey-unlock = Avage lukustus
+vault-passkey-provider-unsupported = See pääsukoodi pakkuja ei toeta veel krüptitud Vaulti avamist.
+vault-recovery-key = Taastevõti
+vault-recovery-key-description = Salvestage üks võti Bitwardenis või mõnes teises paroolihalduris, et taastada see Vault uues seadmes.
+vault-recovery-key-create = Loo võti
+vault-recovery-key-create-failed = Taastevõtit ei saanud luua.
+vault-recovery-key-save = Salvestage see võti kohe. Vmux ei saa seda uuesti näidata.
+vault-recovery-key-saved = Ma salvestasin selle
+vault-recovery-key-placeholder = Kleebi taastevõti
+vault-recovery-key-unlock = Ava
+vault-recovery-key-invalid = See taastevõti ei saa varahoidlat avada.
+vault-recovery-key-ready = Taastevõti on konfigureeritud
+vault-recovery-key-upload-pending = Võti salvestatakse kohapeal, kuid üleslaadimine ebaõnnestus. Hoidke seda turvaliselt ja vajutage uuesti proovimiseks nuppu Sünkrooni.
+vault-auto-sync = Automaatne varundamine
+vault-backup-failed = Automaatne varundamine ebaõnnestus. Uuesti proovimiseks vajutage sünkrooni.
+vault-backup-failed-short = Varundamine ebaõnnestus
+vault-recovery-key-copy-hint = Kopeerimiseks klõpsake
+vault-recovery-key-copied = Kopeeritud
+vault-recovery-key-verify = Salvestage see oma paroolihaldurisse, seejärel kleepige see kinnitamiseks alla.
+vault-recovery-key-verify-placeholder = Kleebi salvestatud taastevõti
+vault-recovery-key-mismatch = Taastevõti ei ühti.
+vault-open = { common-open } Vault
+vault-description = Sünkroonige seaded, tööriistad, punktifailid ja teadmised Gitiga.
+vault-sync = Sünkroonimine
+vault-create = Loo
+vault-connect = Ühendage
+vault-github = GitHub
+vault-github-description = Looge privaatne hoidla või valige olemasolev Vault.
+vault-connect-github = Ühendage GitHub
+vault-connected-as = Ühendatud kui { $name }
+vault-use-repository = Kasuta
+vault-repository-name = Hoidla nimi
+vault-cloud-folder = Pilvekaust
+vault-cloud-folder-description = Kasutage Google Drive'i, iCloud Drive'i, Dropboxi või OneDrive'i kausta.
+vault-choose-folder = Valige kaust
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Kaust · { common-done }
+vault-private = Privaatne hoidla
+vault-public-warning = Hoidla ajalugu ja krüpteeritud andmed on avalikud.
+vault-choose-repository = Valige hoidla…
+vault-empty = tühi
+vault-clean = Ajakohane
+vault-not-connected = Pole ühendatud
+vault-change-count = Muudatused: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Alusta
 start-tagline = Üks prompt. Kõik tehtud.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Lisa järjehoidja kausta { $folder }
 common-cancel = Tühista
 common-delete = Kustuta
 common-save = Salvesta
+common-copy = Copy
 common-rename = Nimeta ümber
 common-expand = Laienda
 common-collapse = Ahenda

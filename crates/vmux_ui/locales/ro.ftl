@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elemente
 }
+
+tools-title = Instrumente
+tools-search = Caută pachete, agenți, MCP, LSP și fișiere de configurare…
+tools-open = Deschide Instrumente
+tools-fold = Restrânge instrumentele
+tools-unfold = Extinde instrumentele
+tools-scanning = Se scanează instrumentele locale…
+tools-no-installed = Niciun instrument instalat
+tools-empty = Niciun instrument corespunzător
+tools-empty-detail = Instalează un pachet sau adaugă un pachet de fișiere de configurare în stil Stow.
+tools-apply = Aplică
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulele și aplicațiile instalate se sincronizează automat.
+tools-open-brewfile = Deschide Brewfile
+tools-managed = gestionat
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Aplicații Homebrew
+tools-provider-npm = Pachete NPM
+tools-provider-acp-agents = Agenți ACP
+tools-provider-lsp-servers = Servere LSP
+tools-provider-mcp-servers = Servere MCP
+tools-provider-dotfiles = Fișiere de configurare
+tools-status-available = Disponibil
+tools-status-missing = Lipsește
+tools-status-conflict = Neconcordanță
+tools-forget = Uită
+tools-manage = Gestionează
+tools-link = Leagă
+tools-unlink = Dezleagă
+tools-import = Importă
+tools-update-count = { $count ->
+    [one] 1 actualizare
+   *[other] { $count } actualizări
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflict
+   *[other] { $count } conflicte
+}
+tools-result-applied = Instrumente aplicate
+tools-result-imported = Instrumente importate
+tools-result-installed = { $name } instalat
+tools-result-updated = { $name } actualizat
+tools-result-uninstalled = { $name } dezinstalat
+tools-result-forgotten = { $name } uitat
+tools-result-managed = { $name } este acum gestionat
+tools-result-linked = { $name } legat
+tools-result-unlinked = { $name } dezlegat
+vault-title = Vault
+vault-encrypted = Criptat integral
+vault-passkey = Cheie de acces
+vault-passkey-description = Deblocați acest Vault pe alte dispozitive fără parolă.
+vault-passkey-add = Adăugați cheia de acces
+vault-passkey-unlock = Deblocați
+vault-passkey-provider-unsupported = Acest furnizor de chei de acces nu acceptă încă deblocarea criptată a seifului.
+vault-recovery-key = Cheie de recuperare
+vault-recovery-key-description = Salvați o cheie în Bitwarden sau în alt manager de parole pentru a recupera acest Vault pe un dispozitiv nou.
+vault-recovery-key-create = Creați cheia
+vault-recovery-key-create-failed = Cheia de recuperare nu a putut fi creată.
+vault-recovery-key-save = Salvați această cheie acum. Vmux nu-l poate arăta din nou.
+vault-recovery-key-saved = L-am salvat
+vault-recovery-key-placeholder = Lipiți cheia de recuperare
+vault-recovery-key-unlock = Deblocați
+vault-recovery-key-invalid = Această cheie de recuperare nu poate debloca seiful.
+vault-recovery-key-ready = Cheia de recuperare configurată
+vault-recovery-key-upload-pending = Cheia este salvată local, dar încărcarea nu a reușit. Păstrați-l în siguranță și apăsați pe Sincronizare pentru a reîncerca.
+vault-auto-sync = Backup automat
+vault-backup-failed = Backup automat eșuat. Apăsați pe Sincronizare pentru a reîncerca.
+vault-backup-failed-short = Copierea de rezervă a eșuat
+vault-recovery-key-copy-hint = Faceți clic pentru a copia
+vault-recovery-key-copied = Copiat
+vault-recovery-key-verify = Salvați-l în managerul de parole, apoi inserați-l mai jos pentru a verifica.
+vault-recovery-key-verify-placeholder = Inserați cheia de recuperare salvată
+vault-recovery-key-mismatch = Cheia de recuperare nu se potrivește.
+vault-open = { common-open } Vault
+vault-description = Sincronizați setările, instrumentele, fișierele de puncte și cunoștințele cu Git.
+vault-sync = Sincronizare
+vault-create = Crea
+vault-connect = Conectați-vă
+vault-github = GitHub
+vault-github-description = Creați un depozit privat sau alegeți un seif existent.
+vault-connect-github = Conectați GitHub
+vault-connected-as = Conectat ca { $name }
+vault-use-repository = Utilizare
+vault-repository-name = Numele depozitului
+vault-cloud-folder = Dosarul cloud
+vault-cloud-folder-description = Utilizați un folder din Google Drive, iCloud Drive, Dropbox sau OneDrive.
+vault-choose-folder = Alegeți folderul
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Pliant · { common-done }
+vault-private = Depozit privat
+vault-public-warning = Istoricul depozitului și datele criptate vor fi publice.
+vault-choose-repository = Alegeți un depozit...
+vault-empty = gol
+vault-clean = La zi
+vault-not-connected = Nu este conectat
+vault-change-count = Schimbări: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Un singur prompt. Orice, rezolvat.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Pune semn de carte în { $folder }
 common-cancel = Anulează
 common-delete = Șterge
 common-save = Salvează
+common-copy = Copy
 common-rename = Redenumește
 common-expand = Extinde
 common-collapse = Restrânge

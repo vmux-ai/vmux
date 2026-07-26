@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } פּונקט
    *[other] { $count } פּונקטן
 }
+
+tools-title = מכשירים
+tools-search = זוכן פּעקלעך, אַגענטן, MCP, LSP און קאָנפֿיגוראַציע־טעקעס…
+tools-open = עפֿענען מכשירים
+tools-fold = צונויפֿלייגן מכשירים
+tools-unfold = אויספֿאַלטן מכשירים
+tools-scanning = סקאַנירט לאָקאַלע מכשירים…
+tools-no-installed = קיין אינסטאַלירטע מכשירים
+tools-empty = קיין פּאַסיקע מכשירים
+tools-empty-detail = אינסטאַלירט אַ פּעקל אָדער לייגט צו אַ Stow־נוסח פּעקל פֿון קאָנפֿיגוראַציע־טעקעס.
+tools-apply = אָנווענדן
+tools-homebrew = Homebrew
+tools-homebrew-sync = אינסטאַלירטע פֿאָרמולעס און אַפּליקאַציעס ווערן אויטאָמאַטיש סינכראָניזירט.
+tools-open-brewfile = עפֿענען Brewfile
+tools-managed = פאַרוואַלטעט
+tools-provider-homebrew-formulae = Homebrew־פֿאָרמולעס
+tools-provider-homebrew-casks = Homebrew־אַפּליקאַציעס
+tools-provider-npm = NPM־פּעקלעך
+tools-provider-acp-agents = ACP־אַגענטן
+tools-provider-lsp-servers = LSP־סערווערס
+tools-provider-mcp-servers = MCP־סערווערס
+tools-provider-dotfiles = קאָנפֿיגוראַציע־טעקעס
+tools-status-available = פֿאַראַן
+tools-status-missing = פֿעלט
+tools-status-conflict = קאָנפֿליקט
+tools-forget = פֿאַרגעסן
+tools-manage = פאַרוואַלטן
+tools-link = פֿאַרבינדן
+tools-unlink = אָפּבינדן
+tools-import = אימפּאָרטירן
+tools-update-count = { $count ->
+    [one] 1 דערהייַנטיקונג
+   *[other] { $count } דערהייַנטיקונגען
+}
+tools-conflict-count = { $count ->
+    [one] 1 קאָנפֿליקט
+   *[other] { $count } קאָנפֿליקטן
+}
+tools-result-applied = מכשירים אָנגענומען
+tools-result-imported = מכשירים אימפּאָרטירט
+tools-result-installed = { $name } אינסטאַלירט
+tools-result-updated = { $name } דערהייַנטיקט
+tools-result-uninstalled = { $name } אָפּאינסטאַלירט
+tools-result-forgotten = { $name } פֿאַרגעסן
+tools-result-managed = { $name } ווערט איצט פאַרוואַלטעט
+tools-result-linked = { $name } פֿאַרבונדן
+tools-result-unlinked = { $name } אָפּגעבונדן
+vault-title = Vault
+vault-encrypted = פֿון־עק־צו־עק פֿאַרשליסלט
+vault-passkey = Passkey
+vault-passkey-description = ופשליסן דעם וואָלט אויף אנדערע דעוויסעס אָן אַ פּאַראָל.
+vault-passkey-add = לייג אַ פּאַראָל
+vault-passkey-unlock = ופשליסן
+vault-passkey-provider-unsupported = דער פּאַסקיי שפּייַזער שטיצט נאָך נישט ינקריפּטיד וואָלט ופשליסן.
+vault-recovery-key = רעקאָווערי שליסל
+vault-recovery-key-description = היט איין שליסל אין Bitwarden אָדער אן אנדער פּאַראָל פאַרוואַלטער צו צוריקקריגן דעם וואָלט אויף אַ נייַע מיטל.
+vault-recovery-key-create = שאַפֿן שליסל
+vault-recovery-key-create-failed = רעקאָווערי שליסל קען נישט זיין באשאפן.
+vault-recovery-key-save = היט דעם שליסל איצט. Vmux קען נישט ווייַזן עס ווידער.
+vault-recovery-key-saved = איך געראטעוועט עס
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = ופשליסן
+vault-recovery-key-invalid = דער רעקאָווערי שליסל קען נישט ופשליסן די וואָלט.
+vault-recovery-key-ready = רעקאָווערי שליסל קאַנפיגיערד
+vault-recovery-key-upload-pending = דער שליסל איז געראטעוועט לאָוקאַלי, אָבער צופֿעליקער ניט אַנדערש. האַלטן עס זיכער און דריקן סינק צו פּרובירן ווידער.
+vault-auto-sync = אָטאַמאַטיק באַקאַפּ
+vault-backup-failed = אָטאַמאַטיק באַקאַפּ ניט אַנדערש. דרוק סינק צו פּרובירן ווידער.
+vault-backup-failed-short = באַקקופּ דורכפאַל
+vault-recovery-key-copy-hint = דריקט צו קאָפּיע
+vault-recovery-key-copied = קאַפּיד
+vault-recovery-key-verify = היט עס אין דיין פּאַראָל פאַרוואַלטער, און פּאַפּ עס אונטן צו באַשטעטיקן.
+vault-recovery-key-verify-placeholder = פּאַפּ געראטעוועט רעקאָווערי שליסל
+vault-recovery-key-mismatch = רעקאָווערי שליסל טוט נישט גלייַכן.
+vault-open = { common-open } Vault
+vault-description = סינק סעטטינגס, מכשירים, דאָט טעקעס און וויסן מיט Git.
+vault-sync = סינק
+vault-create = שאַפֿן
+vault-connect = פאַרבינדן
+vault-github = GitHub
+vault-github-description = שאַפֿן אַ פּריוואַט ריפּאַזאַטאָרי אָדער קלייַבן אַן יגזיסטינג וואָלט.
+vault-connect-github = קאָננעקט GitHub
+vault-connected-as = פארבונדן ווי { $name }
+vault-use-repository = ניצן
+vault-repository-name = ריפּאַזאַטאָרי נאָמען
+vault-cloud-folder = וואָלקן טעקע
+vault-cloud-folder-description = ניצן אַ טעקע פֿון Google Drive, iCloud Drive, Dropbox אָדער OneDrive.
+vault-choose-folder = קלייַבן טעקע
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = טעקע · { common-done }
+vault-private = פּריוואַט ריפּאַזאַטאָרי
+vault-public-warning = די ריפּאַזאַטאָרי־געשיכטע און פֿאַרשליסלטע דאַטן וועלן זיין עפֿנטלעך.
+vault-choose-repository = קלייַבן אַ ריפּאַזאַטאָרי ...
+vault-empty = ליידיק
+vault-clean = אַרויף צו טאָג
+vault-not-connected = ניט פארבונדן
+vault-change-count = ענדערונגען: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = אָנהייב
 start-tagline = איין פּראָמפּט. אַלץ געטאָן.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = לייענצייכן אין { $folder }
 common-cancel = אַנולירן
 common-delete = אויסמעקן
 common-save = אויפֿהיטן
+common-copy = Copy
 common-rename = איבעררופֿן
 common-expand = אויסברייטערן
 common-collapse = צונויפֿקנייטשן

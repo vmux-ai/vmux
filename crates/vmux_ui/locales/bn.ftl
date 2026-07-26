@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count }টি আইটেম
    *[other] { $count }টি আইটেম
 }
+
+tools-title = সরঞ্জাম
+tools-search = প্যাকেজ, এজেন্ট, MCP, LSP ও কনফিগারেশন ফাইল খুঁজুন…
+tools-open = সরঞ্জাম খুলুন
+tools-fold = সরঞ্জাম গুটিয়ে নিন
+tools-unfold = সরঞ্জাম প্রসারিত করুন
+tools-scanning = স্থানীয় সরঞ্জাম স্ক্যান করা হচ্ছে…
+tools-no-installed = কোনো সরঞ্জাম ইনস্টল করা নেই
+tools-empty = মিলে যাওয়া কোনো সরঞ্জাম নেই
+tools-empty-detail = একটি প্যাকেজ ইনস্টল করুন অথবা Stow-ধাঁচের কনফিগারেশন ফাইল প্যাকেজ যোগ করুন।
+tools-apply = প্রয়োগ করুন
+tools-homebrew = Homebrew
+tools-homebrew-sync = ইনস্টল করা ফর্মুলা ও অ্যাপ্লিকেশন প্যাকেজ স্বয়ংক্রিয়ভাবে সিঙ্ক হয়।
+tools-open-brewfile = Brewfile খুলুন
+tools-managed = পরিচালিত
+tools-provider-homebrew-formulae = Homebrew ফর্মুলা
+tools-provider-homebrew-casks = Homebrew অ্যাপ্লিকেশন প্যাকেজ
+tools-provider-npm = NPM প্যাকেজ
+tools-provider-acp-agents = ACP এজেন্ট
+tools-provider-lsp-servers = LSP সার্ভার
+tools-provider-mcp-servers = MCP সার্ভার
+tools-provider-dotfiles = কনফিগারেশন ফাইল
+tools-status-available = উপলভ্য
+tools-status-missing = অনুপস্থিত
+tools-status-conflict = দ্বন্দ্ব
+tools-forget = ভুলে যান
+tools-manage = পরিচালনা করুন
+tools-link = লিঙ্ক করুন
+tools-unlink = লিঙ্ক সরান
+tools-import = আমদানি করুন
+tools-update-count = { $count ->
+    [one] ১টি আপডেট
+   *[other] { $count }টি আপডেট
+}
+tools-conflict-count = { $count ->
+    [one] ১টি দ্বন্দ্ব
+   *[other] { $count }টি দ্বন্দ্ব
+}
+tools-result-applied = সরঞ্জাম প্রয়োগ করা হয়েছে
+tools-result-imported = সরঞ্জাম আমদানি করা হয়েছে
+tools-result-installed = { $name } ইনস্টল করা হয়েছে
+tools-result-updated = { $name } আপডেট করা হয়েছে
+tools-result-uninstalled = { $name } আনইনস্টল করা হয়েছে
+tools-result-forgotten = { $name } ভুলে যাওয়া হয়েছে
+tools-result-managed = { $name } এখন পরিচালিত
+tools-result-linked = { $name } লিঙ্ক করা হয়েছে
+tools-result-unlinked = { $name }-এর লিঙ্ক সরানো হয়েছে
+vault-title = Vault
+vault-encrypted = প্রান্ত থেকে প্রান্তে এনক্রিপ্ট করা
+vault-passkey = পাসকি
+vault-passkey-description = পাসওয়ার্ড ছাড়াই অন্যান্য ডিভাইসে এই ভল্টটি আনলক করুন।
+vault-passkey-add = পাসকি যোগ করুন
+vault-passkey-unlock = আনলক করুন
+vault-passkey-provider-unsupported = এই পাসকি প্রদানকারী এখনও এনক্রিপ্ট করা ভল্ট আনলক সমর্থন করে না।
+vault-recovery-key = রিকভারি কী
+vault-recovery-key-description = একটি নতুন ডিভাইসে এই ভল্টটি পুনরুদ্ধার করতে Bitwarden বা অন্য পাসওয়ার্ড ম্যানেজারে একটি কী সংরক্ষণ করুন।
+vault-recovery-key-create = কী তৈরি করুন
+vault-recovery-key-create-failed = পুনরুদ্ধার কী তৈরি করা যায়নি।
+vault-recovery-key-save = এখন এই কী সংরক্ষণ করুন। Vmux এটি আবার দেখাতে পারে না।
+vault-recovery-key-saved = আমি এটি সংরক্ষণ করেছি
+vault-recovery-key-placeholder = পেস্ট রিকভারি কী
+vault-recovery-key-unlock = আনলক
+vault-recovery-key-invalid = এই পুনরুদ্ধার কী ভল্টটি আনলক করতে পারে না।
+vault-recovery-key-ready = পুনরুদ্ধার কী কনফিগার করা হয়েছে
+vault-recovery-key-upload-pending = কী স্থানীয়ভাবে সংরক্ষণ করা হয়েছে, কিন্তু আপলোড ব্যর্থ হয়েছে. এটি নিরাপদ রাখুন এবং পুনরায় চেষ্টা করতে সিঙ্ক টিপুন।
+vault-auto-sync = স্বয়ংক্রিয় ব্যাকআপ
+vault-backup-failed = স্বয়ংক্রিয় ব্যাকআপ ব্যর্থ হয়েছে৷ পুনরায় চেষ্টা করতে সিঙ্ক টিপুন।
+vault-backup-failed-short = ব্যাকআপ ব্যর্থ হয়েছে৷
+vault-recovery-key-copy-hint = কপি করতে ক্লিক করুন
+vault-recovery-key-copied = কপি করা হয়েছে
+vault-recovery-key-verify = আপনার পাসওয়ার্ড ম্যানেজারে এটি সংরক্ষণ করুন, তারপর যাচাই করতে এটি নীচে পেস্ট করুন৷
+vault-recovery-key-verify-placeholder = সংরক্ষিত পুনরুদ্ধার কী আটকান
+vault-recovery-key-mismatch = রিকভারি কী মেলে না।
+vault-open = { common-open } Vault
+vault-description = সিঙ্ক সেটিংস, টুলস, ডটফাইলস এবং নলেজ গিটের সাথে।
+vault-sync = সিঙ্ক
+vault-create = তৈরি করুন
+vault-connect = সংযোগ করুন
+vault-github = GitHub
+vault-github-description = একটি ব্যক্তিগত সংগ্রহস্থল তৈরি করুন বা একটি বিদ্যমান ভল্ট চয়ন করুন৷
+vault-connect-github = GitHub সংযোগ করুন
+vault-connected-as = { $name } হিসাবে সংযুক্ত
+vault-use-repository = ব্যবহার করুন
+vault-repository-name = সংগ্রহস্থলের নাম
+vault-cloud-folder = ক্লাউড ফোল্ডার
+vault-cloud-folder-description = গুগল ড্রাইভ, আইক্লাউড ড্রাইভ, ড্রপবক্স বা ওয়ানড্রাইভ থেকে একটি ফোল্ডার ব্যবহার করুন।
+vault-choose-folder = ফোল্ডার নির্বাচন করুন
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ফোল্ডার · { common-done }
+vault-private = ব্যক্তিগত সংগ্রহস্থল
+vault-public-warning = রিপোজিটরির ইতিহাস এবং এনক্রিপ্ট করা ডেটা সর্বজনীন হবে।
+vault-choose-repository = একটি সংগ্রহস্থল চয়ন করুন...
+vault-empty = খালি
+vault-clean = আপ টু ডেট
+vault-not-connected = সংযুক্ত নয়
+vault-change-count = পরিবর্তন: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = শুরু
 start-tagline = এক প্রম্পটে—যেকোনো কাজ সম্পন্ন।
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder }-এ বুকমার্ক করুন
 common-cancel = বাতিল
 common-delete = মুছুন
 common-save = সংরক্ষণ
+common-copy = Copy
 common-rename = নাম বদলান
 common-expand = প্রসারিত করুন
 common-collapse = গুটিয়ে নিন

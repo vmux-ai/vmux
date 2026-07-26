@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } تۈر
    *[other] { $count } تۈر
 }
+
+tools-title = قوراللار
+tools-search = بوغچا، ۋاكالەتچى، MCP، LSP ۋە سەپلىمە ھۆججەتلىرىنى ئىزدەش…
+tools-open = قوراللارنى ئېچىش
+tools-fold = قوراللارنى يىغىش
+tools-unfold = قوراللارنى يېيىش
+tools-scanning = يەرلىك قوراللار تەكشۈرۈلۈۋاتىدۇ…
+tools-no-installed = قاچىلانغان قورال يوق
+tools-empty = ماس كېلىدىغان قورال يوق
+tools-empty-detail = بىر بوغچا قاچىلاڭ ياكى Stow ئۇسلۇبىدىكى سەپلىمە ھۆججەتلىرى بوغچىسىنى قوشۇڭ.
+tools-apply = قوللىنىش
+tools-homebrew = Homebrew
+tools-homebrew-sync = قاچىلانغان فورمۇلا ۋە ئەپلەر ئاپتوماتىك ماسقەدەملىنىدۇ.
+tools-open-brewfile = Brewfile نى ئېچىش
+tools-managed = باشقۇرۇلىدۇ
+tools-provider-homebrew-formulae = Homebrew فورمۇلالىرى
+tools-provider-homebrew-casks = Homebrew ئەپلىرى
+tools-provider-npm = NPM بوغچىلىرى
+tools-provider-acp-agents = ACP ۋاكالەتچىلىرى
+tools-provider-lsp-servers = LSP مۇلازىمېتىرلىرى
+tools-provider-mcp-servers = MCP مۇلازىمېتىرلىرى
+tools-provider-dotfiles = سەپلىمە ھۆججەتلىرى
+tools-status-available = بار
+tools-status-missing = يوق
+tools-status-conflict = توقۇنۇش
+tools-forget = ئۇنتۇش
+tools-manage = باشقۇرۇش
+tools-link = ئۇلاش
+tools-unlink = ئۇلىنىشنى ئۈزۈش
+tools-import = ئەكىرىش
+tools-update-count = { $count ->
+    [one] 1 يېڭىلاش
+   *[other] { $count } يېڭىلاش
+}
+tools-conflict-count = { $count ->
+    [one] 1 توقۇنۇش
+   *[other] { $count } توقۇنۇش
+}
+tools-result-applied = قوراللار قوللىنىلدى
+tools-result-imported = قوراللار ئەكىرىلدى
+tools-result-installed = { $name } قاچىلاندى
+tools-result-updated = { $name } يېڭىلاندى
+tools-result-uninstalled = { $name } ئۆچۈرۈلدى
+tools-result-forgotten = { $name } ئۇنتۇلدى
+tools-result-managed = { $name } ھازىر باشقۇرۇلىدۇ
+tools-result-linked = { $name } ئۇلاندى
+tools-result-unlinked = { $name } نىڭ ئۇلىنىشى ئۈزۈلدى
+vault-title = Vault
+vault-encrypted = باشتىن-ئاخىر شىفىرلانغان
+vault-passkey = Passkey
+vault-passkey-description = پارولسىز باشقا ئۈسكۈنىلەردە بۇ Vault نى ئېچىڭ.
+vault-passkey-add = Passkey نى قوشۇڭ
+vault-passkey-unlock = قۇلۇپ ئېچىش
+vault-passkey-provider-unsupported = بۇ پاسپورت تەمىنلىگۈچى شىفىرلانغان Vault قۇلۇپىنى تېخى قوللىمايدۇ.
+vault-recovery-key = ئەسلىگە كەلتۈرۈش ئاچقۇچى
+vault-recovery-key-description = بۇ ئۈسكۈنىنى يېڭى ئۈسكۈنىدە ئەسلىگە كەلتۈرۈش ئۈچۈن Bitwarden ياكى باشقا پارول باشقۇرغۇچتا بىر ئاچقۇچنى ساقلاڭ.
+vault-recovery-key-create = ئاچقۇچ قۇرۇش
+vault-recovery-key-create-failed = ئەسلىگە كەلتۈرۈش ئاچقىلى بولمايدۇ.
+vault-recovery-key-save = بۇ ئاچقۇچنى ھازىر ساقلاڭ. Vmux ئۇنى قايتا كۆرسىتەلمەيدۇ.
+vault-recovery-key-saved = ئۇنى ساقلىدىم
+vault-recovery-key-placeholder = ئەسلىگە كەلتۈرۈش ئاچقۇچىنى چاپلاڭ
+vault-recovery-key-unlock = قۇلۇپ ئېچىش
+vault-recovery-key-invalid = بۇ ئەسلىگە كەلتۈرۈش ئاچقۇچى Vault نى ئاچالمايدۇ.
+vault-recovery-key-ready = ئەسلىگە كەلتۈرۈش ئاچقۇچى سەپلەندى
+vault-recovery-key-upload-pending = ئاچقۇچ يەرلىكتە ساقلانغان ، ئەمما يوللاش مەغلۇپ بولغان. ئۇنى بىخەتەر ساقلاڭ ۋە Sync نى بېسىپ قايتا سىناڭ.
+vault-auto-sync = ئاپتوماتىك زاپاسلاش
+vault-backup-failed = ئاپتوماتىك زاپاسلاش مەغلۇپ بولدى. قايتا سىناش ئۈچۈن Sync نى بېسىڭ.
+vault-backup-failed-short = زاپاسلاش مەغلۇپ بولدى
+vault-recovery-key-copy-hint = كۆچۈرۈش ئۈچۈن چېكىڭ
+vault-recovery-key-copied = كۆچۈرۈلگەن
+vault-recovery-key-verify = پارول باشقۇرغۇچىڭىزدا ساقلاڭ ، ئاندىن ئاستىغا چاپلاپ دەلىللەڭ.
+vault-recovery-key-verify-placeholder = ئەسلىگە كەلتۈرۈش ئاچقۇچىنى چاپلاڭ
+vault-recovery-key-mismatch = ئەسلىگە كەلتۈرۈش ئاچقۇچى ماس كەلمەيدۇ.
+vault-open = { common-open } Vault
+vault-description = تەڭشەك ، قورال ، چېكىت ۋە بىلىملەرنى Git بىلەن ماسقەدەملەڭ.
+vault-sync = ماسقەدەملەش
+vault-create = قۇر
+vault-connect = ئۇلاڭ
+vault-github = GitHub
+vault-github-description = شەخسىي ئامبار قۇرۇڭ ياكى مەۋجۇت Vault نى تاللاڭ.
+vault-connect-github = GitHub نى ئۇلاڭ
+vault-connected-as = { $name } قىلىپ ئۇلاندى
+vault-use-repository = ئىشلىتىش
+vault-repository-name = ئامبار ئىسمى
+vault-cloud-folder = بۇلۇت قىسقۇچ
+vault-cloud-folder-description = Google Drive ، iCloud Drive ، Dropbox ياكى OneDrive دىن ھۆججەت قىسقۇچ ئىشلىتىڭ.
+vault-choose-folder = ھۆججەت قىسقۇچنى تاللاڭ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ھۆججەت قىسقۇچ · { common-done }
+vault-private = شەخسىي ئامبار
+vault-public-warning = ئامبار تارىخى ۋە شىفىرلانغان سانلىق مەلۇماتلار ئاشكارا بولىدۇ.
+vault-choose-repository = ئامبارنى تاللاڭ…
+vault-empty = قۇرۇق
+vault-clean = ئەڭ يېڭى
+vault-not-connected = ئۇلانمىدى
+vault-change-count = ئۆزگەرتىش: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = باشلاش
 start-tagline = بىر prompt. ھەممىسى تەييار.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ئىچىگە خەتكۈچلەش
 common-cancel = ۋاز كەچ
 common-delete = ئۆچۈر
 common-save = ساقلا
+common-copy = Copy
 common-rename = نام ئۆزگەرت
 common-expand = ياپ
 common-collapse = يىغ

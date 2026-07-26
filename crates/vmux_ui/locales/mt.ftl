@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } oġġett
    *[other] { $count } oġġetti
 }
+
+tools-title = Għodod
+tools-search = Fittex pakketti, aġenti, MCP, LSP u fajls tal-konfigurazzjoni…
+tools-open = Iftaħ l-għodod
+tools-fold = Agħlaq l-għodod
+tools-unfold = Espandi l-għodod
+tools-scanning = Qed jiġu skennjati l-għodod lokali…
+tools-no-installed = M’hemmx għodod installati
+tools-empty = M’hemmx għodod li jaqblu
+tools-empty-detail = Installa pakkett jew żid pakkett ta’ fajls tal-konfigurazzjoni bi stil Stow.
+tools-apply = Applika
+tools-homebrew = Homebrew
+tools-homebrew-sync = Il-formuli u l-applikazzjonijiet installati jissinkronizzaw awtomatikament.
+tools-open-brewfile = Iftaħ Brewfile
+tools-managed = immaniġġjat
+tools-provider-homebrew-formulae = Formuli Homebrew
+tools-provider-homebrew-casks = Applikazzjonijiet Homebrew
+tools-provider-npm = Pakketti NPM
+tools-provider-acp-agents = Aġenti ACP
+tools-provider-lsp-servers = Servers LSP
+tools-provider-mcp-servers = Servers MCP
+tools-provider-dotfiles = Fajls tal-konfigurazzjoni
+tools-status-available = Disponibbli
+tools-status-missing = Nieqes
+tools-status-conflict = Kunflitt
+tools-forget = Nesa
+tools-manage = Immaniġġja
+tools-link = Illinkja
+tools-unlink = Neħħi l-link
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] Aġġornament 1
+   *[other] { $count } aġġornamenti
+}
+tools-conflict-count = { $count ->
+    [one] Kunflitt 1
+   *[other] { $count } kunflitti
+}
+tools-result-applied = L-għodod ġew applikati
+tools-result-imported = L-għodod ġew importati
+tools-result-installed = { $name } ġie installat
+tools-result-updated = { $name } ġie aġġornat
+tools-result-uninstalled = { $name } tneħħa
+tools-result-forgotten = { $name } intesa
+tools-result-managed = { $name } issa huwa mmaniġġjat
+tools-result-linked = { $name } ġie llinkjat
+tools-result-unlinked = Il-link ta’ { $name } tneħħa
+vault-title = Vault
+vault-encrypted = Ikkriptat minn tarf sa tarf
+vault-passkey = Passkey
+vault-passkey-description = Nisfrutta dan il-Vault fuq apparati oħra mingħajr password.
+vault-passkey-add = Żid passkey
+vault-passkey-unlock = Nisfruttaw
+vault-passkey-provider-unsupported = Dan il-fornitur tal-passkey għadu ma jappoġġjax il-ftuħ tal-Vault encrypted.
+vault-recovery-key = Ċavetta tal-Irkupru
+vault-recovery-key-description = Ħlief ċavetta waħda f'Bitwarden jew maniġer ieħor tal-password biex tirkupra dan il-Vault fuq apparat ġdid.
+vault-recovery-key-create = Oħloq ċavetta
+vault-recovery-key-create-failed = Recovery Key ma setgħetx tinħoloq.
+vault-recovery-key-save = Issejvja din iċ-ċavetta issa. Vmux ma jistax jerġa' jurih.
+vault-recovery-key-saved = Salvajtu
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Nisfruttaw
+vault-recovery-key-invalid = Din iċ-Ċavetta tal-Irkupru ma tistax tiftaħ il-Vault.
+vault-recovery-key-ready = Recovery Key konfigurat
+vault-recovery-key-upload-pending = Iċ-ċavetta tiġi ssejvjata lokalment, iżda t-tlugħ fallut. Żommha sigura u agħfas Sinkronizzazzjoni biex terġa' tipprova.
+vault-auto-sync = Backup awtomatiku
+vault-backup-failed = Il-backup awtomatiku falla. Agħfas Sinkronizzazzjoni biex terġa' tipprova.
+vault-backup-failed-short = Il-backup falla
+vault-recovery-key-copy-hint = Ikklikkja biex tikkopja
+vault-recovery-key-copied = Ikkopjati
+vault-recovery-key-verify = Issejvjah fil-maniġer tal-password tiegħek, imbagħad waħħalha hawn taħt biex tivverifika.
+vault-recovery-key-verify-placeholder = Paste ssejvjata Recovery Key
+vault-recovery-key-mismatch = Recovery Key ma taqbilx.
+vault-open = { common-open } Vault
+vault-description = Issinkronizza s-settings, l-għodod, il-dotfiles, u l-Għarfien ma’ Git.
+vault-sync = Sinkronizzazzjoni
+vault-create = Oħloq
+vault-connect = Qabbad
+vault-github = GitHub
+vault-github-description = Oħloq repożitorju privat jew agħżel Vault eżistenti.
+vault-connect-github = Qabbad GitHub
+vault-connected-as = Konnessi bħala { $name }
+vault-use-repository = Użu
+vault-repository-name = Isem tar-repożitorju
+vault-cloud-folder = Fowlder tas-sħab
+vault-cloud-folder-description = Uża folder minn Google Drive, iCloud Drive, Dropbox, jew OneDrive.
+vault-choose-folder = Agħżel folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Repożitorju privat
+vault-public-warning = L-istorja tar-repożitorju u d-data kriptata se jkunu pubbliċi.
+vault-choose-repository = Agħżel repożitorju...
+vault-empty = vojta
+vault-clean = Aġġornata
+vault-not-connected = Mhux konnessi
+vault-change-count = Bidliet: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Ibda
 start-tagline = Prompt wieħed. Kollox, lest.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bookmark f'{ $folder }
 common-cancel = Ikkanċella
 common-delete = Ħassar
 common-save = Issejvja
+common-copy = Copy
 common-rename = Semmi mill-ġdid
 common-expand = Espandi
 common-collapse = Ikkollassa

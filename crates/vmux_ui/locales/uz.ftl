@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ta element
    *[other] { $count } ta element
 }
+
+tools-title = Asboblar
+tools-search = Paketlar, agentlar, MCP, LSP va sozlama fayllarini qidiring…
+tools-open = Asboblarni ochish
+tools-fold = Asboblarni yig‘ish
+tools-unfold = Asboblarni yoyish
+tools-scanning = Mahalliy asboblar tekshirilmoqda…
+tools-no-installed = O‘rnatilgan asbob yo‘q
+tools-empty = Mos asbob yo‘q
+tools-empty-detail = Paket o‘rnating yoki Stow uslubidagi sozlama fayllari paketini qo‘shing.
+tools-apply = Qo‘llash
+tools-homebrew = Homebrew
+tools-homebrew-sync = O‘rnatilgan formulalar va ilovalar avtomatik sinxronlanadi.
+tools-open-brewfile = Brewfile faylini ochish
+tools-managed = boshqarilmoqda
+tools-provider-homebrew-formulae = Homebrew formulalari
+tools-provider-homebrew-casks = Homebrew ilovalari
+tools-provider-npm = NPM paketlari
+tools-provider-acp-agents = ACP agentlari
+tools-provider-lsp-servers = LSP serverlari
+tools-provider-mcp-servers = MCP serverlari
+tools-provider-dotfiles = Sozlama fayllari
+tools-status-available = Mavjud
+tools-status-missing = Yo‘q
+tools-status-conflict = Ziddiyat
+tools-forget = Unutish
+tools-manage = Boshqarish
+tools-link = Bog‘lash
+tools-unlink = Bog‘lanishni uzish
+tools-import = Import qilish
+tools-update-count = { $count ->
+    [one] 1 yangilanish
+   *[other] { $count } yangilanish
+}
+tools-conflict-count = { $count ->
+    [one] 1 ziddiyat
+   *[other] { $count } ziddiyat
+}
+tools-result-applied = Asboblar qo‘llandi
+tools-result-imported = Asboblar import qilindi
+tools-result-installed = { $name } o‘rnatildi
+tools-result-updated = { $name } yangilandi
+tools-result-uninstalled = { $name } olib tashlandi
+tools-result-forgotten = { $name } unutildi
+tools-result-managed = { $name } endi boshqariladi
+tools-result-linked = { $name } bog‘landi
+tools-result-unlinked = { $name } bog‘lanishi uzildi
+vault-title = Vault
+vault-encrypted = Boshidan oxirigacha shifrlangan
+vault-passkey = O'tish kaliti
+vault-passkey-description = Bu Vaultni boshqa qurilmalarda parolsiz oching.
+vault-passkey-add = O'tish kalitini qo'shing
+vault-passkey-unlock = Qulfni ochish
+vault-passkey-provider-unsupported = Bu kalit provayderi hali shifrlangan Vault qulfini ochishni qo‘llab-quvvatlamaydi.
+vault-recovery-key = Qayta tiklash kaliti
+vault-recovery-key-description = Bitwarden yoki boshqa parol menejerida ushbu Vaultni yangi qurilmada tiklash uchun bitta kalitni saqlang.
+vault-recovery-key-create = Kalit yaratish
+vault-recovery-key-create-failed = Qayta tiklash kalitini yaratib bo‘lmadi.
+vault-recovery-key-save = Ushbu kalitni hozir saqlang. Vmux uni qayta ko'rsatolmaydi.
+vault-recovery-key-saved = Men uni saqlab qoldim
+vault-recovery-key-placeholder = Qayta tiklash kalitini joylashtirish
+vault-recovery-key-unlock = Qulfni ochish
+vault-recovery-key-invalid = Ushbu Qutqaruv kaliti Vault qulfini ocha olmaydi.
+vault-recovery-key-ready = Qayta tiklash kaliti sozlangan
+vault-recovery-key-upload-pending = Kalit mahalliy sifatida saqlanadi, lekin yuklanmadi. Uni xavfsiz saqlang va qayta urinish uchun Sinxronlash tugmasini bosing.
+vault-auto-sync = Avtomatik zaxiralash
+vault-backup-failed = Avtomatik zaxiralash amalga oshmadi. Qayta urinish uchun Sinxronlash tugmasini bosing.
+vault-backup-failed-short = Zaxiralash amalga oshmadi
+vault-recovery-key-copy-hint = Nusxa olish uchun bosing
+vault-recovery-key-copied = Ko‘chirildi
+vault-recovery-key-verify = Uni parol menejerida saqlang, keyin tasdiqlash uchun uni pastga qo'ying.
+vault-recovery-key-verify-placeholder = Saqlangan tiklash kalitini joylashtiring
+vault-recovery-key-mismatch = Qayta tiklash kaliti mos kelmaydi.
+vault-open = { common-open } Vault
+vault-description = Sozlamalar, asboblar, nuqta fayllari va bilimlarni Git bilan sinxronlashtiring.
+vault-sync = Sinxronlash
+vault-create = Yaratish
+vault-connect = Ulanish
+vault-github = GitHub
+vault-github-description = Shaxsiy ombor yarating yoki mavjud Vaultni tanlang.
+vault-connect-github = GitHub-ga ulaning
+vault-connected-as = { $name } sifatida ulangan
+vault-use-repository = Foydalanish
+vault-repository-name = Repozitoriy nomi
+vault-cloud-folder = Bulut papkasi
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox yoki OneDrive papkasidan foydalaning.
+vault-choose-folder = Jildni tanlang
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Jild · { common-done }
+vault-private = Shaxsiy ombor
+vault-public-warning = Repozitoriy tarixi va shifrlangan maʼlumotlar hammaga ochiq bo‘ladi.
+vault-choose-repository = Repozitoriyni tanlang…
+vault-empty = bo'sh
+vault-clean = Hozirgi kungacha
+vault-not-connected = Ulanmagan
+vault-change-count = O'zgarishlar: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Boshlash
 start-tagline = Bitta prompt. Hammasi tayyor.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ichida xatcho‘p qilish
 common-cancel = Bekor qilish
 common-delete = O‘chirish
 common-save = Saqlash
+common-copy = Copy
 common-rename = Nomini o‘zgartirish
 common-expand = Yoyish
 common-collapse = Yig‘ish

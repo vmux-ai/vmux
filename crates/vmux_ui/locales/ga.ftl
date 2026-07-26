@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } mhír
    *[other] { $count } mír
 }
+
+tools-title = Uirlisí
+tools-search = Cuardaigh pacáistí, gníomhairí, MCP, LSP agus comhaid chumraíochta…
+tools-open = Oscail Uirlisí
+tools-fold = Fill na huirlisí
+tools-unfold = Leathnaigh na huirlisí
+tools-scanning = Uirlisí áitiúla á scanadh…
+tools-no-installed = Níl aon uirlis suiteáilte
+tools-empty = Níl aon uirlis mheaitseála ann
+tools-empty-detail = Suiteáil pacáiste nó cuir pacáiste comhad cumraíochta ar nós Stow leis.
+tools-apply = Cuir i bhfeidhm
+tools-homebrew = Homebrew
+tools-homebrew-sync = Sioncronaítear foirmlí agus feidhmchláir shuiteáilte go huathoibríoch.
+tools-open-brewfile = Oscail Brewfile
+tools-managed = bainistithe
+tools-provider-homebrew-formulae = Foirmlí Homebrew
+tools-provider-homebrew-casks = Feidhmchláir Homebrew
+tools-provider-npm = Pacáistí NPM
+tools-provider-acp-agents = Gníomhairí ACP
+tools-provider-lsp-servers = Freastalaithe LSP
+tools-provider-mcp-servers = Freastalaithe MCP
+tools-provider-dotfiles = Comhaid chumraíochta
+tools-status-available = Ar fáil
+tools-status-missing = Ar iarraidh
+tools-status-conflict = Coimhlint
+tools-forget = Déan dearmad
+tools-manage = Bainistigh
+tools-link = Nasc
+tools-unlink = Dínasc
+tools-import = Iompórtáil
+tools-update-count = { $count ->
+    [one] 1 nuashonrú
+   *[other] { $count } nuashonrú
+}
+tools-conflict-count = { $count ->
+    [one] 1 choimhlint
+   *[other] { $count } coimhlint
+}
+tools-result-applied = Uirlisí curtha i bhfeidhm
+tools-result-imported = Uirlisí iompórtáilte
+tools-result-installed = { $name } suiteáilte
+tools-result-updated = { $name } nuashonraithe
+tools-result-uninstalled = { $name } díshuiteáilte
+tools-result-forgotten = Rinneadh dearmad ar { $name }
+tools-result-managed = Tá { $name } á bhainistiú anois
+tools-result-linked = { $name } nasctha
+tools-result-unlinked = { $name } dínasctha
+vault-title = Vault
+vault-encrypted = Criptithe ó cheann ceann
+vault-passkey = Pas eochair
+vault-passkey-description = Díghlasáil an cruinneachán seo ar ghléasanna eile gan pasfhocal.
+vault-passkey-add = Cuir pasfhocal leis
+vault-passkey-unlock = Díghlasáil
+vault-passkey-provider-unsupported = Ní thacaíonn an soláthraí pas-eochair seo le díghlasáil Vault criptithe go fóill.
+vault-recovery-key = Eochair Athshlánaithe
+vault-recovery-key-description = Sábháil eochair amháin in Bitwarden nó bainisteoir pasfhocail eile chun an Cruinneachán seo a ghnóthú ar ghléas nua.
+vault-recovery-key-create = Cruthaigh eochair
+vault-recovery-key-create-failed = Níorbh fhéidir Eochair Athshlánaithe a chruthú.
+vault-recovery-key-save = Sábháil an eochair seo anois. Ní féidir le Vmux é a thaispeáint arís.
+vault-recovery-key-saved = Shábháil mé é
+vault-recovery-key-placeholder = Paste Recovery Eochair
+vault-recovery-key-unlock = Díghlasáil
+vault-recovery-key-invalid = Ní féidir leis an Eochair Athshlánaithe seo an cruinneachán a dhíghlasáil.
+vault-recovery-key-ready = Eochair Athshlánaithe cumraithe
+vault-recovery-key-upload-pending = Sábháiltear an eochair go háitiúil, ach theip ar an uaslódáil. Coinnigh sábháilte é agus brúigh Sync chun triail eile a bhaint as.
+vault-auto-sync = Cúltaca uathoibríoch
+vault-backup-failed = Theip ar chúltaca uathoibríoch. Brúigh Sync chun triail eile a bhaint as.
+vault-backup-failed-short = Theip ar an gcúltaca
+vault-recovery-key-copy-hint = Cliceáil chun cóip a dhéanamh
+vault-recovery-key-copied = Cóipeáladh
+vault-recovery-key-verify = Sábháil i do bhainisteoir pasfhocail é, ansin greamaigh thíos chun é a fhíorú.
+vault-recovery-key-verify-placeholder = Greamaigh Eochair Aisghabhála sábháilte
+vault-recovery-key-mismatch = Ní hionann an Eochair Athshlánaithe.
+vault-open = { common-open } Vault
+vault-description = Sioncronaigh socruithe, uirlisí, poncchomhaid, agus Eolas le Git.
+vault-sync = Sioncrónaigh
+vault-create = Cruthaigh
+vault-connect = Ceangail
+vault-github = GitHub
+vault-github-description = Cruthaigh stór príobháideach nó roghnaigh Cruinneachán atá ann cheana féin.
+vault-connect-github = Ceangail GitHub
+vault-connected-as = Ceangailte mar { $name }
+vault-use-repository = Úsáid
+vault-repository-name = Ainm stór
+vault-cloud-folder = Fillteán scamall
+vault-cloud-folder-description = Bain úsáid as fillteán ó Google Drive, iCloud Drive, Dropbox, nó OneDrive.
+vault-choose-folder = Roghnaigh fillteán
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Fillteán · { common-done }
+vault-private = Stór príobháideach
+vault-public-warning = Beidh stair an taisclainne agus na sonraí criptithe poiblí.
+vault-choose-repository = Roghnaigh stór…
+vault-empty = folamh
+vault-clean = Suas chun dáta
+vault-not-connected = Gan ceangal
+vault-change-count = Athruithe: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tosaigh
 start-tagline = Leid amháin. Déanta, pé rud é.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Cuir leabharmharc in { $folder }
 common-cancel = Cealaigh
 common-delete = Scrios
 common-save = Sábháil
+common-copy = Copy
 common-rename = Athainmnigh
 common-expand = Leathnaigh
 common-collapse = Laghdaigh

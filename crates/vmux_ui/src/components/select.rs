@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
+use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::icon;
+use dioxus_primitives::merge_attributes;
 use dioxus_primitives::select::{
     self, SelectGroupLabelProps, SelectGroupProps, SelectListProps, SelectOptionProps, SelectProps,
     SelectTriggerProps, SelectValueProps,
@@ -7,7 +9,7 @@ use dioxus_primitives::select::{
 
 const SELECT_ROOT: &str = "relative";
 
-const SELECT_TRIGGER: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background px-3 py-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors dark:bg-card dark:shadow-[inset_0_0_0_1px_var(--primary)] hover:bg-accent hover:text-foreground focus-visible:outline-none data-[disabled=true]:cursor-not-allowed";
+const SELECT_TRIGGER: &str = "relative box-border flex cursor-pointer flex-row items-center justify-between gap-1 rounded-md border-0 bg-background py-2 pl-3 pr-4 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] transition-colors dark:bg-card dark:shadow-[inset_0_0_0_1px_var(--primary)] hover:bg-accent hover:text-foreground focus-visible:outline-none data-[disabled=true]:cursor-not-allowed";
 
 const SELECT_LIST: &str = "absolute left-0 top-full z-[1000] mt-1 min-w-full origin-top rounded-lg border-0 bg-background p-1 opacity-0 shadow-[inset_0_0_0_1px_var(--border)] will-change-[transform,opacity] data-[state=closed]:pointer-events-none data-[state=closed]:animate-[dx-fade-zoom-out_150ms_ease-in_forwards] data-[state=open]:pointer-events-auto data-[state=open]:animate-[dx-fade-zoom-in_150ms_ease-out_forwards] dark:bg-muted dark:shadow-[inset_0_0_0_1px_var(--primary)]";
 
@@ -17,9 +19,10 @@ const SELECT_OPTION: &str = "flex cursor-pointer items-center justify-between ro
 
 #[component]
 pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element {
+    let base = attributes!(div { class: SELECT_ROOT });
+    let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::Select {
-            class: SELECT_ROOT,
             value: props.value,
             default_value: props.default_value,
             on_value_change: props.on_value_change,
@@ -28,7 +31,7 @@ pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element 
             placeholder: props.placeholder,
             roving_loop: props.roving_loop,
             typeahead_timeout: props.typeahead_timeout,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
         }
     }
@@ -36,12 +39,16 @@ pub fn Select<T: Clone + PartialEq + 'static>(props: SelectProps<T>) -> Element 
 
 #[component]
 pub fn SelectTrigger(props: SelectTriggerProps) -> Element {
+    let base = attributes!(button {
+        class: SELECT_TRIGGER
+    });
+    let merged = merge_attributes(vec![base, props.attributes]);
     rsx! {
         select::SelectTrigger {
-            class: SELECT_TRIGGER,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
             icon::Icon {
+                class: "shrink-0",
                 width: "20px",
                 height: "20px",
                 stroke: "currentColor",
@@ -60,11 +67,12 @@ pub fn SelectValue(props: SelectValueProps) -> Element {
 
 #[component]
 pub fn SelectList(props: SelectListProps) -> Element {
+    let base = attributes!(div { class: SELECT_LIST });
+    let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::SelectList {
-            class: SELECT_LIST,
             id: props.id,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
         }
     }
@@ -84,11 +92,14 @@ pub fn SelectGroup(props: SelectGroupProps) -> Element {
 
 #[component]
 pub fn SelectGroupLabel(props: SelectGroupLabelProps) -> Element {
+    let base = attributes!(div {
+        class: SELECT_GROUP_LABEL
+    });
+    let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::SelectGroupLabel {
-            class: SELECT_GROUP_LABEL,
             id: props.id,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
         }
     }
@@ -96,9 +107,12 @@ pub fn SelectGroupLabel(props: SelectGroupLabelProps) -> Element {
 
 #[component]
 pub fn SelectOption<T: Clone + PartialEq + 'static>(props: SelectOptionProps<T>) -> Element {
+    let base = attributes!(div {
+        class: SELECT_OPTION
+    });
+    let merged = merge_attributes(vec![base, props.attributes.clone()]);
     rsx! {
         select::SelectOption::<T> {
-            class: SELECT_OPTION,
             value: props.value,
             text_value: props.text_value,
             disabled: props.disabled,
@@ -106,7 +120,7 @@ pub fn SelectOption<T: Clone + PartialEq + 'static>(props: SelectOptionProps<T>)
             index: props.index,
             aria_label: props.aria_label,
             aria_roledescription: props.aria_roledescription,
-            attributes: props.attributes,
+            attributes: merged,
             {props.children}
         }
     }

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Mga kagamitan
+tools-search = Maghanap ng mga pakete, ahente, MCP, LSP at talaksan ng pagsasaayos…
+tools-open = Buksan ang mga kagamitan
+tools-fold = Itiklop ang mga kagamitan
+tools-unfold = Iladlad ang mga kagamitan
+tools-scanning = Sinusuri ang mga lokal na kagamitan…
+tools-no-installed = Walang nakatalagang kagamitan
+tools-empty = Walang tumutugmang kagamitan
+tools-empty-detail = Maglagay ng pakete o magdagdag ng Stow-style na pakete ng mga talaksan ng pagsasaayos.
+tools-apply = Ilapat
+tools-homebrew = Homebrew
+tools-homebrew-sync = Awtomatikong pinagtutugma ang mga nakatalagang pormula at aplikasyon.
+tools-open-brewfile = Buksan ang Brewfile
+tools-managed = pinamamahalaan
+tools-provider-homebrew-formulae = Mga pormula ng Homebrew
+tools-provider-homebrew-casks = Mga aplikasyon ng Homebrew
+tools-provider-npm = Mga pakete ng NPM
+tools-provider-acp-agents = Mga ahente ng ACP
+tools-provider-lsp-servers = Mga tagapagsilbi ng LSP
+tools-provider-mcp-servers = Mga tagapagsilbi ng MCP
+tools-provider-dotfiles = Mga talaksan ng pagsasaayos
+tools-status-available = Magagamit
+tools-status-missing = Nawawala
+tools-status-conflict = Salungatan
+tools-forget = Kalimutan
+tools-manage = Pamahalaan
+tools-link = Iugnay
+tools-unlink = Alisin ang ugnay
+tools-import = Ipasok
+tools-update-count = { $count ->
+    [one] 1 pagbabago
+   *[other] { $count } pagbabago
+}
+tools-conflict-count = { $count ->
+    [one] 1 salungatan
+   *[other] { $count } salungatan
+}
+tools-result-applied = Nailapat ang mga kagamitan
+tools-result-imported = Naipasok ang mga kagamitan
+tools-result-installed = Nailagay ang { $name }
+tools-result-updated = Nabago ang { $name }
+tools-result-uninstalled = Inalis ang { $name }
+tools-result-forgotten = Kinalimutan ang { $name }
+tools-result-managed = Pinamamahalaan na ang { $name }
+tools-result-linked = Iniugnay ang { $name }
+tools-result-unlinked = Inalis ang ugnay ng { $name }
+vault-title = Vault
+vault-encrypted = Naka-encrypt nang end-to-end
+vault-passkey = Passkey
+vault-passkey-description = I-unlock ang Vault na ito sa iba pang device na walang password.
+vault-passkey-add = Magdagdag ng passkey
+vault-passkey-unlock = I-unlock
+vault-passkey-provider-unsupported = Hindi pa sinusuportahan ng passkey provider na ito ang naka-encrypt na Vault unlock.
+vault-recovery-key = Susi sa Pagbawi
+vault-recovery-key-description = Mag-save ng isang key sa Bitwarden o isa pang tagapamahala ng password upang mabawi ang Vault na ito sa isang bagong device.
+vault-recovery-key-create = Lumikha ng susi
+vault-recovery-key-create-failed = Hindi magawa ang Recovery Key.
+vault-recovery-key-save = I-save ang key na ito ngayon. Hindi ito maipapakita muli ng Vmux.
+vault-recovery-key-saved = Iniligtas ko ito
+vault-recovery-key-placeholder = Idikit ang Recovery Key
+vault-recovery-key-unlock = I-unlock
+vault-recovery-key-invalid = Hindi ma-unlock ng Recovery Key na ito ang Vault.
+vault-recovery-key-ready = Na-configure ang Recovery Key
+vault-recovery-key-upload-pending = Ang susi ay lokal na naka-save, ngunit nabigo ang pag-upload. Panatilihin itong ligtas at pindutin ang I-sync upang subukang muli.
+vault-auto-sync = Awtomatikong backup
+vault-backup-failed = Nabigo ang awtomatikong pag-backup. Pindutin ang Sync upang subukang muli.
+vault-backup-failed-short = Nabigo ang backup
+vault-recovery-key-copy-hint = I-click para kopyahin
+vault-recovery-key-copied = Kinopya
+vault-recovery-key-verify = I-save ito sa iyong password manager, pagkatapos ay i-paste ito sa ibaba para i-verify.
+vault-recovery-key-verify-placeholder = I-paste ang naka-save na Recovery Key
+vault-recovery-key-mismatch = Hindi tugma ang Recovery Key.
+vault-open = { common-open } Vault
+vault-description = I-sync ang mga setting, tool, dotfile, at Kaalaman sa Git.
+vault-sync = I-sync
+vault-create = Lumikha
+vault-connect = Kumonekta
+vault-github = GitHub
+vault-github-description = Gumawa ng pribadong repositoryo o pumili ng kasalukuyang Vault.
+vault-connect-github = Ikonekta ang GitHub
+vault-connected-as = Nakakonekta bilang { $name }
+vault-use-repository = Gamitin
+vault-repository-name = Pangalan ng repositoryo
+vault-cloud-folder = Cloud folder
+vault-cloud-folder-description = Gumamit ng folder mula sa Google Drive, iCloud Drive, Dropbox, o OneDrive.
+vault-choose-folder = Pumili ng folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Pribadong imbakan
+vault-public-warning = Magiging pampubliko ang kasaysayan ng repositoryo at naka-encrypt na data.
+vault-choose-repository = Pumili ng repositoryo...
+vault-empty = walang laman
+vault-clean = Napapanahon
+vault-not-connected = Hindi konektado
+vault-change-count = Mga pagbabago: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Simula
 start-tagline = Isang prompt. Kahit ano, tapos.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Ipananda sa { $folder }
 common-cancel = Kanselahin
 common-delete = Burahin
 common-save = I-save
+common-copy = Copy
 common-rename = Palitan ang pangalan
 common-expand = Palawakin
 common-collapse = I-collapse

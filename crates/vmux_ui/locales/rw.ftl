@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] ikintu { $count }
    *[other] ibintu { $count }
 }
+
+tools-title = Ibikoresho
+tools-search = Shakisha amapaki, abakozi, MCP, LSP n’amadosiye y’imiterere…
+tools-open = Fungura ibikoresho
+tools-fold = Hina ibikoresho
+tools-unfold = Rambura ibikoresho
+tools-scanning = Gusuzuma ibikoresho byo kuri mudasobwa…
+tools-no-installed = Nta bikoresho byashyizwemo
+tools-empty = Nta bikoresho bihuye
+tools-empty-detail = Shyiramo ipaki cyangwa wongereho ipaki y’amadosiye y’imiterere imeze nka Stow.
+tools-apply = Koresha
+tools-homebrew = Homebrew
+tools-homebrew-sync = Amabwiriza na porogaramu byashyizwemo bihuza byikora.
+tools-open-brewfile = Fungura Brewfile
+tools-managed = gicungwa
+tools-provider-homebrew-formulae = Amabwiriza ya Homebrew
+tools-provider-homebrew-casks = Porogaramu za Homebrew
+tools-provider-npm = Amapaki ya NPM
+tools-provider-acp-agents = Abakozi ba ACP
+tools-provider-lsp-servers = Seriveri za LSP
+tools-provider-mcp-servers = Seriveri za MCP
+tools-provider-dotfiles = Amadosiye y’imiterere
+tools-status-available = Kirahari
+tools-status-missing = Kirabuze
+tools-status-conflict = Ukudahuza
+tools-forget = Ibagiwe
+tools-manage = Gucunga
+tools-link = Huza
+tools-unlink = Tandukanya
+tools-import = Zana
+tools-update-count = { $count ->
+    [one] Ivugurura 1
+   *[other] Amavugurura { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ukudahuza 1
+   *[other] Ukudahuza { $count }
+}
+tools-result-applied = Ibikoresho byakoreshejwe
+tools-result-imported = Ibikoresho byazanywe
+tools-result-installed = { $name } yashyizwemo
+tools-result-updated = { $name } yavuguruwe
+tools-result-uninstalled = { $name } yakuweho
+tools-result-forgotten = { $name } yibagiranye
+tools-result-managed = { $name } ubu iracungwa
+tools-result-linked = { $name } yahujwe
+tools-result-unlinked = { $name } yatandukanyijwe
+vault-title = Vault
+vault-encrypted = Byabitswe kuva ku mpera kugeza ku yindi
+vault-passkey = Passkey
+vault-passkey-description = Fungura iyi Vault kubindi bikoresho udafite ijambo ryibanga.
+vault-passkey-add = Ongeraho passkey
+vault-passkey-unlock = Fungura
+vault-passkey-provider-unsupported = Uyu mutanga wa passkey ntabwo ashyigikiye ibanga rya Vault rifungura.
+vault-recovery-key = Urufunguzo rwo Kugarura
+vault-recovery-key-description = Bika urufunguzo rumwe muri Bitwarden cyangwa irindi jambo ryibanga kugirango ugarure iyi Vault ku gikoresho gishya.
+vault-recovery-key-create = Kora urufunguzo
+vault-recovery-key-create-failed = Urufunguzo rwo Kugarura ntirushobora kuremwa.
+vault-recovery-key-save = Bika urufunguzo nonaha. Vmux ntishobora kongera kwerekana.
+vault-recovery-key-saved = Nabitse
+vault-recovery-key-placeholder = Shyira urufunguzo rwo kugarura
+vault-recovery-key-unlock = Fungura
+vault-recovery-key-invalid = Urufunguzo rwo Kugarura ntirushobora gufungura Ububiko.
+vault-recovery-key-ready = Urufunguzo rwo Kugarura rwashyizweho
+vault-recovery-key-upload-pending = Urufunguzo rwabitswe mugace, ariko kohereza byarananiranye. Komeza umutekano hanyuma ukande Sync kugirango ugerageze.
+vault-auto-sync = Ububiko bwikora
+vault-backup-failed = Gukuramo byikora byananiranye. Kanda Sync kugirango ugerageze.
+vault-backup-failed-short = Kubika byananiranye
+vault-recovery-key-copy-hint = Kanda kugirango wandukure
+vault-recovery-key-copied = Yandukuwe
+vault-recovery-key-verify = Bika mu ijambo ryibanga ryibanga, hanyuma ubishyire munsi kugirango urebe.
+vault-recovery-key-verify-placeholder = Shyira urufunguzo rwo kugarura
+vault-recovery-key-mismatch = Urufunguzo rwo Kugarura ntabwo ruhuye.
+vault-open = { common-open } Vault
+vault-description = Guhuza igenamiterere, ibikoresho, utudomo, nubumenyi hamwe na Git.
+vault-sync = Guhuza
+vault-create = Kurema
+vault-connect = Ihuze
+vault-github = GitHub
+vault-github-description = Kora ububiko bwihariye cyangwa uhitemo Ububiko buriho.
+vault-connect-github = Huza GitHub
+vault-connected-as = Byahujwe nka { $name }
+vault-use-repository = Koresha
+vault-repository-name = Izina ryububiko
+vault-cloud-folder = Ububiko
+vault-cloud-folder-description = Koresha ububiko bwa Google Drive, iCloud Drive, Dropbox, cyangwa OneDrive.
+vault-choose-folder = Hitamo ububiko
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Ububiko · { common-done }
+vault-private = Ububiko bwite
+vault-public-warning = Amateka y'ububiko n'amakuru yabitswe mu ibanga bizaba rusange.
+vault-choose-repository = Hitamo ububiko…
+vault-empty = ubusa
+vault-clean = Kugeza ubu
+vault-not-connected = Ntabwo bihujwe
+vault-change-count = Impinduka: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Tangira
 start-tagline = Prompt imwe. Ibyo ushaka, birakorwa.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Akamenyetso muri { $folder }
 common-cancel = Kureka
 common-delete = Gusiba
 common-save = Kubika
+common-copy = Copy
 common-rename = Guhindura izina
 common-expand = Kwagura
 common-collapse = Kuzinga

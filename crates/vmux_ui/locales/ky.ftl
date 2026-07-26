@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } нерсе
    *[other] { $count } нерсе
 }
+
+tools-title = Куралдар
+tools-search = Топтомдорду, агенттерди, MCP, LSPн жана жөндөө файлдарын издөө…
+tools-open = Куралдарды ачуу
+tools-fold = Куралдарды жыйноо
+tools-unfold = Куралдарды жаюу
+tools-scanning = Жергиликтүү куралдар сканерленүүдө…
+tools-no-installed = Орнотулган куралдар жок
+tools-empty = Дал келген куралдар жок
+tools-empty-detail = Топтом орнотуңуз же Stow стилиндеги жөндөө файлдарынын топтомун кошуңуз.
+tools-apply = Колдонуу
+tools-homebrew = Homebrew
+tools-homebrew-sync = Орнотулган формулалар жана колдонмолор автоматтык түрдө шайкештештирилет.
+tools-open-brewfile = Brewfile файлын ачуу
+tools-managed = башкарылуучу
+tools-provider-homebrew-formulae = Homebrew формулалары
+tools-provider-homebrew-casks = Homebrew колдонмолору
+tools-provider-npm = NPM топтомдору
+tools-provider-acp-agents = ACP агенттери
+tools-provider-lsp-servers = LSP серверлери
+tools-provider-mcp-servers = MCP серверлери
+tools-provider-dotfiles = Жөндөө файлдары
+tools-status-available = Жеткиликтүү
+tools-status-missing = Жок
+tools-status-conflict = Карама-каршылык
+tools-forget = Унутуу
+tools-manage = Башкаруу
+tools-link = Байлоо
+tools-unlink = Байланышты үзүү
+tools-import = Импорттоо
+tools-update-count = { $count ->
+    [one] 1 жаңыртуу
+   *[other] { $count } жаңыртуу
+}
+tools-conflict-count = { $count ->
+    [one] 1 карама-каршылык
+   *[other] { $count } карама-каршылык
+}
+tools-result-applied = Куралдар колдонулду
+tools-result-imported = Куралдар импорттолду
+tools-result-installed = { $name } орнотулду
+tools-result-updated = { $name } жаңыртылды
+tools-result-uninstalled = { $name } өчүрүлдү
+tools-result-forgotten = { $name } унутулду
+tools-result-managed = { $name } эми башкарылат
+tools-result-linked = { $name } байланды
+tools-result-unlinked = { $name } байланышы үзүлдү
+vault-title = Vault
+vault-encrypted = Башынан аягына чейин шифрленген
+vault-passkey = Passkey
+vault-passkey-description = Сырсөзсүз башка түзмөктөрдө бул Vault кулпусун ачыңыз.
+vault-passkey-add = Кошуу ачкыч
+vault-passkey-unlock = Кулпуну ачуу
+vault-passkey-provider-unsupported = Бул ачкыч камсыздоочу шифрленген Vault кулпусун азырынча колдобойт.
+vault-recovery-key = Калыбына келтирүүчү ачкыч
+vault-recovery-key-description = Бул Vaultту жаңы түзмөктө калыбына келтирүү үчүн Bitwarden же башка сырсөз башкаргычында бир ачкычты сактаңыз.
+vault-recovery-key-create = ачкыч түзүү
+vault-recovery-key-create-failed = Калыбына келтирүүчү ачкыч түзүлбөй койду.
+vault-recovery-key-save = Бул ачкычты азыр сактаңыз. Vmux аны кайра көрсөтө албайт.
+vault-recovery-key-saved = Мен аны сактадым
+vault-recovery-key-placeholder = Паста калыбына келтирүүчү ачкыч
+vault-recovery-key-unlock = Кулпуну ачуу
+vault-recovery-key-invalid = Бул калыбына келтирүүчү ачкыч Vault кулпусун ача албайт.
+vault-recovery-key-ready = Калыбына келтирүү ачкычы конфигурацияланган
+vault-recovery-key-upload-pending = Ачкыч жергиликтүү сакталган, бирок жүктөлүп берилген жок. Аны коопсуз сактаңыз жана кайра аракет кылуу үчүн Шайкештирүүнү басыңыз.
+vault-auto-sync = Автоматтык камдык көчүрмө
+vault-backup-failed = Автоматтык камдык көчүрмөнү сактоо ишке ашкан жок. Кайра аракет кылуу үчүн Шайкештирүүнү басыңыз.
+vault-backup-failed-short = Камдык көчүрмө сакталган жок
+vault-recovery-key-copy-hint = Көчүрүү үчүн басыңыз
+vault-recovery-key-copied = Көчүрүлгөн
+vault-recovery-key-verify = Аны сырсөз башкаргычыңызга сактап, андан соң ырастоо үчүн төмөнкүгө чаптаңыз.
+vault-recovery-key-verify-placeholder = Сакталган калыбына келтирүүчү ачкычты чаптоо
+vault-recovery-key-mismatch = Калыбына келтирүү ачкычы дал келбейт.
+vault-open = { common-open } Vault
+vault-description = Орнотууларды, куралдарды, чекит файлдарын жана билимди Git менен шайкештирүү.
+vault-sync = Синхрондоштуруу
+vault-create = Түзүү
+vault-connect = Туташуу
+vault-github = GitHub
+vault-github-description = Жеке репозиторий түзүңүз же учурдагы Vault тандаңыз.
+vault-connect-github = GitHub туташтыруу
+vault-connected-as = { $name } катары туташты
+vault-use-repository = Колдонуу
+vault-repository-name = Репозиторийдин аты
+vault-cloud-folder = Булут папкасы
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox же OneDrive папкасын колдонуңуз.
+vault-choose-folder = Папканы тандаңыз
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Папка · { common-done }
+vault-private = Жеке репозиторий
+vault-public-warning = Репозиторийдин тарыхы жана шифрленген маалыматтар жалпыга ачык болот.
+vault-choose-repository = Репозиторий тандоо…
+vault-empty = бош
+vault-clean = Заманбап
+vault-not-connected = Туташкан эмес
+vault-change-count = Өзгөрүүлөр: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Баштоо
 start-tagline = Бир промпт. Баары даяр.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ичинде кыстарма коюу
 common-cancel = Жокко чыгаруу
 common-delete = Өчүрүү
 common-save = Сактоо
+common-copy = Copy
 common-rename = Аталышын өзгөртүү
 common-expand = Жайып көрсөтүү
 common-collapse = Жыйноо

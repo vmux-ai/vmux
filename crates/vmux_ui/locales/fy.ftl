@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } items
 }
+
+tools-title = Ark
+tools-search = Sykje nei pakketten, aginten, MCP, LSP en konfiguraasjebestannen…
+tools-open = Ark iepenje
+tools-fold = Ark ynklappe
+tools-unfold = Ark útklappe
+tools-scanning = Lokale ark wurdt skand…
+tools-no-installed = Gjin ark ynstallearre
+tools-empty = Gjin oerienkommende ark
+tools-empty-detail = Ynstallearje in pakket of foegje in pakket mei konfiguraasjebestannen yn Stow-styl ta.
+tools-apply = Tapasse
+tools-homebrew = Homebrew
+tools-homebrew-sync = Ynstallearre formules en tapassingen wurde automatysk syngronisearre.
+tools-open-brewfile = Brewfile iepenje
+tools-managed = beheard
+tools-provider-homebrew-formulae = Homebrew-formules
+tools-provider-homebrew-casks = Homebrew-tapassingen
+tools-provider-npm = NPM-pakketten
+tools-provider-acp-agents = ACP-aginten
+tools-provider-lsp-servers = LSP-tsjinners
+tools-provider-mcp-servers = MCP-tsjinners
+tools-provider-dotfiles = Konfiguraasjebestannen
+tools-status-available = Beskikber
+tools-status-missing = Untbrekt
+tools-status-conflict = Konflikt
+tools-forget = Ferjitte
+tools-manage = Beheare
+tools-link = Keppelje
+tools-unlink = Untkeppelje
+tools-import = Ymportearje
+tools-update-count = { $count ->
+    [one] 1 fernijing
+   *[other] { $count } fernijingen
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikten
+}
+tools-result-applied = Ark tapast
+tools-result-imported = Ark ymportearre
+tools-result-installed = { $name } ynstallearre
+tools-result-updated = { $name } fernijd
+tools-result-uninstalled = { $name } de-ynstallearre
+tools-result-forgotten = { $name } fergetten
+tools-result-managed = { $name } wurdt no beheard
+tools-result-linked = { $name } keppele
+tools-result-unlinked = { $name } ûntkeppele
+vault-title = Vault
+vault-encrypted = Fan ein oant ein fersifere
+vault-passkey = Passkey
+vault-passkey-description = Untskoattelje dizze Vault op oare apparaten sûnder wachtwurd.
+vault-passkey-add = Foegje wachtwurd ta
+vault-passkey-unlock = Untskoattelje
+vault-passkey-provider-unsupported = Dizze passkey-provider stipet noch gjin fersifere Vault-ûntskoatteljen.
+vault-recovery-key = Herstelkaai
+vault-recovery-key-description = Bewarje ien kaai yn Bitwarden as in oare wachtwurdbehearder om dizze Vault op in nij apparaat werom te heljen.
+vault-recovery-key-create = Meitsje kaai
+vault-recovery-key-create-failed = Herstelkaai koe net oanmakke wurde.
+vault-recovery-key-save = Bewarje dizze kaai no. Vmux kin it net wer sjen litte.
+vault-recovery-key-saved = Ik haw it bewarre
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Untskoattelje
+vault-recovery-key-invalid = Dizze herstelkaai kin de Vault net ûntsluten.
+vault-recovery-key-ready = Recovery Key konfigurearre
+vault-recovery-key-upload-pending = De kaai wurdt lokaal bewarre, mar upload mislearre. Hâld it feilich en druk op Sync om it opnij te besykjen.
+vault-auto-sync = Automatyske reservekopy
+vault-backup-failed = Automatyske reservekopy mislearre. Druk op Sync om it opnij te besykjen.
+vault-backup-failed-short = Reservekopy mislearre
+vault-recovery-key-copy-hint = Klikje om te kopiearjen
+vault-recovery-key-copied = Kopiearre
+vault-recovery-key-verify = Bewarje it yn jo wachtwurdbehearder, plak it dan hjirûnder om te ferifiearjen.
+vault-recovery-key-verify-placeholder = Plak bewarre herstelkaai
+vault-recovery-key-mismatch = Herstelkaai komt net oerien.
+vault-open = { common-open } Vault
+vault-description = Syngronisearje ynstellings, ark, dotfiles en kennis mei Git.
+vault-sync = Syngronisearje
+vault-create = Meitsje
+vault-connect = Ferbine
+vault-github = GitHub
+vault-github-description = Meitsje in privee repository of kies in besteande Vault.
+vault-connect-github = GitHub ferbine
+vault-connected-as = Ferbûn as { $name }
+vault-use-repository = Gebrûk
+vault-repository-name = Repository namme
+vault-cloud-folder = Wolk map
+vault-cloud-folder-description = Brûk in map fan Google Drive, iCloud Drive, Dropbox of OneDrive.
+vault-choose-folder = Kies map
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Private repository
+vault-public-warning = De skiednis fan it repository en fersifere gegevens sille iepenbier wêze.
+vault-choose-repository = Kies in repository ...
+vault-empty = leech
+vault-clean = Aktueel
+vault-not-connected = Net ferbûn
+vault-change-count = Feroarings: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Ien prompt. Alles dien.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Blêdwizer yn { $folder }
 common-cancel = Annulearje
 common-delete = Wiskje
 common-save = Bewarje
+common-copy = Copy
 common-rename = Omneame
 common-expand = Utklappe
 common-collapse = Ynklappe

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ставка
    *[other] { $count } ставки
 }
+
+tools-title = Алатке
+tools-search = Претражи пакете, агенте, MCP, LSP и конфигурационе датотеке…
+tools-open = Отвори алатке
+tools-fold = Скупи алатке
+tools-unfold = Прошири алатке
+tools-scanning = Скенирање локалних алатки…
+tools-no-installed = Нема инсталираних алатки
+tools-empty = Нема одговарајућих алатки
+tools-empty-detail = Инсталирајте пакет или додајте пакет конфигурационих датотека у стилу Stow.
+tools-apply = Примени
+tools-homebrew = Homebrew
+tools-homebrew-sync = Инсталиране формуле и апликације аутоматски се синхронизују.
+tools-open-brewfile = Отвори Brewfile
+tools-managed = управљано
+tools-provider-homebrew-formulae = Homebrew формуле
+tools-provider-homebrew-casks = Homebrew апликације
+tools-provider-npm = NPM пакети
+tools-provider-acp-agents = ACP агенти
+tools-provider-lsp-servers = LSP сервери
+tools-provider-mcp-servers = MCP сервери
+tools-provider-dotfiles = Конфигурационе датотеке
+tools-status-available = Доступно
+tools-status-missing = Недостаје
+tools-status-conflict = Сукоб
+tools-forget = Заборави
+tools-manage = Управљај
+tools-link = Повежи
+tools-unlink = Прекини везу
+tools-import = Увези
+tools-update-count = { $count ->
+    [one] 1 ажурирање
+   *[other] { $count } ажурирања
+}
+tools-conflict-count = { $count ->
+    [one] 1 сукоб
+   *[other] { $count } сукоба
+}
+tools-result-applied = Алатке су примењене
+tools-result-imported = Алатке су увезене
+tools-result-installed = { $name } је инсталиран
+tools-result-updated = { $name } је ажуриран
+tools-result-uninstalled = { $name } је деинсталиран
+tools-result-forgotten = { $name } је заборављен
+tools-result-managed = { $name } је сада под управљањем
+tools-result-linked = { $name } је повезан
+tools-result-unlinked = Веза са { $name } је прекинута
+vault-title = Vault
+vault-encrypted = Шифровано од краја до краја
+vault-passkey = Пасскеи
+vault-passkey-description = Откључајте овај трезор на другим уређајима без лозинке.
+vault-passkey-add = Додај приступни кључ
+vault-passkey-unlock = Откључај
+vault-passkey-provider-unsupported = Овај добављач приступних кључева још увек не подржава шифровано откључавање трезора.
+vault-recovery-key = Кључ за опоравак
+vault-recovery-key-description = Сачувајте један кључ у Битвардену или другом менаџеру лозинки да бисте опоравили овај трезор на новом уређају.
+vault-recovery-key-create = Креирајте кључ
+vault-recovery-key-create-failed = Није могуће креирати кључ за опоравак.
+vault-recovery-key-save = Сачувајте овај кључ сада. Вмук не може поново да га прикаже.
+vault-recovery-key-saved = Сачувао сам га
+vault-recovery-key-placeholder = Налепите кључ за опоравак
+vault-recovery-key-unlock = Откључај
+vault-recovery-key-invalid = Овај кључ за опоравак не може да откључа трезор.
+vault-recovery-key-ready = Кључ за опоравак је конфигурисан
+vault-recovery-key-upload-pending = Кључ је сачуван локално, али отпремање није успело. Чувајте га и притисните Синц да бисте покушали поново.
+vault-auto-sync = Аутоматска резервна копија
+vault-backup-failed = Аутоматско прављење резервних копија није успело. Притисните Синц да покушате поново.
+vault-backup-failed-short = Прављење резервне копије није успело
+vault-recovery-key-copy-hint = Кликните да бисте копирали
+vault-recovery-key-copied = Копирано
+vault-recovery-key-verify = Сачувајте га у свом менаџеру лозинки, а затим га налепите испод да бисте потврдили.
+vault-recovery-key-verify-placeholder = Налепите сачувани кључ за опоравак
+vault-recovery-key-mismatch = Кључ за опоравак се не подудара.
+vault-open = { common-open } Vault
+vault-description = Синхронизујте подешавања, алатке, датотеке са тачкама и знање са Гитом.
+vault-sync = Синц
+vault-create = Креирај
+vault-connect = Повежите се
+vault-github = GitHub
+vault-github-description = Направите приватно спремиште или изаберите постојећи трезор.
+vault-connect-github = Повежите ГитХуб
+vault-connected-as = Повезано као { $name }
+vault-use-repository = Користите
+vault-repository-name = Име спремишта
+vault-cloud-folder = Цлоуд фолдер
+vault-cloud-folder-description = Користите фасциклу са Гоогле диска, иЦлоуд Дриве-а, Дропбок-а или ОнеДриве-а.
+vault-choose-folder = Изаберите фасциклу
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Фолдер · { common-done }
+vault-private = Приватно спремиште
+vault-public-warning = Историја спремишта и шифровани подаци биће јавни.
+vault-choose-repository = Изаберите складиште…
+vault-empty = празан
+vault-clean = Ажурно
+vault-not-connected = Није повезан
+vault-change-count = Промене: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Почетак
 start-tagline = Један prompt. Све завршено.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Obeleži u { $folder }
 common-cancel = Otkaži
 common-delete = Obriši
 common-save = Sačuvaj
+common-copy = Copy
 common-rename = Preimenuj
 common-expand = Proširi
 common-collapse = Skupi

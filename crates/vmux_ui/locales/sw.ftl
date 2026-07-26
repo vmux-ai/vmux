@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] kipengee { $count }
    *[other] vipengee { $count }
 }
+
+tools-title = Zana
+tools-search = Tafuta vifurushi, mawakala, MCP, LSP na faili za usanidi…
+tools-open = Fungua zana
+tools-fold = Kunja zana
+tools-unfold = Panua zana
+tools-scanning = Inachanganua zana za ndani…
+tools-no-installed = Hakuna zana zilizosakinishwa
+tools-empty = Hakuna zana zinazolingana
+tools-empty-detail = Sakinisha kifurushi au ongeza kifurushi cha faili za usanidi cha mtindo wa Stow.
+tools-apply = Tekeleza
+tools-homebrew = Homebrew
+tools-homebrew-sync = Fomula na programu zilizosakinishwa husawazishwa kiotomatiki.
+tools-open-brewfile = Fungua Brewfile
+tools-managed = inayodhibitiwa
+tools-provider-homebrew-formulae = Fomula za Homebrew
+tools-provider-homebrew-casks = Programu za Homebrew
+tools-provider-npm = Vifurushi vya NPM
+tools-provider-acp-agents = Mawakala wa ACP
+tools-provider-lsp-servers = Seva za LSP
+tools-provider-mcp-servers = Seva za MCP
+tools-provider-dotfiles = Faili za usanidi
+tools-status-available = Inapatikana
+tools-status-missing = Haipo
+tools-status-conflict = Mgongano
+tools-forget = Sahau
+tools-manage = Dhibiti
+tools-link = Unganisha
+tools-unlink = Tenganisha
+tools-import = Leta
+tools-update-count = { $count ->
+    [one] Sasisho 1
+   *[other] Masasisho { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Mgongano 1
+   *[other] Migongano { $count }
+}
+tools-result-applied = Zana zimetekelezwa
+tools-result-imported = Zana zimeletwa
+tools-result-installed = { $name } imesakinishwa
+tools-result-updated = { $name } imesasishwa
+tools-result-uninstalled = { $name } imeondolewa
+tools-result-forgotten = { $name } imesahaulika
+tools-result-managed = { $name } sasa inadhibitiwa
+tools-result-linked = { $name } imeunganishwa
+tools-result-unlinked = { $name } imetenganishwa
+vault-title = Vault
+vault-encrypted = Imesimbwa kutoka mwanzo hadi mwisho
+vault-passkey = Nenosiri
+vault-passkey-description = Fungua Vault hii kwenye vifaa vingine bila nenosiri.
+vault-passkey-add = Ongeza nenosiri
+vault-passkey-unlock = Fungua
+vault-passkey-provider-unsupported = Mtoa huduma huyu wa nenosiri bado hatumii kufungua kwa Vault kwa njia fiche.
+vault-recovery-key = Ufunguo wa Kuokoa
+vault-recovery-key-description = Hifadhi ufunguo mmoja katika Bitwarden au kidhibiti kingine cha nenosiri ili kurejesha Vault hii kwenye kifaa kipya.
+vault-recovery-key-create = Unda ufunguo
+vault-recovery-key-create-failed = Ufunguo wa Kuokoa Haikuweza kuundwa.
+vault-recovery-key-save = Hifadhi ufunguo huu sasa. Vmux haiwezi kuionyesha tena.
+vault-recovery-key-saved = Niliihifadhi
+vault-recovery-key-placeholder = Bandika Ufunguo wa Urejeshaji
+vault-recovery-key-unlock = Fungua
+vault-recovery-key-invalid = Ufunguo huu wa Urejeshaji hauwezi kufungua Vault.
+vault-recovery-key-ready = Ufunguo wa Urejeshaji umesanidiwa
+vault-recovery-key-upload-pending = Ufunguo umehifadhiwa ndani, lakini upakiaji umeshindwa. Iweke salama na ubonyeze Sawazisha ili kujaribu tena.
+vault-auto-sync = Hifadhi nakala kiotomatiki
+vault-backup-failed = Imeshindwa kuhifadhi nakala kiotomatiki. Bonyeza Sawazisha ili kujaribu tena.
+vault-backup-failed-short = Imeshindwa kuhifadhi nakala
+vault-recovery-key-copy-hint = Bofya ili kunakili
+vault-recovery-key-copied = Imenakiliwa
+vault-recovery-key-verify = Ihifadhi kwenye kidhibiti chako cha nenosiri, kisha uibandike hapa chini ili kuthibitisha.
+vault-recovery-key-verify-placeholder = Bandika Ufunguo wa Urejeshaji uliohifadhiwa
+vault-recovery-key-mismatch = Ufunguo wa Kuokoa hailingani.
+vault-open = { common-open } Vault
+vault-description = Sawazisha mipangilio, zana, faili za nukta, na Knowledge na Git.
+vault-sync = Sawazisha
+vault-create = Unda
+vault-connect = Unganisha
+vault-github = GitHub
+vault-github-description = Unda hazina ya kibinafsi au chagua Vault iliyopo.
+vault-connect-github = Unganisha GitHub
+vault-connected-as = Imeunganishwa kama { $name }
+vault-use-repository = Tumia
+vault-repository-name = Jina la hifadhi
+vault-cloud-folder = Folda ya wingu
+vault-cloud-folder-description = Tumia folda kutoka Hifadhi ya Google, Hifadhi ya iCloud, Dropbox, au OneDrive.
+vault-choose-folder = Chagua folda
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folda · { common-done }
+vault-private = Hifadhi ya kibinafsi
+vault-public-warning = Historia ya hazina na data iliyosimbwa zitakuwa za umma.
+vault-choose-repository = Chagua hifadhi...
+vault-empty = tupu
+vault-clean = Imesasishwa
+vault-not-connected = Haijaunganishwa
+vault-change-count = Mabadiliko: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Anza
 start-tagline = Maelekezo moja. Chochote, kimekamilika.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Weka alamisho katika { $folder }
 common-cancel = Ghairi
 common-delete = Futa
 common-save = Hifadhi
+common-copy = Copy
 common-rename = Badili jina
 common-expand = Panua
 common-collapse = Kunja

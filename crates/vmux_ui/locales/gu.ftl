@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } આઇટમ
    *[other] { $count } આઇટમ
 }
+
+tools-title = સાધનો
+tools-search = પૅકેજ, એજન્ટ, MCP, LSP અને રૂપરેખાંકન ફાઇલો શોધો…
+tools-open = સાધનો ખોલો
+tools-fold = સાધનો સંકોચો
+tools-unfold = સાધનો વિસ્તારો
+tools-scanning = સ્થાનિક સાધનો સ્કૅન થઈ રહ્યાં છે…
+tools-no-installed = કોઈ સાધન ઇન્સ્ટૉલ કરેલું નથી
+tools-empty = મેળ ખાતું કોઈ સાધન નથી
+tools-empty-detail = પૅકેજ ઇન્સ્ટૉલ કરો અથવા Stow-શૈલીનું રૂપરેખાંકન ફાઇલ પૅકેજ ઉમેરો.
+tools-apply = લાગુ કરો
+tools-homebrew = Homebrew
+tools-homebrew-sync = ઇન્સ્ટૉલ કરેલા ફૉર્મ્યુલા અને ઍપ્લિકેશન આપમેળે સમન્વયિત થાય છે.
+tools-open-brewfile = Brewfile ખોલો
+tools-managed = સંચાલિત
+tools-provider-homebrew-formulae = Homebrew ફૉર્મ્યુલા
+tools-provider-homebrew-casks = Homebrew ઍપ્લિકેશન
+tools-provider-npm = NPM પૅકેજ
+tools-provider-acp-agents = ACP એજન્ટ
+tools-provider-lsp-servers = LSP સર્વર
+tools-provider-mcp-servers = MCP સર્વર
+tools-provider-dotfiles = રૂપરેખાંકન ફાઇલો
+tools-status-available = ઉપલબ્ધ
+tools-status-missing = ગેરહાજર
+tools-status-conflict = વિરોધાભાસ
+tools-forget = ભૂલી જાઓ
+tools-manage = સંચાલિત કરો
+tools-link = જોડો
+tools-unlink = જોડાણ દૂર કરો
+tools-import = આયાત કરો
+tools-update-count = { $count ->
+    [one] 1 સુધારો
+   *[other] { $count } સુધારા
+}
+tools-conflict-count = { $count ->
+    [one] 1 વિરોધાભાસ
+   *[other] { $count } વિરોધાભાસ
+}
+tools-result-applied = સાધનો લાગુ કરાયા
+tools-result-imported = સાધનો આયાત કરાયા
+tools-result-installed = { $name } ઇન્સ્ટૉલ થયું
+tools-result-updated = { $name } સુધારાયું
+tools-result-uninstalled = { $name } અનઇન્સ્ટૉલ થયું
+tools-result-forgotten = { $name } ભૂલી જવાયું
+tools-result-managed = { $name } હવે સંચાલિત છે
+tools-result-linked = { $name } જોડાયું
+tools-result-unlinked = { $name }નું જોડાણ દૂર થયું
+vault-title = Vault
+vault-encrypted = એન્ડ-ટુ-એન્ડ એન્ક્રિપ્ટેડ
+vault-passkey = પાસકી
+vault-passkey-description = પાસવર્ડ વિના અન્ય ઉપકરણો પર આ વૉલ્ટને અનલૉક કરો.
+vault-passkey-add = પાસકી ઉમેરો
+vault-passkey-unlock = અનલોક કરો
+vault-passkey-provider-unsupported = આ પાસકી પ્રદાતા હજી સુધી એન્ક્રિપ્ટેડ વૉલ્ટ અનલૉકને સપોર્ટ કરતું નથી.
+vault-recovery-key = પુનઃપ્રાપ્તિ કી
+vault-recovery-key-description = આ વૉલ્ટને નવા ઉપકરણ પર પુનઃપ્રાપ્ત કરવા માટે Bitwarden અથવા અન્ય પાસવર્ડ મેનેજરમાં એક કી સાચવો.
+vault-recovery-key-create = કી બનાવો
+vault-recovery-key-create-failed = પુનઃપ્રાપ્તિ કી બનાવી શકાઈ નથી.
+vault-recovery-key-save = હવે આ કી સાચવો. Vmux તેને ફરીથી બતાવી શકતું નથી.
+vault-recovery-key-saved = મેં તેને સાચવ્યું છે
+vault-recovery-key-placeholder = પેસ્ટ રિકવરી કી
+vault-recovery-key-unlock = અનલૉક
+vault-recovery-key-invalid = આ રિકવરી કી વૉલ્ટને અનલૉક કરી શકતી નથી.
+vault-recovery-key-ready = પુનઃપ્રાપ્તિ કી ગોઠવેલ
+vault-recovery-key-upload-pending = કી સ્થાનિક રીતે સાચવવામાં આવી છે, પરંતુ અપલોડ નિષ્ફળ થયું. તેને સુરક્ષિત રાખો અને ફરી પ્રયાસ કરવા માટે સિંક દબાવો.
+vault-auto-sync = સ્વચાલિત બેકઅપ
+vault-backup-failed = સ્વચાલિત બેકઅપ નિષ્ફળ થયું. ફરી પ્રયાસ કરવા માટે સિંક દબાવો.
+vault-backup-failed-short = બેકઅપ નિષ્ફળ થયું
+vault-recovery-key-copy-hint = નકલ કરવા માટે ક્લિક કરો
+vault-recovery-key-copied = નકલ કરી
+vault-recovery-key-verify = તેને તમારા પાસવર્ડ મેનેજરમાં સાચવો, પછી ચકાસવા માટે તેને નીચે પેસ્ટ કરો.
+vault-recovery-key-verify-placeholder = સાચવેલી પુનઃપ્રાપ્તિ કી પેસ્ટ કરો
+vault-recovery-key-mismatch = પુનઃપ્રાપ્તિ કી મેળ ખાતી નથી.
+vault-open = { common-open } Vault
+vault-description = Git સાથે સેટિંગ, ટૂલ્સ, ડોટફાઈલ્સ અને નોલેજ સિંક કરો.
+vault-sync = સમન્વય
+vault-create = બનાવો
+vault-connect = કનેક્ટ કરો
+vault-github = GitHub
+vault-github-description = ખાનગી ભંડાર બનાવો અથવા હાલની વૉલ્ટ પસંદ કરો.
+vault-connect-github = GitHub ને કનેક્ટ કરો
+vault-connected-as = { $name } તરીકે કનેક્ટેડ
+vault-use-repository = ઉપયોગ કરો
+vault-repository-name = ભંડારનું નામ
+vault-cloud-folder = મેઘ ફોલ્ડર
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox અથવા OneDriveમાંથી ફોલ્ડરનો ઉપયોગ કરો.
+vault-choose-folder = ફોલ્ડર પસંદ કરો
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ફોલ્ડર · { common-done }
+vault-private = ખાનગી ભંડાર
+vault-public-warning = રિપોઝિટરીનો ઇતિહાસ અને એન્ક્રિપ્ટેડ ડેટા સાર્વજનિક રહેશે.
+vault-choose-repository = એક ભંડાર પસંદ કરો...
+vault-empty = ખાલી
+vault-clean = અપ ટુ ડેટ
+vault-not-connected = જોડાયેલ નથી
+vault-change-count = ફેરફારો: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = શરૂ કરો
 start-tagline = એક prompt. કંઈ પણ, તૈયાર.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } માં બુકમાર્ક કરો
 common-cancel = રદ કરો
 common-delete = કાઢી નાખો
 common-save = સાચવો
+common-copy = Copy
 common-rename = નામ બદલો
 common-expand = વિસ્તારો
 common-collapse = સંકોચો

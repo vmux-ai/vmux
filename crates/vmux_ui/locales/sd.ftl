@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } شئي
    *[other] { $count } شيون
 }
+
+tools-title = اوزار
+tools-search = پيڪيج، ايجنٽ، MCP، LSP ۽ ترتيب جون فائلون ڳوليو…
+tools-open = اوزار کوليو
+tools-fold = اوزار سميٽو
+tools-unfold = اوزار پکيڙيو
+tools-scanning = مقامي اوزار جاچيا پيا وڃن…
+tools-no-installed = ڪوبه اوزار انسٽال ٿيل ناهي
+tools-empty = ڪوبه ملندڙ اوزار ناهي
+tools-empty-detail = پيڪيج انسٽال ڪريو يا Stow طرز جو ترتيب فائلن جو پيڪيج شامل ڪريو.
+tools-apply = لاڳو ڪريو
+tools-homebrew = Homebrew
+tools-homebrew-sync = انسٽال ٿيل فارمولا ۽ ايپليڪيشنون پاڻمرادو هم وقت ٿين ٿيون.
+tools-open-brewfile = Brewfile کوليو
+tools-managed = منظم ٿيل
+tools-provider-homebrew-formulae = Homebrew فارمولا
+tools-provider-homebrew-casks = Homebrew ايپليڪيشنون
+tools-provider-npm = NPM پيڪيج
+tools-provider-acp-agents = ACP ايجنٽ
+tools-provider-lsp-servers = LSP سرور
+tools-provider-mcp-servers = MCP سرور
+tools-provider-dotfiles = ترتيب جون فائلون
+tools-status-available = موجود
+tools-status-missing = گم
+tools-status-conflict = ٽڪراءُ
+tools-forget = وساريو
+tools-manage = منظم ڪريو
+tools-link = ڳنڍيو
+tools-unlink = ڳانڍاپو هٽايو
+tools-import = درآمد ڪريو
+tools-update-count = { $count ->
+    [one] 1 تازه‌ڪاري
+   *[other] { $count } تازه‌ڪاريون
+}
+tools-conflict-count = { $count ->
+    [one] 1 ٽڪراءُ
+   *[other] { $count } ٽڪراءَ
+}
+tools-result-applied = اوزار لاڳو ڪيا ويا
+tools-result-imported = اوزار درآمد ڪيا ويا
+tools-result-installed = { $name } انسٽال ٿيو
+tools-result-updated = { $name } تازه ٿيو
+tools-result-uninstalled = { $name } هٽايو ويو
+tools-result-forgotten = { $name } وساريو ويو
+tools-result-managed = { $name } هاڻي منظم آهي
+tools-result-linked = { $name } ڳنڍيو ويو
+tools-result-unlinked = { $name } جو ڳانڍاپو هٽايو ويو
+vault-title = Vault
+vault-encrypted = شروع کان آخر تائين انڪرپٽ ٿيل
+vault-passkey = پاسڪي
+vault-passkey-description = ھن والٽ کي ان لاڪ ڪريو ٻين ڊوائيسز تي بغير پاسورڊ جي.
+vault-passkey-add = پاسڪي شامل ڪريو
+vault-passkey-unlock = لاڪ
+vault-passkey-provider-unsupported = هي پاسڪي فراهم ڪندڙ اڃا تائين انڪريپٽ ٿيل والٽ انلاڪ کي سپورٽ نٿو ڪري.
+vault-recovery-key = بحالي جي چاٻي
+vault-recovery-key-description = هن والٽ کي نئين ڊوائيس تي بحال ڪرڻ لاءِ Bitwarden يا ٻئي پاسورڊ مئنيجر ۾ هڪ چيڪ محفوظ ڪريو.
+vault-recovery-key-create = چيڪ ٺاهيو
+vault-recovery-key-create-failed = بحالي ڪيڏي نه ٿي سگھي.
+vault-recovery-key-save = ھاڻي ھن چاٻي کي محفوظ ڪريو. Vmux ان کي ٻيهر نه ڏيکاري سگھي.
+vault-recovery-key-saved = مون ان کي بچايو
+vault-recovery-key-placeholder = پيسٽ ڪريو وصولي چاٻي
+vault-recovery-key-unlock = لاڪ
+vault-recovery-key-invalid = هي وصولي چيڪ والٽ کي ان لاڪ نٿو ڪري سگهي.
+vault-recovery-key-ready = بحالي جي چاٻي ترتيب ڏني وئي
+vault-recovery-key-upload-pending = چيڪ مقامي طور تي محفوظ ڪئي وئي، پر اپلوڊ ناڪام ٿي. ان کي محفوظ رکو ۽ ٻيهر ڪوشش ڪرڻ لاءِ Sync کي دٻايو.
+vault-auto-sync = خودڪار بيڪ اپ
+vault-backup-failed = خودڪار بيڪ اپ ناڪام ٿيو. ٻيهر ڪوشش ڪرڻ لاءِ هم وقت سازي کي دٻايو.
+vault-backup-failed-short = بيڪ اپ ناڪام ٿيو
+vault-recovery-key-copy-hint = نقل ڪرڻ لاءِ ڪلڪ ڪريو
+vault-recovery-key-copied = نقل ٿيل
+vault-recovery-key-verify = ان کي محفوظ ڪريو پنھنجي پاسورڊ مئنيجر ۾، پوءِ تصديق ڪرڻ لاءِ ھيٺ پيسٽ ڪريو.
+vault-recovery-key-verify-placeholder = محفوظ ڪيل وصولي چاٻي پيسٽ ڪريو
+vault-recovery-key-mismatch = وصولي چاٻي نه ملندي.
+vault-open = { common-open } Vault
+vault-description = Git سان سيٽنگون، اوزار، ڊاٽ فائلون، ۽ علم هم وقت سازي ڪريو.
+vault-sync = هم وقت سازي
+vault-create = ٺاهيو
+vault-connect = ڳنڍڻ
+vault-github = GitHub
+vault-github-description = هڪ خانگي مخزن ٺاهيو يا موجوده والٽ چونڊيو.
+vault-connect-github = ڳنڍيو GitHub
+vault-connected-as = { $name } طور ڳنڍيل
+vault-use-repository = استعمال ڪريو
+vault-repository-name = مخزن جو نالو
+vault-cloud-folder = Cloud فولڊر
+vault-cloud-folder-description = Google Drive، iCloud Drive، Dropbox، يا OneDrive مان فولڊر استعمال ڪريو.
+vault-choose-folder = فولڊر چونڊيو
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = فولڊر · { common-done }
+vault-private = خانگي ذخيرو
+vault-public-warning = ذخيري جي تاريخ ۽ انڪرپٽ ٿيل ڊيٽا عوامي هوندي.
+vault-choose-repository = هڪ مخزن چونڊيو...
+vault-empty = خالي
+vault-clean = تازه ترين
+vault-not-connected = ڳنڍيل ناهي
+vault-change-count = تبديليون: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = شروع
 start-tagline = هڪ پرامپٽ. هر ڪم، پورو.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } ۾ نشان لڳايو
 common-cancel = رد
 common-delete = حذف
 common-save = محفوظ
+common-copy = Copy
 common-rename = نالو مٽايو
 common-expand = وڌايو
 common-collapse = سميٽو

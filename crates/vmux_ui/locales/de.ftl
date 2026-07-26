@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } Element
    *[other] { $count } Elemente
 }
+
+tools-title = Werkzeuge
+tools-search = Pakete, Agenten, MCP, LSP und Konfigurationsdateien durchsuchen…
+tools-open = Werkzeuge öffnen
+tools-fold = Werkzeuge einklappen
+tools-unfold = Werkzeuge ausklappen
+tools-scanning = Lokale Werkzeuge werden durchsucht…
+tools-no-installed = Keine Werkzeuge installiert
+tools-empty = Keine passenden Werkzeuge
+tools-empty-detail = Installieren Sie ein Paket oder fügen Sie ein Konfigurationsdateipaket im Stow-Stil hinzu.
+tools-apply = Anwenden
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installierte Formeln und Anwendungen werden automatisch synchronisiert.
+tools-open-brewfile = Brewfile öffnen
+tools-managed = verwaltet
+tools-provider-homebrew-formulae = Homebrew-Formeln
+tools-provider-homebrew-casks = Homebrew-Anwendungen
+tools-provider-npm = NPM-Pakete
+tools-provider-acp-agents = ACP-Agenten
+tools-provider-lsp-servers = LSP-Server
+tools-provider-mcp-servers = MCP-Server
+tools-provider-dotfiles = Konfigurationsdateien
+tools-status-available = Verfügbar
+tools-status-missing = Fehlt
+tools-status-conflict = Konflikt
+tools-forget = Vergessen
+tools-manage = Verwalten
+tools-link = Verknüpfen
+tools-unlink = Verknüpfung lösen
+tools-import = Importieren
+tools-update-count = { $count ->
+    [one] 1 Aktualisierung
+   *[other] { $count } Aktualisierungen
+}
+tools-conflict-count = { $count ->
+    [one] 1 Konflikt
+   *[other] { $count } Konflikte
+}
+tools-result-applied = Werkzeuge angewendet
+tools-result-imported = Werkzeuge importiert
+tools-result-installed = { $name } installiert
+tools-result-updated = { $name } aktualisiert
+tools-result-uninstalled = { $name } deinstalliert
+tools-result-forgotten = { $name } vergessen
+tools-result-managed = { $name } wird jetzt verwaltet
+tools-result-linked = { $name } verknüpft
+tools-result-unlinked = Verknüpfung mit { $name } gelöst
+vault-title = Vault
+vault-encrypted = Ende-zu-Ende-verschlüsselt
+vault-passkey = Hauptschlüssel
+vault-passkey-description = Entsperren Sie diesen Tresor auf anderen Geräten ohne Passwort.
+vault-passkey-add = Passschlüssel hinzufügen
+vault-passkey-unlock = Entsperren
+vault-passkey-provider-unsupported = Dieser Passkey-Anbieter unterstützt die verschlüsselte Vault-Entsperrung noch nicht.
+vault-recovery-key = Wiederherstellungsschlüssel
+vault-recovery-key-description = Speichern Sie einen Schlüssel in Bitwarden oder einem anderen Passwort-Manager, um diesen Tresor auf einem neuen Gerät wiederherzustellen.
+vault-recovery-key-create = Schlüssel erstellen
+vault-recovery-key-create-failed = Der Wiederherstellungsschlüssel konnte nicht erstellt werden.
+vault-recovery-key-save = Speichern Sie diesen Schlüssel jetzt. Vmux kann es nicht erneut anzeigen.
+vault-recovery-key-saved = Ich habe es gespeichert.
+vault-recovery-key-placeholder = . Wiederherstellungsschlüssel einfügen.
+vault-recovery-key-unlock = .
+vault-recovery-key-invalid = Dieser Wiederherstellungsschlüssel kann den Tresor nicht entsperren.
+vault-recovery-key-ready = Wiederherstellungsschlüssel konfiguriert
+vault-recovery-key-upload-pending = Der Schlüssel ist lokal gespeichert, aber der Upload ist fehlgeschlagen. Bewahren Sie es sicher auf und drücken Sie „Synchronisieren“, um es erneut zu versuchen.
+vault-auto-sync = entsperren. Automatische Sicherung
+vault-backup-failed = Die automatische Sicherung ist fehlgeschlagen. Drücken Sie „Synchronisieren“, um es erneut zu versuchen.
+vault-backup-failed-short = Die Sicherung ist fehlgeschlagen
+vault-recovery-key-copy-hint = Klicken Sie zum Kopieren
+vault-recovery-key-copied = Kopiert
+vault-recovery-key-verify = Speichern Sie es in Ihrem Passwort-Manager und fügen Sie es zur Bestätigung unten ein.
+vault-recovery-key-verify-placeholder = Gespeicherten Wiederherstellungsschlüssel einfügen
+vault-recovery-key-mismatch = Der Wiederherstellungsschlüssel stimmt nicht überein.
+vault-open = { common-open } Vault
+vault-description = Synchronisieren Sie Einstellungen, Tools, Dotfiles und Wissen mit Git.
+vault-sync = Synchronisieren
+vault-create = Erstellen
+vault-connect = Verbinden
+vault-github = GitHub
+vault-github-description = Erstellen Sie ein privates Repository oder wählen Sie einen vorhandenen Tresor.
+vault-connect-github = GitHub verbinden
+vault-connected-as = Verbunden als { $name }
+vault-use-repository = Verwenden
+vault-repository-name = Repository-Name
+vault-cloud-folder = Cloud-Ordner
+vault-cloud-folder-description = Verwenden Sie einen Ordner von Google Drive, iCloud Drive, Dropbox oder OneDrive.
+vault-choose-folder = Ordner auswählen
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Ordner · { common-done }
+vault-private = Privates Repository
+vault-public-warning = Repository-Verlauf und verschlüsselte Daten werden öffentlich sein.
+vault-choose-repository = Wählen Sie ein Repository…
+vault-empty = leer
+vault-clean = Auf dem neuesten Stand
+vault-not-connected = Nicht verbunden
+vault-change-count = Änderungen: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Ein Prompt. Alles erledigt.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Lesezeichen in { $folder }
 common-cancel = Abbrechen
 common-delete = Löschen
 common-save = Sichern
+common-copy = Copy
 common-rename = Umbenennen
 common-expand = Aufklappen
 common-collapse = Zuklappen

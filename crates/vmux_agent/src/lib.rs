@@ -28,6 +28,8 @@ pub mod handoff;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod launch;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod managed_mcp;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod mcp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;

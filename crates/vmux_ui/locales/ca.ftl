@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elements
 }
+
+tools-title = Eines
+tools-search = Cerca paquets, agents, MCP, LSP i fitxers de configuració…
+tools-open = Obre les eines
+tools-fold = Plega les eines
+tools-unfold = Desplega les eines
+tools-scanning = S’estan analitzant les eines locals…
+tools-no-installed = No hi ha eines instal·lades
+tools-empty = No hi ha eines coincidents
+tools-empty-detail = Instal·la un paquet o afegeix un paquet de fitxers de configuració a l’estil Stow.
+tools-apply = Aplica
+tools-homebrew = Homebrew
+tools-homebrew-sync = Les fórmules i aplicacions instal·lades se sincronitzen automàticament.
+tools-open-brewfile = Obre el Brewfile
+tools-managed = gestionat
+tools-provider-homebrew-formulae = Fórmules de Homebrew
+tools-provider-homebrew-casks = Aplicacions de Homebrew
+tools-provider-npm = Paquets NPM
+tools-provider-acp-agents = Agents ACP
+tools-provider-lsp-servers = Servidors LSP
+tools-provider-mcp-servers = Servidors MCP
+tools-provider-dotfiles = Fitxers de configuració
+tools-status-available = Disponible
+tools-status-missing = Falta
+tools-status-conflict = Conflicte
+tools-forget = Oblida
+tools-manage = Gestiona
+tools-link = Enllaça
+tools-unlink = Desenllaça
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 actualització
+   *[other] { $count } actualitzacions
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflicte
+   *[other] { $count } conflictes
+}
+tools-result-applied = S’han aplicat les eines
+tools-result-imported = S’han importat les eines
+tools-result-installed = S’ha instal·lat { $name }
+tools-result-updated = S’ha actualitzat { $name }
+tools-result-uninstalled = S’ha desinstal·lat { $name }
+tools-result-forgotten = S’ha oblidat { $name }
+tools-result-managed = Ara es gestiona { $name }
+tools-result-linked = S’ha enllaçat { $name }
+tools-result-unlinked = S’ha desenllaçat { $name }
+vault-title = Vault
+vault-encrypted = Xifratge d'extrem a extrem
+vault-passkey = Clau d'accés
+vault-passkey-description = Desbloquegeu aquest Vault en altres dispositius sense contrasenya.
+vault-passkey-add = Afegeix la clau de pas
+vault-passkey-unlock = Desbloqueja
+vault-passkey-provider-unsupported = Aquest proveïdor de claus de contrasenya encara no admet el desbloqueig encriptat de Vault.
+vault-recovery-key = Clau de recuperació
+vault-recovery-key-description = Deseu una clau a Bitwarden o en un altre gestor de contrasenyes per recuperar aquest Vault en un dispositiu nou.
+vault-recovery-key-create = Crea la clau
+vault-recovery-key-create-failed = No s'ha pogut crear la clau de recuperació.
+vault-recovery-key-save = Desa aquesta clau ara. Vmux no pot tornar-lo a mostrar.
+vault-recovery-key-saved = L'he desat
+vault-recovery-key-placeholder = Enganxa la clau de recuperació
+vault-recovery-key-unlock = Desbloqueja
+vault-recovery-key-invalid = Aquesta clau de recuperació no pot desbloquejar la volta.
+vault-recovery-key-ready = Clau de recuperació configurada
+vault-recovery-key-upload-pending = La clau es desa localment, però no s'ha pogut carregar. Manteniu-lo segur i premeu Sincronitza per tornar-ho a provar.
+vault-auto-sync = Còpia de seguretat automàtica
+vault-backup-failed = La còpia de seguretat automàtica ha fallat. Premeu Sincronització per tornar-ho a provar.
+vault-backup-failed-short = La còpia de seguretat ha fallat
+vault-recovery-key-copy-hint = Feu clic per copiar
+vault-recovery-key-copied = Copiat
+vault-recovery-key-verify = Deseu-lo al vostre gestor de contrasenyes i, a continuació, enganxeu-lo a continuació per verificar-lo.
+vault-recovery-key-verify-placeholder = Enganxa la clau de recuperació desada
+vault-recovery-key-mismatch = La clau de recuperació no coincideix.
+vault-open = { common-open } Vault
+vault-description = Sincronitza la configuració, les eines, els fitxers de punts i el coneixement amb Git.
+vault-sync = Sincronització
+vault-create = Crear
+vault-connect = Connecta't
+vault-github = GitHub
+vault-github-description = Creeu un dipòsit privat o trieu un Vault existent.
+vault-connect-github = Connecta GitHub
+vault-connected-as = Connectat com a { $name }
+vault-use-repository = Ús
+vault-repository-name = Nom del repositori
+vault-cloud-folder = Carpeta del núvol
+vault-cloud-folder-description = Utilitzeu una carpeta de Google Drive, iCloud Drive, Dropbox o OneDrive.
+vault-choose-folder = Trieu la carpeta
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Carpeta · { common-done }
+vault-private = Repositori privat
+vault-public-warning = L'historial del repositori i les dades xifrades seran públics.
+vault-choose-repository = Trieu un repositori...
+vault-empty = buit
+vault-clean = Actualitzat
+vault-not-connected = No connectat
+vault-change-count = Canvis: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Inici
 start-tagline = Una sola instrucció. Tot fet.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Marcador a { $folder }
 common-cancel = Cancel·la
 common-delete = Suprimeix
 common-save = Desa
+common-copy = Copy
 common-rename = Canvia el nom
 common-expand = Desplega
 common-collapse = Replega

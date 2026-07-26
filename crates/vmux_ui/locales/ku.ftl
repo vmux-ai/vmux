@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } دانە
    *[other] { $count } دانە
 }
+
+tools-title = ئامرازەکان
+tools-search = گەڕان بۆ پاکێجەکان، بریکارەکان، MCP، LSP و فایلەکانی ڕێکخستن…
+tools-open = کردنەوەی ئامرازەکان
+tools-fold = کۆکردنەوەی ئامرازەکان
+tools-unfold = بڵاوکردنەوەی ئامرازەکان
+tools-scanning = پشکنینی ئامرازە ناوخۆییەکان…
+tools-no-installed = هیچ ئامرازێک دامەزراو نییە
+tools-empty = هیچ ئامرازێکی گونجاو نییە
+tools-empty-detail = پاکێجێک دابمەزرێنە یان پاکێجێکی فایلەکانی ڕێکخستن بە شێوازی Stow زیاد بکە.
+tools-apply = جێبەجێکردن
+tools-homebrew = Homebrew
+tools-homebrew-sync = فۆرمولاکان و بەرنامە دامەزراوەکان خۆکارانە هاوکات دەکرێن.
+tools-open-brewfile = کردنەوەی Brewfile
+tools-managed = بەڕێوەبراو
+tools-provider-homebrew-formulae = فۆرمولاکانی Homebrew
+tools-provider-homebrew-casks = بەرنامەکانی Homebrew
+tools-provider-npm = پاکێجەکانی NPM
+tools-provider-acp-agents = بریکارەکانی ACP
+tools-provider-lsp-servers = ڕاژەکارەکانی LSP
+tools-provider-mcp-servers = ڕاژەکارەکانی MCP
+tools-provider-dotfiles = فایلەکانی ڕێکخستن
+tools-status-available = بەردەستە
+tools-status-missing = ونە
+tools-status-conflict = ناکۆکی
+tools-forget = لەبیرکردن
+tools-manage = بەڕێوەبردن
+tools-link = بەستنەوە
+tools-unlink = پچڕاندنی بەستەر
+tools-import = هاوردەکردن
+tools-update-count = { $count ->
+    [one] 1 نوێکردنەوە
+   *[other] { $count } نوێکردنەوە
+}
+tools-conflict-count = { $count ->
+    [one] 1 ناکۆکی
+   *[other] { $count } ناکۆکی
+}
+tools-result-applied = ئامرازەکان جێبەجێ کران
+tools-result-imported = ئامرازەکان هاوردە کران
+tools-result-installed = { $name } دامەزرا
+tools-result-updated = { $name } نوێ کرایەوە
+tools-result-uninstalled = { $name } لابرا
+tools-result-forgotten = { $name } لەبیر کرا
+tools-result-managed = { $name } ئێستا بەڕێوە دەبرێت
+tools-result-linked = { $name } بەسترایەوە
+tools-result-unlinked = بەستەری { $name } پچڕێنرا
+vault-title = Vault
+vault-encrypted = Ji serî heta serî şîfrekirî
+vault-passkey = Passkey
+vault-passkey-description = Vê Vault-ê bêyî şîfreyek li ser cîhazên din vekin.
+vault-passkey-add = Passkey zêde bike
+vault-passkey-unlock = Vekirin
+vault-passkey-provider-unsupported = Vê dabînkerê şîfreya şîfrekirinê hîna vekirina Vault-a şîfrekirî piştgirî nake.
+vault-recovery-key = Mifteya Vegerandinê
+vault-recovery-key-description = Bişkojek li Bitwarden an rêveberek şîfreyek din hilîne da ku vê Vault-ê li ser cîhazek nû vegerîne.
+vault-recovery-key-create = Miftê biafirîne
+vault-recovery-key-create-failed = Mifteya Vegerandinê nehat afirandin.
+vault-recovery-key-save = Vê mifteyê nuha hilîne. Vmux nikare wê dîsa nîşan bide.
+vault-recovery-key-saved = Min ew hilanî
+vault-recovery-key-placeholder = Mifteya Vegerandina Paste
+vault-recovery-key-unlock = Vekişîna
+vault-recovery-key-invalid = Ev Mifteya Vegerandinê nikare Vaultê veke.
+vault-recovery-key-ready = Mifteya Vegerandinê hate mîheng kirin
+vault-recovery-key-upload-pending = Mifteya herêmî hatiye tomarkirin, lê barkirin bi ser neket. Wê ewle bihêlin û ji nû ve biceribîne Syncê bikirtînin.
+vault-auto-sync = Piştgiriya otomatîkî
+vault-backup-failed = Piştgiriya otomatîk têk çû. Bişkojka Syncê bike da ku ji nû ve biceribîne.
+vault-backup-failed-short = Backup têk çû
+vault-recovery-key-copy-hint = Ji bo kopîkirinê bikirtînin
+vault-recovery-key-copied = Kopî kirin
+vault-recovery-key-verify = Wê di rêveberê şîfreya xwe de hilînin, dûv re wê li jêr bixin da ku verast bikin.
+vault-recovery-key-verify-placeholder = Mifteya Vegerandinê ya tomarkirî bipêçin
+vault-recovery-key-mismatch = Mifteya Vegerandinê li hev nayê.
+vault-open = { common-open } Vault
+vault-description = Mîheng, amûr, dotfiles û Zanîn bi Git re hevdeng bikin.
+vault-sync = Sync
+vault-create = Xûliqandin
+vault-connect = Bihevgirêdan
+vault-github = GitHub
+vault-github-description = Depoyek taybet biafirînin an Vaultek heyî hilbijêrin.
+vault-connect-github = Girêdana GitHub
+vault-connected-as = Girêdayî wekî { $name }
+vault-use-repository = Bikaranîn
+vault-repository-name = Navê depoyê
+vault-cloud-folder = Peldanka ewr
+vault-cloud-folder-description = Peldankek ji Google Drive, iCloud Drive, Dropbox, an OneDrive bikar bînin.
+vault-choose-folder = Peldanka hilbijêre
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Pêçek · { common-done }
+vault-private = Depoya taybet
+vault-public-warning = Dîroka depoyê û daneyên şîfrekirî dê giştî bin.
+vault-choose-repository = Depoyek hilbijêrin…
+vault-empty = vala
+vault-clean = Biroj
+vault-not-connected = Ne girêdayî ye
+vault-change-count = Changes: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = دەستپێک
 start-tagline = یەک پرۆمپت. هەر کارێک، تەواو.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Di { $folder } de nîşan bike
 common-cancel = پاشگەزبوونەوە
 common-delete = سڕینەوە
 common-save = پاشەکەوت
+common-copy = Copy
 common-rename = ناوگۆڕین
 common-expand = فراوانکردن
 common-collapse = داخستنەوە

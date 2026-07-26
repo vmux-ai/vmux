@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } element
    *[other] { $count } elementer
 }
+
+tools-title = Verktøy
+tools-search = Søk etter pakker, agenter, MCP, LSP og konfigurasjonsfiler…
+tools-open = Åpne verktøy
+tools-fold = Fold sammen verktøy
+tools-unfold = Fold ut verktøy
+tools-scanning = Skanner lokale verktøy…
+tools-no-installed = Ingen installerte verktøy
+tools-empty = Ingen samsvarende verktøy
+tools-empty-detail = Installer en pakke, eller legg til en konfigurasjonsfilpakke i Stow-stil.
+tools-apply = Bruk
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installerte formler og programmer synkroniseres automatisk.
+tools-open-brewfile = Åpne Brewfile
+tools-managed = administrert
+tools-provider-homebrew-formulae = Homebrew-formler
+tools-provider-homebrew-casks = Homebrew-programmer
+tools-provider-npm = NPM-pakker
+tools-provider-acp-agents = ACP-agenter
+tools-provider-lsp-servers = LSP-servere
+tools-provider-mcp-servers = MCP-servere
+tools-provider-dotfiles = Konfigurasjonsfiler
+tools-status-available = Tilgjengelig
+tools-status-missing = Mangler
+tools-status-conflict = Konflikt
+tools-forget = Glem
+tools-manage = Administrer
+tools-link = Koble
+tools-unlink = Koble fra
+tools-import = Importer
+tools-update-count = { $count ->
+    [one] 1 oppdatering
+   *[other] { $count } oppdateringer
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikter
+}
+tools-result-applied = Verktøy brukt
+tools-result-imported = Verktøy importert
+tools-result-installed = { $name } installert
+tools-result-updated = { $name } oppdatert
+tools-result-uninstalled = { $name } avinstallert
+tools-result-forgotten = { $name } glemt
+tools-result-managed = { $name } administreres nå
+tools-result-linked = { $name } koblet
+tools-result-unlinked = { $name } koblet fra
+vault-title = Vault
+vault-encrypted = Ende-til-ende-kryptert
+vault-passkey = Passnøkkel
+vault-passkey-description = Lås opp dette hvelvet på andre enheter uten passord.
+vault-passkey-add = Legg til passord
+vault-passkey-unlock = Låse opp
+vault-passkey-provider-unsupported = Denne passordleverandøren støtter ikke kryptert Vault-opplåsing ennå.
+vault-recovery-key = Gjenopprettingsnøkkel
+vault-recovery-key-description = Lagre én nøkkel i Bitwarden eller en annen passordbehandling for å gjenopprette dette hvelvet på en ny enhet.
+vault-recovery-key-create = Opprett nøkkel
+vault-recovery-key-create-failed = Gjenopprettingsnøkkel kunne ikke opprettes.
+vault-recovery-key-save = Lagre denne nøkkelen nå. Vmux kan ikke vise det igjen.
+vault-recovery-key-saved = Jeg lagret den
+vault-recovery-key-placeholder = Lim inn gjenopprettingsnøkkel
+vault-recovery-key-unlock = Lås opp
+vault-recovery-key-invalid = Denne gjenopprettingsnøkkelen kan ikke låse opp hvelvet.
+vault-recovery-key-ready = Gjenopprettingsnøkkel konfigurert
+vault-recovery-key-upload-pending = Nøkkelen er lagret lokalt, men opplastingen mislyktes. Hold det trygt og trykk på Synkroniser for å prøve på nytt.
+vault-auto-sync = Automatisk sikkerhetskopiering
+vault-backup-failed = Automatisk sikkerhetskopiering mislyktes. Trykk på Synkroniser for å prøve på nytt.
+vault-backup-failed-short = Sikkerhetskopiering mislyktes
+vault-recovery-key-copy-hint = Klikk for å kopiere
+vault-recovery-key-copied = Kopiert
+vault-recovery-key-verify = Lagre det i passordbehandlingen, og lim det deretter inn nedenfor for å bekrefte.
+vault-recovery-key-verify-placeholder = Lim inn lagret gjenopprettingsnøkkel
+vault-recovery-key-mismatch = Gjenopprettingsnøkkelen samsvarer ikke.
+vault-open = { common-open } Vault
+vault-description = Synkroniser innstillinger, verktøy, punktfiler og kunnskap med Git.
+vault-sync = Synkroniser
+vault-create = Skape
+vault-connect = Koble til
+vault-github = GitHub
+vault-github-description = Opprett et privat depot eller velg et eksisterende hvelv.
+vault-connect-github = Koble til GitHub
+vault-connected-as = Tilkoblet som { $name }
+vault-use-repository = Bruk
+vault-repository-name = Depotnavn
+vault-cloud-folder = Cloud-mappe
+vault-cloud-folder-description = Bruk en mappe fra Google Drive, iCloud Drive, Dropbox eller OneDrive.
+vault-choose-folder = Velg mappe
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mappe · { common-done }
+vault-private = Privat depot
+vault-public-warning = Historikken til depotet og krypterte data vil være offentlige.
+vault-choose-repository = Velg et depot...
+vault-empty = tømme
+vault-clean = Oppdatert
+vault-not-connected = Ikke tilkoblet
+vault-change-count = Endringer: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = Én prompt. Hva som helst, ferdig.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bokmerk i { $folder }
 common-cancel = Avbryt
 common-delete = Slett
 common-save = Arkiver
+common-copy = Copy
 common-rename = Gi nytt navn
 common-expand = Utvid
 common-collapse = Skjul

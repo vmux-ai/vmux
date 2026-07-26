@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } item
    *[other] { $count } item
 }
+
+tools-title = Piranti
+tools-search = Telusuri paket, agen, MCP, LSP lan berkas konfigurasi…
+tools-open = Bukak Piranti
+tools-fold = Ciutaké piranti
+tools-unfold = Jembarake piranti
+tools-scanning = Mindhai piranti lokal…
+tools-no-installed = Ora ana piranti sing dipasang
+tools-empty = Ora ana piranti sing cocog
+tools-empty-detail = Pasang paket utawa tambahaké paket berkas konfigurasi gaya Stow.
+tools-apply = Terapaké
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formula lan aplikasi sing dipasang diselarasaké kanthi otomatis.
+tools-open-brewfile = Bukak Brewfile
+tools-managed = dikelola
+tools-provider-homebrew-formulae = Formula Homebrew
+tools-provider-homebrew-casks = Aplikasi Homebrew
+tools-provider-npm = Paket NPM
+tools-provider-acp-agents = Agen ACP
+tools-provider-lsp-servers = Server LSP
+tools-provider-mcp-servers = Server MCP
+tools-provider-dotfiles = Berkas konfigurasi
+tools-status-available = Kasedhiya
+tools-status-missing = Ora ana
+tools-status-conflict = Konflik
+tools-forget = Lalèkaké
+tools-manage = Kelola
+tools-link = Sambungaké
+tools-unlink = Pedhot sambungan
+tools-import = Impor
+tools-update-count = { $count ->
+    [one] 1 nganyari
+   *[other] { $count } nganyari
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflik
+   *[other] { $count } konflik
+}
+tools-result-applied = Piranti wis diterapaké
+tools-result-imported = Piranti wis diimpor
+tools-result-installed = { $name } wis dipasang
+tools-result-updated = { $name } wis dianyari
+tools-result-uninstalled = { $name } wis dibusak
+tools-result-forgotten = { $name } wis dilalèkaké
+tools-result-managed = { $name } saiki dikelola
+tools-result-linked = { $name } wis disambungaké
+tools-result-unlinked = { $name } wis dipedhot
+vault-title = Vault
+vault-encrypted = Dienkripsi saka ujung menyang ujung
+vault-passkey = Passkey
+vault-passkey-description = Mbukak kunci Vault iki ing piranti liyane tanpa sandhi.
+vault-passkey-add = Tambah sandhi
+vault-passkey-unlock = Mbukak kunci
+vault-passkey-provider-unsupported = Panyedhiya kunci sandhi iki durung ndhukung bukak kunci Vault sing dienkripsi.
+vault-recovery-key = Recovery Key
+vault-recovery-key-description = Simpen siji tombol ing Bitwarden utawa manager sandi liyane kanggo waras Vault iki ing piranti anyar.
+vault-recovery-key-create = Nggawe tombol
+vault-recovery-key-create-failed = Kunci Recovery ora bisa digawe.
+vault-recovery-key-save = Simpen tombol iki saiki. Vmux ora bisa nuduhake maneh.
+vault-recovery-key-saved = Aku simpen
+vault-recovery-key-placeholder = Tempel Kunci Pemulihan
+vault-recovery-key-unlock = Mbukak kunci
+vault-recovery-key-invalid = Tombol Recovery iki ora bisa mbukak kunci Vault.
+vault-recovery-key-ready = Kunci Recovery dikonfigurasi
+vault-recovery-key-upload-pending = Tombol disimpen sacara lokal, nanging upload gagal. Tansah aman banjur pencet Sync kanggo nyoba maneh.
+vault-auto-sync = Serep otomatis
+vault-backup-failed = Gawe serep otomatis gagal. Pencet Sync kanggo nyoba maneh.
+vault-backup-failed-short = Gawe serep gagal
+vault-recovery-key-copy-hint = Klik kanggo nyalin
+vault-recovery-key-copied = disalin
+vault-recovery-key-verify = Simpen ing manager sandi, banjur paste ing ngisor iki kanggo verifikasi.
+vault-recovery-key-verify-placeholder = Tempel Recovery Key sing disimpen
+vault-recovery-key-mismatch = Recovery Key ora cocog.
+vault-open = { common-open } Vault
+vault-description = Nyelarasake setelan, alat, dotfiles, lan Kawruh karo Git.
+vault-sync = Sinkronisasi
+vault-create = Nggawe
+vault-connect = Nyambung
+vault-github = GitHub
+vault-github-description = Gawe gudang pribadi utawa pilih Vault sing wis ana.
+vault-connect-github = Sambungake GitHub
+vault-connected-as = Disambungake minangka { $name }
+vault-use-repository = Gunakake
+vault-repository-name = Jeneng repositori
+vault-cloud-folder = folder awan
+vault-cloud-folder-description = Gunakake folder saka Google Drive, iCloud Drive, Dropbox, utawa OneDrive.
+vault-choose-folder = Pilih folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Repositori pribadi
+vault-public-warning = Riwayat repositori lan data sing dienkripsi bakal dadi umum.
+vault-choose-repository = Pilih repositori…
+vault-empty = kosong
+vault-clean = Nganti saiki
+vault-not-connected = Ora nyambung
+vault-change-count = Owah-owahan: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Miwiti
 start-tagline = Siji prompt. Apa waé, rampung.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Tetenger ing { $folder }
 common-cancel = Batal
 common-delete = Busak
 common-save = Simpen
+common-copy = Copy
 common-rename = Ganti jeneng
 common-expand = Jembarake
 common-collapse = Ciutake

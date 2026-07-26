@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } στοιχείο
    *[other] { $count } στοιχεία
 }
+
+tools-title = Εργαλεία
+tools-search = Αναζήτηση πακέτων, πρακτόρων, MCP, LSP και αρχείων ρυθμίσεων…
+tools-open = Άνοιγμα εργαλείων
+tools-fold = Σύμπτυξη εργαλείων
+tools-unfold = Ανάπτυξη εργαλείων
+tools-scanning = Σάρωση τοπικών εργαλείων…
+tools-no-installed = Δεν υπάρχουν εγκατεστημένα εργαλεία
+tools-empty = Δεν υπάρχουν εργαλεία που να ταιριάζουν
+tools-empty-detail = Εγκαταστήστε ένα πακέτο ή προσθέστε ένα πακέτο αρχείων ρυθμίσεων τύπου Stow.
+tools-apply = Εφαρμογή
+tools-homebrew = Homebrew
+tools-homebrew-sync = Οι εγκατεστημένες φόρμουλες και εφαρμογές συγχρονίζονται αυτόματα.
+tools-open-brewfile = Άνοιγμα Brewfile
+tools-managed = διαχειριζόμενο
+tools-provider-homebrew-formulae = Φόρμουλες Homebrew
+tools-provider-homebrew-casks = Εφαρμογές Homebrew
+tools-provider-npm = Πακέτα NPM
+tools-provider-acp-agents = Πράκτορες ACP
+tools-provider-lsp-servers = Διακομιστές LSP
+tools-provider-mcp-servers = Διακομιστές MCP
+tools-provider-dotfiles = Αρχεία ρυθμίσεων
+tools-status-available = Διαθέσιμο
+tools-status-missing = Λείπει
+tools-status-conflict = Διένεξη
+tools-forget = Παράβλεψη
+tools-manage = Διαχείριση
+tools-link = Σύνδεση
+tools-unlink = Αποσύνδεση
+tools-import = Εισαγωγή
+tools-update-count = { $count ->
+    [one] 1 ενημέρωση
+   *[other] { $count } ενημερώσεις
+}
+tools-conflict-count = { $count ->
+    [one] 1 διένεξη
+   *[other] { $count } διενέξεις
+}
+tools-result-applied = Τα εργαλεία εφαρμόστηκαν
+tools-result-imported = Τα εργαλεία εισήχθησαν
+tools-result-installed = Το { $name } εγκαταστάθηκε
+tools-result-updated = Το { $name } ενημερώθηκε
+tools-result-uninstalled = Το { $name } απεγκαταστάθηκε
+tools-result-forgotten = Το { $name } παραβλέφθηκε
+tools-result-managed = Το { $name } είναι πλέον διαχειριζόμενο
+tools-result-linked = Το { $name } συνδέθηκε
+tools-result-unlinked = Το { $name } αποσυνδέθηκε
+vault-title = Vault
+vault-encrypted = Κρυπτογράφηση από άκρο σε άκρο
+vault-passkey = Αντικλείδι
+vault-passkey-description = Ξεκλειδώστε αυτό το Vault σε άλλες συσκευές χωρίς κωδικό πρόσβασης.
+vault-passkey-add = Προσθήκη κλειδιού πρόσβασης
+vault-passkey-unlock = Ξεκλειδώνω
+vault-passkey-provider-unsupported = Αυτός ο πάροχος κωδικών πρόσβασης δεν υποστηρίζει ακόμη το κρυπτογραφημένο ξεκλείδωμα του Vault.
+vault-recovery-key = Κλειδί αποκατάστασης
+vault-recovery-key-description = Αποθηκεύστε ένα κλειδί στο Bitwarden ή άλλο διαχειριστή κωδικών πρόσβασης για να ανακτήσετε αυτό το Vault σε μια νέα συσκευή.
+vault-recovery-key-create = Δημιουργία κλειδιού
+vault-recovery-key-create-failed = Δεν ήταν δυνατή η δημιουργία του κλειδιού ανάκτησης.
+vault-recovery-key-save = Αποθηκεύστε αυτό το κλειδί τώρα. Το Vmux δεν μπορεί να το εμφανίσει ξανά.
+vault-recovery-key-saved = Το αποθήκευσα
+vault-recovery-key-placeholder = Κλειδί ανάκτησης επικόλλησης
+vault-recovery-key-unlock = Ξεκλείδωμα
+vault-recovery-key-invalid = Αυτό το κλειδί ανάκτησης δεν μπορεί να ξεκλειδώσει το Vault.
+vault-recovery-key-ready = Ρυθμίστηκε το κλειδί ανάκτησης
+vault-recovery-key-upload-pending = Το κλειδί αποθηκεύεται τοπικά, αλλά η μεταφόρτωση απέτυχε. Διατηρήστε το ασφαλές και πατήστε Συγχρονισμός για να προσπαθήσετε ξανά.
+vault-auto-sync = Αυτόματη δημιουργία αντιγράφων ασφαλείας
+vault-backup-failed = Η αυτόματη δημιουργία αντιγράφων ασφαλείας απέτυχε. Πατήστε Συγχρονισμός για να προσπαθήσετε ξανά.
+vault-backup-failed-short = Η δημιουργία αντιγράφων ασφαλείας απέτυχε
+vault-recovery-key-copy-hint = Κάντε κλικ για αντιγραφή
+vault-recovery-key-copied = Αντιγράφηκε
+vault-recovery-key-verify = Αποθηκεύστε το στη διαχείριση κωδικών πρόσβασης και, στη συνέχεια, επικολλήστε το παρακάτω για επαλήθευση.
+vault-recovery-key-verify-placeholder = Επικόλληση αποθηκευμένου κλειδιού ανάκτησης
+vault-recovery-key-mismatch = Το κλειδί ανάκτησης δεν ταιριάζει.
+vault-open = { common-open } Vault
+vault-description = Συγχρονίστε ρυθμίσεις, εργαλεία, dotfiles και Knowledge με το Git.
+vault-sync = Συγχρονισμός
+vault-create = Δημιουργώ
+vault-connect = Συνδέω
+vault-github = GitHub
+vault-github-description = Δημιουργήστε ένα ιδιωτικό αποθετήριο ή επιλέξτε ένα υπάρχον Vault.
+vault-connect-github = Συνδέστε το GitHub
+vault-connected-as = Συνδέθηκε ως { $name }
+vault-use-repository = Χρήση
+vault-repository-name = Όνομα αποθετηρίου
+vault-cloud-folder = Φάκελος σύννεφο
+vault-cloud-folder-description = Χρησιμοποιήστε έναν φάκελο από το Google Drive, το iCloud Drive, το Dropbox ή το OneDrive.
+vault-choose-folder = Επιλέξτε φάκελο
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Ντοσιέ · { common-done }
+vault-private = Ιδιωτικό αποθετήριο
+vault-public-warning = Το ιστορικό του αποθετηρίου και τα κρυπτογραφημένα δεδομένα θα είναι δημόσια.
+vault-choose-repository = Επιλέξτε ένα αποθετήριο…
+vault-empty = αδειάζω
+vault-clean = Σύγχρονος
+vault-not-connected = Δεν είναι συνδεδεμένο
+vault-change-count = Αλλαγές: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Έναρξη
 start-tagline = Μία οδηγία. Όλα έτοιμα.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Σελιδοδείκτης σε { $folder }
 common-cancel = Άκυρο
 common-delete = Διαγραφή
 common-save = Αποθήκευση
+common-copy = Copy
 common-rename = Μετονομασία
 common-expand = Ανάπτυξη
 common-collapse = Σύμπτυξη

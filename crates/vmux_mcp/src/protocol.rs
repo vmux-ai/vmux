@@ -152,6 +152,10 @@ async fn tool_call_result(
         return grep_result(&arguments, anchor).await;
     }
 
+    if normalized_name == "vault_status" {
+        return Ok(vault_status_response(vmux_profile::vault::status()));
+    }
+
     match crate::tools::dispatch_with_anchor(name, arguments, anchor)? {
         crate::tools::DispatchTarget::Command(command @ AgentCommand::Run { .. })
         | crate::tools::DispatchTarget::Command(
@@ -160,6 +164,41 @@ async fn tool_call_result(
         crate::tools::DispatchTarget::Command(command) => run_agent_command(command, anchor).await,
         crate::tools::DispatchTarget::Query(query) => run_agent_query(query).await,
     }
+}
+
+fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
+    let connected = status.initialized && !status.remote.is_empty();
+    let provider = if !connected {
+        None
+    } else if status.remote.contains("github.com") {
+        Some("github")
+    } else if std::path::Path::new(&status.remote).is_absolute() {
+        Some("cloud_folder")
+    } else {
+        Some("git")
+    };
+    let state = json!({
+        "root": status.root,
+        "connected": connected,
+        "encrypted": status.encrypted,
+        "unlocked": status.unlocked,
+        "passkeys": status.passkey_credentials.len(),
+        "recoveryKey": status.recovery_enabled,
+        "automaticBackup": true,
+        "provider": provider,
+        "remote": status.remote,
+        "branch": status.branch,
+        "localChanges": status.dirty,
+        "ahead": status.ahead,
+        "behind": status.behind,
+        "syncNeeded": status.dirty > 0 || status.ahead > 0 || status.behind > 0,
+    });
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string_pretty(&state).unwrap_or_else(|_| state.to_string())
+        }]
+    })
 }
 
 async fn read_file_result(
@@ -955,6 +994,37 @@ mod tests {
         assert!(text.contains("/tmp/x.gif"));
         assert!(text.contains("auto-stopped"));
         assert!(v.get("isError").is_none());
+    }
+
+    #[test]
+    fn vault_status_reports_provider_and_pending_sync() {
+        let response = vault_status_response(vmux_profile::vault::VaultStatus {
+            root: "/Users/test/.vmux".into(),
+            initialized: true,
+            encrypted: true,
+            unlocked: true,
+            passkey_credentials: vec!["a1".repeat(32)],
+            recovery_enabled: true,
+            remote: "https://github.com/vmux-ai/vault.git".into(),
+            branch: "main".into(),
+            dirty: 2,
+            ahead: 1,
+            behind: 0,
+            ..Default::default()
+        });
+        let status: Value =
+            serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
+
+        assert_eq!(status["connected"], true);
+        assert_eq!(status["encrypted"], true);
+        assert_eq!(status["unlocked"], true);
+        assert_eq!(status["passkeys"], 1);
+        assert_eq!(status["recoveryKey"], true);
+        assert_eq!(status["automaticBackup"], true);
+        assert_eq!(status["provider"], "github");
+        assert_eq!(status["localChanges"], 2);
+        assert_eq!(status["ahead"], 1);
+        assert_eq!(status["syncNeeded"], true);
     }
 
     #[test]

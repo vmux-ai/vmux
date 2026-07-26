@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } zat
    *[other] { $count } zat
 }
+
+tools-title = Gurallar
+tools-search = Bukjalary, agentleri, MCP, LSPny we sazlama faýllaryny gözle…
+tools-open = Gurallary aç
+tools-fold = Gurallary ýygna
+tools-unfold = Gurallary giňelt
+tools-scanning = Ýerli gurallar barlanýar…
+tools-no-installed = Gurnalan gural ýok
+tools-empty = Gabat gelýän gural ýok
+tools-empty-detail = Bukja gurnaň ýa-da Stow görnüşli sazlama faýllary bukjasyny goşuň.
+tools-apply = Ulan
+tools-homebrew = Homebrew
+tools-homebrew-sync = Gurnalan formulalar we programmalar awtomatiki sinhronlanýar.
+tools-open-brewfile = Brewfile aç
+tools-managed = dolandyrylýar
+tools-provider-homebrew-formulae = Homebrew formulalary
+tools-provider-homebrew-casks = Homebrew programmalary
+tools-provider-npm = NPM bukjalary
+tools-provider-acp-agents = ACP agentleri
+tools-provider-lsp-servers = LSP serwerleri
+tools-provider-mcp-servers = MCP serwerleri
+tools-provider-dotfiles = Sazlama faýllary
+tools-status-available = Elýeterli
+tools-status-missing = Ýok
+tools-status-conflict = Gapma-garşylyk
+tools-forget = Ýatdan çykar
+tools-manage = Dolandyr
+tools-link = Bagla
+tools-unlink = Baglanyşygy aýyr
+tools-import = Import et
+tools-update-count = { $count ->
+    [one] 1 täzelenme
+   *[other] { $count } täzelenme
+}
+tools-conflict-count = { $count ->
+    [one] 1 gapma-garşylyk
+   *[other] { $count } gapma-garşylyk
+}
+tools-result-applied = Gurallar ulanyldy
+tools-result-imported = Gurallar import edildi
+tools-result-installed = { $name } gurnaldy
+tools-result-updated = { $name } täzelendi
+tools-result-uninstalled = { $name } aýryldy
+tools-result-forgotten = { $name } ýatdan çykaryldy
+tools-result-managed = { $name } indi dolandyrylýar
+tools-result-linked = { $name } baglandy
+tools-result-unlinked = { $name } baglanyşygy aýryldy
+vault-title = Vault
+vault-encrypted = Baştan-aýak şifrlenen
+vault-passkey = Passkey
+vault-passkey-description = Bu Vault-y parolsyz beýleki enjamlarda açyň.
+vault-passkey-add = Passkey goş
+vault-passkey-unlock = Gulpy aç
+vault-passkey-provider-unsupported = Bu açar üpjün ediji entek kodlanan Vault gulpuny goldamaýar.
+vault-recovery-key = Dikeldiş açary
+vault-recovery-key-description = Bu enjamy täze enjamda dikeltmek üçin Bitwarden ýa-da başga bir parol dolandyryjysynda saklaň.
+vault-recovery-key-create = Düwme dörediň
+vault-recovery-key-create-failed = Dikeldiş açary döredilip bilinmedi.
+vault-recovery-key-save = Bu açary indi ýazdyryň. Vmux ony ýene görkezip bilmeýär.
+vault-recovery-key-saved = Men halas etdim
+vault-recovery-key-placeholder = Dikeldiş açaryny goýuň
+vault-recovery-key-unlock = Gulpy aç
+vault-recovery-key-invalid = Bu Dikeldiş açary Vault-y açyp bilmeýär.
+vault-recovery-key-ready = Dikeldiş açary düzüldi
+vault-recovery-key-upload-pending = Açar ýerli ýagdaýda saklanýar, ýöne ýüklemek şowsuz. Howpsuz saklaň we gaýtadan synanyşmak üçin Sync basyň.
+vault-auto-sync = Awtomatiki ätiýaçlyk
+vault-backup-failed = Awtomatiki ätiýaçlyk şowsuz. Gaýtadan synamak üçin Sync basyň.
+vault-backup-failed-short = Uptiýaçlyk şowsuz
+vault-recovery-key-copy-hint = Göçürmek üçin basyň
+vault-recovery-key-copied = Göçürildi
+vault-recovery-key-verify = Parol dolandyryjyňyzda saklaň, barlamak üçin aşakda goýuň.
+vault-recovery-key-verify-placeholder = Saklanan Dikeldiş açaryny goýuň
+vault-recovery-key-mismatch = Dikeldiş açary gabat gelenok.
+vault-open = { common-open } Vault
+vault-description = Git bilen sazlamalary, gurallary, nokat faýllaryny we Bilimi sinhronlaň.
+vault-sync = Sinhronlamak
+vault-create = Dörediň
+vault-connect = Birikdiriň
+vault-github = GitHub
+vault-github-description = Hususy ammar dörediň ýa-da bar bolan Vault saýlaň.
+vault-connect-github = GitHub-a birikdiriň
+vault-connected-as = { $name } hökmünde birikdirildi
+vault-use-repository = Ulany
+vault-repository-name = Ammaryň ady
+vault-cloud-folder = Bulut bukjasy
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox ýa-da OneDrive bukjasyny ulanyň.
+vault-choose-folder = Papkany saýlaň
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Papka · { common-done }
+vault-private = Şahsy ammar
+vault-public-warning = Ammaryň taryhy we şifrlenen maglumatlar köpçülige açyk bolar.
+vault-choose-repository = Ammar saýlaň ...
+vault-empty = boş
+vault-clean = Häzirki wagta çenli
+vault-not-connected = Baglanmadyk
+vault-change-count = Üýtgeşmeler: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Başla
 start-tagline = Bir prompt. Islendik iş ýerine.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } içinde bellik et
 common-cancel = Ýatyr
 common-delete = Poz
 common-save = Ýatda sakla
+common-copy = Copy
 common-rename = Adyny üýtget
 common-expand = Giňelt
 common-collapse = Ýygna

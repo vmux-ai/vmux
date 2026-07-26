@@ -38,6 +38,7 @@ web-sys = { version = "0.3", features = [
     "CssStyleDeclaration", "DomRect",
     "EventTarget", "Event", "HtmlTextAreaElement", "KeyboardEvent",
     "Navigator",
+    "ScrollIntoViewOptions", "ScrollLogicalPosition",
 ] }
 dioxus = { workspace = true }
 time = { version = "0.3", default-features = false, features = [

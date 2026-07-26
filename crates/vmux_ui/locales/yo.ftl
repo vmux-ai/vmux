@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] ohun kan { $count }
    *[other] ohun { $count }
 }
+
+tools-title = Àwọn irinṣẹ́
+tools-search = Wá àwọn àkójọpọ̀, aṣojú, MCP, LSP àti fáìlì ìṣètò…
+tools-open = Ṣí àwọn irinṣẹ́
+tools-fold = Kó àwọn irinṣẹ́ pọ̀
+tools-unfold = Na àwọn irinṣẹ́ síta
+tools-scanning = Ń ṣàyẹ̀wò àwọn irinṣẹ́ abẹ́nú…
+tools-no-installed = Kò sí irinṣẹ́ tí a ti fi sílẹ̀
+tools-empty = Kò sí irinṣẹ́ tó bá mu
+tools-empty-detail = Fi àkójọpọ̀ kan sílẹ̀ tàbí ṣàfikún àkójọpọ̀ fáìlì ìṣètò irú Stow.
+tools-apply = Lò
+tools-homebrew = Homebrew
+tools-homebrew-sync = Àwọn fọ́múlà àti ohun èlò tí a fi sílẹ̀ máa ń bá ara wọn mu fúnra wọn.
+tools-open-brewfile = Ṣí Brewfile
+tools-managed = ń ṣàkóso
+tools-provider-homebrew-formulae = Àwọn fọ́múlà Homebrew
+tools-provider-homebrew-casks = Àwọn ohun èlò Homebrew
+tools-provider-npm = Àwọn àkójọpọ̀ NPM
+tools-provider-acp-agents = Àwọn aṣojú ACP
+tools-provider-lsp-servers = Àwọn olupin LSP
+tools-provider-mcp-servers = Àwọn olupin MCP
+tools-provider-dotfiles = Àwọn fáìlì ìṣètò
+tools-status-available = Wà
+tools-status-missing = Pàdánù
+tools-status-conflict = Ìtakora
+tools-forget = Gbàgbé
+tools-manage = Ṣàkóso
+tools-link = Sopọ̀
+tools-unlink = Yọ ìsopọ̀
+tools-import = Gbé wọlé
+tools-update-count = { $count ->
+    [one] Àtúnṣe 1
+   *[other] Àtúnṣe { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ìtakora 1
+   *[other] Ìtakora { $count }
+}
+tools-result-applied = A ti lo àwọn irinṣẹ́
+tools-result-imported = A ti gbé àwọn irinṣẹ́ wọlé
+tools-result-installed = A ti fi { $name } sílẹ̀
+tools-result-updated = A ti tún { $name } ṣe
+tools-result-uninstalled = A ti yọ { $name }
+tools-result-forgotten = A ti gbàgbé { $name }
+tools-result-managed = A ń ṣàkóso { $name } báyìí
+tools-result-linked = A ti so { $name }
+tools-result-unlinked = A ti yọ ìsopọ̀ { $name }
+vault-title = Vault
+vault-encrypted = Ti paroko lati opin si opin
+vault-passkey = Bọtini igbanu
+vault-passkey-description = Ṣii ifinkan yii sori awọn ẹrọ miiran laisi ọrọ igbaniwọle kan.
+vault-passkey-add = Fi bọtini iwọle kun
+vault-passkey-unlock = Ṣii silẹ
+vault-passkey-provider-unsupported = Olupese bọtini iwọle yii ko ṣe atilẹyin ṣiṣii Vault ti paroko sibẹsibẹ.
+vault-recovery-key = Bọtini imularada
+vault-recovery-key-description = Ṣafipamọ bọtini kan ni Bitwarden tabi oluṣakoso ọrọ igbaniwọle miiran lati gba Vault yii pada sori ẹrọ tuntun kan.
+vault-recovery-key-create = Ṣẹda bọtini
+vault-recovery-key-create-failed = Ko le ṣẹda bọtini imularada.
+vault-recovery-key-save = Fi bọtini yii pamọ ni bayi. Vmux ko le fi han lẹẹkansi.
+vault-recovery-key-saved = Mo ti fipamọ
+vault-recovery-key-placeholder = Lẹẹmọ Bọtini Imularada
+vault-recovery-key-unlock = Ṣii silẹ
+vault-recovery-key-invalid = Bọtini Imularada yii ko le ṣii ifinkan naa.
+vault-recovery-key-ready = Bọtini imularada ni tunto
+vault-recovery-key-upload-pending = Bọtini naa wa ni ipamọ ni agbegbe, ṣugbọn ikojọpọ kuna. Jeki o ni ailewu ati tẹ Amuṣiṣẹpọ lati tun gbiyanju.
+vault-auto-sync = Afẹyinti aifọwọyi
+vault-backup-failed = Afẹyinti aifọwọyi kuna. Tẹ Amuṣiṣẹpọ lati tun gbiyanju.
+vault-backup-failed-short = Afẹyinti kuna
+vault-recovery-key-copy-hint = Tẹ lati daakọ
+vault-recovery-key-copied = Ti daakọ
+vault-recovery-key-verify = Fipamọ sinu oluṣakoso ọrọ igbaniwọle rẹ, lẹhinna lẹẹmọ si isalẹ lati rii daju.
+vault-recovery-key-verify-placeholder = Lẹẹmọ Bọtini Imularada ti o fipamọ
+vault-recovery-key-mismatch = Bọtini imularada ko baramu.
+vault-open = { common-open } Vault
+vault-description = Awọn eto amuṣiṣẹpọ, awọn irinṣẹ, awọn faili dotfiles, ati Imọ pẹlu Git.
+vault-sync = Amuṣiṣẹpọ
+vault-create = Ṣẹda
+vault-connect = Sopọ
+vault-github = GitHub
+vault-github-description = Ṣẹda ibi ipamọ ikọkọ tabi yan ifinkan ti o wa tẹlẹ.
+vault-connect-github = Sopọ GitHub
+vault-connected-as = Ti sopọ bi { $name }
+vault-use-repository = Lo
+vault-repository-name = Orukọ ibi ipamọ
+vault-cloud-folder = Awọsanma folda
+vault-cloud-folder-description = Lo folda kan lati Google Drive, iCloud Drive, Dropbox, tabi OneDrive.
+vault-choose-folder = Yan folda
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = folda · { common-done }
+vault-private = Ibi ipamọ aladani
+vault-public-warning = Itan ibi ipamọ ati data ti a paroko yoo wa fun gbogbo eniyan.
+vault-choose-repository = Yan ibi ipamọ kan…
+vault-empty = ofo
+vault-clean = Fun asiko
+vault-not-connected = Ko ti sopọ
+vault-change-count = Awọn iyipada: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Bẹ̀rẹ̀
 start-tagline = Prompt kan. Ohunkóhun, ti ṣe.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Ṣe àmì ìwé nínú { $folder }
 common-cancel = Fagilé
 common-delete = Paarẹ
 common-save = Fipamọ́
+common-copy = Copy
 common-rename = Tún lorúkọ
 common-expand = Fẹ̀
 common-collapse = Kó pọ̀

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] ធាតុ { $count }
    *[other] ធាតុ { $count }
 }
+
+tools-title = ឧបករណ៍
+tools-search = ស្វែងរកកញ្ចប់ ភ្នាក់ងារ MCP LSP និងឯកសារកំណត់រចនាសម្ព័ន្ធ…
+tools-open = បើកឧបករណ៍
+tools-fold = បង្រួមឧបករណ៍
+tools-unfold = ពង្រីកឧបករណ៍
+tools-scanning = កំពុងស្កេនឧបករណ៍ក្នុងម៉ាស៊ីន…
+tools-no-installed = មិនមានឧបករណ៍ដែលបានដំឡើង
+tools-empty = មិនមានឧបករណ៍ដែលត្រូវគ្នា
+tools-empty-detail = ដំឡើងកញ្ចប់ ឬបន្ថែមកញ្ចប់ឯកសារកំណត់រចនាសម្ព័ន្ធបែប Stow។
+tools-apply = អនុវត្ត
+tools-homebrew = Homebrew
+tools-homebrew-sync = រូបមន្ត និងកម្មវិធីដែលបានដំឡើងត្រូវបានធ្វើសមកាលកម្មដោយស្វ័យប្រវត្តិ។
+tools-open-brewfile = បើក Brewfile
+tools-managed = បានគ្រប់គ្រង
+tools-provider-homebrew-formulae = រូបមន្ត Homebrew
+tools-provider-homebrew-casks = កម្មវិធី Homebrew
+tools-provider-npm = កញ្ចប់ NPM
+tools-provider-acp-agents = ភ្នាក់ងារ ACP
+tools-provider-lsp-servers = ម៉ាស៊ីនបម្រើ LSP
+tools-provider-mcp-servers = ម៉ាស៊ីនបម្រើ MCP
+tools-provider-dotfiles = ឯកសារកំណត់រចនាសម្ព័ន្ធ
+tools-status-available = មាន
+tools-status-missing = បាត់
+tools-status-conflict = ជម្លោះ
+tools-forget = បំភ្លេច
+tools-manage = គ្រប់គ្រង
+tools-link = ភ្ជាប់
+tools-unlink = ផ្ដាច់
+tools-import = នាំចូល
+tools-update-count = { $count ->
+    [one] បច្ចុប្បន្នភាព 1
+   *[other] បច្ចុប្បន្នភាព { $count }
+}
+tools-conflict-count = { $count ->
+    [one] ជម្លោះ 1
+   *[other] ជម្លោះ { $count }
+}
+tools-result-applied = បានអនុវត្តឧបករណ៍
+tools-result-imported = បាននាំចូលឧបករណ៍
+tools-result-installed = បានដំឡើង { $name }
+tools-result-updated = បានធ្វើបច្ចុប្បន្នភាព { $name }
+tools-result-uninstalled = បានលុប { $name }
+tools-result-forgotten = បានបំភ្លេច { $name }
+tools-result-managed = ឥឡូវនេះ { $name } ត្រូវបានគ្រប់គ្រង
+tools-result-linked = បានភ្ជាប់ { $name }
+tools-result-unlinked = បានផ្ដាច់ { $name }
+vault-title = Vault
+vault-encrypted = បានអ៊ិនគ្រីបពីចុងដល់ចុង
+vault-passkey = លេខសម្ងាត់
+vault-passkey-description = ដោះសោ Vault នេះនៅលើឧបករណ៍ផ្សេងទៀតដោយគ្មានពាក្យសម្ងាត់។
+vault-passkey-add = បន្ថែមលេខសម្ងាត់
+vault-passkey-unlock = ដោះសោ
+vault-passkey-provider-unsupported = អ្នកផ្តល់លេខសម្ងាត់នេះមិនគាំទ្រការដោះសោរ Vault ដែលបានអ៊ិនគ្រីបនៅឡើយទេ។
+vault-recovery-key = កូនសោសង្គ្រោះ
+vault-recovery-key-description = រក្សាទុកកូនសោមួយនៅក្នុង Bitwarden ឬអ្នកគ្រប់គ្រងពាក្យសម្ងាត់ផ្សេងទៀត ដើម្បីសង្គ្រោះ Vault នេះនៅលើឧបករណ៍ថ្មី។
+vault-recovery-key-create = បង្កើតកូនសោ
+vault-recovery-key-create-failed = សោស្តារមិនអាចបង្កើតបានទេ។
+vault-recovery-key-save = រក្សាទុកសោនេះឥឡូវនេះ។ Vmux មិនអាចបង្ហាញវាម្តងទៀតបានទេ។
+vault-recovery-key-saved = ខ្ញុំបានរក្សាទុកវា
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = ដោះសោ
+vault-recovery-key-invalid = សោសង្គ្រោះនេះមិនអាចដោះសោតុដេកបានទេ។
+vault-recovery-key-ready = បានកំណត់រចនាសម្ព័ន្ធសោស្តារឡើងវិញ
+vault-recovery-key-upload-pending = សោត្រូវបានរក្សាទុកក្នុងមូលដ្ឋាន ប៉ុន្តែការបង្ហោះបរាជ័យ។ រក្សាវាឱ្យមានសុវត្ថិភាព ហើយចុចសមកាលកម្ម ដើម្បីព្យាយាមម្តងទៀត។
+vault-auto-sync = ការបម្រុងទុកដោយស្វ័យប្រវត្តិ
+vault-backup-failed = ការបម្រុងទុកដោយស្វ័យប្រវត្តិបានបរាជ័យ។ ចុច Sync ដើម្បីព្យាយាមម្តងទៀត។
+vault-backup-failed-short = ការបម្រុងទុកបានបរាជ័យ
+vault-recovery-key-copy-hint = ចុចដើម្បីចម្លង
+vault-recovery-key-copied = ចម្លង
+vault-recovery-key-verify = រក្សាទុកវានៅក្នុងកម្មវិធីគ្រប់គ្រងពាក្យសម្ងាត់របស់អ្នក បន្ទាប់មកបិទភ្ជាប់វាខាងក្រោមដើម្បីផ្ទៀងផ្ទាត់។
+vault-recovery-key-verify-placeholder = បិទភ្ជាប់​គន្លឹះ​សង្គ្រោះ​ដែល​បាន​រក្សាទុក
+vault-recovery-key-mismatch = សោស្តារមិនត្រូវគ្នាទេ។
+vault-open = { common-open } Vault
+vault-description = ការ​កំណត់​សមកាលកម្ម ឧបករណ៍ ឯកសារ dotfiles និង​ចំណេះដឹង​ជាមួយ Git ។
+vault-sync = ធ្វើសមកាលកម្ម
+vault-create = បង្កើត
+vault-connect = ភ្ជាប់
+vault-github = GitHub
+vault-github-description = បង្កើតឃ្លាំងឯកជន ឬជ្រើសរើសឃ្លាំងដែលមានស្រាប់។
+vault-connect-github = ភ្ជាប់ GitHub
+vault-connected-as = បានភ្ជាប់ជា { $name }
+vault-use-repository = ប្រើ
+vault-repository-name = ឈ្មោះឃ្លាំង
+vault-cloud-folder = ថតពពក
+vault-cloud-folder-description = ប្រើថតឯកសារពី Google Drive, iCloud Drive, Dropbox ឬ OneDrive ។
+vault-choose-folder = ជ្រើសរើសថត
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = ថតឯកសារ · { common-done }
+vault-private = ឃ្លាំងឯកជន
+vault-public-warning = ប្រវត្តិឃ្លាំង និងទិន្នន័យដែលបានអ៊ិនគ្រីបនឹងត្រូវបង្ហាញជាសាធារណៈ។
+vault-choose-repository = ជ្រើសរើសឃ្លាំង…
+vault-empty = ទទេ
+vault-clean = ទាន់សម័យ
+vault-not-connected = មិនបានភ្ជាប់
+vault-change-count = ការផ្លាស់ប្តូរ: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = ចាប់ផ្ដើម
 start-tagline = ពាក្យបញ្ជាតែមួយ។ ធ្វើអ្វីក៏រួចរាល់។
 
@@ -299,6 +399,7 @@ layout-bookmark-in = ចំណាំក្នុង { $folder }
 common-cancel = បោះបង់
 common-delete = លុប
 common-save = រក្សាទុក
+common-copy = Copy
 common-rename = ប្ដូរឈ្មោះ
 common-expand = ពង្រីក
 common-collapse = បង្រួម

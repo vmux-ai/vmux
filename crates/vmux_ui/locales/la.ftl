@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } res
    *[other] { $count } res
 }
+
+tools-title = Instrumenta
+tools-search = Quaere fasciculos, agentes, MCP, LSP et tabulas configurationis…
+tools-open = Aperi instrumenta
+tools-fold = Complica instrumenta
+tools-unfold = Explica instrumenta
+tools-scanning = Instrumenta localia explorantur…
+tools-no-installed = Nulla instrumenta instituta
+tools-empty = Nulla instrumenta congruentia
+tools-empty-detail = Fasciculum institue aut fasciculum tabularum configurationis more Stow adde.
+tools-apply = Applica
+tools-homebrew = Homebrew
+tools-homebrew-sync = Formulae et applicationes institutae automatice synchronizantur.
+tools-open-brewfile = Aperi Brewfile
+tools-managed = administratum
+tools-provider-homebrew-formulae = Formulae Homebrew
+tools-provider-homebrew-casks = Applicationes Homebrew
+tools-provider-npm = Fasciculi NPM
+tools-provider-acp-agents = Agentes ACP
+tools-provider-lsp-servers = Servitores LSP
+tools-provider-mcp-servers = Servitores MCP
+tools-provider-dotfiles = Tabulae configurationis
+tools-status-available = Praesto
+tools-status-missing = Abest
+tools-status-conflict = Conflictus
+tools-forget = Oblivisci
+tools-manage = Administra
+tools-link = Coniunge
+tools-unlink = Disiunge
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 renovatio
+   *[other] { $count } renovationes
+}
+tools-conflict-count = { $count ->
+    [one] 1 conflictus
+   *[other] { $count } conflictus
+}
+tools-result-applied = Instrumenta applicata
+tools-result-imported = Instrumenta importata
+tools-result-installed = { $name } institutum
+tools-result-updated = { $name } renovatum
+tools-result-uninstalled = { $name } remotum
+tools-result-forgotten = { $name } oblitum
+tools-result-managed = { $name } nunc administratur
+tools-result-linked = { $name } coniunctum
+tools-result-unlinked = { $name } disiunctum
+vault-title = Vault
+vault-encrypted = Ab extremo ad extremum encryptatum
+vault-passkey = Passkey
+vault-passkey-description = Hoc Cochleam recludam in aliis machinis sine tessera.
+vault-passkey-add = Add passkey
+vault-passkey-unlock = Basem
+vault-passkey-provider-unsupported = Hic provisor passkey encrypted Vault reserare adhuc non sustinet.
+vault-recovery-key = Recuperatio Key
+vault-recovery-key-description = Serva unam clavem in Bitwarden vel in alia password procurator ut hoc Vault in novo artificio recipias.
+vault-recovery-key-create = Create key
+vault-recovery-key-create-failed = Key Recuperatio creari non potuit.
+vault-recovery-key-save = Serva hanc clavem nunc. Vmux iterum ostendere non potest.
+vault-recovery-key-saved = Servavi eam
+vault-recovery-key-placeholder = Crustulum Recuperatio Key
+vault-recovery-key-unlock = Basem
+vault-recovery-key-invalid = Haec Recuperatio Key non potest reserare Buy.
+vault-recovery-key-ready = Key convaluisset felis
+vault-recovery-key-upload-pending = Clavis localiter salvatur, sed fasciculus incassum. Incolumem serva et premet Sync ad retry.
+vault-auto-sync = Lorem tergum
+vault-backup-failed = Lorem tergum defuit. Sync Press ad retry.
+vault-backup-failed-short = Tergum defecit
+vault-recovery-key-copy-hint = Click to effingo
+vault-recovery-key-copied = Copied
+vault-recovery-key-verify = Serva in es tesserae procuratoris, deinde crustulum infra ut verificetur.
+vault-recovery-key-verify-placeholder = Crustulum salvus Recuperatio Key
+vault-recovery-key-mismatch = Recuperatio Key non congruit.
+vault-open = { common-open } Vault
+vault-description = Sync occasus, instrumenta, dotfiles, et scientia apud Git.
+vault-sync = Sync
+vault-create = Create
+vault-connect = Connect
+vault-github = GitHub
+vault-github-description = Repositorium privatum vel crea exsistentem Vault eligere.
+vault-connect-github = Connect GitHub
+vault-connected-as = Coniuncta cum { $name }
+vault-use-repository = Usus
+vault-repository-name = Reconditorium nomen
+vault-cloud-folder = Nubes folder
+vault-cloud-folder-description = Utere folder ex Google Coegi, iCloud Drive, Dropbox vel OneDrive.
+vault-choose-folder = Elige folder
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Privata repositio
+vault-public-warning = Historia repositorii et data encryptata publica erunt.
+vault-choose-repository = Elige repositio…
+vault-empty = inanis
+vault-clean = Usque ad diem
+vault-not-connected = Seiuncta
+vault-change-count = Mutationes: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Initium
 start-tagline = Unum promptum. Quidlibet, perfectum.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Signum in { $folder }
 common-cancel = Abrogare
 common-delete = Delere
 common-save = Servare
+common-copy = Copy
 common-rename = Renominare
 common-expand = Expandere
 common-collapse = Contrahere

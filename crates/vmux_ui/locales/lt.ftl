@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } elementas
    *[other] { $count } elementai
 }
+
+tools-title = Įrankiai
+tools-search = Ieškoti paketų, agentų, MCP, LSP ir konfigūracijos failų…
+tools-open = Atverti įrankius
+tools-fold = Suskleisti įrankius
+tools-unfold = Išskleisti įrankius
+tools-scanning = Tikrinami vietiniai įrankiai…
+tools-no-installed = Nėra įdiegtų įrankių
+tools-empty = Nėra atitinkančių įrankių
+tools-empty-detail = Įdiekite paketą arba pridėkite Stow stiliaus konfigūracijos failų paketą.
+tools-apply = Taikyti
+tools-homebrew = Homebrew
+tools-homebrew-sync = Įdiegtos formulės ir programos sinchronizuojamos automatiškai.
+tools-open-brewfile = Atverti Brewfile
+tools-managed = valdomas
+tools-provider-homebrew-formulae = Homebrew formulės
+tools-provider-homebrew-casks = Homebrew programos
+tools-provider-npm = NPM paketai
+tools-provider-acp-agents = ACP agentai
+tools-provider-lsp-servers = LSP serveriai
+tools-provider-mcp-servers = MCP serveriai
+tools-provider-dotfiles = Konfigūracijos failai
+tools-status-available = Pasiekiamas
+tools-status-missing = Trūksta
+tools-status-conflict = Konfliktas
+tools-forget = Pamiršti
+tools-manage = Valdyti
+tools-link = Susieti
+tools-unlink = Atsieti
+tools-import = Importuoti
+tools-update-count = { $count ->
+    [one] 1 naujinimas
+   *[other] { $count } naujinimų
+}
+tools-conflict-count = { $count ->
+    [one] 1 konfliktas
+   *[other] { $count } konfliktų
+}
+tools-result-applied = Įrankiai pritaikyti
+tools-result-imported = Įrankiai importuoti
+tools-result-installed = { $name } įdiegtas
+tools-result-updated = { $name } atnaujintas
+tools-result-uninstalled = { $name } pašalintas
+tools-result-forgotten = { $name } pamirštas
+tools-result-managed = { $name } dabar valdomas
+tools-result-linked = { $name } susietas
+tools-result-unlinked = { $name } atsietas
+vault-title = Vault
+vault-encrypted = Užšifruota nuo galo iki galo
+vault-passkey = Passkey
+vault-passkey-description = Atrakinkite šią saugyklą kituose įrenginiuose be slaptažodžio.
+vault-passkey-add = Pridėti prieigos raktą
+vault-passkey-unlock = Atrakinti
+vault-passkey-provider-unsupported = Šis slaptažodžio teikėjas dar nepalaiko šifruoto Vault atrakinimo.
+vault-recovery-key = Atkūrimo raktas
+vault-recovery-key-description = Išsaugokite vieną raktą „Bitwarden“ arba kitoje slaptažodžių tvarkytuvėje, kad atkurtumėte šį saugyklą naujame įrenginyje.
+vault-recovery-key-create = Sukurti raktą
+vault-recovery-key-create-failed = Nepavyko sukurti atkūrimo rakto.
+vault-recovery-key-save = Išsaugokite šį raktą dabar. Vmux negali to parodyti dar kartą.
+vault-recovery-key-saved = Išsaugojau
+vault-recovery-key-placeholder = Įklijuoti atkūrimo raktą
+vault-recovery-key-unlock = Atrakinti
+vault-recovery-key-invalid = Šis atkūrimo raktas negali atrakinti saugyklos.
+vault-recovery-key-ready = Atkūrimo raktas sukonfigūruotas
+vault-recovery-key-upload-pending = Raktas išsaugotas vietoje, bet įkelti nepavyko. Saugokite ir paspauskite Sinchronizuoti, kad bandykite dar kartą.
+vault-auto-sync = Automatinis atsarginis kopijavimas
+vault-backup-failed = Automatinis atsarginis kopijavimas nepavyko. Norėdami bandyti dar kartą, paspauskite Sinchronizuoti.
+vault-backup-failed-short = Nepavyko sukurti atsarginės kopijos
+vault-recovery-key-copy-hint = Spustelėkite norėdami nukopijuoti
+vault-recovery-key-copied = Nukopijuota
+vault-recovery-key-verify = Išsaugokite jį slaptažodžių tvarkyklėje, tada įklijuokite toliau, kad patvirtintumėte.
+vault-recovery-key-verify-placeholder = Įklijuokite išsaugotą atkūrimo raktą
+vault-recovery-key-mismatch = Atkūrimo raktas neatitinka.
+vault-open = { common-open } Vault
+vault-description = Sinchronizuokite nustatymus, įrankius, taškinius failus ir žinias su „Git“.
+vault-sync = Sinchronizuoti
+vault-create = Sukurti
+vault-connect = Prisijunkite
+vault-github = GitHub
+vault-github-description = Sukurkite privačią saugyklą arba pasirinkite esamą saugyklą.
+vault-connect-github = Prijunkite „GitHub“.
+vault-connected-as = Prisijungta kaip { $name }
+vault-use-repository = Naudokite
+vault-repository-name = Saugyklos pavadinimas
+vault-cloud-folder = Debesų aplankas
+vault-cloud-folder-description = Naudokite aplanką iš „Google“ disko, „iCloud Drive“, „Dropbox“ arba „OneDrive“.
+vault-choose-folder = Pasirinkite aplanką
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Aplankas · { common-done }
+vault-private = Privati ​​saugykla
+vault-public-warning = Saugyklos istorija ir užšifruoti duomenys bus vieši.
+vault-choose-repository = Pasirinkite saugyklą…
+vault-empty = tuščias
+vault-clean = Naujausia
+vault-not-connected = Neprisijungęs
+vault-change-count = Pakeitimai: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Pradžia
 start-tagline = Viena užklausa. Viskas atlikta.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Įrašyti žymelę į { $folder }
 common-cancel = Atšaukti
 common-delete = Ištrinti
 common-save = Įrašyti
+common-copy = Copy
 common-rename = Pervardyti
 common-expand = Išskleisti
 common-collapse = Suskleisti

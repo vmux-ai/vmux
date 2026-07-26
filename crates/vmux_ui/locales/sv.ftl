@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } objekt
    *[other] { $count } objekt
 }
+
+tools-title = Verktyg
+tools-search = Sök efter paket, agenter, MCP, LSP och konfigurationsfiler…
+tools-open = Öppna Verktyg
+tools-fold = Fäll ihop verktyg
+tools-unfold = Fäll ut verktyg
+tools-scanning = Söker igenom lokala verktyg…
+tools-no-installed = Inga verktyg installerade
+tools-empty = Inga matchande verktyg
+tools-empty-detail = Installera ett paket eller lägg till ett konfigurationsfilspaket i Stow-stil.
+tools-apply = Tillämpa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Installerade formler och program synkroniseras automatiskt.
+tools-open-brewfile = Öppna Brewfile
+tools-managed = hanterad
+tools-provider-homebrew-formulae = Homebrew-formler
+tools-provider-homebrew-casks = Homebrew-program
+tools-provider-npm = NPM-paket
+tools-provider-acp-agents = ACP-agenter
+tools-provider-lsp-servers = LSP-servrar
+tools-provider-mcp-servers = MCP-servrar
+tools-provider-dotfiles = Konfigurationsfiler
+tools-status-available = Tillgänglig
+tools-status-missing = Saknas
+tools-status-conflict = Konflikt
+tools-forget = Glöm
+tools-manage = Hantera
+tools-link = Länka
+tools-unlink = Ta bort länk
+tools-import = Importera
+tools-update-count = { $count ->
+    [one] 1 uppdatering
+   *[other] { $count } uppdateringar
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikt
+   *[other] { $count } konflikter
+}
+tools-result-applied = Verktyg tillämpade
+tools-result-imported = Verktyg importerade
+tools-result-installed = { $name } installerad
+tools-result-updated = { $name } uppdaterad
+tools-result-uninstalled = { $name } avinstallerad
+tools-result-forgotten = { $name } glömd
+tools-result-managed = { $name } hanteras nu
+tools-result-linked = { $name } länkad
+tools-result-unlinked = Länken till { $name } borttagen
+vault-title = Vault
+vault-encrypted = End-to-end-krypterad
+vault-passkey = Nyckel
+vault-passkey-description = Lås upp detta valv på andra enheter utan lösenord.
+vault-passkey-add = Lägg till lösenord
+vault-passkey-unlock = Låsa upp
+vault-passkey-provider-unsupported = Den här lösenordsleverantören stöder inte krypterad valvupplåsning ännu.
+vault-recovery-key = Återställningsnyckel
+vault-recovery-key-description = Spara en nyckel i Bitwarden eller en annan lösenordshanterare för att återställa detta valv på en ny enhet.
+vault-recovery-key-create = Skapa nyckel
+vault-recovery-key-create-failed = Det gick inte att skapa återställningsnyckel.
+vault-recovery-key-save = Spara den här nyckeln nu. Vmux kan inte visa det igen.
+vault-recovery-key-saved = Jag sparade den
+vault-recovery-key-placeholder = Klistra in återställningsnyckel
+vault-recovery-key-unlock = Låsa upp
+vault-recovery-key-invalid = Den här återställningsnyckeln kan inte låsa upp valvet.
+vault-recovery-key-ready = Återställningsnyckel konfigurerad
+vault-recovery-key-upload-pending = Nyckeln sparas lokalt, men uppladdningen misslyckades. Håll det säkert och tryck på Synkronisera för att försöka igen.
+vault-auto-sync = Automatisk säkerhetskopiering
+vault-backup-failed = Automatisk säkerhetskopiering misslyckades. Tryck på Synkronisera för att försöka igen.
+vault-backup-failed-short = Säkerhetskopieringen misslyckades
+vault-recovery-key-copy-hint = Klicka för att kopiera
+vault-recovery-key-copied = Kopierade
+vault-recovery-key-verify = Spara det i din lösenordshanterare och klistra sedan in det nedan för att verifiera.
+vault-recovery-key-verify-placeholder = Klistra in sparad återställningsnyckel
+vault-recovery-key-mismatch = Återställningsnyckeln matchar inte.
+vault-open = { common-open } Vault
+vault-description = Synkronisera inställningar, verktyg, dotfiler och Knowledge med Git.
+vault-sync = Synkronisera
+vault-create = Skapa
+vault-connect = Ansluta
+vault-github = GitHub
+vault-github-description = Skapa ett privat arkiv eller välj ett befintligt valv.
+vault-connect-github = Anslut GitHub
+vault-connected-as = Ansluten som { $name }
+vault-use-repository = Använda
+vault-repository-name = Förvaringsnamn
+vault-cloud-folder = Molnmapp
+vault-cloud-folder-description = Använd en mapp från Google Drive, iCloud Drive, Dropbox eller OneDrive.
+vault-choose-folder = Välj mapp
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mapp · { common-done }
+vault-private = Privat förvar
+vault-public-warning = Historiken för arkivet och krypterade data kommer att vara offentliga.
+vault-choose-repository = Välj ett arkiv...
+vault-empty = tömma
+vault-clean = Upp till datum
+vault-not-connected = Ej ansluten
+vault-change-count = Ändringar: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Start
 start-tagline = En prompt. Allt klart.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Bokmärk i { $folder }
 common-cancel = Avbryt
 common-delete = Radera
 common-save = Spara
+common-copy = Copy
 common-rename = Byt namn
 common-expand = Expandera
 common-collapse = Fäll ihop

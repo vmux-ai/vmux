@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } elem
    *[other] { $count } elem
 }
+
+tools-title = Eszközök
+tools-search = Csomagok, ügynökök, MCP, LSP és konfigurációs fájlok keresése…
+tools-open = Eszközök megnyitása
+tools-fold = Eszközök összecsukása
+tools-unfold = Eszközök kibontása
+tools-scanning = Helyi eszközök vizsgálata…
+tools-no-installed = Nincs telepített eszköz
+tools-empty = Nincs egyező eszköz
+tools-empty-detail = Telepítsen egy csomagot, vagy adjon hozzá egy Stow-stílusú konfigurációsfájl-csomagot.
+tools-apply = Alkalmaz
+tools-homebrew = Homebrew
+tools-homebrew-sync = A telepített képletek és alkalmazások automatikusan szinkronizálódnak.
+tools-open-brewfile = Brewfile megnyitása
+tools-managed = kezelt
+tools-provider-homebrew-formulae = Homebrew-képletek
+tools-provider-homebrew-casks = Homebrew-alkalmazások
+tools-provider-npm = NPM-csomagok
+tools-provider-acp-agents = ACP-ügynökök
+tools-provider-lsp-servers = LSP-kiszolgálók
+tools-provider-mcp-servers = MCP-kiszolgálók
+tools-provider-dotfiles = Konfigurációs fájlok
+tools-status-available = Elérhető
+tools-status-missing = Hiányzik
+tools-status-conflict = Ütközés
+tools-forget = Elfelejtés
+tools-manage = Kezelés
+tools-link = Összekapcsolás
+tools-unlink = Szétkapcsolás
+tools-import = Importálás
+tools-update-count = { $count ->
+    [one] 1 frissítés
+   *[other] { $count } frissítés
+}
+tools-conflict-count = { $count ->
+    [one] 1 ütközés
+   *[other] { $count } ütközés
+}
+tools-result-applied = Eszközök alkalmazva
+tools-result-imported = Eszközök importálva
+tools-result-installed = { $name } telepítve
+tools-result-updated = { $name } frissítve
+tools-result-uninstalled = { $name } eltávolítva
+tools-result-forgotten = { $name } elfelejtve
+tools-result-managed = { $name } mostantól kezelt
+tools-result-linked = { $name } összekapcsolva
+tools-result-unlinked = { $name } szétkapcsolva
+vault-title = Vault
+vault-encrypted = Végpontok között titkosított
+vault-passkey = Passkey
+vault-passkey-description = Jelszó nélkül oldja fel a Széf zárolását más eszközökön.
+vault-passkey-add = Adjon hozzá jelszót
+vault-passkey-unlock = Kinyit
+vault-passkey-provider-unsupported = Ez a jelszószolgáltató még nem támogatja a titkosított Vault feloldást.
+vault-recovery-key = Helyreállítási kulcs
+vault-recovery-key-description = Mentse el az egyik kulcsot a Bitwardenben vagy egy másik jelszókezelőben, hogy helyreállítsa ezt a Vaultot egy új eszközön.
+vault-recovery-key-create = Kulcs létrehozása
+vault-recovery-key-create-failed = A helyreállítási kulcs létrehozása nem sikerült.
+vault-recovery-key-save = Mentse el ezt a kulcsot most. A Vmux nem tudja újra megmutatni.
+vault-recovery-key-saved = elmentettem
+vault-recovery-key-placeholder = Illessze be a helyreállítási kulcsot
+vault-recovery-key-unlock = Kinyit
+vault-recovery-key-invalid = Ez a helyreállítási kulcs nem tudja feloldani a Vault zárolását.
+vault-recovery-key-ready = Helyreállítási kulcs konfigurálva
+vault-recovery-key-upload-pending = A kulcsot helyileg menti, de a feltöltés nem sikerült. Tartsa biztonságban, és nyomja meg a Szinkronizálás gombot az újrapróbálkozáshoz.
+vault-auto-sync = Automatikus biztonsági mentés
+vault-backup-failed = Az automatikus biztonsági mentés nem sikerült. Nyomja meg a Sync gombot az újrapróbálkozáshoz.
+vault-backup-failed-short = A biztonsági mentés nem sikerült
+vault-recovery-key-copy-hint = Kattintson a másoláshoz
+vault-recovery-key-copied = Másolva
+vault-recovery-key-verify = Mentse el a jelszókezelőbe, majd illessze be alább az ellenőrzéshez.
+vault-recovery-key-verify-placeholder = Illessze be a mentett helyreállítási kulcsot
+vault-recovery-key-mismatch = A helyreállítási kulcs nem egyezik.
+vault-open = { common-open } Vault
+vault-description = Szinkronizálja a beállításokat, eszközöket, pontfájlokat és a tudást a Git segítségével.
+vault-sync = Szinkronizál
+vault-create = Teremt
+vault-connect = Csatlakozás
+vault-github = GitHub
+vault-github-description = Hozzon létre egy privát adattárat, vagy válasszon egy meglévő Vaultot.
+vault-connect-github = Csatlakoztassa a GitHubot
+vault-connected-as = Csatlakozva mint { $name }
+vault-use-repository = Használat
+vault-repository-name = Az adattár neve
+vault-cloud-folder = Felhő mappa
+vault-cloud-folder-description = Használjon mappát a Google Drive, iCloud Drive, Dropbox vagy OneDrive szolgáltatásból.
+vault-choose-folder = Válasszon mappát
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mappa · { common-done }
+vault-private = Privát adattár
+vault-public-warning = A tároló előzményei és a titkosított adatok nyilvánosak lesznek.
+vault-choose-repository = Válasszon egy adattárat…
+vault-empty = üres
+vault-clean = Naprakész
+vault-not-connected = Nincs csatlakoztatva
+vault-change-count = Változások: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Kezdés
 start-tagline = Egy prompt. Bármi elkészül.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Könyvjelző ide: { $folder }
 common-cancel = Mégse
 common-delete = Törlés
 common-save = Mentés
+common-copy = Copy
 common-rename = Átnevezés
 common-expand = Kibontás
 common-collapse = Összecsukás

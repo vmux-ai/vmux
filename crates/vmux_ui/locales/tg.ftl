@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } адад
    *[other] { $count } адад
 }
+
+tools-title = Абзорҳо
+tools-search = Ҷустуҷӯи бастаҳо, агентҳо, MCP, LSP ва файлҳои танзимот…
+tools-open = Кушодани абзорҳо
+tools-fold = Ҷамъ кардани абзорҳо
+tools-unfold = Кушодани абзорҳо
+tools-scanning = Санҷиши абзорҳои маҳаллӣ…
+tools-no-installed = Абзори насбшуда нест
+tools-empty = Абзори мувофиқ нест
+tools-empty-detail = Бастаеро насб кунед ё бастаи файлҳои танзимоти сабки Stow илова кунед.
+tools-apply = Татбиқ
+tools-homebrew = Homebrew
+tools-homebrew-sync = Формулаҳо ва барномаҳои насбшуда худкор ҳамоҳанг мешаванд.
+tools-open-brewfile = Кушодани Brewfile
+tools-managed = идорашаванда
+tools-provider-homebrew-formulae = Формулаҳои Homebrew
+tools-provider-homebrew-casks = Барномаҳои Homebrew
+tools-provider-npm = Бастаҳои NPM
+tools-provider-acp-agents = Агентҳои ACP
+tools-provider-lsp-servers = Серверҳои LSP
+tools-provider-mcp-servers = Серверҳои MCP
+tools-provider-dotfiles = Файлҳои танзимот
+tools-status-available = Дастрас
+tools-status-missing = Нест
+tools-status-conflict = Ихтилоф
+tools-forget = Фаромӯш кардан
+tools-manage = Идора кардан
+tools-link = Пайваст кардан
+tools-unlink = Қатъи пайваст
+tools-import = Ворид кардан
+tools-update-count = { $count ->
+    [one] 1 навсозӣ
+   *[other] { $count } навсозӣ
+}
+tools-conflict-count = { $count ->
+    [one] 1 ихтилоф
+   *[other] { $count } ихтилоф
+}
+tools-result-applied = Абзорҳо татбиқ шуданд
+tools-result-imported = Абзорҳо ворид шуданд
+tools-result-installed = { $name } насб шуд
+tools-result-updated = { $name } нав шуд
+tools-result-uninstalled = { $name } ҳазф шуд
+tools-result-forgotten = { $name } фаромӯш шуд
+tools-result-managed = { $name } акнун идора мешавад
+tools-result-linked = { $name } пайваст шуд
+tools-result-unlinked = Пайвасти { $name } қатъ шуд
+vault-title = Vault
+vault-encrypted = Рамзгузории саросарӣ
+vault-passkey = Калиди гузариш
+vault-passkey-description = Ин Vault-ро дар дигар дастгоҳҳо бе парол кушоед.
+vault-passkey-add = Калиди гузаришро илова кунед
+vault-passkey-unlock = Кушодан
+vault-passkey-provider-unsupported = Ин провайдери калиди гузариш кушодани Vault-и рамзгузоришударо ҳанӯз дастгирӣ намекунад.
+vault-recovery-key = Калиди барқарорсозӣ
+vault-recovery-key-description = Як калидро дар Bitwarden ё мудири дигари парол захира кунед, то ин Vaultро дар дастгоҳи нав барқарор кунед.
+vault-recovery-key-create = Калид эҷод кунед
+vault-recovery-key-create-failed = Калиди барқарорсозӣ эҷод карда нашуд.
+vault-recovery-key-save = Ин калидро ҳозир захира кунед. Vmux онро дубора нишон дода наметавонад.
+vault-recovery-key-saved = Ман онро захира кардам
+vault-recovery-key-placeholder = Калиди барқароркуниро часбонед
+vault-recovery-key-unlock = Кушодан
+vault-recovery-key-invalid = Ин Калиди барқарорсозӣ қулфи Vaultро кушода наметавонад.
+vault-recovery-key-ready = Калиди барқарорсозӣ танзим карда шудааст
+vault-recovery-key-upload-pending = Калид ба таври маҳаллӣ захира карда шудааст, аммо боргузорӣ натавонист. Онро бехатар нигоҳ доред ва Синхронизатсияро пахш кунед, то дубора кӯшиш кунед.
+vault-auto-sync = Нусхаи худкор
+vault-backup-failed = Нусхаи худкор ноком шуд. Барои аз нав кӯшиш кардан Синхронизатсияро пахш кунед.
+vault-backup-failed-short = Нусхабардорӣ ноком шуд
+vault-recovery-key-copy-hint = Барои нусхабардорӣ клик кунед
+vault-recovery-key-copied = Нусхабардорӣ
+vault-recovery-key-verify = Онро дар менеҷери пароли худ захира кунед ва пас онро барои тафтиш дар зер часбонед.
+vault-recovery-key-verify-placeholder = Калиди барқароркунии захирашударо часбонед
+vault-recovery-key-mismatch = Калиди барқарорсозӣ мувофиқат намекунад.
+vault-open = { common-open } Vault
+vault-description = Танзимотҳо, асбобҳо, файлҳои нуқтаҳо ва донишро бо Git ҳамоҳанг созед.
+vault-sync = Синхронизатсия
+vault-create = Эҷод кунед
+vault-connect = Пайваст кунед
+vault-github = GitHub
+vault-github-description = Анбори хусусӣ эҷод кунед ё як Vault мавҷударо интихоб кунед.
+vault-connect-github = GitHub-ро пайваст кунед
+vault-connected-as = Пайвастшавӣ ҳамчун { $name }
+vault-use-repository = Истифода баред
+vault-repository-name = Номи анбор
+vault-cloud-folder = Папкаи абрӣ
+vault-cloud-folder-description = Ҷузвдонро аз Google Drive, iCloud Drive, Dropbox ё OneDrive истифода баред.
+vault-choose-folder = Папкаро интихоб кунед
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Папка · { common-done }
+vault-private = Анбори хусусӣ
+vault-public-warning = Таърихи анбор ва маълумоти рамзгузоришуда оммавӣ хоҳанд буд.
+vault-choose-repository = Анбор интихоб кунед…
+vault-empty = холӣ
+vault-clean = Навшуда
+vault-not-connected = Пайваст нест
+vault-change-count = Тағйирот: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Оғоз
 start-tagline = Як prompt. Ҳар кор — анҷом.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Хатчӯб дар { $folder }
 common-cancel = Бекор
 common-delete = Нест кардан
 common-save = Захира кардан
+common-copy = Copy
 common-rename = Ном иваз кардан
 common-expand = Кушодан
 common-collapse = Пӯшондан

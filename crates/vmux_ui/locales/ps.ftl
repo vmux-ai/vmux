@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } توکی
    *[other] { $count } توکي
 }
+
+tools-title = وسایل
+tools-search = د کڅوړو، استازو، MCP، LSP او سازونې فایلونو لټون…
+tools-open = وسایل پرانیستل
+tools-fold = وسایل راټولول
+tools-unfold = وسایل غځول
+tools-scanning = ځايي وسایل کتل کېږي…
+tools-no-installed = هېڅ وسیله نه ده لګول شوې
+tools-empty = هېڅ سمون خوړونکې وسیله نشته
+tools-empty-detail = یوه کڅوړه ولګوئ یا د Stow په بڼه د سازونې فایلونو کڅوړه ورزیاته کړئ.
+tools-apply = پلي کول
+tools-homebrew = Homebrew
+tools-homebrew-sync = لګول شوې فورمولې او کاریالونه په اتومات ډول همغږي کېږي.
+tools-open-brewfile = Brewfile پرانیستل
+tools-managed = اداره شوی
+tools-provider-homebrew-formulae = د Homebrew فورمولې
+tools-provider-homebrew-casks = د Homebrew کاریالونه
+tools-provider-npm = د NPM کڅوړې
+tools-provider-acp-agents = د ACP استازي
+tools-provider-lsp-servers = د LSP سرورونه
+tools-provider-mcp-servers = د MCP سرورونه
+tools-provider-dotfiles = د سازونې فایلونه
+tools-status-available = شته
+tools-status-missing = ورک
+tools-status-conflict = ټکر
+tools-forget = هېرول
+tools-manage = اداره کول
+tools-link = تړل
+tools-unlink = تړاو لرې کول
+tools-import = واردول
+tools-update-count = { $count ->
+    [one] ۱ اوسمهالونه
+   *[other] { $count } اوسمهالونه
+}
+tools-conflict-count = { $count ->
+    [one] ۱ ټکر
+   *[other] { $count } ټکرونه
+}
+tools-result-applied = وسایل پلي شول
+tools-result-imported = وسایل وارد شول
+tools-result-installed = { $name } ولګول شو
+tools-result-updated = { $name } اوسمهال شو
+tools-result-uninstalled = { $name } لرې شو
+tools-result-forgotten = { $name } هېر شو
+tools-result-managed = { $name } اوس اداره کېږي
+tools-result-linked = { $name } وتړل شو
+tools-result-unlinked = د { $name } تړاو لرې شو
+vault-title = Vault
+vault-encrypted = له پیل څخه تر پایه کوډ شوی
+vault-passkey = پاسکی
+vault-passkey-description = دا والټ په نورو وسیلو کې پرته له پاسورډ خلاص کړئ.
+vault-passkey-add = پاسکی اضافه کړئ
+vault-passkey-unlock = خلاصول
+vault-passkey-provider-unsupported = دا پاسکي چمتو کونکی لاهم د کوډ شوي والټ انلاک ملاتړ نه کوي.
+vault-recovery-key = د بیا رغونې کیلي
+vault-recovery-key-description = یوه کیلي په بټوارډن یا بل پاسورډ مدیر کې خوندي کړئ ترڅو دا والټ په نوي وسیله بیرته ترلاسه کړئ.
+vault-recovery-key-create = کلید جوړ کړئ
+vault-recovery-key-create-failed = د بیا رغونې کیلي نشي رامینځته کیدی.
+vault-recovery-key-save = اوس دا کیلي خوندي کړئ. Vmux نشي کولی دا بیا وښیې.
+vault-recovery-key-saved = ما دا خوندي کړ
+vault-recovery-key-placeholder = د بیا رغونې کیلي پیسټ کړئ
+vault-recovery-key-unlock = خلاصول
+vault-recovery-key-invalid = دا د بیا رغونې کیلي نشي کولی والټ خلاص کړي.
+vault-recovery-key-ready = د بیا رغونې کیلي ترتیب شوې
+vault-recovery-key-upload-pending = کیلي په محلي توګه خوندي شوې، مګر اپلوډ ناکام شو. دا خوندي وساتئ او د بیا هڅه کولو لپاره Sync فشار ورکړئ.
+vault-auto-sync = اتوماتیک بیک اپ
+vault-backup-failed = اتوماتیک بیک اپ ناکام شو. د بیا هڅه کولو لپاره Sync فشار ورکړئ.
+vault-backup-failed-short = بیک اپ ناکام شو
+vault-recovery-key-copy-hint = د کاپي کولو لپاره کلیک وکړئ
+vault-recovery-key-copied = کاپي
+vault-recovery-key-verify = دا په خپل پټنوم مدیر کې خوندي کړئ، بیا یې د تایید لپاره لاندې پیسټ کړئ.
+vault-recovery-key-verify-placeholder = خوندي شوي د بیا رغونې کیلي پیسټ کړئ
+vault-recovery-key-mismatch = د بیا رغونې کیلي سره سمون نه خوري.
+vault-open = { common-open } Vault
+vault-description = د ګیټ سره تنظیمات ، اوزار ، ډاټ فایلونه او پوهه همغږي کړئ.
+vault-sync = همغږي
+vault-create = جوړ کړئ
+vault-connect = نښلول
+vault-github = GitHub
+vault-github-description = یو شخصي ذخیره جوړه کړئ یا موجوده والټ غوره کړئ.
+vault-connect-github = GitHub سره وصل کړئ
+vault-connected-as = د { $name } په توګه وصل شوی
+vault-use-repository = کارول
+vault-repository-name = د ذخیره نوم
+vault-cloud-folder = کلاوډ فولډر
+vault-cloud-folder-description = د ګوګل ډرایو، iCloud ډرایو، Dropbox، یا OneDrive څخه یو فولډر وکاروئ.
+vault-choose-folder = فولډر غوره کړئ
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = فولډر · { common-done }
+vault-private = شخصي ذخیره
+vault-public-warning = د ذخیرې تاریخچه او کوډ شوي معلومات به عامه وي.
+vault-choose-repository = یو ذخیره غوره کړئ ...
+vault-empty = خالي
+vault-clean = تر دې نیټې
+vault-not-connected = تړلی نه دی
+vault-change-count = بدلونونه: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = پیل
 start-tagline = یوه لارښوونه. هر کار، بشپړ.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = په { $folder } کې نښه کړه
 common-cancel = لغوه
 common-delete = ړنګول
 common-save = ساتل
+common-copy = Copy
 common-rename = نوم بدلول
 common-expand = غځول
 common-collapse = راټولول

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } ihe
    *[other] { $count } ihe
 }
+
+tools-title = Ngwaọrụ
+tools-search = Chọọ ngwugwu, ndị nnọchi anya, MCP, LSP na faịlụ nhazi…
+tools-open = Mepee ngwaọrụ
+tools-fold = Kpachie ngwaọrụ
+tools-unfold = Gbasaa ngwaọrụ
+tools-scanning = Na-enyocha ngwaọrụ mpaghara…
+tools-no-installed = Enweghị ngwaọrụ arụnyere
+tools-empty = Enweghị ngwaọrụ dabara
+tools-empty-detail = Wụnye ngwugwu ma ọ bụ tinye ngwugwu faịlụ nhazi ụdị Stow.
+tools-apply = Tinye
+tools-homebrew = Homebrew
+tools-homebrew-sync = Usoro na ngwa arụnyere na-emekọrịta onwe ha na-akpaghị aka.
+tools-open-brewfile = Mepee Brewfile
+tools-managed = a na-achịkwa
+tools-provider-homebrew-formulae = Usoro Homebrew
+tools-provider-homebrew-casks = Ngwa Homebrew
+tools-provider-npm = Ngwugwu NPM
+tools-provider-acp-agents = Ndị nnọchi anya ACP
+tools-provider-lsp-servers = Sava LSP
+tools-provider-mcp-servers = Sava MCP
+tools-provider-dotfiles = Faịlụ nhazi
+tools-status-available = Dị
+tools-status-missing = Adịghị
+tools-status-conflict = Esemokwu
+tools-forget = Chefuo
+tools-manage = Jikwaa
+tools-link = Jikọọ
+tools-unlink = Kwụpụ
+tools-import = Bubata
+tools-update-count = { $count ->
+    [one] Mmelite 1
+   *[other] Mmelite { $count }
+}
+tools-conflict-count = { $count ->
+    [one] Esemokwu 1
+   *[other] Esemokwu { $count }
+}
+tools-result-applied = Etinyela ngwaọrụ
+tools-result-imported = Ebutela ngwaọrụ
+tools-result-installed = Awụnyela { $name }
+tools-result-updated = Emelitela { $name }
+tools-result-uninstalled = Ewepụla { $name }
+tools-result-forgotten = Echefuola { $name }
+tools-result-managed = A na-achịkwa { $name } ugbu a
+tools-result-linked = Ejikọọla { $name }
+tools-result-unlinked = Ekwupụla { $name }
+vault-title = Vault
+vault-encrypted = Ezoro ezo site n'isi ruo n'isi
+vault-passkey = Akara mbanye
+vault-passkey-description = Mepee Vault a na ngwaọrụ ndị ọzọ na-enweghị paswọọdụ.
+vault-passkey-add = Tinye igodo mbanye
+vault-passkey-unlock = Mepee
+vault-passkey-provider-unsupported = Onye na-eweta paswọọdụ akwadoghị mkpọghe Vault ezoro ezo.
+vault-recovery-key = Igodo mgbake
+vault-recovery-key-description = Chekwaa otu igodo na Bitwarden ma ọ bụ njikwa paswọọdụ ọzọ iji nwetaghachi Vault a na ngwaọrụ ọhụrụ.
+vault-recovery-key-create = Mepụta igodo
+vault-recovery-key-create-failed = Enweghị ike ịmepụta igodo mgbake.
+vault-recovery-key-save = Chekwaa igodo a ugbu a. Vmux enweghị ike igosi ya ọzọ.
+vault-recovery-key-saved = echekwara m ya
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Kpọghe
+vault-recovery-key-invalid = Igodo mgbake a enweghị ike imeghe Vault.
+vault-recovery-key-ready = Haziri igodo mgbake
+vault-recovery-key-upload-pending = A na-echekwa igodo ahụ na mpaghara, mana ebugo dara. Debe ya ma pịa Mmekọrịta ka ịnwagharịa.
+vault-auto-sync = ndabere akpaaka
+vault-backup-failed = Ndabere na akpaghị aka dara. Pịa mmekọrịta ka ịnwagharịa.
+vault-backup-failed-short = Ndabere ada ada
+vault-recovery-key-copy-hint = Pịa ka idetuo
+vault-recovery-key-copied = Eṅomiri
+vault-recovery-key-verify = Chekwaa ya na njikwa paswọọdụ gị, wee mado ya n'okpuru iji nyochaa.
+vault-recovery-key-verify-placeholder = Tapawa igodo mgbake echekwara
+vault-recovery-key-mismatch = Igodo mgbake adabaghị.
+vault-open = { common-open } Vault
+vault-description = Ntọala mmekọrịta, ngwaọrụ, dotfiles na Ọmụma na Git.
+vault-sync = Mmekọrịta
+vault-create = Mepụta
+vault-connect = Jikọọ
+vault-github = GitHub
+vault-github-description = Mepụta ebe nchekwa ma ọ bụ họrọ Vault dị adị.
+vault-connect-github = Jikọọ GitHub
+vault-connected-as = Ejikọrọ dị ka { $name }
+vault-use-repository = Jiri
+vault-repository-name = Aha nchekwa
+vault-cloud-folder = nchekwa igwe ojii
+vault-cloud-folder-description = Jiri nchekwa sitere na Google Drive, iCloud Drive, Dropbox, ma ọ bụ OneDrive.
+vault-choose-folder = Họrọ nchekwa
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = nchekwa · { common-done }
+vault-private = Ebe nchekwa nkeonwe
+vault-public-warning = Akụkọ ebe nchekwa na data ezoro ezo ga-abụ nke ọha.
+vault-choose-repository = Họrọ ebe nchekwa…
+vault-empty = efu
+vault-clean = Kwalitere ruo ugbu a
+vault-not-connected = Ejikọtaghị ya
+vault-change-count = Mgbanwe: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Malite
 start-tagline = Otu prompt. Ihe ọ bụla, emechaala.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Debe edokọbara na { $folder }
 common-cancel = Kagbuo
 common-delete = Hichapụ
 common-save = Chekwaa
+common-copy = Copy
 common-rename = Nyegharịa aha
 common-expand = Gbasaa
 common-collapse = Kpukọta

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } yam
    *[other] { $count } yam
 }
+
+tools-title = Cov cuab yeej
+tools-search = Tshawb cov pob, cov neeg sawv cev, MCP, LSP thiab ntaub ntawv teeb tsa…
+tools-open = Qhib cov cuab yeej
+tools-fold = Quav cov cuab yeej
+tools-unfold = Nthuav cov cuab yeej
+tools-scanning = Tab tom tshuaj xyuas cov cuab yeej hauv zos…
+tools-no-installed = Tsis muaj cuab yeej raug nruab
+tools-empty = Tsis muaj cuab yeej phim
+tools-empty-detail = Nruab ib pob lossis ntxiv ib pob ntaub ntawv teeb tsa hom Stow.
+tools-apply = Siv
+tools-homebrew = Homebrew
+tools-homebrew-sync = Cov qauv thiab kev siv uas twb nruab lawm sib txuas tau txais.
+tools-open-brewfile = Qhib Brewfile
+tools-managed = raug tswj
+tools-provider-homebrew-formulae = Cov qauv Homebrew
+tools-provider-homebrew-casks = Cov kev siv Homebrew
+tools-provider-npm = Cov pob NPM
+tools-provider-acp-agents = Cov neeg sawv cev ACP
+tools-provider-lsp-servers = Cov tshuab pab LSP
+tools-provider-mcp-servers = Cov tshuab pab MCP
+tools-provider-dotfiles = Ntaub ntawv teeb tsa
+tools-status-available = Muaj
+tools-status-missing = Ploj lawm
+tools-status-conflict = Kev tsis sib haum
+tools-forget = Tsis nco qab
+tools-manage = Tswj
+tools-link = Txuas
+tools-unlink = Tshem kev txuas
+tools-import = Nqa tuaj
+tools-update-count = { $count ->
+    [one] 1 qhov hloov tshiab
+   *[other] { $count } qhov hloov tshiab
+}
+tools-conflict-count = { $count ->
+    [one] 1 qhov tsis sib haum
+   *[other] { $count } qhov tsis sib haum
+}
+tools-result-applied = Siv cov cuab yeej lawm
+tools-result-imported = Nqa cov cuab yeej tuaj lawm
+tools-result-installed = Nruab { $name } lawm
+tools-result-updated = Hloov tshiab { $name } lawm
+tools-result-uninstalled = Tshem { $name } lawm
+tools-result-forgotten = Tsis nco { $name } lawm
+tools-result-managed = Tam sim no { $name } raug tswj
+tools-result-linked = Txuas { $name } lawm
+tools-result-unlinked = Tshem kev txuas ntawm { $name } lawm
+vault-title = Vault
+vault-encrypted = Muab zais tag nrho txij ib kawg mus rau ib kawg
+vault-passkey = Passkey
+vault-passkey-description = Xauv lub Vault no ntawm lwm yam khoom siv yam tsis muaj tus password.
+vault-passkey-add = Ntxiv tus password
+vault-passkey-unlock = Xauv
+vault-passkey-provider-unsupported = Tus neeg muab ntawv hla tebchaws no tseem tsis tau txhawb nqa encrypted Vault xauv tsis tau.
+vault-recovery-key = Rov qab Cov Ntsiab Lus
+vault-recovery-key-description = Txuag ib tus yuam sij hauv Bitwarden lossis lwm tus neeg saib xyuas tus password kom rov qab tau lub Vault ntawm lub cuab yeej tshiab.
+vault-recovery-key-create = Tsim tus yuam sij
+vault-recovery-key-create-failed = Recovery Key tsis tuaj yeem tsim.
+vault-recovery-key-save = Txuag tus yuam sij tam sim no. Vmux tsis tuaj yeem qhia nws dua.
+vault-recovery-key-saved = Kuv khaws nws
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Xauv
+vault-recovery-key-invalid = Qhov Tseem Ceeb Rov Qab no tsis tuaj yeem qhib lub Vault.
+vault-recovery-key-ready = Recovery Key configured
+vault-recovery-key-upload-pending = Tus yuam sij raug cawm hauv zos, tab sis upload ua tsis tiav. Khaws nws nyab xeeb thiab nias Sync kom rov sim dua.
+vault-auto-sync = Tsis siv neeg thaub qab
+vault-backup-failed = Tsis siv neeg thaub qab ua tsis tau. Nias Sync kom rov sim dua.
+vault-backup-failed-short = Kev thaub qab ua tsis tiav
+vault-recovery-key-copy-hint = Nyem rau luam
+vault-recovery-key-copied = Luam
+vault-recovery-key-verify = Txuag nws rau hauv koj tus neeg saib xyuas tus password, tom qab ntawd muab tso rau hauv qab no txhawm rau txheeb xyuas.
+vault-recovery-key-verify-placeholder = Paste saved Recovery Key
+vault-recovery-key-mismatch = Rov qab yuam sij tsis phim.
+vault-open = { common-open } Vault
+vault-description = Sync chaw, cuab yeej, dotfiles, thiab Kev Paub nrog Git.
+vault-sync = Sync
+vault-create = Tsim
+vault-connect = Txuas
+vault-github = GitHub
+vault-github-description = Tsim ib lub chaw khaws cia ntiag tug lossis xaiv lub Vault uas twb muaj lawm.
+vault-connect-github = Txuas GitHub
+vault-connected-as = Txuas li { $name }
+vault-use-repository = Siv
+vault-repository-name = Repository npe
+vault-cloud-folder = Huab folder
+vault-cloud-folder-description = Siv ib daim nplaub tshev los ntawm Google Drive, iCloud Drive, Dropbox, lossis OneDrive.
+vault-choose-folder = Xaiv lub nplaub tshev
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Private repository
+vault-public-warning = Keeb kwm repository thiab cov ntaub ntawv uas muab zais yuav yog pej xeem.
+vault-choose-repository = Xaiv lub chaw cia khoom…
+vault-empty = khoob
+vault-clean = Txog hnub tim
+vault-not-connected = Tsis txuas
+vault-change-count = Hloov: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Pib
 start-tagline = Ib lo lus txib. Ua tau txhua yam, kom tiav.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Cim tseg hauv { $folder }
 common-cancel = Tso tseg
 common-delete = Rho tawm
 common-save = Tseg
+common-copy = Copy
 common-rename = Hloov npe
 common-expand = Nthuav
 common-collapse = Quav

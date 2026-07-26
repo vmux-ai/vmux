@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } зүйл
    *[other] { $count } зүйл
 }
+
+tools-title = Хэрэгслүүд
+tools-search = Багц, агент, MCP, LSP болон тохиргооны файл хайх…
+tools-open = Хэрэгслүүдийг нээх
+tools-fold = Хэрэгслүүдийг хураах
+tools-unfold = Хэрэгслүүдийг дэлгэх
+tools-scanning = Дотоод хэрэгслүүдийг шалгаж байна…
+tools-no-installed = Суулгасан хэрэгсэл алга
+tools-empty = Тохирох хэрэгсэл алга
+tools-empty-detail = Багц суулгах эсвэл Stow загварын тохиргооны файлын багц нэмнэ үү.
+tools-apply = Хэрэглэх
+tools-homebrew = Homebrew
+tools-homebrew-sync = Суулгасан томьёо болон аппууд автоматаар синк хийнэ.
+tools-open-brewfile = Brewfile нээх
+tools-managed = удирдлагатай
+tools-provider-homebrew-formulae = Homebrew томьёонууд
+tools-provider-homebrew-casks = Homebrew аппууд
+tools-provider-npm = NPM багцууд
+tools-provider-acp-agents = ACP агентууд
+tools-provider-lsp-servers = LSP серверүүд
+tools-provider-mcp-servers = MCP серверүүд
+tools-provider-dotfiles = Тохиргооны файлууд
+tools-status-available = Боломжтой
+tools-status-missing = Алга
+tools-status-conflict = Зөрчил
+tools-forget = Мартах
+tools-manage = Удирдах
+tools-link = Холбох
+tools-unlink = Холбоосыг салгах
+tools-import = Импортлох
+tools-update-count = { $count ->
+    [one] 1 шинэчлэл
+   *[other] { $count } шинэчлэл
+}
+tools-conflict-count = { $count ->
+    [one] 1 зөрчил
+   *[other] { $count } зөрчил
+}
+tools-result-applied = Хэрэгслүүдийг хэрэглэв
+tools-result-imported = Хэрэгслүүдийг импортлов
+tools-result-installed = { $name } суулгагдлаа
+tools-result-updated = { $name } шинэчлэгдлээ
+tools-result-uninstalled = { $name } устгагдлаа
+tools-result-forgotten = { $name } мартагдлаа
+tools-result-managed = { $name } одоо удирдлагатай
+tools-result-linked = { $name } холбогдлоо
+tools-result-unlinked = { $name }-ийн холбоос салгагдлаа
+vault-title = Vault
+vault-encrypted = Төгсгөл хооронд шифрлэгдсэн
+vault-passkey = Нэвтрэх түлхүүр
+vault-passkey-description = Энэ Vault-н түгжээг нууц үггүйгээр бусад төхөөрөмж дээр тайл.
+vault-passkey-add = Нэвтрэх түлхүүр нэмнэ үү
+vault-passkey-unlock = Түгжээг тайлах
+vault-passkey-provider-unsupported = Энэ нэвтрэх түлхүүрийн үйлчилгээ үзүүлэгч нь шифрлэгдсэн Vault түгжээг тайлахыг хараахан дэмждэггүй.
+vault-recovery-key = Сэргээх түлхүүр
+vault-recovery-key-description = Энэ Vault-г шинэ төхөөрөмж дээр сэргээхийн тулд Bitwarden эсвэл өөр нууц үгийн менежерт нэг түлхүүр хадгална уу.
+vault-recovery-key-create = Түлхүүр үүсгэх
+vault-recovery-key-create-failed = Сэргээх түлхүүрийг үүсгэж чадсангүй.
+vault-recovery-key-save = Энэ түлхүүрийг одоо хадгална уу. Vmux үүнийг дахин харуулах боломжгүй.
+vault-recovery-key-saved = Би үүнийг хадгалсан
+vault-recovery-key-placeholder = Paste Recovery түлхүүр
+vault-recovery-key-unlock = Түгжээг тайлах
+vault-recovery-key-invalid = Энэ сэргээх түлхүүр нь Vault-н түгжээг тайлж чадахгүй.
+vault-recovery-key-ready = Сэргээх түлхүүрийг тохируулсан
+vault-recovery-key-upload-pending = Түлхүүрийг дотооддоо хадгалсан боловч байршуулж чадсангүй. Үүнийг аюулгүй байлгаад дахин оролдохын тулд Синк дар.
+vault-auto-sync = Автомат нөөцлөлт
+vault-backup-failed = Автомат нөөцлөлт амжилтгүй боллоо. Дахин оролдохын тулд Синк дарна уу.
+vault-backup-failed-short = Нөөцлөлт амжилтгүй боллоо
+vault-recovery-key-copy-hint = Хуулах бол товшино уу
+vault-recovery-key-copied = Хуулсан
+vault-recovery-key-verify = Үүнийг нууц үгийн менежертээ хадгалаад баталгаажуулахын тулд доор буулгана уу.
+vault-recovery-key-verify-placeholder = Хадгалсан сэргээх түлхүүрийг буулгана уу
+vault-recovery-key-mismatch = Сэргээх түлхүүр таарахгүй байна.
+vault-open = { common-open } Vault
+vault-description = Тохиргоо, хэрэгсэл, цэгийн файлууд болон мэдлэгийг Git-тэй синк хийнэ үү.
+vault-sync = Синк хийх
+vault-create = Үүсгэх
+vault-connect = Холбох
+vault-github = GitHub
+vault-github-description = Хувийн репозитор үүсгэх эсвэл одоо байгаа Vault-г сонгоно уу.
+vault-connect-github = GitHub-г холбоно уу
+vault-connected-as = { $name } нэрээр холбогдсон
+vault-use-repository = Ашиглах
+vault-repository-name = Хадгалах газрын нэр
+vault-cloud-folder = Үүлэн хавтас
+vault-cloud-folder-description = Google Drive, iCloud Drive, Dropbox эсвэл OneDrive-аас хавтас ашиглана уу.
+vault-choose-folder = Фолдер сонгоно уу
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Хавтас · { common-done }
+vault-private = Хувийн хадгалах газар
+vault-public-warning = Репозиторийн түүх болон шифрлэгдсэн өгөгдөл нийтэд нээлттэй байна.
+vault-choose-repository = Хадгалах газрыг сонгох...
+vault-empty = хоосон
+vault-clean = Шинэчлэгдсэн
+vault-not-connected = Холбогдоогүй байна
+vault-change-count = Өөрчлөлтүүд: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Эхлэх
 start-tagline = Нэг prompt. Юу ч байсан, хийчихнэ.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } дотор хавчуулах
 common-cancel = Цуцлах
 common-delete = Устгах
 common-save = Хадгалах
+common-copy = Copy
 common-rename = Нэр өөрчлөх
 common-expand = Дэлгэх
 common-collapse = Хураах

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } vienums
    *[other] { $count } vienumi
 }
+
+tools-title = Rīki
+tools-search = Meklēt pakotnes, aģentus, MCP, LSP un konfigurācijas failus…
+tools-open = Atvērt rīkus
+tools-fold = Sakļaut rīkus
+tools-unfold = Izvērst rīkus
+tools-scanning = Vietējo rīku skenēšana…
+tools-no-installed = Nav instalētu rīku
+tools-empty = Nav atbilstošu rīku
+tools-empty-detail = Instalējiet pakotni vai pievienojiet Stow stila konfigurācijas failu pakotni.
+tools-apply = Lietot
+tools-homebrew = Homebrew
+tools-homebrew-sync = Instalētās formulas un lietotnes tiek sinhronizētas automātiski.
+tools-open-brewfile = Atvērt Brewfile
+tools-managed = pārvaldīts
+tools-provider-homebrew-formulae = Homebrew formulas
+tools-provider-homebrew-casks = Homebrew lietotnes
+tools-provider-npm = NPM pakotnes
+tools-provider-acp-agents = ACP aģenti
+tools-provider-lsp-servers = LSP serveri
+tools-provider-mcp-servers = MCP serveri
+tools-provider-dotfiles = Konfigurācijas faili
+tools-status-available = Pieejams
+tools-status-missing = Trūkst
+tools-status-conflict = Konflikts
+tools-forget = Aizmirst
+tools-manage = Pārvaldīt
+tools-link = Saistīt
+tools-unlink = Atsaistīt
+tools-import = Importēt
+tools-update-count = { $count ->
+    [one] 1 atjauninājums
+   *[other] { $count } atjauninājumi
+}
+tools-conflict-count = { $count ->
+    [one] 1 konflikts
+   *[other] { $count } konflikti
+}
+tools-result-applied = Rīki lietoti
+tools-result-imported = Rīki importēti
+tools-result-installed = { $name } instalēts
+tools-result-updated = { $name } atjaunināts
+tools-result-uninstalled = { $name } atinstalēts
+tools-result-forgotten = { $name } aizmirsts
+tools-result-managed = { $name } tagad tiek pārvaldīts
+tools-result-linked = { $name } saistīts
+tools-result-unlinked = { $name } atsaistīts
+vault-title = Vault
+vault-encrypted = Pilnīga šifrēšana
+vault-passkey = Ieejas atslēga
+vault-passkey-description = Atbloķējiet šo Vault citās ierīcēs bez paroles.
+vault-passkey-add = Pievienojiet piekļuves atslēgu
+vault-passkey-unlock = Atbloķēt
+vault-passkey-provider-unsupported = Šis piekļuves atslēgas nodrošinātājs vēl neatbalsta šifrētu Vault atbloķēšanu.
+vault-recovery-key = Atkopšanas atslēga
+vault-recovery-key-description = Saglabājiet vienu atslēgu Bitwarden vai citā paroļu pārvaldniekā, lai atjaunotu šo Vault jaunā ierīcē.
+vault-recovery-key-create = Izveidot atslēgu
+vault-recovery-key-create-failed = Atkopšanas atslēgu nevarēja izveidot.
+vault-recovery-key-save = Saglabājiet šo atslēgu tūlīt. Vmux nevar to parādīt vēlreiz.
+vault-recovery-key-saved = Es to saglabāju
+vault-recovery-key-placeholder = Ielīmēt atkopšanas atslēgu
+vault-recovery-key-unlock = Atbloķēt
+vault-recovery-key-invalid = Šī atkopšanas atslēga nevar atbloķēt glabātuvi.
+vault-recovery-key-ready = Atkopšanas atslēga ir konfigurēta
+vault-recovery-key-upload-pending = Atslēga tiek saglabāta lokāli, taču augšupielāde neizdevās. Saglabājiet to drošībā un nospiediet Sinhronizēt, lai mēģinātu vēlreiz.
+vault-auto-sync = Automātiskā dublēšana
+vault-backup-failed = Automātiskā dublēšana neizdevās. Nospiediet Sinhronizēt, lai mēģinātu vēlreiz.
+vault-backup-failed-short = Dublēšana neizdevās
+vault-recovery-key-copy-hint = Noklikšķiniet, lai kopētu
+vault-recovery-key-copied = Kopēts
+vault-recovery-key-verify = Saglabājiet to savā paroļu pārvaldniekā un pēc tam ielīmējiet to tālāk, lai pārbaudītu.
+vault-recovery-key-verify-placeholder = Ielīmējiet saglabāto atkopšanas atslēgu
+vault-recovery-key-mismatch = Atkopšanas atslēga neatbilst.
+vault-open = { common-open } Vault
+vault-description = Sinhronizējiet iestatījumus, rīkus, punktu failus un zināšanas ar Git.
+vault-sync = Sinhronizēt
+vault-create = Izveidot
+vault-connect = Savienot
+vault-github = GitHub
+vault-github-description = Izveidojiet privātu repozitoriju vai izvēlieties esošu Vault.
+vault-connect-github = Pievienojiet GitHub
+vault-connected-as = Savienots kā { $name }
+vault-use-repository = Izmantot
+vault-repository-name = Repozitorija nosaukums
+vault-cloud-folder = Mākoņu mape
+vault-cloud-folder-description = Izmantojiet mapi no Google diska, iCloud Drive, Dropbox vai OneDrive.
+vault-choose-folder = Izvēlieties mapi
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Mape · { common-done }
+vault-private = Privātā krātuve
+vault-public-warning = Repozitorija vēsture un šifrētie dati būs publiski.
+vault-choose-repository = Izvēlieties repozitoriju…
+vault-empty = tukšs
+vault-clean = Aktuāli
+vault-not-connected = Nav savienots
+vault-change-count = Izmaiņas: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Sākums
 start-tagline = Viens prompts. Viss izdarīts.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Grāmatzīme mapē { $folder }
 common-cancel = Atcelt
 common-delete = Dzēst
 common-save = Saglabāt
+common-copy = Copy
 common-rename = Pārdēvēt
 common-expand = Izvērst
 common-collapse = Sakļaut

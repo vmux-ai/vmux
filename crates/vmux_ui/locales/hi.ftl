@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } आइटम
    *[other] { $count } आइटम
 }
+
+tools-title = उपकरण
+tools-search = पैकेज, एजेंट, MCP, LSP और कॉन्फ़िगरेशन फ़ाइलें खोजें…
+tools-open = उपकरण खोलें
+tools-fold = उपकरण समेटें
+tools-unfold = उपकरण फैलाएँ
+tools-scanning = स्थानीय उपकरण स्कैन किए जा रहे हैं…
+tools-no-installed = कोई उपकरण इंस्टॉल नहीं है
+tools-empty = कोई मिलता-जुलता उपकरण नहीं है
+tools-empty-detail = कोई पैकेज इंस्टॉल करें या Stow-शैली का कॉन्फ़िगरेशन फ़ाइल पैकेज जोड़ें।
+tools-apply = लागू करें
+tools-homebrew = Homebrew
+tools-homebrew-sync = इंस्टॉल किए गए फ़ॉर्मूले और ऐप्लिकेशन अपने-आप सिंक होते हैं।
+tools-open-brewfile = Brewfile खोलें
+tools-managed = प्रबंधित
+tools-provider-homebrew-formulae = Homebrew फ़ॉर्मूले
+tools-provider-homebrew-casks = Homebrew ऐप्लिकेशन
+tools-provider-npm = NPM पैकेज
+tools-provider-acp-agents = ACP एजेंट
+tools-provider-lsp-servers = LSP सर्वर
+tools-provider-mcp-servers = MCP सर्वर
+tools-provider-dotfiles = कॉन्फ़िगरेशन फ़ाइलें
+tools-status-available = उपलब्ध
+tools-status-missing = अनुपलब्ध
+tools-status-conflict = टकराव
+tools-forget = भूलें
+tools-manage = प्रबंधित करें
+tools-link = लिंक करें
+tools-unlink = लिंक हटाएँ
+tools-import = आयात करें
+tools-update-count = { $count ->
+    [one] 1 अपडेट
+   *[other] { $count } अपडेट
+}
+tools-conflict-count = { $count ->
+    [one] 1 टकराव
+   *[other] { $count } टकराव
+}
+tools-result-applied = उपकरण लागू किए गए
+tools-result-imported = उपकरण आयात किए गए
+tools-result-installed = { $name } इंस्टॉल किया गया
+tools-result-updated = { $name } अपडेट किया गया
+tools-result-uninstalled = { $name } अनइंस्टॉल किया गया
+tools-result-forgotten = { $name } भुला दिया गया
+tools-result-managed = { $name } अब प्रबंधित है
+tools-result-linked = { $name } लिंक किया गया
+tools-result-unlinked = { $name } का लिंक हटाया गया
+vault-title = Vault
+vault-encrypted = एंड-टू-एंड एन्क्रिप्टेड
+vault-passkey = सर्व-कुंजी
+vault-passkey-description = इस वॉल्ट को अन्य डिवाइस पर बिना पासवर्ड के अनलॉक करें।
+vault-passkey-add = पासकी जोड़ें
+vault-passkey-unlock = अनलॉक
+vault-passkey-provider-unsupported = यह पासकी प्रदाता अभी तक एन्क्रिप्टेड वॉल्ट अनलॉक का समर्थन नहीं करता है।
+vault-recovery-key = पुनर्प्राप्ति कुंजी
+vault-recovery-key-description = इस वॉल्ट को नए डिवाइस पर पुनर्प्राप्त करने के लिए बिटवर्डन या किसी अन्य पासवर्ड मैनेजर में एक कुंजी सहेजें।
+vault-recovery-key-create = कुंजी बनाएं
+vault-recovery-key-create-failed = पुनर्प्राप्ति कुंजी नहीं बनाई जा सकी.
+vault-recovery-key-save = इस कुंजी को अभी सहेजें। Vmux इसे दोबारा नहीं दिखा सकता।
+vault-recovery-key-saved = मैंने इसे सहेजा है
+vault-recovery-key-placeholder = पेस्ट रिकवरी कुंजी
+vault-recovery-key-unlock = अनलॉक
+vault-recovery-key-invalid = यह पुनर्प्राप्ति कुंजी वॉल्ट को अनलॉक नहीं कर सकती.
+vault-recovery-key-ready = पुनर्प्राप्ति कुंजी कॉन्फ़िगर की गई
+vault-recovery-key-upload-pending = कुंजी स्थानीय रूप से सहेजी गई है, लेकिन अपलोड विफल रहा। इसे सुरक्षित रखें और पुनः प्रयास करने के लिए सिंक दबाएँ।
+vault-auto-sync = स्वचालित बैकअप
+vault-backup-failed = स्वचालित बैकअप विफल रहा. पुनः प्रयास करने के लिए सिंक दबाएँ।
+vault-backup-failed-short = बैकअप विफल रहा
+vault-recovery-key-copy-hint = कॉपी करने के लिए क्लिक करें
+vault-recovery-key-copied = कॉपी किया गया
+vault-recovery-key-verify = इसे अपने पासवर्ड मैनेजर में सेव करें, फिर सत्यापित करने के लिए इसे नीचे पेस्ट करें।
+vault-recovery-key-verify-placeholder = सहेजी गई पुनर्प्राप्ति कुंजी चिपकाएँ
+vault-recovery-key-mismatch = पुनर्प्राप्ति कुंजी मेल नहीं खाती.
+vault-open = { common-open } Vault
+vault-description = सेटिंग्स, टूल्स, डॉटफाइल्स और नॉलेज को Git के साथ सिंक करें।
+vault-sync = साथ-साथ करना
+vault-create = बनाएं
+vault-connect = जोड़ना
+vault-github = GitHub
+vault-github-description = एक निजी भंडार बनाएं या मौजूदा वॉल्ट चुनें।
+vault-connect-github = GitHub कनेक्ट करें
+vault-connected-as = { $name } के रूप में जुड़ा हुआ
+vault-use-repository = उपयोग
+vault-repository-name = भंडार का नाम
+vault-cloud-folder = क्लाउड फ़ोल्डर
+vault-cloud-folder-description = गूगल ड्राइव, आईक्लाउड ड्राइव, ड्रॉपबॉक्स या वनड्राइव से एक फ़ोल्डर का उपयोग करें।
+vault-choose-folder = फोल्डर को चुनो
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = फ़ोल्डर · { common-done }
+vault-private = निजी भंडार
+vault-public-warning = रिपॉजिटरी का इतिहास और एन्क्रिप्टेड डेटा सार्वजनिक होंगे।
+vault-choose-repository = एक भंडार चुनें...
+vault-empty = खाली
+vault-clean = अप टू डेट
+vault-not-connected = जुड़े नहीं हैं
+vault-change-count = परिवर्तन: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = शुरू करें
 start-tagline = एक प्रॉम्प्ट। कुछ भी, पूरा।
 
@@ -299,6 +399,7 @@ layout-bookmark-in = { $folder } में बुकमार्क करें
 common-cancel = रद्द करें
 common-delete = हटाएँ
 common-save = सहेजें
+common-copy = Copy
 common-rename = नाम बदलें
 common-expand = फैलाएँ
 common-collapse = समेटें

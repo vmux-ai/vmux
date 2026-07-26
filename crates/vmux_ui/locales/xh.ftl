@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] Into eyi-{ $count }
    *[other] Izinto eziyi-{ $count }
 }
+
+tools-title = Izixhobo
+tools-search = Khangela iipakethe, iiarhente, MCP, LSP neefayile zoqwalaselo…
+tools-open = Vula izixhobo
+tools-fold = Songa izixhobo
+tools-unfold = Yandisa izixhobo
+tools-scanning = Kuskenwa izixhobo zalapha…
+tools-no-installed = Akukho zixhobo zifakiweyo
+tools-empty = Akukho zixhobo zihambelanayo
+tools-empty-detail = Faka ipakethe okanye wongeze ipakethe yeefayile zoqwalaselo yohlobo lweStow.
+tools-apply = Sebenzisa
+tools-homebrew = Homebrew
+tools-homebrew-sync = Iifomyula neenkqubo ezifakiweyo ziyangqamaniswa ngokuzenzekelayo.
+tools-open-brewfile = Vula Brewfile
+tools-managed = ilawulwa
+tools-provider-homebrew-formulae = Iifomyula zeHomebrew
+tools-provider-homebrew-casks = Iinkqubo zeHomebrew
+tools-provider-npm = Iipakethe zeNPM
+tools-provider-acp-agents = Iiarhente zeACP
+tools-provider-lsp-servers = Iiseva zeLSP
+tools-provider-mcp-servers = Iiseva zeMCP
+tools-provider-dotfiles = Iifayile zoqwalaselo
+tools-status-available = Iyafumaneka
+tools-status-missing = Ilahlekile
+tools-status-conflict = Ungquzulwano
+tools-forget = Libala
+tools-manage = Lawula
+tools-link = Qhagamshela
+tools-unlink = Nqamula
+tools-import = Ngenisa
+tools-update-count = { $count ->
+    [one] Uhlaziyo olu-1
+   *[other] Uhlaziyo olu-{ $count }
+}
+tools-conflict-count = { $count ->
+    [one] Ungquzulwano olu-1
+   *[other] Ungquzulwano olu-{ $count }
+}
+tools-result-applied = Izixhobo zisetyenzisiwe
+tools-result-imported = Izixhobo zingenisiwe
+tools-result-installed = { $name } ifakiwe
+tools-result-updated = { $name } ihlaziyiwe
+tools-result-uninstalled = { $name } isusiwe
+tools-result-forgotten = { $name } ilityelwe
+tools-result-managed = { $name } ngoku iyalawulwa
+tools-result-linked = { $name } iqhagamshelwe
+tools-result-unlinked = { $name } inqamliwe
+vault-title = Vault
+vault-encrypted = Iguqulelwe ngokufihlakeleyo ukusuka ekuqaleni ukuya ekupheleni
+vault-passkey = Isitshixo sokugqitha
+vault-passkey-description = Vula le Vault kwezinye izixhobo ngaphandle kwegama lokugqitha.
+vault-passkey-add = Yongeza isitshixo sokugqitha
+vault-passkey-unlock = Vula
+vault-passkey-provider-unsupported = Lo mboneleli wesitshixo sokugqitha akakuxhasi ukuvulwa kweVault efihliweyo okwangoku.
+vault-recovery-key = Isitshixo sokuBuyisa
+vault-recovery-key-description = Gcina isitshixo esinye kwiBitwarden okanye omnye umphathi wephasiwedi ukubuyisela le Vault kwisixhobo esitsha.
+vault-recovery-key-create = Yenza isitshixo
+vault-recovery-key-create-failed = Iqhosha lokubuyisela alikwazanga kuyilwa.
+vault-recovery-key-save = Gcina esi sitshixo ngoku. I-Vmux ayikwazi ukuyibonisa kwakhona.
+vault-recovery-key-saved = Ndiyigcinile
+vault-recovery-key-placeholder = Cola iSitshixo sokuBuyisa
+vault-recovery-key-unlock = Vula
+vault-recovery-key-invalid = Eli qhosha lokuFumana alinakuvula iVault.
+vault-recovery-key-ready = Iqhosha loBuyiselo liqwalaselwe
+vault-recovery-key-upload-pending = Isitshixo sigcinwa ekuhlaleni, kodwa ukulayisha akuphumelelanga. Yigcine ikhuselekile kwaye ucinezele u-Sync ukuze uzame kwakhona.
+vault-auto-sync = Ugcino oluzenzekelayo
+vault-backup-failed = Ugcino oluzenzekelayo aluphumelelanga. Cofa u-Sync ukuzama kwakhona.
+vault-backup-failed-short = Ugcino aluphumelelanga
+vault-recovery-key-copy-hint = Cofa ukukopa
+vault-recovery-key-copied = Ikopishiwe
+vault-recovery-key-verify = Yigcine kumphathi wakho wephasiwedi, emva koko uyincamathisele ngezantsi ukuqinisekisa.
+vault-recovery-key-verify-placeholder = Cola iSitshixo sokuBuyisa esigciniweyo
+vault-recovery-key-mismatch = Iqhosha loBuyiselo alihambelani.
+vault-open = { common-open } Vault
+vault-description = Isetingi zongqamaniso, izixhobo, iifayile zamachaphaza, kunye nolwazi ngeGit.
+vault-sync = Ngqamanisa
+vault-create = Yenza
+vault-connect = Qhagamshela
+vault-github = GitHub
+vault-github-description = Yenza indawo yokugcina yabucala okanye khetha iVault ekhoyo.
+vault-connect-github = Qhagamshela i-GitHub
+vault-connected-as = Iqhagamshelwe njengo- { $name }
+vault-use-repository = Sebenzisa
+vault-repository-name = Igama lovimba
+vault-cloud-folder = Ifolda yelifu
+vault-cloud-folder-description = Sebenzisa ifolda esuka kuGoogle Drive, iCloud Drive, Dropbox, okanye OneDrive.
+vault-choose-folder = Khetha isiqulathi seefayili
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Isiqulathi seefayili · { common-done }
+vault-private = Uvimba wabucala
+vault-public-warning = Imbali yendawo yokugcina kunye nedatha eguqulelwe ngokufihlakeleyo ziya kuba sesidlangalaleni.
+vault-choose-repository = Khetha indawo yokugcina...
+vault-empty = engenanto
+vault-clean = Isemgangathweno
+vault-not-connected = Ayidityaniswanga
+vault-change-count = Iinguqu: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Qalisa
 start-tagline = Umyalelo omnye. Nantoni na, yenziwe.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Phawula ku-{ $folder }
 common-cancel = Rhoxisa
 common-delete = Cima
 common-save = Gcina
+common-copy = Copy
 common-rename = Thiya ngokutsha
 common-expand = Yandisa
 common-collapse = Songa

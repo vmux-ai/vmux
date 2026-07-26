@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } elementu
    *[other] { $count } elementi
 }
+
+tools-title = Strumenti
+tools-search = Cerca pacchetti, agenti, MCP, LSP è fugliali di cunfigurazione…
+tools-open = Apri i strumenti
+tools-fold = Piegà i strumenti
+tools-unfold = Spiegà i strumenti
+tools-scanning = Analisi di i strumenti lucali…
+tools-no-installed = Nisunu strumentu installatu
+tools-empty = Nisunu strumentu currispundente
+tools-empty-detail = Installa un pacchettu o aghjusta un pacchettu di fugliali di cunfigurazione in stile Stow.
+tools-apply = Applica
+tools-homebrew = Homebrew
+tools-homebrew-sync = E formule è l’applicazioni installate si sincronizanu automaticamente.
+tools-open-brewfile = Apri u Brewfile
+tools-managed = gestitu
+tools-provider-homebrew-formulae = Formule Homebrew
+tools-provider-homebrew-casks = Applicazioni Homebrew
+tools-provider-npm = Pacchetti NPM
+tools-provider-acp-agents = Agenti ACP
+tools-provider-lsp-servers = Servitori LSP
+tools-provider-mcp-servers = Servitori MCP
+tools-provider-dotfiles = Fugliali di cunfigurazione
+tools-status-available = Dispunibule
+tools-status-missing = Mancante
+tools-status-conflict = Cunflittu
+tools-forget = Scurdà
+tools-manage = Gestisce
+tools-link = Leghje
+tools-unlink = Slega
+tools-import = Importa
+tools-update-count = { $count ->
+    [one] 1 aghjurnamentu
+   *[other] { $count } aghjurnamenti
+}
+tools-conflict-count = { $count ->
+    [one] 1 cunflittu
+   *[other] { $count } cunflitti
+}
+tools-result-applied = Strumenti applicati
+tools-result-imported = Strumenti impurtati
+tools-result-installed = { $name } installatu
+tools-result-updated = { $name } aghjurnatu
+tools-result-uninstalled = { $name } disinstallatu
+tools-result-forgotten = { $name } scurdatu
+tools-result-managed = { $name } hè avà gestitu
+tools-result-linked = { $name } ligatu
+tools-result-unlinked = { $name } slegatu
+vault-title = Vault
+vault-encrypted = Cifratu da punta à punta
+vault-passkey = Passkey
+vault-passkey-description = Sblocca stu Vault in altri dispositi senza password.
+vault-passkey-add = Aggiungi passkey
+vault-passkey-unlock = Sbloccare
+vault-passkey-provider-unsupported = Stu fornitore di passkey ùn sustene ancu u sbloccare Vault criptatu.
+vault-recovery-key = Chjave di Recuperazione
+vault-recovery-key-description = Salvà una chjave in Bitwarden o un altru gestore di password per ricuperà questa Vault in un novu dispositivu.
+vault-recovery-key-create = Crea chjave
+vault-recovery-key-create-failed = Chjave di ricuperazione ùn pò micca esse creatu.
+vault-recovery-key-save = Salvà sta chjave avà. Vmux ùn pò micca mostrallu di novu.
+vault-recovery-key-saved = L'aghju salvatu
+vault-recovery-key-placeholder = Paste Recovery Key
+vault-recovery-key-unlock = Sblocca
+vault-recovery-key-invalid = Questa Chjave di Recuperazione ùn pò micca sbloccare u Vault.
+vault-recovery-key-ready = Chjave di ricuperazione cunfigurata
+vault-recovery-key-upload-pending = A chjave hè salvata in u locu, ma a carica falluta. Mantene a sicura è appughjà Sync per ripruvà.
+vault-auto-sync = Backup automaticu
+vault-backup-failed = A copia di salvezza automatica hà fiascatu. Press Sync per ripruvà.
+vault-backup-failed-short = A copia di salvezza hà fiascatu
+vault-recovery-key-copy-hint = Cliccate per copià
+vault-recovery-key-copied = Copiatu
+vault-recovery-key-verify = Salvà in u vostru gestore di password, poi incollà quì sottu per verificà.
+vault-recovery-key-verify-placeholder = Incolla a chjave di ricuperazione salvata
+vault-recovery-key-mismatch = Chjave di ricuperazione ùn currisponde micca.
+vault-open = { common-open } Vault
+vault-description = Sincronizza paràmetri, arnesi, dotfiles è Cunniscenza cù Git.
+vault-sync = Sincronizza
+vault-create = Crià
+vault-connect = Cunnette
+vault-github = GitHub
+vault-github-description = Crea un repositoriu privatu o sceglite un Vault esistente.
+vault-connect-github = Cunnette GitHub
+vault-connected-as = Cunnessu cum'è { $name }
+vault-use-repository = Aduprà
+vault-repository-name = Nome di repository
+vault-cloud-folder = cartulare Cloud
+vault-cloud-folder-description = Aduprate un cartulare da Google Drive, iCloud Drive, Dropbox o OneDrive.
+vault-choose-folder = Sceglite u cartulare
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Folder · { common-done }
+vault-private = Repositoriu privatu
+vault-public-warning = A storia di u repositoriu è i dati cifrati saranu publichi.
+vault-choose-repository = Sceglite un repository...
+vault-empty = viotu
+vault-clean = Attualizatu
+vault-not-connected = Micca cunnessu
+vault-change-count = Cambiamenti: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Principiu
 start-tagline = Un prompt. Tuttu fattu.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Mette un segnalibru in { $folder }
 common-cancel = Annullà
 common-delete = Sguassà
 common-save = Salvà
+common-copy = Copy
 common-rename = Rinuminà
 common-expand = Allargà
 common-collapse = Riduce

@@ -19,6 +19,106 @@ common-items = { $count ->
     [one] { $count } mục
    *[other] { $count } mục
 }
+
+tools-title = Công cụ
+tools-search = Tìm gói, tác nhân, MCP, LSP và tệp cấu hình…
+tools-open = Mở Công cụ
+tools-fold = Thu gọn công cụ
+tools-unfold = Mở rộng công cụ
+tools-scanning = Đang quét công cụ cục bộ…
+tools-no-installed = Chưa cài công cụ nào
+tools-empty = Không có công cụ phù hợp
+tools-empty-detail = Cài một gói hoặc thêm gói tệp cấu hình theo kiểu Stow.
+tools-apply = Áp dụng
+tools-homebrew = Homebrew
+tools-homebrew-sync = Các công thức và ứng dụng đã cài sẽ tự động đồng bộ.
+tools-open-brewfile = Mở Brewfile
+tools-managed = được quản lý
+tools-provider-homebrew-formulae = Công thức Homebrew
+tools-provider-homebrew-casks = Ứng dụng Homebrew
+tools-provider-npm = Gói NPM
+tools-provider-acp-agents = Tác nhân ACP
+tools-provider-lsp-servers = Máy chủ LSP
+tools-provider-mcp-servers = Máy chủ MCP
+tools-provider-dotfiles = Tệp cấu hình
+tools-status-available = Có sẵn
+tools-status-missing = Thiếu
+tools-status-conflict = Xung đột
+tools-forget = Quên
+tools-manage = Quản lý
+tools-link = Liên kết
+tools-unlink = Hủy liên kết
+tools-import = Nhập
+tools-update-count = { $count ->
+    [one] 1 bản cập nhật
+   *[other] { $count } bản cập nhật
+}
+tools-conflict-count = { $count ->
+    [one] 1 xung đột
+   *[other] { $count } xung đột
+}
+tools-result-applied = Đã áp dụng công cụ
+tools-result-imported = Đã nhập công cụ
+tools-result-installed = Đã cài { $name }
+tools-result-updated = Đã cập nhật { $name }
+tools-result-uninstalled = Đã gỡ cài đặt { $name }
+tools-result-forgotten = Đã quên { $name }
+tools-result-managed = { $name } hiện được quản lý
+tools-result-linked = Đã liên kết { $name }
+tools-result-unlinked = Đã hủy liên kết { $name }
+vault-title = Vault
+vault-encrypted = Được mã hóa đầu cuối
+vault-passkey = Mật mã
+vault-passkey-description = Mở khóa Vault này trên các thiết bị khác mà không cần mật khẩu.
+vault-passkey-add = Thêm mật mã
+vault-passkey-unlock = Mở khóa
+vault-passkey-provider-unsupported = Nhà cung cấp mã khóa này chưa hỗ trợ mở khóa Vault được mã hóa.
+vault-recovery-key = Khóa khôi phục
+vault-recovery-key-description = Lưu một khóa trong Bitwarden hoặc trình quản lý mật khẩu khác để khôi phục Vault này trên thiết bị mới.
+vault-recovery-key-create = Tạo khóa
+vault-recovery-key-create-failed = Không thể tạo Khóa khôi phục.
+vault-recovery-key-save = Hãy lưu lại khóa này ngay bây giờ. Vmux không thể hiển thị lại.
+vault-recovery-key-saved = Tôi đã lưu nó
+vault-recovery-key-placeholder = Dán khóa khôi phục
+vault-recovery-key-unlock = Mở khóa
+vault-recovery-key-invalid = Khóa khôi phục này không thể mở khóa Vault.
+vault-recovery-key-ready = Khóa khôi phục được định cấu hình
+vault-recovery-key-upload-pending = Khóa được lưu cục bộ nhưng tải lên không thành công. Hãy giữ nó an toàn và nhấn Đồng bộ để thử lại.
+vault-auto-sync = Tự động sao lưu
+vault-backup-failed = Tự động sao lưu không thành công. Nhấn Đồng bộ để thử lại.
+vault-backup-failed-short = Sao lưu không thành công
+vault-recovery-key-copy-hint = Bấm để sao chép
+vault-recovery-key-copied = Đã sao chép
+vault-recovery-key-verify = Lưu nó vào trình quản lý mật khẩu của bạn, sau đó dán nó vào bên dưới để xác minh.
+vault-recovery-key-verify-placeholder = Dán Khóa khôi phục đã lưu
+vault-recovery-key-mismatch = Khóa khôi phục không khớp.
+vault-open = { common-open } Vault
+vault-description = Đồng bộ hóa cài đặt, công cụ, tệp dotfile và Kiến thức với Git.
+vault-sync = Đồng bộ hóa
+vault-create = Tạo nên
+vault-connect = Kết nối
+vault-github = GitHub
+vault-github-description = Tạo một kho lưu trữ riêng hoặc chọn Vault hiện có.
+vault-connect-github = Kết nối GitHub
+vault-connected-as = Đã kết nối với tên { $name }
+vault-use-repository = Sử dụng
+vault-repository-name = Tên kho lưu trữ
+vault-cloud-folder = Thư mục đám mây
+vault-cloud-folder-description = Sử dụng thư mục từ Google Drive, iCloud Drive, Dropbox hoặc OneDrive.
+vault-choose-folder = Chọn thư mục
+vault-result-github-connected = GitHub · { common-done }
+vault-result-folder-connected = Thư mục · { common-done }
+vault-private = Kho lưu trữ riêng
+vault-public-warning = Lịch sử kho lưu trữ và dữ liệu được mã hóa sẽ được công khai.
+vault-choose-repository = Chọn một kho lưu trữ…
+vault-empty = trống
+vault-clean = Cập nhật
+vault-not-connected = Không được kết nối
+vault-change-count = Thay đổi: { $count }
+vault-result-created = Vault · { common-done }
+vault-result-connected = Vault · { common-done }
+vault-result-synced = Vault · { common-done }
+
 start-title = Bắt đầu
 start-tagline = Một prompt. Xong mọi việc.
 
@@ -299,6 +399,7 @@ layout-bookmark-in = Đánh dấu trong { $folder }
 common-cancel = Hủy
 common-delete = Xóa
 common-save = Lưu
+common-copy = Copy
 common-rename = Đổi tên
 common-expand = Mở rộng
 common-collapse = Thu gọn
