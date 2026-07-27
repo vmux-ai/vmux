@@ -6,7 +6,8 @@ use crate::explorer::ExplorerPanel;
 use crate::note::render_block;
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, heading_class, image_mime, line_severity,
-    severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
+    note_inline_consumes_ctrl_navigation, severity_color_class, should_apply_explorer_chrome,
+    span_style, squiggle_style,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -2227,6 +2228,11 @@ pub fn Page() -> Element {
                                                                         }
                                                                         let key = raw.key();
                                                                         let mods = key_mods(raw);
+                                                                        if note_inline_consumes_ctrl_navigation(&key, mods) {
+                                                                            event.prevent_default();
+                                                                            event.stop_propagation();
+                                                                            return;
+                                                                        }
                                                                         if comp_open() && !note_comp_keys.is_empty() {
                                                                             match key.as_str() {
                                                                                 "ArrowDown" => {

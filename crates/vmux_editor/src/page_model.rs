@@ -1,8 +1,16 @@
 use std::collections::{HashMap, HashSet};
 
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
+    DiagSeverity, FileDiagnostic, FileDirEntry, KeyMods, LspPkgStatus, MdTableAlign, StyledSpan,
+    TreeRow,
 };
+
+pub fn note_inline_consumes_ctrl_navigation(key: &str, mods: KeyMods) -> bool {
+    mods.ctrl
+        && !mods.alt
+        && !mods.meta
+        && (key.eq_ignore_ascii_case("n") || key.eq_ignore_ascii_case("p"))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgAction {
@@ -280,6 +288,24 @@ mod tests {
         assert!(!should_apply_explorer_chrome(7, 3, 7, 2));
         assert!(should_apply_explorer_chrome(7, 3, 7, 3));
         assert!(should_apply_explorer_chrome(7, 3, 9, 1));
+    }
+
+    #[test]
+    fn note_inline_editor_consumes_ctrl_n_and_ctrl_p_only() {
+        let ctrl = KeyMods {
+            ctrl: true,
+            ..Default::default()
+        };
+        assert!(note_inline_consumes_ctrl_navigation("n", ctrl));
+        assert!(note_inline_consumes_ctrl_navigation("P", ctrl));
+        assert!(!note_inline_consumes_ctrl_navigation("j", ctrl));
+        assert!(!note_inline_consumes_ctrl_navigation(
+            "n",
+            KeyMods {
+                meta: true,
+                ..Default::default()
+            }
+        ));
     }
 
     #[test]
