@@ -16,7 +16,7 @@ use crate::command_bar::results::{
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
     result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
-    result_leading_icon_class, result_list_class, result_primary_text_class,
+    result_leading_icon_class, result_list_class, result_location_class, result_primary_text_class,
     result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
     result_trailing_slot_class,
 };
@@ -1351,7 +1351,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                         span { class: result_secondary_text_class(), "{url}" }
                                     }
                                 }
-                                span { class: result_trailing_slot_class(),
+                                span {
+                                    class: result_location_class(),
+                                    title: "{location}",
                                     if location.is_empty() { {translate("command-stack")} } else { "{location}" }
                                 }
                             },
