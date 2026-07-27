@@ -5,13 +5,14 @@ use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::knowledge::{
-    KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT, KnowledgeIndex, KnowledgeSearchEvent,
+    KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
+    KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
     KnowledgeSearchMatch, KnowledgeSearchRequest, KnowledgeTreeEvent,
 };
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
 
-use crate::store::{build_tree, ensure_vault, vault_dir};
+use crate::store::{build_tree, create_entry, ensure_vault, vault_dir};
 
 pub struct KnowledgePlugin;
 
@@ -71,7 +72,10 @@ impl Plugin for KnowledgePlugin {
         }
         app.init_resource::<KnowledgeState>()
             .init_resource::<KnowledgeIndex>()
-            .add_plugins(BinEventEmitterPlugin::<(KnowledgeSearchRequest,)>::default())
+            .add_plugins(BinEventEmitterPlugin::<(
+                KnowledgeSearchRequest,
+                KnowledgeCreateRequest,
+            )>::default())
             .add_systems(
                 Update,
                 (
@@ -82,7 +86,8 @@ impl Plugin for KnowledgePlugin {
                 )
                     .chain(),
             )
-            .add_observer(on_knowledge_search);
+            .add_observer(on_knowledge_search)
+            .add_observer(on_knowledge_create);
     }
 }
 
@@ -205,5 +210,47 @@ fn on_knowledge_search(
         webview,
         KNOWLEDGE_SEARCH_EVENT,
         &KnowledgeSearchEvent { query, matches },
+    ));
+}
+
+fn on_knowledge_create(
+    trigger: On<BinReceive<KnowledgeCreateRequest>>,
+    browsers: NonSend<Browsers>,
+    mut state: ResMut<KnowledgeState>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        return;
+    }
+    let request = &trigger.event().payload;
+    let result = create_entry(
+        &vault_dir(),
+        std::path::Path::new(&request.parent),
+        &request.name,
+        request.is_directory,
+    );
+    let payload = match result {
+        Ok(path) => {
+            state.dirty = true;
+            state.generation = state.generation.wrapping_add(1);
+            KnowledgeCreateResult {
+                ok: true,
+                path: path.to_string_lossy().into_owned(),
+                error: String::new(),
+                is_directory: request.is_directory,
+            }
+        }
+        Err(error) => KnowledgeCreateResult {
+            ok: false,
+            path: String::new(),
+            error,
+            is_directory: request.is_directory,
+        },
+    };
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        webview,
+        KNOWLEDGE_CREATE_RESULT_EVENT,
+        &payload,
     ));
 }

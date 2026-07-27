@@ -15,7 +15,8 @@ use vmux_core::event::extension::{
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{
-    KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeSearchEvent,
+    KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
+    KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeEntry, KnowledgeSearchEvent,
     KnowledgeSearchRequest, KnowledgeTreeEvent,
 };
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolCategory, ToolItem, ToolStatus, ToolsSnapshot};
@@ -1134,6 +1135,137 @@ fn compact_knowledge_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KnowledgeCreateKind {
+    File,
+    Folder,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct KnowledgeCreatePrompt {
+    parent: String,
+    kind: KnowledgeCreateKind,
+}
+
+fn begin_knowledge_create(
+    mut prompt: Signal<Option<KnowledgeCreatePrompt>>,
+    mut draft: Signal<String>,
+    mut error: Signal<String>,
+    parent: String,
+    kind: KnowledgeCreateKind,
+) {
+    draft.set(String::new());
+    error.set(String::new());
+    prompt.set(Some(KnowledgeCreatePrompt { parent, kind }));
+}
+
+fn submit_knowledge_create(mut prompt: Signal<Option<KnowledgeCreatePrompt>>, name: String) {
+    let Some(current) = prompt() else {
+        return;
+    };
+    let name = name.trim().to_string();
+    prompt.set(None);
+    if name.is_empty() {
+        return;
+    }
+    let _ = try_cef_bin_emit_rkyv(&KnowledgeCreateRequest {
+        parent: current.parent,
+        name,
+        is_directory: current.kind == KnowledgeCreateKind::Folder,
+    });
+}
+
+#[component]
+fn KnowledgeCreateMenu(
+    parent: String,
+    prompt: Signal<Option<KnowledgeCreatePrompt>>,
+    draft: Signal<String>,
+    error: Signal<String>,
+    expand: Option<Signal<bool>>,
+    expand_section_for_pane: Option<u64>,
+    disabled: bool,
+) -> Element {
+    let menu_value = use_signal(|| parent.clone());
+    rsx! {
+        SideSheetContextMenuContent {
+            ContextMenuItem {
+                index: 0usize,
+                value: Into::<ReadSignal<String>>::into(menu_value),
+                disabled,
+                on_select: {
+                    let parent = parent.clone();
+                    move |_: String| {
+                        if let Some(mut expanded) = expand {
+                            expanded.set(true);
+                        }
+                        if let Some(pane_id) = expand_section_for_pane {
+                            set_side_sheet_section(pane_id, "knowledge", true);
+                        }
+                        begin_knowledge_create(
+                            prompt,
+                            draft,
+                            error,
+                            parent.clone(),
+                            KnowledgeCreateKind::File,
+                        );
+                    }
+                },
+                attributes: vec![],
+                {translate("editor-new-file")}
+            }
+            ContextMenuItem {
+                index: 1usize,
+                value: Into::<ReadSignal<String>>::into(menu_value),
+                disabled,
+                on_select: {
+                    let parent = parent.clone();
+                    move |_: String| {
+                        if let Some(mut expanded) = expand {
+                            expanded.set(true);
+                        }
+                        if let Some(pane_id) = expand_section_for_pane {
+                            set_side_sheet_section(pane_id, "knowledge", true);
+                        }
+                        begin_knowledge_create(
+                            prompt,
+                            draft,
+                            error,
+                            parent.clone(),
+                            KnowledgeCreateKind::Folder,
+                        );
+                    }
+                },
+                attributes: vec![],
+                {translate("editor-new-folder")}
+            }
+        }
+    }
+}
+
+#[component]
+fn KnowledgeCreateInput(
+    kind: KnowledgeCreateKind,
+    draft: Signal<String>,
+    prompt: Signal<Option<KnowledgeCreatePrompt>>,
+) -> Element {
+    let placeholder = match kind {
+        KnowledgeCreateKind::File => translate("editor-new-file"),
+        KnowledgeCreateKind::Folder => translate("editor-new-folder"),
+    };
+    rsx! {
+        div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
+            {type_icon("untitled.md", kind == KnowledgeCreateKind::Folder, "h-4 w-4 shrink-0 text-muted-foreground")}
+            BookmarkNameInput {
+                draft,
+                class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
+                placeholder,
+                on_commit: move |name| submit_knowledge_create(prompt, name),
+                on_cancel: move |_| prompt.set(None),
+            }
+        }
+    }
+}
+
 #[component]
 fn KnowledgeCard(
     pane_id: u64,
@@ -1143,6 +1275,22 @@ fn KnowledgeCard(
     expanded: bool,
 ) -> Element {
     let mut query = use_signal(String::new);
+    let create_prompt = use_signal(|| None::<KnowledgeCreatePrompt>);
+    let create_draft = use_signal(String::new);
+    let mut create_error = use_signal(String::new);
+    let _create_listener = use_bin_event_listener::<KnowledgeCreateResult, _>(
+        KNOWLEDGE_CREATE_RESULT_EVENT,
+        move |result| {
+            if result.ok {
+                create_error.set(String::new());
+                if !result.is_directory {
+                    open_knowledge_path(pane_id, result.path);
+                }
+            } else {
+                create_error.set(result.error);
+            }
+        },
+    );
     let root = knowledge.root.clone();
     let landing_path = knowledge
         .entries
@@ -1173,36 +1321,49 @@ fn KnowledgeCard(
     };
     rsx! {
         div { class: "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
-            div { class: "flex items-center transition-colors hover:bg-glass-hover",
-                button {
-                    r#type: "button",
-                    disabled: !loaded || root.is_empty(),
-                    title: "{root_action_title}",
-                    class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left enabled:cursor-pointer disabled:cursor-default",
-                    onclick: move |_| open_knowledge_path(pane_id, landing_path.clone()),
-                    div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
-                        Icon { class: "h-3.5 w-3.5",
-                            path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+            LayoutContextMenu {
+                ContextMenuTrigger { attributes: vec![],
+                    div { class: "flex items-center transition-colors hover:bg-glass-hover",
+                        button {
+                            r#type: "button",
+                            disabled: !loaded || root.is_empty(),
+                            title: "{root_action_title}",
+                            class: "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left enabled:cursor-pointer disabled:cursor-default",
+                            onclick: move |_| open_knowledge_path(pane_id, landing_path.clone()),
+                            div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
+                                Icon { class: "h-3.5 w-3.5",
+                                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                                }
+                            }
+                            div { class: "min-w-0 flex-1",
+                                div { class: "text-ui font-semibold text-foreground", "{knowledge_title}" }
+                                div { class: "truncate text-[10px] text-muted-foreground", "{root_title}" }
+                            }
+                        }
+                        button {
+                            r#type: "button",
+                            aria_label: "{fold_title}",
+                            title: "{fold_title}",
+                            class: if expanded {
+                                "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
+                            } else {
+                                "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
+                            },
+                            onclick: move |_| set_side_sheet_section(pane_id, "knowledge", !expanded),
+                            Icon { class: "h-3.5 w-3.5 pointer-events-none",
+                                path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                            }
                         }
                     }
-                    div { class: "min-w-0 flex-1",
-                        div { class: "text-ui font-semibold text-foreground", "{knowledge_title}" }
-                        div { class: "truncate text-[10px] text-muted-foreground", "{root_title}" }
-                    }
                 }
-                button {
-                    r#type: "button",
-                    aria_label: "{fold_title}",
-                    title: "{fold_title}",
-                    class: if expanded {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 hover:bg-foreground/10 hover:text-foreground"
-                    } else {
-                        "mr-2 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-sm bg-foreground/10 text-foreground"
-                    },
-                    onclick: move |_| set_side_sheet_section(pane_id, "knowledge", !expanded),
-                    Icon { class: "h-3.5 w-3.5 pointer-events-none",
-                        path { d: if expanded { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
-                    }
+                KnowledgeCreateMenu {
+                    parent: root.clone(),
+                    prompt: create_prompt,
+                    draft: create_draft,
+                    error: create_error,
+                    expand: None,
+                    expand_section_for_pane: Some(pane_id),
+                    disabled: !loaded || root.is_empty(),
                 }
             }
             div { class: if expanded {
@@ -1216,59 +1377,74 @@ fn KnowledgeCard(
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-loading")} }
                         } else if !knowledge.error.is_empty() {
                             div { class: "px-2 py-2 text-ui-xs text-destructive", "{knowledge.error}" }
-                        } else if knowledge.entries.is_empty() {
-                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-markdown-files")} }
                         } else {
-                            div { class: "mb-1.5 flex h-8 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 ring-1 ring-inset ring-foreground/10",
-                                Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
-                                    circle { cx: "11", cy: "11", r: "8" }
-                                    path { d: "m21 21-4.35-4.35" }
-                                }
-                                input {
-                                    r#type: "search",
-                                    value: "{query}",
-                                    placeholder: translate("knowledge-search"),
-                                    class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground",
-                                    oninput: move |event| {
-                                        let value = event.value();
-                                        query.set(value.clone());
-                                        let _ = try_cef_bin_emit_rkyv(&KnowledgeSearchRequest { query: value });
-                                    },
+                            if !create_error().is_empty() {
+                                div { class: "px-2 py-2 text-ui-xs text-destructive", "{create_error}" }
+                            }
+                            if let Some(current) = create_prompt().filter(|current| current.parent == root) {
+                                KnowledgeCreateInput {
+                                    kind: current.kind,
+                                    draft: create_draft,
+                                    prompt: create_prompt,
                                 }
                             }
-                            if !query().is_empty() {
-                                div { class: "flex max-h-64 flex-col gap-0.5 overflow-y-auto",
-                                    if search.matches.is_empty() {
-                                        div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("knowledge-no-match")} }
+                            if knowledge.entries.is_empty() {
+                                div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-markdown-files")} }
+                            } else {
+                                div { class: "mb-1.5 flex h-8 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 ring-1 ring-inset ring-foreground/10",
+                                    Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                                        circle { cx: "11", cy: "11", r: "8" }
+                                        path { d: "m21 21-4.35-4.35" }
                                     }
-                                    for result in search.matches.iter() {
-                                        {
-                                            let path = result.path.clone();
-                                            let line = result.line;
-                                            rsx! {
-                                                button {
-                                                    key: "{result.path}:{result.line}",
-                                                    r#type: "button",
-                                                    title: "{result.path}:{result.line}",
-                                                    class: "rounded-md px-2 py-1.5 text-left hover:bg-glass-hover",
-                                                    onclick: move |_| open_knowledge_result(pane_id, path.clone(), line),
-                                                    div { class: "truncate text-ui font-medium text-foreground", "{result.title}" }
-                                                    if !result.preview.is_empty() {
-                                                        div { class: "line-clamp-2 text-[10px] text-muted-foreground", "{result.preview}" }
+                                    input {
+                                        r#type: "search",
+                                        value: "{query}",
+                                        placeholder: translate("knowledge-search"),
+                                        class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground",
+                                        oninput: move |event| {
+                                            let value = event.value();
+                                            query.set(value.clone());
+                                            let _ = try_cef_bin_emit_rkyv(&KnowledgeSearchRequest { query: value });
+                                        },
+                                    }
+                                }
+                                if !query().is_empty() {
+                                    div { class: "flex max-h-64 flex-col gap-0.5 overflow-y-auto",
+                                        if search.matches.is_empty() {
+                                            div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("knowledge-no-match")} }
+                                        }
+                                        for result in search.matches.iter() {
+                                            {
+                                                let path = result.path.clone();
+                                                let line = result.line;
+                                                rsx! {
+                                                    button {
+                                                        key: "{result.path}:{result.line}",
+                                                        r#type: "button",
+                                                        title: "{result.path}:{result.line}",
+                                                        class: "rounded-md px-2 py-1.5 text-left hover:bg-glass-hover",
+                                                        onclick: move |_| open_knowledge_result(pane_id, path.clone(), line),
+                                                        div { class: "truncate text-ui font-medium text-foreground", "{result.title}" }
+                                                        if !result.preview.is_empty() {
+                                                            div { class: "line-clamp-2 text-[10px] text-muted-foreground", "{result.preview}" }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                            } else {
-                                div { class: "flex flex-col gap-0.5",
-                                    for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
-                                        KnowledgeEntryRow {
-                                            key: "{entry.path}",
-                                            entry: entry.clone(),
-                                            entries: knowledge.entries.clone(),
-                                            pane_id,
+                                } else {
+                                    div { class: "flex flex-col gap-0.5",
+                                        for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
+                                            KnowledgeEntryRow {
+                                                key: "{entry.path}",
+                                                entry: entry.clone(),
+                                                entries: knowledge.entries.clone(),
+                                                pane_id,
+                                                prompt: create_prompt,
+                                                draft: create_draft,
+                                                error: create_error,
+                                            }
                                         }
                                     }
                                 }
@@ -1282,27 +1458,54 @@ fn KnowledgeCard(
 }
 
 #[component]
-fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_id: u64) -> Element {
+fn KnowledgeEntryRow(
+    entry: KnowledgeEntry,
+    entries: Vec<KnowledgeEntry>,
+    pane_id: u64,
+    prompt: Signal<Option<KnowledgeCreatePrompt>>,
+    draft: Signal<String>,
+    error: Signal<String>,
+) -> Element {
     let mut expanded = use_signal(|| false);
     if entry.is_directory {
         let has_children = entries.iter().any(|child| child.parent == entry.path);
         rsx! {
             div { class: "flex flex-col gap-0.5",
-                button {
-                    r#type: "button",
-                    title: "{entry.path}",
-                    class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                    onclick: move |_| expanded.set(!expanded()),
-                    Icon { class: "h-3 w-3 shrink-0",
-                        path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                LayoutContextMenu {
+                    ContextMenuTrigger { attributes: vec![],
+                        button {
+                            r#type: "button",
+                            title: "{entry.path}",
+                            class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                            onclick: move |_| expanded.set(!expanded()),
+                            Icon { class: "h-3 w-3 shrink-0",
+                                path { d: if expanded() { "m6 9 6 6 6-6" } else { "m9 18 6-6-6-6" } }
+                            }
+                            Icon { class: "h-3.5 w-3.5 shrink-0",
+                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                            }
+                            span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
+                        }
                     }
-                    Icon { class: "h-3.5 w-3.5 shrink-0",
-                        path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                    KnowledgeCreateMenu {
+                        parent: entry.path.clone(),
+                        prompt,
+                        draft,
+                        error,
+                        expand: Some(expanded),
+                        expand_section_for_pane: None,
+                        disabled: false,
                     }
-                    span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
                 }
                 if expanded() {
                     div { class: "ml-3 flex flex-col gap-0.5 border-l border-foreground/10 pl-1.5",
+                        if let Some(current) = prompt().filter(|current| current.parent == entry.path) {
+                            KnowledgeCreateInput {
+                                kind: current.kind,
+                                draft,
+                                prompt,
+                            }
+                        }
                         if has_children {
                             for child in entries.iter().filter(|child| child.parent == entry.path) {
                                 KnowledgeEntryRow {
@@ -1310,9 +1513,12 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
                                     entry: child.clone(),
                                     entries: entries.clone(),
                                     pane_id,
+                                    prompt,
+                                    draft,
+                                    error,
                                 }
                             }
-                        } else {
+                        } else if prompt().is_none_or(|current| current.parent != entry.path) {
                             div { class: "px-2 py-1.5 text-ui-xs text-muted-foreground", {translate("layout-empty-folder")} }
                         }
                     }
@@ -1327,13 +1533,26 @@ fn KnowledgeEntryRow(entry: KnowledgeEntry, entries: Vec<KnowledgeEntry>, pane_i
             entry.title.clone()
         };
         rsx! {
-            button {
-                r#type: "button",
-                title: "{entry.path}",
-                class: "flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
-                onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
-                span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
+            LayoutContextMenu {
+                ContextMenuTrigger { attributes: vec![],
+                    button {
+                        r#type: "button",
+                        title: "{entry.path}",
+                        class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
+                        onclick: move |_| open_knowledge_path(pane_id, path.clone()),
+                        {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
+                        span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
+                    }
+                }
+                KnowledgeCreateMenu {
+                    parent: entry.parent.clone(),
+                    prompt,
+                    draft,
+                    error,
+                    expand: None,
+                    expand_section_for_pane: None,
+                    disabled: false,
+                }
             }
         }
     }

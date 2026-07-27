@@ -1,5 +1,5 @@
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[cfg(all(unix, test))]
 use std::os::unix::fs::MetadataExt;
@@ -50,6 +50,48 @@ pub fn build_tree(root: &Path) -> std::io::Result<KnowledgeTreeEvent> {
         entries,
         error: String::new(),
     })
+}
+
+pub fn create_entry(
+    root: &Path,
+    parent: &Path,
+    name: &str,
+    is_directory: bool,
+) -> Result<PathBuf, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("Cannot access {}: {error}", root.display()))?;
+    let parent = parent
+        .canonicalize()
+        .map_err(|error| format!("Cannot access {}: {error}", parent.display()))?;
+    if !parent.starts_with(&root) {
+        return Err("Path is outside the Knowledge root".to_string());
+    }
+    let name = name.trim();
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err("Name must be one file or folder name".to_string());
+    }
+    let name = if is_directory || is_markdown(Path::new(name)) {
+        name.to_string()
+    } else {
+        format!("{name}.md")
+    };
+    let target = parent.join(name);
+    if target.exists() {
+        return Err(format!("{} already exists", target.display()));
+    }
+    if is_directory {
+        std::fs::create_dir(&target)
+    } else {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map(|_| ())
+    }
+    .map_err(|error| format!("Cannot create {}: {error}", target.display()))?;
+    Ok(target)
 }
 
 fn scan_directory(
@@ -151,6 +193,26 @@ mod tests {
         for directory in DIRECTORIES {
             assert!(temp.path().join(directory).is_dir());
         }
+    }
+
+    #[test]
+    fn creates_markdown_notes_and_nested_folders_inside_knowledge() {
+        let temp = tempfile::tempdir().unwrap();
+        ensure_vault(temp.path()).unwrap();
+        let folder = create_entry(temp.path(), temp.path(), "Ideas", true).unwrap();
+        let note = create_entry(temp.path(), &folder, "Restaurant", false).unwrap();
+        assert!(folder.is_dir());
+        assert_eq!(note.file_name().unwrap(), "Restaurant.md");
+        assert!(note.is_file());
+    }
+
+    #[test]
+    fn rejects_knowledge_creation_outside_root_and_nested_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        ensure_vault(temp.path()).unwrap();
+        assert!(create_entry(temp.path(), outside.path(), "note", false).is_err());
+        assert!(create_entry(temp.path(), temp.path(), "nested/note", false).is_err());
     }
 
     #[test]
