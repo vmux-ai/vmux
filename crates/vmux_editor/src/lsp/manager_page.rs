@@ -44,7 +44,7 @@ impl Plugin for ManagerPlugin {
                 host: "lsp",
                 url: "vmux://lsp/",
                 title: "Language Servers",
-                pool_size: 0,
+                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "lsp");

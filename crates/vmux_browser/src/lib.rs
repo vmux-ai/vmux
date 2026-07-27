@@ -70,9 +70,15 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
+
 use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
+
+#[derive(Clone, Copy, Debug, Message)]
+pub(crate) struct WebviewLoadCompleted {
+    webview: Entity,
+}
 
 /// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
 /// the CEF backend, and forwards pointer and cursor input between the layout and pages.
@@ -209,6 +215,7 @@ impl Plugin for BrowserPlugin {
                 crate::extensions::broker::fire_conformance_wake_timer,
             )
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+            .add_message::<WebviewLoadCompleted>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
             .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
@@ -2925,7 +2932,11 @@ fn should_show_osr_webview(
     stack_is_active || stack_is_previous_new_stack
 }
 
-fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands: Commands) {
+fn drain_loading_state(
+    receiver: Res<WebviewLoadingStateReceiver>,
+    mut commands: Commands,
+    mut completed: MessageWriter<WebviewLoadCompleted>,
+) {
     while let Ok(ev) = receiver.0.try_recv() {
         let Ok(mut ecmds) = commands.get_entity(ev.webview) else {
             continue;
@@ -2934,6 +2945,9 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
             ecmds.insert(Loading);
         } else {
             ecmds.remove::<Loading>();
+            completed.write(WebviewLoadCompleted {
+                webview: ev.webview,
+            });
         }
         ecmds.insert(NavigationState {
             can_go_back: ev.can_go_back,
