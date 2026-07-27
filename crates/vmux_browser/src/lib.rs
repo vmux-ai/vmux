@@ -371,7 +371,7 @@ fn cef_command_line_config() -> CommandLineConfig {
 }
 
 fn on_webview_ready_send_theme(
-    trigger: On<Add, PageReady>,
+    trigger: On<BinReceive<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     cef_q: Query<(), With<LayoutCef>>,
@@ -379,7 +379,7 @@ fn on_webview_ready_send_theme(
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event_target();
+    let entity = trigger.event().webview;
     webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
         let payload = theme_event(&settings);
@@ -2507,7 +2507,7 @@ fn sync_windowed_command_bar(
     }
 }
 
-fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<PageReady>>) {
+fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
     for entity in &ready {
         browsers.nudge_windowed_repaint(&entity);
     }
