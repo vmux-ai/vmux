@@ -106,8 +106,11 @@ impl Plugin for BrowserPlugin {
         let startup_locale =
             vmux_ui::i18n::requested_locale(Some(&startup_settings.appearance.locale));
         let startup_accept_language_list = browser_accept_language_list(&startup_locale);
-        let prepared_extensions = crate::extensions::load::apply_env()
-            .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
+        let prepared_extensions = crate::extensions::load::apply_env().unwrap_or_else(|error| {
+            bevy::log::error!(%error, "failed to prepare extensions; starting without them");
+            unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
+            Vec::new()
+        });
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
         let extension_registrations = prepared_extensions
             .iter()

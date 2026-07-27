@@ -17,23 +17,15 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let profile = vmux_core::profile::active_profile_name();
     let mut idx = store::Index::load(&root)?;
     let migrating = idx.requires_save();
-    let mut prepared = Vec::new();
     let mut index_changed = migrating;
     if migrating {
         migrate_index_permissions(&root, &mut idx)?;
     }
-    for entry in idx
-        .entries
-        .iter_mut()
-        .filter(|entry| entry.enabled_for(&profile))
-    {
-        let item = runtime::prepare_runtime_in(&root, &runtime_store, &profile, entry)?;
-        if entry.source_hash.is_empty() {
-            entry.source_hash.clone_from(&item.source_hash);
-            index_changed = true;
-        }
-        prepared.push(item);
-    }
+    let (prepared, preparation_changed) =
+        prepare_enabled_entries(&profile, &mut idx.entries, |entry| {
+            runtime::prepare_runtime_in(&root, &runtime_store, &profile, entry)
+        });
+    index_changed |= preparation_changed;
     if index_changed {
         idx.save(&root)?;
     }
@@ -55,6 +47,40 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     std::fs::write(loaded_path, idx.enabled_ids_for(&profile).join("\n"))
         .map_err(|error| error.to_string())?;
     Ok(prepared)
+}
+
+fn prepare_enabled_entries(
+    profile: &str,
+    entries: &mut [store::ExtEntry],
+    mut prepare: impl FnMut(&store::ExtEntry) -> Result<PreparedRuntime, String>,
+) -> (Vec<PreparedRuntime>, bool) {
+    let mut prepared = Vec::new();
+    let mut changed = false;
+    for entry in entries
+        .iter_mut()
+        .filter(|entry| entry.enabled_for(profile))
+    {
+        match prepare(entry) {
+            Ok(item) => {
+                if entry.source_hash.is_empty() {
+                    entry.source_hash.clone_from(&item.source_hash);
+                    changed = true;
+                }
+                prepared.push(item);
+            }
+            Err(error) => {
+                bevy::log::error!(
+                    extension_id = %entry.id,
+                    %profile,
+                    %error,
+                    "disabling extension after preparation failure"
+                );
+                entry.profile_enabled.insert(profile.to_string(), false);
+                changed = true;
+            }
+        }
+    }
+    (prepared, changed)
 }
 
 fn runtime_store_root() -> std::path::PathBuf {
@@ -178,6 +204,51 @@ mod tests {
             granted_permissions: Vec::new(),
             granted_host_permissions: Vec::new(),
         }
+    }
+
+    fn enabled_entry(id: &str) -> store::ExtEntry {
+        let mut profile_enabled = std::collections::BTreeMap::new();
+        profile_enabled.insert("personal".to_string(), true);
+        store::ExtEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            version: "1".to_string(),
+            popup: None,
+            icon: None,
+            enabled: false,
+            profile_enabled,
+            permissions: Vec::new(),
+            optional_permissions: Vec::new(),
+            host_permissions: Vec::new(),
+            optional_host_permissions: Vec::new(),
+            approved_grants: std::collections::BTreeMap::new(),
+            source_hash: "source-hash".to_string(),
+            public_key_b64: None,
+        }
+    }
+
+    #[test]
+    fn preparation_failure_disables_only_the_broken_extension() {
+        let mut entries = vec![enabled_entry("broken"), enabled_entry("working")];
+
+        let (prepared, changed) = prepare_enabled_entries("personal", &mut entries, |entry| {
+            if entry.id == "broken" {
+                Err("source hash mismatch".to_string())
+            } else {
+                Ok(prepared_runtime(&entry.id))
+            }
+        });
+
+        assert!(changed);
+        assert!(!entries[0].enabled_for("personal"));
+        assert!(entries[1].enabled_for("personal"));
+        assert_eq!(
+            prepared
+                .iter()
+                .map(|runtime| runtime.extension_id.as_str())
+                .collect::<Vec<_>>(),
+            ["working"]
+        );
     }
 
     #[test]
