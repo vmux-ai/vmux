@@ -404,9 +404,6 @@ impl AcpProjector {
 
     fn apply_tool_call(&mut self, tc: ToolCall) -> Vec<Intent> {
         let call_id = tc.tool_call_id.to_string();
-        if is_mcp_startup_tool(&tc.title) {
-            return Vec::new();
-        }
         if is_conversation_title_tool(&tc.title) {
             if !matches!(
                 tc.status,
@@ -474,9 +471,6 @@ impl AcpProjector {
     fn apply_tool_call_update(&mut self, update: ToolCallUpdate) -> Vec<Intent> {
         let call_id = update.tool_call_id.to_string();
         let title = update.fields.title.clone().unwrap_or_default();
-        if is_mcp_startup_tool(&title) {
-            return Vec::new();
-        }
         if self.hidden_tool_calls.contains(&call_id) || is_conversation_title_tool(&title) {
             if matches!(
                 update.fields.status,
@@ -805,14 +799,6 @@ pub(crate) fn is_conversation_title_tool(title: &str) -> bool {
         })
         .filter(|part| !part.is_empty())
         .eq(["mcp", "vmux", "set", "conversation", "title"])
-}
-
-fn is_mcp_startup_tool(title: &str) -> bool {
-    title
-        .trim()
-        .strip_prefix("mcp__")
-        .and_then(|title| title.strip_suffix("__startup"))
-        .is_some_and(|server| !server.is_empty())
 }
 
 fn subagent_block(

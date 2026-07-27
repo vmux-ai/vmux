@@ -864,10 +864,22 @@ fn agent_is_viewed(
     entity: Entity,
     foreground: bool,
     focused: &vmux_layout::stack::FocusedStack,
+    stacks: &Query<(), With<vmux_layout::stack::Stack>>,
     child_of: &Query<&ChildOf>,
 ) -> bool {
-    let stack = child_of.get(entity).ok().map(|c| c.parent());
-    foreground && focused.stack.is_some() && focused.stack == stack
+    foreground && focused.stack == agent_stack(entity, stacks, child_of)
+}
+
+fn agent_stack(
+    entity: Entity,
+    stacks: &Query<(), With<vmux_layout::stack::Stack>>,
+    child_of: &Query<&ChildOf>,
+) -> Option<Entity> {
+    stacks
+        .get(entity)
+        .is_ok()
+        .then_some(entity)
+        .or_else(|| child_of.get(entity).ok().map(|child| child.parent()))
 }
 
 fn mark_agent_done(
@@ -875,6 +887,7 @@ fn mark_agent_done(
     mut notify: MessageWriter<vmux_core::notify::OsNotify>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     focused: Res<vmux_layout::stack::FocusedStack>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
     child_of: Query<&ChildOf>,
     meta: Query<(
         &vmux_core::team::Profile,
@@ -887,12 +900,15 @@ fn mark_agent_done(
 ) {
     let foreground = window_foreground(&windows);
     for att in reader.read() {
+        if agent_is_viewed(att.entity, foreground, &focused, &stacks, &child_of) {
+            commands
+                .entity(att.entity)
+                .remove::<vmux_core::notify::AgentDoneUnseen>();
+            continue;
+        }
         commands
             .entity(att.entity)
             .insert(vmux_core::notify::AgentDoneUnseen);
-        if agent_is_viewed(att.entity, foreground, &focused, &child_of) {
-            continue;
-        }
         let now = time.elapsed_secs_f64();
         if last_notify
             .get(&att.entity)
@@ -941,6 +957,7 @@ fn clear_agent_done(
     done: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     focused: Res<vmux_layout::stack::FocusedStack>,
+    stacks: Query<(), With<vmux_layout::stack::Stack>>,
     child_of: Query<&ChildOf>,
     mut prev_focused: Local<Option<Entity>>,
     mut commands: Commands,
@@ -955,7 +972,7 @@ fn clear_agent_done(
         return;
     };
     for entity in &done {
-        if child_of.get(entity).ok().map(|c| c.parent()) == Some(stack) {
+        if agent_stack(entity, &stacks, &child_of) == Some(stack) {
             commands
                 .entity(entity)
                 .remove::<vmux_core::notify::AgentDoneUnseen>();
@@ -7460,7 +7477,10 @@ mod tests {
     }
 
     fn spawn_agent_in_stack(app: &mut App) -> (Entity, Entity) {
-        let stack = app.world_mut().spawn_empty().id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::Stack::default())
+            .id();
         let agent = app
             .world_mut()
             .spawn((
@@ -7516,7 +7536,7 @@ mod tests {
     }
 
     #[test]
-    fn no_banner_when_foreground_but_dot_still_set() {
+    fn focused_child_agent_does_not_notify_or_mark() {
         let mut app = done_test_app();
         let (agent, stack) = spawn_agent_in_stack(&mut app);
         set_window(&mut app, true);
@@ -7529,24 +7549,53 @@ mod tests {
         assert!(
             app.world()
                 .get::<vmux_core::notify::AgentDoneUnseen>(agent)
-                .is_some(),
-            "dot shows even when foreground"
+                .is_none(),
+            "focused agent has no unseen marker"
         );
         assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
     }
 
     #[test]
-    fn clear_removes_marker_on_focus_transition() {
+    fn focused_stack_agent_does_not_notify_or_mark() {
         let mut app = done_test_app();
-        let (agent, stack) = spawn_agent_in_stack(&mut app);
+        let stack = app
+            .world_mut()
+            .spawn((
+                vmux_layout::stack::Stack::default(),
+                vmux_core::team::Profile::agent(vmux_core::agent::AgentKind::Claude),
+            ))
+            .id();
         set_window(&mut app, true);
         app.world_mut()
-            .entity_mut(agent)
+            .resource_mut::<vmux_layout::stack::FocusedStack>()
+            .stack = Some(stack);
+        app.update();
+        send_attention(&mut app, stack);
+        app.update();
+        assert!(
+            app.world()
+                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
+                .is_none(),
+            "focused stack agent has no unseen marker"
+        );
+        assert_eq!(os_notify_count(&app), 0, "no banner when foreground");
+    }
+
+    #[test]
+    fn clear_removes_marker_from_focused_stack_agent() {
+        let mut app = done_test_app();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::Stack::default())
+            .id();
+        set_window(&mut app, true);
+        app.world_mut()
+            .entity_mut(stack)
             .insert(vmux_core::notify::AgentDoneUnseen);
         app.update();
         assert!(
             app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
                 .is_some()
         );
         app.world_mut()
@@ -7555,7 +7604,7 @@ mod tests {
         app.update();
         assert!(
             app.world()
-                .get::<vmux_core::notify::AgentDoneUnseen>(agent)
+                .get::<vmux_core::notify::AgentDoneUnseen>(stack)
                 .is_none()
         );
     }
