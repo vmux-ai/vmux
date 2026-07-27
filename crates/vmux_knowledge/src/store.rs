@@ -72,6 +72,9 @@ pub fn create_entry(
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
         return Err("Name must be one file or folder name".to_string());
     }
+    if name.starts_with('.') {
+        return Err("Name cannot start with a dot".to_string());
+    }
     let name = if is_directory || is_markdown(Path::new(name)) {
         name.to_string()
     } else {
@@ -213,6 +216,8 @@ mod tests {
         ensure_vault(temp.path()).unwrap();
         assert!(create_entry(temp.path(), outside.path(), "note", false).is_err());
         assert!(create_entry(temp.path(), temp.path(), "nested/note", false).is_err());
+        assert!(create_entry(temp.path(), temp.path(), ".hidden", false).is_err());
+        assert!(create_entry(temp.path(), temp.path(), ".hidden.md", false).is_err());
     }
 
     #[test]

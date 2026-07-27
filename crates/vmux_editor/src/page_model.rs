@@ -302,7 +302,16 @@ mod tests {
         assert!(!note_inline_consumes_ctrl_navigation(
             "n",
             KeyMods {
+                ctrl: true,
                 meta: true,
+                ..Default::default()
+            }
+        ));
+        assert!(!note_inline_consumes_ctrl_navigation(
+            "p",
+            KeyMods {
+                ctrl: true,
+                alt: true,
                 ..Default::default()
             }
         ));

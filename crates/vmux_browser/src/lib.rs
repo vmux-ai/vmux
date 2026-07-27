@@ -2159,8 +2159,8 @@ fn refresh_active_windowed_hover(
 }
 
 const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
-const LAYOUT_HOVER_FRAME_RATE: i32 = 30;
-const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
+const LAYOUT_HOVER_FRAME_RATE: i32 = 60;
+const LAYOUT_ACTIVE_FRAME_RATE: i32 = 120;
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
 #[derive(Default)]

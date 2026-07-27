@@ -1,5 +1,8 @@
 #![allow(non_snake_case)]
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
     BookmarksCommandEvent, BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT,
@@ -1314,6 +1317,13 @@ fn KnowledgeCard(
         )
     };
     let knowledge_title = translate("layout-knowledge");
+    let entries_by_parent = Rc::new(knowledge.entries.iter().cloned().fold(
+        HashMap::<String, Vec<KnowledgeEntry>>::new(),
+        |mut grouped, entry| {
+            grouped.entry(entry.parent.clone()).or_default().push(entry);
+            grouped
+        },
+    ));
     let fold_title = if expanded {
         translate("layout-fold-knowledge")
     } else {
@@ -1435,11 +1445,11 @@ fn KnowledgeCard(
                                     }
                                 } else {
                                     div { class: "flex flex-col gap-0.5",
-                                        for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
+                                        for entry in entries_by_parent.get(&knowledge.root).into_iter().flatten() {
                                             KnowledgeEntryRow {
                                                 key: "{entry.path}",
                                                 entry: entry.clone(),
-                                                entries: knowledge.entries.clone(),
+                                                entries_by_parent: entries_by_parent.clone(),
                                                 pane_id,
                                                 prompt: create_prompt,
                                                 draft: create_draft,
@@ -1460,7 +1470,7 @@ fn KnowledgeCard(
 #[component]
 fn KnowledgeEntryRow(
     entry: KnowledgeEntry,
-    entries: Vec<KnowledgeEntry>,
+    entries_by_parent: Rc<HashMap<String, Vec<KnowledgeEntry>>>,
     pane_id: u64,
     prompt: Signal<Option<KnowledgeCreatePrompt>>,
     draft: Signal<String>,
@@ -1468,7 +1478,8 @@ fn KnowledgeEntryRow(
 ) -> Element {
     let mut expanded = use_signal(|| false);
     if entry.is_directory {
-        let has_children = entries.iter().any(|child| child.parent == entry.path);
+        let children = entries_by_parent.get(&entry.path);
+        let has_children = children.is_some_and(|children| !children.is_empty());
         rsx! {
             div { class: "flex flex-col gap-0.5",
                 LayoutContextMenu {
@@ -1507,11 +1518,11 @@ fn KnowledgeEntryRow(
                             }
                         }
                         if has_children {
-                            for child in entries.iter().filter(|child| child.parent == entry.path) {
+                            for child in children.into_iter().flatten() {
                                 KnowledgeEntryRow {
                                     key: "{child.path}",
                                     entry: child.clone(),
-                                    entries: entries.clone(),
+                                    entries_by_parent: entries_by_parent.clone(),
                                     pane_id,
                                     prompt,
                                     draft,
@@ -2989,6 +3000,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
         .filter(|stack| !(stack.url.is_empty() && stack.title == "New Stack"))
         .cloned()
         .collect::<Vec<_>>();
+    let collapsed_stack = visible_stacks
+        .iter()
+        .find(|stack| stack.is_active)
+        .or_else(|| visible_stacks.first())
+        .cloned();
     rsx! {
         div { class: if pane.is_active && any_loading {
                 "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
@@ -3035,13 +3051,22 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                 },
                 div { class: "overflow-hidden",
+                    if expanded {
+                        div { class: "border-t border-foreground/10 p-1.5",
+                            div { class: "flex flex-col gap-1",
+                                for stack in visible_stacks.iter() {
+                                    SideSheetStackRow { stack: stack.clone(), pane_id }
+                                }
+                                NewStackRow { pane_id }
+                            }
+                        }
+                    }
+                }
+            }
+            if !expanded {
+                if let Some(stack) = collapsed_stack {
                     div { class: "border-t border-foreground/10 p-1.5",
-                        div { class: "flex flex-col gap-1",
-                        for stack in visible_stacks.iter() {
-                            SideSheetStackRow { stack: stack.clone(), pane_id }
-                        }
-                        NewStackRow { pane_id }
-                        }
+                        SideSheetStackRow { stack, pane_id }
                     }
                 }
             }
