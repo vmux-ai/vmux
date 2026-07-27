@@ -113,8 +113,6 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
     assert!(knowledge_card.contains("grid-rows-[1fr]"));
     assert!(source.contains("overflow-x-hidden overflow-y-auto"));
     assert!(source.contains("scrollbar-gutter:stable"));
-    assert!(!knowledge_card.contains("overflow-y-auto"));
-    assert!(!knowledge_card.contains("max-h-64"));
     assert!(!source.contains("KnowledgeUse"));
     assert!(!source.contains("Build with"));
     assert!(!source.contains("vmux://notes"));

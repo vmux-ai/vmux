@@ -200,6 +200,9 @@ struct FileViewModeSent;
 #[derive(Component)]
 struct NoteSent;
 
+#[derive(Component, Clone, Copy)]
+struct NoteRevealLine(u32);
+
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 type UnloadedFileView = (
     Without<FileBuffer>,
@@ -674,14 +677,15 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
 
 fn send_note(
     mode: Res<SharedFileViewMode>,
-    q: Query<(Entity, &FileView, &EditState), ReadyUnsentNote>,
+    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    q: Query<(Entity, &FileView, &EditState, Option<&NoteRevealLine>), ReadyUnsentNote>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     if mode.0 != FileViewMode::Note {
         return;
     }
-    for (entity, file, edit) in &q {
+    for (entity, file, edit, reveal) in &q {
         if !crate::markdown::is_markdown_path(&file.path) {
             commands.entity(entity).insert(NoteSent);
             continue;
@@ -689,22 +693,60 @@ fn send_note(
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
-        let note = crate::markdown::parse_note_document(&edit.core.buffer.text());
+        let mut note = crate::markdown::parse_note_document(&edit.core.buffer.text());
+        let references = index
+            .as_deref()
+            .filter(|index| index.loaded() && file.path.starts_with(index.root()))
+            .map(|index| {
+                index.resolve_blocks(&file.path, &mut note.blocks);
+                let mut references = index.backlinks(&file.path);
+                references.extend(index.unlinked_mentions(&file.path, 32));
+                references
+                    .into_iter()
+                    .map(|reference| vmux_core::knowledge::KnowledgeReference {
+                        title: reference.title,
+                        path: reference.path.to_string_lossy().into_owned(),
+                        line: reference.line,
+                        preview: reference.preview,
+                        unlinked: reference.unlinked,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let active = active_note_block(&note.blocks, edit.core.cursor_pos().line);
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             FILE_NOTE_EVENT,
             &FileNoteEvent {
                 title: note.title,
+                properties: note.properties,
                 blocks: note.blocks,
                 active,
+                references,
+                reveal_line: reveal.map(|line| line.0),
             },
         ));
-        commands.entity(entity).insert(NoteSent);
+        commands
+            .entity(entity)
+            .insert(NoteSent)
+            .remove::<NoteRevealLine>();
     }
 }
 
 fn mark_note_dirty(q: Query<Entity, ChangedNoteEditor>, mut commands: Commands) {
+    for entity in &q {
+        commands.entity(entity).remove::<NoteSent>();
+    }
+}
+
+fn mark_notes_on_knowledge_change(
+    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    q: Query<Entity, With<FileView>>,
+    mut commands: Commands,
+) {
+    if index.is_none_or(|index| !index.is_changed()) {
+        return;
+    }
     for entity in &q {
         commands.entity(entity).remove::<NoteSent>();
     }
@@ -1278,6 +1320,85 @@ fn on_file_open(
     );
 }
 
+fn on_knowledge_link_open(
+    trigger: On<BinReceive<KnowledgeLinkOpen>>,
+    mut goto: MessageWriter<crate::lsp::manager::LspGoto>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let request = &trigger.event().payload;
+    let root = vmux_core::knowledge::knowledge_dir();
+    let requested = PathBuf::from(&request.path);
+    let path = if request.create {
+        let Ok(relative) = requested.strip_prefix(&root) else {
+            return;
+        };
+        if requested.exists() {
+            let Ok(canonical_root) = root.canonicalize() else {
+                return;
+            };
+            let Ok(metadata) = std::fs::symlink_metadata(&requested) else {
+                return;
+            };
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return;
+            }
+            let Ok(path) = requested.canonicalize() else {
+                return;
+            };
+            if !path.starts_with(canonical_root) {
+                return;
+            }
+            path
+        } else {
+            let relative = relative.to_string_lossy();
+            match vmux_core::knowledge::write_note(
+                Some(&relative),
+                &request.title,
+                &format!("# {}", request.title),
+            ) {
+                Ok(path) => path,
+                Err(error) => {
+                    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                        commands.trigger(BinHostEmitEvent::from_rkyv(
+                            entity,
+                            FILE_ERROR_EVENT,
+                            &FileErrorEvent { message: error },
+                        ));
+                    }
+                    return;
+                }
+            }
+        }
+    } else {
+        let Ok(root) = root.canonicalize() else {
+            return;
+        };
+        if std::fs::symlink_metadata(&requested)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+        {
+            return;
+        }
+        let Ok(path) = requested.canonicalize() else {
+            return;
+        };
+        if !path.starts_with(root) {
+            return;
+        }
+        path
+    };
+    if let Some(line) = request.line {
+        commands.entity(entity).insert(NoteRevealLine(line));
+    }
+    goto.write(crate::lsp::manager::LspGoto {
+        entity,
+        path,
+        line: request.line.unwrap_or(0),
+        utf16_col: 0,
+    });
+}
+
 #[derive(Component)]
 struct FileReloadRequested;
 
@@ -1488,6 +1609,61 @@ fn word_start_col(line_text: &str, char_col: usize) -> u32 {
         i -= 1;
     }
     i as u32
+}
+
+fn wiki_completion_context(edit: &EditState) -> Option<(u32, u32, String)> {
+    if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
+        return None;
+    }
+    let (line, _, col, text) = caret_lsp(edit);
+    let chars = text.chars().collect::<Vec<_>>();
+    let col = col.min(chars.len());
+    let open = (0..col.saturating_sub(1))
+        .rev()
+        .find(|index| chars[*index] == '[' && chars[*index + 1] == '[')?;
+    let fragment = chars[open + 2..col].iter().collect::<String>();
+    if fragment.contains("]]") || fragment.contains('|') || fragment.contains('#') {
+        return None;
+    }
+    Some((line, open as u32 + 2, fragment))
+}
+
+fn emit_wiki_completions(
+    entity: Entity,
+    edit: &EditState,
+    index: &vmux_core::knowledge::KnowledgeIndex,
+    browsers: &Browsers,
+    commands: &mut Commands,
+) -> bool {
+    if !index.loaded() || !edit.core.buffer.path.starts_with(index.root()) {
+        return false;
+    }
+    let Some((line, replace_from_col, prefix)) = wiki_completion_context(edit) else {
+        return false;
+    };
+    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        return true;
+    }
+    let items = index
+        .completions(&prefix, 32)
+        .into_iter()
+        .map(|(title, relative)| CompletionItem {
+            label: title.clone(),
+            insert_text: format!("{title}]]"),
+            detail: relative,
+            kind: "knowledge".to_string(),
+        })
+        .collect();
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        entity,
+        FILE_COMPLETION_EVENT,
+        &FileCompletionEvent {
+            items,
+            replace_from_col,
+            line,
+        },
+    ));
+    true
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -1744,6 +1920,7 @@ fn on_file_key(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
     mut q: Query<(
@@ -1755,6 +1932,7 @@ fn on_file_text_input(
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1772,6 +1950,62 @@ fn on_file_text_input(
     run_commands(
         entity,
         vec![EditCommand::InsertText(text)],
+        &mut edit,
+        &mut diff_source,
+        keymap.0.as_ref(),
+        &mut vp,
+        &mut clipboard,
+        &mut self_writes,
+        &mut manager,
+        &browsers,
+        &mut commands,
+    );
+    if let Some(index) = index.as_deref() {
+        emit_wiki_completions(entity, &edit, index, &browsers, &mut commands);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn on_file_property_edit(
+    trigger: On<BinReceive<FilePropertyEdit>>,
+    mut q: Query<(
+        &mut EditState,
+        &EditorKeymap,
+        &mut FileViewport,
+        &mut vmux_git::GitDiffSource,
+    )>,
+    mut clipboard: NonSendMut<ClipboardHandle>,
+    mut self_writes: NonSendMut<SelfWrites>,
+    mut manager: NonSendMut<crate::lsp::manager::LspManager>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event().webview;
+    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+        return;
+    };
+    if !crate::markdown::is_markdown_path(&edit.core.buffer.path) {
+        return;
+    }
+    let text = edit.core.buffer.text();
+    let updated =
+        match vmux_core::knowledge::edit_markdown_property(&text, &trigger.event().payload) {
+            Ok(updated) => updated,
+            Err(message) => {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_ERROR_EVENT,
+                    &FileErrorEvent { message },
+                ));
+                return;
+            }
+        };
+    if updated == text {
+        return;
+    }
+    run_commands(
+        entity,
+        vec![EditCommand::ReplaceText(updated)],
         &mut edit,
         &mut diff_source,
         keymap.0.as_ref(),
@@ -1885,6 +2119,9 @@ fn on_file_references_request(
 fn on_file_completion_request(
     trigger: On<BinReceive<FileCompletionRequest>>,
     q: Query<&EditState>,
+    index: Option<Res<vmux_core::knowledge::KnowledgeIndex>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
 ) {
     let entity = trigger.event().webview;
@@ -1892,6 +2129,12 @@ fn on_file_completion_request(
     let Ok(edit) = q.get(entity) else {
         return;
     };
+    if index
+        .as_deref()
+        .is_some_and(|index| emit_wiki_completions(entity, edit, index, &browsers, &mut commands))
+    {
+        return;
+    }
     let (line, utf16, lt) = req_pos(edit, req.line, req.col);
     let replace_from = word_start_col(&lt, req.col as usize);
     let path = edit.core.buffer.path.clone();
@@ -2027,6 +2270,7 @@ fn apply_goto(
                 .remove::<FileBuffer>()
                 .remove::<FileMedia>()
                 .remove::<FileDir>()
+                .remove::<NoteSent>()
                 .remove::<FileInitialMetaSent>()
                 .remove::<crate::lsp::manager::LspOpened>()
                 .remove::<crate::lsp::manager::LintRan>()
@@ -2393,7 +2637,25 @@ fn run_explorer_mutation(
                 .parent()
                 .ok_or_else(|| "Explorer root cannot be changed".to_string())?
                 .to_path_buf();
+            let next_path = path.with_file_name(&name);
+            let knowledge_root = vmux_core::knowledge::knowledge_dir();
+            let rename_plan = (root
+                .canonicalize()
+                .ok()
+                .zip(knowledge_root.canonicalize().ok())
+                .is_some_and(|(root, knowledge_root)| root == knowledge_root))
+            .then(|| {
+                vmux_core::knowledge::KnowledgeIndex::build(&root)
+                    .map(|index| {
+                        vmux_core::knowledge::KnowledgeRenamePlan::build(&index, &path, &next_path)
+                    })
+                    .map_err(|error| error.to_string())
+            })
+            .transpose()?;
             let (changed_path, was_dir) = crate::explorer_fs::rename_entry(&root, &path, &name)?;
+            if let Some(plan) = rename_plan {
+                plan.apply().map_err(|error| error.to_string())?;
+            }
             Ok(ExplorerMutationOutcome {
                 changed_path,
                 refresh_dir,
@@ -3046,6 +3308,8 @@ impl Plugin for EditorPlugin {
                 FileOpenExternalRequest,
                 FileVideoRect,
                 FileViewModeSet,
+                KnowledgeLinkOpen,
+                FilePropertyEdit,
             )>::default())
             .add_plugins(BinEventEmitterPlugin::<(
                 ExplorerTreeToggle,
@@ -3096,7 +3360,16 @@ impl Plugin for EditorPlugin {
                     persist_folds,
                 ),
             )
-            .add_systems(Update, (mark_note_dirty, send_note.after(mark_note_dirty)))
+            .add_systems(
+                Update,
+                (
+                    mark_notes_on_knowledge_change,
+                    mark_note_dirty,
+                    send_note
+                        .after(mark_note_dirty)
+                        .after(mark_notes_on_knowledge_change),
+                ),
+            )
             .add_systems(Update, (drain_explorer_dir_loads, drain_explorer_mutations))
             .add_systems(
                 Update,
@@ -3130,6 +3403,8 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_completion_request)
             .add_observer(on_file_goto_request)
             .add_observer(on_file_completion_commit)
+            .add_observer(on_knowledge_link_open)
+            .add_observer(on_file_property_edit)
             .add_observer(on_file_fold_toggle)
             .add_observer(on_file_view_mode_set)
             .add_observer(on_explorer_tree_toggle)

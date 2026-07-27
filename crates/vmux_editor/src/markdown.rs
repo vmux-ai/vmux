@@ -24,7 +24,7 @@ enum Frame {
     Heading(u8, Vec<MdInline>),
     Quote(Vec<MdBlock>),
     List(bool, u64, Vec<MdListItem>),
-    Item(Option<bool>, Vec<MdInline>, Vec<MdBlock>),
+    Item(u32, Option<bool>, Vec<MdInline>, Vec<MdBlock>),
     Strong(Vec<MdInline>),
     Emph(Vec<MdInline>),
     Strike(Vec<MdInline>),
@@ -44,6 +44,7 @@ enum Frame {
 
 pub struct ParsedNote {
     pub title: String,
+    pub properties: Vec<vmux_core::knowledge::KnowledgeProperty>,
     pub blocks: Vec<NoteBlock>,
 }
 
@@ -56,7 +57,7 @@ fn push_inline(stack: &mut [Frame], inline: MdInline) {
         | Frame::Strike(inlines)
         | Frame::Link(_, inlines)
         | Frame::Cell(inlines)
-        | Frame::Item(_, inlines, _),
+        | Frame::Item(_, _, inlines, _),
     ) = stack.last_mut()
     {
         inlines.push(inline);
@@ -66,7 +67,7 @@ fn push_inline(stack: &mut [Frame], inline: MdInline) {
 fn push_block(stack: &mut [Frame], block: MdBlock) {
     match stack.last_mut() {
         Some(Frame::Doc(blocks) | Frame::Quote(blocks) | Frame::Sink(blocks)) => blocks.push(block),
-        Some(Frame::Item(_, pending, blocks)) => {
+        Some(Frame::Item(_, _, pending, blocks)) => {
             if !pending.is_empty() {
                 blocks.push(MdBlock::Paragraph {
                     inlines: std::mem::take(pending),
@@ -119,8 +120,44 @@ fn inline_text(inlines: &[MdInline], output: &mut String) {
                 inlines: children, ..
             } => inline_text(children, output),
             MdInline::Image { alt, .. } => output.push_str(alt),
+            MdInline::WikiLink { label, .. } => output.push_str(label),
             MdInline::SoftBreak | MdInline::HardBreak => output.push(' '),
         }
+    }
+}
+
+fn push_text_with_wiki_links(stack: &mut [Frame], text: &str) {
+    let links = vmux_core::knowledge::wiki_links(text);
+    if links.is_empty() {
+        push_inline(stack, MdInline::Text(text.to_string()));
+        return;
+    }
+    let mut offset = 0;
+    for link in links {
+        if offset < link.start {
+            push_inline(stack, MdInline::Text(text[offset..link.start].to_string()));
+        }
+        let target = match link.anchor.as_deref() {
+            Some(anchor) if link.note.is_empty() => format!("#{anchor}"),
+            Some(anchor) => format!("{}#{anchor}", link.note),
+            None => link.note.clone(),
+        };
+        let label = link.label.clone().unwrap_or_else(|| target.clone());
+        push_inline(
+            stack,
+            MdInline::WikiLink {
+                target,
+                label,
+                path: String::new(),
+                line: None,
+                exists: false,
+                embed: link.embed,
+            },
+        );
+        offset = link.end;
+    }
+    if offset < text.len() {
+        push_inline(stack, MdInline::Text(text[offset..].to_string()));
     }
 }
 
@@ -176,7 +213,12 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
                 Tag::List(start) => {
                     stack.push(Frame::List(start.is_some(), start.unwrap_or(1), Vec::new()))
                 }
-                Tag::Item => stack.push(Frame::Item(None, Vec::new(), Vec::new())),
+                Tag::Item => stack.push(Frame::Item(
+                    offset_to_line(&line_starts, range_start),
+                    None,
+                    Vec::new(),
+                    Vec::new(),
+                )),
                 Tag::CodeBlock(kind) => {
                     let language = match kind {
                         CodeBlockKind::Fenced(language) => language.to_string(),
@@ -232,12 +274,16 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
                     }
                 }
                 TagEnd::Item => {
-                    if let Some(Frame::Item(task, pending, mut blocks)) = stack.pop() {
+                    if let Some(Frame::Item(source_line, task, pending, mut blocks)) = stack.pop() {
                         if !pending.is_empty() {
                             blocks.push(MdBlock::Paragraph { inlines: pending });
                         }
                         if let Some(Frame::List(_, _, items)) = stack.last_mut() {
-                            items.push(MdListItem { task, blocks });
+                            items.push(MdListItem {
+                                source_line,
+                                task,
+                                blocks,
+                            });
                         }
                     }
                 }
@@ -322,14 +368,14 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
             Event::Text(text) => match stack.last_mut() {
                 Some(Frame::Code(_, code)) => code.push_str(&text),
                 Some(Frame::Image(_, alt)) => alt.push_str(&text),
-                _ => push_inline(&mut stack, MdInline::Text(text.to_string())),
+                _ => push_text_with_wiki_links(&mut stack, &text),
             },
             Event::Code(code) => push_inline(&mut stack, MdInline::Code(code.to_string())),
             Event::SoftBreak => push_inline(&mut stack, MdInline::SoftBreak),
             Event::HardBreak => push_inline(&mut stack, MdInline::HardBreak),
             Event::Rule => push_block(&mut stack, MdBlock::ThematicBreak),
             Event::TaskListMarker(checked) => {
-                if let Some(Frame::Item(task, _, _)) = stack.last_mut() {
+                if let Some(Frame::Item(_, task, _, _)) = stack.last_mut() {
                     *task = Some(checked);
                 }
             }
@@ -408,6 +454,7 @@ pub fn parse_note_document(text: &str) -> ParsedNote {
     }
     ParsedNote {
         title: metadata.title,
+        properties: metadata.properties,
         blocks: parsed,
     }
 }
@@ -431,6 +478,20 @@ mod tests {
         assert_eq!(blocks[0].start_line, 0);
         assert_eq!(blocks[1].start_line, 2);
         assert_eq!(blocks[2].start_line, 4);
+    }
+
+    #[test]
+    fn nested_list_items_keep_exact_source_lines() {
+        let blocks = parse_note("1. one\n   - nested\n2. two\n");
+        let MdBlock::List { items, .. } = &blocks[0].block else {
+            panic!("expected list");
+        };
+        assert_eq!(items[0].source_line, 0);
+        assert_eq!(items[1].source_line, 2);
+        let MdBlock::List { items, .. } = &items[0].blocks[1] else {
+            panic!("expected nested list");
+        };
+        assert_eq!(items[0].source_line, 1);
     }
 
     #[test]

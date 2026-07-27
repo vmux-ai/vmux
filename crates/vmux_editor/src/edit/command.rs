@@ -24,6 +24,7 @@ pub enum EditCommand {
     Move(Motion),
     Select(Motion),
     InsertText(String),
+    ReplaceText(String),
     InsertNewline,
     InsertTab,
     DeleteBack,

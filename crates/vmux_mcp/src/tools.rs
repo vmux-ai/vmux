@@ -562,6 +562,41 @@ fn write_knowledge_definition() -> ToolDefinition {
     }
 }
 
+fn search_knowledge_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "search_knowledge".into(),
+        description: "Search every Markdown note in the user's vmux Knowledge base. Returns ranked source references as path:line with titles and matching previews. Use this before read_knowledge when the relevant note is unknown. No permission is required."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["query"],
+            "additionalProperties": false,
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+            }
+        }),
+    }
+}
+
+fn read_knowledge_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "read_knowledge".into(),
+        description: "Read a Markdown note from the user's vmux Knowledge base by relative path, title, or alias. line is 1-based and defaults to 1; limit defaults to 200 lines. Use source references returned by search_knowledge. No permission is required."
+            .into(),
+        input_schema: serde_json::json!({
+            "type": "object",
+            "required": ["path"],
+            "additionalProperties": false,
+            "properties": {
+                "path": {"type": "string"},
+                "line": {"type": "integer", "minimum": 1},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 2000}
+            }
+        }),
+    }
+}
+
 fn resume_in_acp_definition() -> ToolDefinition {
     ToolDefinition {
         name: "resume_in_acp".into(),
@@ -826,6 +861,8 @@ pub fn tool_definitions_filtered(acp_session: bool, acp_terminals: bool) -> Vec<
     defs.push(vault_status_definition());
     defs.push(open_vault_definition());
     defs.push(set_conversation_title_definition());
+    defs.push(search_knowledge_definition());
+    defs.push(read_knowledge_definition());
     defs.push(write_knowledge_definition());
     defs.push(select_project_definition());
     defs.push(create_worktree_definition());
@@ -1102,6 +1139,52 @@ pub fn dispatch_with_anchor(
                 title: title.to_string(),
             },
         ));
+    }
+    if name == "search_knowledge" {
+        let anchor = anchor
+            .ok_or("search_knowledge requires an agent anchor (not available to this client)")?;
+        let query = arguments
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|query| !query.is_empty())
+            .ok_or("search_knowledge.query is empty")?;
+        let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(20);
+        if !(1..=100).contains(&limit) {
+            return Err("search_knowledge.limit must be between 1 and 100".to_string());
+        }
+        return Ok(DispatchTarget::Command(AgentCommand::SearchKnowledge {
+            anchor,
+            query: query.to_string(),
+            limit: limit as u16,
+        }));
+    }
+    if name == "read_knowledge" {
+        let anchor = anchor
+            .ok_or("read_knowledge requires an agent anchor (not available to this client)")?;
+        let path = arguments
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .ok_or("read_knowledge.path is empty")?;
+        let line = arguments.get("line").and_then(Value::as_u64).unwrap_or(1);
+        let limit = arguments
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200);
+        if line == 0 || line > u32::MAX as u64 {
+            return Err("read_knowledge.line must be at least 1".to_string());
+        }
+        if !(1..=2_000).contains(&limit) {
+            return Err("read_knowledge.limit must be between 1 and 2000".to_string());
+        }
+        return Ok(DispatchTarget::Command(AgentCommand::ReadKnowledge {
+            anchor,
+            path: path.to_string(),
+            line: line as u32,
+            limit: limit as u32,
+        }));
     }
     if name == "write_knowledge" {
         let anchor = anchor
@@ -1828,6 +1911,45 @@ mod tests {
                 && title == "YC Startup School"
                 && content == "Notes"
         ));
+    }
+
+    #[test]
+    fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
+        let anchor = vmux_service::protocol::ProcessId::new();
+        let search = dispatch_with_anchor(
+            "search_knowledge",
+            serde_json::json!({"query": "  Obsidian links  ", "limit": 12}),
+            Some(anchor),
+        )
+        .unwrap();
+        let read = dispatch_with_anchor(
+            "read_knowledge",
+            serde_json::json!({"path": "projects/obsidian-gap-analysis.md", "line": 8}),
+            Some(anchor),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            search,
+            DispatchTarget::Command(AgentCommand::SearchKnowledge {
+                anchor: got,
+                query,
+                limit: 12,
+            }) if got == anchor && query == "Obsidian links"
+        ));
+        assert!(matches!(
+            read,
+            DispatchTarget::Command(AgentCommand::ReadKnowledge {
+                anchor: got,
+                path,
+                line: 8,
+                limit: 200,
+            }) if got == anchor && path == "projects/obsidian-gap-analysis.md"
+        ));
+        assert!(
+            dispatch_from_tool_call("search_knowledge", serde_json::json!({"query": "links"}))
+                .is_err()
+        );
     }
 
     #[test]

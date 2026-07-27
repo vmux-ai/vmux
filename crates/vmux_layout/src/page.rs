@@ -14,7 +14,10 @@ use vmux_core::event::extension::{
     ExtensionsEvent,
 };
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
-use vmux_core::knowledge::{KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeTreeEvent};
+use vmux_core::knowledge::{
+    KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT, KnowledgeEntry, KnowledgeSearchEvent,
+    KnowledgeSearchRequest, KnowledgeTreeEvent,
+};
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolCategory, ToolItem, ToolStatus, ToolsSnapshot};
 use vmux_core::{PageIcon, PageMetadata};
 use vmux_ui::components::context_menu::{
@@ -94,6 +97,11 @@ pub fn Page() -> Element {
         use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
             knowledge_state_received.set(true);
             knowledge_state.set(data);
+        });
+    let mut knowledge_search = use_signal(KnowledgeSearchEvent::default);
+    let _knowledge_search_listener =
+        use_bin_event_listener::<KnowledgeSearchEvent, _>(KNOWLEDGE_SEARCH_EVENT, move |data| {
+            knowledge_search.set(data)
         });
 
     let mut tools_state = use_signal(ToolsSnapshot::default);
@@ -241,6 +249,7 @@ pub fn Page() -> Element {
                             tab_boundary,
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
+                            knowledge_search: knowledge_search(),
                             knowledge_loaded: knowledge_state_received(),
                             tools: tools_state(),
                             tools_loaded: tools_state_received(),
@@ -827,6 +836,7 @@ fn SideSheetView(
     tab_boundary: Option<crate::event::TabBoundary>,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
+    knowledge_search: KnowledgeSearchEvent,
     knowledge_loaded: bool,
     tools: ToolsSnapshot,
     tools_loaded: bool,
@@ -889,6 +899,7 @@ fn SideSheetView(
                 KnowledgeCard {
                     pane_id: pane.id,
                     knowledge,
+                    search: knowledge_search,
                     loaded: knowledge_loaded,
                     expanded: pane.knowledge_expanded,
                 }
@@ -1105,10 +1116,14 @@ fn bookmark_folder_choices(nodes: &[BookmarkNode]) -> Vec<BookmarkFolderChoice> 
 }
 
 fn open_knowledge_path(pane_id: u64, path: String) {
+    open_knowledge_result(pane_id, path, 0);
+}
+
+fn open_knowledge_result(pane_id: u64, path: String, line: u32) {
     let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
         command: "open_knowledge_path".to_string(),
         pane_id: pane_id.to_string(),
-        stack_index: 0,
+        stack_index: line,
         path,
     });
 }
@@ -1123,9 +1138,11 @@ fn compact_knowledge_path(path: &str) -> String {
 fn KnowledgeCard(
     pane_id: u64,
     knowledge: KnowledgeTreeEvent,
+    search: KnowledgeSearchEvent,
     loaded: bool,
     expanded: bool,
 ) -> Element {
+    let mut query = use_signal(String::new);
     let root = knowledge.root.clone();
     let landing_path = knowledge
         .entries
@@ -1202,13 +1219,57 @@ fn KnowledgeCard(
                         } else if knowledge.entries.is_empty() {
                             div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("layout-no-markdown-files")} }
                         } else {
-                            div { class: "flex flex-col gap-0.5",
-                                for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
-                                    KnowledgeEntryRow {
-                                        key: "{entry.path}",
-                                        entry: entry.clone(),
-                                        entries: knowledge.entries.clone(),
-                                        pane_id,
+                            div { class: "mb-1.5 flex h-8 items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 ring-1 ring-inset ring-foreground/10",
+                                Icon { class: "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+                                    circle { cx: "11", cy: "11", r: "8" }
+                                    path { d: "m21 21-4.35-4.35" }
+                                }
+                                input {
+                                    r#type: "search",
+                                    value: "{query}",
+                                    placeholder: translate("knowledge-search"),
+                                    class: "min-w-0 flex-1 bg-transparent text-ui text-foreground outline-none placeholder:text-muted-foreground",
+                                    oninput: move |event| {
+                                        let value = event.value();
+                                        query.set(value.clone());
+                                        let _ = try_cef_bin_emit_rkyv(&KnowledgeSearchRequest { query: value });
+                                    },
+                                }
+                            }
+                            if !query().is_empty() {
+                                div { class: "flex max-h-64 flex-col gap-0.5 overflow-y-auto",
+                                    if search.matches.is_empty() {
+                                        div { class: "px-2 py-2 text-ui-xs text-muted-foreground", {translate("knowledge-no-match")} }
+                                    }
+                                    for result in search.matches.iter() {
+                                        {
+                                            let path = result.path.clone();
+                                            let line = result.line;
+                                            rsx! {
+                                                button {
+                                                    key: "{result.path}:{result.line}",
+                                                    r#type: "button",
+                                                    title: "{result.path}:{result.line}",
+                                                    class: "rounded-md px-2 py-1.5 text-left hover:bg-glass-hover",
+                                                    onclick: move |_| open_knowledge_result(pane_id, path.clone(), line),
+                                                    div { class: "truncate text-ui font-medium text-foreground", "{result.title}" }
+                                                    if !result.preview.is_empty() {
+                                                        div { class: "line-clamp-2 text-[10px] text-muted-foreground", "{result.preview}" }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { class: "flex flex-col gap-0.5",
+                                    for entry in knowledge.entries.iter().filter(|entry| entry.parent == knowledge.root) {
+                                        KnowledgeEntryRow {
+                                            key: "{entry.path}",
+                                            entry: entry.clone(),
+                                            entries: knowledge.entries.clone(),
+                                            pane_id,
+                                        }
                                     }
                                 }
                             }

@@ -88,14 +88,10 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("render_block(&note_block.block, index)"));
     assert!(s.contains("document.set_title(&title)"));
     assert!(s.contains("let mut note_editing = use_signal(|| false)"));
-    assert!(s.contains("if note_editing() && Some(index as u32) == active"));
-    assert!(s.contains("note_pointer_line(&event, start, end)"));
     assert!(s.contains("query_selector(\"[data-note-line-text]\")"));
-    assert!(s.contains("class: \"flow-root w-full cursor-text\""));
     assert!(
         !s.contains("note_editing.set(false);\n                            focus_container();")
     );
-    assert!(s.contains("class: \"relative w-full cursor-text\""));
     assert!(!s.contains("rounded-lg bg-primary/[0.04]"));
     assert!(s.contains("if git_path() != m.abs_path"));
 }

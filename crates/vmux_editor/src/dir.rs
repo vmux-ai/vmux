@@ -46,11 +46,18 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
 /// (or its parent when `start` is a file). Falls back to the containing
 /// directory when no git root is found.
 pub fn project_root(start: &Path) -> std::path::PathBuf {
+    project_root_with_knowledge(start, &vmux_core::knowledge::knowledge_dir())
+}
+
+fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> std::path::PathBuf {
     let base = if start.is_dir() {
         start
     } else {
         start.parent().unwrap_or(start)
     };
+    if base.starts_with(knowledge) {
+        return knowledge.to_path_buf();
+    }
     let mut dir = base;
     loop {
         if dir.join(".git").exists() {
@@ -101,6 +108,17 @@ mod tests {
         let file = sub.join("a.txt");
         fs::write(&file, "x").unwrap();
         assert_eq!(project_root(&file), sub);
+    }
+
+    #[test]
+    fn project_root_uses_full_knowledge_vault() {
+        let tmp = tempfile::tempdir().unwrap();
+        let knowledge = tmp.path().join("knowledge");
+        let projects = knowledge.join("projects");
+        fs::create_dir_all(&projects).unwrap();
+        let file = projects.join("note.md");
+        fs::write(&file, "# Note").unwrap();
+        assert_eq!(project_root_with_knowledge(&file, &knowledge), knowledge);
     }
 
     #[test]

@@ -4317,11 +4317,14 @@ fn on_side_sheet_command_emit(
             }
         }
         "open_knowledge_path" => {
-            let Some(url) =
+            let Some(mut url) =
                 knowledge_path_url(&vmux_core::knowledge::knowledge_dir(), Path::new(&evt.path))
             else {
                 return;
             };
+            if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {
+                url.push_str(&format!("#L{}", evt.stack_index));
+            }
             commands.entity(target_pane).insert(LastActivatedAt::now());
             let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
                 url: Some(url),

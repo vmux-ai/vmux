@@ -279,6 +279,17 @@ pub enum AgentCommand {
         title: String,
         content: String,
     },
+    SearchKnowledge {
+        anchor: ProcessId,
+        query: String,
+        limit: u16,
+    },
+    ReadKnowledge {
+        anchor: ProcessId,
+        path: String,
+        line: u32,
+        limit: u32,
+    },
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -473,6 +484,16 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
             || content.trim().is_empty() =>
         {
             Err("write_knowledge requires a non-empty title and content")
+        }
+        AgentCommand::SearchKnowledge { query, limit, .. }
+            if query.trim().is_empty() || *limit == 0 || *limit > 100 =>
+        {
+            Err("search_knowledge requires a query and limit between 1 and 100")
+        }
+        AgentCommand::ReadKnowledge { path, limit, .. }
+            if path.trim().is_empty() || *limit == 0 || *limit > 2_000 =>
+        {
+            Err("read_knowledge requires a path and limit between 1 and 2000")
         }
         _ => Ok(()),
     }
@@ -1584,6 +1605,29 @@ mod tests {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
         let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
         assert_eq!(decoded, command);
+    }
+
+    #[test]
+    fn knowledge_read_commands_roundtrip_and_validate() {
+        let commands = [
+            AgentCommand::SearchKnowledge {
+                anchor: ProcessId::new(),
+                query: "Obsidian links".into(),
+                limit: 20,
+            },
+            AgentCommand::ReadKnowledge {
+                anchor: ProcessId::new(),
+                path: "projects/obsidian-gap-analysis.md".into(),
+                line: 1,
+                limit: 200,
+            },
+        ];
+        for command in commands {
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
+            let decoded = rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
+            assert_eq!(decoded, command);
+            assert!(validate_agent_command(&command).is_ok());
+        }
     }
 
     #[test]

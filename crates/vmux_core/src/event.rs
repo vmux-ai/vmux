@@ -225,6 +225,14 @@ pub enum MdInline {
     },
     SoftBreak,
     HardBreak,
+    WikiLink {
+        target: String,
+        label: String,
+        path: String,
+        line: Option<u32>,
+        exists: bool,
+        embed: bool,
+    },
 }
 
 #[derive(
@@ -241,6 +249,7 @@ pub enum MdInline {
 #[rkyv(deserialize_bounds(__D::Error: rkyv::rancor::Source))]
 #[rkyv(bytecheck(bounds(__C: rkyv::validation::ArchiveContext, __C::Error: rkyv::rancor::Source)))]
 pub struct MdListItem {
+    pub source_line: u32,
     pub task: Option<bool>,
     #[rkyv(omit_bounds)]
     pub blocks: Vec<MdBlock>,
@@ -321,8 +330,48 @@ pub struct NoteBlock {
 )]
 pub struct FileNoteEvent {
     pub title: String,
+    pub properties: Vec<crate::knowledge::KnowledgeProperty>,
     pub blocks: Vec<NoteBlock>,
     pub active: Option<u32>,
+    pub references: Vec<crate::knowledge::KnowledgeReference>,
+    pub reveal_line: Option<u32>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FilePropertyEdit {
+    pub original_key: String,
+    pub key: String,
+    pub kind: crate::knowledge::KnowledgePropertyKind,
+    pub values: Vec<String>,
+    pub remove: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeLinkOpen {
+    pub path: String,
+    pub title: String,
+    pub line: Option<u32>,
+    pub create: bool,
 }
 
 #[derive(
@@ -2193,6 +2242,11 @@ mod tests {
     fn file_note_event_roundtrips() {
         let event = FileNoteEvent {
             title: "Title".into(),
+            properties: vec![crate::knowledge::KnowledgeProperty {
+                key: "tags".into(),
+                kind: crate::knowledge::KnowledgePropertyKind::Tags,
+                values: vec!["test".into()],
+            }],
             blocks: vec![NoteBlock {
                 start_line: 0,
                 end_line: 1,
@@ -2203,6 +2257,8 @@ mod tests {
                 },
             }],
             active: Some(0),
+            references: Vec::new(),
+            reveal_line: None,
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&event).unwrap();
         let back = rkyv::from_bytes::<FileNoteEvent, rkyv::rancor::Error>(&bytes).unwrap();
