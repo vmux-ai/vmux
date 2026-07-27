@@ -12,7 +12,8 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy_cef_core::prelude::{
-    AcceleratedFrame, AcceleratedPixelFormat, Browsers, coalesce_webview_dirty_rects,
+    AcceleratedFrame, AcceleratedPixelFormat, Browsers, WebviewDirtyRects,
+    coalesce_webview_dirty_rects,
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -67,7 +68,7 @@ fn queue_accelerated_uploads(
         return;
     };
     let mut resized = false;
-    for frame in browsers.drain_accelerated_frames() {
+    for mut frame in browsers.drain_accelerated_frames() {
         let webview = frame.webview;
         let overlay = overlay_webviews.contains(webview);
         if overlay {
@@ -79,11 +80,12 @@ fn queue_accelerated_uploads(
         };
         let id = surface.0.id();
         if let Some(mut image) = images.get_mut(id) {
-            resized |= resize_surface_image_if_needed(
+            resized |= prepare_accelerated_surface(
                 &mut image,
                 frame.width,
                 frame.height,
                 accelerated_surface_format(frame.format),
+                &mut frame.dirty,
             );
         }
         pending.push(PendingAcceleratedUpload { image: id, frame });
@@ -91,6 +93,20 @@ fn queue_accelerated_uploads(
     if resized {
         request_followup_frame(texture_wake.as_deref());
     }
+}
+
+fn prepare_accelerated_surface(
+    image: &mut Image,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    dirty: &mut WebviewDirtyRects,
+) -> bool {
+    let resized = resize_surface_image_if_needed(image, width, height, format);
+    if resized {
+        dirty.clear();
+    }
+    resized
 }
 
 fn resize_surface_image_if_needed(
@@ -256,6 +272,7 @@ fn upload_accelerated_textures(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef_core::prelude::WebviewDirtyRect;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -308,6 +325,47 @@ mod tests {
             50,
             TextureFormat::Bgra8UnormSrgb,
         ));
+    }
+
+    #[test]
+    fn resized_surface_uploads_the_complete_frame() {
+        let mut image = resized_surface_image(1, 1, TextureFormat::Bgra8UnormSrgb);
+        let mut dirty = WebviewDirtyRects::from_vec(vec![WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
+
+        assert!(prepare_accelerated_surface(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+            &mut dirty,
+        ));
+        assert!(dirty.is_empty());
+    }
+
+    #[test]
+    fn same_size_surface_preserves_dirty_uploads() {
+        let mut image = resized_surface_image(100, 50, TextureFormat::Bgra8UnormSrgb);
+        let rect = WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        };
+        let mut dirty = WebviewDirtyRects::from_vec(vec![rect]);
+
+        assert!(!prepare_accelerated_surface(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+            &mut dirty,
+        ));
+        assert_eq!(dirty.as_slice(), [rect]);
     }
 
     #[test]

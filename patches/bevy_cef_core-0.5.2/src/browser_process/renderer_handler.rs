@@ -10,6 +10,7 @@ use std::any::Any;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::os::raw::c_int;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Inline dirty-rectangle storage for CEF paints.
@@ -81,6 +82,19 @@ fn webview_dirty_rects(rects: Option<&[cef::Rect]>, width: u32, height: u32) -> 
         width,
         height,
     )
+}
+
+fn accelerated_dirty_rects(
+    first_paint: &AtomicBool,
+    rects: Option<&[cef::Rect]>,
+    width: u32,
+    height: u32,
+) -> WebviewDirtyRects {
+    if first_paint.swap(false, Ordering::AcqRel) {
+        WebviewDirtyRects::new()
+    } else {
+        webview_dirty_rects(rects, width, height)
+    }
 }
 
 fn dirty_rect_union(left: WebviewDirtyRect, right: WebviewDirtyRect) -> Option<WebviewDirtyRect> {
@@ -473,6 +487,7 @@ pub struct RenderHandlerBuilder {
     accel_sender: AcceleratedSender,
     texture_wake: Option<TextureWake>,
     accelerated_presenter: Option<AcceleratedFramePresenter>,
+    first_accelerated_paint: Arc<AtomicBool>,
     size: SharedViewSize,
     device_scale: SharedDeviceScaleFactor,
 }
@@ -494,6 +509,7 @@ impl RenderHandlerBuilder {
             accel_sender,
             texture_wake,
             accelerated_presenter,
+            first_accelerated_paint: Arc::new(AtomicBool::new(true)),
             size,
             device_scale,
         })
@@ -529,6 +545,7 @@ impl Clone for RenderHandlerBuilder {
             accel_sender: self.accel_sender.clone(),
             texture_wake: self.texture_wake.clone(),
             accelerated_presenter: self.accelerated_presenter.clone(),
+            first_accelerated_paint: Arc::clone(&self.first_accelerated_paint),
             size: self.size.clone(),
             device_scale: self.device_scale.clone(),
         }
@@ -625,7 +642,12 @@ impl ImplRenderHandler for RenderHandlerBuilder {
                 handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
                 io_surface,
                 keepalive,
-                dirty: webview_dirty_rects(dirty_rects, width, height),
+                dirty: accelerated_dirty_rects(
+                    &self.first_accelerated_paint,
+                    dirty_rects,
+                    width,
+                    height,
+                ),
             };
             if let Some(presenter) = self.accelerated_presenter.as_ref() {
                 presenter(frame);
@@ -809,6 +831,28 @@ mod tests {
     #[test]
     fn missing_dirty_rects_mean_full_frame() {
         assert!(webview_dirty_rects(None, 100, 100).is_empty());
+    }
+
+    #[test]
+    fn first_accelerated_paint_uploads_the_complete_surface() {
+        let first_paint = AtomicBool::new(true);
+        let rects = [cef::Rect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }];
+
+        assert!(accelerated_dirty_rects(&first_paint, Some(&rects), 100, 100).is_empty());
+        assert_eq!(
+            accelerated_dirty_rects(&first_paint, Some(&rects), 100, 100).as_slice(),
+            &[WebviewDirtyRect {
+                x: 10,
+                y: 10,
+                width: 20,
+                height: 20,
+            }]
+        );
     }
 
     #[test]
