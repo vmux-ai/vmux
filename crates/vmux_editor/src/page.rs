@@ -186,6 +186,12 @@ fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEdi
     })
 }
 
+fn browser_has_text_selection() -> bool {
+    web_sys::window()
+        .and_then(|window| window.get_selection().ok().flatten())
+        .is_some_and(|selection| !selection.is_collapsed())
+}
+
 fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32, block: &MdBlock) -> u32 {
     if matches!(block, MdBlock::List { .. })
         && let Some(line) = note_list_item_line(event)
@@ -2246,12 +2252,14 @@ pub fn Page() -> Element {
                                                         id: "note-block-{index}",
                                                         "data-note-block": "{index}",
                                                         class: "relative flow-root w-full cursor-text",
-                                                        onmousedown: move |event| {
+                                                        onclick: move |event| {
                                                             if editing && !is_list {
                                                                 return;
                                                             }
                                                             event.stop_propagation();
-                                                            event.prevent_default();
+                                                            if browser_has_text_selection() {
+                                                                return;
+                                                            }
                                                             let line = note_pointer_line(
                                                                 &event,
                                                                 start,
@@ -2339,6 +2347,10 @@ pub fn Page() -> Element {
                                                                                     id: "note-line-{line}",
                                                                                     "data-note-edit-line": "{line}",
                                                                                     class: line_class,
+                                                                                    onclick: move |event: Event<MouseData>| {
+                                                                                        event.stop_propagation();
+                                                                                        event.prevent_default();
+                                                                                    },
                                                                                     onpointerdown: move |event: Event<PointerData>| {
                                                                                         event.stop_propagation();
                                                                                         event.prevent_default();
