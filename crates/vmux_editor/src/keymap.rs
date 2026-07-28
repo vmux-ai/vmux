@@ -32,6 +32,9 @@ pub struct KeyInput {
 pub trait Keymap: Send + Sync {
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand>;
     fn mode(&self) -> EditMode;
+    fn pointer_selection_mode(&mut self, _extend: bool) -> Option<EditCommand> {
+        None
+    }
     fn mode_label(&self) -> String {
         self.mode().label().to_string()
     }

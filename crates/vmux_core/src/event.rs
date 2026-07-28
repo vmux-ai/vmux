@@ -48,6 +48,8 @@ pub const FILE_DIRTY_EVENT: &str = "file_dirty";
 pub const FILE_NOTE_EVENT: &str = "file_note";
 pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
+pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
+pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 /// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 /// File page → host: the user's choice on the tidy prompt banner.
@@ -1913,6 +1915,40 @@ pub struct FileViewModeEvent {
 )]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
+}
+
+/// Host → file page: update the active editor keymap.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileKeymapEvent {
+    pub keymap: crate::editor::KeymapKind,
+}
+
+/// File page → host: persist a new editor keymap.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileKeymapSet {
+    pub keymap: crate::editor::KeymapKind,
 }
 
 /// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.

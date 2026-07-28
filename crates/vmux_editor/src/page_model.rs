@@ -12,6 +12,36 @@ pub fn note_inline_consumes_ctrl_navigation(key: &str, mods: KeyMods) -> bool {
         && (key.eq_ignore_ascii_case("n") || key.eq_ignore_ascii_case("p"))
 }
 
+pub fn note_list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
+    let chars = line.chars().collect::<Vec<_>>();
+    let indent = chars.iter().take_while(|ch| ch.is_whitespace()).count();
+    let rest = &chars[indent..];
+    let marker_end =
+        if rest.len() >= 2 && matches!(rest[0], '-' | '*' | '+') && rest[1].is_whitespace() {
+            2
+        } else {
+            let digits = rest.iter().take_while(|ch| ch.is_ascii_digit()).count();
+            if digits > 0
+                && rest.len() > digits + 1
+                && matches!(rest[digits], '.' | ')')
+                && rest[digits + 1].is_whitespace()
+            {
+                digits + 2
+            } else {
+                return None;
+            }
+        };
+    let task = &rest[marker_end..];
+    let task_prefix = usize::from(
+        task.len() >= 4
+            && task[0] == '['
+            && matches!(task[1], ' ' | 'x' | 'X')
+            && task[2] == ']'
+            && task[3].is_whitespace(),
+    ) * 4;
+    Some((indent, indent + marker_end + task_prefix))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgAction {
     Install,
@@ -315,6 +345,15 @@ mod tests {
                 ..Default::default()
             }
         ));
+    }
+
+    #[test]
+    fn note_list_prefix_excludes_marker_and_task_checkbox() {
+        assert_eq!(note_list_marker_prefix_len("- item"), Some((0, 2)));
+        assert_eq!(note_list_marker_prefix_len("  12. item"), Some((2, 6)));
+        assert_eq!(note_list_marker_prefix_len("- [ ] task"), Some((0, 6)));
+        assert_eq!(note_list_marker_prefix_len("  * [x] done"), Some((2, 8)));
+        assert_eq!(note_list_marker_prefix_len("paragraph"), None);
     }
 
     #[test]

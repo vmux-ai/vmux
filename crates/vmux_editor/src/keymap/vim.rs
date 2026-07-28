@@ -318,6 +318,19 @@ impl Keymap for VimKeymap {
     fn mode(&self) -> EditMode {
         self.mode
     }
+    fn pointer_selection_mode(&mut self, extend: bool) -> Option<EditCommand> {
+        match (extend, self.mode) {
+            (true, EditMode::Normal) => {
+                self.mode = EditMode::Visual;
+                Some(EditCommand::SetMode(EditMode::Visual))
+            }
+            (false, EditMode::Visual | EditMode::VisualLine) => {
+                self.mode = EditMode::Normal;
+                Some(EditCommand::SetMode(EditMode::Normal))
+            }
+            _ => None,
+        }
+    }
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         if k.mods.ctrl && k.key.eq_ignore_ascii_case("c") {
             if self.ex.take().is_some() {
@@ -453,6 +466,21 @@ mod tests {
         );
         assert_eq!(km.handle(&k("l")), vec![EditCommand::Select(Motion::Right)]);
         assert_eq!(km.handle(&k("y")), vec![EditCommand::Yank]);
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn pointer_drag_enters_visual_and_click_returns_normal() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.pointer_selection_mode(true),
+            Some(EditCommand::SetMode(EditMode::Visual))
+        );
+        assert_eq!(km.mode(), EditMode::Visual);
+        assert_eq!(
+            km.pointer_selection_mode(false),
+            Some(EditCommand::SetMode(EditMode::Normal))
+        );
         assert_eq!(km.mode(), EditMode::Normal);
     }
 

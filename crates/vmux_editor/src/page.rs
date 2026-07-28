@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
-use crate::note::render_block;
+use crate::note::{render_block, render_block_with_hidden_list_line};
 use crate::page_model::{
     clamp_selection, dir_select_index, gutter_width, heading_class, image_mime, line_severity,
-    note_inline_consumes_ctrl_navigation, severity_color_class, should_apply_explorer_chrome,
-    span_style, squiggle_style,
+    note_inline_consumes_ctrl_navigation, note_list_marker_prefix_len, severity_color_class,
+    should_apply_explorer_chrome, span_style, squiggle_style,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -51,30 +51,19 @@ fn file_mode_class(active: bool) -> &'static str {
     }
 }
 
+fn keymap_label(keymap: vmux_core::KeymapKind) -> &'static str {
+    match keymap {
+        vmux_core::KeymapKind::Vscode => "VS Code",
+        vmux_core::KeymapKind::Vim => "Vim",
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct NoteEditRect {
     top: f64,
     left: f64,
     width: f64,
     height: f64,
-}
-
-fn note_list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
-    let chars = line.chars().collect::<Vec<_>>();
-    let indent = chars.iter().take_while(|ch| ch.is_whitespace()).count();
-    let rest = &chars[indent..];
-    if rest.len() >= 2 && matches!(rest[0], '-' | '*' | '+') && rest[1].is_whitespace() {
-        return Some((indent, indent + 2));
-    }
-    let digits = rest.iter().take_while(|ch| ch.is_ascii_digit()).count();
-    if digits > 0
-        && rest.len() > digits + 1
-        && matches!(rest[digits], '.' | ')')
-        && rest[digits + 1].is_whitespace()
-    {
-        return Some((indent, indent + digits + 2));
-    }
-    None
 }
 
 fn note_list_item_line(event: &Event<MouseData>) -> Option<u32> {
@@ -167,15 +156,8 @@ fn note_edit_line_class(block: &MdBlock) -> &'static str {
     }
 }
 
-fn note_edit_overlay_class(block: &MdBlock) -> &'static str {
-    if matches!(
-        block,
-        MdBlock::CodeBlock { .. } | MdBlock::BlockQuote { .. } | MdBlock::Table { .. }
-    ) {
-        "visible absolute inset-0 cursor-text overflow-auto"
-    } else {
-        "visible absolute inset-0 cursor-text overflow-visible"
-    }
+fn note_edit_overlay_class() -> &'static str {
+    "visible absolute inset-0 cursor-text overflow-auto"
 }
 
 fn reveal_note_block(index: usize) {
@@ -1139,6 +1121,7 @@ pub fn Page() -> Element {
     let mut note_edit_line = use_signal(|| Option::<u32>::None);
     let mut note_edit_rect = use_signal(|| Option::<NoteEditRect>::None);
     let mut note_dragging = use_signal(|| false);
+    let mut editor_dragging = use_signal(|| false);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
@@ -1149,6 +1132,7 @@ pub fn Page() -> Element {
     let git_message = use_signal(String::new);
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
+    let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut dirty = use_signal(|| false);
@@ -1230,6 +1214,8 @@ pub fn Page() -> Element {
         note_editing.set(false);
         note_edit_line.set(None);
         note_edit_rect.set(None);
+        note_dragging.set(false);
+        editor_dragging.set(false);
         git_nonce.set(git_nonce() + 1);
     });
 
@@ -1271,6 +1257,10 @@ pub fn Page() -> Element {
             }
             file_view_mode.set(event.mode);
         });
+
+    let _keymap = use_bin_event_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
+        keymap.set(event.keymap);
+    });
 
     let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
         let FileNoteEvent {
@@ -1576,6 +1566,7 @@ pub fn Page() -> Element {
             },
             onmouseup: move |_| {
                 note_dragging.set(false);
+                editor_dragging.set(false);
                 if explorer_resizing() {
                     explorer_resizing.set(false);
                     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
@@ -1763,52 +1754,68 @@ pub fn Page() -> Element {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
                 }
                 div { class: "flex-1" }
-                if mode() == Mode::Text && (is_markdown_file(&git_path()) || git_has_diff()) {
-                    div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
-                        if is_markdown_file(&git_path()) {
+                if mode() == Mode::Text {
+                    if is_markdown_file(&git_path()) || git_has_diff() {
+                        div { class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
+                            if is_markdown_file(&git_path()) {
+                                button {
+                                    class: file_mode_class(file_view_mode() == FileViewMode::Note),
+                                    title: translate("editor-rendered-markdown"),
+                                    onclick: move |_| {
+                                        file_view_mode.set(FileViewMode::Note);
+                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
+                                        if note_editing() {
+                                            focus_file_input();
+                                        } else {
+                                            focus_container();
+                                        }
+                                    },
+                                    {translate("editor-note")}
+                                }
+                            }
                             button {
-                                class: file_mode_class(file_view_mode() == FileViewMode::Note),
-                                title: translate("editor-rendered-markdown"),
+                                class: file_mode_class(
+                                    file_view_mode() == FileViewMode::Editor
+                                        || (file_view_mode() == FileViewMode::Note
+                                            && !is_markdown_file(&git_path())),
+                                ),
+                                title: translate("editor-source-editor"),
                                 onclick: move |_| {
-                                    file_view_mode.set(FileViewMode::Note);
-                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
-                                    if note_editing() {
-                                        focus_file_input();
-                                    } else {
-                                        focus_container();
-                                    }
+                                    note_editing.set(false);
+                                    file_view_mode.set(FileViewMode::Editor);
+                                    reveal_git_change(git_line_markers, cell_dims);
+                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
+                                    focus_file_input();
                                 },
-                                {translate("editor-note")}
+                                {translate("editor-editor")}
+                            }
+                            if git_has_diff() {
+                                button {
+                                    class: file_mode_class(file_view_mode() == FileViewMode::Diff),
+                                    title: translate("editor-git-diff"),
+                                    onclick: move |_| {
+                                        file_view_mode.set(FileViewMode::Diff);
+                                        git_nonce.set(git_nonce().wrapping_add(1));
+                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
+                                    },
+                                    {translate("editor-diff")}
+                                }
                             }
                         }
-                        button {
-                            class: file_mode_class(
-                                file_view_mode() == FileViewMode::Editor
-                                    || (file_view_mode() == FileViewMode::Note
-                                        && !is_markdown_file(&git_path())),
-                            ),
-                            title: translate("editor-source-editor"),
-                            onclick: move |_| {
-                                note_editing.set(false);
-                                file_view_mode.set(FileViewMode::Editor);
-                                reveal_git_change(git_line_markers, cell_dims);
-                                let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
-                                focus_file_input();
-                            },
-                            {translate("editor-editor")}
-                        }
-                        if git_has_diff() {
-                            button {
-                                class: file_mode_class(file_view_mode() == FileViewMode::Diff),
-                                title: translate("editor-git-diff"),
-                                onclick: move |_| {
-                                    file_view_mode.set(FileViewMode::Diff);
-                                    git_nonce.set(git_nonce().wrapping_add(1));
-                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
-                                },
-                                {translate("editor-diff")}
-                            }
-                        }
+                    }
+                    button {
+                        class: "shrink-0 rounded-md bg-foreground/[0.06] px-2 py-1 text-[10px] font-semibold text-foreground/65 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.10] hover:text-foreground",
+                        title: translate("schema-keymap"),
+                        onclick: move |_| {
+                            let next = match keymap() {
+                                vmux_core::KeymapKind::Vscode => vmux_core::KeymapKind::Vim,
+                                vmux_core::KeymapKind::Vim => vmux_core::KeymapKind::Vscode,
+                            };
+                            keymap.set(next);
+                            let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                            focus_file_input();
+                        },
+                        {keymap_label(keymap())}
                     }
                 }
                 {
@@ -2039,16 +2046,16 @@ pub fn Page() -> Element {
                                                 };
                                                 let note_comp_keys = comp_keys.clone();
                                                 let edit_class = note_edit_block_class(&note_block.block);
-                                                let overlay_class = note_edit_overlay_class(&note_block.block);
+                                                let overlay_class = note_edit_overlay_class();
                                                 let edit_overlay_class = if is_list {
-                                                    "visible absolute z-10 cursor-text overflow-visible bg-background"
+                                                    "visible absolute z-10 cursor-text overflow-auto"
                                                 } else {
                                                     overlay_class
                                                 };
                                                 let edit_overlay_style = if is_list {
                                                     note_edit_rect().map_or_else(String::new, |rect| {
                                                         format!(
-                                                            "top:{}px;left:{}px;width:{}px;min-height:{}px;",
+                                                            "top:{}px;left:{}px;width:{}px;height:{}px;",
                                                             rect.top, rect.left, rect.width, rect.height,
                                                         )
                                                     })
@@ -2103,7 +2110,15 @@ pub fn Page() -> Element {
                                                         },
                                                         div {
                                                             class: if editing && !is_list { "invisible" } else { "" },
-                                                            {render_block(&note_block.block, index)}
+                                                            if editing && is_list {
+                                                                {render_block_with_hidden_list_line(
+                                                                    &note_block.block,
+                                                                    index,
+                                                                    active_edit_line,
+                                                                )}
+                                                            } else {
+                                                                {render_block(&note_block.block, index)}
+                                                            }
                                                         }
                                                         if editing {
                                                             div {
@@ -2369,6 +2384,7 @@ pub fn Page() -> Element {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
                                         gutter_hover.set(false);
+                                        editor_dragging.set(false);
                                     },
                                     onscroll: move |_| {
                                         let (_, ch) = cell_dims();
@@ -2428,11 +2444,13 @@ pub fn Page() -> Element {
                                                                     0
                                                                 };
                                                                 if raw.meta_key() {
+                                                                    editor_dragging.set(false);
                                                                     let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
                                                                         line: ln,
                                                                         col,
                                                                     });
                                                                 } else {
+                                                                    editor_dragging.set(true);
                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
                                                                         line: ln,
                                                                         col,
@@ -2478,6 +2496,24 @@ pub fn Page() -> Element {
                                                             {
                                                                 let rect = t.get_bounding_client_rect();
                                                                 let x = raw.client_x() as f64 - rect.left() - g;
+                                                                if editor_dragging() {
+                                                                    if raw.buttons() & 1 != 1 {
+                                                                        editor_dragging.set(false);
+                                                                        return;
+                                                                    }
+                                                                    e.prevent_default();
+                                                                    let col = if cw > 0.0 {
+                                                                        (x.max(0.0) / cw).round() as u32
+                                                                    } else {
+                                                                        0
+                                                                    };
+                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                        line: ln,
+                                                                        col,
+                                                                        extend: true,
+                                                                    });
+                                                                    return;
+                                                                }
                                                                 let in_gutter = x < 0.0;
                                                                 if gutter_hover() != in_gutter {
                                                                     gutter_hover.set(in_gutter);

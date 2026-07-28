@@ -198,6 +198,9 @@ const GLOBAL_SEARCH_RETRY_LIMIT: u8 = 120;
 struct FileViewModeSent;
 
 #[derive(Component)]
+struct FileKeymapSent;
+
+#[derive(Component)]
 struct NoteSent;
 
 #[derive(Component, Clone, Copy)]
@@ -227,6 +230,16 @@ type ReadyUnsentViewMode = (
 type ReadySentViewMode = (
     With<FileView>,
     With<FileViewModeSent>,
+    With<vmux_core::page::PageReady>,
+);
+type ReadyUnsentKeymap = (
+    With<FileView>,
+    Without<FileKeymapSent>,
+    With<vmux_core::page::PageReady>,
+);
+type ReadySentKeymap = (
+    With<FileView>,
+    With<FileKeymapSent>,
     With<vmux_core::page::PageReady>,
 );
 type ReadyUnsentNote = (Without<NoteSent>, With<vmux_core::page::PageReady>);
@@ -659,6 +672,44 @@ fn send_file_view_mode(
     }
 }
 
+fn send_file_keymap(
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    pending: Query<Entity, ReadyUnsentKeymap>,
+    sent: Query<Entity, ReadySentKeymap>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let event = FileKeymapEvent {
+        keymap: settings_keymap(&settings),
+    };
+    for entity in &pending {
+        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            entity,
+            FILE_KEYMAP_EVENT,
+            &event,
+        ));
+        commands.entity(entity).insert(FileKeymapSent);
+    }
+    if settings
+        .as_ref()
+        .is_some_and(|settings| settings.is_changed())
+    {
+        for entity in &sent {
+            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+                continue;
+            }
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                FILE_KEYMAP_EVENT,
+                &event,
+            ));
+        }
+    }
+}
+
 fn apply_file_view_mode_requests(
     mut reader: MessageReader<FileViewModeRequest>,
     mut mode: ResMut<SharedFileViewMode>,
@@ -890,6 +941,7 @@ fn reset_file_sent_markers_on_page_ready(
         .remove::<FileInitialMetaSent>()
         .remove::<FileThemeSent>()
         .remove::<FileViewModeSent>()
+        .remove::<FileKeymapSent>()
         .remove::<NoteSent>()
         .remove::<crate::lsp::manager::LspStatusSent>()
         .remove::<crate::lsp::manager::DiagSent>()
@@ -918,6 +970,31 @@ fn on_file_view_mode_set(
         {
             commands.entity(entity).remove::<NoteSent>();
         }
+    }
+}
+
+fn on_file_keymap_set(
+    trigger: On<BinReceive<FileKeymapSet>>,
+    views: Query<(), With<FileView>>,
+    mut settings: ResMut<vmux_setting::AppSettings>,
+    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+) {
+    if !views.contains(trigger.event().webview) {
+        return;
+    }
+    let keymap = trigger.event().payload.keymap;
+    if settings.editor.keymap == keymap {
+        return;
+    }
+    match vmux_setting::apply_settings_update(
+        settings.as_mut(),
+        "editor.keymap",
+        serde_json::to_value(keymap).unwrap_or_default(),
+    ) {
+        Ok(ron_bytes) => {
+            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+        }
+        Err(error) => bevy::log::warn!("editor: keymap update rejected: {error}"),
     }
 }
 
@@ -2328,13 +2405,13 @@ fn apply_pending_goto(
 
 fn on_file_pointer(
     trigger: On<BinReceive<FilePointerEvent>>,
-    mut q: Query<(&mut EditState, &EditorKeymap, &FileViewport)>,
+    mut q: Query<(&mut EditState, &mut EditorKeymap, &FileViewport)>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
     let p = trigger.event().payload;
-    let Ok((mut edit, keymap, vp)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, vp)) = q.get_mut(entity) else {
         return;
     };
     let at = edit
@@ -2346,6 +2423,9 @@ fn on_file_pointer(
         edit.core.selections = vec![Selection { anchor, head: at }];
     } else {
         edit.core.set_caret(at);
+    }
+    if let Some(command) = keymap.0.pointer_selection_mode(p.extend) {
+        edit.core.apply(command);
     }
     emit_cursor(
         entity,
@@ -3287,6 +3367,7 @@ impl Plugin for EditorPlugin {
             .add_message::<vmux_core::event::RecordVisitRequest>()
             .add_message::<FileViewModeRequest>()
             .add_message::<GlobalSearchRequest>()
+            .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
@@ -3308,6 +3389,7 @@ impl Plugin for EditorPlugin {
                 FileOpenExternalRequest,
                 FileVideoRect,
                 FileViewModeSet,
+                FileKeymapSet,
                 KnowledgeLinkOpen,
                 FilePropertyEdit,
             )>::default())
@@ -3350,6 +3432,7 @@ impl Plugin for EditorPlugin {
                     send_file_theme,
                     apply_file_view_mode_requests.before(send_file_view_mode),
                     send_file_view_mode,
+                    send_file_keymap,
                     rehighlight_on_color_scheme,
                     drain_thumb_tasks,
                     flush_lsp_changes,
@@ -3407,6 +3490,7 @@ impl Plugin for EditorPlugin {
             .add_observer(on_file_property_edit)
             .add_observer(on_file_fold_toggle)
             .add_observer(on_file_view_mode_set)
+            .add_observer(on_file_keymap_set)
             .add_observer(on_explorer_tree_toggle)
             .add_observer(on_explorer_tree_prefetch)
             .add_observer(on_explorer_tree_refresh)

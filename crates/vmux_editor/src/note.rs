@@ -6,22 +6,47 @@ use vmux_ui::i18n::translate;
 use crate::page_model::{heading_class, span_style, table_align_style};
 
 pub fn render_block(block: &MdBlock, key: usize) -> Element {
+    render_block_inner(block, key, false, None)
+}
+
+pub fn render_block_with_hidden_list_line(
+    block: &MdBlock,
+    key: usize,
+    hidden_line: u32,
+) -> Element {
+    render_block_inner(block, key, false, Some(hidden_line))
+}
+
+fn hidden_class(class: &'static str, hidden: bool) -> String {
+    if hidden {
+        format!("{class} invisible")
+    } else {
+        class.to_string()
+    }
+}
+
+fn render_block_inner(
+    block: &MdBlock,
+    key: usize,
+    hidden: bool,
+    hidden_list_line: Option<u32>,
+) -> Element {
     match block {
         MdBlock::Heading { level, inlines } => rsx! {
-            div { key: "{key}", class: heading_class(*level), {render_inlines(inlines)} }
+            div { key: "{key}", class: hidden_class(heading_class(*level), hidden), {render_inlines(inlines)} }
         },
         MdBlock::Paragraph { inlines } => rsx! {
-            p { key: "{key}", class: "my-3", {render_inlines(inlines)} }
+            p { key: "{key}", class: hidden_class("my-3", hidden), {render_inlines(inlines)} }
         },
         MdBlock::List {
             ordered,
             start,
             items,
-        } => render_list(*ordered, *start, items, key),
+        } => render_list(*ordered, *start, items, key, hidden, hidden_list_line),
         MdBlock::CodeBlock { lines, .. } => rsx! {
             pre {
                 key: "{key}",
-                class: "my-4 overflow-auto rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border",
+                class: hidden_class("my-4 overflow-auto rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border", hidden),
                 for (line_index, line) in lines.iter().enumerate() {
                     div { key: "{line_index}",
                         for (span_index, span) in line.spans.iter().enumerate() {
@@ -34,27 +59,39 @@ pub fn render_block(block: &MdBlock, key: usize) -> Element {
         MdBlock::BlockQuote { blocks } => rsx! {
             blockquote {
                 key: "{key}",
-                class: "my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70",
-                for (index, block) in blocks.iter().enumerate() { {render_block(block, index)} }
+                class: hidden_class("my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70", hidden),
+                for (index, block) in blocks.iter().enumerate() {
+                    {render_block_inner(block, index, hidden, hidden_list_line)}
+                }
             }
         },
         MdBlock::Table {
             aligns,
             header,
             rows,
-        } => render_table(aligns, header, rows, key),
+        } => render_table(aligns, header, rows, key, hidden),
         MdBlock::ThematicBreak => rsx! {
-            hr { key: "{key}", class: "my-6 border-border" }
+            hr { key: "{key}", class: hidden_class("my-6 border-border", hidden) }
         },
         MdBlock::Html { raw } => rsx! {
-            div { key: "{key}", class: "my-3 whitespace-pre-wrap text-foreground/60", "{raw}" }
+            div { key: "{key}", class: hidden_class("my-3 whitespace-pre-wrap text-foreground/60", hidden), "{raw}" }
         },
     }
 }
 
-fn render_list(ordered: bool, start: u64, items: &[MdListItem], key: usize) -> Element {
+fn render_list(
+    ordered: bool,
+    start: u64,
+    items: &[MdListItem],
+    key: usize,
+    hidden: bool,
+    hidden_list_line: Option<u32>,
+) -> Element {
     let inner = rsx! {
         for (index, item) in items.iter().enumerate() {
+            {
+                let item_hidden = hidden || hidden_list_line == Some(item.source_line);
+                rsx! {
             li {
                 key: "{index}",
                 "data-note-list-line": "{item.source_line}",
@@ -68,15 +105,25 @@ fn render_list(ordered: bool, start: u64, items: &[MdListItem], key: usize) -> E
                     }
                 }
                 for (block_index, block) in item.blocks.iter().enumerate() {
-                    {render_block(block, block_index)}
+                    {render_block_inner(block, block_index, item_hidden, hidden_list_line)}
+                }
+            }
                 }
             }
         }
     };
+    let class = hidden_class(
+        if ordered {
+            "my-3 list-decimal pl-6"
+        } else {
+            "my-3 list-disc pl-6"
+        },
+        hidden,
+    );
     if ordered {
-        rsx! { ol { key: "{key}", start: "{start}", class: "my-3 list-decimal pl-6", {inner} } }
+        rsx! { ol { key: "{key}", start: "{start}", class, {inner} } }
     } else {
-        rsx! { ul { key: "{key}", class: "my-3 list-disc pl-6", {inner} } }
+        rsx! { ul { key: "{key}", class, {inner} } }
     }
 }
 
@@ -85,6 +132,7 @@ fn render_table(
     header: &[Vec<MdInline>],
     rows: &[Vec<Vec<MdInline>>],
     key: usize,
+    hidden: bool,
 ) -> Element {
     let col_style = |column: usize| {
         aligns
@@ -94,7 +142,7 @@ fn render_table(
             .to_string()
     };
     rsx! {
-        div { key: "{key}", class: "my-4 overflow-auto rounded-xl ring-1 ring-inset ring-border",
+        div { key: "{key}", class: hidden_class("my-4 overflow-auto rounded-xl ring-1 ring-inset ring-border", hidden),
             table { class: "w-full border-collapse text-xs",
                 thead {
                     tr { class: "bg-foreground/[0.04]",
