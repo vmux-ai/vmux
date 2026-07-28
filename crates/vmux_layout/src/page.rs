@@ -3005,6 +3005,17 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
         .find(|stack| stack.is_active)
         .or_else(|| visible_stacks.first())
         .cloned();
+    let collapsed_stack_index = collapsed_stack.as_ref().map(|stack| stack.stack_index);
+    let remaining_stacks = visible_stacks
+        .iter()
+        .filter(|stack| Some(stack.stack_index) != collapsed_stack_index)
+        .cloned()
+        .collect::<Vec<_>>();
+    let remaining_class = if collapsed_stack.is_some() {
+        "flex flex-col gap-1 pt-1"
+    } else {
+        "flex flex-col gap-1"
+    };
     rsx! {
         div { class: if pane.is_active && any_loading {
                 "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
@@ -3045,28 +3056,24 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                     }
                 }
             }
-            div { class: if expanded {
-                    "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                } else {
-                    "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
-                },
-                div { class: "overflow-hidden",
-                    if expanded {
-                        div { class: "border-t border-foreground/10 p-1.5",
-                            div { class: "flex flex-col gap-1",
-                                for stack in visible_stacks.iter() {
+            div { class: "border-t border-foreground/10 p-1.5",
+                div { class: "flex flex-col gap-1",
+                    if let Some(stack) = collapsed_stack {
+                        SideSheetStackRow { stack, pane_id }
+                    }
+                    div { class: if expanded {
+                            "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                        } else {
+                            "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
+                        },
+                        div { class: "min-h-0 overflow-hidden",
+                            div { class: remaining_class,
+                                for stack in remaining_stacks.iter() {
                                     SideSheetStackRow { stack: stack.clone(), pane_id }
                                 }
                                 NewStackRow { pane_id }
                             }
                         }
-                    }
-                }
-            }
-            if !expanded {
-                if let Some(stack) = collapsed_stack {
-                    div { class: "border-t border-foreground/10 p-1.5",
-                        SideSheetStackRow { stack, pane_id }
                     }
                 }
             }

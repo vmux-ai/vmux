@@ -12,7 +12,7 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy_cef_core::prelude::{
-    AcceleratedFrame, AcceleratedPixelFormat, Browsers, WebviewDirtyRects,
+    AcceleratedFrame, AcceleratedPixelFormat, Browsers, RenderPaintElementType, WebviewDirtyRects,
     coalesce_webview_dirty_rects,
 };
 use std::collections::HashMap;
@@ -35,6 +35,9 @@ pub struct NativeOverlayFrames(pub HashMap<Entity, AcceleratedFrame>);
 #[derive(Resource, Default)]
 struct ExtractedAcceleratedUploads(Vec<PendingAcceleratedUpload>);
 
+#[derive(Resource, Default)]
+struct UploadedAcceleratedSurfaces(HashMap<(Entity, RenderPaintElementType), usize>);
+
 pub(crate) struct WebviewAcceleratedUploadPlugin;
 
 impl Plugin for WebviewAcceleratedUploadPlugin {
@@ -46,6 +49,7 @@ impl Plugin for WebviewAcceleratedUploadPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedAcceleratedUploads>()
+                .init_resource::<UploadedAcceleratedSurfaces>()
                 .add_systems(ExtractSchedule, extract_accelerated_uploads)
                 .add_systems(
                     Render,
@@ -182,7 +186,8 @@ fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUplo
                 &upload.frame.dirty,
                 previous.frame.width == upload.frame.width
                     && previous.frame.height == upload.frame.height
-                    && previous.frame.format == upload.frame.format,
+                    && previous.frame.format == upload.frame.format
+                    && previous.frame.io_surface == upload.frame.io_surface,
             );
         }
         latest.push(upload);
@@ -192,6 +197,7 @@ fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUplo
 
 fn upload_accelerated_textures(
     mut extracted: ResMut<ExtractedAcceleratedUploads>,
+    mut uploaded_surfaces: ResMut<UploadedAcceleratedSurfaces>,
     gpu_images: Res<RenderAssets<GpuImage>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -211,7 +217,10 @@ fn upload_accelerated_textures(
         }
         let PendingAcceleratedUpload { frame, .. } = upload;
         let AcceleratedFrame {
+            webview,
+            ty,
             handle,
+            io_surface,
             keepalive,
             dirty,
             width,
@@ -226,6 +235,11 @@ fn upload_accelerated_textures(
         let mut encoder =
             render_device.create_command_encoder(&CommandEncoderDescriptor { label: None });
         {
+            let full_upload = accelerated_upload_requires_full(
+                uploaded_surfaces.0.get(&(webview, ty)).copied(),
+                io_surface,
+                &dirty,
+            );
             let mut blit = |x: u32, y: u32, w: u32, h: u32| {
                 if w == 0 || h == 0 {
                     return;
@@ -250,7 +264,7 @@ fn upload_accelerated_textures(
                     },
                 );
             };
-            if dirty.is_empty() {
+            if full_upload {
                 blit(0, 0, width, height);
             } else {
                 for rect in &dirty {
@@ -259,6 +273,7 @@ fn upload_accelerated_textures(
             }
         }
         render_queue.submit(std::iter::once(encoder.finish()));
+        uploaded_surfaces.0.insert((webview, ty), io_surface);
         render_queue.on_submitted_work_done(move || {
             drop((keepalive, src));
         });
@@ -267,6 +282,14 @@ fn upload_accelerated_textures(
         extracted.0.extend(retry);
         coalesce_pending_accelerated_uploads(&mut extracted.0);
     }
+}
+
+fn accelerated_upload_requires_full(
+    previous_io_surface: Option<usize>,
+    io_surface: usize,
+    dirty: &WebviewDirtyRects,
+) -> bool {
+    dirty.is_empty() || previous_io_surface != Some(io_surface)
 }
 
 #[cfg(test)]
@@ -366,6 +389,24 @@ mod tests {
             &mut dirty,
         ));
         assert_eq!(dirty.as_slice(), [rect]);
+    }
+
+    #[test]
+    fn changed_io_surface_uploads_the_complete_frame() {
+        let dirty = WebviewDirtyRects::from_vec(vec![WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
+
+        assert!(accelerated_upload_requires_full(Some(1), 2, &dirty));
+        assert!(!accelerated_upload_requires_full(Some(2), 2, &dirty));
+        assert!(accelerated_upload_requires_full(
+            Some(2),
+            2,
+            &WebviewDirtyRects::new(),
+        ));
     }
 
     #[test]

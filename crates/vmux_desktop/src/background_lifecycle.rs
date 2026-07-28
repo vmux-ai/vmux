@@ -8,9 +8,9 @@ use bevy_cef_core::prelude::{
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 #[cfg(target_os = "macos")]
-use std::sync::Arc;
-#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -29,6 +29,89 @@ const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 #[cfg(target_os = "macos")]
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct NativeWindowFrame {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NativeResizeEdges {
+    left: bool,
+    right: bool,
+    bottom: bool,
+    top: bool,
+}
+
+impl NativeResizeEdges {
+    fn any(self) -> bool {
+        self.left || self.right || self.bottom || self.top
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct NativeWindowResizeDrag {
+    frame: NativeWindowFrame,
+    cursor_x: f64,
+    cursor_y: f64,
+    min_width: f64,
+    min_height: f64,
+    edges: NativeResizeEdges,
+}
+
+fn native_resize_edges(
+    frame: NativeWindowFrame,
+    cursor_x: f64,
+    cursor_y: f64,
+    grip: f64,
+) -> NativeResizeEdges {
+    let right = frame.x + frame.width;
+    let top = frame.y + frame.height;
+    let within_x = cursor_x >= frame.x - grip && cursor_x <= right + grip;
+    let within_y = cursor_y >= frame.y - grip && cursor_y <= top + grip;
+    NativeResizeEdges {
+        left: within_y && (cursor_x - frame.x).abs() <= grip,
+        right: within_y && (cursor_x - right).abs() <= grip,
+        bottom: within_x && (cursor_y - frame.y).abs() <= grip,
+        top: within_x && (cursor_y - top).abs() <= grip,
+    }
+}
+
+fn resized_native_window_frame(
+    drag: NativeWindowResizeDrag,
+    cursor_x: f64,
+    cursor_y: f64,
+) -> NativeWindowFrame {
+    let mut frame = drag.frame;
+    let delta_x = cursor_x - drag.cursor_x;
+    let delta_y = cursor_y - drag.cursor_y;
+    if drag.edges.left {
+        let right = drag.frame.x + drag.frame.width;
+        frame.x = drag.frame.x + delta_x;
+        frame.width = drag.frame.width - delta_x;
+        if frame.width < drag.min_width {
+            frame.width = drag.min_width;
+            frame.x = right - drag.min_width;
+        }
+    } else if drag.edges.right {
+        frame.width = (drag.frame.width + delta_x).max(drag.min_width);
+    }
+    if drag.edges.bottom {
+        let top = drag.frame.y + drag.frame.height;
+        frame.y = drag.frame.y + delta_y;
+        frame.height = drag.frame.height - delta_y;
+        if frame.height < drag.min_height {
+            frame.height = drag.min_height;
+            frame.y = top - drag.min_height;
+        }
+    } else if drag.edges.top {
+        frame.height = (drag.frame.height + delta_y).max(drag.min_height);
+    }
+    frame
+}
 
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
@@ -301,6 +384,64 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
 }
 
 #[cfg(target_os = "macos")]
+fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWindowResizeDrag> {
+    use objc2_app_kit::{NSEvent, NSWindowStyleMask};
+
+    let mtm = objc2::MainThreadMarker::new()?;
+    let window = event.window(mtm)?;
+    let style = window.styleMask();
+    if style.contains(NSWindowStyleMask::FullScreen) {
+        return None;
+    }
+    if !style.contains(NSWindowStyleMask::Resizable) {
+        window.setStyleMask(style | NSWindowStyleMask::Resizable);
+    }
+    let frame = window.frame();
+    let cursor = NSEvent::mouseLocation();
+    let frame = NativeWindowFrame {
+        x: frame.origin.x,
+        y: frame.origin.y,
+        width: frame.size.width,
+        height: frame.size.height,
+    };
+    let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
+    if !edges.any() {
+        return None;
+    }
+    let min_size = window.minSize();
+    Some(NativeWindowResizeDrag {
+        frame,
+        cursor_x: cursor.x,
+        cursor_y: cursor.y,
+        min_width: min_size.width.max(1.0),
+        min_height: min_size.height.max(1.0),
+        edges,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindowResizeDrag) {
+    use objc2_app_kit::NSEvent;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let Some(window) = event.window(mtm) else {
+        return;
+    };
+    let cursor = NSEvent::mouseLocation();
+    let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
+    window.setFrame_display(
+        NSRect::new(
+            NSPoint::new(frame.x, frame.y),
+            NSSize::new(frame.width, frame.height),
+        ),
+        true,
+    );
+}
+
+#[cfg(target_os = "macos")]
 fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
@@ -319,10 +460,51 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             vmux_browser::flush_native_layout_pointer_move();
         });
     });
+    let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
+    let local_resize_drag = Arc::clone(&resize_drag);
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
+        let capture_window_resize = match event_type {
+            NSEventType::LeftMouseDown => {
+                let drag = begin_native_window_resize(ev);
+                *local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = drag;
+                if drag.is_some() {
+                    IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+            NSEventType::LeftMouseDragged => {
+                let drag = *local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(drag) = drag {
+                    update_native_window_resize(ev, drag);
+                    true
+                } else {
+                    false
+                }
+            }
+            NSEventType::LeftMouseUp => {
+                let drag = local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(drag) = drag {
+                    update_native_window_resize(ev, drag);
+                    IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
         if event_type == NSEventType::LeftMouseDown {
             vmux_browser::set_native_left_mouse_down(true);
         } else if event_type == NSEventType::LeftMouseUp {
@@ -387,8 +569,12 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
+        if capture_window_resize {
+            return std::ptr::null_mut();
+        }
         event.as_ptr()
     });
+    let global_resize_drag = Arc::clone(&resize_drag);
     let global_wake = wake.clone();
     let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
         let event_type = unsafe { event.as_ref() }.r#type();
@@ -396,6 +582,11 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             vmux_browser::set_native_left_mouse_down(true);
         } else if event_type == NSEventType::LeftMouseUp {
             vmux_browser::set_native_left_mouse_down(false);
+            global_resize_drag
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
         }
         vmux_layout::native_pointer::publish_buttons(native_mouse_buttons());
         global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
@@ -728,6 +919,81 @@ fn hide_all_osr_webviews(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_window_resize_detects_edges_and_corners() {
+        let frame = NativeWindowFrame {
+            x: 100.0,
+            y: 100.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        assert_eq!(
+            native_resize_edges(frame, 100.0, 100.0, 8.0),
+            NativeResizeEdges {
+                left: true,
+                bottom: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            native_resize_edges(frame, 900.0, 700.0, 8.0),
+            NativeResizeEdges {
+                right: true,
+                top: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            native_resize_edges(frame, 500.0, 100.0, 8.0),
+            NativeResizeEdges {
+                bottom: true,
+                ..Default::default()
+            }
+        );
+        assert!(!native_resize_edges(frame, 500.0, 400.0, 8.0).any());
+    }
+
+    #[test]
+    fn native_corner_resize_updates_both_axes_and_clamps_minimum() {
+        let drag = NativeWindowResizeDrag {
+            frame: NativeWindowFrame {
+                x: 100.0,
+                y: 100.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            cursor_x: 100.0,
+            cursor_y: 100.0,
+            min_width: 200.0,
+            min_height: 120.0,
+            edges: NativeResizeEdges {
+                left: true,
+                bottom: true,
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(
+            resized_native_window_frame(drag, 150.0, 150.0),
+            NativeWindowFrame {
+                x: 150.0,
+                y: 150.0,
+                width: 750.0,
+                height: 550.0,
+            }
+        );
+        assert_eq!(
+            resized_native_window_frame(drag, 850.0, 650.0),
+            NativeWindowFrame {
+                x: 700.0,
+                y: 580.0,
+                width: 200.0,
+                height: 120.0,
+            }
+        );
+    }
 
     #[test]
     fn player_frame_demand_only_runs_for_player_or_transition() {

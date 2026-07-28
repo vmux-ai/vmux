@@ -439,7 +439,8 @@ impl AcceleratedMailbox {
                 &frame.dirty,
                 previous.width == frame.width
                     && previous.height == frame.height
-                    && previous.format == frame.format,
+                    && previous.format == frame.format
+                    && previous.io_surface == frame.io_surface,
             );
         }
         state.next_sequence = state.next_sequence.wrapping_add(1);
