@@ -302,7 +302,29 @@ impl EditCore {
         match cmd {
             EditCommand::Move(m) => {
                 self.break_group();
-                let h = self.resolve_motion(self.primary().head, m);
+                let selection = self.primary();
+                let h = if !self.mode.is_visual() && !selection.is_empty() {
+                    match m {
+                        Motion::Left
+                        | Motion::Up
+                        | Motion::PageUp
+                        | Motion::WordPrev
+                        | Motion::LineStart
+                        | Motion::DocStart => selection.range().start,
+                        Motion::Right
+                        | Motion::Down
+                        | Motion::PageDown
+                        | Motion::WordNext
+                        | Motion::WordEnd
+                        | Motion::LineEnd
+                        | Motion::DocEnd => selection.range().end,
+                        Motion::FirstNonBlank | Motion::GotoLine(_) => {
+                            self.resolve_motion(selection.head, m)
+                        }
+                    }
+                } else {
+                    self.resolve_motion(selection.head, m)
+                };
                 if self.mode.is_visual() {
                     self.set_head(h);
                 } else {
@@ -770,5 +792,20 @@ mod tests {
         c.apply(EditCommand::Move(Motion::Down));
         let (line, _) = c.buffer.char_to_coords(c.primary().head);
         assert_eq!(line, 3);
+    }
+
+    #[test]
+    fn vertical_motion_collapses_selection_before_moving() {
+        let mut c = core("first\nsecond\nthird\n");
+        let start = c.buffer.coords_to_char(1, 1);
+        let end = c.buffer.coords_to_char(2, 3);
+        c.selections = vec![Selection {
+            anchor: start,
+            head: end,
+        }];
+
+        c.apply(EditCommand::Move(Motion::Up));
+
+        assert_eq!(c.primary(), Selection::caret(start));
     }
 }

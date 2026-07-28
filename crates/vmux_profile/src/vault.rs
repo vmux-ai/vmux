@@ -27,9 +27,13 @@ const PASSKEYS_DIR: &str = "keys/passkeys";
 const RECOVERY_DIR: &str = "keys/recovery";
 const RECOVERY_FILE: &str = "default.ron";
 #[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
+const KEYCHAIN_SERVICE: &str = "ai.vmux.vault.v2";
 #[cfg(target_os = "macos")]
-const KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v1";
+const LEGACY_KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
+#[cfg(target_os = "macos")]
+const KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v2";
+#[cfg(target_os = "macos")]
+const LEGACY_KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v1";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
@@ -2384,17 +2388,28 @@ fn keychain_options(
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
-    use security_framework::passwords::generic_password;
+    use security_framework::passwords::{delete_generic_password_options, generic_password};
     use security_framework_sys::base::errSecItemNotFound;
 
-    match generic_password(keychain_options(KEY_BROKER_SERVICE, vault_id, false)) {
-        Ok(key) => {
-            validate_key(&key)?;
-            Ok(Some(hex(&key)))
+    for service in [KEY_BROKER_SERVICE, LEGACY_KEY_BROKER_SERVICE] {
+        match generic_password(keychain_options(service, vault_id, false)) {
+            Ok(key) => {
+                validate_key(&key)?;
+                if service == LEGACY_KEY_BROKER_SERVICE {
+                    store_keychain_key(KEY_BROKER_SERVICE, vault_id, &key)?;
+                    let _ = delete_generic_password_options(keychain_options(
+                        LEGACY_KEY_BROKER_SERVICE,
+                        vault_id,
+                        false,
+                    ));
+                }
+                return Ok(Some(hex(&key)));
+            }
+            Err(error) if error.code() == errSecItemNotFound => {}
+            Err(error) => return Err(format!("failed to unlock Vault key: {error}")),
         }
-        Err(error) if error.code() == errSecItemNotFound => Ok(None),
-        Err(error) => Err(format!("failed to unlock Vault key: {error}")),
     }
+    Ok(None)
 }
 
 #[cfg(target_os = "macos")]
@@ -2490,13 +2505,25 @@ pub fn authorize_key_broker_parent() -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn load_legacy_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    use security_framework::passwords::generic_password;
+    use security_framework::passwords::{delete_generic_password_options, generic_password};
     use security_framework_sys::base::errSecItemNotFound;
 
-    for synchronized in [false, true] {
-        match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, synchronized)) {
+    for (service, synchronized) in [
+        (KEYCHAIN_SERVICE, false),
+        (LEGACY_KEYCHAIN_SERVICE, false),
+        (LEGACY_KEYCHAIN_SERVICE, true),
+    ] {
+        match generic_password(keychain_options(service, vault_id, synchronized)) {
             Ok(key) => {
                 validate_key(&key)?;
+                if service == LEGACY_KEYCHAIN_SERVICE {
+                    store_keychain_key(KEYCHAIN_SERVICE, vault_id, &key)?;
+                    let _ = delete_generic_password_options(keychain_options(
+                        LEGACY_KEYCHAIN_SERVICE,
+                        vault_id,
+                        synchronized,
+                    ));
+                }
                 return Ok(Some(Zeroizing::new(key)));
             }
             Err(error) if error.code() == errSecItemNotFound => {}
@@ -2546,16 +2573,11 @@ fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn store_keychain_key(service: &str, vault_id: &str, key: &[u8]) -> Result<(), String> {
-    use security_framework::passwords::{AccessControlOptions, set_generic_password_options};
+    use security_framework::passwords::set_generic_password_options;
 
     validate_key(key)?;
-    let mut protected = keychain_options(service, vault_id, false);
-    protected.set_access_control_options(AccessControlOptions::USER_PRESENCE);
-    if set_generic_password_options(key, protected).is_err() {
-        set_generic_password_options(key, keychain_options(service, vault_id, false))
-            .map_err(|error| format!("failed to store Vault key in system Keychain: {error}"))?;
-    }
-    Ok(())
+    set_generic_password_options(key, keychain_options(service, vault_id, false))
+        .map_err(|error| format!("failed to store Vault key in system Keychain: {error}"))
 }
 
 #[cfg(target_os = "macos")]

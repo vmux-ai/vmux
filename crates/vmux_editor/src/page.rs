@@ -51,13 +51,6 @@ fn file_mode_class(active: bool) -> &'static str {
     }
 }
 
-fn keymap_label(keymap: vmux_core::KeymapKind) -> &'static str {
-    match keymap {
-        vmux_core::KeymapKind::Vscode => "VS Code",
-        vmux_core::KeymapKind::Vim => "Vim",
-    }
-}
-
 fn editor_pointer_position(
     event: &web_sys::MouseEvent,
     target: &web_sys::Element,
@@ -88,6 +81,57 @@ fn editor_pointer_position(
     )
 }
 
+fn set_pointer_capture(event: &Event<PointerData>, element_id: &str, capture: bool) {
+    let data = event.data();
+    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+        return;
+    };
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(element_id))
+    else {
+        return;
+    };
+    if capture {
+        let _ = element.set_pointer_capture(pointer.pointer_id());
+    } else {
+        let _ = element.release_pointer_capture(pointer.pointer_id());
+    }
+}
+
+fn editor_pointer_file_position(
+    pointer: &web_sys::PointerEvent,
+    gutter: f64,
+    char_width: f64,
+    char_height: f64,
+    layouts: &[FileLineLayout],
+    wrap_columns: u16,
+    round: bool,
+) -> Option<(u32, u32)> {
+    if char_width <= 0.0 || char_height <= 0.0 {
+        return None;
+    }
+    let scroll = scroll_el()?;
+    let rect = scroll.get_bounding_client_rect();
+    let content_y = pointer.client_y() as f64 - rect.top() + scroll.scroll_top() as f64;
+    let row = (content_y.max(0.0) / char_height).floor() as u32;
+    let layout = layouts
+        .iter()
+        .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
+    let x = pointer.client_x() as f64 - rect.left() + scroll.scroll_left() as f64 - gutter;
+    let local = if round {
+        (x.max(0.0) / char_width).round()
+    } else {
+        (x.max(0.0) / char_width).floor()
+    } as u32;
+    let col = if wrap_columns == 0 {
+        local
+    } else {
+        (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
+    };
+    Some((layout.line_no, col))
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct NoteEditRect {
     top: f64,
@@ -115,10 +159,18 @@ fn note_list_edit_rect(event: &Event<MouseData>, block_index: usize) -> Option<N
     let target = raw
         .target()
         .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
-    let block = web_sys::window()
-        .and_then(|window| window.document())?
-        .get_element_by_id(&format!("note-block-{block_index}"))?;
     let item = target.closest("[data-note-list-line]").ok().flatten()?;
+    let line = item.get_attribute("data-note-list-line")?.parse().ok()?;
+    note_list_edit_rect_for_line(block_index, line)
+}
+
+fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEditRect> {
+    let document = web_sys::window()?.document()?;
+    let block = document.get_element_by_id(&format!("note-block-{block_index}"))?;
+    let item = block
+        .query_selector(&format!("[data-note-list-line=\"{line}\"]"))
+        .ok()
+        .flatten()?;
     let content = item
         .query_selector(":scope > p")
         .ok()
@@ -211,9 +263,9 @@ fn reveal_note_block(index: usize) {
     }
 }
 
-fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
+fn note_pointer_col_from_pointer(event: &Event<PointerData>, text: &str) -> u32 {
     let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
+    let Some(raw) = data.downcast::<web_sys::PointerEvent>() else {
         return 0;
     };
     let Some(target) = raw
@@ -223,6 +275,40 @@ fn note_pointer_col(event: &Event<MouseData>, text: &str) -> u32 {
         return 0;
     };
     note_col_at_point(&target, raw.client_x() as f64, raw.client_y() as f64, text)
+}
+
+fn note_pointer_position_at(
+    client_x: f64,
+    client_y: f64,
+    blocks: &[NoteBlock],
+) -> Option<(u32, u32)> {
+    let document = web_sys::window()?.document()?;
+    let target = document.element_from_point(client_x as f32, client_y as f32)?;
+    let line_element = target
+        .closest("[data-note-edit-line], [data-note-list-line]")
+        .ok()
+        .flatten()?;
+    let line = line_element
+        .get_attribute("data-note-edit-line")
+        .or_else(|| line_element.get_attribute("data-note-list-line"))?
+        .parse::<u32>()
+        .ok()?;
+    let block = blocks
+        .iter()
+        .find(|block| block.start_line <= line && line < block.end_line)?;
+    let raw = block
+        .source
+        .lines()
+        .nth(line.saturating_sub(block.start_line) as usize)
+        .unwrap_or_default();
+    let prefix = if matches!(block.block, MdBlock::List { .. }) {
+        note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
+    } else {
+        0
+    };
+    let displayed = raw.chars().skip(prefix as usize).collect::<String>();
+    let col = prefix + note_col_at_point(&line_element, client_x, client_y, &displayed);
+    Some((line, col))
 }
 
 fn note_col_at_point(target: &web_sys::Element, client_x: f64, client_y: f64, text: &str) -> u32 {
@@ -1268,7 +1354,17 @@ pub fn Page() -> Element {
         cursor.set(c.primary);
         sel.set(c.selections);
         if note_editing() {
+            let active = note_blocks.read().iter().position(|block| {
+                block.start_line <= c.primary.line && c.primary.line < block.end_line
+            });
+            let rect = active.and_then(|index| {
+                matches!(note_blocks.read()[index].block, MdBlock::List { .. })
+                    .then(|| note_list_edit_rect_for_line(index, c.primary.line))
+                    .flatten()
+            });
+            note_active.set(active.map(|index| index as u32));
             note_edit_line.set(Some(c.primary.line));
+            note_edit_rect.set(rect);
         }
         if moved && (file_view_mode() != FileViewMode::Note || !is_markdown_file(&git_path())) {
             ensure_line_visible(c.primary.row, cell_dims().1);
@@ -1840,19 +1936,29 @@ pub fn Page() -> Element {
                             }
                         }
                     }
-                    button {
-                        class: "shrink-0 rounded-md bg-foreground/[0.06] px-2 py-1 text-[10px] font-semibold text-foreground/65 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.10] hover:text-foreground",
+                    div {
+                        class: "flex shrink-0 items-center gap-0.5 rounded-md bg-foreground/[0.06] p-0.5 text-[10px] font-medium ring-1 ring-inset ring-foreground/10",
                         title: translate("schema-keymap"),
-                        onclick: move |_| {
-                            let next = match keymap() {
-                                vmux_core::KeymapKind::Vscode => vmux_core::KeymapKind::Vim,
-                                vmux_core::KeymapKind::Vim => vmux_core::KeymapKind::Vscode,
-                            };
-                            keymap.set(next);
-                            let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
-                            focus_file_input();
-                        },
-                        {keymap_label(keymap())}
+                        button {
+                            class: file_mode_class(keymap() == vmux_core::KeymapKind::Vscode),
+                            onclick: move |_| {
+                                let next = vmux_core::KeymapKind::Vscode;
+                                keymap.set(next);
+                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                focus_file_input();
+                            },
+                            "Normal"
+                        }
+                        button {
+                            class: file_mode_class(keymap() == vmux_core::KeymapKind::Vim),
+                            onclick: move |_| {
+                                let next = vmux_core::KeymapKind::Vim;
+                                keymap.set(next);
+                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                focus_file_input();
+                            },
+                            "Vim"
+                        }
                     }
                 }
                 {
@@ -2042,6 +2148,41 @@ pub fn Page() -> Element {
                                 div {
                                     id: "file-scroll",
                                     class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
+                                    onpointermove: move |event: Event<PointerData>| {
+                                        if !note_dragging() {
+                                            return;
+                                        }
+                                        let data = event.data();
+                                        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+                                            return;
+                                        };
+                                        if pointer.buttons() & 1 != 1 {
+                                            note_dragging.set(false);
+                                            set_pointer_capture(&event, "file-scroll", false);
+                                            return;
+                                        }
+                                        event.stop_propagation();
+                                        event.prevent_default();
+                                        if let Some((line, col)) = note_pointer_position_at(
+                                            pointer.client_x() as f64,
+                                            pointer.client_y() as f64,
+                                            &note_blocks.read(),
+                                        ) {
+                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                line,
+                                                col,
+                                                extend: true,
+                                            });
+                                        }
+                                    },
+                                    onpointerup: move |event: Event<PointerData>| {
+                                        set_pointer_capture(&event, "file-scroll", false);
+                                        note_dragging.set(false);
+                                    },
+                                    onpointercancel: move |event: Event<PointerData>| {
+                                        set_pointer_capture(&event, "file-scroll", false);
+                                        note_dragging.set(false);
+                                    },
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         NoteProperties { properties: note_properties() }
@@ -2168,7 +2309,6 @@ pub fn Page() -> Element {
                                                                             let line = *line;
                                                                             let prefix = *prefix;
                                                                             let pointer_raw_down = raw.clone();
-                                                                            let pointer_raw_drag = raw.clone();
                                                                             let line_selection = selections
                                                                                 .iter()
                                                                                 .find(|selection| selection.line == line)
@@ -2197,39 +2337,24 @@ pub fn Page() -> Element {
                                                                                 div {
                                                                                     key: "{line}",
                                                                                     id: "note-line-{line}",
+                                                                                    "data-note-edit-line": "{line}",
                                                                                     class: line_class,
-                                                                                    onmousedown: move |event| {
+                                                                                    onpointerdown: move |event: Event<PointerData>| {
                                                                                         event.stop_propagation();
                                                                                         event.prevent_default();
                                                                                         let extend = event
                                                                                             .data()
-                                                                                            .downcast::<web_sys::MouseEvent>()
+                                                                                            .downcast::<web_sys::PointerEvent>()
                                                                                             .is_some_and(|raw| raw.shift_key());
-                                                                                        let col = prefix + note_pointer_col(&event, &pointer_raw_down);
+                                                                                        let col = prefix + note_pointer_col_from_pointer(&event, &pointer_raw_down);
                                                                                         note_dragging.set(true);
+                                                                                        set_pointer_capture(&event, "file-scroll", true);
                                                                                         let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend });
                                                                                         focus_file_input();
                                                                                     },
-                                                                                    onmousemove: move |event| {
-                                                                                        if !note_dragging() {
-                                                                                            return;
-                                                                                        }
-                                                                                        let pressed = event
-                                                                                            .data()
-                                                                                            .downcast::<web_sys::MouseEvent>()
-                                                                                            .is_some_and(|raw| raw.buttons() & 1 == 1);
-                                                                                        if !pressed {
-                                                                                            note_dragging.set(false);
-                                                                                            return;
-                                                                                        }
+                                                                                    onmousedown: move |event: Event<MouseData>| {
                                                                                         event.stop_propagation();
                                                                                         event.prevent_default();
-                                                                                        let col = prefix + note_pointer_col(&event, &pointer_raw_drag);
-                                                                                        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                                                            line,
-                                                                                            col,
-                                                                                            extend: true,
-                                                                                        });
                                                                                     },
                                                                                     span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]",
                                                                                         for (chunk_index, chunk) in chunks.iter().enumerate() {
@@ -2421,6 +2546,45 @@ pub fn Page() -> Element {
                                         lsp_hover.set(None);
                                         hover_pos.set(None);
                                         gutter_hover.set(false);
+                                    },
+                                    onpointermove: move |event: Event<PointerData>| {
+                                        if !editor_dragging() {
+                                            return;
+                                        }
+                                        let data = event.data();
+                                        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+                                            return;
+                                        };
+                                        if pointer.buttons() & 1 != 1 {
+                                            editor_dragging.set(false);
+                                            set_pointer_capture(&event, "file-scroll", false);
+                                            return;
+                                        }
+                                        let (cw, ch) = cell_dims();
+                                        let gutter = gw as f64 * cw + 48.0;
+                                        if let Some((line, col)) = editor_pointer_file_position(
+                                            pointer,
+                                            gutter,
+                                            cw,
+                                            ch,
+                                            &line_layouts.read(),
+                                            wrap_columns(),
+                                            false,
+                                        ) {
+                                            event.prevent_default();
+                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                line,
+                                                col,
+                                                extend: true,
+                                            });
+                                        }
+                                    },
+                                    onpointerup: move |event: Event<PointerData>| {
+                                        set_pointer_capture(&event, "file-scroll", false);
+                                        editor_dragging.set(false);
+                                    },
+                                    onpointercancel: move |event: Event<PointerData>| {
+                                        set_pointer_capture(&event, "file-scroll", false);
                                         editor_dragging.set(false);
                                     },
                                     onscroll: move |_| {
@@ -2482,36 +2646,34 @@ pub fn Page() -> Element {
                                                         key: "{ln}",
                                                         class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start hover:bg-foreground/[0.035]" },
                                                         style: "position:absolute;left:0;right:0;top:{lt}px;height:{line_height}px;",
-                                                        onmousedown: move |e: Event<MouseData>| {
+                                                        onpointerdown: move |e: Event<PointerData>| {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
                                                             let (cw, ch) = cell_dims();
                                                             let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
-                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
-                                                                && let Some(t) = raw
-                                                                    .current_target()
-                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                                                            {
-                                                                let (_, col) = editor_pointer_position(
+                                                            if let Some(raw) = dd.downcast::<web_sys::PointerEvent>()
+                                                                && let Some((line, col)) = editor_pointer_file_position(
                                                                     raw,
-                                                                    &t,
                                                                     g,
                                                                     cw,
                                                                     ch,
+                                                                    &line_layouts.read(),
                                                                     wrap_cols,
                                                                     true,
-                                                                );
+                                                                )
+                                                            {
                                                                 if raw.meta_key() {
                                                                     editor_dragging.set(false);
                                                                     let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
-                                                                        line: ln,
+                                                                        line,
                                                                         col,
                                                                     });
                                                                 } else {
                                                                     editor_dragging.set(true);
+                                                                    set_pointer_capture(&e, "file-scroll", true);
                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                                        line: ln,
+                                                                        line,
                                                                         col,
                                                                         extend: raw.shift_key(),
                                                                     });
@@ -2547,6 +2709,9 @@ pub fn Page() -> Element {
                                                             }
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
+                                                            if editor_dragging() {
+                                                                return;
+                                                            }
                                                             let (cw, ch) = cell_dims();
                                                             let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
@@ -2564,19 +2729,6 @@ pub fn Page() -> Element {
                                                                     wrap_cols,
                                                                     false,
                                                                 );
-                                                                if editor_dragging() {
-                                                                    if raw.buttons() & 1 != 1 {
-                                                                        editor_dragging.set(false);
-                                                                        return;
-                                                                    }
-                                                                    e.prevent_default();
-                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                                        line: ln,
-                                                                        col: pointer_col,
-                                                                        extend: true,
-                                                                    });
-                                                                    return;
-                                                                }
                                                                 let in_gutter = x < 0.0;
                                                                 if gutter_hover() != in_gutter {
                                                                     gutter_hover.set(in_gutter);
