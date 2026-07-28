@@ -29,6 +29,8 @@ const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 #[cfg(target_os = "macos")]
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+#[cfg(target_os = "macos")]
+const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct NativeWindowFrame {
@@ -336,6 +338,9 @@ fn activate_app_during_boot() {}
 type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
 #[cfg(target_os = "macos")]
+type NativeDebounce = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(target_os = "macos")]
 fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> NativeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
@@ -379,6 +384,35 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
     Arc::new(move |min_interval: Duration| {
         let min_interval = min_interval.as_nanos().min(u64::MAX as u128) as u64;
         pending_interval_ns.fetch_min(min_interval, Ordering::Relaxed);
+        let _ = tx.try_send(());
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn native_debounce(
+    name: &'static str,
+    delay: Duration,
+    action: impl Fn() + Send + 'static,
+) -> NativeDebounce {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                loop {
+                    match rx.recv_timeout(delay) {
+                        Ok(()) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            action();
+                            break;
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+            }
+        })
+        .unwrap_or_else(|error| panic!("failed to spawn {name}: {error}"));
+    Arc::new(move || {
         let _ = tx.try_send(());
     })
 }
@@ -452,9 +486,18 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         return;
     }
     let proxy = (**proxy).clone();
+    let settle_proxy = proxy.clone();
     let wake = native_throttle("native-mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
+    let settle_layout = native_debounce(
+        "native-layout-activity-settle",
+        NATIVE_LAYOUT_ACTIVITY_SETTLE,
+        move || {
+            vmux_browser::set_native_layout_activity(false);
+            let _ = settle_proxy.send_event(WinitUserEvent::WakeUp);
+        },
+    );
     let flush_layout = native_throttle("native-layout-pointer-throttle", || {
         dispatch2::DispatchQueue::main().exec_async(|| {
             vmux_browser::flush_native_layout_pointer_move();
@@ -551,21 +594,32 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 && result.owns_pointer
                 && result.presenter_active
             {
+                let activity_started = vmux_browser::set_native_layout_activity(true);
+                settle_layout();
                 if result.region_changed {
                     vmux_browser::flush_native_layout_pointer_move();
                     local_wake(interval);
                 } else if result.pending {
                     flush_layout(interval);
                 }
+                if activity_started && !result.region_changed {
+                    local_wake(interval);
+                }
             } else {
+                vmux_browser::set_native_layout_activity(false);
                 HOVER_OVER_PANE.store(true, Ordering::Relaxed);
                 local_wake(interval);
             }
         } else {
-            if layout_pointer.is_some_and(|result| {
-                result.owns_pointer && result.presenter_active && result.pending
-            }) {
-                vmux_browser::flush_native_layout_pointer_move();
+            if let Some(result) = layout_pointer
+                && result.owns_pointer
+                && result.presenter_active
+            {
+                vmux_browser::set_native_layout_activity(true);
+                settle_layout();
+                if result.pending {
+                    vmux_browser::flush_native_layout_pointer_move();
+                }
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
@@ -1223,23 +1277,6 @@ mod tests {
         assert!(!throttle.contains("while wake_rx.try_recv().is_ok()"));
         assert!(!throttle.contains("thread_pending_interval_ns.store"));
         assert!(!throttle.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
-    }
-
-    #[test]
-    fn native_layout_motion_skips_bevy_wake_after_entry() {
-        let source = include_str!("background_lifecycle.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("result.owns_pointer"));
-        assert!(monitor.contains("result.presenter_active"));
-        assert!(monitor.contains(
-            "if result.region_changed {\n                    vmux_browser::flush_native_layout_pointer_move();\n                    local_wake(interval);\n                } else if result.pending {\n                    flush_layout(interval);\n                }"
-        ));
-        assert!(monitor.contains("layout_pointer.is_some_and"));
     }
 
     #[test]

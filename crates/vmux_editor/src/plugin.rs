@@ -13,7 +13,7 @@ use vmux_layout::Browser;
 
 use crate::dir::{list_dir, parent_listing, project_root};
 use crate::edit::highlight_cache::HighlightCache;
-use crate::edit::{EditCommand, EditCore, Selection};
+use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
@@ -2109,7 +2109,7 @@ fn on_file_key(
         },
         repeat: evt.repeat,
     };
-    let cmds = keymap.0.handle(&input);
+    let cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
     if cmds.is_empty() {
         return;
     }
@@ -2126,6 +2126,24 @@ fn on_file_key(
         &browsers,
         &mut commands,
     );
+}
+
+fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<EditCommand> {
+    if !repeat {
+        return cmds;
+    }
+    cmds.into_iter()
+        .flat_map(|cmd| {
+            let accelerate = matches!(
+                &cmd,
+                EditCommand::Move(Motion::Left | Motion::Right | Motion::Up | Motion::Down)
+                    | EditCommand::Select(Motion::Left | Motion::Right | Motion::Up | Motion::Down)
+            );
+            [Some(cmd.clone()), accelerate.then_some(cmd)]
+                .into_iter()
+                .flatten()
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3832,6 +3850,21 @@ mod edit_flow_tests {
         core.apply(EditCommand::InsertText("hello".into()));
         assert_eq!(core.buffer.text(), "hello");
         assert!(core.dirty);
+    }
+
+    #[test]
+    fn repeated_navigation_advances_two_steps_without_accelerating_edits() {
+        assert_eq!(
+            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
+            [
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down)
+            ]
+        );
+        assert_eq!(
+            accelerate_repeated_navigation(vec![EditCommand::DeleteBack], true),
+            [EditCommand::DeleteBack]
+        );
     }
 }
 

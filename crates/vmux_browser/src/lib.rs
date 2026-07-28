@@ -532,6 +532,7 @@ struct NativeLayoutPointerState {
 static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
     LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
+static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 #[derive(Default)]
@@ -614,6 +615,7 @@ fn clear_native_layout_pointer_state() {
         should_flush
     };
     NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+    NATIVE_LAYOUT_ACTIVITY.store(false, Ordering::Relaxed);
     if should_flush {
         flush_native_layout_pointer_move();
     }
@@ -708,6 +710,14 @@ pub fn flush_native_layout_pointer_move() -> bool {
 
 pub fn native_layout_pointer_is_inside() -> bool {
     NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
+}
+
+pub fn set_native_layout_activity(active: bool) -> bool {
+    NATIVE_LAYOUT_ACTIVITY.swap(active, Ordering::Relaxed) != active
+}
+
+fn native_layout_activity_active() -> bool {
+    NATIVE_LAYOUT_ACTIVITY.load(Ordering::Relaxed)
 }
 
 fn cef_pointer_hit_rect(
@@ -2169,8 +2179,7 @@ fn refresh_active_windowed_hover(
     state.position = Some(position);
 }
 
-const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
-const LAYOUT_HOVER_FRAME_RATE: i32 = 30;
+const LAYOUT_IDLE_FRAME_RATE: i32 = 1;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -2184,15 +2193,14 @@ struct LayoutFrameRateState {
 fn layout_frame_rate(
     now: std::time::Instant,
     last_input: Option<std::time::Instant>,
-    hovered: bool,
+    native_activity: bool,
     dragging: bool,
 ) -> i32 {
-    if dragging
+    if native_activity
+        || dragging
         || last_input.is_some_and(|last| now.saturating_duration_since(last) < LAYOUT_INPUT_BURST)
     {
         LAYOUT_ACTIVE_FRAME_RATE
-    } else if hovered {
-        LAYOUT_HOVER_FRAME_RATE
     } else {
         LAYOUT_IDLE_FRAME_RATE
     }
@@ -2232,7 +2240,12 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
-    let desired = layout_frame_rate(now, state.last_input, inside, state.dragging_layout);
+    let desired = layout_frame_rate(
+        now,
+        state.last_input,
+        native_layout_activity_active(),
+        state.dragging_layout,
+    );
     let Ok(mut cap) = layout_q.single_mut() else {
         return;
     };
@@ -6634,7 +6647,7 @@ mod tests {
         );
         assert_eq!(
             layout_frame_rate(now, None, true, false),
-            LAYOUT_HOVER_FRAME_RATE
+            LAYOUT_ACTIVE_FRAME_RATE
         );
         assert_eq!(
             layout_frame_rate(now, Some(now), false, false),

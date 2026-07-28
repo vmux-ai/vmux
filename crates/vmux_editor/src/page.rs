@@ -2393,7 +2393,7 @@ pub fn Page() -> Element {
                                                                                                 span {
                                                                                                     key: "caret-{chunk_index}",
                                                                                                     class: "relative inline-block h-[1.15em] w-0 align-text-bottom",
-                                                                                                    span { class: "pointer-events-none absolute inset-y-0 left-0 w-px animate-pulse bg-primary" }
+                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]" }
                                                                                                 }
                                                                                             }
                                                                                             if !chunk.text.is_empty() {
@@ -2567,6 +2567,16 @@ pub fn Page() -> Element {
                             let gutter = gw as f64 * cw + 48.0;
                             let cx = gutter + cursor().col as f64 * cw;
                             let cy = cursor().row as f64 * ch;
+                            let cursor_style = if ed_mode().accepts_text() {
+                                format!(
+                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:3px;background:rgb(34,211,238);box-shadow:0 0 8px rgba(34,211,238,0.95);"
+                                )
+                            } else {
+                                format!(
+                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:{}px;background:rgba(34,211,238,0.32);outline:1px solid rgb(103,232,249);box-shadow:0 0 8px rgba(34,211,238,0.65);",
+                                    cw.max(2.0)
+                                )
+                            };
                             let spacer = total_rows() as f64 * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
@@ -2883,8 +2893,8 @@ pub fn Page() -> Element {
                                         }
 
                                         div {
-                                            class: "pointer-events-none absolute z-20 w-[2px] bg-cyan-300",
-                                            style: "left:{cx}px;top:{cy}px;height:{ch}px;",
+                                            class: "pointer-events-none absolute z-20 rounded-[1px]",
+                                            style: "{cursor_style}",
                                         }
 
                                         textarea {

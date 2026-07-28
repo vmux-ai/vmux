@@ -256,6 +256,8 @@ trait KeyStore {
 
 struct SystemKeyStore;
 
+struct SilentSystemKeyStore;
+
 impl KeyStore for SystemKeyStore {
     fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
         load_system_key(vault_id)
@@ -267,6 +269,29 @@ impl KeyStore for SystemKeyStore {
 
     fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String> {
         store_system_key(vault_id, key)
+    }
+}
+
+impl KeyStore for SilentSystemKeyStore {
+    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        if let Some(key) = load_session_key(vault_id)? {
+            return Ok(key);
+        }
+        let Some(key) = load_key_from_broker_silent(vault_id)? else {
+            return Err(
+                "This Vault is locked on this device. Unlock it with a passkey.".to_string(),
+            );
+        };
+        store_session_key(vault_id, &key)?;
+        Ok(key)
+    }
+
+    fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
+        Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
+    }
+
+    fn store(&self, _vault_id: &str, _key: &[u8]) -> Result<(), String> {
+        Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
     }
 }
 
@@ -285,7 +310,7 @@ pub fn is_managed_local_path(path: &Path) -> bool {
 }
 
 pub fn status() -> VaultStatus {
-    status_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
+    status_paths(&root_dir(), &repository_dir(), &SilentSystemKeyStore)
 }
 
 pub fn status_with_repositories() -> VaultStatus {
@@ -2414,6 +2439,34 @@ pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
 
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
+pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
+
+    for service in [KEY_BROKER_SERVICE, LEGACY_KEY_BROKER_SERVICE] {
+        let mut search = ItemSearchOptions::new();
+        let results = search
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(vault_id)
+            .load_data(true)
+            .skip_authenticated_items(true)
+            .search();
+        let Ok(results) = results else {
+            continue;
+        };
+        if let Some(key) = results.into_iter().find_map(|result| match result {
+            SearchResult::Data(key) => Some(key),
+            _ => None,
+        }) {
+            validate_key(&key)?;
+            return Ok(Some(hex(&key)));
+        }
+    }
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+#[doc(hidden)]
 pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
     let key = decode_key_hex(encoded_key)?;
     store_keychain_key(KEY_BROKER_SERVICE, vault_id, &key)
@@ -2482,6 +2535,12 @@ fn validate_key_broker_caller(
 #[cfg(not(target_os = "macos"))]
 #[doc(hidden)]
 pub fn key_broker_load(_vault_id: &str) -> Result<Option<String>, String> {
+    Err("Vault key broker is only available on macOS".to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+#[doc(hidden)]
+pub fn key_broker_load_silent(_vault_id: &str) -> Result<Option<String>, String> {
     Err("Vault key broker is only available on macOS".to_string())
 }
 
@@ -2642,6 +2701,7 @@ fn run_key_broker(
     action: &str,
     vault_id: &str,
     input: Option<&str>,
+    silent: bool,
 ) -> Result<Option<Output>, String> {
     let Some(path) = key_broker_path() else {
         return Ok(None);
@@ -2651,6 +2711,9 @@ fn run_key_broker(
         .args(["vault-key", action, "--vault-id", vault_id])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if silent {
+        command.arg("--no-ui");
+    }
     if input.is_none() {
         return command
             .output()
@@ -2675,7 +2738,7 @@ fn run_key_broker(
 
 #[cfg(target_os = "macos")]
 fn load_key_from_broker(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    let Some(output) = run_key_broker("load", vault_id, None)? else {
+    let Some(output) = run_key_broker("load", vault_id, None, false)? else {
         return Ok(None);
     };
     if output.status.success() {
@@ -2689,9 +2752,29 @@ fn load_key_from_broker(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, St
 }
 
 #[cfg(target_os = "macos")]
+fn load_key_from_broker_silent(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    let Some(output) = run_key_broker("load", vault_id, None, true)? else {
+        return Ok(None);
+    };
+    if output.status.success() {
+        let key = decode_key_hex(String::from_utf8_lossy(&output.stdout).trim())?;
+        return Ok(Some(Zeroizing::new(key)));
+    }
+    if output.status.code() == Some(2) {
+        return Ok(None);
+    }
+    Err(key_broker_error(&output))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn load_key_from_broker_silent(_vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
 fn store_key_with_broker(vault_id: &str, key: &[u8]) -> Result<(), String> {
     let encoded = Zeroizing::new(hex(key));
-    let Some(output) = run_key_broker("store", vault_id, Some(&encoded))? else {
+    let Some(output) = run_key_broker("store", vault_id, Some(&encoded), false)? else {
         return store_keychain_key(KEYCHAIN_SERVICE, vault_id, key);
     };
     if output.status.success() {

@@ -15,6 +15,8 @@ pub struct VaultKeyArgs {
     action: VaultKeyAction,
     #[arg(long)]
     vault_id: String,
+    #[arg(long, hide = true)]
+    no_ui: bool,
 }
 
 pub fn run(args: VaultKeyArgs) -> io::Result<i32> {
@@ -33,6 +35,9 @@ pub fn run(args: VaultKeyArgs) -> io::Result<i32> {
         return Ok(1);
     }
     let result = match args.action {
+        VaultKeyAction::Load if args.no_ui => {
+            vmux_profile::vault::key_broker_load_silent(&args.vault_id)
+        }
         VaultKeyAction::Load => vmux_profile::vault::key_broker_load(&args.vault_id),
         VaultKeyAction::Migrate => unreachable!(),
         VaultKeyAction::Store => {
