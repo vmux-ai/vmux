@@ -96,3 +96,25 @@ pub enum KeymapKind {
     Vscode,
     Vim,
 }
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    Default,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum WordWrap {
+    Off,
+    #[default]
+    On,
+    WordWrapColumn,
+    Bounded,
+}

@@ -58,6 +58,36 @@ fn keymap_label(keymap: vmux_core::KeymapKind) -> &'static str {
     }
 }
 
+fn editor_pointer_position(
+    event: &web_sys::MouseEvent,
+    target: &web_sys::Element,
+    gutter: f64,
+    char_width: f64,
+    char_height: f64,
+    wrap_columns: u16,
+    round: bool,
+) -> (f64, u32) {
+    let rect = target.get_bounding_client_rect();
+    let x = event.client_x() as f64 - rect.left() - gutter;
+    if char_width <= 0.0 {
+        return (x, 0);
+    }
+    let local = if round {
+        (x.max(0.0) / char_width).round()
+    } else {
+        (x.max(0.0) / char_width).floor()
+    } as u32;
+    if wrap_columns == 0 || char_height <= 0.0 {
+        return (x, local);
+    }
+    let wrapped_row =
+        ((event.client_y() as f64 - rect.top()).max(0.0) / char_height).floor() as u32;
+    (
+        x,
+        wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
+    )
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct NoteEditRect {
     top: f64,
@@ -1089,6 +1119,8 @@ pub fn Page() -> Element {
     let mut first_row = use_signal(|| 0u32);
     let mut gutter_hover = use_signal(|| false);
     let mut lines = use_signal(Vec::<FileLine>::new);
+    let mut line_layouts = use_signal(Vec::<FileLineLayout>::new);
+    let mut wrap_columns = use_signal(|| 0u16);
     let mut diagnostics = use_signal(Vec::<FileDiagnostic>::new);
     let mut hover_diag = use_signal(|| Option::<FileDiagnostic>::None);
     let mut lsp_status = use_signal(|| Option::<FileLspStatusEvent>::None);
@@ -1223,6 +1255,8 @@ pub fn Page() -> Element {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
+        wrap_columns.set(p.wrap_columns);
+        line_layouts.set(p.layouts);
         lines.set(p.lines);
         lsp_hover.set(None);
     });
@@ -1503,7 +1537,10 @@ pub fn Page() -> Element {
         theme_style.set(s);
     });
 
-    use_effect(move || setup_measurement(cell_dims));
+    use_effect(move || {
+        let _ = file_view_mode();
+        setup_measurement(cell_dims, total_lines);
+    });
 
     use_effect(move || match mode() {
         Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
@@ -2398,7 +2435,10 @@ pub fn Page() -> Element {
                                         let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
                                         let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
-                                        let loaded_len = lines.read().len() as u32;
+                                        let loaded_len = line_layouts
+                                            .read()
+                                            .last()
+                                            .map_or(0, |line| line.row + line.rows as u32 - rfirst);
                                         if vmux_core::scroll::needs_refetch(vis_first, vis_rows, rfirst, loaded_len, trigger)
                                             && last_scroll_req() != vis_first
                                         {
@@ -2410,7 +2450,24 @@ pub fn Page() -> Element {
                                         for (i, line) in lines().iter().enumerate() {
                                             {
                                                 let ln = line.line_no;
-                                                let lt = (first_row() + i as u32) as f64 * ch;
+                                                let layout = line_layouts().get(i).copied().unwrap_or(FileLineLayout {
+                                                    line_no: ln,
+                                                    row: first_row() + i as u32,
+                                                    rows: 1,
+                                                });
+                                                let lt = layout.row as f64 * ch;
+                                                let line_height = layout.rows as f64 * ch;
+                                                let wrap_cols = wrap_columns();
+                                                let text_class = if wrap_cols > 0 {
+                                                    "relative whitespace-pre-wrap break-all pr-8"
+                                                } else {
+                                                    "relative whitespace-pre pr-8"
+                                                };
+                                                let text_style = if wrap_cols > 0 {
+                                                    format!("box-sizing:border-box;width:calc(var(--cw) * {wrap_cols} + 2rem);")
+                                                } else {
+                                                    String::new()
+                                                };
                                                 let fold = line.fold;
                                                 let diags = diagnostics();
                                                 let sev = line_severity(&diags, ln);
@@ -2423,12 +2480,12 @@ pub fn Page() -> Element {
                                                 rsx! {
                                                     div {
                                                         key: "{ln}",
-                                                        class: if let Some(marker) = diff_marker { "group flex {diff_marker_row_class(marker)}" } else { "group flex hover:bg-foreground/[0.035]" },
-                                                        style: "position:absolute;left:0;right:0;top:{lt}px;",
+                                                        class: if let Some(marker) = diff_marker { "group flex items-start {diff_marker_row_class(marker)}" } else { "group flex items-start hover:bg-foreground/[0.035]" },
+                                                        style: "position:absolute;left:0;right:0;top:{lt}px;height:{line_height}px;",
                                                         onmousedown: move |e: Event<MouseData>| {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
-                                                            let (cw, _) = cell_dims();
+                                                            let (cw, ch) = cell_dims();
                                                             let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
@@ -2436,13 +2493,15 @@ pub fn Page() -> Element {
                                                                     .current_target()
                                                                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                                                             {
-                                                                let rect = t.get_bounding_client_rect();
-                                                                let x = raw.client_x() as f64 - rect.left() - g;
-                                                                let col = if cw > 0.0 {
-                                                                    (x / cw).round().max(0.0) as u32
-                                                                } else {
-                                                                    0
-                                                                };
+                                                                let (_, col) = editor_pointer_position(
+                                                                    raw,
+                                                                    &t,
+                                                                    g,
+                                                                    cw,
+                                                                    ch,
+                                                                    wrap_cols,
+                                                                    true,
+                                                                );
                                                                 if raw.meta_key() {
                                                                     editor_dragging.set(false);
                                                                     let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
@@ -2462,7 +2521,7 @@ pub fn Page() -> Element {
                                                         },
                                                         oncontextmenu: move |e: Event<MouseData>| {
                                                             e.prevent_default();
-                                                            let (cw, _) = cell_dims();
+                                                            let (cw, ch) = cell_dims();
                                                             let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
@@ -2470,13 +2529,15 @@ pub fn Page() -> Element {
                                                                     .current_target()
                                                                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                                                             {
-                                                                let rect = t.get_bounding_client_rect();
-                                                                let x = raw.client_x() as f64 - rect.left() - g;
-                                                                let col = if cw > 0.0 {
-                                                                    (x / cw).round().max(0.0) as u32
-                                                                } else {
-                                                                    0
-                                                                };
+                                                                let (_, col) = editor_pointer_position(
+                                                                    raw,
+                                                                    &t,
+                                                                    g,
+                                                                    cw,
+                                                                    ch,
+                                                                    wrap_cols,
+                                                                    true,
+                                                                );
                                                                 ctx_menu.set(Some((
                                                                     raw.client_x() as f64,
                                                                     raw.client_y() as f64,
@@ -2486,7 +2547,7 @@ pub fn Page() -> Element {
                                                             }
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
-                                                            let (cw, _) = cell_dims();
+                                                            let (cw, ch) = cell_dims();
                                                             let g = gw as f64 * cw + 48.0;
                                                             let dd = e.data();
                                                             if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
@@ -2494,22 +2555,24 @@ pub fn Page() -> Element {
                                                                     .current_target()
                                                                     .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
                                                             {
-                                                                let rect = t.get_bounding_client_rect();
-                                                                let x = raw.client_x() as f64 - rect.left() - g;
+                                                                let (x, pointer_col) = editor_pointer_position(
+                                                                    raw,
+                                                                    &t,
+                                                                    g,
+                                                                    cw,
+                                                                    ch,
+                                                                    wrap_cols,
+                                                                    false,
+                                                                );
                                                                 if editor_dragging() {
                                                                     if raw.buttons() & 1 != 1 {
                                                                         editor_dragging.set(false);
                                                                         return;
                                                                     }
                                                                     e.prevent_default();
-                                                                    let col = if cw > 0.0 {
-                                                                        (x.max(0.0) / cw).round() as u32
-                                                                    } else {
-                                                                        0
-                                                                    };
                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
                                                                         line: ln,
-                                                                        col,
+                                                                        col: pointer_col,
                                                                         extend: true,
                                                                     });
                                                                     return;
@@ -2521,11 +2584,7 @@ pub fn Page() -> Element {
                                                                 if x < 0.0 {
                                                                     return;
                                                                 }
-                                                                let col = if cw > 0.0 {
-                                                                    (x / cw).floor().max(0.0) as u32
-                                                                } else {
-                                                                    0
-                                                                };
+                                                                let col = pointer_col;
                                                                 if hover_pos() != Some((ln, col)) {
                                                                     hover_pos.set(Some((ln, col)));
                                                                     lsp_hover.set(None);
@@ -2538,7 +2597,7 @@ pub fn Page() -> Element {
                                                         },
                                                         span {
                                                             class: "sticky left-0 z-[1] relative flex shrink-0 select-none items-center justify-end bg-background pl-4 pr-5 tabular-nums",
-                                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 3rem);",
+                                                            style: "min-width:calc(var(--cw, 1ch) * {gw} + 3rem);height:{ch}px;",
                                                             if let Some(s) = sev {
                                                                 span { class: "pointer-events-none absolute left-1 {severity_color_class(s)}", "●" }
                                                             }
@@ -2585,7 +2644,7 @@ pub fn Page() -> Element {
                                                                 FoldGutter::None => rsx! {},
                                                             }
                                                         }
-                                                        span { class: "relative whitespace-pre pr-8",
+                                                        span { class: "{text_class}", style: "{text_style}",
                                                             for (i, s) in line.spans.iter().enumerate() {
                                                                 span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
                                                             }
@@ -3111,7 +3170,7 @@ fn is_text_key(key: &str) -> bool {
     key.chars().count() == 1
 }
 
-fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
+fn setup_measurement(cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -3123,7 +3182,7 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     };
 
     if document.get_element_by_id(MEASURE_ID).is_some() {
-        do_measure(cell_dims);
+        do_measure(cell_dims, total_lines);
         return;
     }
 
@@ -3139,10 +3198,10 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>) {
     measure_node.set_text_content(Some(&"X".repeat(80)));
     container.append_child(&measure).unwrap();
 
-    do_measure(cell_dims);
+    do_measure(cell_dims, total_lines);
 
     let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        do_measure(cell_dims);
+        do_measure(cell_dims, total_lines);
     }) as Box<dyn FnMut(JsValue)>);
 
     if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
@@ -3195,7 +3254,7 @@ fn report_video_rect(path: String) {
     callback.forget();
 }
 
-fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
+fn do_measure(mut cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -3233,14 +3292,25 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>) {
     let _ = html.style().set_property("--cw", &format!("{cw}px"));
     let _ = html.style().set_property("--ch", &format!("{ch}px"));
 
-    let vh = document
-        .get_element_by_id("file-scroll")
-        .map(|e| e.client_height() as f64)
+    let scroll = document.get_element_by_id(SCROLL_ID);
+    let vh = scroll
+        .as_ref()
+        .map(|element| element.client_height() as f64)
         .filter(|h| *h > 0.0)
         .unwrap_or_else(|| container.client_height() as f64);
+    let vw = scroll
+        .as_ref()
+        .map(|element| element.client_width() as f64)
+        .filter(|width| *width > 0.0)
+        .unwrap_or_else(|| container.client_width() as f64);
+    let gutter = gutter_width(total_lines()) as f64 * cw + 48.0;
+    let wrap_columns = ((vw - gutter - 32.0).max(cw) / cw)
+        .floor()
+        .min(u16::MAX as f64) as u16;
 
     let _ = try_cef_bin_emit_rkyv(&FileResizeEvent {
         char_height: ch as f32,
         viewport_height: vh as f32,
+        wrap_columns,
     });
 }

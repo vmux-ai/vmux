@@ -1041,11 +1041,7 @@ mod tests {
         let hl = HighlightCache::new(&path);
         app.world_mut().spawn((
             FileView { path: path.clone() },
-            EditState {
-                core,
-                hl,
-                folds: crate::fold::FoldState::default(),
-            },
+            EditState::new(core, hl, crate::fold::FoldState::default()),
         ));
 
         let diag = lsp_types::Diagnostic {

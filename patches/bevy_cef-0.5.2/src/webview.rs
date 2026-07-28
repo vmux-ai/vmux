@@ -258,8 +258,8 @@ fn spawn_texture_wake_throttler(
     }) as TextureWake
 }
 
-fn shared_texture_enabled(windowed: bool) -> bool {
-    !windowed
+fn shared_texture_enabled(windowed: bool, transparent: bool, native_direct_overlay: bool) -> bool {
+    !windowed && (!transparent || native_direct_overlay)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -402,7 +402,7 @@ fn create_webview(
                 },
                 windowless_frame_rate,
                 windowed,
-                shared_texture_enabled(windowed),
+                shared_texture_enabled(windowed, transparent, native_direct_overlay),
                 native_liquid_glass,
                 windowed && windowed_native_focus,
             );
@@ -528,9 +528,11 @@ mod tests {
     }
 
     #[test]
-    fn windowless_webviews_use_shared_textures() {
-        assert!(shared_texture_enabled(false));
-        assert!(!shared_texture_enabled(true));
+    fn shared_textures_skip_transparent_osr_meshes() {
+        assert!(shared_texture_enabled(false, false, false));
+        assert!(shared_texture_enabled(false, true, true));
+        assert!(!shared_texture_enabled(false, true, false));
+        assert!(!shared_texture_enabled(true, false, false));
     }
 
     #[test]

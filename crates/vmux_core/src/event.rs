@@ -176,7 +176,27 @@ pub struct FileViewportPatch {
     pub first_row: u32,
     pub total_rows: u32,
     pub total_lines: u32,
+    pub wrap_columns: u16,
+    pub layouts: Vec<FileLineLayout>,
     pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileLineLayout {
+    pub line_no: u32,
+    pub row: u32,
+    pub rows: u16,
 }
 
 #[derive(
@@ -404,6 +424,7 @@ pub struct FileErrorEvent {
 pub struct FileResizeEvent {
     pub char_height: f32,
     pub viewport_height: f32,
+    pub wrap_columns: u16,
 }
 
 #[derive(
@@ -1349,6 +1370,12 @@ mod file_event_tests {
             first_row: 100,
             total_rows: 4000,
             total_lines: 5000,
+            wrap_columns: 80,
+            layouts: vec![FileLineLayout {
+                line_no: 100,
+                row: 100,
+                rows: 1,
+            }],
             lines: vec![FileLine {
                 line_no: 100,
                 fold: FoldGutter::None,
@@ -1366,6 +1393,8 @@ mod file_event_tests {
         assert_eq!(decoded.first_row, 100);
         assert_eq!(decoded.total_rows, 4000);
         assert_eq!(decoded.total_lines, 5000);
+        assert_eq!(decoded.wrap_columns, 80);
+        assert_eq!(decoded.layouts, patch.layouts);
         assert_eq!(decoded.lines[0].line_no, 100);
         assert_eq!(decoded.lines[0].spans[0].text, "fn main() {");
         assert_eq!(decoded.lines[0].spans[0].fg, [220, 220, 170]);
@@ -1384,11 +1413,13 @@ mod file_event_tests {
         let r = FileResizeEvent {
             char_height: 16.0,
             viewport_height: 480.0,
+            wrap_columns: 120,
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
         let d = rkyv::from_bytes::<FileResizeEvent, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.char_height, 16.0);
         assert_eq!(d.viewport_height, 480.0);
+        assert_eq!(d.wrap_columns, 120);
     }
 
     #[test]

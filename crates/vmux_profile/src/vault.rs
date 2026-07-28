@@ -41,6 +41,7 @@ const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 1
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
+static SESSION_KEY_LOAD: OnceLock<Mutex<()>> = OnceLock::new();
 const IGNORED_ROOTS: [&str; 8] = [
     "agents",
     "extensions",
@@ -2507,21 +2508,20 @@ fn load_legacy_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String>
 
 #[cfg(target_os = "macos")]
 fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    if let Some(key) = load_session_key(vault_id)? {
-        return Ok(key);
-    }
-    if let Some(key) = load_key_from_broker(vault_id)? {
-        store_session_key(vault_id, &key)?;
-        return Ok(key);
-    }
-    let Some(key) = load_legacy_key(vault_id)? else {
-        return Err("This Vault is locked on this device. Unlock it with a passkey.".to_string());
-    };
-    if key_broker_path().is_some() {
-        store_key_with_broker(vault_id, &key)?;
-    }
-    store_session_key(vault_id, &key)?;
-    Ok(key)
+    load_or_store_session_key(vault_id, || {
+        if let Some(key) = load_key_from_broker(vault_id)? {
+            return Ok(key);
+        }
+        let Some(key) = load_legacy_key(vault_id)? else {
+            return Err(
+                "This Vault is locked on this device. Unlock it with a passkey.".to_string(),
+            );
+        };
+        if key_broker_path().is_some() {
+            store_key_with_broker(vault_id, &key)?;
+        }
+        Ok(key)
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -2748,6 +2748,25 @@ fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .insert(vault_id.to_string(), Zeroizing::new(key.to_vec()));
     Ok(())
+}
+
+fn load_or_store_session_key<F>(vault_id: &str, load: F) -> Result<Zeroizing<Vec<u8>>, String>
+where
+    F: FnOnce() -> Result<Zeroizing<Vec<u8>>, String>,
+{
+    if let Some(key) = load_session_key(vault_id)? {
+        return Ok(key);
+    }
+    let _load = SESSION_KEY_LOAD
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(key) = load_session_key(vault_id)? {
+        return Ok(key);
+    }
+    let key = load()?;
+    store_session_key(vault_id, &key)?;
+    Ok(key)
 }
 
 #[cfg(unix)]
@@ -3084,7 +3103,8 @@ fn command_success(output: Output) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
 
     #[test]
     fn vault_key_broker_encoding_round_trips() {
@@ -3093,6 +3113,38 @@ mod tests {
         assert_eq!(decode_key_hex(&hex(&key)), Ok(key));
         assert!(decode_key_hex("00").is_err());
         assert!(decode_key_hex(&"z".repeat(KEY_LEN * 2)).is_err());
+    }
+
+    #[test]
+    fn concurrent_vault_key_loads_prompt_once_per_session() {
+        let vault_id = "test-concurrent-vault-key-load";
+        SESSION_KEYS
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap()
+            .remove(vault_id);
+        let loads = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(8));
+        let threads = (0..8)
+            .map(|_| {
+                let loads = loads.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    load_or_store_session_key(vault_id, || {
+                        loads.fetch_add(1, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(10));
+                        Ok(Zeroizing::new(vec![7; KEY_LEN]))
+                    })
+                    .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for thread in threads {
+            assert_eq!(*thread.join().unwrap(), vec![7; KEY_LEN]);
+        }
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
     }
 
     #[cfg(target_os = "macos")]

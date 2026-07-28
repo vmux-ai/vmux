@@ -16,6 +16,8 @@ pub mod fold_store;
 pub mod keymap;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod markdown;
+#[cfg(not(target_arch = "wasm32"))]
+mod wrap;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod dir;

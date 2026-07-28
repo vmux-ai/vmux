@@ -1393,7 +1393,8 @@ fn sync_windowed_content_mesh_materials(
 ///
 /// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
 /// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
-/// visible leaves OSR running. Premultiplied alpha preserves CEF's accelerated transparent pixels.
+/// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
+/// transparent areas.
 fn sync_layout_mesh_visibility(
     mode: Res<vmux_layout::scene::InteractionMode>,
     layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
@@ -1408,8 +1409,8 @@ fn sync_layout_mesh_visibility(
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
         };
-        if material.base.alpha_mode != AlphaMode::Premultiplied {
-            material.base.alpha_mode = AlphaMode::Premultiplied;
+        if material.base.alpha_mode != AlphaMode::Blend {
+            material.base.alpha_mode = AlphaMode::Blend;
         }
         if material.base.base_color.alpha() != want_alpha {
             material.base.base_color.set_alpha(want_alpha);
@@ -3472,7 +3473,7 @@ fn push_pane_tree_emit(
     tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    expanded_panes: Query<(), With<SideSheetPaneExpanded>>,
+    collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -3559,7 +3560,7 @@ fn push_pane_tree_emit(
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
-            collapsed: !expanded_panes.contains(pane_entity),
+            collapsed: collapsed_panes.contains(pane_entity),
             projects_expanded: sections.projects,
             bookmarks_expanded: sections.bookmarks,
             knowledge_expanded: sections.knowledge,
@@ -4289,24 +4290,25 @@ fn on_side_sheet_command_emit(
         "collapse_card" => {
             commands
                 .entity(target_pane)
-                .remove::<SideSheetCardCollapsed>()
+                .insert(SideSheetCardCollapsed)
                 .remove::<SideSheetPaneExpanded>();
         }
         "expand_card" => {
             commands
                 .entity(target_pane)
                 .remove::<SideSheetCardCollapsed>()
-                .insert(SideSheetPaneExpanded);
+                .remove::<SideSheetPaneExpanded>();
         }
         "collapse_section" | "expand_section" => {
             let expanded = evt.command == "expand_section";
             if evt.path == "pane" {
                 let mut pane = commands.entity(target_pane);
-                pane.remove::<SideSheetCardCollapsed>();
                 if expanded {
-                    pane.insert(SideSheetPaneExpanded);
+                    pane.remove::<SideSheetCardCollapsed>()
+                        .remove::<SideSheetPaneExpanded>();
                 } else {
-                    pane.remove::<SideSheetPaneExpanded>();
+                    pane.insert(SideSheetCardCollapsed)
+                        .remove::<SideSheetPaneExpanded>();
                 }
                 return;
             }
@@ -5316,7 +5318,7 @@ mod tests {
             0.0,
             "User mode presents layout chrome through the native accelerated overlay"
         );
-        assert_eq!(mat.base.alpha_mode, AlphaMode::Premultiplied);
+        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]
@@ -5329,8 +5331,8 @@ mod tests {
         );
         assert_eq!(
             mat.base.alpha_mode,
-            AlphaMode::Premultiplied,
-            "Player uses premultiplied alpha so pages show through the layout's transparent areas"
+            AlphaMode::Blend,
+            "Player uses straight alpha so pages show through the layout's transparent areas"
         );
     }
 
@@ -5825,7 +5827,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_cef_shell_keeps_premultiplied_material() {
+    fn layout_cef_shell_keeps_blend_material() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_app_settings_with_radius(12.0))
@@ -5835,7 +5837,7 @@ mod tests {
             .add_systems(Update, sync_webview_pane_corner_clip);
 
         let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Premultiplied;
+        material.base.alpha_mode = AlphaMode::Blend;
         let handle = app
             .world_mut()
             .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
@@ -5856,7 +5858,7 @@ mod tests {
             .expect("webview material");
 
         assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Premultiplied);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]

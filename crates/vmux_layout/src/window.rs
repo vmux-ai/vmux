@@ -681,24 +681,17 @@ fn sync_window_surface_alpha(
 fn apply_webview_material_defaults(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     q: Query<
-        (
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-            Has<WebviewTransparent>,
-        ),
+        &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
         Or<(
             Added<WebviewSource>,
             Changed<WebviewMaterialHandle<WebviewExtendStandardMaterial>>,
         )>,
     >,
 ) {
-    for (handle, transparent) in &q {
+    for handle in &q {
         if let Some(mut material) = materials.get_mut(handle) {
             material.base.unlit = true;
-            material.base.alpha_mode = if transparent {
-                AlphaMode::Premultiplied
-            } else {
-                AlphaMode::Blend
-            };
+            material.base.alpha_mode = AlphaMode::Blend;
             material.base.depth_bias = WEBVIEW_MESH_DEPTH_BIAS;
             material.base.cull_mode = None;
         }
@@ -1083,7 +1076,7 @@ mod tests {
 
     #[cfg(feature = "player-mode")]
     #[test]
-    fn transparent_webview_material_uses_premultiplied_alpha() {
+    fn transparent_webview_material_uses_straight_alpha() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
@@ -1105,7 +1098,7 @@ mod tests {
             .get(&handle)
             .expect("webview material");
 
-        assert_eq!(material.base.alpha_mode, AlphaMode::Premultiplied);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
     fn test_settings(gap: f32) -> LayoutSettings {

@@ -69,14 +69,34 @@ fn default_locale_setting() -> String {
     "system".to_string()
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EditorSettings {
     #[serde(default)]
     pub keymap: vmux_core::KeymapKind,
     #[serde(default)]
+    pub word_wrap: vmux_core::editor::WordWrap,
+    #[serde(default = "default_word_wrap_column")]
+    pub word_wrap_column: u16,
+    #[serde(default)]
     pub lsp: LspSettings,
     #[serde(default)]
     pub explorer: ExplorerSettings,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            keymap: vmux_core::KeymapKind::default(),
+            word_wrap: vmux_core::editor::WordWrap::default(),
+            word_wrap_column: default_word_wrap_column(),
+            lsp: LspSettings::default(),
+            explorer: ExplorerSettings::default(),
+        }
+    }
+}
+
+fn default_word_wrap_column() -> u16 {
+    80
 }
 
 /// Default Explorer panel width in pixels when unset.
@@ -1364,6 +1384,26 @@ mod tests {
         let s = base_settings();
         assert!(!s.editor.explorer.visible());
         assert_eq!(s.editor.explorer.width(), EXPLORER_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn editor_wrap_defaults_match_enabled_vscode_settings() {
+        let settings = EditorSettings::default();
+
+        assert_eq!(settings.word_wrap, vmux_core::editor::WordWrap::On);
+        assert_eq!(settings.word_wrap_column, 80);
+    }
+
+    #[test]
+    fn editor_wrap_uses_vscode_setting_values() {
+        let settings =
+            parse_settings("(editor: (word_wrap: wordWrapColumn, word_wrap_column: 100))").unwrap();
+
+        assert_eq!(
+            settings.editor.word_wrap,
+            vmux_core::editor::WordWrap::WordWrapColumn
+        );
+        assert_eq!(settings.editor.word_wrap_column, 100);
     }
 
     #[test]
