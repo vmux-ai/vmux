@@ -1950,8 +1950,17 @@ pub fn Page() -> Element {
                             onclick: move |_| {
                                 let next = vmux_core::KeymapKind::Vscode;
                                 keymap.set(next);
+                                ed_mode.set(vmux_core::editor::EditMode::Insert);
+                                ed_label.set(String::new());
                                 let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
-                                focus_file_input();
+                                if file_view_mode() == FileViewMode::Note
+                                    && is_markdown_file(&git_path())
+                                    && !note_editing()
+                                {
+                                    focus_container();
+                                } else {
+                                    focus_file_input();
+                                }
                             },
                             "Normal"
                         }
@@ -1960,8 +1969,18 @@ pub fn Page() -> Element {
                             onclick: move |_| {
                                 let next = vmux_core::KeymapKind::Vim;
                                 keymap.set(next);
+                                let next_mode = vmux_core::editor::EditMode::Normal;
+                                ed_mode.set(next_mode);
+                                ed_label.set(next_mode.label().to_string());
                                 let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
-                                focus_file_input();
+                                if file_view_mode() == FileViewMode::Note
+                                    && is_markdown_file(&git_path())
+                                    && !note_editing()
+                                {
+                                    focus_container();
+                                } else {
+                                    focus_file_input();
+                                }
                             },
                             "Vim"
                         }

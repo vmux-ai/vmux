@@ -541,7 +541,14 @@ fn load_file_buffers(
 fn reapply_keymap_on_change(
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut last: Local<Option<vmux_core::KeymapKind>>,
-    mut q: Query<(&mut EditState, &mut EditorKeymap)>,
+    mut q: Query<(
+        Entity,
+        &mut EditState,
+        &mut EditorKeymap,
+        Option<&FileViewport>,
+    )>,
+    browsers: Option<NonSend<Browsers>>,
+    mut commands: Commands,
 ) {
     let kind = settings_keymap(&settings);
     if *last == Some(kind) {
@@ -552,9 +559,19 @@ fn reapply_keymap_on_change(
     if first {
         return;
     }
-    for (mut edit, mut keymap) in &mut q {
+    for (entity, mut edit, mut keymap, viewport) in &mut q {
         keymap.0 = kind.make();
         edit.core.mode = kind.initial_mode();
+        if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
+            emit_cursor(
+                entity,
+                &mut edit,
+                keymap.0.as_ref(),
+                viewport,
+                browsers,
+                &mut commands,
+            );
+        }
     }
 }
 
