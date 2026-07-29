@@ -649,6 +649,339 @@ fn RenderedNoteBlock(
     }
 }
 
+#[component]
+fn NoteBlockView(
+    note_blocks: Signal<Vec<NoteBlock>>,
+    diff_markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    index: usize,
+    editing: bool,
+    current: vmux_core::editor::CursorPos,
+    selections: Vec<vmux_core::editor::SelSpan>,
+    note_diff_marker: Option<EditorDiffMarker>,
+    keymap: vmux_core::KeymapKind,
+    active_edit_line: u32,
+    edit_rect: Option<NoteEditRect>,
+    mut note_active: Signal<Option<u32>>,
+    mut note_editing: Signal<bool>,
+    mut note_edit_line: Signal<Option<u32>>,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    mut note_dragging: Signal<bool>,
+    comp_open: bool,
+    comp_filtered: Vec<CompletionItem>,
+    comp_sel_clamped: usize,
+) -> Element {
+    let Some(note_block) = note_blocks.read().get(index).cloned() else {
+        return rsx! {};
+    };
+    let is_list = matches!(note_block.block, MdBlock::List { .. });
+    let is_live_inline = matches!(
+        note_block.block,
+        MdBlock::Paragraph { .. } | MdBlock::Heading { .. }
+    );
+    let start = note_block.start_line;
+    let end = note_block.end_line;
+    let note_diff_marker = note_block_diff_marker(&diff_markers.read(), start, end);
+    let source = note_block.source.clone();
+    let pointer_source = source.clone();
+    let live_pointer_source = source.clone();
+    let live_down_source = if editing {
+        source.clone()
+    } else {
+        String::new()
+    };
+    let pointer_block = note_block.block.clone();
+    let edit_lines = if !editing {
+        Vec::new()
+    } else if is_list {
+        let raw = source
+            .lines()
+            .nth(active_edit_line.saturating_sub(start) as usize)
+            .unwrap_or_default();
+        let prefix = note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix);
+        vec![(
+            active_edit_line,
+            raw.chars().skip(prefix).collect::<String>(),
+            prefix as u32,
+        )]
+    } else if source.is_empty() {
+        vec![(start, String::new(), 0)]
+    } else {
+        source
+            .lines()
+            .enumerate()
+            .map(|(offset, raw)| (start + offset as u32, raw.to_string(), 0))
+            .collect::<Vec<_>>()
+    };
+    let edit_class = note_edit_block_class(&note_block.block);
+    let heading_level = match &note_block.block {
+        MdBlock::Heading { level, .. } => Some(*level),
+        _ => None,
+    };
+    let (live_nodes, live_source, live_caret, live_selections) = if editing && is_live_inline {
+        (
+            note_inline_nodes(&source, heading_level),
+            source.chars().collect::<Vec<_>>(),
+            note_source_offset(&source, start, current.line, current.col),
+            note_selection_ranges(&source, start, &selections),
+        )
+    } else {
+        (Vec::new(), Vec::new(), 0, Vec::new())
+    };
+    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
+        "w-px"
+    } else {
+        "w-[2px]"
+    };
+    let edit_overlay_class = if is_list {
+        "visible absolute z-10 cursor-text overflow-auto"
+    } else {
+        note_edit_overlay_class()
+    };
+    let edit_overlay_style = if is_list {
+        edit_rect.map_or_else(String::new, |rect| {
+            format!(
+                "top:{}px;left:{}px;width:{}px;height:{}px;",
+                rect.top, rect.left, rect.width, rect.height,
+            )
+        })
+    } else {
+        String::new()
+    };
+
+    rsx! {
+        div {
+            id: "note-block-{index}",
+            "data-note-block": "{index}",
+            class: "relative flow-root w-full cursor-text",
+            onclick: move |event| {
+                if editing && !is_list {
+                    return;
+                }
+                event.stop_propagation();
+                if browser_has_text_selection() {
+                    return;
+                }
+                let event_data = event.data();
+                let raw = event_data.downcast::<web_sys::MouseEvent>();
+                let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
+                let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
+                if is_live_inline {
+                    note_active.set(Some(index as u32));
+                    note_editing.set(true);
+                    note_edit_line.set(None);
+                    note_edit_rect.set(None);
+                    place_note_block_caret(
+                        index,
+                        start,
+                        live_pointer_source.clone(),
+                        client_x,
+                        client_y,
+                    );
+                    return;
+                }
+                let line = note_pointer_line(&event, start, end, &pointer_block);
+                let text = pointer_source
+                    .lines()
+                    .nth(line.saturating_sub(start) as usize)
+                    .unwrap_or_default()
+                    .to_string();
+                let prefix = if is_list {
+                    note_list_marker_prefix_len(&text).map_or(0, |(_, prefix)| prefix as u32)
+                } else {
+                    0
+                };
+                note_active.set(Some(index as u32));
+                note_editing.set(true);
+                note_edit_line.set(Some(line));
+                note_edit_rect.set(
+                    is_list
+                        .then(|| note_list_edit_rect(&event, index))
+                        .flatten(),
+                );
+                let displayed = text.chars().skip(prefix as usize).collect();
+                place_note_caret(line, displayed, client_x, prefix);
+            },
+            if let Some(marker) = note_diff_marker {
+                span {
+                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
+                }
+            }
+            RenderedNoteBlock {
+                block: note_block.block.clone(),
+                index,
+                hidden_list_line: (editing && is_list).then_some(active_edit_line),
+                invisible: editing && !is_list,
+            }
+            if editing {
+                div {
+                    class: edit_overlay_class,
+                    style: edit_overlay_style,
+                    if is_live_inline {
+                        div {
+                            id: "note-live-block-{index}",
+                            "data-note-edit-block": "{index}",
+                            class: edit_class,
+                            onclick: move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                            },
+                            onpointerdown: move |event: Event<PointerData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                                let extend = event
+                                    .data()
+                                    .downcast::<web_sys::PointerEvent>()
+                                    .is_some_and(|raw| raw.shift_key());
+                                let offset = note_pointer_col_from_pointer(
+                                    &event,
+                                    &live_down_source,
+                                );
+                                let (line, col) = note_source_position(
+                                    &live_down_source,
+                                    start,
+                                    offset,
+                                );
+                                note_dragging.set(true);
+                                set_pointer_capture(&event, "file-scroll", true);
+                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                    line,
+                                    col,
+                                    extend,
+                                });
+                                focus_file_input();
+                            },
+                            onmousedown: move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                            },
+                            span {
+                                "data-note-line-text": "true",
+                                class: "inline",
+                                {render_note_inline_nodes(
+                                    &live_source,
+                                    &live_nodes,
+                                    live_caret,
+                                    &live_selections,
+                                    caret_width_class,
+                                )}
+                                if live_caret == live_source.len() as u32 {
+                                    {render_note_caret(caret_width_class)}
+                                }
+                            }
+                        }
+                    } else {
+                        div {
+                            class: if is_list { "" } else { edit_class },
+                            for (line, raw, prefix) in edit_lines.iter() {
+                                {
+                                    let line = *line;
+                                    let prefix = *prefix;
+                                    let pointer_raw_down = raw.clone();
+                                    let line_selection = selections
+                                        .iter()
+                                        .find(|selection| selection.line == line)
+                                        .map(|selection| vmux_core::editor::SelSpan {
+                                            line: selection.line,
+                                            row: selection.row,
+                                            start: selection.start.saturating_sub(prefix),
+                                            end: if selection.end == u32::MAX {
+                                                u32::MAX
+                                            } else {
+                                                selection.end.saturating_sub(prefix)
+                                            },
+                                        });
+                                    let chunks = note_line_chunks(
+                                        raw,
+                                        (line == current.line)
+                                            .then_some(current.col.saturating_sub(prefix)),
+                                        line_selection,
+                                    );
+                                    let line_class = if is_list {
+                                        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
+                                    } else {
+                                        note_edit_line_class(&note_block.block)
+                                    };
+                                    rsx! {
+                                        div {
+                                            key: "{line}",
+                                            id: "note-line-{line}",
+                                            "data-note-edit-line": "{line}",
+                                            class: line_class,
+                                            onclick: move |event: Event<MouseData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                            },
+                                            onpointerdown: move |event: Event<PointerData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                                let extend = event
+                                                    .data()
+                                                    .downcast::<web_sys::PointerEvent>()
+                                                    .is_some_and(|raw| raw.shift_key());
+                                                let col = prefix
+                                                    + note_pointer_col_from_pointer(
+                                                        &event,
+                                                        &pointer_raw_down,
+                                                    );
+                                                note_dragging.set(true);
+                                                set_pointer_capture(&event, "file-scroll", true);
+                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                    line,
+                                                    col,
+                                                    extend,
+                                                });
+                                                focus_file_input();
+                                            },
+                                            onmousedown: move |event: Event<MouseData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                            },
+                                            span {
+                                                "data-note-line-text": "true",
+                                                class: "inline-block min-w-[1ch]",
+                                                for (chunk_index, chunk) in chunks.iter().enumerate() {
+                                                    if chunk.caret_before {
+                                                        span {
+                                                            key: "caret-{chunk_index}",
+                                                            id: NOTE_CARET_ID,
+                                                            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
+                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
+                                                        }
+                                                    }
+                                                    if !chunk.text.is_empty() {
+                                                        span {
+                                                            key: "text-{chunk_index}",
+                                                            class: if chunk.selected { "bg-cyan-400/20" } else { "" },
+                                                            "{chunk.text}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if comp_open && !comp_filtered.is_empty() {
+                        div {
+                            class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
+                            for (item_index, item) in comp_filtered.iter().enumerate() {
+                                div {
+                                    key: "note-completion-{item_index}",
+                                    class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-cyan-400/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
+                                    span { class: "truncate", "{item.label}" }
+                                    span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn render_note_source_range(
     source: &[char],
     start: u32,
@@ -1769,30 +2102,31 @@ pub fn Page() -> Element {
     });
 
     let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
-        let moved = cursor() != c.primary;
-        if ed_mode() != c.mode {
+        let moved = cursor.peek().ne(&c.primary);
+        if *ed_mode.peek() != c.mode {
             ed_mode.set(c.mode);
         }
-        if ed_label() != c.mode_label {
-            ed_label.set(c.mode_label);
+        if ed_label.peek().ne(&c.mode_label) {
+            ed_label.set(c.mode_label.clone());
         }
         if moved {
             cursor.set(c.primary);
         }
-        if sel() != c.selections {
-            sel.set(c.selections);
+        if sel.peek().as_slice() != c.selections.as_slice() {
+            sel.set(c.selections.clone());
         }
-        if source_cursor() != c.source_primary {
+        if source_cursor.peek().ne(&c.source_primary) {
             source_cursor.set(c.source_primary);
         }
-        if source_sel() != c.source_selections {
-            source_sel.set(c.source_selections);
+        if source_sel.peek().as_slice() != c.source_selections.as_slice() {
+            source_sel.set(c.source_selections.clone());
         }
-        let note_mode = file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path());
+        let note_mode = *file_view_mode.peek() == FileViewMode::Note
+            && is_markdown_file(git_path.peek().as_str());
         if note_mode {
-            let active = note_block_index_for_line(&note_blocks.read(), c.source_primary.line);
-            if keymap() == vmux_core::KeymapKind::Vim
-                && !note_editing()
+            let active = note_block_index_for_line(&note_blocks.peek(), c.source_primary.line);
+            if *keymap.peek() == vmux_core::KeymapKind::Vim
+                && !*note_editing.peek()
                 && let Some(index) = active
             {
                 activate_note_cursor(
@@ -1804,23 +2138,23 @@ pub fn Page() -> Element {
                     note_edit_rect,
                 );
             }
-            if note_editing() {
+            if *note_editing.peek() {
                 let is_list = active.is_some_and(|index| {
-                    matches!(note_blocks.read()[index].block, MdBlock::List { .. })
+                    matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
                 });
                 let edit_line = is_list.then_some(c.source_primary.line);
                 let rect = active
                     .filter(|_| is_list)
                     .and_then(|index| note_list_edit_rect_for_line(index, c.source_primary.line));
-                if note_edit_line() != edit_line {
+                if *note_edit_line.peek() != edit_line {
                     note_edit_line.set(edit_line);
                 }
-                if note_edit_rect() != rect {
+                if *note_edit_rect.peek() != rect {
                     note_edit_rect.set(rect);
                 }
             }
             let active = active.map(|index| index as u32);
-            if note_active() != active {
+            if *note_active.peek() != active {
                 note_active.set(active);
             }
             if moved && let Some(index) = active {
@@ -2715,7 +3049,7 @@ pub fn Page() -> Element {
                             let active = note_active();
                             let current = source_cursor();
                             let selections = source_sel();
-                            let diff_markers = git_line_markers();
+                            let block_count = note_blocks.read().len();
                             let note_input_comp_keys = comp_keys.clone();
                             rsx! {
                                 div {
@@ -2783,333 +3117,54 @@ pub fn Page() -> Element {
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         NoteProperties { properties: note_properties() }
-                                        for (index, note_block) in note_blocks().iter().enumerate() {
+                                        for index in 0..block_count {
                                             {
-                                                let editing = note_editing() && Some(index as u32) == active;
-                                                let is_list = matches!(note_block.block, MdBlock::List { .. });
-                                                let is_live_inline = matches!(
-                                                    note_block.block,
-                                                    MdBlock::Paragraph { .. } | MdBlock::Heading { .. }
-                                                );
-                                                let start = note_block.start_line;
-                                                let end = note_block.end_line;
-                                                let note_diff_marker = note_block_diff_marker(
-                                                    &diff_markers,
-                                                    start,
-                                                    end,
-                                                );
-                                                let source = note_block.source.clone();
-                                                let pointer_source = source.clone();
-                                                let live_pointer_source = source.clone();
-                                                let live_down_source = if editing {
-                                                    source.clone()
+                                                let editing =
+                                                    note_editing() && Some(index as u32) == active;
+                                                let block_current = if editing {
+                                                    current
                                                 } else {
-                                                    String::new()
+                                                    vmux_core::editor::CursorPos::default()
                                                 };
-                                                let pointer_block = note_block.block.clone();
-                                                let active_edit_line = note_edit_line().unwrap_or(current.line);
-                                                let edit_lines = if !editing {
+                                                let block_selections = if editing {
+                                                    selections.clone()
+                                                } else {
                                                     Vec::new()
-                                                } else if is_list {
-                                                    let raw = source
-                                                        .lines()
-                                                        .nth(active_edit_line.saturating_sub(start) as usize)
-                                                        .unwrap_or_default();
-                                                    let prefix = note_list_marker_prefix_len(raw)
-                                                        .map_or(0, |(_, prefix)| prefix);
-                                                    vec![(
-                                                        active_edit_line,
-                                                        raw.chars().skip(prefix).collect::<String>(),
-                                                        prefix as u32,
-                                                    )]
-                                                } else if source.is_empty() {
-                                                    vec![(start, String::new(), 0)]
-                                                } else {
-                                                    source
-                                                        .lines()
-                                                        .enumerate()
-                                                        .map(|(offset, raw)| {
-                                                            (start + offset as u32, raw.to_string(), 0)
-                                                        })
-                                                        .collect::<Vec<_>>()
                                                 };
-                                                let edit_class = note_edit_block_class(&note_block.block);
-                                                let heading_level = match &note_block.block {
-                                                    MdBlock::Heading { level, .. } => Some(*level),
-                                                    _ => None,
-                                                };
-                                                let (live_nodes, live_source, live_caret, live_selections) =
-                                                    if editing && is_live_inline {
-                                                        (
-                                                            note_inline_nodes(&source, heading_level),
-                                                            source.chars().collect::<Vec<_>>(),
-                                                            note_source_offset(
-                                                                &source,
-                                                                start,
-                                                                current.line,
-                                                                current.col,
-                                                            ),
-                                                            note_selection_ranges(
-                                                                &source,
-                                                                start,
-                                                                &selections,
-                                                            ),
-                                                        )
-                                                    } else {
-                                                        (Vec::new(), Vec::new(), 0, Vec::new())
-                                                    };
-                                                let caret_width_class = if keymap() == vmux_core::KeymapKind::Vscode {
-                                                    "w-px"
+                                                let active_edit_line = if editing {
+                                                    note_edit_line().unwrap_or(current.line)
                                                 } else {
-                                                    "w-[2px]"
+                                                    0
                                                 };
-                                                let overlay_class = note_edit_overlay_class();
-                                                let edit_overlay_class = if is_list {
-                                                    "visible absolute z-10 cursor-text overflow-auto"
+                                                let edit_rect = if editing {
+                                                    note_edit_rect()
                                                 } else {
-                                                    overlay_class
-                                                };
-                                                let edit_overlay_style = if is_list {
-                                                    note_edit_rect().map_or_else(String::new, |rect| {
-                                                        format!(
-                                                            "top:{}px;left:{}px;width:{}px;height:{}px;",
-                                                            rect.top, rect.left, rect.width, rect.height,
-                                                        )
-                                                    })
-                                                } else {
-                                                    String::new()
+                                                    None
                                                 };
                                                 rsx! {
-                                                    div {
+                                                    NoteBlockView {
                                                         key: "block-{index}",
-                                                        id: "note-block-{index}",
-                                                        "data-note-block": "{index}",
-                                                        class: "relative flow-root w-full cursor-text",
-                                                        onclick: move |event| {
-                                                            if editing && !is_list {
-                                                                return;
-                                                            }
-                                                            event.stop_propagation();
-                                                            if browser_has_text_selection() {
-                                                                return;
-                                                            }
-                                                            let event_data = event.data();
-                                                            let raw = event_data.downcast::<web_sys::MouseEvent>();
-                                                            let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
-                                                            let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
-                                                            if is_live_inline {
-                                                                note_active.set(Some(index as u32));
-                                                                note_editing.set(true);
-                                                                note_edit_line.set(None);
-                                                                note_edit_rect.set(None);
-                                                                place_note_block_caret(
-                                                                    index,
-                                                                    start,
-                                                                    live_pointer_source.clone(),
-                                                                    client_x,
-                                                                    client_y,
-                                                                );
-                                                                return;
-                                                            }
-                                                            let line = note_pointer_line(
-                                                                &event,
-                                                                start,
-                                                                end,
-                                                                &pointer_block,
-                                                            );
-                                                            let text = pointer_source
-                                                                .lines()
-                                                                .nth(line.saturating_sub(start) as usize)
-                                                                .unwrap_or_default()
-                                                                .to_string();
-                                                            let prefix = if is_list {
-                                                                note_list_marker_prefix_len(&text)
-                                                                    .map_or(0, |(_, prefix)| prefix as u32)
-                                                            } else {
-                                                                0
-                                                            };
-                                                            note_active.set(Some(index as u32));
-                                                            note_editing.set(true);
-                                                            note_edit_line.set(Some(line));
-                                                            note_edit_rect.set(
-                                                                is_list
-                                                                    .then(|| note_list_edit_rect(&event, index))
-                                                                    .flatten(),
-                                                            );
-                                                            let displayed = text
-                                                                .chars()
-                                                                .skip(prefix as usize)
-                                                                .collect();
-                                                            place_note_caret(line, displayed, client_x, prefix);
+                                                        note_blocks,
+                                                        diff_markers: git_line_markers,
+                                                        index,
+                                                        editing,
+                                                        current: block_current,
+                                                        selections: block_selections,
+                                                        keymap: keymap(),
+                                                        active_edit_line,
+                                                        edit_rect,
+                                                        note_active,
+                                                        note_editing,
+                                                        note_edit_line,
+                                                        note_edit_rect,
+                                                        note_dragging,
+                                                        comp_open: editing && comp_open(),
+                                                        comp_filtered: if editing {
+                                                            comp_filtered.clone()
+                                                        } else {
+                                                            Vec::new()
                                                         },
-                                                        if let Some(marker) = note_diff_marker {
-                                                            span {
-                                                                class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
-                                                            }
-                                                        }
-                                                        RenderedNoteBlock {
-                                                            block: note_block.block.clone(),
-                                                            index,
-                                                            hidden_list_line: (editing && is_list)
-                                                                .then_some(active_edit_line),
-                                                            invisible: editing && !is_list,
-                                                        }
-                                                        if editing {
-                                                            div {
-                                                                class: edit_overlay_class,
-                                                                style: edit_overlay_style,
-                                                                if is_live_inline {
-                                                                    div {
-                                                                        id: "note-live-block-{index}",
-                                                                        "data-note-edit-block": "{index}",
-                                                                        class: edit_class,
-                                                                        onclick: move |event: Event<MouseData>| {
-                                                                            event.stop_propagation();
-                                                                            event.prevent_default();
-                                                                        },
-                                                                        onpointerdown: move |event: Event<PointerData>| {
-                                                                            event.stop_propagation();
-                                                                            event.prevent_default();
-                                                                            let extend = event
-                                                                                .data()
-                                                                                .downcast::<web_sys::PointerEvent>()
-                                                                                .is_some_and(|raw| raw.shift_key());
-                                                                            let offset = note_pointer_col_from_pointer(
-                                                                                &event,
-                                                                                &live_down_source,
-                                                                            );
-                                                                            let (line, col) = note_source_position(
-                                                                                &live_down_source,
-                                                                                start,
-                                                                                offset,
-                                                                            );
-                                                                            note_dragging.set(true);
-                                                                            set_pointer_capture(&event, "file-scroll", true);
-                                                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                                                line,
-                                                                                col,
-                                                                                extend,
-                                                                            });
-                                                                            focus_file_input();
-                                                                        },
-                                                                        onmousedown: move |event: Event<MouseData>| {
-                                                                            event.stop_propagation();
-                                                                            event.prevent_default();
-                                                                        },
-                                                                        span {
-                                                                            "data-note-line-text": "true",
-                                                                            class: "inline",
-                                                                            {render_note_inline_nodes(
-                                                                                &live_source,
-                                                                                &live_nodes,
-                                                                                live_caret,
-                                                                                &live_selections,
-                                                                                caret_width_class,
-                                                                            )}
-                                                                            if live_caret == live_source.len() as u32 {
-                                                                                {render_note_caret(caret_width_class)}
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                } else {
-                                                                    div {
-                                                                        class: if is_list { "" } else { edit_class },
-                                                                    for (line, raw, prefix) in edit_lines.iter() {
-                                                                        {
-                                                                            let line = *line;
-                                                                            let prefix = *prefix;
-                                                                            let pointer_raw_down = raw.clone();
-                                                                            let line_selection = selections
-                                                                                .iter()
-                                                                                .find(|selection| selection.line == line)
-                                                                                .map(|selection| vmux_core::editor::SelSpan {
-                                                                                    line: selection.line,
-                                                                                    row: selection.row,
-                                                                                    start: selection.start.saturating_sub(prefix),
-                                                                                    end: if selection.end == u32::MAX {
-                                                                                        u32::MAX
-                                                                                    } else {
-                                                                                        selection.end.saturating_sub(prefix)
-                                                                                    },
-                                                                                });
-                                                                            let chunks = note_line_chunks(
-                                                                                raw,
-                                                                                (line == current.line)
-                                                                                    .then_some(current.col.saturating_sub(prefix)),
-                                                                                line_selection,
-                                                                            );
-                                                                            let line_class = if is_list {
-                                                                                "min-h-[1lh] w-full whitespace-pre-wrap break-words"
-                                                                            } else {
-                                                                                note_edit_line_class(&note_block.block)
-                                                                            };
-                                                                            rsx! {
-                                                                                div {
-                                                                                    key: "{line}",
-                                                                                    id: "note-line-{line}",
-                                                                                    "data-note-edit-line": "{line}",
-                                                                                    class: line_class,
-                                                                                    onclick: move |event: Event<MouseData>| {
-                                                                                        event.stop_propagation();
-                                                                                        event.prevent_default();
-                                                                                    },
-                                                                                    onpointerdown: move |event: Event<PointerData>| {
-                                                                                        event.stop_propagation();
-                                                                                        event.prevent_default();
-                                                                                        let extend = event
-                                                                                            .data()
-                                                                                            .downcast::<web_sys::PointerEvent>()
-                                                                                            .is_some_and(|raw| raw.shift_key());
-                                                                                        let col = prefix + note_pointer_col_from_pointer(&event, &pointer_raw_down);
-                                                                                        note_dragging.set(true);
-                                                                                        set_pointer_capture(&event, "file-scroll", true);
-                                                                                        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent { line, col, extend });
-                                                                                        focus_file_input();
-                                                                                    },
-                                                                                    onmousedown: move |event: Event<MouseData>| {
-                                                                                        event.stop_propagation();
-                                                                                        event.prevent_default();
-                                                                                    },
-                                                                                    span { "data-note-line-text": "true", class: "inline-block min-w-[1ch]",
-                                                                                        for (chunk_index, chunk) in chunks.iter().enumerate() {
-                                                                                            if chunk.caret_before {
-                                                                                                span {
-                                                                                                    key: "caret-{chunk_index}",
-                                                                                                    id: NOTE_CARET_ID,
-                                                                                                    class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                                                                                                    span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
-                                                                                                }
-                                                                                            }
-                                                                                            if !chunk.text.is_empty() {
-                                                                                                span {
-                                                                                                    key: "text-{chunk_index}",
-                                                                                                    class: if chunk.selected { "bg-cyan-400/20" } else { "" },
-                                                                                                    "{chunk.text}"
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                                }
-                                                                if comp_open() && !comp_filtered.is_empty() {
-                                                                    div {
-                                                                        class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
-                                                                        for (item_index, item) in comp_filtered.iter().enumerate() {
-                                                                            div {
-                                                                                key: "note-completion-{item_index}",
-                                                                                class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-cyan-400/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
-                                                                                span { class: "truncate", "{item.label}" }
-                                                                                span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
+                                                        comp_sel_clamped,
                                                     }
                                                 }
                                             }
