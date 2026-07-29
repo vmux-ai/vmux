@@ -25,6 +25,7 @@ pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
+pub const FILE_SCROLL_BY_EVENT: &str = "file_scroll_by";
 pub const FILE_FOLD_TOGGLE_EVENT: &str = "file_fold_toggle";
 pub const FILE_DIR_EVENT: &str = "file_dir";
 pub const FILE_THEME_EVENT: &str = "file_theme";
@@ -459,6 +460,23 @@ pub struct FileVideoRect {
 )]
 pub struct FileScrollEvent {
     pub top_row: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileScrollByEvent {
+    pub lines: i32,
 }
 
 #[derive(
@@ -1875,6 +1893,8 @@ pub struct FileCursorEvent {
     pub mode_label: String,
     pub primary: crate::editor::CursorPos,
     pub selections: Vec<crate::editor::SelSpan>,
+    pub source_primary: crate::editor::CursorPos,
+    pub source_selections: Vec<crate::editor::SelSpan>,
 }
 
 #[derive(
@@ -2288,6 +2308,17 @@ mod tests {
                 row: 3,
                 start: 0,
                 end: 5,
+            }],
+            source_primary: CursorPos {
+                line: 3,
+                row: 3,
+                col: 25,
+            },
+            source_selections: vec![SelSpan {
+                line: 3,
+                row: 3,
+                start: 20,
+                end: 25,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();

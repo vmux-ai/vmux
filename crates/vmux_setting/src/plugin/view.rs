@@ -687,12 +687,12 @@ fn build_settings_schema_for(locale: &str) -> SettingsSchema {
                     widget: Some(WidgetKind::Select),
                     options: vec![
                         SelectOption {
-                            value: "vscode".into(),
-                            label: "VS Code".into(),
+                            value: "standard".into(),
+                            label: t("editor-keymap-standard"),
                         },
                         SelectOption {
                             value: "vim".into(),
-                            label: "Vim".into(),
+                            label: t("editor-keymap-vim"),
                         },
                     ],
                     ..Default::default()
@@ -764,6 +764,18 @@ mod appearance_schema_tests {
         assert_eq!(mode.widget, Some(WidgetKind::Select));
         let vals: Vec<_> = mode.options.iter().map(|o| o.value.as_str()).collect();
         assert_eq!(vals, vec!["device", "light", "dark"]);
+    }
+
+    #[test]
+    fn schema_exposes_standard_and_vim_keymaps() {
+        let schema = build_settings_schema();
+        let keymap = schema.field("editor.keymap").expect("keymap field");
+        let options = keymap
+            .options
+            .iter()
+            .map(|option| (option.value.as_str(), option.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(options, vec![("standard", "Standard"), ("vim", "Vim")]);
     }
 
     #[test]

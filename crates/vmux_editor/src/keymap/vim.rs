@@ -17,16 +17,18 @@ fn rep(cmd: EditCommand, n: usize) -> Vec<EditCommand> {
 
 fn motion_for(key: &str) -> Option<Motion> {
     Some(match key {
-        "h" => Motion::Left,
-        "l" => Motion::Right,
-        "j" => Motion::Down,
-        "k" => Motion::Up,
+        "h" | "ArrowLeft" => Motion::LeftBounded,
+        "l" | "ArrowRight" => Motion::RightBounded,
+        "j" | "ArrowDown" => Motion::Down,
+        "k" | "ArrowUp" => Motion::Up,
         "w" => Motion::WordNext,
         "b" => Motion::WordPrev,
         "e" => Motion::WordEnd,
         "0" => Motion::LineStart,
         "^" => Motion::FirstNonBlank,
         "$" => Motion::LineEnd,
+        "{" => Motion::ParagraphPrev,
+        "}" => Motion::ParagraphNext,
         _ => return None,
     })
 }
@@ -270,7 +272,7 @@ impl VimKeymap {
         match k.key.as_str() {
             "Escape" => {
                 self.mode = EditMode::Normal;
-                vec![Move(Motion::Left), SetMode(EditMode::Normal)]
+                vec![Move(Motion::LeftBounded), SetMode(EditMode::Normal)]
             }
             "Backspace" => vec![DeleteBack],
             "Delete" => vec![DeleteForward],
@@ -332,6 +334,53 @@ impl Keymap for VimKeymap {
         }
     }
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+        #[cfg(target_os = "macos")]
+        if k.mods.meta && !k.mods.ctrl && !k.mods.alt {
+            let command = match k.key.to_ascii_lowercase().as_str() {
+                "c" => Some(EditCommand::Yank),
+                "x" => Some(EditCommand::Cut),
+                "v" => Some(EditCommand::Paste),
+                "a" => Some(EditCommand::Move(Motion::DocStart)),
+                "s" => Some(EditCommand::Save),
+                "z" if k.mods.shift => Some(EditCommand::Redo),
+                "z" => Some(EditCommand::Undo),
+                "y" => Some(EditCommand::Redo),
+                _ => None,
+            };
+            if let Some(command) = command {
+                self.reset();
+                return if k.key.eq_ignore_ascii_case("a") {
+                    vec![command, EditCommand::Select(Motion::DocEnd)]
+                } else {
+                    vec![command]
+                };
+            }
+        }
+        if k.mods.ctrl && !k.mods.meta && !k.mods.alt {
+            let direction = match k.key.to_ascii_lowercase().as_str() {
+                "e" => Some(1),
+                "y" => Some(-1),
+                _ => None,
+            };
+            if let Some(direction) = direction {
+                let count = self.take_count().min(i32::MAX as usize) as i32;
+                self.reset();
+                return vec![EditCommand::ScrollViewport(direction * count)];
+            }
+            let motion = match k.key.to_ascii_lowercase().as_str() {
+                "n" => Some(Motion::Down),
+                "p" => Some(Motion::Up),
+                _ => None,
+            };
+            if let Some(motion) = motion {
+                self.reset();
+                return if self.mode.is_visual() {
+                    vec![EditCommand::Select(motion)]
+                } else {
+                    vec![EditCommand::Move(motion)]
+                };
+            }
+        }
         if k.mods.ctrl && k.key.eq_ignore_ascii_case("c") {
             if self.ex.take().is_some() {
                 return vec![];
@@ -340,7 +389,7 @@ impl Keymap for VimKeymap {
                 EditMode::Insert => {
                     self.mode = EditMode::Normal;
                     vec![
-                        EditCommand::Move(Motion::Left),
+                        EditCommand::Move(Motion::LeftBounded),
                         EditCommand::SetMode(EditMode::Normal),
                     ]
                 }
@@ -382,6 +431,17 @@ mod tests {
             key: key.into(),
             mods: Mods {
                 ctrl: true,
+                ..Default::default()
+            },
+            repeat: false,
+        }
+    }
+    #[cfg(target_os = "macos")]
+    fn command(key: &str) -> KeyInput {
+        KeyInput {
+            key: key.into(),
+            mods: Mods {
+                meta: true,
                 ..Default::default()
             },
             repeat: false,
@@ -434,6 +494,22 @@ mod tests {
     }
 
     #[test]
+    fn document_jump_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&k("G")), vec![EditCommand::Move(Motion::DocEnd)]);
+        assert_eq!(km.handle(&k("g")), vec![]);
+        assert_eq!(
+            km.handle(&k("g")),
+            vec![EditCommand::Move(Motion::DocStart)]
+        );
+        assert_eq!(km.handle(&k("4")), vec![]);
+        assert_eq!(
+            km.handle(&k("G")),
+            vec![EditCommand::Move(Motion::GotoLine(3))]
+        );
+    }
+
+    #[test]
     fn i_enters_insert() {
         let mut km = VimKeymap::default();
         assert_eq!(
@@ -450,7 +526,7 @@ mod tests {
         assert_eq!(
             km.handle(&k("Escape")),
             vec![
-                EditCommand::Move(Motion::Left),
+                EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
@@ -464,7 +540,10 @@ mod tests {
             km.handle(&k("v")),
             vec![EditCommand::SetMode(EditMode::Visual)]
         );
-        assert_eq!(km.handle(&k("l")), vec![EditCommand::Select(Motion::Right)]);
+        assert_eq!(
+            km.handle(&k("l")),
+            vec![EditCommand::Select(Motion::RightBounded)]
+        );
         assert_eq!(km.handle(&k("y")), vec![EditCommand::Yank]);
         assert_eq!(km.mode(), EditMode::Normal);
     }
@@ -501,6 +580,48 @@ mod tests {
     fn ctrl_r_redo() {
         let mut km = VimKeymap::default();
         assert_eq!(km.handle(&ctrl("r")), vec![EditCommand::Redo]);
+    }
+
+    #[test]
+    fn ctrl_navigation_never_falls_through_to_vim_commands() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&ctrl("n")), vec![EditCommand::Move(Motion::Down)]);
+        assert_eq!(km.handle(&ctrl("p")), vec![EditCommand::Move(Motion::Up)]);
+        km.mode = EditMode::Insert;
+        assert_eq!(km.handle(&ctrl("p")), vec![EditCommand::Move(Motion::Up)]);
+    }
+
+    #[test]
+    fn ctrl_e_y_scroll_the_viewport_with_counts() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&ctrl("e")), vec![EditCommand::ScrollViewport(1)]);
+        km.handle(&k("3"));
+        assert_eq!(km.handle(&ctrl("y")), vec![EditCommand::ScrollViewport(-3)]);
+        km.mode = EditMode::Insert;
+        assert_eq!(km.handle(&ctrl("e")), vec![EditCommand::ScrollViewport(1)]);
+        assert_eq!(km.handle(&ctrl("y")), vec![EditCommand::ScrollViewport(-1)]);
+    }
+
+    #[test]
+    fn arrow_keys_navigate_in_normal_mode() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&k("ArrowRight")),
+            vec![EditCommand::Move(Motion::RightBounded)]
+        );
+        assert_eq!(
+            km.handle(&k("ArrowDown")),
+            vec![EditCommand::Move(Motion::Down)]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn command_z_undoes_in_vim_modes() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&command("z")), vec![EditCommand::Undo]);
+        km.mode = EditMode::Insert;
+        assert_eq!(km.handle(&command("z")), vec![EditCommand::Undo]);
     }
 
     #[test]
@@ -543,7 +664,7 @@ mod tests {
         assert_eq!(
             km.handle(&ctrl("c")),
             vec![
-                EditCommand::Move(Motion::Left),
+                EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal)
             ]
         );
@@ -580,6 +701,19 @@ mod tests {
                 EditCommand::DeleteForward,
                 EditCommand::SetMode(EditMode::Insert)
             ]
+        );
+    }
+
+    #[test]
+    fn braces_move_by_paragraph() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&k("}")),
+            vec![EditCommand::Move(Motion::ParagraphNext)]
+        );
+        assert_eq!(
+            km.handle(&k("{")),
+            vec![EditCommand::Move(Motion::ParagraphPrev)]
         );
     }
 }

@@ -5,9 +5,10 @@ use std::collections::HashMap;
 use crate::explorer::ExplorerPanel;
 use crate::note::{render_block, render_block_with_hidden_list_line};
 use crate::page_model::{
-    clamp_selection, dir_select_index, gutter_width, heading_class, image_mime, line_severity,
-    note_inline_consumes_ctrl_navigation, note_list_marker_prefix_len, severity_color_class,
-    should_apply_explorer_chrome, span_style, squiggle_style,
+    NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index,
+    gutter_width, heading_class, image_mime, line_severity, note_inline_nodes,
+    note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
+    should_apply_explorer_chrome, span_style, squiggle_style, viewport_reveal_delta,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -24,7 +25,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 const CONTAINER_ID: &str = "file-container";
+const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
+const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
@@ -186,6 +189,44 @@ fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEdi
     })
 }
 
+fn activate_note_cursor(
+    block_index: usize,
+    line: u32,
+    mut note_active: Signal<Option<u32>>,
+    mut note_editing: Signal<bool>,
+    mut note_edit_line: Signal<Option<u32>>,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+) {
+    note_active.set(Some(block_index as u32));
+    note_editing.set(true);
+    note_edit_line.set(Some(line));
+    note_edit_rect.set(None);
+    schedule_note_cursor_activation(block_index, line, note_edit_rect, true);
+}
+
+fn schedule_note_cursor_activation(
+    block_index: usize,
+    line: u32,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    retry: bool,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        note_edit_rect.set(note_list_edit_rect_for_line(block_index, line));
+        focus_file_input();
+        center_note_caret(block_index, line);
+        if retry {
+            schedule_note_cursor_activation(block_index, line, note_edit_rect, false);
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
 fn browser_has_text_selection() -> bool {
     web_sys::window()
         .and_then(|window| window.get_selection().ok().flatten())
@@ -245,28 +286,15 @@ fn note_edit_line_class(block: &MdBlock) -> &'static str {
 }
 
 fn note_edit_overlay_class() -> &'static str {
-    "visible absolute inset-0 cursor-text overflow-auto"
+    "visible absolute inset-0 z-10 cursor-text overflow-visible"
 }
 
-fn reveal_note_block(index: usize) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&format!("note-block-{index}")))
-        else {
-            return;
-        };
-        let options = web_sys::ScrollIntoViewOptions::new();
-        options.set_block(web_sys::ScrollLogicalPosition::Center);
-        element.scroll_into_view_with_scroll_into_view_options(&options);
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
+fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
+    blocks
+        .iter()
+        .position(|block| block.start_line <= line && line < block.end_line)
+        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
+        .or_else(|| (!blocks.is_empty()).then_some(0))
 }
 
 fn note_pointer_col_from_pointer(event: &Event<PointerData>, text: &str) -> u32 {
@@ -290,6 +318,19 @@ fn note_pointer_position_at(
 ) -> Option<(u32, u32)> {
     let document = web_sys::window()?.document()?;
     let target = document.element_from_point(client_x as f32, client_y as f32)?;
+    if let Some(block_element) = target.closest("[data-note-edit-block]").ok().flatten() {
+        let index = block_element
+            .get_attribute("data-note-edit-block")?
+            .parse::<usize>()
+            .ok()?;
+        let block = blocks.get(index)?;
+        let offset = note_col_at_point(&block_element, client_x, client_y, &block.source);
+        return Some(note_source_position(
+            &block.source,
+            block.start_line,
+            offset,
+        ));
+    }
     let line_element = target
         .closest("[data-note-edit-line], [data-note-list-line]")
         .ok()
@@ -385,6 +426,38 @@ fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
     }
 }
 
+fn place_note_block_caret(
+    index: usize,
+    start_line: u32,
+    source: String,
+    client_x: f64,
+    client_y: f64,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        let Some(target) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&format!("note-live-block-{index}")))
+        else {
+            return;
+        };
+        let offset = note_col_at_point(&target, client_x, client_y, &source);
+        let (line, col) = note_source_position(&source, start_line, offset);
+        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+            line,
+            col,
+            extend: false,
+        });
+        focus_file_input();
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
 #[derive(Clone, PartialEq)]
 struct NoteLineChunk {
     text: String,
@@ -441,6 +514,166 @@ fn note_line_chunks(
         });
     }
     chunks
+}
+
+#[derive(Clone, PartialEq)]
+struct NoteSourceChunk {
+    text: String,
+    selected: bool,
+    caret_before: bool,
+}
+
+fn note_source_chunks(
+    source: &[char],
+    start: u32,
+    end: u32,
+    caret: u32,
+    selections: &[(u32, u32)],
+) -> Vec<NoteSourceChunk> {
+    let mut boundaries = vec![start, end];
+    if start <= caret && caret < end {
+        boundaries.push(caret);
+    }
+    for (selection_start, selection_end) in selections {
+        let clipped_start = (*selection_start).clamp(start, end);
+        let clipped_end = (*selection_end).clamp(start, end);
+        if clipped_start < clipped_end {
+            boundaries.push(clipped_start);
+            boundaries.push(clipped_end);
+        }
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    boundaries
+        .windows(2)
+        .map(|range| {
+            let chunk_start = range[0];
+            let chunk_end = range[1];
+            NoteSourceChunk {
+                text: source[chunk_start as usize..chunk_end as usize]
+                    .iter()
+                    .map(|character| if *character == '\n' { ' ' } else { *character })
+                    .collect(),
+                selected: selections.iter().any(|(selection_start, selection_end)| {
+                    chunk_start < *selection_end && chunk_end > *selection_start
+                }),
+                caret_before: caret == chunk_start,
+            }
+        })
+        .collect()
+}
+
+fn note_inline_class(kind: NoteInlineKind) -> &'static str {
+    match kind {
+        NoteInlineKind::BlockMarker | NoteInlineKind::Escape => "",
+        NoteInlineKind::Code => {
+            "rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em] text-primary"
+        }
+        NoteInlineKind::Strong => "font-semibold text-foreground",
+        NoteInlineKind::Emph => "italic",
+        NoteInlineKind::Strike => "line-through opacity-70",
+        NoteInlineKind::Link | NoteInlineKind::WikiLink => {
+            "text-primary underline decoration-primary/40 underline-offset-2"
+        }
+    }
+}
+
+fn render_note_caret() -> Element {
+    rsx! {
+        span {
+            id: NOTE_CARET_ID,
+            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
+            span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-current" }
+        }
+    }
+}
+
+fn render_note_source_range(
+    source: &[char],
+    start: u32,
+    end: u32,
+    caret: u32,
+    selections: &[(u32, u32)],
+) -> Element {
+    let chunks = note_source_chunks(source, start, end, caret, selections);
+    rsx! {
+        for (index, chunk) in chunks.iter().enumerate() {
+            if chunk.caret_before {
+                {render_note_caret()}
+            }
+            if !chunk.text.is_empty() {
+                span {
+                    key: "source-{start}-{index}",
+                    class: if chunk.selected { "bg-current/20" } else { "" },
+                    "{chunk.text}"
+                }
+            }
+        }
+    }
+}
+
+fn render_note_inline_nodes(
+    source: &[char],
+    nodes: &[NoteInlineNode],
+    caret: u32,
+    selections: &[(u32, u32)],
+) -> Element {
+    rsx! {
+        for (index, node) in nodes.iter().enumerate() {
+            match node {
+                NoteInlineNode::Text { start, end } => rsx! {
+                    span { key: "text-{index}",
+                        {render_note_source_range(source, *start, *end, caret, selections)}
+                    }
+                },
+                NoteInlineNode::Syntax {
+                    kind,
+                    start,
+                    prefix_end,
+                    suffix_start,
+                    end,
+                    children,
+                } => {
+                    let reveal = *start <= caret && caret <= *end;
+                    rsx! {
+                        span { key: "syntax-{index}", class: note_inline_class(*kind),
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *start, *prefix_end, caret, selections)}
+                            }
+                            {render_note_inline_nodes(source, children, caret, selections)}
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *suffix_start, *end, caret, selections)}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn note_selection_ranges(
+    source: &str,
+    start_line: u32,
+    selections: &[vmux_core::editor::SelSpan],
+) -> Vec<(u32, u32)> {
+    selections
+        .iter()
+        .map(|selection| {
+            let start = note_source_offset(source, start_line, selection.line, selection.start);
+            let end_col = if selection.end == u32::MAX {
+                source
+                    .split('\n')
+                    .nth(selection.line.saturating_sub(start_line) as usize)
+                    .map_or(0, |line| line.chars().count() as u32)
+            } else {
+                selection.end
+            };
+            let end = note_source_offset(source, start_line, selection.line, end_col);
+            (start.min(end), start.max(end))
+        })
+        .filter(|(start, end)| start < end)
+        .collect()
 }
 
 fn emit_property_edit(
@@ -843,22 +1076,28 @@ fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
     }
 }
 
-fn reveal_git_change(
-    markers: Signal<HashMap<u32, EditorDiffMarker>>,
-    cell_dims: Signal<(f64, f64)>,
-) {
-    let Some(line) = markers.read().keys().min().copied() else {
-        return;
+fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "bg-ansi-2",
+        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "bg-ansi-3",
+        EditorDiffMarker::Deleted => "bg-ansi-1",
+    }
+}
+
+fn note_block_diff_marker(
+    markers: &HashMap<u32, EditorDiffMarker>,
+    start_line: u32,
+    end_line: u32,
+) -> Option<EditorDiffMarker> {
+    let priority = |marker| match marker {
+        EditorDiffMarker::Staged => 0,
+        EditorDiffMarker::Deleted => 1,
+        EditorDiffMarker::Added => 2,
+        EditorDiffMarker::Modified => 3,
     };
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let closure = Closure::once(move || {
-        ensure_line_visible(line.saturating_sub(1), cell_dims().1);
-    });
-    let _ = window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(closure.as_ref().unchecked_ref(), 0);
-    closure.forget();
+    (start_line..=end_line)
+        .filter_map(|line| markers.get(&(line + 1)).copied())
+        .max_by_key(|marker| priority(*marker))
 }
 
 fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
@@ -1008,13 +1247,16 @@ fn explorer_client_id() -> u64 {
 fn set_explorer_visible(
     next: bool,
     mut visible: Signal<bool>,
+    mut preferred_visible: Signal<bool>,
+    width: Signal<u32>,
     client_id: Signal<u64>,
     mut request_id: Signal<u64>,
     mode: Signal<Mode>,
 ) {
     let next_request_id = request_id().wrapping_add(1);
     request_id.set(next_request_id);
-    visible.set(next);
+    preferred_visible.set(next);
+    visible.set(next && explorer_has_room(width()));
     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
         visible: next,
         client_id: client_id(),
@@ -1028,8 +1270,50 @@ fn set_explorer_visible(
     }
 }
 
+fn explorer_page_width() -> Option<u32> {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(PAGE_ID))
+        .map(|element| element.client_width().max(0) as u32)
+}
+
+fn explorer_has_room(explorer_width: u32) -> bool {
+    explorer_page_width().is_some_and(|page_width| {
+        NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
+    })
+}
+
+fn sync_explorer_visibility(
+    mut visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+) {
+    let next = preferred_visible() && explorer_has_room(width());
+    if visible() != next {
+        visible.set(next);
+    }
+}
+
+fn schedule_explorer_visibility_sync(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        sync_explorer_visibility(visible, preferred_visible, width);
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
 fn show_explorer_if_room(
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
     width: Signal<u32>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
@@ -1042,15 +1326,16 @@ fn show_explorer_if_room(
         if visible() {
             return;
         }
-        let Some(page_width) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(CONTAINER_ID))
-            .map(|element| element.client_width().max(0) as u32)
-        else {
-            return;
-        };
-        if NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(width()) <= page_width {
-            set_explorer_visible(true, visible, client_id, request_id, mode);
+        if explorer_has_room(width()) {
+            set_explorer_visible(
+                true,
+                visible,
+                preferred_visible,
+                width,
+                client_id,
+                request_id,
+                mode,
+            );
         }
     })
     .unchecked_into::<js_sys::Function>();
@@ -1085,15 +1370,27 @@ fn schedule_lsp_notice_clear(
 
 fn toggle_explorer(
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
     mode: Signal<Mode>,
 ) {
-    set_explorer_visible(!visible(), visible, client_id, request_id, mode);
+    set_explorer_visible(
+        !preferred_visible(),
+        visible,
+        preferred_visible,
+        width,
+        client_id,
+        request_id,
+        mode,
+    );
 }
 
 fn reveal_current_in_explorer(
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
     mode: Signal<Mode>,
@@ -1101,13 +1398,23 @@ fn reveal_current_in_explorer(
     if visible() {
         let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
     } else {
-        set_explorer_visible(true, visible, client_id, request_id, mode);
+        set_explorer_visible(
+            true,
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
     }
 }
 
 fn handle_explorer_shortcut(
     event: &Event<KeyboardData>,
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
     mode: Signal<Mode>,
@@ -1119,12 +1426,26 @@ fn handle_explorer_shortcut(
     let key = raw.key();
     if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
         event.prevent_default();
-        reveal_current_in_explorer(visible, client_id, request_id, mode);
+        reveal_current_in_explorer(
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
         return true;
     }
     if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
         event.prevent_default();
-        toggle_explorer(visible, client_id, request_id, mode);
+        toggle_explorer(
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
         return true;
     }
     false
@@ -1133,6 +1454,7 @@ fn handle_explorer_shortcut(
 #[component]
 fn ExplorerSidebar(
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
     client_id: Signal<u64>,
@@ -1157,7 +1479,15 @@ fn ExplorerSidebar(
             class: "relative z-[2] h-full shrink-0",
             style: "{wrapper_style}",
             onkeydown: move |event| {
-                handle_explorer_shortcut(&event, visible, client_id, request_id, mode);
+                handle_explorer_shortcut(
+                    &event,
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                );
             },
             div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
         }
@@ -1178,6 +1508,8 @@ fn ExplorerSidebar(
 #[component]
 fn ExplorerToggleButton(
     visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
     client_id: Signal<u64>,
     request_id: Signal<u64>,
     mode: Signal<Mode>,
@@ -1186,7 +1518,16 @@ fn ExplorerToggleButton(
         button {
             class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
             title: translate("editor-toggle-explorer"),
-            onclick: move |_| toggle_explorer(visible, client_id, request_id, mode),
+            onclick: move |_| {
+                toggle_explorer(
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                )
+            },
             svg {
                 class: "h-4 w-4",
                 view_box: "0 0 24 24",
@@ -1233,6 +1574,7 @@ pub fn Page() -> Element {
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
     let cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
     let mut git_has_diff = use_signal(|| false);
     let mut git_line_markers = use_signal(HashMap::<u32, EditorDiffMarker>::new);
@@ -1259,6 +1601,8 @@ pub fn Page() -> Element {
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
+    let mut source_cursor = use_signal(vmux_core::editor::CursorPos::default);
+    let mut source_sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut dirty = use_signal(|| false);
     let mut composing = use_signal(|| false);
     let mut lsp_hover = use_signal(|| Option::<FileHoverEvent>::None);
@@ -1272,7 +1616,8 @@ pub fn Page() -> Element {
     let mut comp_sel = use_signal(|| 0usize);
     let mut comp_anchor = use_signal(|| (0u32, 0u32));
     let mut last_scroll_req = use_signal(|| 0u32);
-    let mut explorer_visible = use_signal(|| false);
+    let explorer_visible = use_signal(|| false);
+    let mut explorer_preferred_visible = use_signal(|| false);
     let mut explorer_width = use_signal(|| 240u32);
     let mut explorer_resizing = use_signal(|| false);
     let explorer_client_id = use_signal(explorer_client_id);
@@ -1286,13 +1631,17 @@ pub fn Page() -> Element {
                 explorer_request_id(),
                 c.client_id,
                 c.request_id,
-            ) && explorer_visible() != c.visible
-            {
-                explorer_visible.set(c.visible);
+            ) {
+                explorer_preferred_visible.set(c.visible);
             }
             if explorer_width() != c.width {
                 explorer_width.set(c.width);
             }
+            schedule_explorer_visibility_sync(
+                explorer_visible,
+                explorer_preferred_visible,
+                explorer_width,
+            );
         });
 
     let _tidy =
@@ -1326,6 +1675,7 @@ pub fn Page() -> Element {
         lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
         show_explorer_if_room(
             explorer_visible,
+            explorer_preferred_visible,
             explorer_width,
             explorer_client_id,
             explorer_request_id,
@@ -1359,23 +1709,55 @@ pub fn Page() -> Element {
         ed_label.set(c.mode_label);
         cursor.set(c.primary);
         sel.set(c.selections);
-        if note_editing() {
-            let active = note_blocks.read().iter().position(|block| {
-                block.start_line <= c.primary.line && c.primary.line < block.end_line
-            });
-            let rect = active.and_then(|index| {
-                matches!(note_blocks.read()[index].block, MdBlock::List { .. })
-                    .then(|| note_list_edit_rect_for_line(index, c.primary.line))
-                    .flatten()
-            });
+        source_cursor.set(c.source_primary);
+        source_sel.set(c.source_selections);
+        let note_mode = file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path());
+        if note_mode {
+            let active = note_block_index_for_line(&note_blocks.read(), c.source_primary.line);
+            if keymap() == vmux_core::KeymapKind::Vim
+                && !note_editing()
+                && let Some(index) = active
+            {
+                activate_note_cursor(
+                    index,
+                    c.source_primary.line,
+                    note_active,
+                    note_editing,
+                    note_edit_line,
+                    note_edit_rect,
+                );
+            }
+            if note_editing() {
+                let rect = active.and_then(|index| {
+                    matches!(note_blocks.read()[index].block, MdBlock::List { .. })
+                        .then(|| note_list_edit_rect_for_line(index, c.source_primary.line))
+                        .flatten()
+                });
+                note_edit_line.set(Some(c.source_primary.line));
+                note_edit_rect.set(rect);
+            }
             note_active.set(active.map(|index| index as u32));
-            note_edit_line.set(Some(c.primary.line));
-            note_edit_rect.set(rect);
+            if moved && let Some(index) = active {
+                ensure_note_caret_visible(index, c.source_primary.line);
+            }
         }
-        if moved && (file_view_mode() != FileViewMode::Note || !is_markdown_file(&git_path())) {
+        if moved && !note_mode {
             ensure_line_visible(c.primary.row, cell_dims().1);
         }
     });
+
+    let _scroll_by =
+        use_bin_event_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
+            let line_height = if file_view_mode() == FileViewMode::Note {
+                28.0
+            } else {
+                cell_dims().1
+            };
+            if line_height <= 0.0 {
+                return;
+            }
+            scroll_viewport_by(event.lines, line_height);
+        });
 
     let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
@@ -1388,14 +1770,49 @@ pub fn Page() -> Element {
 
     let _view_mode =
         use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
-            if file_view_mode() != event.mode {
+            if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
                 note_editing.set(false);
             }
             file_view_mode.set(event.mode);
+            match event.mode {
+                FileViewMode::Note if is_markdown_file(&git_path()) => {
+                    let line = source_cursor().line;
+                    if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                        activate_note_cursor(
+                            index,
+                            line,
+                            note_active,
+                            note_editing,
+                            note_edit_line,
+                            note_edit_rect,
+                        );
+                    }
+                }
+                FileViewMode::Editor => {
+                    schedule_line_center(cursor().row, cell_dims().1, true);
+                }
+                _ => {}
+            }
         });
 
     let _keymap = use_bin_event_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
         keymap.set(event.keymap);
+        if event.keymap == vmux_core::KeymapKind::Vim
+            && file_view_mode() == FileViewMode::Note
+            && is_markdown_file(&git_path())
+        {
+            let line = source_cursor().line;
+            if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                activate_note_cursor(
+                    index,
+                    line,
+                    note_active,
+                    note_editing,
+                    note_edit_line,
+                    note_edit_rect,
+                );
+            }
+        }
     });
 
     let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
@@ -1415,17 +1832,25 @@ pub fn Page() -> Element {
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             document.set_title(&title);
         }
-        let reveal = reveal_line.and_then(|line| {
-            blocks
-                .iter()
-                .position(|block| block.start_line <= line && line < block.end_line)
-        });
+        let reveal = reveal_line
+            .or_else(|| {
+                (keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note)
+                    .then(|| source_cursor().line)
+            })
+            .and_then(|line| note_block_index_for_line(&blocks, line).map(|index| (index, line)));
         note_blocks.set(blocks);
         note_properties.set(properties);
         note_references.set(references);
         note_active.set(active);
-        if let Some(index) = reveal {
-            reveal_note_block(index);
+        if let Some((index, line)) = reveal {
+            activate_note_cursor(
+                index,
+                line,
+                note_active,
+                note_editing,
+                note_edit_line,
+                note_edit_rect,
+            );
         }
     });
 
@@ -1641,11 +2066,19 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         let _ = file_view_mode();
-        setup_measurement(cell_dims, total_lines);
+        setup_measurement(
+            cell_dims,
+            total_lines,
+            last_resize,
+            explorer_visible,
+            explorer_preferred_visible,
+            explorer_width,
+        );
     });
 
     use_effect(move || match mode() {
         Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
+            let _ = note_active();
             if note_editing() {
                 focus_file_input();
             } else {
@@ -1696,6 +2129,7 @@ pub fn Page() -> Element {
 
     rsx! {
         div {
+            id: PAGE_ID,
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
@@ -1714,6 +2148,7 @@ pub fn Page() -> Element {
 
             ExplorerSidebar {
                 visible: explorer_visible,
+                preferred_visible: explorer_preferred_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
                 client_id: explorer_client_id,
@@ -1755,6 +2190,8 @@ pub fn Page() -> Element {
                 if handle_explorer_shortcut(
                     &e,
                     explorer_visible,
+                    explorer_preferred_visible,
+                    explorer_width,
                     explorer_client_id,
                     explorer_request_id,
                     mode,
@@ -1766,6 +2203,14 @@ pub fn Page() -> Element {
                     return;
                 };
                 let key = raw.key();
+                if mode() == Mode::Text
+                    && file_view_mode() == FileViewMode::Note
+                    && is_markdown_file(&git_path())
+                    && !note_editing()
+                {
+                    let _ = forward_file_key(&e, raw, ed_mode());
+                    return;
+                }
                 match mode() {
                     Mode::Dir => {
                         let vis = visible_entries(&dir_entries.read(), show_hidden());
@@ -1883,6 +2328,8 @@ pub fn Page() -> Element {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
                 ExplorerToggleButton {
                     visible: explorer_visible,
+                    preferred_visible: explorer_preferred_visible,
+                    width: explorer_width,
                     client_id: explorer_client_id,
                     request_id: explorer_request_id,
                     mode,
@@ -1903,10 +2350,16 @@ pub fn Page() -> Element {
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Note);
                                         let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
-                                        if note_editing() {
-                                            focus_file_input();
-                                        } else {
-                                            focus_container();
+                                        let line = source_cursor().line;
+                                        if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                                            activate_note_cursor(
+                                                index,
+                                                line,
+                                                note_active,
+                                                note_editing,
+                                                note_edit_line,
+                                                note_edit_rect,
+                                            );
                                         }
                                     },
                                     {translate("editor-note")}
@@ -1922,7 +2375,7 @@ pub fn Page() -> Element {
                                 onclick: move |_| {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
-                                    reveal_git_change(git_line_markers, cell_dims);
+                                    schedule_line_center(cursor().row, cell_dims().1, true);
                                     let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
@@ -1962,7 +2415,7 @@ pub fn Page() -> Element {
                                     focus_file_input();
                                 }
                             },
-                            "Normal"
+                            {translate("editor-keymap-standard")}
                         }
                         button {
                             class: file_mode_class(keymap() == vmux_core::KeymapKind::Vim),
@@ -1982,18 +2435,9 @@ pub fn Page() -> Element {
                                     focus_file_input();
                                 }
                             },
-                            "Vim"
+                            {translate("editor-keymap-vim")}
                         }
                     }
-                }
-                {
-                    let lbl = ed_label();
-                    (!lbl.is_empty() && mode() == Mode::Text).then(|| rsx! {
-                        span {
-                            class: "shrink-0 rounded bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-cyan-700 dark:text-cyan-200",
-                            "{lbl}"
-                        }
-                    })
                 }
                 {
                     tidy_prompt().map(|count| {
@@ -2167,12 +2611,36 @@ pub fn Page() -> Element {
                     if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
                         {
                             let active = note_active();
-                            let current = cursor();
-                            let selections = sel();
+                            let current = source_cursor();
+                            let selections = source_sel();
                             rsx! {
                                 div {
                                     id: "file-scroll",
                                     class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
+                                    onclick: move |event| {
+                                        if keymap() == vmux_core::KeymapKind::Vim {
+                                            event.prevent_default();
+                                            let line = source_cursor().line;
+                                            if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                                                activate_note_cursor(
+                                                    index,
+                                                    line,
+                                                    note_active,
+                                                    note_editing,
+                                                    note_edit_line,
+                                                    note_edit_rect,
+                                                );
+                                            }
+                                            return;
+                                        }
+                                        if note_editing() {
+                                            note_editing.set(false);
+                                            note_active.set(None);
+                                            note_edit_line.set(None);
+                                            note_edit_rect.set(None);
+                                            focus_container();
+                                        }
+                                    },
                                     onpointermove: move |event: Event<PointerData>| {
                                         if !note_dragging() {
                                             return;
@@ -2215,10 +2683,21 @@ pub fn Page() -> Element {
                                             {
                                                 let editing = note_editing() && Some(index as u32) == active;
                                                 let is_list = matches!(note_block.block, MdBlock::List { .. });
+                                                let is_live_inline = matches!(
+                                                    note_block.block,
+                                                    MdBlock::Paragraph { .. } | MdBlock::Heading { .. }
+                                                );
                                                 let start = note_block.start_line;
                                                 let end = note_block.end_line;
+                                                let note_diff_marker = note_block_diff_marker(
+                                                    &git_line_markers(),
+                                                    start,
+                                                    end,
+                                                );
                                                 let source = note_block.source.clone();
                                                 let pointer_source = source.clone();
+                                                let live_pointer_source = source.clone();
+                                                let live_down_source = source.clone();
                                                 let pointer_block = note_block.block.clone();
                                                 let source_lines = if source.is_empty() {
                                                     vec![String::new()]
@@ -2249,6 +2728,23 @@ pub fn Page() -> Element {
                                                 };
                                                 let note_comp_keys = comp_keys.clone();
                                                 let edit_class = note_edit_block_class(&note_block.block);
+                                                let heading_level = match &note_block.block {
+                                                    MdBlock::Heading { level, .. } => Some(*level),
+                                                    _ => None,
+                                                };
+                                                let live_nodes = note_inline_nodes(&source, heading_level);
+                                                let live_source = source.chars().collect::<Vec<_>>();
+                                                let live_caret = note_source_offset(
+                                                    &source,
+                                                    start,
+                                                    current.line,
+                                                    current.col,
+                                                );
+                                                let live_selections = note_selection_ranges(
+                                                    &source,
+                                                    start,
+                                                    &selections,
+                                                );
                                                 let overlay_class = note_edit_overlay_class();
                                                 let edit_overlay_class = if is_list {
                                                     "visible absolute z-10 cursor-text overflow-auto"
@@ -2279,15 +2775,30 @@ pub fn Page() -> Element {
                                                             if browser_has_text_selection() {
                                                                 return;
                                                             }
+                                                            let event_data = event.data();
+                                                            let raw = event_data.downcast::<web_sys::MouseEvent>();
+                                                            let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
+                                                            let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
+                                                            if is_live_inline {
+                                                                note_active.set(Some(index as u32));
+                                                                note_editing.set(true);
+                                                                note_edit_line.set(None);
+                                                                note_edit_rect.set(None);
+                                                                place_note_block_caret(
+                                                                    index,
+                                                                    start,
+                                                                    live_pointer_source.clone(),
+                                                                    client_x,
+                                                                    client_y,
+                                                                );
+                                                                return;
+                                                            }
                                                             let line = note_pointer_line(
                                                                 &event,
                                                                 start,
                                                                 end,
                                                                 &pointer_block,
                                                             );
-                                                            let event_data = event.data();
-                                                            let raw = event_data.downcast::<web_sys::MouseEvent>();
-                                                            let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
                                                             let text = pointer_source
                                                                 .lines()
                                                                 .nth(line.saturating_sub(start) as usize)
@@ -2313,6 +2824,11 @@ pub fn Page() -> Element {
                                                                 .collect();
                                                             place_note_caret(line, displayed, client_x, prefix);
                                                         },
+                                                        if let Some(marker) = note_diff_marker {
+                                                            span {
+                                                                class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
+                                                            }
+                                                        }
                                                         div {
                                                             class: if editing && !is_list { "invisible" } else { "" },
                                                             if editing && is_list {
@@ -2329,8 +2845,61 @@ pub fn Page() -> Element {
                                                             div {
                                                                 class: edit_overlay_class,
                                                                 style: edit_overlay_style,
-                                                                div {
-                                                                    class: if is_list { "" } else { edit_class },
+                                                                if is_live_inline {
+                                                                    div {
+                                                                        id: "note-live-block-{index}",
+                                                                        "data-note-edit-block": "{index}",
+                                                                        class: edit_class,
+                                                                        onclick: move |event: Event<MouseData>| {
+                                                                            event.stop_propagation();
+                                                                            event.prevent_default();
+                                                                        },
+                                                                        onpointerdown: move |event: Event<PointerData>| {
+                                                                            event.stop_propagation();
+                                                                            event.prevent_default();
+                                                                            let extend = event
+                                                                                .data()
+                                                                                .downcast::<web_sys::PointerEvent>()
+                                                                                .is_some_and(|raw| raw.shift_key());
+                                                                            let offset = note_pointer_col_from_pointer(
+                                                                                &event,
+                                                                                &live_down_source,
+                                                                            );
+                                                                            let (line, col) = note_source_position(
+                                                                                &live_down_source,
+                                                                                start,
+                                                                                offset,
+                                                                            );
+                                                                            note_dragging.set(true);
+                                                                            set_pointer_capture(&event, "file-scroll", true);
+                                                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                                line,
+                                                                                col,
+                                                                                extend,
+                                                                            });
+                                                                            focus_file_input();
+                                                                        },
+                                                                        onmousedown: move |event: Event<MouseData>| {
+                                                                            event.stop_propagation();
+                                                                            event.prevent_default();
+                                                                        },
+                                                                        span {
+                                                                            "data-note-line-text": "true",
+                                                                            class: "inline",
+                                                                            {render_note_inline_nodes(
+                                                                                &live_source,
+                                                                                &live_nodes,
+                                                                                live_caret,
+                                                                                &live_selections,
+                                                                            )}
+                                                                            if live_caret == live_source.len() as u32 {
+                                                                                {render_note_caret()}
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    div {
+                                                                        class: if is_list { "" } else { edit_class },
                                                                     for (line, raw, prefix) in edit_lines.iter() {
                                                                         {
                                                                             let line = *line;
@@ -2392,8 +2961,9 @@ pub fn Page() -> Element {
                                                                                             if chunk.caret_before {
                                                                                                 span {
                                                                                                     key: "caret-{chunk_index}",
-                                                                                                    class: "relative inline-block h-[1.15em] w-0 align-text-bottom",
-                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-cyan-300 shadow-[0_0_7px_rgba(34,211,238,0.9)]" }
+                                                                                                    id: NOTE_CARET_ID,
+                                                                                                    class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
+                                                                                                    span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-current" }
                                                                                                 }
                                                                                             }
                                                                                             if !chunk.text.is_empty() {
@@ -2409,6 +2979,7 @@ pub fn Page() -> Element {
                                                                             }
                                                                         }
                                                                     }
+                                                                }
                                                                 }
                                                                 textarea {
                                                                     id: "file-input",
@@ -2431,16 +3002,12 @@ pub fn Page() -> Element {
                                                                         let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
                                                                             return;
                                                                         };
+                                                                        event.stop_propagation();
                                                                         if raw.is_composing() {
                                                                             return;
                                                                         }
                                                                         let key = raw.key();
                                                                         let mods = key_mods(raw);
-                                                                        if note_inline_consumes_ctrl_navigation(&key, mods) {
-                                                                            event.prevent_default();
-                                                                            event.stop_propagation();
-                                                                            return;
-                                                                        }
                                                                         if comp_open() && !note_comp_keys.is_empty() {
                                                                             match key.as_str() {
                                                                                 "ArrowDown" => {
@@ -2476,27 +3043,23 @@ pub fn Page() -> Element {
                                                                         }
                                                                         if key == "Escape" {
                                                                             event.prevent_default();
-                                                                            note_editing.set(false);
+                                                                            if keymap() != vmux_core::KeymapKind::Vim {
+                                                                                note_editing.set(false);
+                                                                            }
                                                                             let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
                                                                                 key,
                                                                                 code: raw.code(),
                                                                                 mods,
                                                                                 repeat: raw.repeat(),
                                                                             });
-                                                                            focus_container();
+                                                                            if keymap() == vmux_core::KeymapKind::Vim {
+                                                                                focus_file_input();
+                                                                            } else {
+                                                                                focus_container();
+                                                                            }
                                                                             return;
                                                                         }
-                                                                        let chord = mods.ctrl || mods.alt || mods.meta;
-                                                                        if ed_mode().accepts_text() && !chord && is_text_key(&key) {
-                                                                            return;
-                                                                        }
-                                                                        event.prevent_default();
-                                                                        let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
-                                                                            key,
-                                                                            code: raw.code(),
-                                                                            mods,
-                                                                            repeat: raw.repeat(),
-                                                                        });
+                                                                        let _ = forward_file_key(&event, raw, ed_mode());
                                                                     },
                                                                 }
                                                                 if comp_open() && !comp_filtered.is_empty() {
@@ -2569,11 +3132,11 @@ pub fn Page() -> Element {
                             let cy = cursor().row as f64 * ch;
                             let cursor_style = if ed_mode().accepts_text() {
                                 format!(
-                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:3px;background:rgb(34,211,238);box-shadow:0 0 8px rgba(34,211,238,0.95);"
+                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:2px;background:currentColor;"
                                 )
                             } else {
                                 format!(
-                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:{}px;background:rgba(34,211,238,0.32);outline:1px solid rgb(103,232,249);box-shadow:0 0 8px rgba(34,211,238,0.65);",
+                                    "left:{cx}px;top:{cy}px;height:{ch}px;width:{}px;background:color-mix(in srgb,currentColor 28%,transparent);outline:1px solid currentColor;",
                                     cw.max(2.0)
                                 )
                             };
@@ -2920,6 +3483,7 @@ pub fn Page() -> Element {
                                                 let Some(raw) = dd.downcast::<web_sys::KeyboardEvent>() else {
                                                     return;
                                                 };
+                                                e.stop_propagation();
                                                 if raw.is_composing() {
                                                     return;
                                                 }
@@ -2957,18 +3521,7 @@ pub fn Page() -> Element {
                                                         _ => {}
                                                     }
                                                 }
-                                                let mods = key_mods(raw);
-                                                let chord = mods.ctrl || mods.alt || mods.meta;
-                                                if ed_mode().accepts_text() && !chord && is_text_key(&key) {
-                                                    return;
-                                                }
-                                                e.prevent_default();
-                                                let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
-                                                    key,
-                                                    code: raw.code(),
-                                                    mods,
-                                                    repeat: raw.repeat(),
-                                                });
+                                                let _ = forward_file_key(&e, raw, ed_mode());
                                             },
                                         }
 
@@ -3207,6 +3760,22 @@ pub fn Page() -> Element {
                 behind: git_behind,
                 staged_count: git_staged,
                 message: git_message,
+                always_visible: mode() == Mode::Text
+                    && keymap() == vmux_core::KeymapKind::Vim,
+                leading: rsx! {
+                    {
+                        let lbl = ed_label();
+                        (!lbl.is_empty()
+                            && mode() == Mode::Text
+                            && keymap() == vmux_core::KeymapKind::Vim)
+                            .then(|| rsx! {
+                                span {
+                                    class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
+                                    "{lbl}"
+                                }
+                            })
+                    }
+                },
                 {
                     lsp_status().map(|s| {
                         let (dot, label) = match s.state {
@@ -3310,6 +3879,107 @@ fn scroll_el() -> Option<web_sys::Element> {
         .and_then(|d| d.get_element_by_id(SCROLL_ID))
 }
 
+fn scroll_viewport_by(lines: i32, line_height: f64) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
+        return;
+    };
+    let restore_input_focus = document
+        .active_element()
+        .is_some_and(|element| element.id() == INPUT_ID);
+    if restore_input_focus
+        && let Some(input) = document
+            .get_element_by_id(INPUT_ID)
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = input.blur();
+    }
+    let top = scroll.scroll_top() as f64 + lines as f64 * line_height;
+    scroll.set_scroll_top(top.max(0.0).round() as i32);
+    if restore_input_focus {
+        focus_by_id(INPUT_ID);
+    }
+}
+
+fn scroll_note_caret_into_view(block_index: usize, line: u32) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
+        return;
+    };
+    let block_selector = format!("#note-block-{block_index}");
+    let caret = document
+        .get_element_by_id(NOTE_CARET_ID)
+        .filter(|caret| caret.closest(&block_selector).ok().flatten().is_some());
+    let Some(target) = caret
+        .or_else(|| document.get_element_by_id(&format!("note-line-{line}")))
+        .or_else(|| document.get_element_by_id(&format!("note-live-block-{block_index}")))
+        .or_else(|| document.get_element_by_id(&format!("note-block-{block_index}")))
+    else {
+        return;
+    };
+    let viewport = scroll.get_bounding_client_rect();
+    let target = target.get_bounding_client_rect();
+    let delta = viewport_reveal_delta(
+        target.top(),
+        target.bottom(),
+        viewport.top(),
+        viewport.bottom(),
+    );
+    if delta.abs() >= 1.0 {
+        scroll.set_scroll_top((scroll.scroll_top() as f64 + delta).round() as i32);
+    }
+}
+
+fn center_note_caret(block_index: usize, line: u32) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
+        return;
+    };
+    let block_selector = format!("#note-block-{block_index}");
+    let caret = document
+        .get_element_by_id(NOTE_CARET_ID)
+        .filter(|caret| caret.closest(&block_selector).ok().flatten().is_some());
+    let Some(target) = caret
+        .or_else(|| document.get_element_by_id(&format!("note-line-{line}")))
+        .or_else(|| document.get_element_by_id(&format!("note-live-block-{block_index}")))
+        .or_else(|| document.get_element_by_id(&format!("note-block-{block_index}")))
+    else {
+        return;
+    };
+    let viewport = scroll.get_bounding_client_rect();
+    let target = target.get_bounding_client_rect();
+    let target_center =
+        scroll.scroll_top() as f64 + target.top() - viewport.top() + target.height() * 0.5;
+    let top = centered_scroll_top(target_center, viewport.height());
+    scroll.set_scroll_top(top.round() as i32);
+}
+
+fn schedule_note_caret_visibility(block_index: usize, line: u32, retry: bool) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        scroll_note_caret_into_view(block_index, line);
+        if retry {
+            schedule_note_caret_visibility(block_index, line, false);
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn ensure_note_caret_visible(block_index: usize, line: u32) {
+    schedule_note_caret_visibility(block_index, line, true);
+}
+
 fn ensure_line_visible(line: u32, ch: f64) {
     if ch <= 0.0 {
         return;
@@ -3327,6 +3997,37 @@ fn ensure_line_visible(line: u32, ch: f64) {
         el.set_scroll_top(top as i32);
     } else if top + ch > view_top + view_h {
         el.set_scroll_top((top + ch - view_h) as i32);
+    }
+}
+
+fn center_line(line: u32, ch: f64) {
+    if ch <= 0.0 {
+        return;
+    }
+    let Some(el) = scroll_el() else {
+        return;
+    };
+    let view_h = el.client_height() as f64;
+    if view_h <= 0.0 {
+        return;
+    }
+    let target_center = line as f64 * ch + ch * 0.5;
+    el.set_scroll_top(centered_scroll_top(target_center, view_h).round() as i32);
+}
+
+fn schedule_line_center(line: u32, ch: f64, retry: bool) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        center_line(line, ch);
+        if retry {
+            schedule_line_center(line, ch, false);
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
     }
 }
 
@@ -3359,11 +4060,42 @@ fn key_mods(raw: &web_sys::KeyboardEvent) -> KeyMods {
     }
 }
 
+fn forward_file_key(
+    event: &Event<KeyboardData>,
+    raw: &web_sys::KeyboardEvent,
+    mode: vmux_core::editor::EditMode,
+) -> bool {
+    if raw.is_composing() {
+        return false;
+    }
+    let key = raw.key();
+    let mods = key_mods(raw);
+    let chord = mods.ctrl || mods.alt || mods.meta;
+    if mode.accepts_text() && !chord && is_text_key(&key) {
+        return false;
+    }
+    event.prevent_default();
+    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+        key,
+        code: raw.code(),
+        mods,
+        repeat: raw.repeat(),
+    });
+    true
+}
+
 fn is_text_key(key: &str) -> bool {
     key.chars().count() == 1
 }
 
-fn setup_measurement(cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
+fn setup_measurement(
+    cell_dims: Signal<(f64, f64)>,
+    total_lines: Signal<u32>,
+    last_resize: Signal<FileResizeEvent>,
+    explorer_visible: Signal<bool>,
+    explorer_preferred_visible: Signal<bool>,
+    explorer_width: Signal<u32>,
+) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -3374,8 +4106,9 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
         return;
     };
 
+    sync_explorer_visibility(explorer_visible, explorer_preferred_visible, explorer_width);
     if document.get_element_by_id(MEASURE_ID).is_some() {
-        do_measure(cell_dims, total_lines);
+        do_measure(cell_dims, total_lines, last_resize);
         return;
     }
 
@@ -3391,10 +4124,11 @@ fn setup_measurement(cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
     measure_node.set_text_content(Some(&"X".repeat(80)));
     container.append_child(&measure).unwrap();
 
-    do_measure(cell_dims, total_lines);
+    do_measure(cell_dims, total_lines, last_resize);
 
     let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        do_measure(cell_dims, total_lines);
+        sync_explorer_visibility(explorer_visible, explorer_preferred_visible, explorer_width);
+        do_measure(cell_dims, total_lines, last_resize);
     }) as Box<dyn FnMut(JsValue)>);
 
     if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
@@ -3447,7 +4181,11 @@ fn report_video_rect(path: String) {
     callback.forget();
 }
 
-fn do_measure(mut cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
+fn do_measure(
+    mut cell_dims: Signal<(f64, f64)>,
+    total_lines: Signal<u32>,
+    mut last_resize: Signal<FileResizeEvent>,
+) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -3479,7 +4217,10 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
         return;
     }
 
-    cell_dims.set((cw, ch));
+    let previous_dims = cell_dims();
+    if (previous_dims.0 - cw).abs() > 0.01 || (previous_dims.1 - ch).abs() > 0.01 {
+        cell_dims.set((cw, ch));
+    }
 
     let html: &web_sys::HtmlElement = container.unchecked_ref();
     let _ = html.style().set_property("--cw", &format!("{cw}px"));
@@ -3501,9 +4242,18 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>, total_lines: Signal<u32>) {
         .floor()
         .min(u16::MAX as f64) as u16;
 
-    let _ = try_cef_bin_emit_rkyv(&FileResizeEvent {
+    let next = FileResizeEvent {
         char_height: ch as f32,
         viewport_height: vh as f32,
         wrap_columns,
-    });
+    };
+    let previous = last_resize();
+    if (previous.char_height - next.char_height).abs() <= 0.01
+        && (previous.viewport_height - next.viewport_height).abs() <= 0.01
+        && previous.wrap_columns == next.wrap_columns
+    {
+        return;
+    }
+    last_resize.set(next.clone());
+    let _ = try_cef_bin_emit_rkyv(&next);
 }

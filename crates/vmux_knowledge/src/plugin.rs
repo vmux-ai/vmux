@@ -2,8 +2,9 @@ use std::sync::mpsc;
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::knowledge::{
     KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeIndex, KnowledgeSearchEvent,
@@ -12,7 +13,7 @@ use vmux_core::knowledge::{
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
 
-use crate::store::{build_tree, create_entry, ensure_vault, vault_dir};
+use crate::store::{build_tree, create_entry, ensure_vault, ensure_vault_repository, vault_dir};
 
 pub struct KnowledgePlugin;
 
@@ -52,12 +53,23 @@ impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
         let vault = vault_dir();
         if ensure_vault(&vault).is_ok() {
+            if let Err(error) = ensure_vault_repository(&vault) {
+                bevy::log::warn!("knowledge Git initialization failed: {error}");
+            }
             if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
                 bevy::log::warn!("external agent Knowledge sync failed: {error}");
             }
             let (tx, rx) = mpsc::channel();
+            let watch_wake = app
+                .world()
+                .get_resource::<EventLoopProxyWrapper>()
+                .map(|wrapper| (**wrapper).clone());
             match notify::recommended_watcher(move |result| {
-                let _ = tx.send(result);
+                if tx.send(result).is_ok()
+                    && let Some(wake) = watch_wake.as_ref()
+                {
+                    let _ = wake.send_event(WinitUserEvent::WakeUp);
+                }
             }) {
                 Ok(mut watcher) => {
                     if watcher.watch(&vault, RecursiveMode::Recursive).is_ok() {
@@ -100,7 +112,7 @@ fn drain_knowledge_watch(
     };
     let mut changed = false;
     for result in watch.rx.try_iter() {
-        changed |= result.is_ok();
+        changed |= result.is_ok_and(|event| !matches!(event.kind, EventKind::Access(_)));
     }
     if changed {
         state.dirty = true;
@@ -111,17 +123,25 @@ fn drain_knowledge_watch(
 fn start_knowledge_tree_scan(
     mut state: ResMut<KnowledgeState>,
     pending: Query<(), With<KnowledgeTreeTask>>,
+    wake: Option<Res<EventLoopProxyWrapper>>,
     mut commands: Commands,
 ) {
     if !state.dirty || !pending.is_empty() {
         return;
     }
     let generation = state.generation;
+    let wake = wake.map(|wrapper| (**wrapper).clone());
     let task = IoTaskPool::get().spawn(async move {
-        let root = vault_dir();
-        let tree = build_tree(&root).map_err(|error| error.to_string())?;
-        let index = KnowledgeIndex::build(&root).map_err(|error| error.to_string())?;
-        Ok((tree, index))
+        let result = (|| {
+            let root = vault_dir();
+            let tree = build_tree(&root).map_err(|error| error.to_string())?;
+            let index = KnowledgeIndex::build(&root).map_err(|error| error.to_string())?;
+            Ok((tree, index))
+        })();
+        if let Some(wake) = wake {
+            let _ = wake.send_event(WinitUserEvent::WakeUp);
+        }
+        result
     });
     state.dirty = false;
     commands.spawn(KnowledgeTreeTask { generation, task });

@@ -161,6 +161,10 @@ fn read_text(path: &Path) -> Option<String> {
 }
 
 impl LspManager {
+    fn is_open(&self, path: &Path) -> bool {
+        self.open_docs.contains_key(path)
+    }
+
     fn ensure_server(
         &mut self,
         root: &Path,
@@ -851,7 +855,7 @@ pub struct LspStatusSent {
 fn lsp_status_system(
     q: Query<(Entity, &FileView, Option<&LspStatusSent>), With<vmux_core::page::PageReady>>,
     settings: Res<vmux_setting::AppSettings>,
-    state: Res<DiagState>,
+    manager: NonSend<LspManager>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -866,7 +870,7 @@ fn lsp_status_system(
         };
         let desired = match store::resolved_command(&store::default_root(), &spec.command) {
             store::Resolution::Missing => LspServerState::Missing,
-            _ if state.lsp.contains_key(&canon(&fv.path)) => LspServerState::Ready,
+            _ if manager.is_open(&fv.path) => LspServerState::Ready,
             _ => LspServerState::Starting,
         };
         if sent.is_some_and(|s| s.state == desired && s.path == fv.path) {

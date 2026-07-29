@@ -27,13 +27,7 @@ const PASSKEYS_DIR: &str = "keys/passkeys";
 const RECOVERY_DIR: &str = "keys/recovery";
 const RECOVERY_FILE: &str = "default.ron";
 #[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "ai.vmux.vault.v2";
-#[cfg(target_os = "macos")]
-const LEGACY_KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
-#[cfg(target_os = "macos")]
-const KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v2";
-#[cfg(target_os = "macos")]
-const LEGACY_KEY_BROKER_SERVICE: &str = "ai.vmux.vault.key.v1";
+const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
@@ -2413,28 +2407,17 @@ fn keychain_options(
 #[cfg(target_os = "macos")]
 #[doc(hidden)]
 pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
-    use security_framework::passwords::{delete_generic_password_options, generic_password};
+    use security_framework::passwords::generic_password;
     use security_framework_sys::base::errSecItemNotFound;
 
-    for service in [KEY_BROKER_SERVICE, LEGACY_KEY_BROKER_SERVICE] {
-        match generic_password(keychain_options(service, vault_id, false)) {
-            Ok(key) => {
-                validate_key(&key)?;
-                if service == LEGACY_KEY_BROKER_SERVICE {
-                    store_keychain_key(KEY_BROKER_SERVICE, vault_id, &key)?;
-                    let _ = delete_generic_password_options(keychain_options(
-                        LEGACY_KEY_BROKER_SERVICE,
-                        vault_id,
-                        false,
-                    ));
-                }
-                return Ok(Some(hex(&key)));
-            }
-            Err(error) if error.code() == errSecItemNotFound => {}
-            Err(error) => return Err(format!("failed to unlock Vault key: {error}")),
+    match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, false)) {
+        Ok(key) => {
+            validate_key(&key)?;
+            Ok(Some(hex(&key)))
         }
+        Err(error) if error.code() == errSecItemNotFound => Ok(None),
+        Err(error) => Err(format!("failed to unlock Vault key: {error}")),
     }
-    Ok(None)
 }
 
 #[cfg(target_os = "macos")]
@@ -2442,25 +2425,23 @@ pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
 pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> {
     use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
 
-    for service in [KEY_BROKER_SERVICE, LEGACY_KEY_BROKER_SERVICE] {
-        let mut search = ItemSearchOptions::new();
-        let results = search
-            .class(ItemClass::generic_password())
-            .service(service)
-            .account(vault_id)
-            .load_data(true)
-            .skip_authenticated_items(true)
-            .search();
-        let Ok(results) = results else {
-            continue;
-        };
-        if let Some(key) = results.into_iter().find_map(|result| match result {
-            SearchResult::Data(key) => Some(key),
-            _ => None,
-        }) {
-            validate_key(&key)?;
-            return Ok(Some(hex(&key)));
-        }
+    let mut search = ItemSearchOptions::new();
+    let results = search
+        .class(ItemClass::generic_password())
+        .service(KEYCHAIN_SERVICE)
+        .account(vault_id)
+        .load_data(true)
+        .skip_authenticated_items(true)
+        .search();
+    let Ok(results) = results else {
+        return Ok(None);
+    };
+    if let Some(key) = results.into_iter().find_map(|result| match result {
+        SearchResult::Data(key) => Some(key),
+        _ => None,
+    }) {
+        validate_key(&key)?;
+        return Ok(Some(hex(&key)));
     }
     Ok(None)
 }
@@ -2469,20 +2450,7 @@ pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> 
 #[doc(hidden)]
 pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
     let key = decode_key_hex(encoded_key)?;
-    store_keychain_key(KEY_BROKER_SERVICE, vault_id, &key)
-}
-
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
-pub fn migrate_legacy_key(vault_id: &str) -> Result<bool, String> {
-    let Some(key) = load_legacy_key(vault_id)? else {
-        return Ok(false);
-    };
-    if key_broker_path().is_none() {
-        return Err("Vault key broker is missing".to_string());
-    }
-    store_key_with_broker(vault_id, &key)?;
-    Ok(true)
+    store_keychain_key(KEYCHAIN_SERVICE, vault_id, &key)
 }
 
 #[cfg(target_os = "macos")]
@@ -2552,61 +2520,36 @@ pub fn key_broker_store(_vault_id: &str, _encoded_key: &str) -> Result<(), Strin
 
 #[cfg(not(target_os = "macos"))]
 #[doc(hidden)]
-pub fn migrate_legacy_key(_vault_id: &str) -> Result<bool, String> {
-    Err("Legacy Vault keys are only available on macOS".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[doc(hidden)]
 pub fn authorize_key_broker_parent() -> Result<(), String> {
     Err("Vault key broker is only available on macOS".to_string())
 }
 
 #[cfg(target_os = "macos")]
-fn load_legacy_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    use security_framework::passwords::{delete_generic_password_options, generic_password};
+fn load_keychain_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+    use security_framework::passwords::generic_password;
     use security_framework_sys::base::errSecItemNotFound;
 
-    for (service, synchronized) in [
-        (KEYCHAIN_SERVICE, false),
-        (LEGACY_KEYCHAIN_SERVICE, false),
-        (LEGACY_KEYCHAIN_SERVICE, true),
-    ] {
-        match generic_password(keychain_options(service, vault_id, synchronized)) {
-            Ok(key) => {
-                validate_key(&key)?;
-                if service == LEGACY_KEYCHAIN_SERVICE {
-                    store_keychain_key(KEYCHAIN_SERVICE, vault_id, &key)?;
-                    let _ = delete_generic_password_options(keychain_options(
-                        LEGACY_KEYCHAIN_SERVICE,
-                        vault_id,
-                        synchronized,
-                    ));
-                }
-                return Ok(Some(Zeroizing::new(key)));
-            }
-            Err(error) if error.code() == errSecItemNotFound => {}
-            Err(error) => return Err(format!("failed to unlock Vault encryption key: {error}")),
+    match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, false)) {
+        Ok(key) => {
+            validate_key(&key)?;
+            Ok(Some(Zeroizing::new(key)))
         }
+        Err(error) if error.code() == errSecItemNotFound => Ok(None),
+        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
     }
-    Ok(None)
 }
 
 #[cfg(target_os = "macos")]
 fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
     load_or_store_session_key(vault_id, || {
-        if let Some(key) = load_key_from_broker(vault_id)? {
-            return Ok(key);
-        }
-        let Some(key) = load_legacy_key(vault_id)? else {
-            return Err(
-                "This Vault is locked on this device. Unlock it with a passkey.".to_string(),
-            );
+        let key = if key_broker_path().is_some() {
+            load_key_from_broker(vault_id)?
+        } else {
+            load_keychain_key(vault_id)?
         };
-        if key_broker_path().is_some() {
-            store_key_with_broker(vault_id, &key)?;
-        }
-        Ok(key)
+        key.ok_or_else(|| {
+            "This Vault is locked on this device. Unlock it with a passkey.".to_string()
+        })
     })
 }
 

@@ -29,26 +29,26 @@ fn str_array(v: Option<&Value>) -> Vec<String> {
     }
 }
 
-fn first_target(v: Option<&Value>) -> Option<String> {
-    match v {
-        Some(Value::String(s)) => Some(s.clone()),
-        Some(Value::Array(a)) => a.first().and_then(|x| x.as_str()).map(String::from),
-        _ => None,
-    }
-}
-
-fn parse_asset(v: &Value) -> Option<Asset> {
-    Some(Asset {
-        target: first_target(v.get("target"))?,
-        file: v.get("file")?.as_str()?.to_string(),
-        bin: v.get("bin").and_then(|x| x.as_str()).map(String::from),
-    })
+fn parse_asset(v: &Value) -> Vec<Asset> {
+    let targets = str_array(v.get("target"));
+    let Some(file) = v.get("file").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    let bin = v.get("bin").and_then(Value::as_str).map(String::from);
+    targets
+        .into_iter()
+        .map(|target| Asset {
+            target,
+            file: file.to_string(),
+            bin: bin.clone(),
+        })
+        .collect()
 }
 
 fn parse_assets(v: Option<&Value>) -> Vec<Asset> {
     match v {
-        Some(Value::Array(a)) => a.iter().filter_map(parse_asset).collect(),
-        Some(obj @ Value::Object(_)) => parse_asset(obj).into_iter().collect(),
+        Some(Value::Array(assets)) => assets.iter().flat_map(parse_asset).collect(),
+        Some(asset @ Value::Object(_)) => parse_asset(asset),
         _ => Vec::new(),
     }
 }
@@ -186,9 +186,10 @@ mod tests {
         let ra = pkgs.iter().find(|p| p.name == "rust-analyzer").unwrap();
         assert_eq!(ra.description, "Rust LSP");
         assert!(ra.categories.contains(&"LSP".to_string()));
-        assert_eq!(ra.assets.len(), 2);
+        assert_eq!(ra.assets.len(), 3);
         assert_eq!(ra.assets[0].target, "darwin_arm64");
         assert_eq!(ra.assets[1].target, "linux_x64_gnu");
+        assert_eq!(ra.assets[2].target, "linux_x64");
         assert_eq!(ra.bin.get("rust-analyzer").unwrap(), "{{source.asset.bin}}");
     }
 

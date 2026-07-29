@@ -218,6 +218,7 @@ impl Plugin for BrowserPlugin {
             .add_message::<WebviewLoadCompleted>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
             .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .configure_sets(
                 Update,
@@ -253,6 +254,7 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
+            .add_observer(request_layout_frame_burst)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_observer(on_debug_update_ready)
@@ -351,6 +353,7 @@ impl Plugin for BrowserPlugin {
                     .chain(),
             )
             .init_resource::<HostFocusIntent>()
+            .init_resource::<LayoutFrameRateBurst>()
             .init_resource::<PendingNavSnapshots>()
             .init_resource::<RecentBrowserInteraction>()
             .init_resource::<HostSpawnRegistry>()
@@ -1663,6 +1666,7 @@ fn sync_windowed_frames(
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
     mut last_visible_pages: Local<Vec<Entity>>,
     mut last_windowed_pages: Local<Vec<Entity>>,
+    mut visible_frames: Local<Vec<WindowedFrameRect>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
@@ -1672,6 +1676,7 @@ fn sync_windowed_frames(
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
+    visible_frames.clear();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
@@ -1743,6 +1748,7 @@ fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browsers.has_browser(entity) {
+            visible_frames.push(frame);
             let key = (
                 frame.left.round() as i32,
                 frame.top.round() as i32,
@@ -1768,6 +1774,7 @@ fn sync_windowed_frames(
     }
     *last_visible_pages = visible;
     *last_windowed_pages = current_windowed;
+    *visible_frames = set_native_windowed_page_frames(std::mem::take(&mut *visible_frames));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1786,6 +1793,50 @@ impl WindowedFrameRect {
     fn bottom(self) -> f32 {
         self.top + self.height
     }
+}
+
+#[cfg(target_os = "macos")]
+static NATIVE_WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(any(target_os = "macos", test))]
+fn windowed_frame_contains(frame: WindowedFrameRect, point: Vec2) -> bool {
+    point.x >= frame.left
+        && point.x <= frame.right()
+        && point.y >= frame.top
+        && point.y <= frame.bottom()
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    let mut published = NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::mem::swap(&mut *published, &mut frames);
+    frames.clear();
+    frames
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    frames.clear();
+    frames
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
+    let point = Vec2::new(x_px, y_px);
+    NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .copied()
+        .any(|frame| windowed_frame_contains(frame, point))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn native_windowed_page_contains_point(_: f32, _: f32) -> bool {
+    false
 }
 
 fn windowed_frame_rect_from_computed(
@@ -2179,7 +2230,7 @@ fn refresh_active_windowed_hover(
     state.position = Some(position);
 }
 
-const LAYOUT_IDLE_FRAME_RATE: i32 = 1;
+const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -2188,6 +2239,32 @@ struct LayoutFrameRateState {
     native_sequence: u64,
     last_input: Option<std::time::Instant>,
     dragging_layout: bool,
+}
+
+#[derive(Resource, Default)]
+struct LayoutFrameRateBurst {
+    last_emit: Option<std::time::Instant>,
+}
+
+fn request_layout_frame_burst(
+    trigger: On<BinHostEmitEvent>,
+    mut layouts: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    browsers: NonSend<Browsers>,
+    mut burst: ResMut<LayoutFrameRateBurst>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    if trigger.id != TABS_EVENT && trigger.id != STACKS_EVENT {
+        return;
+    }
+    let Ok(mut cap) = layouts.get_mut(trigger.webview) else {
+        return;
+    };
+    cap.0 = LAYOUT_ACTIVE_FRAME_RATE;
+    browsers.set_windowless_frame_rate(&trigger.webview, LAYOUT_ACTIVE_FRAME_RATE);
+    burst.last_emit = Some(std::time::Instant::now());
+    if let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
 }
 
 fn layout_frame_rate(
@@ -2212,6 +2289,7 @@ fn sync_layout_cef_frame_rate(
     mut wheel_events: MessageReader<MouseWheel>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    burst: Res<LayoutFrameRateBurst>,
     mut state: Local<LayoutFrameRateState>,
 ) {
     let inside = native_layout_pointer_is_inside();
@@ -2242,7 +2320,7 @@ fn sync_layout_cef_frame_rate(
     }
     let desired = layout_frame_rate(
         now,
-        state.last_input,
+        state.last_input.max(burst.last_emit),
         native_layout_activity_active(),
         state.dragging_layout,
     );
@@ -4242,12 +4320,15 @@ fn on_side_sheet_command_emit(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
+    mut last_activated: Query<&mut LastActivatedAt>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
     section_states: Query<&SideSheetSectionsExpanded, With<Tab>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -4269,11 +4350,23 @@ fn on_side_sheet_command_emit(
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
                 return;
             };
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            commands.entity(target_stack).insert(LastActivatedAt::now());
+            let activated_at = LastActivatedAt::now();
+            if let Ok(mut value) = last_activated.get_mut(target_pane) {
+                *value = activated_at;
+            } else {
+                commands.entity(target_pane).insert(activated_at);
+            }
+            if let Ok(mut value) = last_activated.get_mut(target_stack) {
+                *value = activated_at;
+            } else {
+                commands.entity(target_stack).insert(activated_at);
+            }
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
+            if let Some(proxy) = proxy {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
         }
         "close_stack" => {
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
@@ -4357,15 +4450,13 @@ fn on_side_sheet_command_emit(
             if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {
                 url.push_str(&format!("#L{}", evt.stack_index));
             }
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                url: Some(url),
-            }));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
+            open_beside.write(vmux_layout::OpenBesideRequest {
+                pane: target_pane,
+                direction: None,
+                url,
+                request_id: [0; 16],
+                focus: true,
             });
-            messages.write(cmd);
         }
         "open_tools" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
@@ -5999,6 +6090,21 @@ mod tests {
     }
 
     #[test]
+    fn windowed_frame_hit_test_uses_physical_page_bounds() {
+        let frame = WindowedFrameRect {
+            left: 100.0,
+            top: 50.0,
+            width: 400.0,
+            height: 300.0,
+        };
+
+        assert!(windowed_frame_contains(frame, Vec2::new(100.0, 50.0)));
+        assert!(windowed_frame_contains(frame, Vec2::new(500.0, 350.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(99.0, 200.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(300.0, 351.0)));
+    }
+
+    #[test]
     fn windowed_page_sync_sets_focus_ring_on_active_split_page() {
         let source = include_str!("lib.rs");
         let sync_fn = source
@@ -6655,6 +6761,56 @@ mod tests {
         );
         assert_eq!(
             layout_frame_rate(now, None, true, true),
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
+    }
+
+    #[test]
+    fn layout_host_emit_requests_frame_burst() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<LayoutFrameRateBurst>()
+            .add_observer(request_layout_frame_burst);
+        app.world_mut().insert_non_send(Browsers::default());
+        let other = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(BinHostEmitEvent::from_bytes(other, "other", Vec::new()));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_none()
+        );
+
+        let layout = app
+            .world_mut()
+            .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
+            .id();
+        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+            layout,
+            PANE_TREE_EVENT,
+            Vec::new(),
+        ));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_none()
+        );
+        assert_eq!(
+            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
+            LAYOUT_IDLE_FRAME_RATE
+        );
+        app.world_mut()
+            .trigger(BinHostEmitEvent::from_bytes(layout, "tabs", Vec::new()));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_some()
+        );
+        assert_eq!(
+            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
             LAYOUT_ACTIVE_FRAME_RATE
         );
     }

@@ -40,6 +40,28 @@ pub struct KnowledgeEntry {
     pub path: String,
     pub parent: String,
     pub is_directory: bool,
+    pub git_status: KnowledgeGitStatus,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum KnowledgeGitStatus {
+    #[default]
+    Clean,
+    Added,
+    Modified,
+    Deleted,
 }
 
 #[derive(

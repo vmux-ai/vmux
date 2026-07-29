@@ -32,7 +32,8 @@ mod preview;
 mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::{
-    EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, restore_file_view_bundle,
+    EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, StackExplorerVisibility,
+    restore_file_view_bundle,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

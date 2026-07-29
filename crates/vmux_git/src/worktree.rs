@@ -184,6 +184,35 @@ pub fn ensure_initial_commit(root: &Path) -> Result<(), GitError> {
     Ok(())
 }
 
+pub fn ensure_initial_snapshot(root: &Path, message: &str) -> Result<(), GitError> {
+    let (_, _, has_head) = git(root, &["rev-parse", "--verify", "HEAD"])?;
+    if has_head {
+        return Ok(());
+    }
+    let (stdout, stderr, added) = git(root, &["add", "--all"])?;
+    if !added {
+        return Err(git_err(&stdout, &stderr));
+    }
+    let (stdout, stderr, committed) = git(
+        root,
+        &[
+            "-c",
+            "user.name=vmux",
+            "-c",
+            "user.email=knowledge@vmux.ai",
+            "commit",
+            "--allow-empty",
+            "--no-gpg-sign",
+            "--message",
+            message,
+        ],
+    )?;
+    if !committed {
+        return Err(git_err(&stdout, &stderr));
+    }
+    Ok(())
+}
+
 /// The absolute common Git directory shared by a repository's main and linked worktrees.
 pub fn common_dir_of(dir: &Path) -> Result<PathBuf, GitError> {
     checkout_info(dir).map(|info| info.common_dir)
@@ -653,6 +682,23 @@ mod tests {
 
         assert_eq!(root, workspace.path().canonicalize().unwrap());
         assert!(workspace.path().join(".git").is_dir());
+    }
+
+    #[test]
+    fn initial_snapshot_commits_existing_files_once() {
+        let repository = tempfile::tempdir().unwrap();
+        repository_init(repository.path()).unwrap();
+        std::fs::write(repository.path().join("note.md"), "# Note\n").unwrap();
+
+        ensure_initial_snapshot(repository.path(), "Initialize").unwrap();
+        ensure_initial_snapshot(repository.path(), "Ignored").unwrap();
+
+        let (count, _, ok) = git(repository.path(), &["rev-list", "--count", "HEAD"]).unwrap();
+        assert!(ok);
+        assert_eq!(count.trim(), "1");
+        let (tracked, _, ok) = git(repository.path(), &["ls-files", "note.md"]).unwrap();
+        assert!(ok);
+        assert_eq!(tracked.trim(), "note.md");
     }
 
     #[test]

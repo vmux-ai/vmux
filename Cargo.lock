@@ -9868,6 +9868,7 @@ dependencies = [
  "serde",
  "tempfile",
  "vmux_core",
+ "vmux_git",
  "vmux_layout",
 ]
 

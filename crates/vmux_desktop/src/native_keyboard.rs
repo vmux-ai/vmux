@@ -212,6 +212,7 @@ pub(crate) fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 fn install(wake: impl Fn() + Send + Sync + 'static) {
     let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
+        wake();
         if ev.r#type() != NSEventType::KeyDown {
             return event.as_ptr();
         }

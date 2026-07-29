@@ -86,6 +86,9 @@ fn mutate(
 
 pub fn run_job(job: JobKind) -> Vec<Emit> {
     match job {
+        JobKind::Status { path, .. } if !runner::has_repository(&path) => {
+            vec![Emit::Status(runner::non_repository_status())]
+        }
         JobKind::Status { path, dirty } => match runner::status(&path) {
             Ok(mut ev) => {
                 if dirty {
@@ -99,6 +102,14 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
             }
             Err(e) => vec![Emit::Error(GitErrorEvent { message: e.0 })],
         },
+        JobKind::Diff { path, top_line, .. } if !runner::has_repository(&path) => vec![
+            Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
+            Emit::DiffViewport(GitDiffViewportEvent {
+                first_line: top_line,
+                total_lines: 0,
+                lines: Vec::new(),
+            }),
+        ],
         JobKind::Diff {
             path,
             top_line,
@@ -203,14 +214,44 @@ mod tests {
     }
 
     #[test]
-    fn job_on_non_repo_emits_error() {
+    fn job_on_non_repo_emits_empty_status() {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
         let emits = run_job(JobKind::Status {
             path: file,
             dirty: false,
         });
-        assert!(matches!(emits.as_slice(), [Emit::Error(_)]));
+        assert!(matches!(
+            emits.as_slice(),
+            [Emit::Status(GitStatusEvent {
+                branch,
+                file_status: FileStatus::Clean,
+                ..
+            })] if branch.is_empty()
+        ));
+    }
+
+    #[test]
+    fn diff_on_non_repo_emits_empty_viewport() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = test_repo::write(dir.path(), "loose.txt", "x");
+        let emits = run_job(JobKind::Diff {
+            path: file,
+            top_line: 0,
+            rows: 50,
+            content: None,
+        });
+        assert!(matches!(
+            emits.as_slice(),
+            [
+                Emit::DiffMeta(GitDiffMetaEvent { total_lines: 0 }),
+                Emit::DiffViewport(GitDiffViewportEvent {
+                    total_lines: 0,
+                    lines,
+                    ..
+                })
+            ] if lines.is_empty()
+        ));
     }
 
     #[test]

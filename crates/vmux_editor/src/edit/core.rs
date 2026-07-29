@@ -63,6 +63,7 @@ pub struct EditCore {
     undo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
     redo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
     last_group: Option<Group>,
+    preferred_vertical_col: Option<usize>,
     pub fold_view: crate::fold::FoldView,
 }
 
@@ -80,6 +81,7 @@ impl EditCore {
             undo: Vec::new(),
             redo: Vec::new(),
             last_group: None,
+            preferred_vertical_col: None,
             fold_view: crate::fold::FoldView::default(),
         }
     }
@@ -94,6 +96,15 @@ impl EditCore {
         self.selections[0]
     }
     pub fn set_caret(&mut self, at: usize) {
+        self.preferred_vertical_col = None;
+        self.place_caret(at);
+    }
+    fn place_caret(&mut self, at: usize) {
+        let at = if self.mode == EditMode::Normal {
+            self.normal_cursor_target(at)
+        } else {
+            at.min(self.buffer.len_chars())
+        };
         self.selections = vec![Selection::caret(at)];
     }
     fn set_head(&mut self, head: usize) {
@@ -174,10 +185,14 @@ impl EditCore {
         match motion {
             Motion::Left => self.buffer.prev_grapheme(from),
             Motion::Right => self.buffer.next_grapheme(from).min(len),
+            Motion::LeftBounded => self.line_left(from),
+            Motion::RightBounded => self.line_right(from),
             Motion::Up => self.vertical(from, -1),
             Motion::Down => self.vertical(from, 1),
             Motion::PageUp => self.vertical(from, -(self.rows.max(1) as i64)),
             Motion::PageDown => self.vertical(from, self.rows.max(1) as i64),
+            Motion::ParagraphPrev => self.paragraph_prev(from),
+            Motion::ParagraphNext => self.paragraph_next(from),
             Motion::LineStart => {
                 let (l, _) = self.buffer.char_to_coords(from);
                 self.buffer.line_to_char(l)
@@ -196,10 +211,92 @@ impl EditCore {
         }
     }
 
+    fn resolve_navigation_motion(&mut self, from: usize, motion: Motion) -> usize {
+        let delta = match motion {
+            Motion::Up => Some(-1),
+            Motion::Down => Some(1),
+            Motion::PageUp => Some(-(self.rows.max(1) as i64)),
+            Motion::PageDown => Some(self.rows.max(1) as i64),
+            _ => None,
+        };
+        let Some(delta) = delta else {
+            self.preferred_vertical_col = None;
+            return self.resolve_motion(from, motion);
+        };
+        let (_, current_col) = self.buffer.char_to_coords(from);
+        let preferred_col = *self.preferred_vertical_col.get_or_insert(current_col);
+        let (line, _) = self.buffer.char_to_coords(from);
+        let target = self.fold_view.step_rows(line as u32, delta) as usize;
+        self.buffer.coords_to_char(target, preferred_col)
+    }
+
     fn vertical(&self, from: usize, delta: i64) -> usize {
         let (l, c) = self.buffer.char_to_coords(from);
         let target = self.fold_view.step_rows(l as u32, delta) as usize;
         self.buffer.coords_to_char(target, c)
+    }
+    fn line_left(&self, from: usize) -> usize {
+        let (line, col) = self.buffer.char_to_coords(from);
+        let start = self.buffer.line_to_char(line);
+        if col == 0 {
+            start
+        } else {
+            self.buffer.prev_grapheme(from).max(start)
+        }
+    }
+    fn line_right(&self, from: usize) -> usize {
+        let (line, _) = self.buffer.char_to_coords(from);
+        let start = self.buffer.line_to_char(line);
+        let end = start + self.buffer.line_len_chars(line);
+        if end == start {
+            return start;
+        }
+        let last = self.buffer.prev_grapheme(end);
+        if from >= last {
+            last
+        } else {
+            self.buffer.next_grapheme(from).min(last)
+        }
+    }
+    fn normal_cursor_target(&self, at: usize) -> usize {
+        let at = at.min(self.buffer.len_chars());
+        let (line, _) = self.buffer.char_to_coords(at);
+        let start = self.buffer.line_to_char(line);
+        let end = start + self.buffer.line_len_chars(line);
+        if start == end {
+            start
+        } else {
+            at.clamp(start, self.buffer.prev_grapheme(end))
+        }
+    }
+    fn paragraph_prev(&self, from: usize) -> usize {
+        let (current, _) = self.buffer.char_to_coords(from);
+        if current == 0 {
+            return 0;
+        }
+        let mut line = current - 1;
+        while line > 0 && self.buffer.line_len_chars(line) == 0 {
+            line -= 1;
+        }
+        while line > 0 && self.buffer.line_len_chars(line - 1) > 0 {
+            line -= 1;
+        }
+        self.buffer.line_to_char(line)
+    }
+    fn paragraph_next(&self, from: usize) -> usize {
+        let (current, _) = self.buffer.char_to_coords(from);
+        let total = self.buffer.len_lines();
+        let mut line = current.saturating_add(1);
+        while line < total && self.buffer.line_len_chars(line) > 0 {
+            line += 1;
+        }
+        while line < total && self.buffer.line_len_chars(line) == 0 {
+            line += 1;
+        }
+        if line < total {
+            return self.buffer.line_to_char(line);
+        }
+        from
     }
     fn first_non_blank(&self, from: usize) -> usize {
         let (l, _) = self.buffer.char_to_coords(from);
@@ -299,21 +396,38 @@ impl EditCore {
         let mut text_changed = false;
         let mut yank: Option<(String, bool)> = None;
 
+        if !matches!(
+            &cmd,
+            EditCommand::Move(Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown)
+                | EditCommand::Select(
+                    Motion::Up | Motion::Down | Motion::PageUp | Motion::PageDown
+                )
+                | EditCommand::ScrollViewport(_)
+        ) {
+            self.preferred_vertical_col = None;
+        }
+
         match cmd {
             EditCommand::Move(m) => {
                 self.break_group();
                 let selection = self.primary();
-                let h = if !self.mode.is_visual() && !selection.is_empty() {
+                let collapse_selection = !self.mode.is_visual() && !selection.is_empty();
+                let h = if collapse_selection {
+                    self.preferred_vertical_col = None;
                     match m {
                         Motion::Left
+                        | Motion::LeftBounded
                         | Motion::Up
                         | Motion::PageUp
+                        | Motion::ParagraphPrev
                         | Motion::WordPrev
                         | Motion::LineStart
                         | Motion::DocStart => selection.range().start,
                         Motion::Right
+                        | Motion::RightBounded
                         | Motion::Down
                         | Motion::PageDown
+                        | Motion::ParagraphNext
                         | Motion::WordNext
                         | Motion::WordEnd
                         | Motion::LineEnd
@@ -323,17 +437,17 @@ impl EditCore {
                         }
                     }
                 } else {
-                    self.resolve_motion(selection.head, m)
+                    self.resolve_navigation_motion(selection.head, m)
                 };
                 if self.mode.is_visual() {
                     self.set_head(h);
                 } else {
-                    self.set_caret(h);
+                    self.place_caret(h);
                 }
             }
             EditCommand::Select(m) => {
                 self.break_group();
-                let h = self.resolve_motion(self.primary().head, m);
+                let h = self.resolve_navigation_motion(self.primary().head, m);
                 self.set_head(h);
             }
             EditCommand::InsertText(t) => text_changed = self.insert_text(&t),
@@ -434,10 +548,10 @@ impl EditCore {
             }
             EditCommand::SetMode(m) => {
                 self.break_group();
-                if m == EditMode::Normal && !self.primary().is_empty() {
+                self.mode = m;
+                if m == EditMode::Normal {
                     self.set_caret(self.primary().head);
                 }
-                self.mode = m;
             }
             EditCommand::Undo => {
                 if let Some((rope, sel, rev)) = self.undo.pop() {
@@ -528,6 +642,7 @@ impl EditCore {
                 }
             }
             EditCommand::Save
+            | EditCommand::ScrollViewport(_)
             | EditCommand::GotoDefinition
             | EditCommand::FindReferences
             | EditCommand::Hover
@@ -626,6 +741,56 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::WordNext));
         assert_eq!(c.primary().head, 4);
+    }
+
+    #[test]
+    fn bounded_horizontal_motion_stays_on_the_current_line() {
+        let mut c = core("ab\ncd");
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(EditCommand::Move(Motion::LeftBounded));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 0));
+
+        c.set_caret(c.buffer.coords_to_char(0, 1));
+        c.apply(EditCommand::Move(Motion::RightBounded));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 1));
+    }
+
+    #[test]
+    fn normal_mode_clamps_every_cursor_target_to_a_line_cell() {
+        let mut c = core("ab\ncd");
+        c.mode = EditMode::Normal;
+
+        c.set_caret(c.buffer.coords_to_char(0, 0));
+        c.apply(EditCommand::Move(Motion::LineEnd));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 1));
+
+        c.apply(EditCommand::Move(Motion::DocEnd));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 1));
+
+        c.apply(EditCommand::Move(Motion::WordNext));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 1));
+
+        c.mode = EditMode::Insert;
+        c.set_caret(c.buffer.coords_to_char(0, 2));
+        c.apply(EditCommand::SetMode(EditMode::Normal));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 1));
+    }
+
+    #[test]
+    fn paragraph_motion_moves_between_visible_paragraph_starts() {
+        let mut c = core("one\ntwo\n\nthree\nfour\n\nfive\n");
+        c.set_caret(c.buffer.coords_to_char(1, 2));
+        c.apply(EditCommand::Move(Motion::ParagraphNext));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (3, 0));
+        c.apply(EditCommand::Move(Motion::ParagraphPrev));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 0));
+
+        c.apply(EditCommand::Move(Motion::ParagraphPrev));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 0));
+
+        c.set_caret(c.buffer.coords_to_char(6, 0));
+        c.apply(EditCommand::Move(Motion::ParagraphNext));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (6, 0));
     }
 
     #[test]
@@ -774,6 +939,21 @@ mod tests {
     }
 
     #[test]
+    fn repeated_pastes_undo_one_at_a_time() {
+        let mut c = core("a");
+        c.register = Some(("X".into(), false));
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Paste);
+        c.apply(EditCommand::Paste);
+        assert_eq!(text_of(&c), "aXX");
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "aX");
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "a");
+    }
+
+    #[test]
     fn autoscroll_follows_caret_down() {
         let mut c = core("a\nb\nc\nd\ne\nf\n");
         c.rows = 3;
@@ -807,5 +987,21 @@ mod tests {
         c.apply(EditCommand::Move(Motion::Up));
 
         assert_eq!(c.primary(), Selection::caret(start));
+    }
+
+    #[test]
+    fn vertical_motion_preserves_column_across_empty_lines() {
+        for mode in [EditMode::Insert, EditMode::Normal] {
+            let mut c = core("abcdefghij\n\nabcdefghij\n");
+            c.fold_view = crate::fold::FoldState::default().view(c.buffer.len_lines() as u32);
+            c.mode = mode;
+            c.set_caret(c.buffer.coords_to_char(0, 5));
+
+            c.apply(EditCommand::Move(Motion::Down));
+            assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 0));
+
+            c.apply(EditCommand::Move(Motion::Down));
+            assert_eq!(c.buffer.char_to_coords(c.primary().head), (2, 5));
+        }
     }
 }

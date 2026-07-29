@@ -172,12 +172,22 @@ struct OutlineDirty;
 #[derive(Component)]
 struct ExplorerChromeSent;
 
-#[derive(Resource, Clone, Copy)]
-struct ExplorerChrome {
-    visible: bool,
-    width: u32,
+#[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[reflect(Component)]
+pub struct StackExplorerVisibility {
+    pub visible: bool,
+}
+
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct StackExplorerRevision {
     client_id: u64,
     request_id: u64,
+}
+
+#[derive(Resource, Clone, Copy)]
+struct ExplorerChrome {
+    default_visible: bool,
+    width: u32,
 }
 
 #[derive(Resource, Default)]
@@ -769,6 +779,8 @@ fn active_note_block(blocks: &[NoteBlock], line: u32) -> Option<u32> {
     blocks
         .iter()
         .position(|block| block.start_line <= line && line < block.end_line)
+        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
+        .or_else(|| (!blocks.is_empty()).then_some(0))
         .map(|index| index as u32)
 }
 
@@ -965,7 +977,8 @@ fn emit_cursor(
     }
     let total = edit.core.buffer.len_lines() as u32;
     let view = edit.folds.view(total);
-    let mut primary = edit.core.cursor_pos();
+    let source_primary = edit.core.cursor_pos();
+    let mut primary = source_primary;
     let raw_selections = edit
         .core
         .sel_spans(0, total as u16)
@@ -974,7 +987,7 @@ fn emit_cursor(
         .collect::<Vec<_>>();
     let wrap = wrapped_view(edit, vp);
     (primary.row, primary.col) = wrap.position(primary.line, primary.col);
-    let selections = wrap.selections(raw_selections);
+    let selections = wrap.selections(raw_selections.iter().copied());
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
@@ -983,6 +996,8 @@ fn emit_cursor(
             mode_label: keymap.mode_label(),
             primary,
             selections,
+            source_primary,
+            source_selections: raw_selections,
         },
     ));
 }
@@ -1086,7 +1101,7 @@ fn reset_file_sent_markers_on_page_ready(
 fn on_file_view_mode_set(
     trigger: On<BinReceive<FileViewModeSet>>,
     views: Query<(), With<FileView>>,
-    files: Query<&FileView>,
+    files: Query<(&FileView, Option<&EditState>)>,
     mut mode: ResMut<SharedFileViewMode>,
     mut commands: Commands,
 ) {
@@ -1096,9 +1111,17 @@ fn on_file_view_mode_set(
         if mode.0 == FileViewMode::Note
             && files
                 .get(entity)
-                .is_ok_and(|file| crate::markdown::is_markdown_path(&file.path))
+                .is_ok_and(|(file, _)| crate::markdown::is_markdown_path(&file.path))
         {
-            commands.entity(entity).remove::<NoteSent>();
+            let reveal_line = files
+                .get(entity)
+                .ok()
+                .and_then(|(_, edit)| edit.map(|edit| edit.core.cursor_pos().line));
+            let mut entity_commands = commands.entity(entity);
+            entity_commands.remove::<NoteSent>();
+            if let Some(line) = reveal_line {
+                entity_commands.insert(NoteRevealLine(line));
+            }
         }
     }
 }
@@ -1143,7 +1166,11 @@ fn on_file_resize(
     let Ok((mut vp, edit, keymap)) = q.get_mut(entity) else {
         return;
     };
-    vp.rows = rows_from_viewport(evt.char_height, evt.viewport_height);
+    let rows = rows_from_viewport(evt.char_height, evt.viewport_height);
+    if vp.rows == rows && vp.wrap_columns == evt.wrap_columns {
+        return;
+    }
+    vp.rows = rows;
     vp.wrap_columns = evt.wrap_columns;
     if let Some(mut edit) = edit {
         edit.core.rows = vp.rows;
@@ -1909,6 +1936,16 @@ fn run_commands(
     let mut dirty_changed = false;
     let mut fold_changed = false;
     for cmd in cmds {
+        if let EditCommand::ScrollViewport(lines) = &cmd {
+            if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+                commands.trigger(BinHostEmitEvent::from_rkyv(
+                    entity,
+                    FILE_SCROLL_BY_EVENT,
+                    &FileScrollByEvent { lines: *lines },
+                ));
+            }
+            continue;
+        }
         if matches!(
             cmd,
             EditCommand::FoldToggle
@@ -1977,6 +2014,7 @@ fn run_commands(
                 manager.completion(entity, &path, line, utf16, replace_from);
                 continue;
             }
+            EditCommand::ScrollViewport(_) => unreachable!(),
             _ => {}
         }
         if matches!(cmd, EditCommand::Save) {
@@ -2080,6 +2118,7 @@ fn run_commands(
     text_changed
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_file_key(
     trigger: On<BinReceive<FileKeyEvent>>,
     mut q: Query<(
@@ -2087,7 +2126,9 @@ fn on_file_key(
         &mut EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
+        &FileView,
     )>,
+    view_mode: Res<SharedFileViewMode>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
     mut manager: NonSendMut<crate::lsp::manager::LspManager>,
@@ -2096,7 +2137,7 @@ fn on_file_key(
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, mut vp, mut diff_source, file)) = q.get_mut(entity) else {
         return;
     };
     let input = KeyInput {
@@ -2109,9 +2150,14 @@ fn on_file_key(
         },
         repeat: evt.repeat,
     };
-    let cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
+    let mut cmds = accelerate_repeated_navigation(keymap.0.handle(&input), evt.repeat);
     if cmds.is_empty() {
         return;
+    }
+    if view_mode.0 == FileViewMode::Note && crate::markdown::is_markdown_path(&file.path) {
+        let line = edit.core.cursor_pos().line;
+        let blocks = crate::markdown::parse_note(&edit.core.buffer.text());
+        cmds = remap_note_vertical_commands(cmds, &blocks, line);
     }
     run_commands(
         entity,
@@ -2136,12 +2182,70 @@ fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<E
         .flat_map(|cmd| {
             let accelerate = matches!(
                 &cmd,
-                EditCommand::Move(Motion::Left | Motion::Right | Motion::Up | Motion::Down)
-                    | EditCommand::Select(Motion::Left | Motion::Right | Motion::Up | Motion::Down)
+                EditCommand::Move(
+                    Motion::Left
+                        | Motion::Right
+                        | Motion::LeftBounded
+                        | Motion::RightBounded
+                        | Motion::Up
+                        | Motion::Down,
+                ) | EditCommand::Select(
+                    Motion::Left
+                        | Motion::Right
+                        | Motion::LeftBounded
+                        | Motion::RightBounded
+                        | Motion::Up
+                        | Motion::Down,
+                )
             );
             [Some(cmd.clone()), accelerate.then_some(cmd)]
                 .into_iter()
                 .flatten()
+        })
+        .collect()
+}
+
+fn remap_note_vertical_commands(
+    cmds: Vec<EditCommand>,
+    blocks: &[NoteBlock],
+    start_line: u32,
+) -> Vec<EditCommand> {
+    let mut line = start_line;
+    cmds.into_iter()
+        .flat_map(|cmd| {
+            let (direction, select) = match &cmd {
+                EditCommand::Move(Motion::Down) => (1, false),
+                EditCommand::Move(Motion::Up) => (-1, false),
+                EditCommand::Select(Motion::Down) => (1, true),
+                EditCommand::Select(Motion::Up) => (-1, true),
+                _ => return vec![cmd],
+            };
+            match crate::markdown::note_vertical_target(blocks, line, direction) {
+                Some(target) if target == line => Vec::new(),
+                Some(target) => {
+                    let steps = target.abs_diff(line) as usize;
+                    line = target;
+                    let motion = if direction > 0 {
+                        Motion::Down
+                    } else {
+                        Motion::Up
+                    };
+                    let command = if select {
+                        EditCommand::Select(motion)
+                    } else {
+                        EditCommand::Move(motion)
+                    };
+                    std::iter::repeat_n(command, steps).collect()
+                }
+                None => {
+                    line = if direction > 0 {
+                        line.saturating_add(1)
+                    } else {
+                        line.saturating_sub(1)
+                    };
+                    vec![cmd]
+                }
+            }
         })
         .collect()
 }
@@ -3145,7 +3249,7 @@ fn sync_explorer_chrome(
     let Some(settings) = settings else {
         return;
     };
-    chrome.visible = settings.editor.explorer.visible();
+    chrome.default_visible = settings.editor.explorer.visible();
     chrome.width = settings.editor.explorer.width();
     synced.0 = true;
     for e in &views {
@@ -3153,40 +3257,51 @@ fn sync_explorer_chrome(
     }
 }
 
+fn explorer_scope(entity: Entity, child_of: &Query<&ChildOf>) -> Entity {
+    child_of.get(entity).map(ChildOf::parent).unwrap_or(entity)
+}
+
 fn emit_explorer_chrome(
-    q: Query<Entity, ChromeUnsentReady>,
+    q: Query<(Entity, Option<&ChildOf>), ChromeUnsentReady>,
+    visibility: Query<&StackExplorerVisibility>,
+    revisions: Query<&StackExplorerRevision>,
     chrome: Res<ExplorerChrome>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    for entity in &q {
+    for (entity, child_of) in &q {
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
+        let scope = child_of.map(ChildOf::parent).unwrap_or(entity);
+        let visible = visibility
+            .get(scope)
+            .map(|state| state.visible)
+            .unwrap_or(chrome.default_visible);
+        let revision = revisions.get(scope).copied().unwrap_or_default();
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,
             EXPLORER_CHROME_EVENT,
             &ExplorerChromeEvent {
-                visible: chrome.visible,
+                visible,
                 width: chrome.width,
-                client_id: chrome.client_id,
-                request_id: chrome.request_id,
+                client_id: revision.client_id,
+                request_id: revision.request_id,
             },
         ));
         commands.entity(entity).insert(ExplorerChromeSent);
     }
 }
 
-fn persist_chrome(
-    chrome: ExplorerChrome,
+fn persist_chrome_width(
+    width: u32,
     settings: Option<ResMut<vmux_setting::AppSettings>>,
     saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
 ) {
     let Some(mut settings) = settings else {
         return;
     };
-    settings.editor.explorer.visible = Some(chrome.visible);
-    settings.editor.explorer.width = Some(chrome.width);
+    settings.editor.explorer.width = Some(width);
     if let Some(mut saves) = saves {
         saves.write(vmux_setting::SettingsSaveRequest);
     }
@@ -3200,27 +3315,45 @@ fn mark_chrome_unsent(views: &Query<Entity, With<FileView>>, commands: &mut Comm
 
 fn on_explorer_panel_set_visible(
     trigger: On<BinReceive<ExplorerPanelSetVisible>>,
-    mut chrome: ResMut<ExplorerChrome>,
-    settings: Option<ResMut<vmux_setting::AppSettings>>,
-    saves: Option<ResMut<bevy::ecs::message::Messages<vmux_setting::SettingsSaveRequest>>>,
-    mut editors: Query<(Entity, &FileView, &mut ExplorerState)>,
+    child_of: Query<&ChildOf>,
+    mut visibility: Query<&mut StackExplorerVisibility>,
+    mut revisions: Query<&mut StackExplorerRevision>,
+    mut editors: Query<(Entity, &FileView, &mut ExplorerState, Option<&ChildOf>)>,
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
-    chrome.visible = trigger.event().payload.visible;
-    chrome.client_id = trigger.event().payload.client_id;
-    chrome.request_id = trigger.event().payload.request_id;
-    persist_chrome(*chrome, settings, saves);
     let entity = trigger.event().webview;
-    for (view, _, _) in &mut editors {
+    let scope = explorer_scope(entity, &child_of);
+    let next_visibility = StackExplorerVisibility {
+        visible: trigger.event().payload.visible,
+    };
+    if let Ok(mut state) = visibility.get_mut(scope) {
+        *state = next_visibility;
+    } else {
+        commands.entity(scope).insert(next_visibility);
+    }
+    let next_revision = StackExplorerRevision {
+        client_id: trigger.event().payload.client_id,
+        request_id: trigger.event().payload.request_id,
+    };
+    if let Ok(mut revision) = revisions.get_mut(scope) {
+        *revision = next_revision;
+    } else {
+        commands.entity(scope).insert(next_revision);
+    }
+    for (view, _, _, parent) in &mut editors {
+        let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
+        if view_scope != scope {
+            continue;
+        }
         if view == entity {
             commands.entity(view).insert(ExplorerChromeSent);
         } else {
             commands.entity(view).remove::<ExplorerChromeSent>();
         }
     }
-    if chrome.visible
-        && let Ok((_, fv, mut st)) = editors.get_mut(entity)
+    if next_visibility.visible
+        && let Ok((_, fv, mut st, _)) = editors.get_mut(entity)
     {
         reveal_current_in_tree(entity, &fv.path, &mut st, &mut commands);
         if let Some(browsers) = browsers {
@@ -3241,7 +3374,7 @@ fn on_explorer_panel_width(
         vmux_setting::EXPLORER_MIN_WIDTH,
         vmux_setting::EXPLORER_MAX_WIDTH,
     );
-    persist_chrome(*chrome, settings, saves);
+    persist_chrome_width(chrome.width, settings, saves);
     mark_chrome_unsent(&views, &mut commands);
 }
 
@@ -3371,9 +3504,10 @@ fn on_explorer_goto(
 
 fn apply_global_search_requests(
     mut reader: MessageReader<GlobalSearchRequest>,
-    views: Query<(Entity, &FileView)>,
+    views: Query<(Entity, &FileView, Option<&ChildOf>)>,
+    visibility: Query<&StackExplorerVisibility>,
     mut pending: ResMut<PendingGlobalSearch>,
-    mut chrome: ResMut<ExplorerChrome>,
+    chrome: Res<ExplorerChrome>,
     mut commands: Commands,
 ) {
     pending.0.extend(
@@ -3385,18 +3519,12 @@ fn apply_global_search_requests(
                 retries_left: GLOBAL_SEARCH_RETRY_LIMIT,
             }),
     );
-    if !pending.0.is_empty() && !chrome.visible {
-        chrome.visible = true;
-        for (entity, _) in &views {
-            commands.entity(entity).remove::<ExplorerChromeSent>();
-        }
-    }
     let mut remaining = Vec::new();
     for mut pending_request in pending.0.drain(..) {
         let request = &pending_request.request;
-        let Some((entity, _)) = views
+        let Some((entity, _, parent)) = views
             .iter()
-            .find(|(_, view)| view.path == request.target_path)
+            .find(|(_, view, _)| view.path == request.target_path)
         else {
             pending_request.retries_left = pending_request.retries_left.saturating_sub(1);
             if pending_request.retries_left > 0 {
@@ -3404,6 +3532,22 @@ fn apply_global_search_requests(
             }
             continue;
         };
+        let scope = parent.map(ChildOf::parent).unwrap_or(entity);
+        let explorer_visible = visibility
+            .get(scope)
+            .map(|state| state.visible)
+            .unwrap_or(chrome.default_visible);
+        if !explorer_visible {
+            commands
+                .entity(scope)
+                .insert(StackExplorerVisibility { visible: true });
+            for (view, _, parent) in &views {
+                let view_scope = parent.map(ChildOf::parent).unwrap_or(view);
+                if view_scope == scope {
+                    commands.entity(view).remove::<ExplorerChromeSent>();
+                }
+            }
+        }
         let request = pending_request.request;
         commands.entity(entity).insert((
             GlobalSearchState(ExplorerSearchEvent {
@@ -3505,11 +3649,10 @@ impl Plugin for EditorPlugin {
             .insert_non_send(SelfWrites::default())
             .insert_non_send(crate::fold_store::FoldStore::load())
             .insert_resource(ExplorerChrome {
-                visible: false,
+                default_visible: false,
                 width: vmux_setting::EXPLORER_DEFAULT_WIDTH,
-                client_id: 0,
-                request_id: 0,
             })
+            .register_type::<StackExplorerVisibility>()
             .init_resource::<ExplorerChromeSynced>()
             .init_resource::<PendingGlobalSearch>()
             .init_resource::<SharedFileViewMode>()
@@ -3695,6 +3838,48 @@ mod edit_flow_tests {
     }
 
     #[test]
+    fn switching_to_note_reveals_the_current_cursor_line() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        app.world_mut().resource_mut::<SharedFileViewMode>().0 = FileViewMode::Editor;
+
+        let path = PathBuf::from("/note.md");
+        let mut core = EditCore::new(
+            path.clone(),
+            "Markdown".into(),
+            "one\ntwo\nthree\n",
+            crate::edit::EditMode::Normal,
+        );
+        core.apply(EditCommand::Move(Motion::GotoLine(2)));
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                EditState::new(
+                    core,
+                    HighlightCache::new(&path),
+                    crate::fold::FoldState::default(),
+                ),
+            ))
+            .id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Note,
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().get::<NoteRevealLine>(entity).map(|line| line.0),
+            Some(2)
+        );
+    }
+
+    #[test]
     fn missing_file_view_loads_when_file_is_created() {
         let temp = tempfile::tempdir().unwrap();
         let parent = temp.path().join("created-after-open");
@@ -3864,6 +4049,24 @@ mod edit_flow_tests {
         assert_eq!(
             accelerate_repeated_navigation(vec![EditCommand::DeleteBack], true),
             [EditCommand::DeleteBack]
+        );
+    }
+
+    #[test]
+    fn repeated_note_navigation_skips_a_separator_after_the_first_step() {
+        let blocks = crate::markdown::parse_note("- one\n- two\n\nnext\n");
+        let commands = remap_note_vertical_commands(
+            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
+            &blocks,
+            0,
+        );
+        assert_eq!(
+            commands,
+            [
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down),
+            ]
         );
     }
 }
@@ -4198,43 +4401,155 @@ mod explorer_tests {
     }
 
     #[test]
-    fn panel_visibility_is_idempotent() {
+    fn panel_visibility_is_shared_only_within_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(ExplorerChrome {
-                visible: true,
-                width: 240,
-                client_id: 0,
-                request_id: 0,
-            })
             .add_observer(on_explorer_panel_set_visible);
-        let e = app
+        let first_stack = app
             .world_mut()
-            .spawn(FileView {
-                path: PathBuf::from("/x"),
-            })
+            .spawn(StackExplorerVisibility { visible: true })
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: true })
+            .id();
+        let first = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/a.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(first_stack),
+            ))
+            .id();
+        let peer = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/b.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(first_stack),
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/c.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(second_stack),
+            ))
             .id();
         app.world_mut().trigger(BinReceive {
-            webview: e,
+            webview: first,
             payload: ExplorerPanelSetVisible {
                 visible: false,
                 client_id: 7,
                 request_id: 1,
             },
         });
-        assert!(!app.world().resource::<ExplorerChrome>().visible);
+        app.update();
+        assert!(
+            !app.world()
+                .get::<StackExplorerVisibility>(first_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(second_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(app.world().get::<ExplorerChromeSent>(first).is_some());
+        assert!(app.world().get::<ExplorerChromeSent>(peer).is_none());
+        assert!(app.world().get::<ExplorerChromeSent>(other).is_some());
+
         app.world_mut().trigger(BinReceive {
-            webview: e,
+            webview: first,
             payload: ExplorerPanelSetVisible {
                 visible: false,
                 client_id: 7,
                 request_id: 2,
             },
         });
-        let chrome = app.world().resource::<ExplorerChrome>();
-        assert!(!chrome.visible);
-        assert_eq!(chrome.client_id, 7);
-        assert_eq!(chrome.request_id, 2);
+        app.update();
+        let revision = app
+            .world()
+            .get::<StackExplorerRevision>(first_stack)
+            .unwrap();
+        assert_eq!(revision.client_id, 7);
+        assert_eq!(revision.request_id, 2);
+    }
+
+    #[test]
+    fn global_search_opens_only_the_target_stack_explorer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                default_visible: false,
+                width: 240,
+            })
+            .init_resource::<PendingGlobalSearch>()
+            .add_message::<GlobalSearchRequest>()
+            .add_systems(Update, apply_global_search_requests);
+        let first_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let target = PathBuf::from("/project/a.rs");
+        let first = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: target.clone(),
+                },
+                ChildOf(first_stack),
+            ))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/project/b.rs"),
+                },
+                ChildOf(second_stack),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<GlobalSearchRequest>>()
+            .write(GlobalSearchRequest {
+                target_path: target,
+                root: "/project".to_string(),
+                query: "needle".to_string(),
+                matches: Vec::new(),
+            });
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(first_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(
+            !app.world()
+                .get::<StackExplorerVisibility>(second_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(app.world().get::<GlobalSearchState>(first).is_some());
+        assert!(app.world().get::<GlobalSearchState>(second).is_none());
     }
 
     #[test]
@@ -4243,17 +4558,19 @@ mod explorer_tests {
         let file = tmp.path().join("src").join("lib.rs");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(ExplorerChrome {
-                visible: false,
-                width: 240,
-                client_id: 0,
-                request_id: 0,
-            })
             .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
             .add_observer(on_explorer_panel_set_visible);
+        let stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
         let e = app
             .world_mut()
-            .spawn((FileView { path: file.clone() }, ExplorerState::default()))
+            .spawn((
+                FileView { path: file.clone() },
+                ExplorerState::default(),
+                ChildOf(stack),
+            ))
             .id();
         wait_for_children(&mut app, e, tmp.path());
         app.world_mut().trigger(BinReceive {
@@ -4265,7 +4582,12 @@ mod explorer_tests {
             },
         });
         wait_for_children(&mut app, e, &tmp.path().join("src"));
-        assert!(app.world().resource::<ExplorerChrome>().visible);
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(stack)
+                .unwrap()
+                .visible
+        );
         let st = app.world().get::<ExplorerState>(e).unwrap();
         assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
     }
@@ -4275,10 +4597,8 @@ mod explorer_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(ExplorerChrome {
-                visible: true,
+                default_visible: true,
                 width: 240,
-                client_id: 0,
-                request_id: 0,
             })
             .add_observer(on_explorer_panel_width);
         let e = app

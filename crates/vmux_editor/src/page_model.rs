@@ -1,16 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use vmux_core::event::{
-    DiagSeverity, FileDiagnostic, FileDirEntry, KeyMods, LspPkgStatus, MdTableAlign, StyledSpan,
-    TreeRow,
+    DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
 };
-
-pub fn note_inline_consumes_ctrl_navigation(key: &str, mods: KeyMods) -> bool {
-    mods.ctrl
-        && !mods.alt
-        && !mods.meta
-        && (key.eq_ignore_ascii_case("n") || key.eq_ignore_ascii_case("p"))
-}
 
 pub fn note_list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
     let chars = line.chars().collect::<Vec<_>>();
@@ -40,6 +32,270 @@ pub fn note_list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
             && task[3].is_whitespace(),
     ) * 4;
     Some((indent, indent + marker_end + task_prefix))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteInlineKind {
+    BlockMarker,
+    Code,
+    Strong,
+    Emph,
+    Strike,
+    Link,
+    WikiLink,
+    Escape,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoteInlineNode {
+    Text {
+        start: u32,
+        end: u32,
+    },
+    Syntax {
+        kind: NoteInlineKind,
+        start: u32,
+        prefix_end: u32,
+        suffix_start: u32,
+        end: u32,
+        children: Vec<NoteInlineNode>,
+    },
+}
+
+impl NoteInlineNode {
+    pub fn start(&self) -> u32 {
+        match self {
+            Self::Text { start, .. } | Self::Syntax { start, .. } => *start,
+        }
+    }
+
+    pub fn end(&self) -> u32 {
+        match self {
+            Self::Text { end, .. } | Self::Syntax { end, .. } => *end,
+        }
+    }
+}
+
+fn find_chars(chars: &[char], from: usize, end: usize, needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || from >= end || needle.len() > end.saturating_sub(from) {
+        return None;
+    }
+    (from..=end - needle.len()).find(|index| chars[*index..].starts_with(needle))
+}
+
+fn inline_syntax_at(chars: &[char], index: usize, end: usize) -> Option<NoteInlineNode> {
+    let syntax = |kind, start, prefix_end, suffix_start, end, children| NoteInlineNode::Syntax {
+        kind,
+        start: start as u32,
+        prefix_end: prefix_end as u32,
+        suffix_start: suffix_start as u32,
+        end: end as u32,
+        children,
+    };
+
+    if chars[index] == '\\' && index + 1 < end {
+        return Some(syntax(
+            NoteInlineKind::Escape,
+            index,
+            index + 1,
+            index + 2,
+            index + 2,
+            vec![NoteInlineNode::Text {
+                start: (index + 1) as u32,
+                end: (index + 2) as u32,
+            }],
+        ));
+    }
+
+    let wiki_open = if chars[index..end].starts_with(&['!', '[', '[']) {
+        Some(3)
+    } else if chars[index..end].starts_with(&['[', '[']) {
+        Some(2)
+    } else {
+        None
+    };
+    if let Some(open_len) = wiki_open
+        && let Some(close) = find_chars(chars, index + open_len, end, &[']', ']'])
+    {
+        let label = chars[index + open_len..close]
+            .iter()
+            .rposition(|character| *character == '|')
+            .map_or(index + open_len, |offset| index + open_len + offset + 1);
+        return Some(syntax(
+            NoteInlineKind::WikiLink,
+            index,
+            label,
+            close,
+            close + 2,
+            parse_inline_range(chars, label, close),
+        ));
+    }
+
+    let link_open = if chars[index..end].starts_with(&['!', '[']) {
+        Some(2)
+    } else if chars[index] == '[' {
+        Some(1)
+    } else {
+        None
+    };
+    if let Some(open_len) = link_open
+        && let Some(label_end) = find_chars(chars, index + open_len, end, &[']', '('])
+        && let Some(close) = find_chars(chars, label_end + 2, end, &[')'])
+    {
+        return Some(syntax(
+            NoteInlineKind::Link,
+            index,
+            index + open_len,
+            label_end,
+            close + 1,
+            parse_inline_range(chars, index + open_len, label_end),
+        ));
+    }
+
+    if chars[index] == '`' {
+        let run = chars[index..end]
+            .iter()
+            .take_while(|character| **character == '`')
+            .count();
+        if let Some(close) = find_chars(chars, index + run, end, &vec!['`'; run])
+            && close > index + run
+        {
+            return Some(syntax(
+                NoteInlineKind::Code,
+                index,
+                index + run,
+                close,
+                close + run,
+                vec![NoteInlineNode::Text {
+                    start: (index + run) as u32,
+                    end: close as u32,
+                }],
+            ));
+        }
+    }
+
+    let paired = [
+        (&['*', '*'][..], NoteInlineKind::Strong),
+        (&['_', '_'][..], NoteInlineKind::Strong),
+        (&['~', '~'][..], NoteInlineKind::Strike),
+    ];
+    for (delimiter, kind) in paired {
+        if chars[index..end].starts_with(delimiter)
+            && let Some(close) = find_chars(chars, index + delimiter.len(), end, delimiter)
+            && close > index + delimiter.len()
+        {
+            return Some(syntax(
+                kind,
+                index,
+                index + delimiter.len(),
+                close,
+                close + delimiter.len(),
+                parse_inline_range(chars, index + delimiter.len(), close),
+            ));
+        }
+    }
+
+    if matches!(chars[index], '*' | '_') {
+        let delimiter = chars[index];
+        if let Some(close) = chars[index + 1..end]
+            .iter()
+            .position(|character| *character == delimiter)
+            .map(|offset| index + 1 + offset)
+            && close > index + 1
+        {
+            return Some(syntax(
+                NoteInlineKind::Emph,
+                index,
+                index + 1,
+                close,
+                close + 1,
+                parse_inline_range(chars, index + 1, close),
+            ));
+        }
+    }
+
+    None
+}
+
+fn parse_inline_range(chars: &[char], start: usize, end: usize) -> Vec<NoteInlineNode> {
+    let mut nodes = Vec::new();
+    let mut text_start = start;
+    let mut index = start;
+    while index < end {
+        let Some(node) = inline_syntax_at(chars, index, end) else {
+            index += 1;
+            continue;
+        };
+        if text_start < index {
+            nodes.push(NoteInlineNode::Text {
+                start: text_start as u32,
+                end: index as u32,
+            });
+        }
+        index = node.end() as usize;
+        text_start = index;
+        nodes.push(node);
+    }
+    if text_start < end {
+        nodes.push(NoteInlineNode::Text {
+            start: text_start as u32,
+            end: end as u32,
+        });
+    }
+    nodes
+}
+
+pub fn note_inline_nodes(source: &str, heading_level: Option<u8>) -> Vec<NoteInlineNode> {
+    let chars = source.chars().collect::<Vec<_>>();
+    let prefix = heading_level
+        .map(|level| level as usize)
+        .filter(|level| {
+            chars.len() > *level
+                && chars[..*level].iter().all(|character| *character == '#')
+                && chars[*level].is_whitespace()
+        })
+        .map_or(0, |level| level + 1);
+    let children = parse_inline_range(&chars, prefix, chars.len());
+    if prefix == 0 {
+        children
+    } else {
+        vec![NoteInlineNode::Syntax {
+            kind: NoteInlineKind::BlockMarker,
+            start: 0,
+            prefix_end: prefix as u32,
+            suffix_start: chars.len() as u32,
+            end: chars.len() as u32,
+            children,
+        }]
+    }
+}
+
+pub fn note_source_offset(source: &str, start_line: u32, line: u32, col: u32) -> u32 {
+    let target = line.saturating_sub(start_line) as usize;
+    let lines = source.split('\n').collect::<Vec<_>>();
+    let before = lines
+        .iter()
+        .take(target.min(lines.len()))
+        .map(|line| line.chars().count() as u32 + 1)
+        .sum::<u32>();
+    let length = lines
+        .get(target)
+        .map_or(0, |line| line.chars().count() as u32);
+    before + col.min(length)
+}
+
+pub fn note_source_position(source: &str, start_line: u32, offset: u32) -> (u32, u32) {
+    let mut line = start_line;
+    let mut col = 0;
+    for character in source.chars().take(offset as usize) {
+        if character == '\n' {
+            line = line.saturating_add(1);
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    (line, col)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +413,25 @@ pub fn clamp_selection(idx: usize, len: usize) -> usize {
     if len == 0 { 0 } else { idx.min(len - 1) }
 }
 
+pub fn centered_scroll_top(target_center: f64, viewport_height: f64) -> f64 {
+    (target_center - viewport_height * 0.5).max(0.0)
+}
+
+pub fn viewport_reveal_delta(
+    target_top: f64,
+    target_bottom: f64,
+    viewport_top: f64,
+    viewport_bottom: f64,
+) -> f64 {
+    if target_top < viewport_top {
+        target_top - viewport_top
+    } else if target_bottom > viewport_bottom {
+        target_bottom - viewport_bottom
+    } else {
+        0.0
+    }
+}
+
 pub fn dir_select_index(entries: &[FileDirEntry], came_from: &str) -> usize {
     let name = came_from
         .trim_end_matches('/')
@@ -246,6 +521,54 @@ pub fn squiggle_style(start_col: u32, end_col: u32, color_rgb: &str) -> String {
 mod tests {
     use super::*;
 
+    fn append_live_text(
+        source: &[char],
+        nodes: &[NoteInlineNode],
+        caret: u32,
+        output: &mut String,
+    ) {
+        for node in nodes {
+            match node {
+                NoteInlineNode::Text { start, end } => {
+                    output.extend(
+                        source[*start as usize..*end as usize]
+                            .iter()
+                            .map(
+                                |character| {
+                                    if *character == '\n' { ' ' } else { *character }
+                                },
+                            ),
+                    );
+                }
+                NoteInlineNode::Syntax {
+                    start,
+                    prefix_end,
+                    suffix_start,
+                    end,
+                    children,
+                    ..
+                } => {
+                    let reveal = *start <= caret && caret <= *end;
+                    if reveal {
+                        output.extend(source[*start as usize..*prefix_end as usize].iter());
+                    }
+                    append_live_text(source, children, caret, output);
+                    if reveal {
+                        output.extend(source[*suffix_start as usize..*end as usize].iter());
+                    }
+                }
+            }
+        }
+    }
+
+    fn live_text(source: &str, caret: u32) -> String {
+        let chars = source.chars().collect::<Vec<_>>();
+        let nodes = note_inline_nodes(source, None);
+        let mut output = String::new();
+        append_live_text(&chars, &nodes, caret, &mut output);
+        output
+    }
+
     #[test]
     fn gutter_width_min_three() {
         assert_eq!(gutter_width(0), 3);
@@ -321,30 +644,16 @@ mod tests {
     }
 
     #[test]
-    fn note_inline_editor_consumes_ctrl_n_and_ctrl_p_only() {
-        let ctrl = KeyMods {
-            ctrl: true,
-            ..Default::default()
-        };
-        assert!(note_inline_consumes_ctrl_navigation("n", ctrl));
-        assert!(note_inline_consumes_ctrl_navigation("P", ctrl));
-        assert!(!note_inline_consumes_ctrl_navigation("j", ctrl));
-        assert!(!note_inline_consumes_ctrl_navigation(
-            "n",
-            KeyMods {
-                ctrl: true,
-                meta: true,
-                ..Default::default()
-            }
-        ));
-        assert!(!note_inline_consumes_ctrl_navigation(
-            "p",
-            KeyMods {
-                ctrl: true,
-                alt: true,
-                ..Default::default()
-            }
-        ));
+    fn cursor_centering_places_target_at_viewport_midpoint() {
+        assert_eq!(centered_scroll_top(500.0, 400.0), 300.0);
+        assert_eq!(centered_scroll_top(100.0, 400.0), 0.0);
+    }
+
+    #[test]
+    fn cursor_reveal_waits_until_the_caret_leaves_the_viewport() {
+        assert_eq!(viewport_reveal_delta(120.0, 148.0, 100.0, 500.0), 0.0);
+        assert_eq!(viewport_reveal_delta(80.0, 108.0, 100.0, 500.0), -20.0);
+        assert_eq!(viewport_reveal_delta(480.0, 520.0, 100.0, 500.0), 20.0);
     }
 
     #[test]
@@ -354,6 +663,36 @@ mod tests {
         assert_eq!(note_list_marker_prefix_len("- [ ] task"), Some((0, 6)));
         assert_eq!(note_list_marker_prefix_len("  * [x] done"), Some((2, 8)));
         assert_eq!(note_list_marker_prefix_len("paragraph"), None);
+    }
+
+    #[test]
+    fn note_live_preview_preserves_paragraph_flow() {
+        let source = "first line\nsecond line\nthird line";
+        assert_eq!(live_text(source, 4), "first line second line third line");
+        assert_eq!(note_source_offset(source, 5, 7, 3), 26);
+        assert_eq!(note_source_position(source, 5, 26), (7, 3));
+    }
+
+    #[test]
+    fn note_live_preview_reveals_only_active_inline_syntax() {
+        let source = "plain `code` and **bold** with [link](https://vmux.ai)";
+        assert_eq!(live_text(source, 2), "plain code and bold with link");
+        assert_eq!(live_text(source, 8), "plain `code` and bold with link");
+        assert_eq!(live_text(source, 20), "plain code and **bold** with link");
+        assert_eq!(
+            live_text(source, 35),
+            "plain code and bold with [link](https://vmux.ai)"
+        );
+    }
+
+    #[test]
+    fn note_live_preview_uses_wiki_link_label() {
+        let source = "See [[projects/vmux|vmux project]] now";
+        assert_eq!(live_text(source, 1), "See vmux project now");
+        assert_eq!(
+            live_text(source, 10),
+            "See [[projects/vmux|vmux project]] now"
+        );
     }
 
     #[test]

@@ -8,6 +8,7 @@ use crate::lsp::{archive, catalog::Package, download, purl, store, target};
 
 fn resolve_bin_template(tmpl: &str, asset_bin: &str) -> String {
     tmpl.replace("{{source.asset.bin}}", asset_bin)
+        .replace("{{source.asset.file}}", asset_bin)
 }
 
 pub fn asset_url(pkg: &Package, asset: &Asset) -> Result<String, String> {
@@ -382,6 +383,14 @@ mod tests {
         let binp = store::bin_path(root, "myserver").unwrap();
         assert_eq!(std::fs::read(&binp).unwrap(), b"#!/bin/sh\necho hi\n");
         assert!(phases.contains(&InstallPhase::Done));
+    }
+
+    #[test]
+    fn asset_file_template_links_extracted_binary() {
+        assert_eq!(
+            resolve_bin_template("{{source.asset.file}}", "marksman"),
+            "marksman"
+        );
     }
 
     #[test]

@@ -125,6 +125,24 @@ fn start_dir(file: &Path) -> PathBuf {
     }
 }
 
+pub fn has_repository(file: &Path) -> bool {
+    start_dir(file)
+        .ancestors()
+        .any(|directory| directory.join(".git").exists())
+}
+
+pub(crate) fn non_repository_status() -> GitStatusEvent {
+    GitStatusEvent {
+        branch: String::new(),
+        ahead: 0,
+        behind: 0,
+        has_upstream: false,
+        file_status: FileStatus::Clean,
+        staged_count: 0,
+        repo_root: String::new(),
+    }
+}
+
 pub fn repo_root(file: &Path) -> Result<PathBuf, GitError> {
     let (stdout, stderr, ok) = git(&start_dir(file), &["rev-parse", "--show-toplevel"])?;
     if !ok {
@@ -158,6 +176,24 @@ pub fn status(file: &Path) -> Result<GitStatusEvent, GitError> {
     statuses(&root, &[file.to_path_buf()])?
         .pop()
         .ok_or_else(|| GitError("missing git status result".into()))
+}
+
+pub fn file_statuses(
+    root: &Path,
+) -> Result<std::collections::HashMap<String, FileStatus>, GitError> {
+    let (stdout, stderr, ok) = git_read(
+        root,
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--untracked-files=all",
+        ],
+    )?;
+    if !ok {
+        return Err(GitError(stderr.trim().to_string()));
+    }
+    Ok(parse::parse_porcelain_v2_statuses(&stdout).into_file_statuses())
 }
 
 pub(crate) fn statuses(root: &Path, files: &[PathBuf]) -> Result<Vec<GitStatusEvent>, GitError> {
@@ -567,6 +603,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = test_repo::write(dir.path(), "loose.txt", "x");
         assert!(repo_root(&file).is_err());
+    }
+
+    #[test]
+    fn detects_repository_marker_in_ancestor() {
+        let repo = test_repo::init();
+        let nested = repo.path().join("notes/projects");
+        std::fs::create_dir_all(&nested).unwrap();
+        let file = test_repo::write(&nested, "plan.md", "# Plan");
+        assert!(has_repository(&file));
+
+        let outside = tempfile::tempdir().unwrap();
+        assert!(!has_repository(&outside.path().join("note.md")));
     }
 
     #[test]

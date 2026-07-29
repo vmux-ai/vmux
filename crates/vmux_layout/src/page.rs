@@ -19,8 +19,8 @@ use vmux_core::event::extension::{
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{
     KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
-    KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeEntry, KnowledgeSearchEvent,
-    KnowledgeSearchRequest, KnowledgeTreeEvent,
+    KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeEntry, KnowledgeGitStatus,
+    KnowledgeSearchEvent, KnowledgeSearchRequest, KnowledgeTreeEvent,
 };
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolCategory, ToolItem, ToolStatus, ToolsSnapshot};
 use vmux_core::{PageIcon, PageMetadata};
@@ -1496,6 +1496,7 @@ fn KnowledgeEntryRow(
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                             }
                             span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
+                            {knowledge_git_indicator(entry.git_status)}
                         }
                     }
                     KnowledgeCreateMenu {
@@ -1553,6 +1554,7 @@ fn KnowledgeEntryRow(
                         onclick: move |_| open_knowledge_path(pane_id, path.clone()),
                         {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
                         span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
+                        {knowledge_git_indicator(entry.git_status)}
                     }
                 }
                 KnowledgeCreateMenu {
@@ -1565,6 +1567,21 @@ fn KnowledgeEntryRow(
                     disabled: false,
                 }
             }
+        }
+    }
+}
+
+fn knowledge_git_indicator(status: KnowledgeGitStatus) -> Element {
+    let (class, title) = match status {
+        KnowledgeGitStatus::Clean => return rsx! {},
+        KnowledgeGitStatus::Added => ("bg-ansi-2", translate("git-status-untracked")),
+        KnowledgeGitStatus::Modified => ("bg-ansi-3", translate("git-status-modified")),
+        KnowledgeGitStatus::Deleted => ("bg-ansi-1", translate("git-status-deleted")),
+    };
+    rsx! {
+        span {
+            class: "h-2 w-2 shrink-0 rounded-full {class}",
+            title: "{title}",
         }
     }
 }
@@ -3000,22 +3017,11 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
         .filter(|stack| !(stack.url.is_empty() && stack.title == "New Stack"))
         .cloned()
         .collect::<Vec<_>>();
-    let collapsed_stack = visible_stacks
+    let active_stack = visible_stacks
         .iter()
         .find(|stack| stack.is_active)
         .or_else(|| visible_stacks.first())
         .cloned();
-    let collapsed_stack_index = collapsed_stack.as_ref().map(|stack| stack.stack_index);
-    let remaining_stacks = visible_stacks
-        .iter()
-        .filter(|stack| Some(stack.stack_index) != collapsed_stack_index)
-        .cloned()
-        .collect::<Vec<_>>();
-    let remaining_class = if collapsed_stack.is_some() {
-        "flex flex-col gap-1 pt-1"
-    } else {
-        "flex flex-col gap-1"
-    };
     rsx! {
         div { class: if pane.is_active && any_loading {
                 "glass group mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg pane-loading-ring"
@@ -3058,7 +3064,7 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
             }
             div { class: "border-t border-foreground/10 p-1.5",
                 div { class: "flex flex-col gap-1",
-                    if let Some(stack) = collapsed_stack {
+                    if !expanded && let Some(stack) = active_stack {
                         SideSheetStackRow { stack, pane_id }
                     }
                     div { class: if expanded {
@@ -3067,8 +3073,8 @@ fn PaneSection(pane: PaneNode, index: usize) -> Element {
                             "grid grid-rows-[0fr] opacity-0 transition-[grid-template-rows,opacity] duration-200 ease-out"
                         },
                         div { class: "min-h-0 overflow-hidden",
-                            div { class: remaining_class,
-                                for stack in remaining_stacks.iter() {
+                            div { class: "flex flex-col gap-1",
+                                for stack in visible_stacks.iter() {
                                     SideSheetStackRow { stack: stack.clone(), pane_id }
                                 }
                                 NewStackRow { pane_id }
