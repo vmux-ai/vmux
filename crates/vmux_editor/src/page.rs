@@ -631,6 +631,24 @@ fn render_note_caret(width_class: &'static str) -> Element {
     }
 }
 
+#[component]
+fn RenderedNoteBlock(
+    block: MdBlock,
+    index: usize,
+    hidden_list_line: Option<u32>,
+    invisible: bool,
+) -> Element {
+    rsx! {
+        div { class: if invisible { "invisible" } else { "" },
+            if let Some(line) = hidden_list_line {
+                {render_block_with_hidden_list_line(&block, index, line)}
+            } else {
+                {render_block(&block, index)}
+            }
+        }
+    }
+}
+
 fn render_note_source_range(
     source: &[char],
     start: u32,
@@ -1752,12 +1770,24 @@ pub fn Page() -> Element {
 
     let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
         let moved = cursor() != c.primary;
-        ed_mode.set(c.mode);
-        ed_label.set(c.mode_label);
-        cursor.set(c.primary);
-        sel.set(c.selections);
-        source_cursor.set(c.source_primary);
-        source_sel.set(c.source_selections);
+        if ed_mode() != c.mode {
+            ed_mode.set(c.mode);
+        }
+        if ed_label() != c.mode_label {
+            ed_label.set(c.mode_label);
+        }
+        if moved {
+            cursor.set(c.primary);
+        }
+        if sel() != c.selections {
+            sel.set(c.selections);
+        }
+        if source_cursor() != c.source_primary {
+            source_cursor.set(c.source_primary);
+        }
+        if source_sel() != c.source_selections {
+            source_sel.set(c.source_selections);
+        }
         let note_mode = file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path());
         if note_mode {
             let active = note_block_index_for_line(&note_blocks.read(), c.source_primary.line);
@@ -1775,17 +1805,26 @@ pub fn Page() -> Element {
                 );
             }
             if note_editing() {
-                let rect = active.and_then(|index| {
+                let is_list = active.is_some_and(|index| {
                     matches!(note_blocks.read()[index].block, MdBlock::List { .. })
-                        .then(|| note_list_edit_rect_for_line(index, c.source_primary.line))
-                        .flatten()
                 });
-                note_edit_line.set(Some(c.source_primary.line));
-                note_edit_rect.set(rect);
+                let edit_line = is_list.then_some(c.source_primary.line);
+                let rect = active
+                    .filter(|_| is_list)
+                    .and_then(|index| note_list_edit_rect_for_line(index, c.source_primary.line));
+                if note_edit_line() != edit_line {
+                    note_edit_line.set(edit_line);
+                }
+                if note_edit_rect() != rect {
+                    note_edit_rect.set(rect);
+                }
             }
-            note_active.set(active.map(|index| index as u32));
+            let active = active.map(|index| index as u32);
+            if note_active() != active {
+                note_active.set(active);
+            }
             if moved && let Some(index) = active {
-                ensure_note_caret_visible(index, c.source_primary.line);
+                ensure_note_caret_visible(index as usize, c.source_primary.line);
             }
         }
         if moved && !note_mode {
@@ -2141,7 +2180,6 @@ pub fn Page() -> Element {
 
     use_effect(move || match mode() {
         Mode::Text if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) => {
-            let _ = note_active();
             if note_editing() {
                 focus_file_input();
             } else {
@@ -2677,6 +2715,8 @@ pub fn Page() -> Element {
                             let active = note_active();
                             let current = source_cursor();
                             let selections = source_sel();
+                            let diff_markers = git_line_markers();
+                            let note_input_comp_keys = comp_keys.clone();
                             rsx! {
                                 div {
                                     id: "file-scroll",
@@ -2754,22 +2794,23 @@ pub fn Page() -> Element {
                                                 let start = note_block.start_line;
                                                 let end = note_block.end_line;
                                                 let note_diff_marker = note_block_diff_marker(
-                                                    &git_line_markers(),
+                                                    &diff_markers,
                                                     start,
                                                     end,
                                                 );
                                                 let source = note_block.source.clone();
                                                 let pointer_source = source.clone();
                                                 let live_pointer_source = source.clone();
-                                                let live_down_source = source.clone();
-                                                let pointer_block = note_block.block.clone();
-                                                let source_lines = if source.is_empty() {
-                                                    vec![String::new()]
+                                                let live_down_source = if editing {
+                                                    source.clone()
                                                 } else {
-                                                    source.lines().map(str::to_string).collect::<Vec<_>>()
+                                                    String::new()
                                                 };
+                                                let pointer_block = note_block.block.clone();
                                                 let active_edit_line = note_edit_line().unwrap_or(current.line);
-                                                let edit_lines = if is_list {
+                                                let edit_lines = if !editing {
+                                                    Vec::new()
+                                                } else if is_list {
                                                     let raw = source
                                                         .lines()
                                                         .nth(active_edit_line.saturating_sub(start) as usize)
@@ -2781,34 +2822,42 @@ pub fn Page() -> Element {
                                                         raw.chars().skip(prefix).collect::<String>(),
                                                         prefix as u32,
                                                     )]
+                                                } else if source.is_empty() {
+                                                    vec![(start, String::new(), 0)]
                                                 } else {
-                                                    source_lines
-                                                        .iter()
+                                                    source
+                                                        .lines()
                                                         .enumerate()
                                                         .map(|(offset, raw)| {
-                                                            (start + offset as u32, raw.clone(), 0)
+                                                            (start + offset as u32, raw.to_string(), 0)
                                                         })
                                                         .collect::<Vec<_>>()
                                                 };
-                                                let note_comp_keys = comp_keys.clone();
                                                 let edit_class = note_edit_block_class(&note_block.block);
                                                 let heading_level = match &note_block.block {
                                                     MdBlock::Heading { level, .. } => Some(*level),
                                                     _ => None,
                                                 };
-                                                let live_nodes = note_inline_nodes(&source, heading_level);
-                                                let live_source = source.chars().collect::<Vec<_>>();
-                                                let live_caret = note_source_offset(
-                                                    &source,
-                                                    start,
-                                                    current.line,
-                                                    current.col,
-                                                );
-                                                let live_selections = note_selection_ranges(
-                                                    &source,
-                                                    start,
-                                                    &selections,
-                                                );
+                                                let (live_nodes, live_source, live_caret, live_selections) =
+                                                    if editing && is_live_inline {
+                                                        (
+                                                            note_inline_nodes(&source, heading_level),
+                                                            source.chars().collect::<Vec<_>>(),
+                                                            note_source_offset(
+                                                                &source,
+                                                                start,
+                                                                current.line,
+                                                                current.col,
+                                                            ),
+                                                            note_selection_ranges(
+                                                                &source,
+                                                                start,
+                                                                &selections,
+                                                            ),
+                                                        )
+                                                    } else {
+                                                        (Vec::new(), Vec::new(), 0, Vec::new())
+                                                    };
                                                 let caret_width_class = if keymap() == vmux_core::KeymapKind::Vscode {
                                                     "w-px"
                                                 } else {
@@ -2898,17 +2947,12 @@ pub fn Page() -> Element {
                                                                 class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
                                                             }
                                                         }
-                                                        div {
-                                                            class: if editing && !is_list { "invisible" } else { "" },
-                                                            if editing && is_list {
-                                                                {render_block_with_hidden_list_line(
-                                                                    &note_block.block,
-                                                                    index,
-                                                                    active_edit_line,
-                                                                )}
-                                                            } else {
-                                                                {render_block(&note_block.block, index)}
-                                                            }
+                                                        RenderedNoteBlock {
+                                                            block: note_block.block.clone(),
+                                                            index,
+                                                            hidden_list_line: (editing && is_list)
+                                                                .then_some(active_edit_line),
+                                                            invisible: editing && !is_list,
                                                         }
                                                         if editing {
                                                             div {
@@ -3051,87 +3095,6 @@ pub fn Page() -> Element {
                                                                     }
                                                                 }
                                                                 }
-                                                                textarea {
-                                                                    id: "file-input",
-                                                                    class: "pointer-events-none absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none",
-                                                                    autocomplete: "off",
-                                                                    autocapitalize: "off",
-                                                                    spellcheck: "false",
-                                                                    oncompositionstart: move |_| composing.set(true),
-                                                                    oncompositionend: move |_| {
-                                                                        composing.set(false);
-                                                                        send_committed_text();
-                                                                    },
-                                                                    oninput: move |_| {
-                                                                        if !composing() {
-                                                                            send_committed_text();
-                                                                        }
-                                                                    },
-                                                                    onkeydown: move |event: Event<KeyboardData>| {
-                                                                        let data = event.data();
-                                                                        let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-                                                                            return;
-                                                                        };
-                                                                        event.stop_propagation();
-                                                                        if raw.is_composing() {
-                                                                            return;
-                                                                        }
-                                                                        let key = raw.key();
-                                                                        let mods = key_mods(raw);
-                                                                        if comp_open() && !note_comp_keys.is_empty() {
-                                                                            match key.as_str() {
-                                                                                "ArrowDown" => {
-                                                                                    event.prevent_default();
-                                                                                    comp_sel.set((comp_sel_clamped + 1).min(note_comp_keys.len() - 1));
-                                                                                    return;
-                                                                                }
-                                                                                "ArrowUp" => {
-                                                                                    event.prevent_default();
-                                                                                    comp_sel.set(comp_sel_clamped.saturating_sub(1));
-                                                                                    return;
-                                                                                }
-                                                                                "Enter" | "Tab" => {
-                                                                                    event.prevent_default();
-                                                                                    if let Some(item) = note_comp_keys.get(comp_sel_clamped) {
-                                                                                        let (line, replace_from_col) = comp_anchor();
-                                                                                        let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
-                                                                                            line,
-                                                                                            replace_from_col,
-                                                                                            text: item.insert_text.clone(),
-                                                                                        });
-                                                                                    }
-                                                                                    comp_open.set(false);
-                                                                                    return;
-                                                                                }
-                                                                                "Escape" => {
-                                                                                    event.prevent_default();
-                                                                                    comp_open.set(false);
-                                                                                    return;
-                                                                                }
-                                                                                _ => {}
-                                                                            }
-                                                                        }
-                                                                        if key == "Escape" {
-                                                                            event.prevent_default();
-                                                                            if keymap() != vmux_core::KeymapKind::Vim {
-                                                                                note_editing.set(false);
-                                                                            }
-                                                                            let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
-                                                                                key,
-                                                                                code: raw.code(),
-                                                                                mods,
-                                                                                repeat: raw.repeat(),
-                                                                            });
-                                                                            if keymap() == vmux_core::KeymapKind::Vim {
-                                                                                focus_file_input();
-                                                                            } else {
-                                                                                focus_container();
-                                                                            }
-                                                                            return;
-                                                                        }
-                                                                        let _ = forward_file_key(&event, raw, ed_mode());
-                                                                    },
-                                                                }
                                                                 if comp_open() && !comp_filtered.is_empty() {
                                                                     div {
                                                                         class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
@@ -3150,6 +3113,87 @@ pub fn Page() -> Element {
                                                     }
                                                 }
                                             }
+                                        }
+                                        textarea {
+                                            id: "file-input",
+                                            class: "pointer-events-none absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none",
+                                            autocomplete: "off",
+                                            autocapitalize: "off",
+                                            spellcheck: "false",
+                                            oncompositionstart: move |_| composing.set(true),
+                                            oncompositionend: move |_| {
+                                                composing.set(false);
+                                                send_committed_text();
+                                            },
+                                            oninput: move |_| {
+                                                if !composing() {
+                                                    send_committed_text();
+                                                }
+                                            },
+                                            onkeydown: move |event: Event<KeyboardData>| {
+                                                let data = event.data();
+                                                let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+                                                    return;
+                                                };
+                                                event.stop_propagation();
+                                                if raw.is_composing() {
+                                                    return;
+                                                }
+                                                let key = raw.key();
+                                                let mods = key_mods(raw);
+                                                if comp_open() && !note_input_comp_keys.is_empty() {
+                                                    match key.as_str() {
+                                                        "ArrowDown" => {
+                                                            event.prevent_default();
+                                                            comp_sel.set((comp_sel_clamped + 1).min(note_input_comp_keys.len() - 1));
+                                                            return;
+                                                        }
+                                                        "ArrowUp" => {
+                                                            event.prevent_default();
+                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
+                                                            return;
+                                                        }
+                                                        "Enter" | "Tab" => {
+                                                            event.prevent_default();
+                                                            if let Some(item) = note_input_comp_keys.get(comp_sel_clamped) {
+                                                                let (line, replace_from_col) = comp_anchor();
+                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
+                                                                    line,
+                                                                    replace_from_col,
+                                                                    text: item.insert_text.clone(),
+                                                                });
+                                                            }
+                                                            comp_open.set(false);
+                                                            return;
+                                                        }
+                                                        "Escape" => {
+                                                            event.prevent_default();
+                                                            comp_open.set(false);
+                                                            return;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                                if key == "Escape" {
+                                                    event.prevent_default();
+                                                    if keymap() != vmux_core::KeymapKind::Vim {
+                                                        note_editing.set(false);
+                                                    }
+                                                    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+                                                        key,
+                                                        code: raw.code(),
+                                                        mods,
+                                                        repeat: raw.repeat(),
+                                                    });
+                                                    if keymap() == vmux_core::KeymapKind::Vim {
+                                                        focus_file_input();
+                                                    } else {
+                                                        focus_container();
+                                                    }
+                                                    return;
+                                                }
+                                                let _ = forward_file_key(&event, raw, ed_mode());
+                                            },
                                         }
                                         if !note_references().is_empty() {
                                             div { class: "mt-10 border-t border-foreground/10 pt-5",

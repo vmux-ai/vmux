@@ -287,7 +287,11 @@ type ReadySentKeymap = (
     With<FileKeymapSent>,
     With<vmux_core::page::PageReady>,
 );
-type ReadyUnsentNote = (Without<NoteSent>, With<vmux_core::page::PageReady>);
+type ReadyUnsentNote = (
+    Without<NoteSent>,
+    With<vmux_core::page::PageReady>,
+    With<FileInitialMetaSent>,
+);
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);

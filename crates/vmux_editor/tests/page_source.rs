@@ -80,7 +80,6 @@ fn page_wires_shared_note_editor_diff_toggle() {
     let line_number = s.find("\"{ln + 1}\"").unwrap();
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
-    assert!(s.contains("render_block(&note_block.block, index)"));
     assert!(s.contains("document.set_title(&title)"));
     assert!(s.contains("let mut note_editing = use_signal(|| false)"));
     assert!(s.contains("query_selector(\"[data-note-line-text]\")"));
