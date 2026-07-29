@@ -41,6 +41,7 @@ vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_mcp = { path = "../vmux_mcp" }
+vmux_remote = { path = "../vmux_remote" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

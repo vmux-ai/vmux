@@ -5,6 +5,67 @@ use vmux_wire::protocol::AgentRunStatus;
 
 pub const CONVERSATION_TITLE_MAX_GRAPHEMES: usize = 64;
 
+macro_rules! string_id {
+    ($name:ident) => {
+        #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+        #[serde(transparent)]
+        pub struct $name(pub String);
+
+        impl $name {
+            pub fn new(value: impl Into<String>) -> Self {
+                Self(value.into())
+            }
+
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(value.to_string())
+            }
+        }
+    };
+}
+
+string_id!(RoomId);
+string_id!(MemberId);
+string_id!(EventId);
+string_id!(ClientOpId);
+string_id!(DeviceId);
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomRole {
+    Owner,
+    Participant,
+    Observer,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberKind {
+    Human,
+    Agent,
+    System,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RoomMember {
+    pub room_id: RoomId,
+    pub member_id: MemberId,
+    pub display_name: String,
+    pub role: RoomRole,
+    pub kind: MemberKind,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Message {
     User {
@@ -20,6 +81,68 @@ pub enum Message {
         content: String,
         is_error: bool,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RoomEvent {
+    pub event_id: EventId,
+    pub room_id: RoomId,
+    pub actor_id: MemberId,
+    pub client_op_id: Option<ClientOpId>,
+    pub server_seq: u64,
+    pub created_at_ms: u64,
+    pub reply_to: Option<EventId>,
+    pub message: Message,
+}
+
+pub fn room_id_for_session(sid: &str) -> RoomId {
+    RoomId::new(format!("session:{sid}"))
+}
+
+pub fn local_member_id(room_id: &RoomId) -> MemberId {
+    MemberId::new(format!("{}:member:local", room_id.as_str()))
+}
+
+pub fn agent_member_id(room_id: &RoomId) -> MemberId {
+    MemberId::new(format!("{}:member:agent", room_id.as_str()))
+}
+
+pub fn room_events_from_messages(
+    sid: &str,
+    created_at_ms: u64,
+    messages: &[Message],
+) -> Vec<RoomEvent> {
+    let room_id = room_id_for_session(sid);
+    let local_member = local_member_id(&room_id);
+    let agent_member = agent_member_id(&room_id);
+    let mut reply_to = None;
+    messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let server_seq = index as u64 + 1;
+            let event_id = EventId::new(format!("{}:event:{server_seq}", room_id.as_str()));
+            let is_user = matches!(message, Message::User { .. });
+            let event = RoomEvent {
+                event_id: event_id.clone(),
+                room_id: room_id.clone(),
+                actor_id: if is_user {
+                    local_member.clone()
+                } else {
+                    agent_member.clone()
+                },
+                client_op_id: None,
+                server_seq,
+                created_at_ms: created_at_ms.saturating_add(index as u64),
+                reply_to: if is_user { None } else { reply_to.clone() },
+                message: message.clone(),
+            };
+            if is_user {
+                reply_to = Some(event_id);
+            }
+            event
+        })
+        .collect()
 }
 
 impl Message {
@@ -134,6 +257,7 @@ pub struct RemoteMediaEntry {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RemoteSession {
     pub sid: String,
+    pub room_id: RoomId,
     #[serde(default)]
     pub title: String,
     pub name: String,
@@ -232,15 +356,29 @@ fn is_disallowed_title_char(character: char) -> bool {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RemoteEvent {
-    Session { session: RemoteSession },
-    Snapshot { messages: Vec<Message> },
-    Delta { text: String },
-    Status { status: RemoteStatus },
-    Approval { approval: Option<RemoteApproval> },
+    Session {
+        session: RemoteSession,
+    },
+    Snapshot {
+        room_id: RoomId,
+        through_seq: u64,
+        events: Vec<RoomEvent>,
+    },
+    Delta {
+        room_id: RoomId,
+        text: String,
+    },
+    Status {
+        status: RemoteStatus,
+    },
+    Approval {
+        approval: Option<RemoteApproval>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PromptRequest {
+    pub client_op_id: ClientOpId,
     pub text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<AgentAttachment>,
@@ -248,6 +386,7 @@ pub struct PromptRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct NewChatRequest {
+    pub client_op_id: ClientOpId,
     pub text: String,
 }
 
@@ -362,6 +501,7 @@ mod tests {
     #[test]
     fn new_chat_request_roundtrips() {
         let request = NewChatRequest {
+            client_op_id: ClientOpId::new("op-1"),
             text: "start here".to_string(),
         };
         let json = serde_json::to_string(&request).unwrap();
@@ -371,9 +511,32 @@ mod tests {
 
     #[test]
     fn prompt_request_deserializes_without_attachments() {
-        let request: PromptRequest = serde_json::from_str(r#"{"text":"hello"}"#).unwrap();
+        let request: PromptRequest =
+            serde_json::from_str(r#"{"client_op_id":"op-1","text":"hello"}"#).unwrap();
         assert_eq!(request.text, "hello");
         assert!(request.attachments.is_empty());
+    }
+
+    #[test]
+    fn message_projection_has_stable_order_and_reply_links() {
+        let events = room_events_from_messages(
+            "session-1",
+            100,
+            &[
+                Message::user("hello"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("hi".to_string())],
+                },
+            ],
+        );
+
+        assert_eq!(
+            events[0].event_id,
+            EventId::new("session:session-1:event:1")
+        );
+        assert_eq!(events[1].server_seq, 2);
+        assert_eq!(events[1].reply_to, Some(events[0].event_id.clone()));
+        assert_eq!(events[1].created_at_ms, 101);
     }
 
     #[test]

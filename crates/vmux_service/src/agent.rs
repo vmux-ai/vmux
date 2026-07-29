@@ -190,6 +190,7 @@ fn now_ms() -> u64 {
 fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
     RemoteSession {
         sid: sid.to_string(),
+        room_id: vmux_remote::room_id_for_session(sid),
         title: handle.provider.clone(),
         name: handle.provider.clone(),
         runtime: "page".to_string(),
