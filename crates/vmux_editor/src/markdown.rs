@@ -42,6 +42,7 @@ enum Frame {
     Sink(Vec<MdBlock>),
 }
 
+#[derive(Clone)]
 pub struct ParsedNote {
     pub title: String,
     pub properties: Vec<vmux_core::knowledge::KnowledgeProperty>,

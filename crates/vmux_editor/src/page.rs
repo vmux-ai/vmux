@@ -6,7 +6,7 @@ use crate::explorer::ExplorerPanel;
 use crate::note::{render_block, render_block_with_hidden_list_line};
 use crate::page_model::{
     NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
-    dir_select_index, gutter_width, heading_class, image_mime, line_severity,
+    dir_select_index, editor_drag_started, gutter_width, heading_class, image_mime, line_severity,
     note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
     note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
     squiggle_style, viewport_reveal_delta,
@@ -1633,6 +1633,7 @@ pub fn Page() -> Element {
     let mut note_edit_rect = use_signal(|| Option::<NoteEditRect>::None);
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
+    let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
     let mut git_nonce = use_signal(|| 0u32);
     let git_refresh_generation = use_signal(|| 0u32);
     let git_display = use_signal(String::new);
@@ -1735,6 +1736,7 @@ pub fn Page() -> Element {
         note_edit_rect.set(None);
         note_dragging.set(false);
         editor_dragging.set(false);
+        editor_drag_origin.set(None);
         git_nonce.set(git_nonce() + 1);
     });
 
@@ -2201,6 +2203,7 @@ pub fn Page() -> Element {
             onmouseup: move |_| {
                 note_dragging.set(false);
                 editor_dragging.set(false);
+                editor_drag_origin.set(None);
                 if explorer_resizing() {
                     explorer_resizing.set(false);
                     let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
@@ -3207,6 +3210,8 @@ pub fn Page() -> Element {
                                     cw.max(2.0)
                                 )
                             };
+                            let cursor_key =
+                                format!("{}:{}:{:?}", cursor().row, cursor().col, ed_mode());
                             let spacer = total_rows() as f64 * ch;
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
@@ -3219,17 +3224,27 @@ pub fn Page() -> Element {
                                         gutter_hover.set(false);
                                     },
                                     onpointermove: move |event: Event<PointerData>| {
-                                        if !editor_dragging() {
-                                            return;
-                                        }
                                         let data = event.data();
                                         let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
                                             return;
                                         };
+                                        let Some(origin) = editor_drag_origin() else {
+                                            return;
+                                        };
                                         if pointer.buttons() & 1 != 1 {
                                             editor_dragging.set(false);
+                                            editor_drag_origin.set(None);
                                             set_pointer_capture(&event, "file-scroll", false);
                                             return;
+                                        }
+                                        if !editor_dragging() {
+                                            if !editor_drag_started(
+                                                origin,
+                                                (pointer.client_x(), pointer.client_y()),
+                                            ) {
+                                                return;
+                                            }
+                                            editor_dragging.set(true);
                                         }
                                         let (cw, ch) = cell_dims();
                                         let gutter = gw as f64 * cw + 48.0;
@@ -3253,10 +3268,12 @@ pub fn Page() -> Element {
                                     onpointerup: move |event: Event<PointerData>| {
                                         set_pointer_capture(&event, "file-scroll", false);
                                         editor_dragging.set(false);
+                                        editor_drag_origin.set(None);
                                     },
                                     onpointercancel: move |event: Event<PointerData>| {
                                         set_pointer_capture(&event, "file-scroll", false);
                                         editor_dragging.set(false);
+                                        editor_drag_origin.set(None);
                                     },
                                     onscroll: move |_| {
                                         let (_, ch) = cell_dims();
@@ -3336,12 +3353,17 @@ pub fn Page() -> Element {
                                                             {
                                                                 if raw.meta_key() {
                                                                     editor_dragging.set(false);
+                                                                    editor_drag_origin.set(None);
                                                                     let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
                                                                         line,
                                                                         col,
                                                                     });
                                                                 } else {
-                                                                    editor_dragging.set(true);
+                                                                    editor_dragging.set(false);
+                                                                    editor_drag_origin.set(Some((
+                                                                        raw.client_x(),
+                                                                        raw.client_y(),
+                                                                    )));
                                                                     set_pointer_capture(&e, "file-scroll", true);
                                                                     let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
                                                                         line,
@@ -3523,6 +3545,7 @@ pub fn Page() -> Element {
                                         }
 
                                         div {
+                                            key: "{cursor_key}",
                                             class: "pointer-events-none absolute z-20 rounded-[1px]",
                                             style: "{cursor_style}",
                                         }

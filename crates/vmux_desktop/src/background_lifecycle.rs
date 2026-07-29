@@ -32,6 +32,18 @@ const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 #[cfg(target_os = "macos")]
 const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
 
+fn windowed_pointer_inside_after_event(
+    pointer_position_changed: bool,
+    previous: bool,
+    sampled: bool,
+) -> bool {
+    if pointer_position_changed {
+        sampled
+    } else {
+        previous
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct NativeWindowFrame {
     x: f64,
@@ -573,15 +585,23 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         );
         let scroll = event_type == NSEventType::ScrollWheel;
         let location = event_location_in_window_physical_px(ev);
-        let over_windowed_page =
+        let pointer_position_changed = motion || button_event;
+        let was_over_windowed_page = NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
+        let sampled_over_windowed_page =
             location.is_some_and(|(x, y)| vmux_browser::native_windowed_page_contains_point(x, y));
-        let was_over_windowed_page =
-            NATIVE_WINDOWED_POINTER_INSIDE.swap(over_windowed_page, Ordering::Relaxed);
+        let over_windowed_page = windowed_pointer_inside_after_event(
+            pointer_position_changed,
+            was_over_windowed_page,
+            sampled_over_windowed_page,
+        );
+        if pointer_position_changed {
+            NATIVE_WINDOWED_POINTER_INSIDE.store(over_windowed_page, Ordering::Relaxed);
+        }
         let buttons = native_mouse_buttons();
-        if let Some((x, y)) = location {
+        if pointer_position_changed && let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        let layout_pointer = (motion || button_event || scroll)
+        let layout_pointer = pointer_position_changed
             .then(|| {
                 location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
             })
@@ -620,7 +640,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 }
             }
         } else if scroll {
-            if layout_pointer.is_some_and(|result| result.owns_pointer) || !over_windowed_page {
+            if vmux_browser::native_layout_pointer_is_inside() || !over_windowed_page {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
@@ -1260,6 +1280,14 @@ mod tests {
             panic!("focused mode must be Reactive");
         };
         assert!(!layout_window);
+    }
+
+    #[test]
+    fn scroll_preserves_windowed_page_pointer_ownership() {
+        assert!(windowed_pointer_inside_after_event(false, true, false));
+        assert!(!windowed_pointer_inside_after_event(false, false, true));
+        assert!(!windowed_pointer_inside_after_event(true, true, false));
+        assert!(windowed_pointer_inside_after_event(true, false, true));
     }
 
     #[test]

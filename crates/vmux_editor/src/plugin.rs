@@ -69,19 +69,28 @@ pub struct EditState {
     pub core: EditCore,
     pub hl: HighlightCache,
     pub folds: crate::fold::FoldState,
+    parsed_note: Option<crate::markdown::ParsedNote>,
     wrap_generation: u64,
     wrap_cache: Option<CachedWrapView>,
 }
 
 impl EditState {
     pub(crate) fn new(core: EditCore, hl: HighlightCache, folds: crate::fold::FoldState) -> Self {
+        let parsed_note = crate::markdown::is_markdown_path(&core.buffer.path)
+            .then(|| crate::markdown::parse_note_document(&core.buffer.text()));
         Self {
             core,
             hl,
             folds,
+            parsed_note,
             wrap_generation: 0,
             wrap_cache: None,
         }
+    }
+
+    fn refresh_parsed_note(&mut self) {
+        self.parsed_note = crate::markdown::is_markdown_path(&self.core.buffer.path)
+            .then(|| crate::markdown::parse_note_document(&self.core.buffer.text()));
     }
 }
 
@@ -279,7 +288,6 @@ type ReadySentKeymap = (
     With<vmux_core::page::PageReady>,
 );
 type ReadyUnsentNote = (Without<NoteSent>, With<vmux_core::page::PageReady>);
-type ChangedNoteEditor = (With<FileView>, With<EditState>, Changed<EditState>);
 type TreeDirtyReady = (With<ExplorerTreeDirty>, With<vmux_core::page::PageReady>);
 type OpenEditorsDirtyReady = (With<OpenEditorsDirty>, With<vmux_core::page::PageReady>);
 type OutlineDirtyReady = (With<OutlineDirty>, With<vmux_core::page::PageReady>);
@@ -532,15 +540,21 @@ fn load_file_buffers(
             folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
-        commands.entity(entity).insert((
-            EditState::new(core, hl, folds),
-            EditorKeymap(kind.make()),
-            vmux_git::GitDiffSource {
-                content: text,
-                dirty: false,
-            },
-        ));
-        commands.entity(entity).remove::<MissingFileView>();
+        let markdown = crate::markdown::is_markdown_path(&fv.path);
+        let mut entity_commands = commands.entity(entity);
+        entity_commands
+            .insert((
+                EditState::new(core, hl, folds),
+                EditorKeymap(kind.make()),
+                vmux_git::GitDiffSource {
+                    content: text,
+                    dirty: false,
+                },
+            ))
+            .remove::<MissingFileView>();
+        if markdown {
+            entity_commands.remove::<NoteSent>().insert(OutlineDirty);
+        }
     }
 }
 
@@ -802,7 +816,10 @@ fn send_note(
         if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
             continue;
         }
-        let mut note = crate::markdown::parse_note_document(&edit.core.buffer.text());
+        let Some(mut note) = edit.parsed_note.clone() else {
+            commands.entity(entity).insert(NoteSent);
+            continue;
+        };
         let references = index
             .as_deref()
             .filter(|index| index.loaded() && file.path.starts_with(index.root()))
@@ -839,12 +856,6 @@ fn send_note(
             .entity(entity)
             .insert(NoteSent)
             .remove::<NoteRevealLine>();
-    }
-}
-
-fn mark_note_dirty(q: Query<Entity, ChangedNoteEditor>, mut commands: Commands) {
-    for entity in &q {
-        commands.entity(entity).remove::<NoteSent>();
     }
 }
 
@@ -1935,6 +1946,7 @@ fn run_commands(
     let mut sel_or_mode = false;
     let mut dirty_changed = false;
     let mut fold_changed = false;
+    let mut viewport_changed = false;
     for cmd in cmds {
         if let EditCommand::ScrollViewport(lines) = &cmd {
             if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
@@ -2086,10 +2098,10 @@ fn run_commands(
     }
     if let Some(top) = wrapped_autoscroll(edit, vp) {
         vp.top_row = top;
-        text_changed = true;
+        viewport_changed = true;
     }
     let vpc = *vp;
-    if text_changed || fold_changed {
+    if text_changed || fold_changed || viewport_changed {
         emit_window(entity, edit, &vpc, browsers, commands);
     }
     if text_changed || sel_or_mode || fold_changed {
@@ -2110,10 +2122,15 @@ fn run_commands(
         ));
     }
     if text_changed {
-        commands
-            .entity(entity)
+        edit.refresh_parsed_note();
+        let markdown = edit.parsed_note.is_some();
+        let mut entity_commands = commands.entity(entity);
+        entity_commands
             .insert(LspEditDirty)
             .remove::<crate::lsp::manager::LintRan>();
+        if markdown {
+            entity_commands.remove::<NoteSent>().insert(OutlineDirty);
+        }
     }
     text_changed
 }
@@ -2126,7 +2143,6 @@ fn on_file_key(
         &mut EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
-        &FileView,
     )>,
     view_mode: Res<SharedFileViewMode>,
     mut clipboard: NonSendMut<ClipboardHandle>,
@@ -2137,7 +2153,7 @@ fn on_file_key(
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
-    let Ok((mut edit, mut keymap, mut vp, mut diff_source, file)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     let input = KeyInput {
@@ -2154,10 +2170,11 @@ fn on_file_key(
     if cmds.is_empty() {
         return;
     }
-    if view_mode.0 == FileViewMode::Note && crate::markdown::is_markdown_path(&file.path) {
+    if view_mode.0 == FileViewMode::Note
+        && let Some(note) = edit.parsed_note.as_ref()
+    {
         let line = edit.core.cursor_pos().line;
-        let blocks = crate::markdown::parse_note(&edit.core.buffer.text());
-        cmds = remap_note_vertical_commands(cmds, &blocks, line);
+        cmds = remap_note_vertical_commands(cmds, &note.blocks, line);
     }
     run_commands(
         entity,
@@ -3442,14 +3459,6 @@ fn on_explorer_close_editor(
     commands.entity(entity).insert(OpenEditorsDirty);
 }
 
-fn mark_outline_dirty(q: Query<(Entity, &FileView), Changed<EditState>>, mut commands: Commands) {
-    for (entity, fv) in &q {
-        if crate::explorer_model::is_markdown(&fv.path) {
-            commands.entity(entity).insert(OutlineDirty);
-        }
-    }
-}
-
 fn emit_outline_markdown(
     q: Query<(Entity, &EditState), OutlineDirtyReady>,
     browsers: NonSend<Browsers>,
@@ -3740,10 +3749,7 @@ impl Plugin for EditorPlugin {
                 Update,
                 (
                     mark_notes_on_knowledge_change,
-                    mark_note_dirty,
-                    send_note
-                        .after(mark_note_dirty)
-                        .after(mark_notes_on_knowledge_change),
+                    send_note.after(mark_notes_on_knowledge_change),
                 ),
             )
             .add_systems(Update, (drain_explorer_dir_loads, drain_explorer_mutations))
@@ -3756,7 +3762,6 @@ impl Plugin for EditorPlugin {
                     emit_explorer_chrome,
                     sync_open_editors,
                     emit_open_editors,
-                    mark_outline_dirty,
                     emit_outline_markdown,
                     clear_outline_on_file_change,
                     apply_global_search_requests,

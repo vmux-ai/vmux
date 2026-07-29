@@ -4,6 +4,12 @@ use vmux_core::event::{
     DiagSeverity, FileDiagnostic, FileDirEntry, LspPkgStatus, MdTableAlign, StyledSpan, TreeRow,
 };
 
+pub fn editor_drag_started(origin: (i32, i32), current: (i32, i32)) -> bool {
+    let dx = f64::from(current.0) - f64::from(origin.0);
+    let dy = f64::from(current.1) - f64::from(origin.1);
+    dx * dx + dy * dy >= 16.0
+}
+
 pub fn note_list_marker_prefix_len(line: &str) -> Option<(usize, usize)> {
     let chars = line.chars().collect::<Vec<_>>();
     let indent = chars.iter().take_while(|ch| ch.is_whitespace()).count();
@@ -670,6 +676,13 @@ mod tests {
         assert_eq!(viewport_reveal_delta(120.0, 148.0, 100.0, 500.0), 0.0);
         assert_eq!(viewport_reveal_delta(80.0, 108.0, 100.0, 500.0), -20.0);
         assert_eq!(viewport_reveal_delta(480.0, 520.0, 100.0, 500.0), 20.0);
+    }
+
+    #[test]
+    fn editor_drag_requires_deliberate_pointer_movement() {
+        assert!(!editor_drag_started((100, 100), (103, 102)));
+        assert!(editor_drag_started((100, 100), (104, 100)));
+        assert!(editor_drag_started((100, 100), (96, 96)));
     }
 
     #[test]
