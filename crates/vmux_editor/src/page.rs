@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use crate::explorer::ExplorerPanel;
 use crate::note::{render_block, render_block_with_hidden_list_line};
 use crate::page_model::{
-    NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index,
-    gutter_width, heading_class, image_mime, line_severity, note_inline_nodes,
-    note_list_marker_prefix_len, note_source_offset, note_source_position, severity_color_class,
-    should_apply_explorer_chrome, span_style, squiggle_style, viewport_reveal_delta,
+    NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
+    dir_select_index, gutter_width, heading_class, image_mime, line_severity,
+    note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
+    note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
+    squiggle_style, viewport_reveal_delta,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -192,22 +193,62 @@ fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEdi
 fn activate_note_cursor(
     block_index: usize,
     line: u32,
+    note_active: Signal<Option<u32>>,
+    note_editing: Signal<bool>,
+    note_edit_line: Signal<Option<u32>>,
+    note_edit_rect: Signal<Option<NoteEditRect>>,
+) {
+    set_note_cursor_active(
+        block_index,
+        line,
+        note_active,
+        note_editing,
+        note_edit_line,
+        note_edit_rect,
+        false,
+    );
+}
+
+fn activate_note_cursor_centered(
+    block_index: usize,
+    line: u32,
+    note_active: Signal<Option<u32>>,
+    note_editing: Signal<bool>,
+    note_edit_line: Signal<Option<u32>>,
+    note_edit_rect: Signal<Option<NoteEditRect>>,
+) {
+    set_note_cursor_active(
+        block_index,
+        line,
+        note_active,
+        note_editing,
+        note_edit_line,
+        note_edit_rect,
+        true,
+    );
+}
+
+fn set_note_cursor_active(
+    block_index: usize,
+    line: u32,
     mut note_active: Signal<Option<u32>>,
     mut note_editing: Signal<bool>,
     mut note_edit_line: Signal<Option<u32>>,
     mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    center: bool,
 ) {
     note_active.set(Some(block_index as u32));
     note_editing.set(true);
     note_edit_line.set(Some(line));
     note_edit_rect.set(None);
-    schedule_note_cursor_activation(block_index, line, note_edit_rect, true);
+    schedule_note_cursor_activation(block_index, line, note_edit_rect, center, true);
 }
 
 fn schedule_note_cursor_activation(
     block_index: usize,
     line: u32,
     mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    center: bool,
     retry: bool,
 ) {
     let Some(window) = web_sys::window() else {
@@ -216,9 +257,11 @@ fn schedule_note_cursor_activation(
     let callback = Closure::once_into_js(move || {
         note_edit_rect.set(note_list_edit_rect_for_line(block_index, line));
         focus_file_input();
-        center_note_caret(block_index, line);
+        if center {
+            center_note_caret(block_index, line);
+        }
         if retry {
-            schedule_note_cursor_activation(block_index, line, note_edit_rect, false);
+            schedule_note_cursor_activation(block_index, line, note_edit_rect, center, false);
         }
     })
     .unchecked_into::<js_sys::Function>();
@@ -578,12 +621,12 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
     }
 }
 
-fn render_note_caret() -> Element {
+fn render_note_caret(width_class: &'static str) -> Element {
     rsx! {
         span {
             id: NOTE_CARET_ID,
             class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-            span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-current" }
+            span { class: "pointer-events-none absolute inset-y-0 left-0 {width_class} bg-current" }
         }
     }
 }
@@ -594,12 +637,13 @@ fn render_note_source_range(
     end: u32,
     caret: u32,
     selections: &[(u32, u32)],
+    caret_width_class: &'static str,
 ) -> Element {
     let chunks = note_source_chunks(source, start, end, caret, selections);
     rsx! {
         for (index, chunk) in chunks.iter().enumerate() {
             if chunk.caret_before {
-                {render_note_caret()}
+                {render_note_caret(caret_width_class)}
             }
             if !chunk.text.is_empty() {
                 span {
@@ -617,13 +661,14 @@ fn render_note_inline_nodes(
     nodes: &[NoteInlineNode],
     caret: u32,
     selections: &[(u32, u32)],
+    caret_width_class: &'static str,
 ) -> Element {
     rsx! {
         for (index, node) in nodes.iter().enumerate() {
             match node {
                 NoteInlineNode::Text { start, end } => rsx! {
                     span { key: "text-{index}",
-                        {render_note_source_range(source, *start, *end, caret, selections)}
+                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
                     }
                 },
                 NoteInlineNode::Syntax {
@@ -638,11 +683,11 @@ fn render_note_inline_nodes(
                     rsx! {
                         span { key: "syntax-{index}", class: note_inline_class(*kind),
                             span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *start, *prefix_end, caret, selections)}
+                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
                             }
-                            {render_note_inline_nodes(source, children, caret, selections)}
+                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
                             span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *suffix_start, *end, caret, selections)}
+                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
                             }
                         }
                     }
@@ -1778,7 +1823,7 @@ pub fn Page() -> Element {
                 FileViewMode::Note if is_markdown_file(&git_path()) => {
                     let line = source_cursor().line;
                     if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                        activate_note_cursor(
+                        activate_note_cursor_centered(
                             index,
                             line,
                             note_active,
@@ -1803,7 +1848,7 @@ pub fn Page() -> Element {
         {
             let line = source_cursor().line;
             if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                activate_note_cursor(
+                activate_note_cursor_centered(
                     index,
                     line,
                     note_active,
@@ -1832,25 +1877,41 @@ pub fn Page() -> Element {
         if let Some(document) = web_sys::window().and_then(|window| window.document()) {
             document.set_title(&title);
         }
-        let reveal = reveal_line
-            .or_else(|| {
-                (keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note)
-                    .then(|| source_cursor().line)
-            })
-            .and_then(|line| note_block_index_for_line(&blocks, line).map(|index| (index, line)));
+        let activation = note_cursor_activation(
+            reveal_line,
+            keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
+            source_cursor().line,
+        );
+        let activation = activation.and_then(|activation| {
+            let line = match activation {
+                NoteCursorActivation::Center(line)
+                | NoteCursorActivation::PreserveViewport(line) => line,
+            };
+            note_block_index_for_line(&blocks, line).map(|index| (activation, index, line))
+        });
         note_blocks.set(blocks);
         note_properties.set(properties);
         note_references.set(references);
         note_active.set(active);
-        if let Some((index, line)) = reveal {
-            activate_note_cursor(
-                index,
-                line,
-                note_active,
-                note_editing,
-                note_edit_line,
-                note_edit_rect,
-            );
+        if let Some((activation, index, line)) = activation {
+            match activation {
+                NoteCursorActivation::Center(_) => activate_note_cursor_centered(
+                    index,
+                    line,
+                    note_active,
+                    note_editing,
+                    note_edit_line,
+                    note_edit_rect,
+                ),
+                NoteCursorActivation::PreserveViewport(_) => activate_note_cursor(
+                    index,
+                    line,
+                    note_active,
+                    note_editing,
+                    note_edit_line,
+                    note_edit_rect,
+                ),
+            }
         }
     });
 
@@ -2352,7 +2413,7 @@ pub fn Page() -> Element {
                                         let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
                                         let line = source_cursor().line;
                                         if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                                            activate_note_cursor(
+                                            activate_note_cursor_centered(
                                                 index,
                                                 line,
                                                 note_active,
@@ -2745,6 +2806,11 @@ pub fn Page() -> Element {
                                                     start,
                                                     &selections,
                                                 );
+                                                let caret_width_class = if keymap() == vmux_core::KeymapKind::Vscode {
+                                                    "w-px"
+                                                } else {
+                                                    "w-[2px]"
+                                                };
                                                 let overlay_class = note_edit_overlay_class();
                                                 let edit_overlay_class = if is_list {
                                                     "visible absolute z-10 cursor-text overflow-auto"
@@ -2891,9 +2957,10 @@ pub fn Page() -> Element {
                                                                                 &live_nodes,
                                                                                 live_caret,
                                                                                 &live_selections,
+                                                                                caret_width_class,
                                                                             )}
                                                                             if live_caret == live_source.len() as u32 {
-                                                                                {render_note_caret()}
+                                                                                {render_note_caret(caret_width_class)}
                                                                             }
                                                                         }
                                                                     }
@@ -2963,7 +3030,7 @@ pub fn Page() -> Element {
                                                                                                     key: "caret-{chunk_index}",
                                                                                                     id: NOTE_CARET_ID,
                                                                                                     class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                                                                                                    span { class: "pointer-events-none absolute inset-y-0 left-0 w-[2px] bg-current" }
+                                                                                                    span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
                                                                                                 }
                                                                                             }
                                                                                             if !chunk.text.is_empty() {

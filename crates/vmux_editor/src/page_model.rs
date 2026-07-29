@@ -432,6 +432,22 @@ pub fn viewport_reveal_delta(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteCursorActivation {
+    Center(u32),
+    PreserveViewport(u32),
+}
+
+pub fn note_cursor_activation(
+    reveal_line: Option<u32>,
+    restore_vim_cursor: bool,
+    cursor_line: u32,
+) -> Option<NoteCursorActivation> {
+    reveal_line.map(NoteCursorActivation::Center).or_else(|| {
+        restore_vim_cursor.then_some(NoteCursorActivation::PreserveViewport(cursor_line))
+    })
+}
+
 pub fn dir_select_index(entries: &[FileDirEntry], came_from: &str) -> usize {
     let name = came_from
         .trim_end_matches('/')
@@ -654,6 +670,19 @@ mod tests {
         assert_eq!(viewport_reveal_delta(120.0, 148.0, 100.0, 500.0), 0.0);
         assert_eq!(viewport_reveal_delta(80.0, 108.0, 100.0, 500.0), -20.0);
         assert_eq!(viewport_reveal_delta(480.0, 520.0, 100.0, 500.0), 20.0);
+    }
+
+    #[test]
+    fn note_cursor_restore_preserves_viewport_until_explicit_reveal() {
+        assert_eq!(
+            note_cursor_activation(Some(12), true, 8),
+            Some(NoteCursorActivation::Center(12))
+        );
+        assert_eq!(
+            note_cursor_activation(None, true, 8),
+            Some(NoteCursorActivation::PreserveViewport(8))
+        );
+        assert_eq!(note_cursor_activation(None, false, 8), None);
     }
 
     #[test]
