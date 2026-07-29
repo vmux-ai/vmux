@@ -1,3 +1,4 @@
+use std::collections::{HashSet, VecDeque};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +23,8 @@ use crate::agent_broker::AgentBroker;
 use crate::message::Message;
 use crate::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
 use crate::remote::{
-    ApprovalRequest, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent, RemoteMediaEntry,
-    RemoteSession, RemoteStatus,
+    ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
+    RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent,
 };
 
 const MAX_PROMPT_BYTES: usize = 64 * 1024;
@@ -34,6 +35,8 @@ const MAX_MEDIA_QUERY_BYTES: usize = 4 * 1024;
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
 const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
+const MAX_CLIENT_OP_IDS: usize = 4096;
+const MAX_CLIENT_OP_ID_BYTES: usize = 256;
 
 #[derive(Deserialize)]
 struct MediaQuery {
@@ -48,6 +51,33 @@ struct RemoteState {
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
     broker: AgentBroker,
+    client_ops: Arc<Mutex<ClientOpDeduper>>,
+}
+
+#[derive(Default)]
+struct ClientOpDeduper {
+    seen: HashSet<ClientOpId>,
+    order: VecDeque<ClientOpId>,
+}
+
+impl ClientOpDeduper {
+    fn claim(&mut self, client_op_id: ClientOpId) -> bool {
+        if !self.seen.insert(client_op_id.clone()) {
+            return false;
+        }
+        self.order.push_back(client_op_id);
+        while self.order.len() > MAX_CLIENT_OP_IDS {
+            if let Some(expired) = self.order.pop_front() {
+                self.seen.remove(&expired);
+            }
+        }
+        true
+    }
+
+    fn release(&mut self, client_op_id: &ClientOpId) {
+        self.seen.remove(client_op_id);
+        self.order.retain(|queued| queued != client_op_id);
+    }
 }
 
 pub fn spawn(
@@ -69,6 +99,7 @@ pub fn spawn(
             agents,
             acp,
             broker,
+            client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
         };
         let address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port());
         let listener = match tokio::net::TcpListener::bind(address).await {
@@ -103,8 +134,19 @@ async fn create_chat(
     Json(request): Json<NewChatRequest>,
 ) -> StatusCode {
     let prompt = request.text.trim();
-    if prompt.is_empty() || prompt.len() > MAX_PROMPT_BYTES {
+    if prompt.is_empty()
+        || prompt.len() > MAX_PROMPT_BYTES
+        || !valid_client_op_id(&request.client_op_id)
+    {
         return StatusCode::BAD_REQUEST;
+    }
+    if !state
+        .client_ops
+        .lock()
+        .await
+        .claim(request.client_op_id.clone())
+    {
+        return StatusCode::ACCEPTED;
     }
     let command = crate::protocol::AgentCommand::NewAgentChat {
         prompt: prompt.to_string(),
@@ -115,8 +157,14 @@ async fn create_chat(
         .await
     {
         Ok(crate::protocol::AgentCommandResult::Ok) => StatusCode::ACCEPTED,
-        Ok(crate::protocol::AgentCommandResult::Error(_)) | Err(_) => StatusCode::BAD_GATEWAY,
-        Ok(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        Ok(crate::protocol::AgentCommandResult::Error(_)) | Err(_) => {
+            state.client_ops.lock().await.release(&request.client_op_id);
+            StatusCode::BAD_GATEWAY
+        }
+        Ok(_) => {
+            state.client_ops.lock().await.release(&request.client_op_id);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -169,8 +217,19 @@ async fn send_prompt(
     let Some(attachments) = validate_remote_attachments(request.attachments) else {
         return StatusCode::BAD_REQUEST;
     };
-    if (text.is_empty() && attachments.is_empty()) || text.len() > MAX_PROMPT_BYTES {
+    if (text.is_empty() && attachments.is_empty())
+        || text.len() > MAX_PROMPT_BYTES
+        || !valid_client_op_id(&request.client_op_id)
+    {
         return StatusCode::BAD_REQUEST;
+    }
+    if !state
+        .client_ops
+        .lock()
+        .await
+        .claim(request.client_op_id.clone())
+    {
+        return StatusCode::ACCEPTED;
     }
     if state.acp.lock().await.contains(&sid) {
         state.acp.lock().await.input(
@@ -185,6 +244,8 @@ async fn send_prompt(
     }
     let agents = state.agents.lock().await;
     if agents.remote_session(&sid).is_none() {
+        drop(agents);
+        state.client_ops.lock().await.release(&request.client_op_id);
         return StatusCode::NOT_FOUND;
     }
     agents.input(
@@ -267,12 +328,21 @@ async fn session_events(
     State(state): State<RemoteState>,
     AxumPath(sid): AxumPath<String>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let Some((session, messages, receiver)) = session_stream(&state, &sid).await else {
+    let Some((session, events, receiver)) = session_stream(&state, &sid).await else {
         return Err(StatusCode::NOT_FOUND);
     };
+    let room_id = session.room_id.clone();
+    let through_seq = events
+        .last()
+        .map(|event| event.server_seq)
+        .unwrap_or_default();
     let initial = vec![
         remote_sse(RemoteEvent::Session { session }),
-        remote_sse(RemoteEvent::Snapshot { messages }),
+        remote_sse(RemoteEvent::Snapshot {
+            room_id,
+            through_seq,
+            events,
+        }),
     ];
     let live_state = state.clone();
     let live_sid = sid.clone();
@@ -299,9 +369,9 @@ async fn session_events(
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
-                            if let Some(messages) = session_messages(&remote_state, &sid).await {
+                            if let Some(event) = session_snapshot(&remote_state, &sid).await {
                                 return Some((
-                                    remote_sse(RemoteEvent::Snapshot { messages }),
+                                    remote_sse(event),
                                     (receiver, disconnect_check),
                                 ));
                             }
@@ -324,7 +394,7 @@ async fn session_stream(
     sid: &str,
 ) -> Option<(
     RemoteSession,
-    Vec<Message>,
+    Vec<RoomEvent>,
     broadcast::Receiver<ServiceMessage>,
 )> {
     {
@@ -332,14 +402,17 @@ async fn session_stream(
         if let Some(mut session) = acp.remote_session(sid) {
             let messages = acp.remote_messages(sid)?;
             session.title = vmux_remote::conversation_title(&messages, &session.name);
-            return Some((session, messages, acp.subscribe(sid)?));
+            let events =
+                vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+            return Some((session, events, acp.subscribe(sid)?));
         }
     }
     let agents = state.agents.lock().await;
     let mut session = agents.remote_session(sid)?;
     let messages = agents.remote_messages(sid).await?;
     session.title = vmux_remote::conversation_title(&messages, &session.name);
-    Some((session, messages, agents.subscribe(sid)?))
+    let events = vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+    Some((session, events, agents.subscribe(sid)?))
 }
 
 async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
@@ -368,13 +441,31 @@ async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession
     Some(session)
 }
 
+async fn session_snapshot(state: &RemoteState, sid: &str) -> Option<RemoteEvent> {
+    let session = current_session(state, sid).await?;
+    let messages = session_messages(state, sid).await?;
+    let events = vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+    let through_seq = events
+        .last()
+        .map(|event| event.server_seq)
+        .unwrap_or_default();
+    Some(RemoteEvent::Snapshot {
+        room_id: session.room_id,
+        through_seq,
+        events,
+    })
+}
+
 async fn service_event(
     state: &RemoteState,
     sid: &str,
     message: ServiceMessage,
 ) -> Option<RemoteEvent> {
     match message {
-        ServiceMessage::AgentDelta { text, .. } => Some(RemoteEvent::Delta { text }),
+        ServiceMessage::AgentDelta { text, .. } => Some(RemoteEvent::Delta {
+            room_id: vmux_remote::room_id_for_session(sid),
+            text,
+        }),
         ServiceMessage::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
             status: RemoteStatus::from(&status),
         }),
@@ -394,9 +485,19 @@ async fn service_event(
             Some(RemoteEvent::Approval { approval: None })
         }
         ServiceMessage::AgentMessagesSnapshot { messages_json, .. } => {
-            serde_json::from_str(&messages_json)
-                .ok()
-                .map(|messages| RemoteEvent::Snapshot { messages })
+            let messages = serde_json::from_str::<Vec<Message>>(&messages_json).ok()?;
+            let session = current_session(state, sid).await?;
+            let events =
+                vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+            let through_seq = events
+                .last()
+                .map(|event| event.server_seq)
+                .unwrap_or_default();
+            Some(RemoteEvent::Snapshot {
+                room_id: session.room_id,
+                through_seq,
+                events,
+            })
         }
         ServiceMessage::AcpAgentInfo { .. }
         | ServiceMessage::AcpModelInfo { .. }
@@ -421,6 +522,11 @@ fn secure_eq(left: &str, right: &str) -> bool {
             difference | (left ^ right)
         })
         == 0
+}
+
+fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
+    let value = client_op_id.as_str();
+    !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
 }
 
 fn validate_remote_attachments(attachments: Vec<AgentAttachment>) -> Option<Vec<AgentAttachment>> {
@@ -718,6 +824,15 @@ mod tests {
     }
 
     #[test]
+    fn client_operation_ids_are_bounded() {
+        assert!(valid_client_op_id(&ClientOpId::new("mobile:1:1")));
+        assert!(!valid_client_op_id(&ClientOpId::new("  ")));
+        assert!(!valid_client_op_id(&ClientOpId::new(
+            "x".repeat(MAX_CLIENT_OP_ID_BYTES + 1)
+        )));
+    }
+
+    #[test]
     fn remote_state_requires_enabled_marker() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("remote-state");
@@ -747,5 +862,21 @@ mod tests {
             })
             .collect();
         assert!(validate_remote_attachments(attachments).is_none());
+    }
+
+    #[test]
+    fn client_operation_deduplication_is_bounded_and_releasable() {
+        let mut deduper = ClientOpDeduper::default();
+        let first = ClientOpId::new("first");
+        assert!(deduper.claim(first.clone()));
+        assert!(!deduper.claim(first.clone()));
+        deduper.release(&first);
+        assert!(deduper.claim(first));
+
+        for index in 0..=MAX_CLIENT_OP_IDS {
+            assert!(deduper.claim(ClientOpId::new(format!("op-{index}"))));
+        }
+        assert_eq!(deduper.order.len(), MAX_CLIENT_OP_IDS);
+        assert_eq!(deduper.seen.len(), MAX_CLIENT_OP_IDS);
     }
 }

@@ -3,8 +3,9 @@
 mod native_transition;
 mod qr_scanner;
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
 use futures_util::StreamExt;
@@ -18,15 +19,26 @@ use vmux_chat_ui::{
     ToolUseBlock, UserBubble, WorkingIndicator,
 };
 use vmux_remote::{
-    AgentAttachment, ApprovalRequest, AssistantBlock, Message, NewChatRequest, PromptRequest,
-    RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus, inline_media_query,
-    media_display_path, media_reference, replace_inline_media_query,
+    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
+    PromptRequest, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus,
+    RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
+    replace_inline_media_query,
 };
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_client_op_id() -> ClientOpId {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let sequence = NEXT_CLIENT_OP_ID.fetch_add(1, Ordering::Relaxed);
+    ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
+}
 
 fn main() {
     let config = dioxus::mobile::Config::new().with_custom_event_handler(|event, _| {
@@ -49,6 +61,13 @@ enum AuthState {
     Loading,
     Paired,
     Unpaired,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct MobileRoomProjection {
+    room_id: Option<RoomId>,
+    through_seq: u64,
+    events: Vec<RoomEvent>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -202,6 +221,7 @@ fn submit_remote_prompt(
             .post_json(
                 &format!("/api/sessions/{sid}/messages"),
                 &PromptRequest {
+                    client_op_id: next_client_op_id(),
                     text,
                     attachments: attachments_to_submit,
                 },
@@ -251,7 +271,7 @@ fn start_new_chat(
     api: Signal<Option<Api>>,
     mut sessions: Signal<Vec<RemoteSession>>,
     current: Signal<Option<RemoteSession>>,
-    messages: Signal<Vec<Message>>,
+    room: Signal<MobileRoomProjection>,
     live_delta: Signal<String>,
     status: Signal<RemoteStatus>,
     approval: Signal<Option<RemoteApproval>>,
@@ -275,7 +295,13 @@ fn start_new_chat(
     error.set(String::new());
     spawn(async move {
         match client
-            .post_json("/api/chats", &NewChatRequest { text })
+            .post_json(
+                "/api/chats",
+                &NewChatRequest {
+                    client_op_id: next_client_op_id(),
+                    text,
+                },
+            )
             .await
         {
             Ok(()) => {
@@ -294,7 +320,7 @@ fn start_new_chat(
                                 client,
                                 created,
                                 current,
-                                messages,
+                                room,
                                 live_delta,
                                 status,
                                 approval,
@@ -318,7 +344,7 @@ fn start_new_chat(
 
 fn leave_session(
     mut current: Signal<Option<RemoteSession>>,
-    mut messages: Signal<Vec<Message>>,
+    mut room: Signal<MobileRoomProjection>,
     mut live_delta: Signal<String>,
     mut status: Signal<RemoteStatus>,
     mut approval: Signal<Option<RemoteApproval>>,
@@ -328,7 +354,7 @@ fn leave_session(
     let transition = native_transition::begin_close();
     generation.set(generation().wrapping_add(1));
     current.set(None);
-    messages.set(Vec::new());
+    room.set(MobileRoomProjection::default());
     live_delta.set(String::new());
     status.set(RemoteStatus::Idle);
     approval.set(None);
@@ -346,7 +372,7 @@ fn App() -> Element {
     let mut api = use_signal(|| None::<Api>);
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
     let current = use_signal(|| None::<RemoteSession>);
-    let messages = use_signal(Vec::<Message>::new);
+    let room = use_signal(MobileRoomProjection::default);
     let live_delta = use_signal(String::new);
     let status = use_signal(|| RemoteStatus::Idle);
     let mut approval = use_signal(|| None::<RemoteApproval>);
@@ -367,7 +393,7 @@ fn App() -> Element {
     let creating_chat = use_signal(|| false);
 
     use_effect(move || {
-        let _ = messages.read().len();
+        let _ = room.read().events.len();
         let _ = live_delta.read().len();
         let _ = document::eval(
             "const el = document.getElementById('remote-chat-scroll'); if (el) el.scrollTop = el.scrollHeight;",
@@ -578,7 +604,7 @@ fn App() -> Element {
                     api,
                     sessions,
                     current,
-                    messages,
+                    room,
                     live_delta,
                     status,
                     approval,
@@ -594,7 +620,7 @@ fn App() -> Element {
                         client,
                         session,
                         current,
-                        messages,
+                        room,
                         live_delta,
                         status,
                         approval,
@@ -667,6 +693,7 @@ fn App() -> Element {
     let approval_sid = selected_sid.clone();
     let approval_value = approval();
     let live_delta_value = live_delta();
+    let room_value = room();
 
     rsx! {
         AppHead {}
@@ -678,7 +705,7 @@ fn App() -> Element {
                     class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-lg text-zinc-300 active:bg-white/10",
                     onclick: move |_| leave_session(
                         current,
-                        messages,
+                        room,
                         live_delta,
                         status,
                         approval,
@@ -717,13 +744,13 @@ fn App() -> Element {
             }
 
             main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5",
-                if messages().is_empty() && live_delta_value.is_empty() && !is_streaming {
+                if room_value.events.is_empty() && live_delta_value.is_empty() && !is_streaming {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-zinc-600",
                         "No messages yet."
                     }
                 }
                 div { class: "mx-auto flex w-full max-w-3xl flex-col",
-                    for (index, item) in group_messages(messages()).into_iter().enumerate() {
+                    for (index, item) in group_messages(room_value.events).into_iter().enumerate() {
                         MessageView { key: "{index}", item }
                     }
                     if !live_delta_value.is_empty() {
@@ -1263,11 +1290,11 @@ fn AssistantBlockView(props: AssistantBlockViewProps) -> Element {
     }
 }
 
-fn group_messages(messages: Vec<Message>) -> Vec<MobileChatItem> {
+fn group_messages(events: Vec<RoomEvent>) -> Vec<MobileChatItem> {
     let mut items = Vec::new();
     let mut turn = Vec::new();
-    for message in messages {
-        match message {
+    for event in events {
+        match event.message {
             Message::User { text, .. } => {
                 if !turn.is_empty() {
                     items.push(MobileChatItem::Turn {
@@ -1295,7 +1322,7 @@ fn open_session(
     api: Api,
     session: RemoteSession,
     mut current: Signal<Option<RemoteSession>>,
-    mut messages: Signal<Vec<Message>>,
+    mut room: Signal<MobileRoomProjection>,
     mut live_delta: Signal<String>,
     mut status: Signal<RemoteStatus>,
     mut approval: Signal<Option<RemoteApproval>>,
@@ -1305,7 +1332,10 @@ fn open_session(
     let transition = native_transition::begin_open();
     let sid = session.sid.clone();
     current.set(Some(session.clone()));
-    messages.set(Vec::new());
+    room.set(MobileRoomProjection {
+        room_id: Some(session.room_id.clone()),
+        ..MobileRoomProjection::default()
+    });
     live_delta.set(String::new());
     status.set(session.status.clone());
     approval.set(session.approval.clone());
@@ -1346,7 +1376,7 @@ fn open_session(
                         continue;
                     };
                     let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
-                    apply_remote_event(event, current, messages, live_delta, status, approval);
+                    apply_remote_event(event, current, room, live_delta, status, approval);
                     if refresh_now {
                         tokio::task::yield_now().await;
                     }
@@ -1361,22 +1391,61 @@ fn open_session(
 fn apply_remote_event(
     event: RemoteEvent,
     mut current: Signal<Option<RemoteSession>>,
-    mut messages: Signal<Vec<Message>>,
+    mut room: Signal<MobileRoomProjection>,
     mut live_delta: Signal<String>,
     mut status: Signal<RemoteStatus>,
     mut approval: Signal<Option<RemoteApproval>>,
 ) {
     match event {
         RemoteEvent::Session { session } => {
+            if room
+                .peek()
+                .room_id
+                .as_ref()
+                .is_some_and(|room_id| room_id != &session.room_id)
+            {
+                room.set(MobileRoomProjection::default());
+            }
             status.set(session.status.clone());
             approval.set(session.approval.clone());
             current.set(Some(session));
         }
-        RemoteEvent::Snapshot { messages: next } => {
-            messages.set(next);
-            live_delta.set(String::new());
+        RemoteEvent::Snapshot {
+            room_id,
+            through_seq,
+            events,
+        } => {
+            let matches_session = current
+                .peek()
+                .as_ref()
+                .is_none_or(|session| session.room_id == room_id);
+            let has_newer_projection = {
+                let projection = room.peek();
+                projection.room_id.as_ref() == Some(&room_id)
+                    && projection.through_seq > through_seq
+            };
+            if matches_session && !has_newer_projection {
+                room.set(MobileRoomProjection {
+                    room_id: Some(room_id),
+                    through_seq,
+                    events,
+                });
+                live_delta.set(String::new());
+            }
         }
-        RemoteEvent::Delta { text } => live_delta.write().push_str(&text),
+        RemoteEvent::Delta { room_id, text } => {
+            let accepts_delta = room
+                .peek()
+                .room_id
+                .as_ref()
+                .is_none_or(|current| current == &room_id);
+            if accepts_delta {
+                if room.peek().room_id.is_none() {
+                    room.write().room_id = Some(room_id);
+                }
+                live_delta.write().push_str(&text);
+            }
+        }
         RemoteEvent::Status { status: next } => {
             if !matches!(next, RemoteStatus::Streaming) {
                 approval.set(None);
@@ -1575,11 +1644,14 @@ mod tests {
 
     #[test]
     fn parses_sse_frames() {
-        let mut buffer = b"data: {\"type\":\"delta\",\"text\":\"hi\"}\r\n\r\n".to_vec();
+        let mut buffer =
+            b"data: {\"type\":\"delta\",\"room_id\":\"session:s\",\"text\":\"hi\"}\r\n\r\n"
+                .to_vec();
         let frame = take_sse_frame(&mut buffer).unwrap();
         assert_eq!(
             parse_sse_event(&frame),
             Some(RemoteEvent::Delta {
+                room_id: vmux_remote::room_id_for_session("s"),
                 text: "hi".to_string()
             })
         );
@@ -1588,20 +1660,24 @@ mod tests {
 
     #[test]
     fn groups_agent_activity_into_one_turn() {
-        let items = group_messages(vec![
-            Message::user("hello"),
-            Message::Assistant {
-                blocks: vec![AssistantBlock::Thinking("working".to_string())],
-            },
-            Message::ToolResult {
-                call_id: "tool-1".to_string(),
-                content: "done".to_string(),
-                is_error: false,
-            },
-            Message::Assistant {
-                blocks: vec![AssistantBlock::Text("answer".to_string())],
-            },
-        ]);
+        let items = group_messages(vmux_remote::room_events_from_messages(
+            "s",
+            0,
+            &[
+                Message::user("hello"),
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Thinking("working".to_string())],
+                },
+                Message::ToolResult {
+                    call_id: "tool-1".to_string(),
+                    content: "done".to_string(),
+                    is_error: false,
+                },
+                Message::Assistant {
+                    blocks: vec![AssistantBlock::Text("answer".to_string())],
+                },
+            ],
+        ));
 
         assert_eq!(items.len(), 2);
         assert!(matches!(items[0], MobileChatItem::User { .. }));

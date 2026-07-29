@@ -36,6 +36,8 @@ pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod providers;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod room;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod run_state;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod run_state_kind;
@@ -83,6 +85,13 @@ pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::AgentPlugin;
+#[cfg(not(target_arch = "wasm32"))]
+pub use room::{
+    ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
+    MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
+    RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
+    RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use run_state::AgentRunState;
 #[cfg(not(target_arch = "wasm32"))]

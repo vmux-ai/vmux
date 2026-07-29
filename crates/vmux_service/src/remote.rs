@@ -1,6 +1,6 @@
 pub use vmux_remote::{
-    ApprovalRequest, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent, RemoteMediaEntry,
-    RemoteSession, RemoteStatus,
+    ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
+    RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

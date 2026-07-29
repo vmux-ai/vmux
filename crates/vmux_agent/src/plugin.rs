@@ -93,6 +93,7 @@ impl Plugin for AgentSessionPlugin {
         strategies.register_cli(Box::new(CodexStrategy));
 
         app.insert_resource(strategies)
+            .add_plugins(crate::room::RoomPlugin)
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
