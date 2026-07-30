@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy::render::{Render, RenderApp, RenderScheduleOrder};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
+#[cfg(target_os = "macos")]
 use bevy_cef::prelude::WebviewWindowed;
 use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
@@ -19,6 +20,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vmux_layout::scene::InteractionMode;
+#[cfg(target_os = "macos")]
 use vmux_layout::{cef::LayoutCef, window::Modal};
 #[cfg(feature = "tray")]
 use vmux_terminal as terminal;
@@ -48,6 +50,7 @@ impl Default for RenderFrameDemand {
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct DemandedRender;
 
+#[cfg(any(target_os = "macos", test))]
 fn windowed_pointer_inside_after_event(
     pointer_position_changed: bool,
     previous: bool,
@@ -60,6 +63,7 @@ fn windowed_pointer_inside_after_event(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn native_scroll_should_wake(
     layout_pointer_inside: bool,
     sampled_over_windowed_page: bool,
@@ -67,6 +71,7 @@ fn native_scroll_should_wake(
     layout_pointer_inside || !sampled_over_windowed_page
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct NativeWindowFrame {
     x: f64,
@@ -75,6 +80,7 @@ struct NativeWindowFrame {
     height: f64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct NativeResizeEdges {
     left: bool,
@@ -83,12 +89,14 @@ struct NativeResizeEdges {
     top: bool,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl NativeResizeEdges {
     fn any(self) -> bool {
         self.left || self.right || self.bottom || self.top
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Clone, Copy, Debug)]
 struct NativeWindowResizeDrag {
     frame: NativeWindowFrame,
@@ -99,6 +107,7 @@ struct NativeWindowResizeDrag {
     edges: NativeResizeEdges,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn native_resize_edges(
     frame: NativeWindowFrame,
     cursor_x: f64,
@@ -117,6 +126,7 @@ fn native_resize_edges(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn resized_native_window_frame(
     drag: NativeWindowResizeDrag,
     cursor_x: f64,
@@ -939,6 +949,7 @@ fn sync_winit_power_mode(
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn render_frame_should_run(
     mode: InteractionMode,
     transition_active: bool,
