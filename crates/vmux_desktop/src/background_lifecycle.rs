@@ -2,6 +2,7 @@ use bevy::ecs::message::Messages;
 use bevy::prelude::*;
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
+use bevy_cef::prelude::WebviewWindowed;
 use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
 };
@@ -16,6 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use vmux_layout::scene::InteractionMode;
+use vmux_layout::{cef::LayoutCef, window::Modal};
 #[cfg(feature = "tray")]
 use vmux_terminal as terminal;
 #[cfg(feature = "tray")]
@@ -150,6 +152,7 @@ impl Plugin for BackgroundLifecyclePlugin {
         app.add_message::<LifecycleEvent>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_systems(Update, sync_main_camera_activity)
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, keep_awake_while_revealing)
             .add_systems(
@@ -890,6 +893,47 @@ fn sync_winit_power_mode(
     }
 }
 
+fn main_camera_should_render(
+    mode: InteractionMode,
+    transition_active: bool,
+    live_resize: bool,
+    visible_windowed_page: bool,
+) -> bool {
+    mode == InteractionMode::Player || transition_active || live_resize || !visible_windowed_page
+}
+
+#[cfg(target_os = "macos")]
+fn sync_main_camera_activity(
+    mode: Res<InteractionMode>,
+    transition: Option<Res<vmux_layout::scene::ModeTransition>>,
+    pages: Query<
+        &Transform,
+        (
+            With<vmux_layout::Browser>,
+            With<WebviewWindowed>,
+            Without<LayoutCef>,
+            Without<Modal>,
+        ),
+    >,
+    mut cameras: Query<&mut Camera, With<vmux_layout::scene::MainCamera>>,
+) {
+    let visible_windowed_page = pages.iter().any(|transform| transform.scale.x > 1.0e-3);
+    let render = main_camera_should_render(
+        *mode,
+        transition.is_some(),
+        IN_LIVE_RESIZE.load(Ordering::Relaxed),
+        visible_windowed_page,
+    );
+    for mut camera in &mut cameras {
+        if camera.is_active != render {
+            camera.is_active = render;
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sync_main_camera_activity() {}
+
 fn foreground_cef_wake_interval(refresh_rates: impl IntoIterator<Item = Option<u32>>) -> Duration {
     windowless_frame_interval_from_refresh_millihertz(refresh_rates.into_iter().flatten().max())
 }
@@ -1099,6 +1143,40 @@ mod tests {
                 height: 120.0,
             }
         );
+    }
+
+    #[test]
+    fn user_mode_skips_bevy_camera_when_native_page_is_visible() {
+        assert!(!main_camera_should_render(
+            InteractionMode::User,
+            false,
+            false,
+            true,
+        ));
+        assert!(main_camera_should_render(
+            InteractionMode::Player,
+            false,
+            false,
+            true,
+        ));
+        assert!(main_camera_should_render(
+            InteractionMode::User,
+            true,
+            false,
+            true,
+        ));
+        assert!(main_camera_should_render(
+            InteractionMode::User,
+            false,
+            true,
+            true,
+        ));
+        assert!(main_camera_should_render(
+            InteractionMode::User,
+            false,
+            false,
+            false,
+        ));
     }
 
     #[test]
