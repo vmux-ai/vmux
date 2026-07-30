@@ -439,6 +439,36 @@ pub fn viewport_reveal_delta(
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NoteCaretVisibilityRequest {
+    pub block_index: usize,
+    pub line: u32,
+    pub retry: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct NoteCaretVisibilityQueue {
+    pending: Option<NoteCaretVisibilityRequest>,
+    scheduled: bool,
+}
+
+impl NoteCaretVisibilityQueue {
+    pub fn enqueue(&mut self, request: NoteCaretVisibilityRequest) -> bool {
+        self.pending = Some(request);
+        if self.scheduled {
+            false
+        } else {
+            self.scheduled = true;
+            true
+        }
+    }
+
+    pub fn take(&mut self) -> Option<NoteCaretVisibilityRequest> {
+        self.scheduled = false;
+        self.pending.take()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteCursorActivation {
     Center(u32),
     PreserveViewport(u32),
@@ -676,6 +706,26 @@ mod tests {
         assert_eq!(viewport_reveal_delta(120.0, 148.0, 100.0, 500.0), 0.0);
         assert_eq!(viewport_reveal_delta(80.0, 108.0, 100.0, 500.0), -20.0);
         assert_eq!(viewport_reveal_delta(480.0, 520.0, 100.0, 500.0), 20.0);
+    }
+
+    #[test]
+    fn note_caret_visibility_coalesces_to_latest_cursor_per_frame() {
+        let mut queue = NoteCaretVisibilityQueue::default();
+        let first = NoteCaretVisibilityRequest {
+            block_index: 2,
+            line: 8,
+            retry: true,
+        };
+        let latest = NoteCaretVisibilityRequest {
+            block_index: 4,
+            line: 15,
+            retry: true,
+        };
+
+        assert!(queue.enqueue(first));
+        assert!(!queue.enqueue(latest));
+        assert_eq!(queue.take(), Some(latest));
+        assert!(queue.enqueue(first));
     }
 
     #[test]

@@ -1,15 +1,17 @@
 #![allow(non_snake_case)]
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
 use crate::note::{render_block, render_block_with_hidden_list_line};
 use crate::page_model::{
-    NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
-    dir_select_index, editor_drag_started, gutter_width, heading_class, image_mime, line_severity,
-    note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
-    note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
-    squiggle_style, viewport_reveal_delta,
+    NoteCaretVisibilityQueue, NoteCaretVisibilityRequest, NoteCursorActivation, NoteInlineKind,
+    NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started,
+    gutter_width, heading_class, image_mime, line_severity, note_cursor_activation,
+    note_inline_nodes, note_list_marker_prefix_len, note_source_offset, note_source_position,
+    severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
+    viewport_reveal_delta,
 };
 use dioxus::prelude::*;
 use vmux_core::event::*;
@@ -36,6 +38,10 @@ const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
 const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
 const LSP_NOTICE_DONE_MS: i32 = 2_500;
 const LSP_NOTICE_FAILED_MS: i32 = 6_000;
+
+std::thread_local! {
+    static NOTE_CARET_VISIBILITY_QUEUE: RefCell<NoteCaretVisibilityQueue> = RefCell::new(NoteCaretVisibilityQueue::default());
+}
 
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
@@ -655,12 +661,10 @@ fn NoteBlockView(
     diff_markers: Signal<HashMap<u32, EditorDiffMarker>>,
     index: usize,
     editing: bool,
-    current: vmux_core::editor::CursorPos,
-    selections: Vec<vmux_core::editor::SelSpan>,
+    source_cursor: Signal<vmux_core::editor::CursorPos>,
+    source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
     note_diff_marker: Option<EditorDiffMarker>,
     keymap: vmux_core::KeymapKind,
-    active_edit_line: u32,
-    edit_rect: Option<NoteEditRect>,
     mut note_active: Signal<Option<u32>>,
     mut note_editing: Signal<bool>,
     mut note_edit_line: Signal<Option<u32>>,
@@ -672,6 +676,26 @@ fn NoteBlockView(
 ) -> Element {
     let Some(note_block) = note_blocks.read().get(index).cloned() else {
         return rsx! {};
+    };
+    let current = if editing {
+        *source_cursor.read()
+    } else {
+        vmux_core::editor::CursorPos::default()
+    };
+    let selections = if editing {
+        source_selections.read().clone()
+    } else {
+        Vec::new()
+    };
+    let active_edit_line = if editing {
+        note_edit_line.read().unwrap_or(current.line)
+    } else {
+        0
+    };
+    let edit_rect = if editing {
+        *note_edit_rect.read()
+    } else {
+        None
     };
     let is_list = matches!(note_block.block, MdBlock::List { .. });
     let is_live_inline = matches!(
@@ -3047,8 +3071,6 @@ pub fn Page() -> Element {
                     if file_view_mode() == FileViewMode::Note && is_markdown_file(&git_path()) {
                         {
                             let active = note_active();
-                            let current = source_cursor();
-                            let selections = source_sel();
                             let block_count = note_blocks.read().len();
                             let note_input_comp_keys = comp_keys.clone();
                             rsx! {
@@ -3121,26 +3143,6 @@ pub fn Page() -> Element {
                                             {
                                                 let editing =
                                                     note_editing() && Some(index as u32) == active;
-                                                let block_current = if editing {
-                                                    current
-                                                } else {
-                                                    vmux_core::editor::CursorPos::default()
-                                                };
-                                                let block_selections = if editing {
-                                                    selections.clone()
-                                                } else {
-                                                    Vec::new()
-                                                };
-                                                let active_edit_line = if editing {
-                                                    note_edit_line().unwrap_or(current.line)
-                                                } else {
-                                                    0
-                                                };
-                                                let edit_rect = if editing {
-                                                    note_edit_rect()
-                                                } else {
-                                                    None
-                                                };
                                                 rsx! {
                                                     NoteBlockView {
                                                         key: "block-{index}",
@@ -3148,11 +3150,9 @@ pub fn Page() -> Element {
                                                         diff_markers: git_line_markers,
                                                         index,
                                                         editing,
-                                                        current: block_current,
-                                                        selections: block_selections,
+                                                        source_cursor,
+                                                        source_selections: source_sel,
                                                         keymap: keymap(),
-                                                        active_edit_line,
-                                                        edit_rect,
                                                         note_active,
                                                         note_editing,
                                                         note_edit_line,
@@ -4092,23 +4092,24 @@ fn scroll_viewport_by(lines: i32, line_height: f64) {
     }
 }
 
-fn scroll_note_caret_into_view(block_index: usize, line: u32) {
+fn scroll_note_caret_into_view(block_index: usize, line: u32) -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return;
+        return false;
     };
     let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
-        return;
+        return false;
     };
     let block_selector = format!("#note-block-{block_index}");
     let caret = document
         .get_element_by_id(NOTE_CARET_ID)
         .filter(|caret| caret.closest(&block_selector).ok().flatten().is_some());
+    let exact = caret.is_some();
     let Some(target) = caret
         .or_else(|| document.get_element_by_id(&format!("note-line-{line}")))
         .or_else(|| document.get_element_by_id(&format!("note-live-block-{block_index}")))
         .or_else(|| document.get_element_by_id(&format!("note-block-{block_index}")))
     else {
-        return;
+        return false;
     };
     let viewport = scroll.get_bounding_client_rect();
     let target = target.get_bounding_client_rect();
@@ -4121,6 +4122,7 @@ fn scroll_note_caret_into_view(block_index: usize, line: u32) {
     if delta.abs() >= 1.0 {
         scroll.set_scroll_top((scroll.scroll_top() as f64 + delta).round() as i32);
     }
+    exact
 }
 
 fn center_note_caret(block_index: usize, line: u32) {
@@ -4149,14 +4151,20 @@ fn center_note_caret(block_index: usize, line: u32) {
     scroll.set_scroll_top(top.round() as i32);
 }
 
-fn schedule_note_caret_visibility(block_index: usize, line: u32, retry: bool) {
+fn schedule_note_caret_visibility() {
     let Some(window) = web_sys::window() else {
+        NOTE_CARET_VISIBILITY_QUEUE.with(|queue| {
+            queue.borrow_mut().take();
+        });
         return;
     };
     let callback = Closure::once_into_js(move || {
-        scroll_note_caret_into_view(block_index, line);
-        if retry {
-            schedule_note_caret_visibility(block_index, line, false);
+        let pending = NOTE_CARET_VISIBILITY_QUEUE.with(|queue| queue.borrow_mut().take());
+        if let Some(request) = pending
+            && !scroll_note_caret_into_view(request.block_index, request.line)
+            && request.retry
+        {
+            queue_note_caret_visibility(request.block_index, request.line, false);
         }
     })
     .unchecked_into::<js_sys::Function>();
@@ -4165,8 +4173,21 @@ fn schedule_note_caret_visibility(block_index: usize, line: u32, retry: bool) {
     }
 }
 
+fn queue_note_caret_visibility(block_index: usize, line: u32, retry: bool) {
+    let should_schedule = NOTE_CARET_VISIBILITY_QUEUE.with(|queue| {
+        queue.borrow_mut().enqueue(NoteCaretVisibilityRequest {
+            block_index,
+            line,
+            retry,
+        })
+    });
+    if should_schedule {
+        schedule_note_caret_visibility();
+    }
+}
+
 fn ensure_note_caret_visible(block_index: usize, line: u32) {
-    schedule_note_caret_visibility(block_index, line, true);
+    queue_note_caret_visibility(block_index, line, true);
 }
 
 fn ensure_line_visible(line: u32, ch: f64) {
