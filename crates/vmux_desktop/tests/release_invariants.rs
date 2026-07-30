@@ -229,22 +229,30 @@ fn target_seed_key_resolves_a_symlinked_repo_root() {
     let linked_repo = temp.path().join("repo");
     symlink(&repo, &linked_repo).expect("symlink repo");
 
-    let output = Command::new("/bin/bash")
-        .args([
-            "-c",
-            "cd \"$1\" && CARGO_BIN=/usr/bin/true RUSTC=/usr/bin/true scripts/target-seed-key.sh",
-            "bash",
-        ])
-        .arg(&linked_repo)
-        .output()
-        .expect("run target seed key");
+    let run = |path: &std::path::Path| {
+        Command::new("/bin/bash")
+            .args([
+                "-c",
+                "cd \"$1\" && CARGO_BIN=/usr/bin/true RUSTC=/usr/bin/true scripts/target-seed-key.sh",
+                "bash",
+            ])
+            .arg(path)
+            .output()
+            .expect("run target seed key")
+    };
+    let canonical = run(&repo);
+    let linked = run(&linked_repo);
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let key = String::from_utf8(output.stdout).expect("utf8 key");
+    for output in [&canonical, &linked] {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let canonical_key = String::from_utf8(canonical.stdout).expect("utf8 canonical key");
+    let key = String::from_utf8(linked.stdout).expect("utf8 linked key");
+    assert_eq!(key, canonical_key);
     assert_eq!(key.trim().len(), 40);
     assert!(key.trim().bytes().all(|byte| byte.is_ascii_hexdigit()));
 }

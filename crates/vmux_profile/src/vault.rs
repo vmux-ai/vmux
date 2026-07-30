@@ -39,6 +39,7 @@ const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 1
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
+#[cfg(any(target_os = "macos", test))]
 static SESSION_KEY_LOAD: OnceLock<Mutex<()>> = OnceLock::new();
 const IGNORED_ROOTS: [&str; 8] = [
     "agents",
@@ -2798,6 +2799,7 @@ fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn load_or_store_session_key<F>(vault_id: &str, load: F) -> Result<Zeroizing<Vec<u8>>, String>
 where
     F: FnOnce() -> Result<Zeroizing<Vec<u8>>, String>,

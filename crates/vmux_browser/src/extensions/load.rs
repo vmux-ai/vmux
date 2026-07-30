@@ -24,7 +24,7 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
     let (prepared, preparation_changed) =
         prepare_enabled_entries(&profile, &mut idx.entries, |entry| {
             runtime::prepare_runtime_in(&root, &runtime_store, &profile, entry)
-        });
+        })?;
     index_changed |= preparation_changed;
     if index_changed {
         idx.save(&root)?;
@@ -52,8 +52,8 @@ pub fn apply_env() -> Result<Vec<PreparedRuntime>, String> {
 fn prepare_enabled_entries(
     profile: &str,
     entries: &mut [store::ExtEntry],
-    mut prepare: impl FnMut(&store::ExtEntry) -> Result<PreparedRuntime, String>,
-) -> (Vec<PreparedRuntime>, bool) {
+    mut prepare: impl FnMut(&store::ExtEntry) -> Result<PreparedRuntime, runtime::PrepareRuntimeError>,
+) -> Result<(Vec<PreparedRuntime>, bool), String> {
     let mut prepared = Vec::new();
     let mut changed = false;
     for entry in entries
@@ -68,7 +68,7 @@ fn prepare_enabled_entries(
                 }
                 prepared.push(item);
             }
-            Err(error) => {
+            Err(runtime::PrepareRuntimeError::Corrupt(error)) => {
                 bevy::log::error!(
                     extension_id = %entry.id,
                     %profile,
@@ -78,9 +78,12 @@ fn prepare_enabled_entries(
                 entry.profile_enabled.insert(profile.to_string(), false);
                 changed = true;
             }
+            Err(runtime::PrepareRuntimeError::Infrastructure(error)) => {
+                return Err(format!("failed to prepare extension {}: {error}", entry.id));
+            }
         }
     }
-    (prepared, changed)
+    Ok((prepared, changed))
 }
 
 fn runtime_store_root() -> std::path::PathBuf {
@@ -233,11 +236,14 @@ mod tests {
 
         let (prepared, changed) = prepare_enabled_entries("personal", &mut entries, |entry| {
             if entry.id == "broken" {
-                Err("source hash mismatch".to_string())
+                Err(runtime::PrepareRuntimeError::Corrupt(
+                    "source hash mismatch".to_string(),
+                ))
             } else {
                 Ok(prepared_runtime(&entry.id))
             }
-        });
+        })
+        .unwrap();
 
         assert!(changed);
         assert!(!entries[0].enabled_for("personal"));
@@ -249,6 +255,28 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["working"]
         );
+    }
+
+    #[test]
+    fn infrastructure_failure_keeps_extensions_enabled() {
+        let mut entries = vec![enabled_entry("broken"), enabled_entry("working")];
+
+        let error = prepare_enabled_entries("personal", &mut entries, |entry| {
+            if entry.id == "broken" {
+                Err(runtime::PrepareRuntimeError::Infrastructure(
+                    "read-only runtime store".to_string(),
+                ))
+            } else {
+                Ok(prepared_runtime(&entry.id))
+            }
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error,
+            "failed to prepare extension broken: read-only runtime store"
+        );
+        assert!(entries.iter().all(|entry| entry.enabled_for("personal")));
     }
 
     #[test]
