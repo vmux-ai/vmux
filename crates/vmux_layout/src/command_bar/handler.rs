@@ -87,7 +87,6 @@ impl PendingCommandBarReveal {
 
 const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
-const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES: u8 = 120;
 
 pub(crate) struct CommandBarInputPlugin;
 
@@ -434,22 +433,13 @@ fn next_command_bar_reveal_frames_for_backend(
     has_native_size: bool,
 ) -> Option<u8> {
     if native_windowed && open_id != 0 && (rendered_open_id != Some(open_id) || !has_native_size) {
-        return Some(frames.saturating_add(1));
+        return if frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
+            None
+        } else {
+            Some(frames.saturating_add(1))
+        };
     }
     next_command_bar_reveal_frames(frames, open_id, rendered_open_id, painted_open_id)
-}
-
-fn native_command_bar_reveal_timed_out(
-    native_windowed: bool,
-    frames: u8,
-    open_id: u64,
-    rendered_open_id: Option<u64>,
-    has_native_size: bool,
-) -> bool {
-    native_windowed
-        && open_id != 0
-        && frames >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES
-        && (rendered_open_id != Some(open_id) || !has_native_size)
 }
 
 fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
@@ -2022,26 +2012,6 @@ fn reveal_command_bar(
     {
         let rendered_open_id = rendered.map(|rendered| rendered.0);
         let painted_open_id = painted.map(|painted| painted.0);
-        if native_command_bar_reveal_timed_out(
-            native_windowed,
-            pending.frames,
-            pending.open_id,
-            rendered_open_id,
-            native_size.is_some(),
-        ) {
-            commands.entity(entity).remove::<PendingCommandBarReveal>();
-            commands.trigger(BinReceive::<CommandBarActionEvent> {
-                webview: entity,
-                payload: CommandBarActionEvent {
-                    action: "dismiss".to_string(),
-                    value: String::new(),
-                    target: None,
-                    agent_url: None,
-                    attachments: Vec::new(),
-                },
-            });
-            continue;
-        }
         match next_command_bar_reveal_frames_for_backend(
             native_windowed,
             pending.frames,
@@ -2482,12 +2452,12 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, true),
-            Some(11)
+            next_command_bar_reveal_frames_for_backend(true, 9, 7, None, None, true),
+            Some(10)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, Some(7), None, false),
-            Some(11)
+            next_command_bar_reveal_frames_for_backend(true, 9, 7, Some(7), None, false),
+            Some(10)
         );
         assert_eq!(
             next_command_bar_reveal_frames_for_backend(true, 2, 7, Some(7), None, true),
@@ -2496,46 +2466,19 @@ mod tests {
     }
 
     #[test]
-    fn native_command_bar_aborts_stalled_reveal() {
-        assert!(!native_command_bar_reveal_timed_out(
-            true,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES - 1,
-            7,
-            None,
-            false,
-        ));
-        assert!(native_command_bar_reveal_timed_out(
-            true,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES,
-            7,
-            None,
-            false,
-        ));
-        assert!(native_command_bar_reveal_timed_out(
-            true,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES,
-            7,
-            Some(7),
-            false,
-        ));
-        assert!(!native_command_bar_reveal_timed_out(
-            true,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES,
-            7,
-            Some(7),
-            true,
-        ));
-        assert!(!native_command_bar_reveal_timed_out(
-            false,
-            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES,
-            7,
-            None,
-            false,
-        ));
+    fn native_command_bar_falls_back_when_ack_stalls() {
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, false),
+            None
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(true, 10, 7, Some(7), None, false),
+            None
+        );
     }
 
     #[test]
-    fn native_command_bar_timeout_clears_pending_reveal() {
+    fn native_command_bar_stalled_reveal_becomes_visible() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, reveal_command_bar);
@@ -2546,7 +2489,7 @@ mod tests {
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
-                    frames: COMMAND_BAR_NATIVE_REVEAL_TIMEOUT_FRAMES,
+                    frames: COMMAND_BAR_REVEAL_FALLBACK_FRAMES,
                     open_id: 7,
                     payload: Some(b"payload".to_vec()),
                 },
@@ -2558,7 +2501,7 @@ mod tests {
         assert!(app.world().get::<PendingCommandBarReveal>(modal).is_none());
         assert_eq!(
             app.world().get::<Visibility>(modal),
-            Some(&Visibility::Hidden)
+            Some(&Visibility::Inherited)
         );
     }
 

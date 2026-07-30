@@ -44,6 +44,13 @@ fn windowed_pointer_inside_after_event(
     }
 }
 
+fn native_scroll_should_wake(
+    layout_pointer_inside: bool,
+    sampled_over_windowed_page: bool,
+) -> bool {
+    layout_pointer_inside || !sampled_over_windowed_page
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct NativeWindowFrame {
     x: f64,
@@ -640,7 +647,10 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 }
             }
         } else if scroll {
-            if vmux_browser::native_layout_pointer_is_inside() || !over_windowed_page {
+            if native_scroll_should_wake(
+                vmux_browser::native_layout_pointer_is_inside(),
+                sampled_over_windowed_page,
+            ) {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
@@ -1288,6 +1298,13 @@ mod tests {
         assert!(!windowed_pointer_inside_after_event(false, false, true));
         assert!(!windowed_pointer_inside_after_event(true, true, false));
         assert!(windowed_pointer_inside_after_event(true, false, true));
+    }
+
+    #[test]
+    fn native_scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
+        assert!(!native_scroll_should_wake(false, true));
+        assert!(native_scroll_should_wake(true, true));
+        assert!(native_scroll_should_wake(false, false));
     }
 
     #[test]
