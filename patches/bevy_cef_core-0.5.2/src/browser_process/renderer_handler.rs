@@ -10,7 +10,9 @@ use std::any::Any;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::os::raw::c_int;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(any(target_os = "macos", test))]
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 /// Inline dirty-rectangle storage for CEF paints.
@@ -84,6 +86,7 @@ fn webview_dirty_rects(rects: Option<&[cef::Rect]>, width: u32, height: u32) -> 
     )
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn accelerated_dirty_rects(
     first_paint: &AtomicBool,
     rects: Option<&[cef::Rect]>,
