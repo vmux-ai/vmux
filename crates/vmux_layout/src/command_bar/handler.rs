@@ -505,13 +505,18 @@ fn on_command_bar_rendered(
 
 fn on_command_bar_size(
     trigger: On<BinReceive<CommandBarSizeEvent>>,
-    state: Query<(&Visibility, Option<&PendingCommandBarReveal>)>,
+    state: Query<(
+        &Visibility,
+        Option<&PendingCommandBarReveal>,
+        Option<&CommandBarNativeSize>,
+    )>,
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if let Ok((visibility, pending_reveal)) = state.get(webview)
-        && !command_bar_size_should_apply(*visibility, pending_reveal)
-    {
+    let Ok((visibility, pending_reveal, current_size)) = state.get(webview) else {
+        return;
+    };
+    if !command_bar_size_should_apply(*visibility, pending_reveal) {
         webview_debug_log(format!(
             "command_bar size ignored entity={webview:?} visibility={visibility:?} pending={}",
             pending_reveal.is_some()
@@ -519,6 +524,11 @@ fn on_command_bar_size(
         return;
     }
     let payload = trigger.event().payload;
+    if current_size.is_some_and(|size| {
+        size.width == payload.width.max(1) as f32 && size.height == payload.height.max(1) as f32
+    }) {
+        return;
+    }
     webview_debug_log(format!(
         "command_bar size entity={webview:?} width={} height={}",
         payload.width, payload.height

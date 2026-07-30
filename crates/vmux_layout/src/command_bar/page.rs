@@ -1,6 +1,9 @@
 #![allow(non_snake_case)]
 
+use std::cell::RefCell;
+
 use crate::command_bar::palette::{CommandPalette, PaletteVariant, emit_action};
+use crate::command_bar::size::CommandBarSizeEmissionState;
 use crate::command_bar::style::{command_bar_root_class, command_bar_shell_class};
 use dioxus::prelude::*;
 use vmux_command::event::{
@@ -10,6 +13,10 @@ use vmux_command::event::{
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+std::thread_local! {
+    static COMMAND_BAR_SIZE_EMISSION: RefCell<CommandBarSizeEmissionState> = RefCell::new(CommandBarSizeEmissionState::default());
+}
 
 /// The Cmd+K command-bar modal page: renders [`CommandPalette`] in a modal shell and
 /// owns the open/ack/reveal handshake, native sizing, and outside-pointer dismiss.
@@ -88,7 +95,7 @@ pub fn Page() -> Element {
         if observed_size_open_id() == Some(open_id) {
             return;
         }
-        if install_command_bar_size_observer() {
+        if install_command_bar_size_observer(current_open_id) {
             observed_size_open_id.set(Some(open_id));
         }
     });
@@ -115,7 +122,7 @@ pub fn Page() -> Element {
                     on_dismiss: move |_| { dismiss_command_bar(is_open); },
                     on_activity: move |_| {
                         if state().native_windowed {
-                            schedule_command_bar_size_emit();
+                            schedule_command_bar_size_emit(current_open_id());
                         }
                     },
                 }
@@ -189,7 +196,7 @@ fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
     true
 }
 
-fn emit_command_bar_size() {
+fn emit_command_bar_size(open_id: u64) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -213,7 +220,15 @@ fn emit_command_bar_size() {
         .offset_height()
         .max(shell.scroll_height() + result_list_extra_height)
         .max(1) as u32;
-    let _ = try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height });
+    let should_emit =
+        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow().should_emit(open_id, width, height));
+    if !should_emit {
+        return;
+    }
+    if try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height }).is_ok() {
+        COMMAND_BAR_SIZE_EMISSION
+            .with(|state| state.borrow_mut().mark_emitted(open_id, width, height));
+    }
 }
 
 fn command_bar_results_extra_height(document: &web_sys::Document) -> i32 {
@@ -239,16 +254,24 @@ fn css_px_value(value: &str) -> Option<f64> {
     value.is_finite().then_some(value.max(0.0))
 }
 
-fn schedule_command_bar_size_emit() {
-    emit_command_bar_size();
+fn schedule_command_bar_size_emit(open_id: u64) {
+    emit_command_bar_size(open_id);
+    let should_schedule = COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().schedule());
+    if !should_schedule {
+        return;
+    }
     let Some(window) = web_sys::window() else {
+        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().finish_schedule());
         return;
     };
-    let callback = Closure::wrap(Box::new(move || {
-        emit_command_bar_size();
-    }) as Box<dyn FnMut()>);
-    let _ = window.request_animation_frame(callback.as_ref().unchecked_ref());
-    callback.forget();
+    let callback = Closure::once_into_js(move || {
+        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().finish_schedule());
+        emit_command_bar_size(open_id);
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
 }
 
 fn schedule_command_bar_rendered_emit(
@@ -285,16 +308,16 @@ fn schedule_command_bar_rendered_emit(
     }
 }
 
-fn install_command_bar_size_observer() -> bool {
+fn install_command_bar_size_observer(current_open_id: Signal<u64>) -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return false;
     };
     let Some(el) = document.get_element_by_id("command-bar-shell") else {
         return false;
     };
-    schedule_command_bar_size_emit();
+    schedule_command_bar_size_emit(current_open_id());
     let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        schedule_command_bar_size_emit();
+        schedule_command_bar_size_emit(current_open_id());
     }) as Box<dyn FnMut(JsValue)>);
     let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) else {
         return false;
