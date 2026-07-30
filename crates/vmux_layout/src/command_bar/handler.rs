@@ -1,4 +1,6 @@
 pub(crate) use crate::NewStackContext;
+use std::time::{Duration, Instant};
+
 use crate::cef::Browser;
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
@@ -75,6 +77,7 @@ pub struct PendingCommandBarReveal {
     frames: u8,
     open_id: u64,
     payload: Option<Vec<u8>>,
+    started_at: Option<Instant>,
 }
 
 impl PendingCommandBarReveal {
@@ -87,6 +90,7 @@ impl PendingCommandBarReveal {
 
 const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
 const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
+const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) struct CommandBarInputPlugin;
 
@@ -382,6 +386,7 @@ fn prewarm_command_bar_modal(
             frames: 0,
             open_id: 0,
             payload: None,
+            started_at: None,
         });
 }
 
@@ -433,13 +438,22 @@ fn next_command_bar_reveal_frames_for_backend(
     has_native_size: bool,
 ) -> Option<u8> {
     if native_windowed && open_id != 0 && (rendered_open_id != Some(open_id) || !has_native_size) {
-        return if frames >= COMMAND_BAR_REVEAL_FALLBACK_FRAMES {
-            None
-        } else {
-            Some(frames.saturating_add(1))
-        };
+        return Some(frames.saturating_add(1));
     }
     next_command_bar_reveal_frames(frames, open_id, rendered_open_id, painted_open_id)
+}
+
+fn native_command_bar_reveal_timed_out(
+    native_windowed: bool,
+    elapsed: Duration,
+    open_id: u64,
+    rendered_open_id: Option<u64>,
+    has_native_size: bool,
+) -> bool {
+    native_windowed
+        && open_id != 0
+        && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
+        && (rendered_open_id != Some(open_id) || !has_native_size)
 }
 
 fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
@@ -1013,6 +1027,7 @@ fn handle_open_command_bar(
                 frames: 0,
                 open_id: 0,
                 payload: None,
+                started_at: None,
             });
         snapshot_params.p2().needs_open = true;
         return;
@@ -1063,6 +1078,7 @@ fn handle_open_command_bar(
                 frames: reveal_start_frames,
                 open_id,
                 payload: Some(payload_bytes.clone()),
+                started_at: Some(Instant::now()),
             });
     } else {
         commands
@@ -1073,6 +1089,7 @@ fn handle_open_command_bar(
                 frames: reveal_start_frames,
                 open_id,
                 payload: Some(payload_bytes),
+                started_at: Some(Instant::now()),
             });
     }
     webview_debug_log(format!(
@@ -2022,6 +2039,29 @@ fn reveal_command_bar(
     {
         let rendered_open_id = rendered.map(|rendered| rendered.0);
         let painted_open_id = painted.map(|painted| painted.0);
+        if native_command_bar_reveal_timed_out(
+            native_windowed,
+            pending
+                .started_at
+                .map(|started_at| started_at.elapsed())
+                .unwrap_or_default(),
+            pending.open_id,
+            rendered_open_id,
+            native_size.is_some(),
+        ) {
+            commands.entity(entity).remove::<PendingCommandBarReveal>();
+            commands.trigger(BinReceive::<CommandBarActionEvent> {
+                webview: entity,
+                payload: CommandBarActionEvent {
+                    action: "dismiss".to_string(),
+                    value: String::new(),
+                    target: None,
+                    agent_url: None,
+                    attachments: Vec::new(),
+                },
+            });
+            continue;
+        }
         match next_command_bar_reveal_frames_for_backend(
             native_windowed,
             pending.frames,
@@ -2462,12 +2502,12 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 9, 7, None, None, true),
-            Some(10)
+            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, true),
+            Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 9, 7, Some(7), None, false),
-            Some(10)
+            next_command_bar_reveal_frames_for_backend(true, 10, 7, Some(7), None, false),
+            Some(11)
         );
         assert_eq!(
             next_command_bar_reveal_frames_for_backend(true, 2, 7, Some(7), None, true),
@@ -2476,19 +2516,46 @@ mod tests {
     }
 
     #[test]
-    fn native_command_bar_falls_back_when_ack_stalls() {
-        assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, false),
-            None
-        );
-        assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, Some(7), None, false),
-            None
-        );
+    fn native_command_bar_aborts_stalled_reveal() {
+        assert!(!native_command_bar_reveal_timed_out(
+            true,
+            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1),
+            7,
+            None,
+            false,
+        ));
+        assert!(native_command_bar_reveal_timed_out(
+            true,
+            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
+            7,
+            None,
+            false,
+        ));
+        assert!(native_command_bar_reveal_timed_out(
+            true,
+            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
+            7,
+            Some(7),
+            false,
+        ));
+        assert!(!native_command_bar_reveal_timed_out(
+            true,
+            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
+            7,
+            Some(7),
+            true,
+        ));
+        assert!(!native_command_bar_reveal_timed_out(
+            false,
+            COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
+            7,
+            None,
+            false,
+        ));
     }
 
     #[test]
-    fn native_command_bar_stalled_reveal_becomes_visible() {
+    fn native_command_bar_stalled_reveal_stays_hidden() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_systems(Update, reveal_command_bar);
@@ -2499,9 +2566,10 @@ mod tests {
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
-                    frames: COMMAND_BAR_REVEAL_FALLBACK_FRAMES,
+                    frames: u8::MAX,
                     open_id: 7,
                     payload: Some(b"payload".to_vec()),
+                    started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
                 },
             ))
             .id();
@@ -2511,7 +2579,38 @@ mod tests {
         assert!(app.world().get::<PendingCommandBarReveal>(modal).is_none());
         assert_eq!(
             app.world().get::<Visibility>(modal),
-            Some(&Visibility::Inherited)
+            Some(&Visibility::Hidden)
+        );
+    }
+
+    #[test]
+    fn native_command_bar_does_not_timeout_from_rapid_updates() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, reveal_command_bar);
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                WebviewWindowed,
+                Visibility::Hidden,
+                PendingCommandBarReveal {
+                    frames: 0,
+                    open_id: 7,
+                    payload: Some(b"payload".to_vec()),
+                    started_at: Some(Instant::now()),
+                },
+            ))
+            .id();
+
+        for _ in 0..256 {
+            app.update();
+        }
+
+        assert!(app.world().get::<PendingCommandBarReveal>(modal).is_some());
+        assert_eq!(
+            app.world().get::<Visibility>(modal),
+            Some(&Visibility::Hidden)
         );
     }
 
@@ -2527,6 +2626,7 @@ mod tests {
             frames: 0,
             open_id: 7,
             payload: Some(Vec::new()),
+            started_at: Some(Instant::now()),
         };
 
         assert!(command_bar_size_should_apply(
@@ -2558,6 +2658,7 @@ mod tests {
                     frames: 2,
                     open_id: 7,
                     payload: Some(b"payload".to_vec()),
+                    started_at: Some(Instant::now()),
                 },
             ))
             .id();
@@ -3216,6 +3317,7 @@ mod tests {
                 frames: 0,
                 open_id: 0,
                 payload: None,
+                started_at: None,
             }
             .is_active()
         );
@@ -3224,6 +3326,7 @@ mod tests {
                 frames: 0,
                 open_id: 7,
                 payload: None,
+                started_at: Some(Instant::now()),
             }
             .is_active()
         );
