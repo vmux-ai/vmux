@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent};
+use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::translate;
@@ -9,7 +9,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 use crate::command_bar::palette::{CommandPalette, PaletteVariant, StartAgentTransition};
-use crate::start::event::{START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput};
+use crate::start::event::{
+    START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
+};
 
 const START_FOCUS_PENDING: &str = "_startFocusPending";
 const START_TRANSITIONED: &str = "_startTransitioned";
@@ -21,8 +23,10 @@ pub fn Page(
     #[props(default)] on_agent_transition: Option<EventHandler<StartAgentTransition>>,
 ) -> Element {
     let locale = use_theme();
-    let state =
-        use_event::<CommandBarOpenEvent>(COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent::default);
+    let state = use_event::<CommandBarOpenEvent>(
+        START_COMMAND_BAR_OPEN_EVENT,
+        CommandBarOpenEvent::default,
+    );
     let mut mounted = use_signal(|| false);
 
     let _focus_listener =

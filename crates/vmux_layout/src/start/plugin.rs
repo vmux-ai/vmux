@@ -5,7 +5,7 @@ use bevy_cef::prelude::{
     BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
     WebviewExtendStandardMaterial, WebviewSource,
 };
-use vmux_command::event::{COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarPromptContext};
+use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
@@ -22,7 +22,8 @@ use crate::command_bar::handler::{
 use crate::settings::ResolvedLocale;
 use crate::start::START_PAGE_URL;
 use crate::start::event::{
-    START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput, StartSelectWorkspace,
+    START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
+    StartSelectWorkspace,
 };
 use crate::tab::{Tab, TabWorkspace, TabWorktree};
 use crate::window::VmuxWindow;
@@ -386,7 +387,7 @@ fn sync_live_start_pages(
     for (e, focus_requested) in targets {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             e,
-            COMMAND_BAR_OPEN_EVENT,
+            START_COMMAND_BAR_OPEN_EVENT,
             &payload,
         ));
         if focus_requested {
@@ -531,7 +532,7 @@ fn on_start_spare_revealed(
         );
         commands.trigger(BinHostEmitEvent::from_rkyv(
             ev.webview,
-            COMMAND_BAR_OPEN_EVENT,
+            START_COMMAND_BAR_OPEN_EVENT,
             &payload,
         ));
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -578,7 +579,7 @@ fn on_start_data_request(
     );
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
-        COMMAND_BAR_OPEN_EVENT,
+        START_COMMAND_BAR_OPEN_EVENT,
         &payload,
     ));
     if keyboard_targets.contains(webview) {
@@ -732,7 +733,10 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]);
+        assert_eq!(
+            emitted,
+            &[START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]
+        );
     }
 
     #[test]
@@ -744,7 +748,7 @@ mod tests {
 
         assert!(app.world().get::<WarmStartReady>(webview).is_some());
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
+        assert_eq!(emitted, &[START_COMMAND_BAR_OPEN_EVENT]);
     }
 
     #[test]
@@ -755,7 +759,7 @@ mod tests {
         emit_start_ready(&mut app, webview);
 
         let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[COMMAND_BAR_OPEN_EVENT]);
+        assert_eq!(emitted, &[START_COMMAND_BAR_OPEN_EVENT]);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use bevy::ecs::message::Messages;
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
+use bevy::render::{Render, RenderApp, RenderScheduleOrder};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_cef::prelude::WebviewWindowed;
@@ -33,6 +35,18 @@ const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 #[cfg(target_os = "macos")]
 const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+struct RenderFrameDemand(bool);
+
+impl Default for RenderFrameDemand {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct DemandedRender;
 
 fn windowed_pointer_inside_after_event(
     pointer_position_changed: bool,
@@ -150,9 +164,9 @@ pub struct BackgroundLifecyclePlugin;
 impl Plugin for BackgroundLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LifecycleEvent>()
+            .init_resource::<RenderFrameDemand>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
-            .add_systems(Update, sync_main_camera_activity)
             .add_systems(Update, activate_app_during_boot)
             .add_systems(Update, keep_awake_while_revealing)
             .add_systems(
@@ -160,6 +174,7 @@ impl Plugin for BackgroundLifecyclePlugin {
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             )
             .add_systems(Update, grab_key_window_on_pane_hover)
+            .add_systems(Last, sync_render_frame_demand)
             .add_systems(Last, keep_awake_while_player_active)
             .add_systems(
                 Startup,
@@ -169,6 +184,37 @@ impl Plugin for BackgroundLifecyclePlugin {
                     activate_primary_window_on_startup,
                 ),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        let Some(mut extract) = render_app.take_extract() else {
+            return;
+        };
+        render_app
+            .init_resource::<RenderFrameDemand>()
+            .add_schedule(Schedule::new(DemandedRender))
+            .add_systems(DemandedRender, run_demanded_render);
+        {
+            let mut order = render_app.world_mut().resource_mut::<RenderScheduleOrder>();
+            for label in &mut order.labels {
+                if (**label).eq(&Render) {
+                    *label = DemandedRender.intern();
+                }
+            }
+        }
+        render_app.set_extract(move |main_world, render_world| {
+            let demand = main_world
+                .get_resource::<RenderFrameDemand>()
+                .copied()
+                .unwrap_or_default();
+            render_world.insert_resource(demand);
+            if demand.0 {
+                extract(main_world, render_world);
+            }
+        });
     }
 }
 
@@ -893,7 +939,7 @@ fn sync_winit_power_mode(
     }
 }
 
-fn main_camera_should_render(
+fn render_frame_should_run(
     mode: InteractionMode,
     transition_active: bool,
     live_resize: bool,
@@ -903,7 +949,7 @@ fn main_camera_should_render(
 }
 
 #[cfg(target_os = "macos")]
-fn sync_main_camera_activity(
+fn sync_render_frame_demand(
     mode: Res<InteractionMode>,
     transition: Option<Res<vmux_layout::scene::ModeTransition>>,
     pages: Query<
@@ -915,24 +961,27 @@ fn sync_main_camera_activity(
             Without<Modal>,
         ),
     >,
-    mut cameras: Query<&mut Camera, With<vmux_layout::scene::MainCamera>>,
+    mut demand: ResMut<RenderFrameDemand>,
 ) {
     let visible_windowed_page = pages.iter().any(|transform| transform.scale.x > 1.0e-3);
-    let render = main_camera_should_render(
+    demand.0 = render_frame_should_run(
         *mode,
         transition.is_some(),
         IN_LIVE_RESIZE.load(Ordering::Relaxed),
         visible_windowed_page,
     );
-    for mut camera in &mut cameras {
-        if camera.is_active != render {
-            camera.is_active = render;
-        }
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
-fn sync_main_camera_activity() {}
+fn sync_render_frame_demand(mut demand: ResMut<RenderFrameDemand>) {
+    demand.0 = true;
+}
+
+fn run_demanded_render(world: &mut World) {
+    if world.resource::<RenderFrameDemand>().0 {
+        world.run_schedule(Render);
+    }
+}
 
 fn foreground_cef_wake_interval(refresh_rates: impl IntoIterator<Item = Option<u32>>) -> Duration {
     windowless_frame_interval_from_refresh_millihertz(refresh_rates.into_iter().flatten().max())
@@ -1146,37 +1195,66 @@ mod tests {
     }
 
     #[test]
-    fn user_mode_skips_bevy_camera_when_native_page_is_visible() {
-        assert!(!main_camera_should_render(
+    fn user_mode_skips_bevy_render_when_native_page_is_visible() {
+        assert!(!render_frame_should_run(
             InteractionMode::User,
             false,
             false,
             true,
         ));
-        assert!(main_camera_should_render(
+        assert!(render_frame_should_run(
             InteractionMode::Player,
             false,
             false,
             true,
         ));
-        assert!(main_camera_should_render(
+        assert!(render_frame_should_run(
             InteractionMode::User,
             true,
             false,
             true,
         ));
-        assert!(main_camera_should_render(
+        assert!(render_frame_should_run(
             InteractionMode::User,
             false,
             true,
             true,
         ));
-        assert!(main_camera_should_render(
+        assert!(render_frame_should_run(
             InteractionMode::User,
             false,
             false,
             false,
         ));
+    }
+
+    #[test]
+    fn render_schedule_runs_only_when_demanded() {
+        #[derive(Resource, Default)]
+        struct RenderRuns(usize);
+
+        fn count_render(mut runs: ResMut<RenderRuns>) {
+            runs.0 += 1;
+        }
+
+        let mut world = World::new();
+        world.insert_resource(RenderFrameDemand(false));
+        world.init_resource::<RenderRuns>();
+
+        let mut render = Schedule::new(Render);
+        render.add_systems(count_render);
+        world.add_schedule(render);
+
+        let mut demanded = Schedule::new(DemandedRender);
+        demanded.add_systems(run_demanded_render);
+        world.add_schedule(demanded);
+
+        world.run_schedule(DemandedRender);
+        assert_eq!(world.resource::<RenderRuns>().0, 0);
+
+        world.resource_mut::<RenderFrameDemand>().0 = true;
+        world.run_schedule(DemandedRender);
+        assert_eq!(world.resource::<RenderRuns>().0, 1);
     }
 
     #[test]
