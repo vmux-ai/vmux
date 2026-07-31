@@ -119,6 +119,22 @@ impl Motion {
             _ => return None,
         })
     }
+
+    /// Whether landing here should record the previous position on the jump list.
+    pub fn is_jump(self) -> bool {
+        matches!(
+            self,
+            Motion::DocStart
+                | Motion::DocEnd
+                | Motion::GotoLine(_)
+                | Motion::ParagraphPrev
+                | Motion::ParagraphNext
+                | Motion::MatchPair
+                | Motion::ScreenTop
+                | Motion::ScreenMiddle
+                | Motion::ScreenBottom
+        )
+    }
 }
 
 /// Where `zz`, `zt`, and `zb` place the cursor's line in the viewport.
@@ -191,6 +207,19 @@ pub enum EditCommand {
     },
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),
+    SetMark(char),
+    GotoMark {
+        name: char,
+        linewise: bool,
+    },
+    JumpList {
+        back: bool,
+        count: usize,
+    },
+    ChangeList {
+        back: bool,
+        count: usize,
+    },
     ScrollViewport(i32),
     ScrollCursorTo(ScrollPlacement),
     SetMode(EditMode),

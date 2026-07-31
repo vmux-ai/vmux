@@ -70,6 +70,11 @@ pub struct EditCore {
     last_group: Option<Group>,
     preferred_vertical_col: Option<usize>,
     pub fold_view: crate::fold::FoldView,
+    marks: std::collections::HashMap<char, usize>,
+    jumps: Vec<usize>,
+    jump_index: usize,
+    changes: Vec<usize>,
+    change_index: usize,
 }
 
 impl EditCore {
@@ -91,6 +96,69 @@ impl EditCore {
             last_group: None,
             preferred_vertical_col: None,
             fold_view,
+            marks: std::collections::HashMap::new(),
+            jumps: Vec::new(),
+            jump_index: 0,
+            changes: Vec::new(),
+            change_index: 0,
+        }
+    }
+
+    /// Insert text and slide any marks sitting after the insertion point.
+    fn buf_insert(&mut self, at: usize, text: &str) {
+        self.buffer.insert(at, text);
+        let n = text.chars().count();
+        for mark in self.marks.values_mut() {
+            if *mark > at {
+                *mark += n;
+            }
+        }
+    }
+
+    /// Remove a range, pulling marks inside it back to its start.
+    fn buf_remove(&mut self, range: std::ops::Range<usize>) {
+        self.buffer.remove(range.clone());
+        let n = range.end - range.start;
+        for mark in self.marks.values_mut() {
+            if *mark >= range.end {
+                *mark -= n;
+            } else if *mark > range.start {
+                *mark = range.start;
+            }
+        }
+    }
+
+    /// Record the current position on the jump list so `Ctrl-o` can come back to it.
+    fn push_jump(&mut self) {
+        let at = self.primary().head;
+        self.jumps.truncate(self.jump_index);
+        if self.jumps.last() == Some(&at) {
+            return;
+        }
+        self.jumps.push(at);
+        self.jump_index = self.jumps.len();
+    }
+
+    fn jump(&mut self, back: bool, count: usize) {
+        let here = self.primary().head;
+        for _ in 0..count.max(1) {
+            if back {
+                if self.jump_index == 0 {
+                    break;
+                }
+                if self.jump_index == self.jumps.len() {
+                    self.jumps.push(here);
+                }
+                self.jump_index -= 1;
+            } else {
+                if self.jump_index + 1 >= self.jumps.len() {
+                    break;
+                }
+                self.jump_index += 1;
+            }
+        }
+        if let Some(&at) = self.jumps.get(self.jump_index) {
+            self.set_caret(at.min(self.buffer.len_chars()));
         }
     }
 
@@ -213,6 +281,11 @@ impl EditCore {
         self.last_group = Some(group);
         self.rev += 1;
         self.dirty = self.saved_rev != Some(self.rev);
+        let at = self.primary().head;
+        if self.changes.last() != Some(&at) {
+            self.changes.push(at);
+        }
+        self.change_index = self.changes.len().saturating_sub(1);
     }
 
     fn resolve_motion(&self, from: usize, motion: Motion) -> usize {
@@ -534,11 +607,11 @@ impl EditCore {
         self.checkpoint(Group::Insert);
         if !self.primary().is_empty() {
             let r = self.primary().range();
-            self.buffer.remove(r.clone());
+            self.buf_remove(r.clone());
             self.set_caret(r.start);
         }
         let at = self.primary().head;
-        self.buffer.insert(at, text);
+        self.buf_insert(at, text);
         self.set_caret(at + text.chars().count());
         true
     }
@@ -549,7 +622,7 @@ impl EditCore {
         }
         self.checkpoint(Group::Other);
         let r = sel.range();
-        self.buffer.remove(r.clone());
+        self.buf_remove(r.clone());
         self.set_caret(r.start);
         true
     }
@@ -719,13 +792,13 @@ impl EditCore {
                 if operator == Operator::Change && kind == RegisterKind::Linewise {
                     let (line, _) = self.buffer.char_to_coords(range.start);
                     let indent = self.line_indent(line);
-                    self.buffer.remove(range.clone());
+                    self.buf_remove(range.clone());
                     self.mode = EditMode::Insert;
                     let tail = if had_newline { "\n" } else { "" };
-                    self.buffer.insert(range.start, &format!("{indent}{tail}"));
+                    self.buf_insert(range.start, &format!("{indent}{tail}"));
                     self.set_caret(range.start + indent.chars().count());
                 } else {
-                    self.buffer.remove(range.clone());
+                    self.buf_remove(range.clone());
                     if operator == Operator::Change {
                         self.mode = EditMode::Insert;
                     } else if was_visual {
@@ -754,11 +827,11 @@ impl EditCore {
                         if self.buffer.line_len_chars(line) == 0 {
                             continue;
                         }
-                        self.buffer.insert(base, "\t");
+                        self.buf_insert(base, "\t");
                     } else {
                         let width = self.outdent_width(line);
                         if width > 0 {
-                            self.buffer.remove(base..base + width);
+                            self.buf_remove(base..base + width);
                         }
                     }
                 }
@@ -788,8 +861,8 @@ impl EditCore {
                     return (false, None);
                 }
                 self.checkpoint(Group::Other);
-                self.buffer.remove(range.clone());
-                self.buffer.insert(range.start, &out);
+                self.buf_remove(range.clone());
+                self.buf_insert(range.start, &out);
                 self.set_caret(range.start);
                 (true, None)
             }
@@ -813,7 +886,7 @@ impl EditCore {
                 self.registers
                     .write_delete(None, RegisterValue { text, kind });
                 self.checkpoint(Group::Other);
-                self.buffer.remove(range.clone());
+                self.buf_remove(range.clone());
             }
             self.mode = EditMode::Normal;
             self.set_caret(range.start.min(self.buffer.len_chars()));
@@ -830,7 +903,7 @@ impl EditCore {
                 };
                 let text = value.text.repeat(count);
                 self.checkpoint(Group::Other);
-                self.buffer.insert(at, &text);
+                self.buf_insert(at, &text);
                 let end = at + text.chars().count();
                 self.set_caret(end.saturating_sub(1).max(at));
             }
@@ -851,10 +924,10 @@ impl EditCore {
                 self.checkpoint(Group::Other);
                 if at == self.buffer.len_chars() && at > 0 && self.buffer.rope.char(at - 1) != '\n'
                 {
-                    self.buffer.insert(at, "\n");
+                    self.buf_insert(at, "\n");
                     at += 1;
                 }
-                self.buffer.insert(at, &text);
+                self.buf_insert(at, &text);
                 self.set_caret(self.first_non_blank(at));
             }
         }
@@ -882,6 +955,9 @@ impl EditCore {
         match cmd {
             EditCommand::Move(m) => {
                 self.break_group();
+                if m.is_jump() {
+                    self.push_jump();
+                }
                 let selection = self.primary();
                 let collapse_selection = !self.mode.is_visual() && !selection.is_empty();
                 let h = if collapse_selection {
@@ -912,6 +988,7 @@ impl EditCore {
                 self.checkpoint(Group::Other);
                 self.buffer.remove(0..self.buffer.len_chars());
                 self.buffer.insert(0, &t);
+                self.marks.clear();
                 self.set_caret(next_caret);
                 text_changed = true;
             }
@@ -923,7 +1000,7 @@ impl EditCore {
                     if head > 0 {
                         self.checkpoint(Group::Delete);
                         let prev = self.buffer.prev_grapheme(head);
-                        self.buffer.remove(prev..head);
+                        self.buf_remove(prev..head);
                         self.set_caret(prev);
                         text_changed = true;
                     }
@@ -939,7 +1016,7 @@ impl EditCore {
                     if head < self.buffer.len_chars() {
                         self.checkpoint(Group::Delete);
                         let next = self.buffer.next_grapheme(head);
-                        self.buffer.remove(head..next);
+                        self.buf_remove(head..next);
                         text_changed = true;
                     }
                 }
@@ -949,7 +1026,7 @@ impl EditCore {
                 let target = self.word_prev(head, false);
                 if target < head {
                     self.checkpoint(Group::Delete);
-                    self.buffer.remove(target..head);
+                    self.buf_remove(target..head);
                     self.set_caret(target);
                     text_changed = true;
                 }
@@ -983,8 +1060,8 @@ impl EditCore {
                 if fits && end > head {
                     let n = self.buffer.rope.slice(head..end).chars().count();
                     self.checkpoint(Group::Other);
-                    self.buffer.remove(head..end);
-                    self.buffer.insert(head, &ch.to_string().repeat(n));
+                    self.buf_remove(head..end);
+                    self.buf_insert(head, &ch.to_string().repeat(n));
                     self.set_caret(head + n - 1);
                     text_changed = true;
                 }
@@ -1011,7 +1088,7 @@ impl EditCore {
                     if !text_changed {
                         self.checkpoint(Group::Other);
                     }
-                    self.buffer.remove(end..next + skip);
+                    self.buf_remove(end..next + skip);
                     if spaces
                         && end > start
                         && end < self.buffer.len_chars()
@@ -1019,7 +1096,7 @@ impl EditCore {
                         && self.buffer.rope.char(end) != ')'
                         && self.buffer.rope.char(end - 1) != ' '
                     {
-                        self.buffer.insert(end, " ");
+                        self.buf_insert(end, " ");
                     }
                     self.set_caret(end);
                     text_changed = true;
@@ -1033,11 +1110,11 @@ impl EditCore {
                 self.mode = EditMode::Insert;
                 if above {
                     let at = self.buffer.line_to_char(line);
-                    self.buffer.insert(at, &format!("{indent}\n"));
+                    self.buf_insert(at, &format!("{indent}\n"));
                     self.set_caret(at + indent.chars().count());
                 } else {
                     let at = self.buffer.line_to_char(line) + self.buffer.line_len_chars(line);
-                    self.buffer.insert(at, &format!("\n{indent}"));
+                    self.buf_insert(at, &format!("\n{indent}"));
                     self.set_caret(at + 1 + indent.chars().count());
                 }
                 text_changed = true;
@@ -1071,6 +1148,38 @@ impl EditCore {
                     self.dirty = self.saved_rev != Some(self.rev);
                     self.break_group();
                     text_changed = true;
+                }
+            }
+            EditCommand::SetMark(name) => {
+                self.marks.insert(name, self.primary().head);
+            }
+            EditCommand::GotoMark { name, linewise } => {
+                if let Some(&at) = self.marks.get(&name) {
+                    let at = at.min(self.buffer.len_chars());
+                    self.push_jump();
+                    let target = if linewise {
+                        self.first_non_blank(at)
+                    } else {
+                        at
+                    };
+                    if self.mode.is_visual() {
+                        self.set_head(target);
+                    } else {
+                        self.set_caret(target);
+                    }
+                }
+            }
+            EditCommand::JumpList { back, count } => self.jump(back, count),
+            EditCommand::ChangeList { back, count } => {
+                if !self.changes.is_empty() {
+                    let last = self.changes.len() - 1;
+                    self.change_index = if back {
+                        self.change_index.saturating_sub(count.max(1))
+                    } else {
+                        (self.change_index + count.max(1)).min(last)
+                    };
+                    let at = self.changes[self.change_index.min(last)];
+                    self.set_caret(at.min(self.buffer.len_chars()));
                 }
             }
             EditCommand::SwapSelectionEnds => {
@@ -1402,6 +1511,111 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::Column(4)));
         assert_eq!(c.primary().head, 3);
+    }
+
+    #[test]
+    fn marks_return_to_a_saved_position() {
+        let mut c = core("one\ntwo\nthree\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(c.buffer.coords_to_char(1, 1));
+        c.apply(EditCommand::SetMark('a'));
+        c.set_caret(0);
+        c.apply(EditCommand::GotoMark {
+            name: 'a',
+            linewise: false,
+        });
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 1));
+    }
+
+    #[test]
+    fn a_linewise_mark_lands_on_the_first_non_blank() {
+        let mut c = core("one\n    two\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(c.buffer.coords_to_char(1, 7));
+        c.apply(EditCommand::SetMark('b'));
+        c.set_caret(0);
+        c.apply(EditCommand::GotoMark {
+            name: 'b',
+            linewise: true,
+        });
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 4));
+    }
+
+    #[test]
+    fn marks_slide_when_text_is_inserted_before_them() {
+        let mut c = core("one\ntwo\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(EditCommand::SetMark('a'));
+        c.set_caret(0);
+        c.apply(EditCommand::OpenLine { above: true });
+        c.apply(EditCommand::InsertText("zero".into()));
+        c.apply(EditCommand::SetMode(EditMode::Normal));
+        c.apply(EditCommand::GotoMark {
+            name: 'a',
+            linewise: false,
+        });
+        assert_eq!(c.buffer.char_to_coords(c.primary().head), (2, 0));
+    }
+
+    #[test]
+    fn an_unset_mark_does_not_move_the_caret() {
+        let mut c = core("one\ntwo\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(1);
+        c.apply(EditCommand::GotoMark {
+            name: 'z',
+            linewise: false,
+        });
+        assert_eq!(c.primary().head, 1);
+    }
+
+    #[test]
+    fn the_jump_list_walks_back_and_forward() {
+        let mut c = core("a\nb\nc\nd\ne\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::DocEnd));
+        let end = c.primary().head;
+        c.apply(EditCommand::JumpList {
+            back: true,
+            count: 1,
+        });
+        assert_eq!(c.primary().head, 0);
+        c.apply(EditCommand::JumpList {
+            back: false,
+            count: 1,
+        });
+        assert_eq!(c.primary().head, end);
+    }
+
+    #[test]
+    fn plain_motions_do_not_record_jumps() {
+        let mut c = core("a\nb\nc\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::Down));
+        c.apply(EditCommand::JumpList {
+            back: true,
+            count: 1,
+        });
+        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 1);
+    }
+
+    #[test]
+    fn the_change_list_revisits_edit_positions() {
+        let mut c = core("one\ntwo\nthree\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::ReplaceChar { ch: 'X', count: 1 });
+        c.set_caret(c.buffer.coords_to_char(2, 0));
+        c.apply(EditCommand::ReplaceChar { ch: 'Y', count: 1 });
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(EditCommand::ChangeList {
+            back: true,
+            count: 1,
+        });
+        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 0);
     }
 
     #[test]

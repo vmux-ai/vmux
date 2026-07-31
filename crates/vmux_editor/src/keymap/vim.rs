@@ -9,6 +9,14 @@ enum ObjectScope {
     Around,
 }
 
+/// What the key after `m`, `` ` ``, or `'` names.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MarkAction {
+    Set,
+    GotoExact,
+    GotoLine,
+}
+
 /// One unit of replayable input.
 ///
 /// Dot-repeat and macros both work by replaying what the user typed, and insert-mode characters
@@ -62,6 +70,7 @@ pub struct VimKeymap {
     macros: std::collections::HashMap<char, Vec<Recorded>>,
     last_macro: Option<char>,
     insert_after_next: bool,
+    mark_pending: Option<MarkAction>,
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -186,6 +195,7 @@ impl VimKeymap {
             && self.pending_object.is_none()
             && self.pending_find.is_none()
             && self.macro_pending.is_none()
+            && self.mark_pending.is_none()
             && self.ex.is_none()
             && !self.register_pending
             && !self.replace_pending
@@ -196,6 +206,18 @@ impl VimKeymap {
     /// Nothing at all is half-typed, so no keys are owed to a command in progress.
     fn is_idle(&self) -> bool {
         self.is_command_start() && self.count.is_none() && self.op_count.is_none()
+    }
+
+    /// A prefix is waiting to consume the next key as a literal argument — a register or mark
+    /// name, a text-object kind, a fold or `g` command — so it must not be read as a motion.
+    fn awaits_literal_key(&self) -> bool {
+        self.pending_object.is_some()
+            || self.macro_pending.is_some()
+            || self.mark_pending.is_some()
+            || self.register_pending
+            || self.replace_pending
+            || self.g_pending
+            || self.z_pending
     }
 
     fn replay(&mut self, inputs: &[Recorded], times: usize) -> Vec<EditCommand> {
@@ -329,6 +351,23 @@ impl VimKeymap {
             return self.resolve_find(forward, till, key);
         }
 
+        if let Some(action) = self.mark_pending.take() {
+            let Some(name) = single_char(key) else {
+                return vec![];
+            };
+            return match action {
+                MarkAction::Set => vec![SetMark(name)],
+                MarkAction::GotoExact => vec![GotoMark {
+                    name,
+                    linewise: false,
+                }],
+                MarkAction::GotoLine => vec![GotoMark {
+                    name,
+                    linewise: true,
+                }],
+            };
+        }
+
         if let Some(record) = self.macro_pending.take() {
             let Some(reg) = single_char(key) else {
                 return vec![];
@@ -379,7 +418,7 @@ impl VimKeymap {
             return vec![];
         }
 
-        if self.pending_object.is_none() {
+        if !self.awaits_literal_key() {
             if let Some((forward, till)) = find_prefix(key) {
                 self.pending_find = Some((forward, till));
                 return vec![];
@@ -416,6 +455,10 @@ impl VimKeymap {
                 "$" => self.motion_command(Motion::LineEnd),
                 "j" => self.motion_command(Motion::Down),
                 "k" => self.motion_command(Motion::Up),
+                ";" | "," => vec![ChangeList {
+                    back: key == ";",
+                    count: self.take_count(),
+                }],
                 "J" => vec![JoinLines {
                     count: self.take_count(),
                     spaces: false,
@@ -489,6 +532,18 @@ impl VimKeymap {
                 let out = self.replay(&body, times);
                 self.last_change = body;
                 out
+            }
+            "m" => {
+                self.mark_pending = Some(MarkAction::Set);
+                vec![]
+            }
+            "`" => {
+                self.mark_pending = Some(MarkAction::GotoExact);
+                vec![]
+            }
+            "'" => {
+                self.mark_pending = Some(MarkAction::GotoLine);
+                vec![]
             }
             "q" => {
                 if let Some((reg, body)) = self.macro_record.take() {
@@ -1001,6 +1056,14 @@ impl VimKeymap {
                 self.reset();
                 return vec![EditCommand::ScrollViewport(direction * count)];
             }
+            if k.key.eq_ignore_ascii_case("o") || k.key == "i" || k.key == "Tab" {
+                let count = self.take_count();
+                self.reset();
+                return vec![EditCommand::JumpList {
+                    back: k.key.eq_ignore_ascii_case("o"),
+                    count,
+                }];
+            }
             let motion = match k.key.to_ascii_lowercase().as_str() {
                 "n" => Some(Motion::Down),
                 "p" => Some(Motion::Up),
@@ -1456,6 +1519,64 @@ mod tests {
         let mut km = VimKeymap::default();
         run(&mut km, &["i"]);
         assert_eq!(km.handle(&chord("e", ctrl())), vec![]);
+    }
+
+    #[test]
+    fn mark_bindings_set_and_recall() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &["m", "a"]), vec![EditCommand::SetMark('a')]);
+        assert_eq!(
+            run(&mut km, &["`", "a"]),
+            vec![EditCommand::GotoMark {
+                name: 'a',
+                linewise: false
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["'", "a"]),
+            vec![EditCommand::GotoMark {
+                name: 'a',
+                linewise: true
+            }]
+        );
+    }
+
+    #[test]
+    fn jump_and_change_list_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&chord("o", ctrl())),
+            vec![EditCommand::JumpList {
+                back: true,
+                count: 1
+            }]
+        );
+        assert_eq!(
+            km.handle(&chord("i", ctrl())),
+            vec![EditCommand::JumpList {
+                back: false,
+                count: 1
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["g", ";"]),
+            vec![EditCommand::ChangeList {
+                back: true,
+                count: 1
+            }]
+        );
+    }
+
+    #[test]
+    fn a_mark_key_is_not_read_as_a_quote_object() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["d", "i", "'"]),
+            vec![op(
+                Operator::Delete,
+                object(TextObjectKind::SingleQuote, false, 1)
+            )]
+        );
     }
 
     #[test]
