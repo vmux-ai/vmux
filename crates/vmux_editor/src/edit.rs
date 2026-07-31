@@ -3,6 +3,7 @@ pub mod command;
 pub mod core;
 pub mod highlight_cache;
 pub mod register;
+pub mod search;
 pub mod text_object;
 
 pub use command::{EditCommand, Motion, Operator, Selection, Target};

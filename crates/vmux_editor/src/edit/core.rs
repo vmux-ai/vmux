@@ -70,6 +70,8 @@ pub struct EditCore {
     last_group: Option<Group>,
     preferred_vertical_col: Option<usize>,
     pub fold_view: crate::fold::FoldView,
+    pub search: Option<crate::edit::search::Search>,
+    pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
     jumps: Vec<usize>,
     jump_index: usize,
@@ -96,6 +98,8 @@ impl EditCore {
             last_group: None,
             preferred_vertical_col: None,
             fold_view,
+            search: None,
+            search_highlight: false,
             marks: std::collections::HashMap::new(),
             jumps: Vec::new(),
             jump_index: 0,
@@ -338,7 +342,88 @@ impl EditCore {
             Motion::FindChar { ch, forward, till } => {
                 self.find_char(from, ch, forward, till).unwrap_or(from)
             }
+            Motion::SearchNext { reverse } => self.search_step(from, reverse).unwrap_or(from),
         }
+    }
+
+    /// Char positions of every match of the active search, in buffer order.
+    pub fn search_matches(&self) -> Vec<std::ops::Range<usize>> {
+        let Some(search) = self.search.as_ref() else {
+            return Vec::new();
+        };
+        let text = self.buffer.text();
+        search
+            .matches(&text)
+            .into_iter()
+            .map(|r| {
+                let start = text[..r.start].chars().count();
+                let len = text[r.clone()].chars().count();
+                start..start + len
+            })
+            .collect()
+    }
+
+    fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
+        let search = self.search.as_ref()?;
+        let forward = search.forward != reverse;
+        let matches = self.search_matches();
+        crate::edit::search::step(&matches, from, forward)
+    }
+
+    /// Highlight spans for the active search, in the same shape the selection uses.
+    pub fn search_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
+        if !self.search_highlight || rows == 0 {
+            return Vec::new();
+        }
+        let last_line = first as usize + rows as usize;
+        let mut out = Vec::new();
+        for m in self.search_matches() {
+            let (l0, _) = self.buffer.char_to_coords(m.start);
+            let (l1, _) = self.buffer.char_to_coords(m.end);
+            if l1 < first as usize || l0 >= last_line {
+                continue;
+            }
+            for line in l0..=l1 {
+                if line < first as usize || line >= last_line {
+                    continue;
+                }
+                let ls = self.buffer.line_to_char(line);
+                let llen = self.buffer.line_len_chars(line);
+                let sc = if line == l0 { m.start - ls } else { 0 };
+                let ec = if line == l1 { m.end - ls } else { llen };
+                out.push(SelSpan {
+                    line: line as u32,
+                    row: line as u32,
+                    start: self.vis_col(ls, sc),
+                    end: self.vis_col(ls, ec),
+                });
+            }
+        }
+        out
+    }
+
+    /// The keyword under the cursor, used by `*` and `#`.
+    fn word_under_cursor(&self) -> Option<String> {
+        let len = self.buffer.len_chars();
+        if len == 0 {
+            return None;
+        }
+        let head = self.primary().head.min(len - 1);
+        let mut start = head;
+        while start < len && char_class(self.buffer.rope.char(start)) != 1 {
+            start += 1;
+        }
+        if start >= len || self.buffer.char_to_line(start) != self.buffer.char_to_line(head) {
+            return None;
+        }
+        let mut end = start;
+        while start > 0 && char_class(self.buffer.rope.char(start - 1)) == 1 {
+            start -= 1;
+        }
+        while end < len && char_class(self.buffer.rope.char(end)) == 1 {
+            end += 1;
+        }
+        Some(self.buffer.rope.slice(start..end).chars().collect())
     }
 
     /// The first non-blank of the buffer line displayed `offset` rows below the viewport top.
@@ -1150,6 +1235,30 @@ impl EditCore {
                     text_changed = true;
                 }
             }
+            EditCommand::SetSearch { pattern, forward } => {
+                if let Some(search) = crate::edit::search::Search::new(&pattern, forward) {
+                    self.search = Some(search);
+                    self.search_highlight = true;
+                    self.push_jump();
+                    if let Some(at) = self.search_step(self.primary().head, false) {
+                        self.set_caret(at);
+                    }
+                }
+            }
+            EditCommand::SearchWord { forward } => {
+                if let Some(word) = self.word_under_cursor() {
+                    let pattern = format!("\\<{}\\>", regex::escape(&word));
+                    if let Some(search) = crate::edit::search::Search::new(&pattern, forward) {
+                        self.search = Some(search);
+                        self.search_highlight = true;
+                        self.push_jump();
+                        if let Some(at) = self.search_step(self.primary().head, false) {
+                            self.set_caret(at);
+                        }
+                    }
+                }
+            }
+            EditCommand::ClearSearchHighlight => self.search_highlight = false,
             EditCommand::SetMark(name) => {
                 self.marks.insert(name, self.primary().head);
             }
@@ -1511,6 +1620,88 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::Column(4)));
         assert_eq!(c.primary().head, 3);
+    }
+
+    #[test]
+    fn search_jumps_to_the_next_match_and_wraps() {
+        let mut c = core("alpha beta alpha gamma");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::SetSearch {
+            pattern: "alpha".into(),
+            forward: true,
+        });
+        assert_eq!(c.primary().head, 11);
+        c.apply(EditCommand::Move(Motion::SearchNext { reverse: false }));
+        assert_eq!(c.primary().head, 0);
+        c.apply(EditCommand::Move(Motion::SearchNext { reverse: true }));
+        assert_eq!(c.primary().head, 11);
+    }
+
+    #[test]
+    fn a_backward_search_reverses_what_n_means() {
+        let mut c = core("x a x a x");
+        c.mode = EditMode::Normal;
+        c.set_caret(4);
+        c.apply(EditCommand::SetSearch {
+            pattern: "x".into(),
+            forward: false,
+        });
+        assert_eq!(c.primary().head, 0);
+        c.apply(EditCommand::Move(Motion::SearchNext { reverse: false }));
+        assert_eq!(c.primary().head, 8);
+    }
+
+    #[test]
+    fn star_searches_the_whole_word_under_the_cursor() {
+        let mut c = core("cat category cat");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::SearchWord { forward: true });
+        assert_eq!(c.primary().head, 13);
+    }
+
+    #[test]
+    fn search_composes_with_an_operator() {
+        let mut c = core("one two three");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::SetSearch {
+            pattern: "three".into(),
+            forward: true,
+        });
+        c.set_caret(0);
+        c.apply(op(
+            Operator::Delete,
+            Target::Motion(Motion::SearchNext { reverse: false }, 1),
+        ));
+        assert_eq!(text_of(&c), "three");
+    }
+
+    #[test]
+    fn an_invalid_pattern_leaves_the_caret_alone() {
+        let mut c = core("abc");
+        c.mode = EditMode::Normal;
+        c.set_caret(1);
+        c.apply(EditCommand::SetSearch {
+            pattern: "\\v(".into(),
+            forward: true,
+        });
+        assert_eq!(c.primary().head, 1);
+        assert!(c.search.is_none());
+    }
+
+    #[test]
+    fn highlight_spans_appear_only_while_highlighting_is_on() {
+        let mut c = core("foo bar foo\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::SetSearch {
+            pattern: "foo".into(),
+            forward: true,
+        });
+        assert_eq!(c.search_spans(0, 4).len(), 2);
+        c.apply(EditCommand::ClearSearchHighlight);
+        assert!(c.search_spans(0, 4).is_empty());
     }
 
     #[test]

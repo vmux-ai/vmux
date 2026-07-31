@@ -47,6 +47,7 @@ pub enum Motion {
     ParagraphNext,
     MatchPair,
     FindChar { ch: char, forward: bool, till: bool },
+    SearchNext { reverse: bool },
     GotoLine(u32),
 }
 
@@ -133,6 +134,7 @@ impl Motion {
                 | Motion::ScreenTop
                 | Motion::ScreenMiddle
                 | Motion::ScreenBottom
+                | Motion::SearchNext { .. }
         )
     }
 }
@@ -207,6 +209,14 @@ pub enum EditCommand {
     },
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),
+    SetSearch {
+        pattern: String,
+        forward: bool,
+    },
+    SearchWord {
+        forward: bool,
+    },
+    ClearSearchHighlight,
     SetMark(char),
     GotoMark {
         name: char,

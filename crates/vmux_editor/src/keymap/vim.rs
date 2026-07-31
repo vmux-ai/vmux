@@ -91,6 +91,8 @@ fn motion_for(key: &str) -> Option<Motion> {
         "{" => Motion::ParagraphPrev,
         "}" => Motion::ParagraphNext,
         "%" => Motion::MatchPair,
+        "n" => Motion::SearchNext { reverse: false },
+        "N" => Motion::SearchNext { reverse: true },
         "H" => Motion::ScreenTop,
         "M" => Motion::ScreenMiddle,
         "L" => Motion::ScreenBottom,
@@ -533,6 +535,8 @@ impl VimKeymap {
                 self.last_change = body;
                 out
             }
+            "*" => vec![SearchWord { forward: true }],
+            "#" => vec![SearchWord { forward: false }],
             "m" => {
                 self.mark_pending = Some(MarkAction::Set);
                 vec![]
@@ -1519,6 +1523,39 @@ mod tests {
         let mut km = VimKeymap::default();
         run(&mut km, &["i"]);
         assert_eq!(km.handle(&chord("e", ctrl())), vec![]);
+    }
+
+    #[test]
+    fn search_repeat_and_word_search_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["n"]),
+            vec![EditCommand::Move(Motion::SearchNext { reverse: false })]
+        );
+        assert_eq!(
+            run(&mut km, &["N"]),
+            vec![EditCommand::Move(Motion::SearchNext { reverse: true })]
+        );
+        assert_eq!(
+            run(&mut km, &["*"]),
+            vec![EditCommand::SearchWord { forward: true }]
+        );
+        assert_eq!(
+            run(&mut km, &["#"]),
+            vec![EditCommand::SearchWord { forward: false }]
+        );
+    }
+
+    #[test]
+    fn an_operator_can_target_the_next_match() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["d", "n"]),
+            vec![op(
+                Operator::Delete,
+                Target::Motion(Motion::SearchNext { reverse: false }, 1)
+            )]
+        );
     }
 
     #[test]

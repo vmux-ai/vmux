@@ -13,6 +13,7 @@ web = []
 path = "src/lib.rs"
 
 [dependencies]
+regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
 vmux_core = { path = "../vmux_core" }
