@@ -1,4 +1,4 @@
-use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target};
+use crate::edit::command::{EditCommand, EditMode, Motion, Operator, ScrollPlacement, Target};
 use crate::edit::text_object::{TextObject, TextObjectKind};
 use crate::keymap::{KeyInput, Keymap};
 
@@ -17,6 +17,8 @@ pub struct VimKeymap {
     pending_op: Option<Operator>,
     pending_op_key: Option<char>,
     pending_object: Option<ObjectScope>,
+    pending_find: Option<(bool, bool)>,
+    last_find: Option<(char, bool, bool)>,
     register: Option<char>,
     register_pending: bool,
     replace_pending: bool,
@@ -27,18 +29,39 @@ pub struct VimKeymap {
 
 fn motion_for(key: &str) -> Option<Motion> {
     Some(match key {
-        "h" | "ArrowLeft" => Motion::LeftBounded,
-        "l" | "ArrowRight" => Motion::RightBounded,
+        "h" | "ArrowLeft" | "Backspace" => Motion::LeftBounded,
+        "l" | "ArrowRight" | " " => Motion::RightBounded,
         "j" | "ArrowDown" => Motion::Down,
         "k" | "ArrowUp" => Motion::Up,
         "w" => Motion::WordNext,
         "b" => Motion::WordPrev,
         "e" => Motion::WordEnd,
+        "W" => Motion::BigWordNext,
+        "B" => Motion::BigWordPrev,
+        "E" => Motion::BigWordEnd,
         "0" => Motion::LineStart,
         "^" => Motion::FirstNonBlank,
         "$" => Motion::LineEnd,
         "{" => Motion::ParagraphPrev,
         "}" => Motion::ParagraphNext,
+        "%" => Motion::MatchPair,
+        "H" => Motion::ScreenTop,
+        "M" => Motion::ScreenMiddle,
+        "L" => Motion::ScreenBottom,
+        "+" | "Enter" => Motion::NextLineStart,
+        "-" => Motion::PrevLineStart,
+        "_" => Motion::FirstNonBlank,
+        _ => return None,
+    })
+}
+
+/// `f`, `F`, `t`, and `T` all take the next key as their target character.
+fn find_prefix(key: &str) -> Option<(bool, bool)> {
+    Some(match key {
+        "f" => (true, false),
+        "F" => (false, false),
+        "t" => (true, true),
+        "T" => (false, true),
         _ => return None,
     })
 }
@@ -111,6 +134,7 @@ impl VimKeymap {
         self.pending_op = None;
         self.pending_op_key = None;
         self.pending_object = None;
+        self.pending_find = None;
         self.register = None;
         self.register_pending = false;
         self.replace_pending = false;
@@ -134,6 +158,42 @@ impl VimKeymap {
             target,
             register: self.take_register(),
         }
+    }
+
+    /// Route a resolved motion to the pending operator, a visual selection, or a plain move.
+    fn motion_command(&mut self, m: Motion) -> Vec<EditCommand> {
+        if let Some(operator) = self.pending_op.take() {
+            let count = self.take_operator_count();
+            self.pending_op_key = None;
+            self.pending_object = None;
+            if operator == Operator::Change {
+                self.enter_insert();
+            }
+            return vec![self.op(operator, Target::Motion(m, count))];
+        }
+        let n = self.take_count();
+        if self.mode.is_visual() {
+            return std::iter::repeat_n(EditCommand::Select(m), n).collect();
+        }
+        std::iter::repeat_n(EditCommand::Move(m), n).collect()
+    }
+
+    /// Consume the character `f`/`F`/`t`/`T` was waiting for, or drop the whole pending command.
+    fn resolve_find(&mut self, forward: bool, till: bool, key: &str) -> Vec<EditCommand> {
+        let Some(ch) = single_char(key) else {
+            self.reset();
+            return vec![];
+        };
+        self.last_find = Some((ch, forward, till));
+        self.motion_command(Motion::FindChar { ch, forward, till })
+    }
+
+    fn repeat_find(&mut self, reverse: bool) -> Vec<EditCommand> {
+        let Some((ch, forward, till)) = self.last_find else {
+            return vec![];
+        };
+        let forward = if reverse { !forward } else { forward };
+        self.motion_command(Motion::FindChar { ch, forward, till })
     }
 
     /// Apply a pending operator to a motion, a text object, a doubled key (`dd`), or abandon it.
@@ -191,6 +251,10 @@ impl VimKeymap {
         use EditCommand::*;
         let key = k.key.as_str();
 
+        if let Some((forward, till)) = self.pending_find.take() {
+            return self.resolve_find(forward, till, key);
+        }
+
         if self.register_pending {
             self.register_pending = false;
             if let Some(c) = single_char(key) {
@@ -217,6 +281,16 @@ impl VimKeymap {
             return vec![];
         }
 
+        if self.pending_object.is_none() {
+            if let Some((forward, till)) = find_prefix(key) {
+                self.pending_find = Some((forward, till));
+                return vec![];
+            }
+            if key == ";" || key == "," {
+                return self.repeat_find(key == ",");
+            }
+        }
+
         if let Some(operator) = self.pending_op.take() {
             return self.operator_pending(operator, key);
         }
@@ -237,6 +311,13 @@ impl VimKeymap {
                 }
                 "d" => vec![GotoDefinition],
                 "r" => vec![FindReferences],
+                "e" => self.motion_command(Motion::WordEndPrev),
+                "E" => self.motion_command(Motion::BigWordEndPrev),
+                "_" => self.motion_command(Motion::LastNonBlank),
+                "0" => self.motion_command(Motion::LineStart),
+                "$" => self.motion_command(Motion::LineEnd),
+                "j" => self.motion_command(Motion::Down),
+                "k" => self.motion_command(Motion::Up),
                 "J" => vec![JoinLines {
                     count: self.take_count(),
                     spaces: false,
@@ -254,6 +335,9 @@ impl VimKeymap {
                 "A" => vec![FoldToggleRecursive],
                 "R" => vec![UnfoldAll],
                 "M" => vec![FoldAll],
+                "z" => vec![ScrollCursorTo(ScrollPlacement::Center)],
+                "t" => vec![ScrollCursorTo(ScrollPlacement::Top)],
+                "b" => vec![ScrollCursorTo(ScrollPlacement::Bottom)],
                 _ => vec![],
             };
         }
@@ -296,6 +380,10 @@ impl VimKeymap {
                     None => Move(Motion::DocEnd),
                 };
                 vec![cmd]
+            }
+            "|" => {
+                let col = self.take_count();
+                vec![Move(Motion::Column(col))]
             }
             "i" => {
                 self.enter_insert();
@@ -400,6 +488,10 @@ impl VimKeymap {
         use EditCommand::*;
         let key = k.key.as_str();
 
+        if let Some((forward, till)) = self.pending_find.take() {
+            return self.resolve_find(forward, till, key);
+        }
+
         if let Some(scope) = self.pending_object.take() {
             let count = self.take_count();
             let Some(kind) = text_object_kind(key) else {
@@ -446,6 +538,15 @@ impl VimKeymap {
             return vec![];
         }
 
+        if let Some((forward, till)) = find_prefix(key) {
+            self.pending_find = Some((forward, till));
+            return vec![];
+        }
+
+        if key == ";" || key == "," {
+            return self.repeat_find(key == ",");
+        }
+
         if let Some(m) = motion_for(key) {
             let n = self.take_count();
             return std::iter::repeat_n(Select(m), n).collect();
@@ -458,6 +559,9 @@ impl VimKeymap {
                 "U" => self.visual_op(Operator::Upper),
                 "~" => self.visual_op(Operator::ToggleCase),
                 "g" => vec![Select(Motion::DocStart)],
+                "e" => self.motion_command(Motion::WordEndPrev),
+                "E" => self.motion_command(Motion::BigWordEndPrev),
+                "_" => self.motion_command(Motion::LastNonBlank),
                 _ => vec![],
             };
         }
@@ -466,6 +570,10 @@ impl VimKeymap {
             "g" => {
                 self.g_pending = true;
                 vec![]
+            }
+            "|" => {
+                let col = self.take_count();
+                vec![Select(Motion::Column(col))]
             }
             "\"" => {
                 self.register_pending = true;
@@ -683,6 +791,10 @@ impl Keymap for VimKeymap {
             let motion = match k.key.to_ascii_lowercase().as_str() {
                 "n" => Some(Motion::Down),
                 "p" => Some(Motion::Up),
+                "d" => Some(Motion::HalfPageDown),
+                "u" => Some(Motion::HalfPageUp),
+                "f" => Some(Motion::PageDown),
+                "b" => Some(Motion::PageUp),
                 _ => None,
             };
             if let Some(motion) = motion {
@@ -865,6 +977,123 @@ mod tests {
         assert_eq!(
             run(&mut km, &["d", "w"]),
             vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
+        );
+    }
+
+    fn find(ch: char, forward: bool, till: bool) -> Motion {
+        Motion::FindChar { ch, forward, till }
+    }
+
+    #[test]
+    fn find_char_prefixes_consume_the_next_key() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["f", ","]),
+            vec![EditCommand::Move(find(',', true, false))]
+        );
+        assert_eq!(
+            run(&mut km, &["T", "x"]),
+            vec![EditCommand::Move(find('x', false, true))]
+        );
+    }
+
+    #[test]
+    fn semicolon_repeats_and_comma_reverses_the_last_find() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["f", "x"]);
+        assert_eq!(
+            run(&mut km, &[";"]),
+            vec![EditCommand::Move(find('x', true, false))]
+        );
+        assert_eq!(
+            run(&mut km, &[","]),
+            vec![EditCommand::Move(find('x', false, false))]
+        );
+    }
+
+    #[test]
+    fn repeat_find_without_a_previous_find_does_nothing() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &[";"]), vec![]);
+    }
+
+    #[test]
+    fn operators_compose_with_find_char() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["d", "t", ","]),
+            vec![op(
+                Operator::Delete,
+                Target::Motion(find(',', true, true), 1)
+            )]
+        );
+        assert_eq!(
+            run(&mut km, &["2", "d", "f", "x"]),
+            vec![op(
+                Operator::Delete,
+                Target::Motion(find('x', true, false), 2)
+            )]
+        );
+    }
+
+    #[test]
+    fn the_tag_object_is_not_shadowed_by_the_till_prefix() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["d", "i", "t"]),
+            vec![op(Operator::Delete, object(TextObjectKind::Tag, false, 1))]
+        );
+    }
+
+    #[test]
+    fn word_and_screen_motions_are_bound() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["W"]),
+            vec![EditCommand::Move(Motion::BigWordNext)]
+        );
+        assert_eq!(
+            run(&mut km, &["g", "e"]),
+            vec![EditCommand::Move(Motion::WordEndPrev)]
+        );
+        assert_eq!(
+            run(&mut km, &["%"]),
+            vec![EditCommand::Move(Motion::MatchPair)]
+        );
+        assert_eq!(
+            run(&mut km, &["H"]),
+            vec![EditCommand::Move(Motion::ScreenTop)]
+        );
+        assert_eq!(
+            run(&mut km, &["8", "|"]),
+            vec![EditCommand::Move(Motion::Column(8))]
+        );
+    }
+
+    #[test]
+    fn half_and_full_page_scroll_chords() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&chord("d", ctrl())),
+            vec![EditCommand::Move(Motion::HalfPageDown)]
+        );
+        assert_eq!(
+            km.handle(&chord("b", ctrl())),
+            vec![EditCommand::Move(Motion::PageUp)]
+        );
+    }
+
+    #[test]
+    fn z_prefix_serves_both_folds_and_scroll_placement() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &["z", "a"]), vec![EditCommand::FoldToggle]);
+        assert_eq!(
+            run(&mut km, &["z", "z"]),
+            vec![EditCommand::ScrollCursorTo(ScrollPlacement::Center)]
+        );
+        assert_eq!(
+            run(&mut km, &["z", "b"]),
+            vec![EditCommand::ScrollCursorTo(ScrollPlacement::Bottom)]
         );
     }
 

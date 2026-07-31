@@ -1189,6 +1189,7 @@ fn on_file_resize(
     vp.wrap_columns = evt.wrap_columns;
     if let Some(mut edit) = edit {
         edit.core.rows = vp.rows;
+        edit.core.top_row = vp.top_row;
         let vpc = *vp;
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
         if let Some(keymap) = keymap {
@@ -1960,6 +1961,21 @@ fn run_commands(
                     &FileScrollByEvent { lines: *lines },
                 ));
             }
+            continue;
+        }
+        if let EditCommand::ScrollCursorTo(placement) = &cmd {
+            let row = edit
+                .folds
+                .view(edit.core.buffer.len_lines() as u32)
+                .buffer_to_row(edit.core.cursor_pos().line);
+            let rows = vp.rows.max(1) as u32;
+            vp.top_row = match placement {
+                crate::edit::command::ScrollPlacement::Top => row,
+                crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
+                crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
+            };
+            edit.core.top_row = vp.top_row;
+            viewport_changed = true;
             continue;
         }
         if matches!(

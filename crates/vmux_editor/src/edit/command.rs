@@ -22,15 +22,31 @@ pub enum Motion {
     WordNext,
     WordPrev,
     WordEnd,
+    BigWordNext,
+    BigWordPrev,
+    BigWordEnd,
+    WordEndPrev,
+    BigWordEndPrev,
     LineStart,
     FirstNonBlank,
     LineEnd,
+    LastNonBlank,
+    Column(usize),
     DocStart,
     DocEnd,
     PageUp,
     PageDown,
+    HalfPageUp,
+    HalfPageDown,
+    ScreenTop,
+    ScreenMiddle,
+    ScreenBottom,
+    NextLineStart,
+    PrevLineStart,
     ParagraphPrev,
     ParagraphNext,
+    MatchPair,
+    FindChar { ch: char, forward: bool, till: bool },
     GotoLine(u32),
 }
 
@@ -41,13 +57,76 @@ impl Motion {
             | Motion::Down
             | Motion::PageUp
             | Motion::PageDown
+            | Motion::HalfPageUp
+            | Motion::HalfPageDown
+            | Motion::ScreenTop
+            | Motion::ScreenMiddle
+            | Motion::ScreenBottom
+            | Motion::NextLineStart
+            | Motion::PrevLineStart
             | Motion::DocStart
             | Motion::DocEnd
             | Motion::GotoLine(_) => MotionKind::Linewise,
-            Motion::WordEnd | Motion::LineEnd => MotionKind::Inclusive,
+            Motion::WordEnd
+            | Motion::BigWordEnd
+            | Motion::WordEndPrev
+            | Motion::BigWordEndPrev
+            | Motion::LineEnd
+            | Motion::LastNonBlank
+            | Motion::MatchPair => MotionKind::Inclusive,
+            Motion::FindChar { forward, .. } if forward => MotionKind::Inclusive,
             _ => MotionKind::Exclusive,
         }
     }
+}
+
+impl Motion {
+    /// Which end of an existing selection a plain move collapses to.
+    ///
+    /// `Some(true)` collapses to the start, `Some(false)` to the end, and `None` marks a motion
+    /// that targets an absolute position and should simply be resolved from the caret.
+    pub fn collapse_to_start(self) -> Option<bool> {
+        Some(match self {
+            Motion::Left
+            | Motion::LeftBounded
+            | Motion::Up
+            | Motion::PageUp
+            | Motion::HalfPageUp
+            | Motion::ParagraphPrev
+            | Motion::WordPrev
+            | Motion::BigWordPrev
+            | Motion::WordEndPrev
+            | Motion::BigWordEndPrev
+            | Motion::LineStart
+            | Motion::PrevLineStart
+            | Motion::ScreenTop
+            | Motion::DocStart => true,
+            Motion::Right
+            | Motion::RightBounded
+            | Motion::Down
+            | Motion::PageDown
+            | Motion::HalfPageDown
+            | Motion::ParagraphNext
+            | Motion::WordNext
+            | Motion::BigWordNext
+            | Motion::WordEnd
+            | Motion::BigWordEnd
+            | Motion::LineEnd
+            | Motion::LastNonBlank
+            | Motion::NextLineStart
+            | Motion::ScreenBottom
+            | Motion::DocEnd => false,
+            _ => return None,
+        })
+    }
+}
+
+/// Where `zz`, `zt`, and `zb` place the cursor's line in the viewport.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollPlacement {
+    Top,
+    Center,
+    Bottom,
 }
 
 /// A transformation applied to a range of text.
@@ -113,6 +192,7 @@ pub enum EditCommand {
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),
     ScrollViewport(i32),
+    ScrollCursorTo(ScrollPlacement),
     SetMode(EditMode),
     Undo,
     Redo,

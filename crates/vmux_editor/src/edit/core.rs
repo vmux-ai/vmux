@@ -60,6 +60,7 @@ pub struct EditCore {
     pub selections: Vec<Selection>,
     pub mode: EditMode,
     pub rows: u16,
+    pub top_row: u32,
     pub dirty: bool,
     pub registers: Registers,
     rev: u64,
@@ -80,6 +81,7 @@ impl EditCore {
             selections: vec![Selection::caret(0)],
             mode: default_mode,
             rows: 0,
+            top_row: 0,
             dirty: false,
             registers: Registers::default(),
             rev: 0,
@@ -238,10 +240,118 @@ impl EditCore {
             Motion::DocStart => 0,
             Motion::DocEnd => len,
             Motion::GotoLine(n) => self.buffer.line_to_char(n as usize),
-            Motion::WordNext => self.word_next(from),
-            Motion::WordPrev => self.word_prev(from),
-            Motion::WordEnd => self.word_end(from),
+            Motion::WordNext => self.word_next(from, false),
+            Motion::WordPrev => self.word_prev(from, false),
+            Motion::WordEnd => self.word_end(from, false),
+            Motion::BigWordNext => self.word_next(from, true),
+            Motion::BigWordPrev => self.word_prev(from, true),
+            Motion::BigWordEnd => self.word_end(from, true),
+            Motion::WordEndPrev => self.word_end_prev(from, false),
+            Motion::BigWordEndPrev => self.word_end_prev(from, true),
+            Motion::LastNonBlank => self.last_non_blank(from),
+            Motion::Column(n) => {
+                let (l, _) = self.buffer.char_to_coords(from);
+                let start = self.buffer.line_to_char(l);
+                (start + n.saturating_sub(1)).min(start + self.buffer.line_len_chars(l))
+            }
+            Motion::HalfPageUp => self.vertical(from, -((self.rows.max(2) / 2) as i64)),
+            Motion::HalfPageDown => self.vertical(from, (self.rows.max(2) / 2) as i64),
+            Motion::ScreenTop => self.screen_line(0),
+            Motion::ScreenMiddle => self.screen_line(self.rows.saturating_sub(1) / 2),
+            Motion::ScreenBottom => self.screen_line(self.rows.saturating_sub(1)),
+            Motion::NextLineStart => self.first_non_blank(self.vertical(from, 1)),
+            Motion::PrevLineStart => self.first_non_blank(self.vertical(from, -1)),
+            Motion::MatchPair => self.match_pair(from).unwrap_or(from),
+            Motion::FindChar { ch, forward, till } => {
+                self.find_char(from, ch, forward, till).unwrap_or(from)
+            }
         }
+    }
+
+    /// The first non-blank of the buffer line displayed `offset` rows below the viewport top.
+    fn screen_line(&self, offset: u16) -> usize {
+        let line = self.fold_view.step_rows(self.top_row, offset as i64);
+        self.first_non_blank(self.buffer.line_to_char(line as usize))
+    }
+
+    fn last_non_blank(&self, from: usize) -> usize {
+        let (l, _) = self.buffer.char_to_coords(from);
+        let base = self.buffer.line_to_char(l);
+        let llen = self.buffer.line_len_chars(l);
+        let mut i = llen;
+        while i > 0 {
+            let ch = self.buffer.rope.char(base + i - 1);
+            if ch != ' ' && ch != '\t' {
+                return base + i - 1;
+            }
+            i -= 1;
+        }
+        base
+    }
+
+    /// Vim's `%`: from the first bracket at or after the cursor on this line, jump to its partner.
+    fn match_pair(&self, from: usize) -> Option<usize> {
+        const PAIRS: [(char, char); 3] = [('(', ')'), ('[', ']'), ('{', '}')];
+        let (line, _) = self.buffer.char_to_coords(from);
+        let base = self.buffer.line_to_char(line);
+        let llen = self.buffer.line_len_chars(line);
+        let col = from - base;
+        for i in col..llen {
+            let at = base + i;
+            let c = self.buffer.rope.char(at);
+            if let Some((open, close)) = PAIRS.iter().find(|(o, _)| *o == c) {
+                return self.scan_pair(at, *open, *close, true);
+            }
+            if let Some((open, close)) = PAIRS.iter().find(|(_, c2)| *c2 == c) {
+                return self.scan_pair(at, *open, *close, false);
+            }
+        }
+        None
+    }
+
+    fn scan_pair(&self, at: usize, open: char, close: char, forward: bool) -> Option<usize> {
+        let len = self.buffer.len_chars();
+        let mut depth = 0i32;
+        let mut i = at as i64;
+        loop {
+            let c = self.buffer.rope.char(i as usize);
+            if c == open {
+                depth += 1;
+            } else if c == close {
+                depth -= 1;
+            }
+            if depth == 0 && (c == open || c == close) && i as usize != at {
+                return Some(i as usize);
+            }
+            i += if forward { 1 } else { -1 };
+            if i < 0 || i as usize >= len {
+                return None;
+            }
+        }
+    }
+
+    /// Vim's `f`/`F`/`t`/`T`: search the cursor's line only.
+    fn find_char(&self, from: usize, ch: char, forward: bool, till: bool) -> Option<usize> {
+        let (line, _) = self.buffer.char_to_coords(from);
+        let base = self.buffer.line_to_char(line);
+        let llen = self.buffer.line_len_chars(line);
+        let col = from - base;
+        if forward {
+            let start = if till { col + 2 } else { col + 1 };
+            for i in start..llen {
+                if self.buffer.rope.char(base + i) == ch {
+                    return Some(base + if till { i - 1 } else { i });
+                }
+            }
+        } else {
+            let end = if till { col.checked_sub(1)? } else { col };
+            for i in (0..end).rev() {
+                if self.buffer.rope.char(base + i) == ch {
+                    return Some(base + if till { i + 1 } else { i });
+                }
+            }
+        }
+        None
     }
 
     fn resolve_navigation_motion(&mut self, from: usize, motion: Motion) -> usize {
@@ -344,47 +454,78 @@ impl EditCore {
         base
     }
 
-    fn word_next(&self, from: usize) -> usize {
+    /// Word classes, or the coarser WORD split that only separates on whitespace.
+    fn cls(&self, i: usize, big: bool) -> u8 {
+        let c = self.buffer.rope.char(i);
+        if big {
+            if c.is_whitespace() { 0 } else { 1 }
+        } else {
+            char_class(c)
+        }
+    }
+    fn word_next(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
         let mut i = from;
         if i >= len {
             return len;
         }
-        let start_class = char_class(self.buffer.rope.char(i));
-        while i < len && char_class(self.buffer.rope.char(i)) == start_class && start_class != 0 {
+        let start_class = self.cls(i, big);
+        while i < len && self.cls(i, big) == start_class && start_class != 0 {
             i += 1;
         }
-        while i < len && char_class(self.buffer.rope.char(i)) == 0 {
+        while i < len && self.cls(i, big) == 0 {
             i += 1;
         }
         i
     }
-    fn word_prev(&self, from: usize) -> usize {
+    fn word_prev(&self, from: usize, big: bool) -> usize {
         let mut i = from;
-        while i > 0 && char_class(self.buffer.rope.char(i - 1)) == 0 {
+        while i > 0 && self.cls(i - 1, big) == 0 {
             i -= 1;
         }
         if i == 0 {
             return 0;
         }
-        let cls = char_class(self.buffer.rope.char(i - 1));
-        while i > 0 && char_class(self.buffer.rope.char(i - 1)) == cls {
+        let cls = self.cls(i - 1, big);
+        while i > 0 && self.cls(i - 1, big) == cls {
             i -= 1;
         }
         i
     }
-    fn word_end(&self, from: usize) -> usize {
+    fn word_end(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
         let mut i = (from + 1).min(len);
-        while i < len && char_class(self.buffer.rope.char(i)) == 0 {
+        while i < len && self.cls(i, big) == 0 {
             i += 1;
         }
         if i >= len {
             return len;
         }
-        let cls = char_class(self.buffer.rope.char(i));
-        while i + 1 < len && char_class(self.buffer.rope.char(i + 1)) == cls {
+        let cls = self.cls(i, big);
+        while i + 1 < len && self.cls(i + 1, big) == cls {
             i += 1;
+        }
+        i
+    }
+    /// Vim's `ge`: the end of the word before the cursor.
+    fn word_end_prev(&self, from: usize, big: bool) -> usize {
+        let len = self.buffer.len_chars();
+        if from == 0 || len == 0 {
+            return 0;
+        }
+        let mut i = from.min(len - 1);
+        let start = self.cls(i, big);
+        if start != 0 {
+            while i > 0 && self.cls(i - 1, big) == start {
+                i -= 1;
+            }
+        }
+        if i == 0 {
+            return 0;
+        }
+        i -= 1;
+        while i > 0 && self.cls(i, big) == 0 {
+            i -= 1;
         }
         i
     }
@@ -745,27 +886,10 @@ impl EditCore {
                 let collapse_selection = !self.mode.is_visual() && !selection.is_empty();
                 let h = if collapse_selection {
                     self.preferred_vertical_col = None;
-                    match m {
-                        Motion::Left
-                        | Motion::LeftBounded
-                        | Motion::Up
-                        | Motion::PageUp
-                        | Motion::ParagraphPrev
-                        | Motion::WordPrev
-                        | Motion::LineStart
-                        | Motion::DocStart => selection.range().start,
-                        Motion::Right
-                        | Motion::RightBounded
-                        | Motion::Down
-                        | Motion::PageDown
-                        | Motion::ParagraphNext
-                        | Motion::WordNext
-                        | Motion::WordEnd
-                        | Motion::LineEnd
-                        | Motion::DocEnd => selection.range().end,
-                        Motion::FirstNonBlank | Motion::GotoLine(_) => {
-                            self.resolve_motion(selection.head, m)
-                        }
+                    match m.collapse_to_start() {
+                        Some(true) => selection.range().start,
+                        Some(false) => selection.range().end,
+                        None => self.resolve_motion(selection.head, m),
                     }
                 } else {
                     self.resolve_navigation_motion(selection.head, m)
@@ -822,7 +946,7 @@ impl EditCore {
             }
             EditCommand::DeleteWordBack => {
                 let head = self.primary().head;
-                let target = self.word_prev(head);
+                let target = self.word_prev(head, false);
                 if target < head {
                     self.checkpoint(Group::Delete);
                     self.buffer.remove(target..head);
@@ -969,6 +1093,7 @@ impl EditCore {
             }
             EditCommand::Save
             | EditCommand::ScrollViewport(_)
+            | EditCommand::ScrollCursorTo(_)
             | EditCommand::GotoDefinition
             | EditCommand::FindReferences
             | EditCommand::Hover
@@ -1150,6 +1275,133 @@ mod tests {
         c.set_caret(0);
         c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
         assert_eq!(text_of(&c), "bar");
+    }
+
+    #[test]
+    fn find_char_lands_on_or_before_the_target() {
+        let mut c = core("alpha, beta, gamma");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::FindChar {
+            ch: ',',
+            forward: true,
+            till: false,
+        }));
+        assert_eq!(c.primary().head, 5);
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::FindChar {
+            ch: ',',
+            forward: true,
+            till: true,
+        }));
+        assert_eq!(c.primary().head, 4);
+    }
+
+    #[test]
+    fn find_char_stays_on_the_cursor_line() {
+        let mut c = core("abc\nx,y\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::FindChar {
+            ch: ',',
+            forward: true,
+            till: false,
+        }));
+        assert_eq!(c.primary().head, 0);
+    }
+
+    #[test]
+    fn forward_find_is_inclusive_as_an_operator_target() {
+        let mut c = core("alpha, beta");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(op(
+            Operator::Delete,
+            Target::Motion(
+                Motion::FindChar {
+                    ch: ',',
+                    forward: true,
+                    till: true,
+                },
+                1,
+            ),
+        ));
+        assert_eq!(text_of(&c), ", beta");
+    }
+
+    #[test]
+    fn counted_find_reaches_the_nth_match() {
+        let mut c = core("a,b,c,d");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(op(
+            Operator::Delete,
+            Target::Motion(
+                Motion::FindChar {
+                    ch: ',',
+                    forward: true,
+                    till: false,
+                },
+                2,
+            ),
+        ));
+        assert_eq!(text_of(&c), "c,d");
+    }
+
+    #[test]
+    fn match_pair_jumps_both_directions() {
+        let mut c = core("foo(bar[baz])");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::MatchPair));
+        assert_eq!(c.primary().head, 12);
+        c.apply(EditCommand::Move(Motion::MatchPair));
+        assert_eq!(c.primary().head, 3);
+    }
+
+    #[test]
+    fn big_word_motions_span_punctuation() {
+        let mut c = core("foo.bar baz");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::BigWordNext));
+        assert_eq!(c.primary().head, 8);
+        c.apply(EditCommand::Move(Motion::BigWordPrev));
+        assert_eq!(c.primary().head, 0);
+        c.apply(EditCommand::Move(Motion::BigWordEnd));
+        assert_eq!(c.primary().head, 6);
+    }
+
+    #[test]
+    fn word_end_prev_walks_back_to_the_previous_word() {
+        let mut c = core("one two three");
+        c.mode = EditMode::Normal;
+        c.set_caret(8);
+        c.apply(EditCommand::Move(Motion::WordEndPrev));
+        assert_eq!(c.primary().head, 6);
+    }
+
+    #[test]
+    fn screen_motions_use_the_viewport_top() {
+        let mut c = core("a\nb\nc\nd\ne\nf\ng\n");
+        c.mode = EditMode::Normal;
+        c.rows = 4;
+        c.top_row = 2;
+        c.apply(EditCommand::Move(Motion::ScreenTop));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 2);
+        c.apply(EditCommand::Move(Motion::ScreenBottom));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 5);
+        c.apply(EditCommand::Move(Motion::ScreenMiddle));
+        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 3);
+    }
+
+    #[test]
+    fn column_motion_is_one_based() {
+        let mut c = core("abcdef");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Move(Motion::Column(4)));
+        assert_eq!(c.primary().head, 3);
     }
 
     #[test]
