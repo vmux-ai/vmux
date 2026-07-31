@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cargo_bin="${CARGO_BIN:-cargo}"
 rustc_bin="${RUSTC:-rustc}"
 manifest_paths=()
@@ -30,5 +30,7 @@ done < <(
     for path in "${manifest_paths[@]}"; do
         printf 'file=%s\n' "${path#"$root/"}"
     done
-    git -C "$root" hash-object "${manifest_paths[@]}"
+    if [[ "${#manifest_paths[@]}" -gt 0 ]]; then
+        git -C "$root" hash-object "${manifest_paths[@]}"
+    fi
 } | git -C "$root" hash-object --stdin

@@ -70,9 +70,15 @@ use vmux_layout::{
         Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
     },
 };
+
 use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
+
+#[derive(Clone, Copy, Debug, Message)]
+pub(crate) struct WebviewLoadCompleted {
+    webview: Entity,
+}
 
 /// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
 /// the CEF backend, and forwards pointer and cursor input between the layout and pages.
@@ -106,8 +112,11 @@ impl Plugin for BrowserPlugin {
         let startup_locale =
             vmux_ui::i18n::requested_locale(Some(&startup_settings.appearance.locale));
         let startup_accept_language_list = browser_accept_language_list(&startup_locale);
-        let prepared_extensions = crate::extensions::load::apply_env()
-            .unwrap_or_else(|error| panic!("failed to prepare extensions: {error}"));
+        let prepared_extensions = crate::extensions::load::apply_env().unwrap_or_else(|error| {
+            bevy::log::error!(%error, "failed to prepare extensions; starting without them");
+            unsafe { std::env::remove_var("VMUX_LOAD_EXTENSIONS") };
+            Vec::new()
+        });
         let conformance_extension = std::env::var("VMUX_EXTENSION_CONFORMANCE_ID").ok();
         let extension_registrations = prepared_extensions
             .iter()
@@ -206,8 +215,10 @@ impl Plugin for BrowserPlugin {
                 crate::extensions::broker::fire_conformance_wake_timer,
             )
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
+            .add_message::<WebviewLoadCompleted>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
+            .add_message::<vmux_layout::OpenBesideRequest>()
             .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .configure_sets(
                 Update,
@@ -243,6 +254,7 @@ impl Plugin for BrowserPlugin {
             .add_observer(on_webview_ready_send_theme)
             .add_observer(on_header_command_emit)
             .add_observer(on_side_sheet_command_emit)
+            .add_observer(request_layout_frame_burst)
             .add_observer(on_reload_notify_header)
             .add_observer(on_hard_reload_notify_header)
             .add_observer(on_debug_update_ready)
@@ -258,7 +270,7 @@ impl Plugin for BrowserPlugin {
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
-                    dismiss_windowed_command_bar_from_native_monitor,
+                    dismiss_command_bar_from_native_monitor,
                     dismiss_windowed_command_bar_on_outside_click
                         .run_if(on_message::<MouseButtonInput>),
                     forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
@@ -341,6 +353,7 @@ impl Plugin for BrowserPlugin {
                     .chain(),
             )
             .init_resource::<HostFocusIntent>()
+            .init_resource::<LayoutFrameRateBurst>()
             .init_resource::<PendingNavSnapshots>()
             .init_resource::<RecentBrowserInteraction>()
             .init_resource::<HostSpawnRegistry>()
@@ -368,7 +381,7 @@ fn cef_command_line_config() -> CommandLineConfig {
 }
 
 fn on_webview_ready_send_theme(
-    trigger: On<Add, PageReady>,
+    trigger: On<BinReceive<PageReady>>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     cef_q: Query<(), With<LayoutCef>>,
@@ -376,7 +389,7 @@ fn on_webview_ready_send_theme(
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
     mut commands: Commands,
 ) {
-    let entity = trigger.event_target();
+    let entity = trigger.event().webview;
     webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
         let payload = theme_event(&settings);
@@ -522,6 +535,7 @@ struct NativeLayoutPointerState {
 static NATIVE_LAYOUT_POINTER_STATE: LazyLock<Mutex<NativeLayoutPointerState>> =
     LazyLock::new(|| Mutex::new(NativeLayoutPointerState::default()));
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
+static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 #[derive(Default)]
@@ -604,6 +618,7 @@ fn clear_native_layout_pointer_state() {
         should_flush
     };
     NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+    NATIVE_LAYOUT_ACTIVITY.store(false, Ordering::Relaxed);
     if should_flush {
         flush_native_layout_pointer_move();
     }
@@ -698,6 +713,14 @@ pub fn flush_native_layout_pointer_move() -> bool {
 
 pub fn native_layout_pointer_is_inside() -> bool {
     NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
+}
+
+pub fn set_native_layout_activity(active: bool) -> bool {
+    NATIVE_LAYOUT_ACTIVITY.swap(active, Ordering::Relaxed) != active
+}
+
+fn native_layout_activity_active() -> bool {
+    NATIVE_LAYOUT_ACTIVITY.load(Ordering::Relaxed)
 }
 
 fn cef_pointer_hit_rect(
@@ -950,8 +973,8 @@ fn dismiss_windowed_command_bar_on_outside_click(
     }
 }
 
-fn dismiss_windowed_command_bar_from_native_monitor(
-    modal_q: Query<Entity, (With<Modal>, With<WebviewWindowed>)>,
+fn dismiss_command_bar_from_native_monitor(
+    modal_q: Query<Entity, With<Modal>>,
     mut commands: Commands,
 ) {
     if !take_native_command_bar_dismiss_requested() {
@@ -1011,10 +1034,10 @@ fn sync_keyboard_target(
         for (browser_e, has_kb) in &content_q {
             if browser_e == layout {
                 if !has_kb {
-                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
                 }
             } else if has_kb {
-                commands.entity(browser_e).remove::<CefKeyboardTarget>();
+                commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
         suppress.0 = false;
@@ -1049,13 +1072,13 @@ fn sync_keyboard_target(
 
         if in_active {
             if !has_kb {
-                commands.entity(browser_e).insert(CefKeyboardTarget);
+                commands.entity(browser_e).try_insert(CefKeyboardTarget);
             }
             // Suppress CEF keyboard forwarding when a terminal is focused —
             // terminals receive input via the service, not CEF key events.
             suppress.0 = terminal_q.contains(browser_e);
         } else if has_kb {
-            commands.entity(browser_e).remove::<CefKeyboardTarget>();
+            commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
         }
     }
 }
@@ -1383,7 +1406,8 @@ fn sync_windowed_content_mesh_materials(
 ///
 /// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
 /// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
-/// visible leaves OSR running. Premultiplied alpha preserves CEF's accelerated transparent pixels.
+/// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
+/// transparent areas.
 fn sync_layout_mesh_visibility(
     mode: Res<vmux_layout::scene::InteractionMode>,
     layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
@@ -1398,8 +1422,8 @@ fn sync_layout_mesh_visibility(
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
         };
-        if material.base.alpha_mode != AlphaMode::Premultiplied {
-            material.base.alpha_mode = AlphaMode::Premultiplied;
+        if material.base.alpha_mode != AlphaMode::Blend {
+            material.base.alpha_mode = AlphaMode::Blend;
         }
         if material.base.base_color.alpha() != want_alpha {
             material.base.base_color.set_alpha(want_alpha);
@@ -1416,26 +1440,36 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     let mut query = world.query_filtered::<(
         Entity,
         Has<LayoutCef>,
+        Has<Modal>,
         Has<WebviewNativeOverlay>,
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<(Entity, bool, bool, bool)> = query.iter(world).collect();
-    let target_windowed = |_entity: Entity, is_layout: bool| base_windowed && !is_layout;
-    let target_native_overlay = |is_layout: bool| {
+    let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
+    let target_windowed =
+        |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
+    let target_native_overlay = |is_layout: bool, is_modal: bool| {
+        cfg!(target_os = "macos")
+            && mode == vmux_layout::scene::InteractionMode::User
+            && (is_layout || is_modal)
+    };
+    let target_native_direct_overlay = |is_layout: bool| {
         cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
     };
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &(entity, is_layout, actual_native_overlay, actual_direct_overlay) in &entities {
+        for &(entity, is_layout, is_modal, actual_native_overlay, actual_direct_overlay) in
+            &entities
+        {
             let has_browser = browsers.has_browser(entity);
             let actual_windowed = browsers.is_windowed(&entity);
-            let want_windowed = target_windowed(entity, is_layout);
-            let want_native_overlay = target_native_overlay(is_layout);
+            let want_windowed = target_windowed(is_layout, is_modal);
+            let want_native_overlay = target_native_overlay(is_layout, is_modal);
+            let want_native_direct_overlay = target_native_direct_overlay(is_layout);
             let needs_recreate = actual_windowed.is_some_and(|actual| actual != want_windowed)
                 || has_browser
                     && (actual_native_overlay != want_native_overlay
-                        || actual_direct_overlay != want_native_overlay);
+                        || actual_direct_overlay != want_native_direct_overlay);
             if needs_recreate {
                 recreate.push(entity);
             }
@@ -1447,14 +1481,15 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for (entity, is_layout, _, _) in entities {
-        let want_windowed = target_windowed(entity, is_layout);
-        let want_native_overlay = target_native_overlay(is_layout);
+    for (entity, is_layout, is_modal, _, _) in entities {
+        let want_windowed = target_windowed(is_layout, is_modal);
+        let want_native_overlay = target_native_overlay(is_layout, is_modal);
+        let want_native_direct_overlay = target_native_direct_overlay(is_layout);
         let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
         let overlay_matches =
             world.get::<WebviewNativeOverlay>(entity).is_some() == want_native_overlay;
         let direct_overlay_matches =
-            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_overlay;
+            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_direct_overlay;
         let needs_recreate = recreate.contains(&entity);
         if marker_matches && overlay_matches && direct_overlay_matches && !needs_recreate {
             continue;
@@ -1468,11 +1503,14 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             entity_mut.remove::<WebviewWindowed>();
         }
         if want_native_overlay {
-            entity_mut.insert((WebviewNativeOverlay, WebviewNativeDirectOverlay));
+            entity_mut.insert(WebviewNativeOverlay);
         } else {
-            entity_mut
-                .remove::<WebviewNativeOverlay>()
-                .remove::<WebviewNativeDirectOverlay>();
+            entity_mut.remove::<WebviewNativeOverlay>();
+        }
+        if want_native_direct_overlay {
+            entity_mut.insert(WebviewNativeDirectOverlay);
+        } else {
+            entity_mut.remove::<WebviewNativeDirectOverlay>();
         }
         if needs_recreate {
             entity_mut
@@ -1642,6 +1680,7 @@ fn sync_windowed_frames(
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
     mut last_visible_pages: Local<Vec<Entity>>,
     mut last_windowed_pages: Local<Vec<Entity>>,
+    mut visible_frames: Local<Vec<WindowedFrameRect>>,
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
@@ -1651,6 +1690,7 @@ fn sync_windowed_frames(
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
+    visible_frames.clear();
     for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
@@ -1722,6 +1762,7 @@ fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browsers.has_browser(entity) {
+            visible_frames.push(frame);
             let key = (
                 frame.left.round() as i32,
                 frame.top.round() as i32,
@@ -1747,6 +1788,7 @@ fn sync_windowed_frames(
     }
     *last_visible_pages = visible;
     *last_windowed_pages = current_windowed;
+    *visible_frames = set_native_windowed_page_frames(std::mem::take(&mut *visible_frames));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1765,6 +1807,50 @@ impl WindowedFrameRect {
     fn bottom(self) -> f32 {
         self.top + self.height
     }
+}
+
+#[cfg(target_os = "macos")]
+static NATIVE_WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(any(target_os = "macos", test))]
+fn windowed_frame_contains(frame: WindowedFrameRect, point: Vec2) -> bool {
+    point.x >= frame.left
+        && point.x <= frame.right()
+        && point.y >= frame.top
+        && point.y <= frame.bottom()
+}
+
+#[cfg(target_os = "macos")]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    let mut published = NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    std::mem::swap(&mut *published, &mut frames);
+    frames.clear();
+    frames
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
+    frames.clear();
+    frames
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
+    let point = Vec2::new(x_px, y_px);
+    NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .iter()
+        .copied()
+        .any(|frame| windowed_frame_contains(frame, point))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn native_windowed_page_contains_point(_: f32, _: f32) -> bool {
+    false
 }
 
 fn windowed_frame_rect_from_computed(
@@ -2159,7 +2245,6 @@ fn refresh_active_windowed_hover(
 }
 
 const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
-const LAYOUT_HOVER_FRAME_RATE: i32 = 30;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 const LAYOUT_INPUT_BURST: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -2170,18 +2255,43 @@ struct LayoutFrameRateState {
     dragging_layout: bool,
 }
 
+#[derive(Resource, Default)]
+struct LayoutFrameRateBurst {
+    last_emit: Option<std::time::Instant>,
+}
+
+fn request_layout_frame_burst(
+    trigger: On<BinHostEmitEvent>,
+    mut layouts: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    browsers: NonSend<Browsers>,
+    mut burst: ResMut<LayoutFrameRateBurst>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    if trigger.id != TABS_EVENT && trigger.id != STACKS_EVENT {
+        return;
+    }
+    let Ok(mut cap) = layouts.get_mut(trigger.webview) else {
+        return;
+    };
+    cap.0 = LAYOUT_ACTIVE_FRAME_RATE;
+    browsers.set_windowless_frame_rate(&trigger.webview, LAYOUT_ACTIVE_FRAME_RATE);
+    burst.last_emit = Some(std::time::Instant::now());
+    if let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
 fn layout_frame_rate(
     now: std::time::Instant,
     last_input: Option<std::time::Instant>,
-    hovered: bool,
+    native_activity: bool,
     dragging: bool,
 ) -> i32 {
-    if dragging
+    if native_activity
+        || dragging
         || last_input.is_some_and(|last| now.saturating_duration_since(last) < LAYOUT_INPUT_BURST)
     {
         LAYOUT_ACTIVE_FRAME_RATE
-    } else if hovered {
-        LAYOUT_HOVER_FRAME_RATE
     } else {
         LAYOUT_IDLE_FRAME_RATE
     }
@@ -2193,6 +2303,7 @@ fn sync_layout_cef_frame_rate(
     mut wheel_events: MessageReader<MouseWheel>,
     buttons: Res<ButtonInput<MouseButton>>,
     mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    burst: Res<LayoutFrameRateBurst>,
     mut state: Local<LayoutFrameRateState>,
 ) {
     let inside = native_layout_pointer_is_inside();
@@ -2221,7 +2332,12 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
-    let desired = layout_frame_rate(now, state.last_input, inside, state.dragging_layout);
+    let desired = layout_frame_rate(
+        now,
+        state.last_input.max(burst.last_emit),
+        native_layout_activity_active(),
+        state.dragging_layout,
+    );
     let Ok(mut cap) = layout_q.single_mut() else {
         return;
     };
@@ -2244,6 +2360,7 @@ const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
 const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
     LazyLock::new(|| Mutex::new(None));
+static NATIVE_COMMAND_BAR_OPEN: AtomicBool = AtomicBool::new(false);
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -2356,6 +2473,14 @@ fn set_native_command_bar_click_frame(frame: Option<CommandBarWindowedFrame>) {
     }
 }
 
+pub fn request_native_command_bar_dismiss() -> bool {
+    if !NATIVE_COMMAND_BAR_OPEN.load(Ordering::Relaxed) {
+        return false;
+    }
+    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
+    true
+}
+
 pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
     if !x_px.is_finite() || !y_px.is_finite() {
         return false;
@@ -2385,6 +2510,10 @@ fn command_bar_windowed_view_should_show(
     display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
 }
 
+fn command_bar_windowed_view_is_open(display: Display, has_keyboard_target: bool) -> bool {
+    display != Display::None && has_keyboard_target
+}
+
 fn command_bar_windowed_view_should_render_hidden(
     display: Display,
     visibility: Visibility,
@@ -2401,24 +2530,31 @@ fn sync_windowed_command_bar(
             &Node,
             &Visibility,
             Has<CefKeyboardTarget>,
+            Has<WebviewWindowed>,
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
-        (With<Modal>, With<WebviewWindowed>),
+        With<Modal>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut was_open: Local<bool>,
 ) {
     let matched = modal_q.single();
-    let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) = matched
+    let Ok((entity, node, visibility, has_keyboard_target, is_windowed, host_window, native_size)) =
+        matched
     else {
+        NATIVE_COMMAND_BAR_OPEN.store(false, Ordering::Relaxed);
         set_native_command_bar_click_frame(None);
         *was_open = false;
         return;
     };
     let open =
         command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
+    NATIVE_COMMAND_BAR_OPEN.store(
+        command_bar_windowed_view_is_open(node.display, has_keyboard_target),
+        Ordering::Relaxed,
+    );
     let render_hidden = command_bar_windowed_view_should_render_hidden(
         node.display,
         *visibility,
@@ -2426,8 +2562,10 @@ fn sync_windowed_command_bar(
     );
     if !open && !render_hidden {
         set_native_command_bar_click_frame(None);
-        browsers.set_windowed_focus(&entity, false);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            browsers.set_windowed_focus(&entity, false);
+            hide_windowed_command_bar(&browsers, entity);
+        }
         *was_open = false;
         return;
     }
@@ -2440,15 +2578,34 @@ fn sync_windowed_command_bar(
         .or_else(|| primary_window.single().ok());
     let Some(window_entity) = window_entity else {
         set_native_command_bar_click_frame(None);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            hide_windowed_command_bar(&browsers, entity);
+        }
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
         set_native_command_bar_click_frame(None);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            hide_windowed_command_bar(&browsers, entity);
+        }
         return;
     };
     let scale = window.resolution.scale_factor();
+    if !is_windowed {
+        let frame = if open {
+            native_size.map(|size| CommandBarWindowedFrame {
+                left_px: size.shell_left * scale,
+                top_px: size.shell_top * scale,
+                width_px: size.shell_width * scale,
+                height_px: size.shell_height * scale,
+            })
+        } else {
+            None
+        };
+        set_native_command_bar_click_frame(frame);
+        *was_open = open;
+        return;
+    }
     if render_hidden {
         set_native_command_bar_click_frame(None);
         let frame = command_bar_hidden_windowed_frame();
@@ -2504,7 +2661,7 @@ fn sync_windowed_command_bar(
     }
 }
 
-fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Added<PageReady>>) {
+fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
     for entity in &ready {
         browsers.nudge_windowed_repaint(&entity);
     }
@@ -2720,6 +2877,8 @@ fn sync_osr_webview_focus(
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
     let mut bookmark_input_target = None;
+    let window_visible = primary_window.visible;
+    let window_focused = primary_window.focused;
     for (
         entity,
         visibility,
@@ -2753,6 +2912,8 @@ fn sync_osr_webview_focus(
             if is_modal && has_keyboard_target {
                 modal_keyboard_target = Some((entity, is_windowed));
             }
+        } else if keep_hidden_osr_webview_warm(is_modal, is_windowed, window_visible) {
+            browsers.set_osr_not_hidden(&entity);
         } else {
             browsers.set_osr_hidden(&entity);
         }
@@ -2761,9 +2922,6 @@ fn sync_osr_webview_focus(
         return;
     }
     ready.sort_by_key(|e| e.to_bits());
-    let window_visible = primary_window.visible;
-    let window_focused = primary_window.focused;
-
     let active_stack_opt = focus.stack;
     let active_stack = active_stack_opt.and_then(|tab| {
         ready
@@ -2876,6 +3034,10 @@ fn webview_osr_should_run(
     pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
 }
 
+fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visible: bool) -> bool {
+    is_modal && !is_windowed && window_visible
+}
+
 fn choose_osr_active_webview(
     modal_keyboard_target: Option<(Entity, bool)>,
     active_stack: Option<Entity>,
@@ -2922,7 +3084,11 @@ fn should_show_osr_webview(
     stack_is_active || stack_is_previous_new_stack
 }
 
-fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands: Commands) {
+fn drain_loading_state(
+    receiver: Res<WebviewLoadingStateReceiver>,
+    mut commands: Commands,
+    mut completed: MessageWriter<WebviewLoadCompleted>,
+) {
     while let Ok(ev) = receiver.0.try_recv() {
         let Ok(mut ecmds) = commands.get_entity(ev.webview) else {
             continue;
@@ -2931,6 +3097,9 @@ fn drain_loading_state(receiver: Res<WebviewLoadingStateReceiver>, mut commands:
             ecmds.insert(Loading);
         } else {
             ecmds.remove::<Loading>();
+            completed.write(WebviewLoadCompleted {
+                webview: ev.webview,
+            });
         }
         ecmds.insert(NavigationState {
             can_go_back: ev.can_go_back,
@@ -3455,7 +3624,7 @@ fn push_pane_tree_emit(
     tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    expanded_panes: Query<(), With<SideSheetPaneExpanded>>,
+    collapsed_panes: Query<(), With<SideSheetCardCollapsed>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
@@ -3542,7 +3711,7 @@ fn push_pane_tree_emit(
         panes.push(PaneNode {
             id: pane_entity.to_bits(),
             is_active,
-            collapsed: !expanded_panes.contains(pane_entity),
+            collapsed: collapsed_panes.contains(pane_entity),
             projects_expanded: sections.projects,
             bookmarks_expanded: sections.bookmarks,
             knowledge_expanded: sections.knowledge,
@@ -4211,12 +4380,15 @@ fn on_side_sheet_command_emit(
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
+    mut last_activated: Query<&mut LastActivatedAt>,
     child_of: Query<&ChildOf>,
     tabs: Query<(), With<Tab>>,
     section_states: Query<&SideSheetSectionsExpanded, With<Tab>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
     mut messages: ResMut<Messages<AppCommand>>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut open_beside: MessageWriter<vmux_layout::OpenBesideRequest>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -4238,11 +4410,23 @@ fn on_side_sheet_command_emit(
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
                 return;
             };
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            commands.entity(target_stack).insert(LastActivatedAt::now());
+            let activated_at = LastActivatedAt::now();
+            if let Ok(mut value) = last_activated.get_mut(target_pane) {
+                *value = activated_at;
+            } else {
+                commands.entity(target_pane).insert(activated_at);
+            }
+            if let Ok(mut value) = last_activated.get_mut(target_stack) {
+                *value = activated_at;
+            } else {
+                commands.entity(target_stack).insert(activated_at);
+            }
 
             hover_intent.target = None;
             hover_intent.last_activation = Some(std::time::Instant::now());
+            if let Some(proxy) = proxy {
+                let _ = proxy.send_event(WinitUserEvent::WakeUp);
+            }
         }
         "close_stack" => {
             let Some(&target_stack) = stack_entities.get(evt.stack_index as usize) else {
@@ -4272,24 +4456,25 @@ fn on_side_sheet_command_emit(
         "collapse_card" => {
             commands
                 .entity(target_pane)
-                .remove::<SideSheetCardCollapsed>()
+                .insert(SideSheetCardCollapsed)
                 .remove::<SideSheetPaneExpanded>();
         }
         "expand_card" => {
             commands
                 .entity(target_pane)
                 .remove::<SideSheetCardCollapsed>()
-                .insert(SideSheetPaneExpanded);
+                .remove::<SideSheetPaneExpanded>();
         }
         "collapse_section" | "expand_section" => {
             let expanded = evt.command == "expand_section";
             if evt.path == "pane" {
                 let mut pane = commands.entity(target_pane);
-                pane.remove::<SideSheetCardCollapsed>();
                 if expanded {
-                    pane.insert(SideSheetPaneExpanded);
+                    pane.remove::<SideSheetCardCollapsed>()
+                        .remove::<SideSheetPaneExpanded>();
                 } else {
-                    pane.remove::<SideSheetPaneExpanded>();
+                    pane.insert(SideSheetCardCollapsed)
+                        .remove::<SideSheetPaneExpanded>();
                 }
                 return;
             }
@@ -4325,15 +4510,13 @@ fn on_side_sheet_command_emit(
             if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {
                 url.push_str(&format!("#L{}", evt.stack_index));
             }
-            commands.entity(target_pane).insert(LastActivatedAt::now());
-            let cmd = AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
-                url: Some(url),
-            }));
-            issued.write(vmux_command::CommandIssued {
-                caller,
-                command: cmd.clone(),
+            open_beside.write(vmux_layout::OpenBesideRequest {
+                pane: target_pane,
+                direction: None,
+                url,
+                request_id: [0; 16],
+                focus: true,
             });
-            messages.write(cmd);
         }
         "open_tools" => {
             commands.entity(target_pane).insert(LastActivatedAt::now());
@@ -5299,7 +5482,7 @@ mod tests {
             0.0,
             "User mode presents layout chrome through the native accelerated overlay"
         );
-        assert_eq!(mat.base.alpha_mode, AlphaMode::Premultiplied);
+        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]
@@ -5312,8 +5495,8 @@ mod tests {
         );
         assert_eq!(
             mat.base.alpha_mode,
-            AlphaMode::Premultiplied,
-            "Player uses premultiplied alpha so pages show through the layout's transparent areas"
+            AlphaMode::Blend,
+            "Player uses straight alpha so pages show through the layout's transparent areas"
         );
     }
 
@@ -5530,6 +5713,14 @@ mod tests {
             Some(&Visibility::Hidden),
             true
         ));
+    }
+
+    #[test]
+    fn hidden_osr_command_bar_stays_warm_for_reopen() {
+        assert!(keep_hidden_osr_webview_warm(true, false, true));
+        assert!(!keep_hidden_osr_webview_warm(false, false, true));
+        assert!(!keep_hidden_osr_webview_warm(true, true, true));
+        assert!(!keep_hidden_osr_webview_warm(true, false, false));
     }
 
     #[test]
@@ -5808,7 +5999,7 @@ mod tests {
     }
 
     #[test]
-    fn layout_cef_shell_keeps_premultiplied_material() {
+    fn layout_cef_shell_keeps_blend_material() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_app_settings_with_radius(12.0))
@@ -5818,7 +6009,7 @@ mod tests {
             .add_systems(Update, sync_webview_pane_corner_clip);
 
         let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Premultiplied;
+        material.base.alpha_mode = AlphaMode::Blend;
         let handle = app
             .world_mut()
             .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
@@ -5839,7 +6030,7 @@ mod tests {
             .expect("webview material");
 
         assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Premultiplied);
+        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]
@@ -5967,6 +6158,21 @@ mod tests {
     }
 
     #[test]
+    fn windowed_frame_hit_test_uses_physical_page_bounds() {
+        let frame = WindowedFrameRect {
+            left: 100.0,
+            top: 50.0,
+            width: 400.0,
+            height: 300.0,
+        };
+
+        assert!(windowed_frame_contains(frame, Vec2::new(100.0, 50.0)));
+        assert!(windowed_frame_contains(frame, Vec2::new(500.0, 350.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(99.0, 200.0)));
+        assert!(!windowed_frame_contains(frame, Vec2::new(300.0, 351.0)));
+    }
+
+    #[test]
     fn windowed_page_sync_sets_focus_ring_on_active_split_page() {
         let source = include_str!("lib.rs");
         let sync_fn = source
@@ -6046,7 +6252,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_shell_osr_for_wallpaper_glass() {
+    fn browser_mode_keeps_layout_and_command_bar_osr_for_native_overlays() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -6055,9 +6261,10 @@ mod tests {
             .unwrap_or_default();
 
         assert!(backend_fn.contains("Has<LayoutCef>"));
-        assert!(backend_fn.contains("!is_layout"));
+        assert!(backend_fn.contains("Has<Modal>"));
+        assert!(backend_fn.contains("!is_layout && !is_modal"));
         assert!(backend_fn.contains("WebviewNativeOverlay"));
-        assert!(!backend_fn.contains("With<Modal>"));
+        assert!(backend_fn.contains("target_native_direct_overlay"));
     }
 
     #[test]
@@ -6089,7 +6296,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_osr_and_windows_pages_and_modal_on_macos() {
+    fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -6130,13 +6337,14 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(terminal).is_some(),
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
+            app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -6187,8 +6395,14 @@ mod tests {
                 .is_some(),
             cfg!(target_os = "macos")
         );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert!(
+            app.world()
+                .get::<WebviewNativeDirectOverlay>(modal)
+                .is_none()
+        );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
@@ -6446,7 +6660,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_plugin_wires_windowed_command_bar_outside_click_dismiss() {
+    fn browser_plugin_wires_command_bar_outside_click_dismiss() {
         let source = include_str!("lib.rs");
         let plugin_build = source
             .split("impl Plugin for BrowserPlugin")
@@ -6454,7 +6668,7 @@ mod tests {
             .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
             .unwrap_or_default();
 
-        assert!(plugin_build.contains("dismiss_windowed_command_bar_from_native_monitor"));
+        assert!(plugin_build.contains("dismiss_command_bar_from_native_monitor"));
         assert!(plugin_build.contains("dismiss_windowed_command_bar_on_outside_click"));
         assert!(plugin_build.contains("run_if(on_message::<MouseButtonInput>)"));
     }
@@ -6615,7 +6829,7 @@ mod tests {
         );
         assert_eq!(
             layout_frame_rate(now, None, true, false),
-            LAYOUT_HOVER_FRAME_RATE
+            LAYOUT_ACTIVE_FRAME_RATE
         );
         assert_eq!(
             layout_frame_rate(now, Some(now), false, false),
@@ -6623,6 +6837,56 @@ mod tests {
         );
         assert_eq!(
             layout_frame_rate(now, None, true, true),
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
+    }
+
+    #[test]
+    fn layout_host_emit_requests_frame_burst() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<LayoutFrameRateBurst>()
+            .add_observer(request_layout_frame_burst);
+        app.world_mut().insert_non_send(Browsers::default());
+        let other = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .trigger(BinHostEmitEvent::from_bytes(other, "other", Vec::new()));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_none()
+        );
+
+        let layout = app
+            .world_mut()
+            .spawn((LayoutCef, WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE)))
+            .id();
+        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+            layout,
+            PANE_TREE_EVENT,
+            Vec::new(),
+        ));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_none()
+        );
+        assert_eq!(
+            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
+            LAYOUT_IDLE_FRAME_RATE
+        );
+        app.world_mut()
+            .trigger(BinHostEmitEvent::from_bytes(layout, "tabs", Vec::new()));
+        assert!(
+            app.world()
+                .resource::<LayoutFrameRateBurst>()
+                .last_emit
+                .is_some()
+        );
+        assert_eq!(
+            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
             LAYOUT_ACTIVE_FRAME_RATE
         );
     }
@@ -6698,6 +6962,7 @@ mod tests {
 
     #[test]
     fn command_bar_windowed_view_shows_hidden_pending_view_for_renderer_ack() {
+        assert!(command_bar_windowed_view_is_open(Display::Flex, true));
         assert!(!command_bar_windowed_view_should_show(
             Display::Flex,
             Visibility::Hidden,

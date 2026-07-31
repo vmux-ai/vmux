@@ -537,6 +537,17 @@ fn on_status_request(
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
+    if !crate::runner::has_repository(&path) {
+        outbox
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(GitOutboxItem::Events {
+                webview,
+                emits: vec![Emit::Status(crate::runner::non_repository_status())],
+            });
+        return;
+    }
     let repo_root = if let Some(mut watch) = watch {
         watch.subscribe(webview, &path)
     } else {

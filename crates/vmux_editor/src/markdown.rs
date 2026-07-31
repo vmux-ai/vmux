@@ -42,6 +42,7 @@ enum Frame {
     Sink(Vec<MdBlock>),
 }
 
+#[derive(Clone)]
 pub struct ParsedNote {
     pub title: String,
     pub properties: Vec<vmux_core::knowledge::KnowledgeProperty>,
@@ -179,6 +180,53 @@ fn offset_to_line(line_starts: &[usize], byte: usize) -> u32 {
 
 pub fn parse_note(text: &str) -> Vec<NoteBlock> {
     parse_note_document(text).blocks
+}
+
+fn note_block_content_end(block: &NoteBlock) -> u32 {
+    if matches!(block.block, MdBlock::CodeBlock { .. }) {
+        return block.end_line;
+    }
+    let line_count = block
+        .source
+        .trim_end_matches(['\r', '\n'])
+        .lines()
+        .count()
+        .max(1) as u32;
+    block
+        .start_line
+        .saturating_add(line_count)
+        .min(block.end_line)
+}
+
+pub fn note_vertical_target(blocks: &[NoteBlock], line: u32, direction: i8) -> Option<u32> {
+    let adjacent = if direction > 0 {
+        line.saturating_add(1)
+    } else {
+        match line.checked_sub(1) {
+            Some(line) => line,
+            None => return Some(line),
+        }
+    };
+    if blocks
+        .iter()
+        .any(|block| block.start_line <= adjacent && adjacent < note_block_content_end(block))
+    {
+        return None;
+    }
+    if direction > 0 {
+        blocks
+            .iter()
+            .find(|block| block.start_line > line)
+            .map(|block| block.start_line)
+            .or(Some(line))
+    } else {
+        blocks
+            .iter()
+            .rev()
+            .find(|block| note_block_content_end(block) <= line)
+            .map(|block| note_block_content_end(block).saturating_sub(1))
+            .or(Some(line))
+    }
 }
 
 pub fn parse_note_document(text: &str) -> ParsedNote {
@@ -478,6 +526,35 @@ mod tests {
         assert_eq!(blocks[0].start_line, 0);
         assert_eq!(blocks[1].start_line, 2);
         assert_eq!(blocks[2].start_line, 4);
+    }
+
+    #[test]
+    fn note_vertical_navigation_skips_block_separators() {
+        let blocks = parse_note("first\nline\n\nsecond\nline\n");
+        assert_eq!(note_vertical_target(&blocks, 1, 1), Some(3));
+        assert_eq!(note_vertical_target(&blocks, 3, -1), Some(1));
+        assert_eq!(note_vertical_target(&blocks, 0, 1), None);
+        assert_eq!(note_vertical_target(&blocks, 4, -1), None);
+        assert_eq!(note_vertical_target(&blocks, 0, -1), Some(0));
+        assert_eq!(note_vertical_target(&blocks, 4, 1), Some(4));
+    }
+
+    #[test]
+    fn note_vertical_navigation_keeps_blank_code_lines() {
+        let blocks = parse_note("```text\none\n\ntwo\n```\n\nafter\n");
+        assert_eq!(note_vertical_target(&blocks, 1, 1), None);
+        assert_eq!(note_vertical_target(&blocks, 2, 1), None);
+        assert_eq!(note_vertical_target(&blocks, 4, 1), Some(6));
+    }
+
+    #[test]
+    fn note_vertical_navigation_leaves_a_list_for_the_following_paragraph() {
+        let blocks = parse_note("- `vmux/` — references.\n\nThis structure is a starting point.\n");
+        assert_eq!(blocks[0].start_line, 0);
+        assert_eq!(blocks[0].end_line, 2);
+        assert_eq!(blocks[1].start_line, 2);
+        assert_eq!(note_vertical_target(&blocks, 0, 1), Some(2));
+        assert_eq!(note_vertical_target(&blocks, 2, -1), Some(0));
     }
 
     #[test]

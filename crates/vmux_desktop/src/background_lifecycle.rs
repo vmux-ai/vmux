@@ -1,21 +1,27 @@
 use bevy::ecs::message::Messages;
+use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
+use bevy::render::{Render, RenderApp, RenderScheduleOrder};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
+#[cfg(target_os = "macos")]
+use bevy_cef::prelude::WebviewWindowed;
 use bevy_cef_core::prelude::{
     Browsers, MessageLoopWakePolicy, windowless_frame_interval_from_refresh_millihertz,
 };
 #[cfg(target_os = "macos")]
 use std::ptr::NonNull;
 #[cfg(target_os = "macos")]
-use std::sync::Arc;
-#[cfg(target_os = "macos")]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
 use vmux_layout::scene::InteractionMode;
+#[cfg(target_os = "macos")]
+use vmux_layout::{cef::LayoutCef, window::Modal};
 #[cfg(feature = "tray")]
 use vmux_terminal as terminal;
 #[cfg(feature = "tray")]
@@ -29,6 +35,130 @@ const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 #[cfg(target_os = "macos")]
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
+#[cfg(target_os = "macos")]
+const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
+
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
+struct RenderFrameDemand(bool);
+
+impl Default for RenderFrameDemand {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct DemandedRender;
+
+#[cfg(any(target_os = "macos", test))]
+fn windowed_pointer_inside_after_event(
+    pointer_position_changed: bool,
+    previous: bool,
+    sampled: bool,
+) -> bool {
+    if pointer_position_changed {
+        sampled
+    } else {
+        previous
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn native_scroll_should_wake(
+    layout_pointer_inside: bool,
+    sampled_over_windowed_page: bool,
+) -> bool {
+    layout_pointer_inside || !sampled_over_windowed_page
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct NativeWindowFrame {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NativeResizeEdges {
+    left: bool,
+    right: bool,
+    bottom: bool,
+    top: bool,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl NativeResizeEdges {
+    fn any(self) -> bool {
+        self.left || self.right || self.bottom || self.top
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Clone, Copy, Debug)]
+struct NativeWindowResizeDrag {
+    frame: NativeWindowFrame,
+    cursor_x: f64,
+    cursor_y: f64,
+    min_width: f64,
+    min_height: f64,
+    edges: NativeResizeEdges,
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn native_resize_edges(
+    frame: NativeWindowFrame,
+    cursor_x: f64,
+    cursor_y: f64,
+    grip: f64,
+) -> NativeResizeEdges {
+    let right = frame.x + frame.width;
+    let top = frame.y + frame.height;
+    let within_x = cursor_x >= frame.x - grip && cursor_x <= right + grip;
+    let within_y = cursor_y >= frame.y - grip && cursor_y <= top + grip;
+    NativeResizeEdges {
+        left: within_y && (cursor_x - frame.x).abs() <= grip,
+        right: within_y && (cursor_x - right).abs() <= grip,
+        bottom: within_x && (cursor_y - frame.y).abs() <= grip,
+        top: within_x && (cursor_y - top).abs() <= grip,
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn resized_native_window_frame(
+    drag: NativeWindowResizeDrag,
+    cursor_x: f64,
+    cursor_y: f64,
+) -> NativeWindowFrame {
+    let mut frame = drag.frame;
+    let delta_x = cursor_x - drag.cursor_x;
+    let delta_y = cursor_y - drag.cursor_y;
+    if drag.edges.left {
+        let right = drag.frame.x + drag.frame.width;
+        frame.x = drag.frame.x + delta_x;
+        frame.width = drag.frame.width - delta_x;
+        if frame.width < drag.min_width {
+            frame.width = drag.min_width;
+            frame.x = right - drag.min_width;
+        }
+    } else if drag.edges.right {
+        frame.width = (drag.frame.width + delta_x).max(drag.min_width);
+    }
+    if drag.edges.bottom {
+        let top = drag.frame.y + drag.frame.height;
+        frame.y = drag.frame.y + delta_y;
+        frame.height = drag.frame.height - delta_y;
+        if frame.height < drag.min_height {
+            frame.height = drag.min_height;
+            frame.y = top - drag.min_height;
+        }
+    } else if drag.edges.top {
+        frame.height = (drag.frame.height + delta_y).max(drag.min_height);
+    }
+    frame
+}
 
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
@@ -44,6 +174,7 @@ pub struct BackgroundLifecyclePlugin;
 impl Plugin for BackgroundLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LifecycleEvent>()
+            .init_resource::<RenderFrameDemand>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
             .add_systems(Update, activate_app_during_boot)
@@ -53,6 +184,7 @@ impl Plugin for BackgroundLifecyclePlugin {
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             )
             .add_systems(Update, grab_key_window_on_pane_hover)
+            .add_systems(Last, sync_render_frame_demand)
             .add_systems(Last, keep_awake_while_player_active)
             .add_systems(
                 Startup,
@@ -62,6 +194,37 @@ impl Plugin for BackgroundLifecyclePlugin {
                     activate_primary_window_on_startup,
                 ),
             );
+    }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        let Some(mut extract) = render_app.take_extract() else {
+            return;
+        };
+        render_app
+            .init_resource::<RenderFrameDemand>()
+            .add_schedule(Schedule::new(DemandedRender))
+            .add_systems(DemandedRender, run_demanded_render);
+        {
+            let mut order = render_app.world_mut().resource_mut::<RenderScheduleOrder>();
+            for label in &mut order.labels {
+                if (**label).eq(&Render) {
+                    *label = DemandedRender.intern();
+                }
+            }
+        }
+        render_app.set_extract(move |main_world, render_world| {
+            let demand = main_world
+                .get_resource::<RenderFrameDemand>()
+                .copied()
+                .unwrap_or_default();
+            render_world.insert_resource(demand);
+            if demand.0 {
+                extract(main_world, render_world);
+            }
+        });
     }
 }
 
@@ -73,6 +236,8 @@ static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
 static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+static NATIVE_WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "macos")]
 fn activate_primary_window_on_startup(
@@ -253,6 +418,9 @@ fn activate_app_during_boot() {}
 type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
 #[cfg(target_os = "macos")]
+type NativeDebounce = Arc<dyn Fn() + Send + Sync>;
+
+#[cfg(target_os = "macos")]
 fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> NativeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
@@ -301,6 +469,93 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
 }
 
 #[cfg(target_os = "macos")]
+fn native_debounce(
+    name: &'static str,
+    delay: Duration,
+    action: impl Fn() + Send + 'static,
+) -> NativeDebounce {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(move || {
+            while rx.recv().is_ok() {
+                loop {
+                    match rx.recv_timeout(delay) {
+                        Ok(()) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                            action();
+                            break;
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+            }
+        })
+        .unwrap_or_else(|error| panic!("failed to spawn {name}: {error}"));
+    Arc::new(move || {
+        let _ = tx.try_send(());
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn begin_native_window_resize(event: &objc2_app_kit::NSEvent) -> Option<NativeWindowResizeDrag> {
+    use objc2_app_kit::{NSEvent, NSWindowStyleMask};
+
+    let mtm = objc2::MainThreadMarker::new()?;
+    let window = event.window(mtm)?;
+    let style = window.styleMask();
+    if style.contains(NSWindowStyleMask::FullScreen) {
+        return None;
+    }
+    if !style.contains(NSWindowStyleMask::Resizable) {
+        window.setStyleMask(style | NSWindowStyleMask::Resizable);
+    }
+    let frame = window.frame();
+    let cursor = NSEvent::mouseLocation();
+    let frame = NativeWindowFrame {
+        x: frame.origin.x,
+        y: frame.origin.y,
+        width: frame.size.width,
+        height: frame.size.height,
+    };
+    let edges = native_resize_edges(frame, cursor.x, cursor.y, 8.0);
+    if !edges.any() {
+        return None;
+    }
+    let min_size = window.minSize();
+    Some(NativeWindowResizeDrag {
+        frame,
+        cursor_x: cursor.x,
+        cursor_y: cursor.y,
+        min_width: min_size.width.max(1.0),
+        min_height: min_size.height.max(1.0),
+        edges,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindowResizeDrag) {
+    use objc2_app_kit::NSEvent;
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let Some(window) = event.window(mtm) else {
+        return;
+    };
+    let cursor = NSEvent::mouseLocation();
+    let frame = resized_native_window_frame(drag, cursor.x, cursor.y);
+    window.setFrame_display(
+        NSRect::new(
+            NSPoint::new(frame.x, frame.y),
+            NSSize::new(frame.width, frame.height),
+        ),
+        true,
+    );
+}
+
+#[cfg(target_os = "macos")]
 fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
@@ -311,18 +566,68 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         return;
     }
     let proxy = (**proxy).clone();
+    let settle_proxy = proxy.clone();
     let wake = native_throttle("native-mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     });
+    let settle_layout = native_debounce(
+        "native-layout-activity-settle",
+        NATIVE_LAYOUT_ACTIVITY_SETTLE,
+        move || {
+            vmux_browser::set_native_layout_activity(false);
+            let _ = settle_proxy.send_event(WinitUserEvent::WakeUp);
+        },
+    );
     let flush_layout = native_throttle("native-layout-pointer-throttle", || {
         dispatch2::DispatchQueue::main().exec_async(|| {
             vmux_browser::flush_native_layout_pointer_move();
         });
     });
+    let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
+    let local_resize_drag = Arc::clone(&resize_drag);
     let local_wake = wake.clone();
     let local_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         let event_type = ev.r#type();
+        let capture_window_resize = match event_type {
+            NSEventType::LeftMouseDown => {
+                let drag = begin_native_window_resize(ev);
+                *local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = drag;
+                if drag.is_some() {
+                    IN_LIVE_RESIZE.store(true, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+            NSEventType::LeftMouseDragged => {
+                let drag = *local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(drag) = drag {
+                    update_native_window_resize(ev, drag);
+                    true
+                } else {
+                    false
+                }
+            }
+            NSEventType::LeftMouseUp => {
+                let drag = local_resize_drag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                if let Some(drag) = drag {
+                    update_native_window_resize(ev, drag);
+                    IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
         if event_type == NSEventType::LeftMouseDown {
             vmux_browser::set_native_left_mouse_down(true);
         } else if event_type == NSEventType::LeftMouseUp {
@@ -344,12 +649,25 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 | NSEventType::OtherMouseDown
                 | NSEventType::OtherMouseUp
         );
+        let scroll = event_type == NSEventType::ScrollWheel;
         let location = event_location_in_window_physical_px(ev);
+        let pointer_position_changed = motion || button_event;
+        let was_over_windowed_page = NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
+        let sampled_over_windowed_page =
+            location.is_some_and(|(x, y)| vmux_browser::native_windowed_page_contains_point(x, y));
+        let over_windowed_page = windowed_pointer_inside_after_event(
+            pointer_position_changed,
+            was_over_windowed_page,
+            sampled_over_windowed_page,
+        );
+        if pointer_position_changed {
+            NATIVE_WINDOWED_POINTER_INSIDE.store(over_windowed_page, Ordering::Relaxed);
+        }
         let buttons = native_mouse_buttons();
-        if let Some((x, y)) = location {
+        if pointer_position_changed && let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        let layout_pointer = (motion || button_event)
+        let layout_pointer = pointer_position_changed
             .then(|| {
                 location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
             })
@@ -369,26 +687,50 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 && result.owns_pointer
                 && result.presenter_active
             {
+                let activity_started = vmux_browser::set_native_layout_activity(true);
+                settle_layout();
                 if result.region_changed {
                     vmux_browser::flush_native_layout_pointer_move();
                     local_wake(interval);
                 } else if result.pending {
                     flush_layout(interval);
                 }
+                if activity_started && !result.region_changed {
+                    local_wake(interval);
+                }
             } else {
-                HOVER_OVER_PANE.store(true, Ordering::Relaxed);
-                local_wake(interval);
+                vmux_browser::set_native_layout_activity(false);
+                if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
+                    HOVER_OVER_PANE.store(true, Ordering::Relaxed);
+                    local_wake(interval);
+                }
+            }
+        } else if scroll {
+            if native_scroll_should_wake(
+                vmux_browser::native_layout_pointer_is_inside(),
+                sampled_over_windowed_page,
+            ) {
+                local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
-            if layout_pointer.is_some_and(|result| {
-                result.owns_pointer && result.presenter_active && result.pending
-            }) {
-                vmux_browser::flush_native_layout_pointer_move();
+            if let Some(result) = layout_pointer
+                && result.owns_pointer
+                && result.presenter_active
+            {
+                vmux_browser::set_native_layout_activity(true);
+                settle_layout();
+                if result.pending {
+                    vmux_browser::flush_native_layout_pointer_move();
+                }
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
+        if capture_window_resize {
+            return std::ptr::null_mut();
+        }
         event.as_ptr()
     });
+    let global_resize_drag = Arc::clone(&resize_drag);
     let global_wake = wake.clone();
     let global_block = block2::RcBlock::new(move |event: NonNull<NSEvent>| {
         let event_type = unsafe { event.as_ref() }.r#type();
@@ -396,6 +738,11 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             vmux_browser::set_native_left_mouse_down(true);
         } else if event_type == NSEventType::LeftMouseUp {
             vmux_browser::set_native_left_mouse_down(false);
+            global_resize_drag
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            IN_LIVE_RESIZE.store(false, Ordering::Relaxed);
         }
         vmux_layout::native_pointer::publish_buttons(native_mouse_buttons());
         global_wake(NATIVE_MOUSE_MOVE_WAKE_INTERVAL);
@@ -504,6 +851,14 @@ fn event_location_in_window_physical_px(event: &objc2_app_kit::NSEvent) -> Optio
 }
 
 #[cfg(target_os = "macos")]
+fn event_window_is_key(event: &objc2_app_kit::NSEvent) -> bool {
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return false;
+    };
+    event.window(mtm).is_some_and(|window| window.isKeyWindow())
+}
+
+#[cfg(target_os = "macos")]
 fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
     let pressed = objc2_app_kit::NSEvent::pressedMouseButtons();
     bevy_cef_core::prelude::NativeMouseButtons {
@@ -516,13 +871,13 @@ fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
 /// `react_to_device_events` is off in browse (User) mode: native CEF views own scroll/input, so only
 /// Player mode's free camera consumes `AccumulatedMouseMotion`.
 ///
-/// At rest window events wake rendering except while native layout chrome owns the pointer. Layout
-/// hover and scroll then use the explicit 30Hz native monitor wake instead of rendering once per
-/// raw macOS pointer event. During live resize the 16ms timer caps rendering near 60Hz.
+/// At rest window events wake rendering except while native CEF content owns the pointer. Native
+/// hover and scroll then use explicit monitor wakes instead of rendering once per raw macOS pointer
+/// event. During live resize the 16ms timer caps rendering near 60Hz.
 pub(crate) fn foreground_winit_settings(
     player: bool,
     live_resize: bool,
-    layout_pointer_inside: bool,
+    native_pointer_inside: bool,
 ) -> WinitSettings {
     let focused_mode = if live_resize {
         UpdateMode::Reactive {
@@ -536,7 +891,7 @@ pub(crate) fn foreground_winit_settings(
             wait: FOCUSED_FRAME_INTERVAL,
             react_to_device_events: player,
             react_to_user_events: true,
-            react_to_window_events: player || !layout_pointer_inside,
+            react_to_window_events: player || !native_pointer_inside,
         }
     };
     WinitSettings {
@@ -567,16 +922,17 @@ fn sync_winit_power_mode(
     #[cfg(not(target_os = "macos"))]
     let live_resize = false;
     #[cfg(target_os = "macos")]
-    let layout_pointer_inside = vmux_browser::native_layout_pointer_is_inside();
+    let native_pointer_inside = vmux_browser::native_layout_pointer_is_inside()
+        || NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
     #[cfg(not(target_os = "macos"))]
-    let layout_pointer_inside = false;
+    let native_pointer_inside = false;
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
         foreground_winit_settings(
             *mode == InteractionMode::Player,
             live_resize,
-            layout_pointer_inside,
+            native_pointer_inside,
         )
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
@@ -590,6 +946,51 @@ fn sync_winit_power_mode(
             any_focused,
             foreground_cef_wake_interval(monitors.iter().map(|m| m.refresh_rate_millihertz)),
         ));
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn render_frame_should_run(
+    mode: InteractionMode,
+    transition_active: bool,
+    live_resize: bool,
+    visible_windowed_page: bool,
+) -> bool {
+    mode == InteractionMode::Player || transition_active || live_resize || !visible_windowed_page
+}
+
+#[cfg(target_os = "macos")]
+fn sync_render_frame_demand(
+    mode: Res<InteractionMode>,
+    transition: Option<Res<vmux_layout::scene::ModeTransition>>,
+    pages: Query<
+        &Transform,
+        (
+            With<vmux_layout::Browser>,
+            With<WebviewWindowed>,
+            Without<LayoutCef>,
+            Without<Modal>,
+        ),
+    >,
+    mut demand: ResMut<RenderFrameDemand>,
+) {
+    let visible_windowed_page = pages.iter().any(|transform| transform.scale.x > 1.0e-3);
+    demand.0 = render_frame_should_run(
+        *mode,
+        transition.is_some(),
+        IN_LIVE_RESIZE.load(Ordering::Relaxed),
+        visible_windowed_page,
+    );
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sync_render_frame_demand(mut demand: ResMut<RenderFrameDemand>) {
+    demand.0 = true;
+}
+
+fn run_demanded_render(world: &mut World) {
+    if world.resource::<RenderFrameDemand>().0 {
+        world.run_schedule(Render);
     }
 }
 
@@ -728,6 +1129,144 @@ fn hide_all_osr_webviews(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_window_resize_detects_edges_and_corners() {
+        let frame = NativeWindowFrame {
+            x: 100.0,
+            y: 100.0,
+            width: 800.0,
+            height: 600.0,
+        };
+
+        assert_eq!(
+            native_resize_edges(frame, 100.0, 100.0, 8.0),
+            NativeResizeEdges {
+                left: true,
+                bottom: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            native_resize_edges(frame, 900.0, 700.0, 8.0),
+            NativeResizeEdges {
+                right: true,
+                top: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            native_resize_edges(frame, 500.0, 100.0, 8.0),
+            NativeResizeEdges {
+                bottom: true,
+                ..Default::default()
+            }
+        );
+        assert!(!native_resize_edges(frame, 500.0, 400.0, 8.0).any());
+    }
+
+    #[test]
+    fn native_corner_resize_updates_both_axes_and_clamps_minimum() {
+        let drag = NativeWindowResizeDrag {
+            frame: NativeWindowFrame {
+                x: 100.0,
+                y: 100.0,
+                width: 800.0,
+                height: 600.0,
+            },
+            cursor_x: 100.0,
+            cursor_y: 100.0,
+            min_width: 200.0,
+            min_height: 120.0,
+            edges: NativeResizeEdges {
+                left: true,
+                bottom: true,
+                ..Default::default()
+            },
+        };
+
+        assert_eq!(
+            resized_native_window_frame(drag, 150.0, 150.0),
+            NativeWindowFrame {
+                x: 150.0,
+                y: 150.0,
+                width: 750.0,
+                height: 550.0,
+            }
+        );
+        assert_eq!(
+            resized_native_window_frame(drag, 850.0, 650.0),
+            NativeWindowFrame {
+                x: 700.0,
+                y: 580.0,
+                width: 200.0,
+                height: 120.0,
+            }
+        );
+    }
+
+    #[test]
+    fn user_mode_skips_bevy_render_when_native_page_is_visible() {
+        assert!(!render_frame_should_run(
+            InteractionMode::User,
+            false,
+            false,
+            true,
+        ));
+        assert!(render_frame_should_run(
+            InteractionMode::Player,
+            false,
+            false,
+            true,
+        ));
+        assert!(render_frame_should_run(
+            InteractionMode::User,
+            true,
+            false,
+            true,
+        ));
+        assert!(render_frame_should_run(
+            InteractionMode::User,
+            false,
+            true,
+            true,
+        ));
+        assert!(render_frame_should_run(
+            InteractionMode::User,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn render_schedule_runs_only_when_demanded() {
+        #[derive(Resource, Default)]
+        struct RenderRuns(usize);
+
+        fn count_render(mut runs: ResMut<RenderRuns>) {
+            runs.0 += 1;
+        }
+
+        let mut world = World::new();
+        world.insert_resource(RenderFrameDemand(false));
+        world.init_resource::<RenderRuns>();
+
+        let mut render = Schedule::new(Render);
+        render.add_systems(count_render);
+        world.add_schedule(render);
+
+        let mut demanded = Schedule::new(DemandedRender);
+        demanded.add_systems(run_demanded_render);
+        world.add_schedule(demanded);
+
+        world.run_schedule(DemandedRender);
+        assert_eq!(world.resource::<RenderRuns>().0, 0);
+
+        world.resource_mut::<RenderFrameDemand>().0 = true;
+        world.run_schedule(DemandedRender);
+        assert_eq!(world.resource::<RenderRuns>().0, 1);
+    }
 
     #[test]
     fn player_frame_demand_only_runs_for_player_or_transition() {
@@ -921,6 +1460,21 @@ mod tests {
     }
 
     #[test]
+    fn scroll_preserves_windowed_page_pointer_ownership() {
+        assert!(windowed_pointer_inside_after_event(false, true, false));
+        assert!(!windowed_pointer_inside_after_event(false, false, true));
+        assert!(!windowed_pointer_inside_after_event(true, true, false));
+        assert!(windowed_pointer_inside_after_event(true, false, true));
+    }
+
+    #[test]
+    fn native_scroll_wakes_bevy_only_for_layout_or_non_windowed_content() {
+        assert!(!native_scroll_should_wake(false, true));
+        assert!(native_scroll_should_wake(true, true));
+        assert!(native_scroll_should_wake(false, false));
+    }
+
+    #[test]
     fn native_mouse_motion_publishes_latest_sample_before_waking() {
         let source = include_str!("background_lifecycle.rs");
         let monitor = source
@@ -957,23 +1511,6 @@ mod tests {
         assert!(!throttle.contains("while wake_rx.try_recv().is_ok()"));
         assert!(!throttle.contains("thread_pending_interval_ns.store"));
         assert!(!throttle.contains("LAST_NATIVE_MOUSE_WAKE.lock()"));
-    }
-
-    #[test]
-    fn native_layout_motion_skips_bevy_wake_after_entry() {
-        let source = include_str!("background_lifecycle.rs");
-        let monitor = source
-            .split("fn install_native_mouse_wake_monitor")
-            .nth(1)
-            .and_then(|tail| tail.split("fn foreground_winit_settings").next())
-            .unwrap_or_default();
-
-        assert!(monitor.contains("result.owns_pointer"));
-        assert!(monitor.contains("result.presenter_active"));
-        assert!(monitor.contains(
-            "if result.region_changed {\n                    vmux_browser::flush_native_layout_pointer_move();\n                    local_wake(interval);\n                } else if result.pending {\n                    flush_layout(interval);\n                }"
-        ));
-        assert!(monitor.contains("layout_pointer.is_some_and"));
     }
 
     #[test]

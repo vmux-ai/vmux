@@ -4,6 +4,8 @@ pub use vmux_core::{CursorPos, EditMode, SelSpan};
 pub enum Motion {
     Left,
     Right,
+    LeftBounded,
+    RightBounded,
     Up,
     Down,
     WordNext,
@@ -16,6 +18,8 @@ pub enum Motion {
     DocEnd,
     PageUp,
     PageDown,
+    ParagraphPrev,
+    ParagraphNext,
     GotoLine(u32),
 }
 
@@ -39,6 +43,7 @@ pub enum EditCommand {
     Cut,
     Paste,
     PasteBefore,
+    ScrollViewport(i32),
     SetMode(EditMode),
     Undo,
     Redo,

@@ -18,6 +18,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 notify = { workspace = true }
+vmux_git = { path = "../vmux_git" }
 vmux_layout = { path = "../vmux_layout" }
 
 [dev-dependencies]

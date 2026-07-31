@@ -28,6 +28,12 @@ pub struct PreparedRuntime {
     pub granted_host_permissions: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PrepareRuntimeError {
+    Corrupt(String),
+    Infrastructure(String),
+}
+
 #[derive(serde::Serialize)]
 pub(crate) struct BridgeConfig<'a> {
     pub endpoint: &'a str,
@@ -37,51 +43,62 @@ pub(crate) struct BridgeConfig<'a> {
     pub conformance: bool,
 }
 
-pub fn prepare_runtime_in(
+pub(crate) fn prepare_runtime_in(
     root: &Path,
     runtime_store: &Path,
     profile: &str,
     entry: &store::ExtEntry,
-) -> Result<PreparedRuntime, String> {
+) -> Result<PreparedRuntime, PrepareRuntimeError> {
     let expected_source = store::source_dir(root, &entry.id, &entry.version);
     let source = if expected_source.exists() {
         expected_source
     } else {
-        store::migrate_legacy_package(root, entry)?
+        store::migrate_legacy_package(root, entry).map_err(PrepareRuntimeError::Infrastructure)?
     };
-    let source_hash = store::tree_sha256(&source)?;
+    let source_hash = store::tree_sha256(&source).map_err(PrepareRuntimeError::Infrastructure)?;
     if !entry.source_hash.is_empty() && source_hash != entry.source_hash {
-        return Err(format!("source hash mismatch for {}", entry.id));
+        return Err(PrepareRuntimeError::Corrupt(format!(
+            "source hash mismatch for {}",
+            entry.id
+        )));
     }
 
-    let worker_source = render_worker_source()?;
-    let runtime_hash = runtime_hash(&source_hash, &worker_source)?;
+    let worker_source = render_worker_source().map_err(PrepareRuntimeError::Infrastructure)?;
+    let runtime_hash =
+        runtime_hash(&source_hash, &worker_source).map_err(PrepareRuntimeError::Infrastructure)?;
     let runtime_root = store::runtime_profile_dir(runtime_store, profile, &entry.id);
-    std::fs::create_dir_all(&runtime_root).map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&runtime_root)
+        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
     let temp_dir = runtime_root.join(format!("current-{runtime_hash}.tmp"));
     let final_dir = runtime_root.join("current");
     if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).map_err(|error| error.to_string())?;
+        std::fs::remove_dir_all(&temp_dir)
+            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
     }
-    copy_tree(&source, &temp_dir)?;
+    copy_tree(&source, &temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
     if let Some(key) = entry.public_key_b64.as_deref() {
-        manifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())?;
+        manifest::prepare_unpacked(&temp_dir, key, entry.popup.as_deref())
+            .map_err(PrepareRuntimeError::Infrastructure)?;
     }
     std::fs::write(temp_dir.join("vmux_runtime.js"), worker_source)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
     std::fs::write(temp_dir.join("vmux_bridge.html"), BRIDGE_HTML)
-        .map_err(|error| error.to_string())?;
-    install_content_script(&temp_dir)?;
-    let loader = shim::install_worker_loader(&temp_dir, "vmux_runtime.js")?;
+        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+    install_content_script(&temp_dir).map_err(PrepareRuntimeError::Infrastructure)?;
+    let loader = shim::install_worker_loader(&temp_dir, "vmux_runtime.js")
+        .map_err(PrepareRuntimeError::Infrastructure)?;
     if let Some(popup) = entry.popup.as_deref() {
-        shim::install_page_loader(&temp_dir, popup)?;
+        shim::install_page_loader(&temp_dir, popup).map_err(PrepareRuntimeError::Infrastructure)?;
     }
-    validate_runtime(&temp_dir, &loader)?;
+    validate_runtime(&temp_dir, &loader).map_err(PrepareRuntimeError::Infrastructure)?;
     if final_dir.exists() {
-        std::fs::remove_dir_all(&final_dir).map_err(|error| error.to_string())?;
+        std::fs::remove_dir_all(&final_dir)
+            .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
     }
-    std::fs::rename(&temp_dir, &final_dir).map_err(|error| error.to_string())?;
-    remove_sibling_runtimes(&runtime_root, &final_dir)?;
+    std::fs::rename(&temp_dir, &final_dir)
+        .map_err(|error| PrepareRuntimeError::Infrastructure(error.to_string()))?;
+    remove_sibling_runtimes(&runtime_root, &final_dir)
+        .map_err(PrepareRuntimeError::Infrastructure)?;
 
     let grants = entry.grants_for(profile);
     Ok(PreparedRuntime {

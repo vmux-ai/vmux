@@ -37,6 +37,7 @@ struct ExtOutbox(Arc<Mutex<Vec<(Entity, OutMsg)>>>);
 #[derive(Resource, Default)]
 struct ExtSubscribers(HashSet<Entity>);
 
+#[derive(Clone)]
 struct WebStoreInjector {
     nonce: String,
     extension_id: String,
@@ -55,7 +56,7 @@ impl Plugin for ExtensionsPlugin {
                 host: "extensions",
                 url: EXTENSIONS_PAGE_URL,
                 title: "Extensions",
-                pool_size: 0,
+                pool_size: 1,
             },
         ));
         vmux_core::register_host_spawn(app, "extensions");
@@ -82,7 +83,12 @@ impl Plugin for ExtensionsPlugin {
             .add_observer(on_add_extension)
             .add_systems(
                 Update,
-                (run_agent_installs, inject_on_cws_nav, drain_outbox),
+                (
+                    run_agent_installs,
+                    inject_on_cws_nav,
+                    inject_on_cws_load_complete.after(crate::drain_loading_state),
+                    drain_outbox,
+                ),
             );
     }
 }
@@ -358,6 +364,57 @@ fn is_webstore_url(url: &str) -> bool {
 
 const INJECTOR_JS: &str = include_str!("add_to_vmux.js");
 
+fn webstore_injector(current: Option<&WebStoreInjector>, extension_id: String) -> WebStoreInjector {
+    if let Some(current) = current
+        && current.extension_id == extension_id
+    {
+        return current.clone();
+    }
+    WebStoreInjector {
+        nonce: uuid::Uuid::new_v4().to_string(),
+        extension_id,
+    }
+}
+
+fn inject_webstore_page(
+    webview: Entity,
+    url: &str,
+    browsers: &Browsers,
+    injectors: &mut WebStoreInjectors,
+) {
+    if !is_webstore_url(url) {
+        injectors.0.remove(&webview);
+        return;
+    }
+    let Some(extension_id) = vmux_core::extension::webstore::extension_id(url) else {
+        injectors.0.remove(&webview);
+        return;
+    };
+    let injector = webstore_injector(injectors.0.get(&webview), extension_id);
+    let profile = vmux_core::profile::active_profile_name();
+    let idx = store::Index::load(&store::root()).unwrap_or_default();
+    let installed = idx
+        .entries
+        .iter()
+        .filter(|entry| entry.installed_for(&profile))
+        .map(|entry| entry.id.as_str())
+        .collect::<Vec<_>>();
+    let replacements = [
+        (
+            "__VMUX_WEBSTORE_INSTALLED__",
+            serde_json::to_string(&installed).expect("serializable extension list"),
+        ),
+        (
+            "__VMUX_WEBSTORE_NONCE__",
+            serde_json::to_string(&injector.nonce).expect("serializable web store nonce"),
+        ),
+    ];
+    injectors.0.insert(webview, injector);
+    if let Ok(js) = super::template::render(INJECTOR_JS, &replacements) {
+        browsers.execute_js(&webview, &js);
+    }
+}
+
 fn inject_on_cws_nav(
     mut events: MessageReader<WebviewCommittedNavigationEvent>,
     browsers: NonSend<Browsers>,
@@ -367,43 +424,21 @@ fn inject_on_cws_nav(
         if !ev.is_main_frame {
             continue;
         }
-        if is_webstore_url(&ev.url) {
-            let Some(extension_id) = vmux_core::extension::webstore::extension_id(&ev.url) else {
-                injectors.0.remove(&ev.webview);
-                continue;
-            };
-            let profile = vmux_core::profile::active_profile_name();
-            let idx = store::Index::load(&store::root()).unwrap_or_default();
-            let installed = idx
-                .entries
-                .iter()
-                .filter(|entry| entry.installed_for(&profile))
-                .map(|entry| entry.id.as_str())
-                .collect::<Vec<_>>();
-            let nonce = uuid::Uuid::new_v4().to_string();
-            injectors.0.insert(
-                ev.webview,
-                WebStoreInjector {
-                    nonce: nonce.clone(),
-                    extension_id,
-                },
-            );
-            let replacements = [
-                (
-                    "__VMUX_WEBSTORE_INSTALLED__",
-                    serde_json::to_string(&installed).expect("serializable extension list"),
-                ),
-                (
-                    "__VMUX_WEBSTORE_NONCE__",
-                    serde_json::to_string(&nonce).expect("serializable web store nonce"),
-                ),
-            ];
-            if let Ok(js) = super::template::render(INJECTOR_JS, &replacements) {
-                browsers.execute_js(&ev.webview, &js);
-            }
-        } else {
-            injectors.0.remove(&ev.webview);
-        }
+        inject_webstore_page(ev.webview, &ev.url, &browsers, &mut injectors);
+    }
+}
+
+fn inject_on_cws_load_complete(
+    mut events: MessageReader<crate::WebviewLoadCompleted>,
+    browsers: NonSend<Browsers>,
+    browser_meta: Query<&vmux_core::PageMetadata, With<vmux_layout::Browser>>,
+    mut injectors: ResMut<WebStoreInjectors>,
+) {
+    for event in events.read() {
+        let Ok(meta) = browser_meta.get(event.webview) else {
+            continue;
+        };
+        inject_webstore_page(event.webview, &meta.url, &browsers, &mut injectors);
     }
 }
 
@@ -496,5 +531,15 @@ mod tests {
         assert!(!source.contains("__VMUX_"));
         assert!(!source.contains("window.__VMUX_NONCE__"));
         assert!(!source.contains("window.__VMUX_INSTALLED__"));
+    }
+
+    #[test]
+    fn web_store_injector_reuses_nonce_for_same_extension() {
+        let first = webstore_injector(None, "a".repeat(32));
+        let same = webstore_injector(Some(&first), "a".repeat(32));
+        let different = webstore_injector(Some(&first), "b".repeat(32));
+
+        assert_eq!(same.nonce, first.nonce);
+        assert_ne!(different.nonce, first.nonce);
     }
 }

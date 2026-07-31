@@ -12,7 +12,8 @@ use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Extract, ExtractSchedule, Render, RenderApp, RenderSystems};
 use bevy_cef_core::prelude::{
-    AcceleratedFrame, AcceleratedPixelFormat, Browsers, coalesce_webview_dirty_rects,
+    AcceleratedFrame, AcceleratedPixelFormat, Browsers, RenderPaintElementType, WebviewDirtyRects,
+    coalesce_webview_dirty_rects,
 };
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -34,6 +35,9 @@ pub struct NativeOverlayFrames(pub HashMap<Entity, AcceleratedFrame>);
 #[derive(Resource, Default)]
 struct ExtractedAcceleratedUploads(Vec<PendingAcceleratedUpload>);
 
+#[derive(Resource, Default)]
+struct UploadedAcceleratedSurfaces(HashMap<(Entity, RenderPaintElementType), usize>);
+
 pub(crate) struct WebviewAcceleratedUploadPlugin;
 
 impl Plugin for WebviewAcceleratedUploadPlugin {
@@ -45,6 +49,7 @@ impl Plugin for WebviewAcceleratedUploadPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<ExtractedAcceleratedUploads>()
+                .init_resource::<UploadedAcceleratedSurfaces>()
                 .add_systems(ExtractSchedule, extract_accelerated_uploads)
                 .add_systems(
                     Render,
@@ -67,7 +72,7 @@ fn queue_accelerated_uploads(
         return;
     };
     let mut resized = false;
-    for frame in browsers.drain_accelerated_frames() {
+    for mut frame in browsers.drain_accelerated_frames() {
         let webview = frame.webview;
         let overlay = overlay_webviews.contains(webview);
         if overlay {
@@ -79,11 +84,12 @@ fn queue_accelerated_uploads(
         };
         let id = surface.0.id();
         if let Some(mut image) = images.get_mut(id) {
-            resized |= resize_surface_image_if_needed(
+            resized |= prepare_accelerated_surface(
                 &mut image,
                 frame.width,
                 frame.height,
                 accelerated_surface_format(frame.format),
+                &mut frame.dirty,
             );
         }
         pending.push(PendingAcceleratedUpload { image: id, frame });
@@ -91,6 +97,20 @@ fn queue_accelerated_uploads(
     if resized {
         request_followup_frame(texture_wake.as_deref());
     }
+}
+
+fn prepare_accelerated_surface(
+    image: &mut Image,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    dirty: &mut WebviewDirtyRects,
+) -> bool {
+    let resized = resize_surface_image_if_needed(image, width, height, format);
+    if resized {
+        dirty.clear();
+    }
+    resized
 }
 
 fn resize_surface_image_if_needed(
@@ -166,7 +186,8 @@ fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUplo
                 &upload.frame.dirty,
                 previous.frame.width == upload.frame.width
                     && previous.frame.height == upload.frame.height
-                    && previous.frame.format == upload.frame.format,
+                    && previous.frame.format == upload.frame.format
+                    && previous.frame.io_surface == upload.frame.io_surface,
             );
         }
         latest.push(upload);
@@ -176,6 +197,7 @@ fn coalesce_pending_accelerated_uploads(uploads: &mut Vec<PendingAcceleratedUplo
 
 fn upload_accelerated_textures(
     mut extracted: ResMut<ExtractedAcceleratedUploads>,
+    mut uploaded_surfaces: ResMut<UploadedAcceleratedSurfaces>,
     gpu_images: Res<RenderAssets<GpuImage>>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
@@ -195,7 +217,10 @@ fn upload_accelerated_textures(
         }
         let PendingAcceleratedUpload { frame, .. } = upload;
         let AcceleratedFrame {
+            webview,
+            ty,
             handle,
+            io_surface,
             keepalive,
             dirty,
             width,
@@ -210,6 +235,11 @@ fn upload_accelerated_textures(
         let mut encoder =
             render_device.create_command_encoder(&CommandEncoderDescriptor { label: None });
         {
+            let full_upload = accelerated_upload_requires_full(
+                uploaded_surfaces.0.get(&(webview, ty)).copied(),
+                io_surface,
+                &dirty,
+            );
             let mut blit = |x: u32, y: u32, w: u32, h: u32| {
                 if w == 0 || h == 0 {
                     return;
@@ -234,7 +264,7 @@ fn upload_accelerated_textures(
                     },
                 );
             };
-            if dirty.is_empty() {
+            if full_upload {
                 blit(0, 0, width, height);
             } else {
                 for rect in &dirty {
@@ -243,6 +273,7 @@ fn upload_accelerated_textures(
             }
         }
         render_queue.submit(std::iter::once(encoder.finish()));
+        uploaded_surfaces.0.insert((webview, ty), io_surface);
         render_queue.on_submitted_work_done(move || {
             drop((keepalive, src));
         });
@@ -253,9 +284,18 @@ fn upload_accelerated_textures(
     }
 }
 
+fn accelerated_upload_requires_full(
+    previous_io_surface: Option<usize>,
+    io_surface: usize,
+    dirty: &WebviewDirtyRects,
+) -> bool {
+    dirty.is_empty() || previous_io_surface != Some(io_surface)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_cef_core::prelude::WebviewDirtyRect;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -307,6 +347,65 @@ mod tests {
             100,
             50,
             TextureFormat::Bgra8UnormSrgb,
+        ));
+    }
+
+    #[test]
+    fn resized_surface_uploads_the_complete_frame() {
+        let mut image = resized_surface_image(1, 1, TextureFormat::Bgra8UnormSrgb);
+        let mut dirty = WebviewDirtyRects::from_vec(vec![WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
+
+        assert!(prepare_accelerated_surface(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+            &mut dirty,
+        ));
+        assert!(dirty.is_empty());
+    }
+
+    #[test]
+    fn same_size_surface_preserves_dirty_uploads() {
+        let mut image = resized_surface_image(100, 50, TextureFormat::Bgra8UnormSrgb);
+        let rect = WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        };
+        let mut dirty = WebviewDirtyRects::from_vec(vec![rect]);
+
+        assert!(!prepare_accelerated_surface(
+            &mut image,
+            100,
+            50,
+            TextureFormat::Bgra8UnormSrgb,
+            &mut dirty,
+        ));
+        assert_eq!(dirty.as_slice(), [rect]);
+    }
+
+    #[test]
+    fn changed_io_surface_uploads_the_complete_frame() {
+        let dirty = WebviewDirtyRects::from_vec(vec![WebviewDirtyRect {
+            x: 10,
+            y: 10,
+            width: 20,
+            height: 20,
+        }]);
+
+        assert!(accelerated_upload_requires_full(Some(1), 2, &dirty));
+        assert!(!accelerated_upload_requires_full(Some(2), 2, &dirty));
+        assert!(accelerated_upload_requires_full(
+            Some(2),
+            2,
+            &WebviewDirtyRects::new(),
         ));
     }
 

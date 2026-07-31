@@ -3398,11 +3398,11 @@ fn reset_terminal_title_on_agent_removed(
 
 /// Mark dirty when webview becomes ready so initial viewport is sent.
 fn on_term_ready(
-    trigger: On<Add, PageReady>,
+    trigger: On<BinReceive<PageReady>>,
     q: Query<&ProcessId, With<Terminal>>,
     service: Option<Res<ServiceClient>>,
 ) {
-    let entity = trigger.event_target();
+    let entity = trigger.event().webview;
     let Some(service) = service else { return };
     if let Ok(pid) = q.get(entity) {
         service
@@ -3540,7 +3540,7 @@ fn scheme_for_appearance(name: &str, dark: bool) -> &str {
 fn sync_terminal_theme(
     q: Query<Entity, With<Terminal>>,
     new_terminals: Query<Entity, Added<Terminal>>,
-    newly_ready: Query<Entity, (With<Terminal>, Added<PageReady>)>,
+    newly_ready: Query<Entity, (With<Terminal>, Changed<PageReady>)>,
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     scheme: Option<Res<vmux_setting::ResolvedColorScheme>>,

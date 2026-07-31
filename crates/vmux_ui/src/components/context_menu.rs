@@ -24,13 +24,7 @@ impl ContextMenuState {
     }
 }
 
-fn clamp_context_menu_to_viewport(event: Event<MountedData>) {
-    let Some(element) = event.downcast::<web_sys::Element>() else {
-        return;
-    };
-    let Ok(menu) = element.clone().dyn_into::<web_sys::HtmlElement>() else {
-        return;
-    };
+fn clamp_context_menu_to_viewport(menu: &web_sys::HtmlElement) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -52,6 +46,28 @@ fn clamp_context_menu_to_viewport(event: Event<MountedData>) {
     let _ = style.set_property("top", &format!("{}px", rect.top().clamp(padding, max_top)));
 }
 
+fn mount_context_menu_top_layer(event: Event<MountedData>) {
+    let Some(element) = event.downcast::<web_sys::Element>() else {
+        return;
+    };
+    let Ok(overlay) = element.clone().dyn_into::<web_sys::HtmlElement>() else {
+        return;
+    };
+    let shown = js_sys::Reflect::get(overlay.as_ref(), &"showPopover".into())
+        .ok()
+        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
+        .is_some_and(|show| show.call0(overlay.as_ref()).is_ok());
+    if !shown {
+        let _ = overlay.remove_attribute("popover");
+    }
+    if let Some(menu) = overlay
+        .first_element_child()
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        clamp_context_menu_to_viewport(&menu);
+    }
+}
+
 #[component]
 pub fn ContextMenu(props: ContextMenuProps) -> Element {
     let controlled = props.open;
@@ -71,6 +87,11 @@ pub fn ContextMenu(props: ContextMenuProps) -> Element {
     use_effect(move || {
         if let Some(value) = controlled() {
             open.set(value);
+        }
+    });
+    use_drop(move || {
+        if *open.peek() {
+            state.on_open_change.call(false);
         }
     });
 
@@ -121,9 +142,11 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[1000] outline-none",
+            popover: "manual",
+            class: "fixed inset-0 z-[1000] m-0 h-screen w-screen max-h-none max-w-none border-0 bg-transparent p-0 outline-none",
             tabindex: "-1",
             onmounted: move |event| {
+                mount_context_menu_top_layer(event.clone());
                 let data = event.data();
                 spawn(async move {
                     let _ = data.set_focus(true).await;
@@ -166,7 +189,6 @@ pub fn ContextMenuContent(props: ContextMenuContentProps) -> Element {
                 left: "clamp(6px, {x}px, calc(100vw - 140px))",
                 top: "clamp(6px, {y}px, calc(100vh - 32px))",
                 class: "z-[1000] min-w-[132px] max-w-[calc(100vw-12px)] max-h-[calc(100vh-12px)] overflow-y-auto rounded-md border border-border bg-background p-0.5 dark:bg-muted",
-                onmounted: clamp_context_menu_to_viewport,
                 onpointerdown: move |event| event.stop_propagation(),
                 oncontextmenu: move |event| {
                     event.prevent_default();

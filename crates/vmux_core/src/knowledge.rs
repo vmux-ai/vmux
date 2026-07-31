@@ -2,6 +2,7 @@
 
 pub const KNOWLEDGE_TREE_EVENT: &str = "knowledge-tree";
 pub const KNOWLEDGE_SEARCH_EVENT: &str = "knowledge-search";
+pub const KNOWLEDGE_CREATE_RESULT_EVENT: &str = "knowledge-create-result";
 
 #[derive(
     Clone,
@@ -39,6 +40,28 @@ pub struct KnowledgeEntry {
     pub path: String,
     pub parent: String,
     pub is_directory: bool,
+    pub git_status: KnowledgeGitStatus,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum KnowledgeGitStatus {
+    #[default]
+    Clean,
+    Added,
+    Modified,
+    Deleted,
 }
 
 #[derive(
@@ -91,6 +114,43 @@ pub struct KnowledgeSearchEvent {
 )]
 pub struct KnowledgeSearchRequest {
     pub query: String,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeCreateRequest {
+    pub parent: String,
+    pub name: String,
+    pub is_directory: bool,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct KnowledgeCreateResult {
+    pub ok: bool,
+    pub path: String,
+    pub error: String,
+    pub is_directory: bool,
 }
 
 #[derive(

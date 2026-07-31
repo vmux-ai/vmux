@@ -217,6 +217,47 @@ fn worktree_target_seed_uses_copy_on_write_and_relocates_cef_cmake_state() {
 }
 
 #[test]
+fn target_seed_key_resolves_a_symlinked_repo_root() {
+    use std::os::unix::fs::symlink;
+    use std::process::Command;
+
+    let temp = tempfile::tempdir().expect("tempdir");
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("repo root");
+    let linked_repo = temp.path().join("repo");
+    symlink(&repo, &linked_repo).expect("symlink repo");
+
+    let run = |path: &std::path::Path| {
+        Command::new("/bin/bash")
+            .args([
+                "-c",
+                "cd \"$1\" && CARGO_BIN=/usr/bin/true RUSTC=/usr/bin/true scripts/target-seed-key.sh",
+                "bash",
+            ])
+            .arg(path)
+            .output()
+            .expect("run target seed key")
+    };
+    let canonical = run(&repo);
+    let linked = run(&linked_repo);
+
+    for output in [&canonical, &linked] {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let canonical_key = String::from_utf8(canonical.stdout).expect("utf8 canonical key");
+    let key = String::from_utf8(linked.stdout).expect("utf8 linked key");
+    assert_eq!(key, canonical_key);
+    assert_eq!(key.trim().len(), 40);
+    assert!(key.trim().bytes().all(|byte| byte.is_ascii_hexdigit()));
+}
+
+#[test]
 fn cef_target_relocator_rewrites_only_cef_build_state() {
     use std::{fs, process::Command};
 

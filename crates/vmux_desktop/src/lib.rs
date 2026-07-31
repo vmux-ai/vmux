@@ -97,6 +97,7 @@ fn primary_window_config(title: String) -> NativeWindow {
         titlebar_show_buttons: false,
         movable_by_window_background: false,
         fullsize_content_view: true,
+        resizable: true,
         ime_enabled: true,
         visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
         position: WindowPosition::Centered(MonitorSelection::Primary),

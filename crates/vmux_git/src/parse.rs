@@ -27,6 +27,10 @@ impl ParsedStatuses {
             .copied()
             .unwrap_or(FileStatus::Clean)
     }
+
+    pub fn into_file_statuses(self) -> HashMap<String, FileStatus> {
+        self.file_statuses
+    }
 }
 
 fn entry_path(line: &str, kind_tokens: usize) -> &str {

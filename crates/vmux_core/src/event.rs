@@ -25,6 +25,7 @@ pub const FILE_VIEWPORT_EVENT: &str = "file_viewport";
 pub const FILE_ERROR_EVENT: &str = "file_error";
 pub const FILE_RESIZE_EVENT: &str = "file_resize";
 pub const FILE_SCROLL_EVENT: &str = "file_scroll";
+pub const FILE_SCROLL_BY_EVENT: &str = "file_scroll_by";
 pub const FILE_FOLD_TOGGLE_EVENT: &str = "file_fold_toggle";
 pub const FILE_DIR_EVENT: &str = "file_dir";
 pub const FILE_THEME_EVENT: &str = "file_theme";
@@ -48,6 +49,8 @@ pub const FILE_DIRTY_EVENT: &str = "file_dirty";
 pub const FILE_NOTE_EVENT: &str = "file_note";
 pub const FILE_VIEW_MODE_EVENT: &str = "file_view_mode";
 pub const FILE_VIEW_MODE_SET_EVENT: &str = "file_view_mode_set";
+pub const FILE_KEYMAP_EVENT: &str = "file_keymap";
+pub const FILE_KEYMAP_SET_EVENT: &str = "file_keymap_set";
 /// Host → file page: show the auto-tidy prompt banner (N unchanged previews).
 pub const FILE_TIDY_PROMPT_EVENT: &str = "file_tidy_prompt";
 /// File page → host: the user's choice on the tidy prompt banner.
@@ -174,7 +177,27 @@ pub struct FileViewportPatch {
     pub first_row: u32,
     pub total_rows: u32,
     pub total_lines: u32,
+    pub wrap_columns: u16,
+    pub layouts: Vec<FileLineLayout>,
     pub lines: Vec<FileLine>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileLineLayout {
+    pub line_no: u32,
+    pub row: u32,
+    pub rows: u16,
 }
 
 #[derive(
@@ -402,6 +425,7 @@ pub struct FileErrorEvent {
 pub struct FileResizeEvent {
     pub char_height: f32,
     pub viewport_height: f32,
+    pub wrap_columns: u16,
 }
 
 #[derive(
@@ -436,6 +460,23 @@ pub struct FileVideoRect {
 )]
 pub struct FileScrollEvent {
     pub top_row: u32,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileScrollByEvent {
+    pub lines: i32,
 }
 
 #[derive(
@@ -1347,6 +1388,12 @@ mod file_event_tests {
             first_row: 100,
             total_rows: 4000,
             total_lines: 5000,
+            wrap_columns: 80,
+            layouts: vec![FileLineLayout {
+                line_no: 100,
+                row: 100,
+                rows: 1,
+            }],
             lines: vec![FileLine {
                 line_no: 100,
                 fold: FoldGutter::None,
@@ -1364,6 +1411,8 @@ mod file_event_tests {
         assert_eq!(decoded.first_row, 100);
         assert_eq!(decoded.total_rows, 4000);
         assert_eq!(decoded.total_lines, 5000);
+        assert_eq!(decoded.wrap_columns, 80);
+        assert_eq!(decoded.layouts, patch.layouts);
         assert_eq!(decoded.lines[0].line_no, 100);
         assert_eq!(decoded.lines[0].spans[0].text, "fn main() {");
         assert_eq!(decoded.lines[0].spans[0].fg, [220, 220, 170]);
@@ -1382,11 +1431,13 @@ mod file_event_tests {
         let r = FileResizeEvent {
             char_height: 16.0,
             viewport_height: 480.0,
+            wrap_columns: 120,
         };
         let b = rkyv::to_bytes::<rkyv::rancor::Error>(&r).unwrap();
         let d = rkyv::from_bytes::<FileResizeEvent, rkyv::rancor::Error>(&b).unwrap();
         assert_eq!(d.char_height, 16.0);
         assert_eq!(d.viewport_height, 480.0);
+        assert_eq!(d.wrap_columns, 120);
     }
 
     #[test]
@@ -1842,6 +1893,8 @@ pub struct FileCursorEvent {
     pub mode_label: String,
     pub primary: crate::editor::CursorPos,
     pub selections: Vec<crate::editor::SelSpan>,
+    pub source_primary: crate::editor::CursorPos,
+    pub source_selections: Vec<crate::editor::SelSpan>,
 }
 
 #[derive(
@@ -1913,6 +1966,40 @@ pub struct FileViewModeEvent {
 )]
 pub struct FileViewModeSet {
     pub mode: FileViewMode,
+}
+
+/// Host → file page: update the active editor keymap.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileKeymapEvent {
+    pub keymap: crate::editor::KeymapKind,
+}
+
+/// File page → host: persist a new editor keymap.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct FileKeymapSet {
+    pub keymap: crate::editor::KeymapKind,
 }
 
 /// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.
@@ -2221,6 +2308,17 @@ mod tests {
                 row: 3,
                 start: 0,
                 end: 5,
+            }],
+            source_primary: CursorPos {
+                line: 3,
+                row: 3,
+                col: 25,
+            },
+            source_selections: vec![SelSpan {
+                line: 3,
+                row: 3,
+                start: 20,
+                end: 25,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();

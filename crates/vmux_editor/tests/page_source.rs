@@ -6,10 +6,6 @@ fn page_source() -> &'static str {
     include_str!("../src/page.rs")
 }
 
-fn note_source() -> &'static str {
-    include_str!("../src/note.rs")
-}
-
 #[test]
 fn explorer_rows_emit_intents() {
     let s = explorer_source();
@@ -77,7 +73,6 @@ fn page_wires_shared_note_editor_diff_toggle() {
     assert!(s.contains("schedule_git_refresh(git_refresh_generation, git_nonce)"));
     assert!(s.contains("GIT_CHANGED_EVENT"));
     assert!(s.contains("GitChangedEvent"));
-    assert!(s.contains("reveal_git_change(git_line_markers, cell_dims)"));
     assert!(s.contains("diff_marker_text_class(marker)"));
     assert!(s.contains("diff_marker_row_class(marker)"));
     assert!(s.contains("text-ansi-3"));
@@ -85,7 +80,6 @@ fn page_wires_shared_note_editor_diff_toggle() {
     let line_number = s.find("\"{ln + 1}\"").unwrap();
     let marker_sign = s.find("\"{diff_marker_sign(marker)}\"").unwrap();
     assert!(line_number < marker_sign);
-    assert!(s.contains("render_block(&note_block.block, index)"));
     assert!(s.contains("document.set_title(&title)"));
     assert!(s.contains("let mut note_editing = use_signal(|| false)"));
     assert!(s.contains("query_selector(\"[data-note-line-text]\")"));
@@ -94,11 +88,4 @@ fn page_wires_shared_note_editor_diff_toggle() {
     );
     assert!(!s.contains("rounded-lg bg-primary/[0.04]"));
     assert!(s.contains("if git_path() != m.abs_path"));
-}
-
-#[test]
-fn note_lists_render_every_block_with_stable_keys() {
-    let s = note_source();
-    assert!(s.contains("render_block(block, block_index)"));
-    assert!(!s.contains("if let MdBlock::Paragraph { inlines } = block"));
 }

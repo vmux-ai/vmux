@@ -72,6 +72,7 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "CssStyleDeclaration",
     "Document",
+    "DomRect",
     "Element",
     "Event",
     "EventInit",

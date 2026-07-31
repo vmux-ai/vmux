@@ -23,7 +23,7 @@ pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
 }
 
 pub fn command_bar_input_row_class() -> &'static str {
-    "flex min-w-0 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3"
+    "flex w-full min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-lg bg-foreground/5 px-3"
 }
 
 pub fn command_bar_input_wrap_class() -> &'static str {
@@ -68,6 +68,10 @@ pub fn result_history_url_class() -> &'static str {
 
 pub fn result_trailing_slot_class() -> &'static str {
     "ml-3 flex h-5 w-24 shrink-0 items-center justify-end overflow-hidden text-right text-xs text-muted-foreground"
+}
+
+pub fn result_location_class() -> &'static str {
+    "ml-3 min-w-0 max-w-[46%] shrink-0 truncate rounded-md bg-foreground/[0.055] px-2 py-1 text-right font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-foreground/[0.06]"
 }
 
 pub fn result_shortcut_badge_class() -> &'static str {

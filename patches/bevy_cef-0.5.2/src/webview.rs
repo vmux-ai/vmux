@@ -528,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn windowless_webviews_use_shared_textures() {
+    fn shared_textures_feed_every_windowless_webview() {
         assert!(shared_texture_enabled(false));
         assert!(!shared_texture_enabled(true));
     }

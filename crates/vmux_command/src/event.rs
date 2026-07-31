@@ -320,6 +320,10 @@ pub struct CommandBarRenderedEvent {
 pub struct CommandBarSizeEvent {
     pub width: u32,
     pub height: u32,
+    pub shell_left: i32,
+    pub shell_top: i32,
+    pub shell_width: u32,
+    pub shell_height: u32,
 }
 
 pub fn command_bar_open_should_reset_input(current_open_id: u64, incoming_open_id: u64) -> bool {

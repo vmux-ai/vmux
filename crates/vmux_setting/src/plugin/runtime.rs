@@ -69,14 +69,34 @@ fn default_locale_setting() -> String {
     "system".to_string()
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct EditorSettings {
     #[serde(default)]
     pub keymap: vmux_core::KeymapKind,
     #[serde(default)]
+    pub word_wrap: vmux_core::editor::WordWrap,
+    #[serde(default = "default_word_wrap_column")]
+    pub word_wrap_column: u16,
+    #[serde(default)]
     pub lsp: LspSettings,
     #[serde(default)]
     pub explorer: ExplorerSettings,
+}
+
+impl Default for EditorSettings {
+    fn default() -> Self {
+        Self {
+            keymap: vmux_core::KeymapKind::default(),
+            word_wrap: vmux_core::editor::WordWrap::default(),
+            word_wrap_column: default_word_wrap_column(),
+            lsp: LspSettings::default(),
+            explorer: ExplorerSettings::default(),
+        }
+    }
+}
+
+fn default_word_wrap_column() -> u16 {
+    80
 }
 
 /// Default Explorer panel width in pixels when unset.
@@ -920,6 +940,12 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
             section_ron(&settings.recording)?
         ));
     }
+    if differs("editor") {
+        parts.push(format!(
+            "    editor: {},",
+            sparse_editor_ron(&settings.editor, &default.editor)?
+        ));
+    }
     if differs("appearance") {
         parts.push(format!(
             "    appearance: {},",
@@ -930,6 +956,34 @@ fn sparse_settings_ron(settings: &AppSettings) -> Result<String, String> {
         return Ok("()\n".to_string());
     }
     Ok(format!("(\n{}\n)\n", parts.join("\n")))
+}
+
+fn sparse_editor_ron(cur: &EditorSettings, def: &EditorSettings) -> Result<String, String> {
+    let cur_json =
+        serde_json::to_value(cur).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let def_json =
+        serde_json::to_value(def).map_err(|e| format!("settings to JSON failed: {e}"))?;
+    let differs = |key: &str| cur_json.get(key) != def_json.get(key);
+    let mut fields = Vec::new();
+    if differs("keymap") {
+        fields.push(format!("keymap: {}", leaf_ron(&cur.keymap)?));
+    }
+    if differs("word_wrap") {
+        fields.push(format!("word_wrap: {}", leaf_ron(&cur.word_wrap)?));
+    }
+    if differs("word_wrap_column") {
+        fields.push(format!(
+            "word_wrap_column: {}",
+            leaf_ron(&cur.word_wrap_column)?
+        ));
+    }
+    if differs("lsp") {
+        fields.push(format!("lsp: {}", leaf_ron(&cur.lsp)?));
+    }
+    if differs("explorer") {
+        fields.push(format!("explorer: {}", leaf_ron(&cur.explorer)?));
+    }
+    Ok(format!("({})", fields.join(", ")))
 }
 
 fn leaf_ron<T: Serialize>(value: &T) -> Result<String, String> {
@@ -1364,6 +1418,26 @@ mod tests {
         let s = base_settings();
         assert!(!s.editor.explorer.visible());
         assert_eq!(s.editor.explorer.width(), EXPLORER_DEFAULT_WIDTH);
+    }
+
+    #[test]
+    fn editor_wrap_defaults_match_enabled_vscode_settings() {
+        let settings = EditorSettings::default();
+
+        assert_eq!(settings.word_wrap, vmux_core::editor::WordWrap::On);
+        assert_eq!(settings.word_wrap_column, 80);
+    }
+
+    #[test]
+    fn editor_wrap_uses_vscode_setting_values() {
+        let settings =
+            parse_settings("(editor: (word_wrap: wordWrapColumn, word_wrap_column: 100))").unwrap();
+
+        assert_eq!(
+            settings.editor.word_wrap,
+            vmux_core::editor::WordWrap::WordWrapColumn
+        );
+        assert_eq!(settings.editor.word_wrap_column, 100);
     }
 
     #[test]
@@ -1912,6 +1986,20 @@ mod tests {
         assert!(
             !ron.contains("terminal"),
             "unchanged terminal must be omitted: {ron}"
+        );
+    }
+
+    #[test]
+    fn sparse_save_persists_vim_keymap() {
+        let mut settings = load_embedded_settings();
+        settings.editor.keymap = vmux_core::KeymapKind::Vim;
+
+        let ron = sparse_settings_ron(&settings).unwrap();
+        assert!(ron.contains("editor: (keymap: vim)"), "{ron}");
+        assert!(!ron.contains("word_wrap"), "{ron}");
+        assert_eq!(
+            parse_settings(&ron).unwrap().editor.keymap,
+            vmux_core::KeymapKind::Vim
         );
     }
 

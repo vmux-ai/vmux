@@ -5,6 +5,7 @@ pub mod palette;
 
 pub mod keyboard;
 pub mod results;
+pub mod size;
 pub mod style;
 
 #[cfg(not(target_arch = "wasm32"))]

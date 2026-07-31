@@ -152,6 +152,7 @@ fn mark_dirty_on_change(
     changed_size: Query<(), Changed<PaneSize>>,
     changed_children: Query<(), Changed<Children>>,
     changed_geometry: Query<(), Changed<WindowGeometry>>,
+    changed_explorer_visibility: Query<(), Changed<vmux_editor::StackExplorerVisibility>>,
     added_archived: Query<(), Added<ArchivedPage>>,
     mut removed_archived: RemovedComponents<ArchivedPage>,
     added_visits: Query<(), Added<vmux_history::Visit>>,
@@ -170,6 +171,7 @@ fn mark_dirty_on_change(
         || !changed_size.is_empty()
         || !changed_children.is_empty()
         || !changed_geometry.is_empty()
+        || !changed_explorer_visibility.is_empty()
         || !added_archived.is_empty()
         || removed_archived.read().count() > 0
         || !added_visits.is_empty()
@@ -248,6 +250,7 @@ pub(crate) fn save_space_to_path(commands: &mut Commands, path: PathBuf) {
         .allow::<vmux_core::VisitedUrl>()
         .allow::<vmux_core::TransitionType>()
         .allow::<vmux_core::Order>()
+        .allow::<vmux_editor::StackExplorerVisibility>()
         .allow::<vmux_terminal::launch::TerminalLaunch>();
     commands.trigger_save(save);
 }
@@ -737,6 +740,31 @@ mod tests {
     }
 
     #[test]
+    fn changing_stack_explorer_visibility_marks_store_dirty() {
+        let mut app = App::new();
+        app.insert_resource(AutoSave {
+            debounce: Timer::from_seconds(0.5, TimerMode::Once),
+            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+            dirty: false,
+        })
+        .add_systems(Update, mark_dirty_on_change);
+        let stack = app
+            .world_mut()
+            .spawn(vmux_editor::StackExplorerVisibility { visible: false })
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<AutoSave>().dirty = false;
+        app.world_mut()
+            .get_mut::<vmux_editor::StackExplorerVisibility>(stack)
+            .unwrap()
+            .visible = true;
+
+        app.update();
+
+        assert!(app.world().resource::<AutoSave>().dirty);
+    }
+
+    #[test]
     fn changing_tab_startup_dir_marks_store_dirty() {
         let mut app = App::new();
         app.insert_resource(AutoSave {
@@ -1046,6 +1074,44 @@ mod tests {
             .next()
             .expect("TransitionType not round-tripped");
         assert_eq!(*tt, vmux_core::TransitionType::Typed);
+    }
+
+    #[test]
+    fn stack_explorer_visibility_round_trips_through_store() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("store.ron");
+
+        let mut app_save = App::new();
+        app_save
+            .add_plugins(MinimalPlugins)
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<vmux_editor::StackExplorerVisibility>()
+            .add_observer(save_on_default_event);
+        app_save
+            .world_mut()
+            .spawn((Save, vmux_editor::StackExplorerVisibility { visible: true }));
+        save_space_to_path(&mut app_save.world_mut().commands(), path.clone());
+        app_save.update();
+
+        let mut app_load = App::new();
+        app_load
+            .add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .add_plugins(vmux_core::CorePlugin)
+            .register_type::<vmux_editor::StackExplorerVisibility>()
+            .add_observer(load_on_default_event);
+        app_load.update();
+        app_load
+            .world_mut()
+            .commands()
+            .trigger_load(LoadWorld::default_from_file(path));
+        app_load.update();
+
+        let visibility = app_load
+            .world_mut()
+            .query::<&vmux_editor::StackExplorerVisibility>()
+            .single(app_load.world())
+            .expect("stack explorer visibility round-tripped");
+        assert!(visibility.visible);
     }
 
     #[test]

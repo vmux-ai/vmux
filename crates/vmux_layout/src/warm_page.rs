@@ -14,7 +14,7 @@ pub trait WarmPage: Component {
     const HOST: &'static str;
     const URL: &'static str;
     const TITLE: &'static str;
-    const POOL_SIZE: usize = 0;
+    const POOL_SIZE: usize = 1;
 
     fn spawn(
         commands: &mut Commands,

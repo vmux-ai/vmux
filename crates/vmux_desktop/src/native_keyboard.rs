@@ -44,6 +44,15 @@ fn is_bare_escape(combo: &KeyCombo) -> bool {
         && !combo.modifiers.super_key
 }
 
+fn is_command_bar_dismiss_combo(combo: &KeyCombo) -> bool {
+    is_bare_escape(combo)
+        || (combo.key == KeyCode::KeyC
+            && combo.modifiers.ctrl
+            && !combo.modifiers.shift
+            && !combo.modifiers.alt
+            && !combo.modifiers.super_key)
+}
+
 pub(crate) enum KeyAction {
     Consume(Option<AppCommand>),
     PassThrough,
@@ -85,6 +94,9 @@ pub(crate) fn decide(
 }
 
 pub(crate) fn classify(combo: KeyCombo) -> KeyAction {
+    if is_command_bar_dismiss_combo(&combo) && vmux_browser::request_native_command_bar_dismiss() {
+        return KeyAction::Consume(None);
+    }
     if is_bare_escape(&combo) && ESC_EXITS_FULLSCREEN.load(Ordering::Relaxed) {
         EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
         return KeyAction::Consume(None);
@@ -212,6 +224,7 @@ pub(crate) fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
 fn install(wake: impl Fn() + Send + Sync + 'static) {
     let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
+        wake();
         if ev.r#type() != NSEventType::KeyDown {
             return event.as_ptr();
         }
@@ -320,6 +333,14 @@ mod tests {
         assert!(!is_bare_escape(&combo(KeyCode::Escape, true)));
         assert!(!is_bare_escape(&super_combo(KeyCode::Escape)));
         assert!(!is_bare_escape(&combo(KeyCode::KeyH, false)));
+    }
+
+    #[test]
+    fn command_bar_dismiss_accepts_escape_and_ctrl_c() {
+        assert!(is_command_bar_dismiss_combo(&combo(KeyCode::Escape, false)));
+        assert!(is_command_bar_dismiss_combo(&combo(KeyCode::KeyC, true)));
+        assert!(!is_command_bar_dismiss_combo(&combo(KeyCode::KeyC, false)));
+        assert!(!is_command_bar_dismiss_combo(&super_combo(KeyCode::KeyC)));
     }
 
     #[test]

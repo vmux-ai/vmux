@@ -123,13 +123,18 @@ pub fn GitBar(
     let mut confirming = use_signal(|| false);
 
     let _status = use_bin_event_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+        message.set(String::new());
         branch.set(s.branch);
         ahead.set(s.ahead);
         behind.set(s.behind);
         staged_count.set(s.staged_count);
         has_diff.set(status_has_diff(s.file_status));
         file_status.set(s.file_status);
-        display_path.set(repo_display_path(&path(), &s.repo_root));
+        display_path.set(if s.repo_root.is_empty() {
+            path()
+        } else {
+            repo_display_path(&path(), &s.repo_root)
+        });
     });
     let _result = use_bin_event_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
         message.set(if r.ok { String::new() } else { r.message });
@@ -148,7 +153,7 @@ pub fn GitBar(
     });
 
     let fs = file_status();
-    if fs == FileStatus::Clean {
+    if !status_has_diff(fs) {
         return rsx! {};
     }
     let can_stage = matches!(
@@ -223,59 +228,74 @@ pub fn GitFooter(
     behind: ReadSignal<u32>,
     staged_count: ReadSignal<u32>,
     message: ReadSignal<String>,
+    leading: Element,
+    always_visible: bool,
     /// Right-aligned status-bar items (e.g. the editor's LSP indicator).
     children: Element,
 ) -> Element {
     let mut commit_msg = use_signal(String::new);
 
-    if branch().is_empty() {
+    let has_branch = !branch().is_empty();
+    if !has_branch && !always_visible {
         return rsx! {};
     }
-    let can_commit = staged_count() > 0;
-    let can_push = ahead() > 0;
+    let can_commit = has_branch && staged_count() > 0;
+    let can_push = has_branch && ahead() > 0;
 
     rsx! {
         div {
-            class: "flex h-7 shrink-0 items-center gap-3 border-t border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
+            class: "flex h-7 min-w-0 shrink-0 items-center gap-3 overflow-hidden border-t border-white/[0.07] bg-black/20 px-4 font-sans text-xs text-muted-foreground",
 
-            span { class: "flex shrink-0 items-center gap-1.5 text-term-fg",
-                Icon { class: "h-3.5 w-3.5 shrink-0 opacity-80",
-                    line { x1: "6", x2: "6", y1: "3", y2: "15" }
-                    circle { cx: "18", cy: "6", r: "3" }
-                    circle { cx: "6", cy: "18", r: "3" }
-                    path { d: "M18 9a9 9 0 0 1-9 9" }
+            {leading}
+            if has_branch {
+                span {
+                    class: "flex min-w-0 max-w-[35%] shrink items-center gap-1.5 text-term-fg",
+                    title: "{branch}",
+                    Icon { class: "h-3.5 w-3.5 shrink-0 opacity-80",
+                        line { x1: "6", x2: "6", y1: "3", y2: "15" }
+                        circle { cx: "18", cy: "6", r: "3" }
+                        circle { cx: "6", cy: "18", r: "3" }
+                        path { d: "M18 9a9 9 0 0 1-9 9" }
+                    }
+                    span { class: "truncate", "{branch}" }
                 }
-                span { "{branch}" }
-            }
-            if ahead() > 0 || behind() > 0 {
-                span { class: "shrink-0 opacity-70", "\u{2191}{ahead} \u{2193}{behind}" }
+                if ahead() > 0 || behind() > 0 {
+                    span { class: "shrink-0 opacity-70", "\u{2191}{ahead} \u{2193}{behind}" }
+                }
             }
 
-            if can_commit {
-                input {
-                    class: "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-0.5 text-term-fg outline-none placeholder:text-muted-foreground",
-                    r#type: "text",
-                    placeholder: translate("git-commit-message"),
-                    value: "{commit_msg}",
-                    oninput: move |e| commit_msg.set(e.value()),
+            div { class: "flex min-w-0 flex-1 items-center gap-3 overflow-hidden",
+                if can_commit {
+                    input {
+                        class: "min-w-0 flex-1 rounded border border-white/15 bg-transparent px-2 py-0.5 text-term-fg outline-none placeholder:text-muted-foreground",
+                        r#type: "text",
+                        placeholder: translate("git-commit-message"),
+                        value: "{commit_msg}",
+                        oninput: move |e| commit_msg.set(e.value()),
+                    }
+                    button {
+                        class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10 disabled:opacity-40",
+                        disabled: commit_msg().is_empty(),
+                        onclick: move |_| {
+                            let m = commit_msg();
+                            if !m.is_empty() {
+                                let _ = try_cef_bin_emit_rkyv(&GitCommitRequest { path: path(), message: m });
+                                commit_msg.set(String::new());
+                            }
+                        },
+                        {translate_with(
+                            "git-commit",
+                            &[("count", TranslationValue::Number(staged_count() as i64))],
+                        )}
+                    }
                 }
-                button {
-                    class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10 disabled:opacity-40",
-                    disabled: commit_msg().is_empty(),
-                    onclick: move |_| {
-                        let m = commit_msg();
-                        if !m.is_empty() {
-                            let _ = try_cef_bin_emit_rkyv(&GitCommitRequest { path: path(), message: m });
-                            commit_msg.set(String::new());
-                        }
-                    },
-                    {translate_with(
-                        "git-commit",
-                        &[("count", TranslationValue::Number(staged_count() as i64))],
-                    )}
+                if !message().is_empty() {
+                    span {
+                        class: "min-w-0 flex-1 truncate text-ansi-1",
+                        title: "{message}",
+                        "{message}"
+                    }
                 }
-            } else {
-                span { class: "flex-1" }
             }
 
             if can_push {
@@ -286,9 +306,6 @@ pub fn GitFooter(
                     },
                     {translate("git-push")}
                 }
-            }
-            if !message().is_empty() {
-                span { class: "shrink-0 truncate text-ansi-1", "{message}" }
             }
             {children}
         }

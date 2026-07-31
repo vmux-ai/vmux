@@ -234,6 +234,14 @@ mod tests {
             vec![EditCommand::Move(Motion::Right)]
         );
         assert_eq!(
+            km.handle(&key("n", ctrl)),
+            vec![EditCommand::Move(Motion::Down)]
+        );
+        assert_eq!(
+            km.handle(&key("p", ctrl)),
+            vec![EditCommand::Move(Motion::Up)]
+        );
+        assert_eq!(
             km.handle(&key("k", ctrl)),
             vec![EditCommand::DeleteToLineEnd]
         );
