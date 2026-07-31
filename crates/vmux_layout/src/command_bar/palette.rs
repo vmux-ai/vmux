@@ -924,7 +924,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     start_keydown_nav
                         || agent_page_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
-                            && start_keydown_q.trim().eq_ignore_ascii_case("terminal"))
+                            && crate::command_bar::results::terminal_matches_query(
+                                &start_keydown_q,
+                            ))
                 }) {
                     execute(item);
                 } else if let Some(item) = start_keydown_default_agent.as_ref() {
@@ -1148,7 +1150,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     || action_nav
                                     || agent_page_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
-                                        && action_query.trim().eq_ignore_ascii_case("terminal"))
+                                        && crate::command_bar::results::terminal_matches_query(&action_query))
                             }) {
                                 execute(item);
                             } else if !action_query.trim().is_empty()
