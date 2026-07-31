@@ -61,6 +61,7 @@ pub struct VimKeymap {
     macro_record: Option<(char, Vec<Recorded>)>,
     macros: std::collections::HashMap<char, Vec<Recorded>>,
     last_macro: Option<char>,
+    insert_after_next: bool,
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -795,6 +796,39 @@ impl VimKeymap {
 
     fn insert(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         use EditCommand::*;
+
+        if self.register_pending {
+            self.register_pending = false;
+            let Some(reg) = single_char(&k.key) else {
+                return vec![];
+            };
+            return vec![Put {
+                before: true,
+                count: 1,
+                register: Some(reg),
+            }];
+        }
+
+        if k.mods.ctrl && !k.mods.meta && !k.mods.alt {
+            return match k.key.to_ascii_lowercase().as_str() {
+                "w" => vec![DeleteWordBack],
+                "h" => vec![DeleteBack],
+                "u" => vec![self.op(Operator::Delete, Target::Motion(Motion::LineStart, 1))],
+                "t" => vec![self.op(Operator::Indent, Target::Line(1))],
+                "d" => vec![self.op(Operator::Outdent, Target::Line(1))],
+                "r" => {
+                    self.register_pending = true;
+                    vec![]
+                }
+                "o" => {
+                    self.mode = EditMode::Normal;
+                    self.insert_after_next = true;
+                    vec![SetMode(EditMode::Normal)]
+                }
+                _ => vec![],
+            };
+        }
+
         match k.key.as_str() {
             "Escape" => {
                 self.mode = EditMode::Normal;
@@ -911,6 +945,17 @@ impl Keymap for VimKeymap {
 impl VimKeymap {
     /// Interpret one key without any dot-repeat or macro bookkeeping.
     fn dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+        let armed = self.insert_after_next;
+        let mut cmds = self.dispatch_inner(k);
+        if armed && self.mode == EditMode::Normal && self.is_idle() && !cmds.is_empty() {
+            self.insert_after_next = false;
+            self.mode = EditMode::Insert;
+            cmds.push(EditCommand::SetMode(EditMode::Insert));
+        }
+        cmds
+    }
+
+    fn dispatch_inner(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         #[cfg(target_os = "macos")]
         if k.mods.meta && !k.mods.ctrl && !k.mods.alt {
             let command = match k.key.to_ascii_lowercase().as_str() {
@@ -945,7 +990,7 @@ impl VimKeymap {
                 };
             }
         }
-        if k.mods.ctrl && !k.mods.meta && !k.mods.alt {
+        if k.mods.ctrl && !k.mods.meta && !k.mods.alt && !self.mode.accepts_text() {
             let direction = match k.key.to_ascii_lowercase().as_str() {
                 "e" => Some(1),
                 "y" => Some(-1),
@@ -1351,6 +1396,66 @@ mod tests {
     fn replaying_an_empty_register_is_inert() {
         let mut km = VimKeymap::default();
         assert_eq!(run(&mut km, &["@", "z"]), vec![]);
+    }
+
+    #[test]
+    fn insert_mode_editing_chords() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        assert_eq!(
+            km.handle(&chord("w", ctrl())),
+            vec![EditCommand::DeleteWordBack]
+        );
+        assert_eq!(
+            km.handle(&chord("u", ctrl())),
+            vec![op(Operator::Delete, Target::Motion(Motion::LineStart, 1))]
+        );
+        assert_eq!(
+            km.handle(&chord("t", ctrl())),
+            vec![op(Operator::Indent, Target::Line(1))]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
+    }
+
+    #[test]
+    fn ctrl_r_pastes_a_register_while_inserting() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        assert_eq!(km.handle(&chord("r", ctrl())), vec![]);
+        assert_eq!(
+            run(&mut km, &["a"]),
+            vec![EditCommand::Put {
+                before: true,
+                count: 1,
+                register: Some('a'),
+            }]
+        );
+    }
+
+    #[test]
+    fn ctrl_o_runs_one_normal_command_then_returns_to_insert() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        assert_eq!(
+            km.handle(&chord("o", ctrl())),
+            vec![EditCommand::SetMode(EditMode::Normal)]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+        assert_eq!(
+            run(&mut km, &["$"]),
+            vec![
+                EditCommand::Move(Motion::LineEnd),
+                EditCommand::SetMode(EditMode::Insert),
+            ]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
+    }
+
+    #[test]
+    fn scroll_chords_do_not_fire_while_inserting() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        assert_eq!(km.handle(&chord("e", ctrl())), vec![]);
     }
 
     #[test]
