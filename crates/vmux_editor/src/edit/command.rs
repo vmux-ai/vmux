@@ -16,6 +16,12 @@ pub enum Motion {
     Left,
     Right,
     LeftBounded,
+    /// Like `LeftBounded`, but steps onto the previous line's last character at column zero.
+    ///
+    /// The note view reflows hard-wrapped source lines into continuous prose, so stopping at a
+    /// source line boundary strands the caret mid-sentence with no visible reason.
+    LeftFlow,
+    RightFlow,
     RightBounded,
     Up,
     Down,
@@ -46,8 +52,14 @@ pub enum Motion {
     ParagraphPrev,
     ParagraphNext,
     MatchPair,
-    FindChar { ch: char, forward: bool, till: bool },
-    SearchNext { reverse: bool },
+    FindChar {
+        ch: char,
+        forward: bool,
+        till: bool,
+    },
+    SearchNext {
+        reverse: bool,
+    },
     GotoLine(u32),
 }
 
@@ -90,6 +102,7 @@ impl Motion {
         Some(match self {
             Motion::Left
             | Motion::LeftBounded
+            | Motion::LeftFlow
             | Motion::Up
             | Motion::PageUp
             | Motion::HalfPageUp
@@ -104,6 +117,7 @@ impl Motion {
             | Motion::DocStart => true,
             Motion::Right
             | Motion::RightBounded
+            | Motion::RightFlow
             | Motion::Down
             | Motion::PageDown
             | Motion::HalfPageDown

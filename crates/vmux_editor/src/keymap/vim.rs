@@ -201,6 +201,10 @@ impl VimKeymap {
         self.replace_pending = false;
         self.g_pending = false;
         self.z_pending = false;
+        // An abandoned prompt would otherwise keep eating every key with no way back.
+        if self.ex.take().is_some() {
+            self.mode = self.mode_before_ex;
+        }
     }
 
     /// No operator or prefix is half-typed. A pending count still counts as a command start,

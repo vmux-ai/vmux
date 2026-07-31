@@ -2219,7 +2219,7 @@ fn on_file_key(
         && let Some(note) = edit.parsed_note.as_ref()
     {
         let line = edit.core.cursor_pos().line;
-        cmds = remap_note_vertical_commands(cmds, &note.blocks, line);
+        cmds = remap_note_commands(cmds, &note.blocks, line);
     }
     run_commands(
         entity,
@@ -2249,6 +2249,8 @@ fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<E
                         | Motion::Right
                         | Motion::LeftBounded
                         | Motion::RightBounded
+                        | Motion::LeftFlow
+                        | Motion::RightFlow
                         | Motion::Up
                         | Motion::Down,
                 ) | EditCommand::Select(
@@ -2256,6 +2258,8 @@ fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<E
                         | Motion::Right
                         | Motion::LeftBounded
                         | Motion::RightBounded
+                        | Motion::LeftFlow
+                        | Motion::RightFlow
                         | Motion::Up
                         | Motion::Down,
                 )
@@ -2267,7 +2271,7 @@ fn accelerate_repeated_navigation(cmds: Vec<EditCommand>, repeat: bool) -> Vec<E
         .collect()
 }
 
-fn remap_note_vertical_commands(
+fn remap_note_commands(
     cmds: Vec<EditCommand>,
     blocks: &[NoteBlock],
     start_line: u32,
@@ -2275,6 +2279,23 @@ fn remap_note_vertical_commands(
     let mut line = start_line;
     cmds.into_iter()
         .flat_map(|cmd| {
+            // Hard-wrapped source lines are reflowed into continuous prose here, so horizontal
+            // motion has to cross the wrap or the caret strands itself mid-sentence.
+            match &cmd {
+                EditCommand::Move(Motion::LeftBounded) => {
+                    return vec![EditCommand::Move(Motion::LeftFlow)];
+                }
+                EditCommand::Move(Motion::RightBounded) => {
+                    return vec![EditCommand::Move(Motion::RightFlow)];
+                }
+                EditCommand::Select(Motion::LeftBounded) => {
+                    return vec![EditCommand::Select(Motion::LeftFlow)];
+                }
+                EditCommand::Select(Motion::RightBounded) => {
+                    return vec![EditCommand::Select(Motion::RightFlow)];
+                }
+                _ => {}
+            }
             let (direction, select) = match &cmd {
                 EditCommand::Move(Motion::Down) => (1, false),
                 EditCommand::Move(Motion::Up) => (-1, false),
@@ -4108,7 +4129,7 @@ mod edit_flow_tests {
     #[test]
     fn repeated_note_navigation_skips_a_separator_after_the_first_step() {
         let blocks = crate::markdown::parse_note("- one\n- two\n\nnext\n");
-        let commands = remap_note_vertical_commands(
+        let commands = remap_note_commands(
             accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
             &blocks,
             0,

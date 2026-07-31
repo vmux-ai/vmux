@@ -3979,21 +3979,23 @@ pub fn Page() -> Element {
                     {
                         let lbl = ed_label();
                         let prompt = ed_command_line();
-                        (!lbl.is_empty()
-                            && mode() == Mode::Text
-                            && keymap() == vmux_core::KeymapKind::Vim)
-                            .then(|| rsx! {
+                        let vim = keymap() == vmux_core::KeymapKind::Vim;
+                        // The prompt shows in every view: a command line that swallows keys
+                        // without showing itself reads as the editor having frozen.
+                        (vim && (!lbl.is_empty() || !prompt.is_empty())).then(|| rsx! {
+                            if !lbl.is_empty() && mode() == Mode::Text {
                                 span {
                                     class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
                                     "{lbl}"
                                 }
-                                if !prompt.is_empty() {
-                                    span {
-                                        class: "flex h-7 min-w-0 flex-1 items-center truncate px-3 font-mono text-[11px] text-neutral-700 dark:text-neutral-200",
-                                        "{prompt}"
-                                    }
+                            }
+                            if !prompt.is_empty() {
+                                span {
+                                    class: "flex h-7 min-w-0 flex-1 items-center truncate px-3 font-mono text-[11px] text-neutral-700 dark:text-neutral-200",
+                                    "{prompt}"
                                 }
-                            })
+                            }
+                        })
                     }
                 },
                 {
