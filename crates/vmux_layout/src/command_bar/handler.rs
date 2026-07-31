@@ -39,7 +39,7 @@ use vmux_core::agent::{
     PendingAgentPromptAttachments,
 };
 use vmux_core::event::space::SpaceCommandEvent;
-use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
+use vmux_core::page::{PageReady, SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{LastActivatedAt, now_millis};
@@ -66,10 +66,20 @@ struct CommandBarRenderedOpen(u64);
 #[derive(Component)]
 struct CommandBarPaintedOpen(u64);
 
+#[derive(Component)]
+struct CommandBarOpenedOnce;
+
+#[derive(Component)]
+struct CommandBarRecreating;
+
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CommandBarNativeSize {
     pub width: f32,
     pub height: f32,
+    pub shell_left: f32,
+    pub shell_top: f32,
+    pub shell_width: f32,
+    pub shell_height: f32,
 }
 
 #[derive(Component)]
@@ -344,6 +354,16 @@ pub fn is_command_bar_open(modal_q: &Query<(&Node, Has<CefKeyboardTarget>), With
         .any(|(n, has_keyboard_target)| command_bar_modal_is_open(n.display, has_keyboard_target))
 }
 
+pub fn is_command_bar_visible(
+    modal_q: &Query<(&Node, &Visibility, Has<CefKeyboardTarget>), With<Modal>>,
+) -> bool {
+    modal_q
+        .iter()
+        .any(|(node, visibility, has_keyboard_target)| {
+            command_bar_modal_is_visible(node.display, *visibility, has_keyboard_target)
+        })
+}
+
 fn command_bar_modal_is_open(display: Display, has_keyboard_target: bool) -> bool {
     display != Display::None && has_keyboard_target
 }
@@ -356,6 +376,32 @@ fn command_bar_modal_is_visible(
     display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
 }
 
+fn prepare_command_bar_surface(
+    modal_node: &mut Node,
+    modal_vis: &mut Visibility,
+    native_overlay: bool,
+) {
+    modal_node.display = Display::Flex;
+    *modal_vis = if native_overlay {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+}
+
+fn close_command_bar_surface(
+    modal_node: &mut Node,
+    modal_vis: &mut Visibility,
+    native_overlay: bool,
+) {
+    if native_overlay {
+        prepare_command_bar_surface(modal_node, modal_vis, true);
+    } else {
+        modal_node.display = Display::None;
+        *modal_vis = Visibility::Hidden;
+    }
+}
+
 fn prewarm_command_bar_modal(
     mut commands: Commands,
     mut modal_q: Query<
@@ -365,20 +411,26 @@ fn prewarm_command_bar_modal(
             &mut Visibility,
             Has<CefKeyboardTarget>,
             Has<PendingCommandBarReveal>,
+            Has<WebviewNativeOverlay>,
         ),
         With<Modal>,
     >,
 ) {
-    let Ok((modal_e, mut modal_node, mut modal_vis, has_keyboard_target, pending_reveal)) =
-        modal_q.single_mut()
+    let Ok((
+        modal_e,
+        mut modal_node,
+        mut modal_vis,
+        has_keyboard_target,
+        pending_reveal,
+        native_overlay,
+    )) = modal_q.single_mut()
     else {
         return;
     };
     if has_keyboard_target || pending_reveal {
         return;
     }
-    modal_node.display = Display::Flex;
-    *modal_vis = Visibility::Hidden;
+    prepare_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
     commands
         .entity(modal_e)
         .insert(Pickable::IGNORE)
@@ -431,13 +483,17 @@ fn next_command_bar_reveal_frames(
 
 fn next_command_bar_reveal_frames_for_backend(
     native_windowed: bool,
+    native_overlay: bool,
     frames: u8,
     open_id: u64,
     rendered_open_id: Option<u64>,
     painted_open_id: Option<u64>,
     has_native_size: bool,
 ) -> Option<u8> {
-    if native_windowed && open_id != 0 && (rendered_open_id != Some(open_id) || !has_native_size) {
+    if (native_windowed || native_overlay)
+        && open_id != 0
+        && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
+    {
         return Some(frames.saturating_add(1));
     }
     next_command_bar_reveal_frames(frames, open_id, rendered_open_id, painted_open_id)
@@ -445,15 +501,16 @@ fn next_command_bar_reveal_frames_for_backend(
 
 fn native_command_bar_reveal_timed_out(
     native_windowed: bool,
+    native_overlay: bool,
     elapsed: Duration,
     open_id: u64,
     rendered_open_id: Option<u64>,
     has_native_size: bool,
 ) -> bool {
-    native_windowed
+    (native_windowed || native_overlay)
         && open_id != 0
         && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
-        && (rendered_open_id != Some(open_id) || !has_native_size)
+        && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
 }
 
 fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
@@ -493,14 +550,22 @@ fn should_requeue_command_bar_open_after_emit(_command_bar_ready: bool) -> bool 
     false
 }
 
-fn on_command_bar_ready(trigger: On<BinReceive<CommandBarReadyEvent>>, mut commands: Commands) {
-    webview_debug_log(format!(
-        "command_bar ready entity={:?}",
-        trigger.event().webview
-    ));
+fn on_command_bar_ready(
+    trigger: On<BinReceive<CommandBarReadyEvent>>,
+    mut pending_q: Query<&mut PendingCommandBarReveal>,
+    mut commands: Commands,
+) {
+    let webview = trigger.event().webview;
+    if let Ok(mut pending) = pending_q.get_mut(webview)
+        && pending.open_id != 0
+        && pending.started_at.is_none()
+    {
+        pending.started_at = Some(Instant::now());
+    }
     commands
-        .entity(trigger.event().webview)
-        .insert(CommandBarReady);
+        .entity(webview)
+        .insert(CommandBarReady)
+        .remove::<CommandBarRecreating>();
 }
 
 fn on_command_bar_rendered(
@@ -512,9 +577,10 @@ fn on_command_bar_rendered(
         trigger.event().webview,
         trigger.event().payload.open_id
     ));
-    commands
-        .entity(trigger.event().webview)
-        .insert(CommandBarRenderedOpen(trigger.event().payload.open_id));
+    commands.entity(trigger.event().webview).insert((
+        CommandBarRenderedOpen(trigger.event().payload.open_id),
+        CommandBarOpenedOnce,
+    ));
 }
 
 fn on_command_bar_size(
@@ -539,7 +605,12 @@ fn on_command_bar_size(
     }
     let payload = trigger.event().payload;
     if current_size.is_some_and(|size| {
-        size.width == payload.width.max(1) as f32 && size.height == payload.height.max(1) as f32
+        size.width == payload.width.max(1) as f32
+            && size.height == payload.height.max(1) as f32
+            && size.shell_left == payload.shell_left as f32
+            && size.shell_top == payload.shell_top as f32
+            && size.shell_width == payload.shell_width.max(1) as f32
+            && size.shell_height == payload.shell_height.max(1) as f32
     }) {
         return;
     }
@@ -550,6 +621,10 @@ fn on_command_bar_size(
     commands.entity(webview).insert(CommandBarNativeSize {
         width: payload.width.max(1) as f32,
         height: payload.height.max(1) as f32,
+        shell_left: payload.shell_left as f32,
+        shell_top: payload.shell_top as f32,
+        shell_width: payload.shell_width.max(1) as f32,
+        shell_height: payload.shell_height.max(1) as f32,
     });
 }
 
@@ -666,23 +741,25 @@ fn command_bar_cancel_pending_stack_for_active_open(
     Some((stack, previous_stack))
 }
 
-/// Whether an open should focus the `vmux://start/` launcher input instead of opening
-/// the modal command bar. True only for a normal open (not a new-stack open) whose active
-/// page is the start launcher. A space-switch open (`<leader> s`) always uses the modal so
-/// the switcher behaves the same on the start page as everywhere else.
 fn command_bar_should_focus_start(
     is_new_stack: bool,
     space_switch: bool,
     active_page_is_start: bool,
+    replace_active_stack: bool,
 ) -> bool {
-    !is_new_stack && !space_switch && active_page_is_start
+    !replace_active_stack && !is_new_stack && !space_switch && active_page_is_start
 }
 
-/// Whether a toggle-style open should (re)open the modal command bar: when it is currently
-/// closed, or always for a space-switch open so `<leader> s` re-drives space-switch mode
-/// even when the command bar is already visible (rather than no-opping).
 fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
     !is_open || space_switch
+}
+
+fn command_bar_should_recreate_renderer(
+    native_overlay: bool,
+    opened_once: bool,
+    was_open: bool,
+) -> bool {
+    native_overlay && opened_once && !was_open
 }
 
 fn handle_open_command_bar(
@@ -697,11 +774,14 @@ fn handle_open_command_bar(
             Option<&CommandBarRenderedOpen>,
             Option<&PendingCommandBarReveal>,
             Has<WebviewWindowed>,
+            Has<WebviewNativeOverlay>,
+            Has<CommandBarOpenedOnce>,
+            Has<CommandBarRecreating>,
         ),
         With<Modal>,
     >,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
-    browsers: NonSend<Browsers>,
+    mut browsers: NonSendMut<Browsers>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -770,17 +850,17 @@ fn handle_open_command_bar(
     if should_dismiss {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, has_keyboard_target, _, _, _, _)| {
+            .map(|(_, n, _, has_keyboard_target, _, _, _, _, _, _, _)| {
                 command_bar_modal_is_open(n.display, has_keyboard_target)
             })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _)) = modal_q.single_mut()
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _, native_overlay, _, _)) =
+                modal_q.single_mut()
             else {
                 return;
             };
-            modal_node.display = Display::None;
-            *modal_vis = Visibility::Hidden;
+            close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
             commands
                 .entity(modal_e)
                 .insert(Pickable::IGNORE)
@@ -788,7 +868,8 @@ fn handle_open_command_bar(
                 .remove::<CefPointerTarget>()
                 .remove::<CommandBarRenderedOpen>()
                 .remove::<CommandBarPaintedOpen>()
-                .remove::<PendingCommandBarReveal>();
+                .remove::<PendingCommandBarReveal>()
+                .remove::<CommandBarRecreating>();
             let mut new_stack_ctx = snapshot_params.p2();
             // Discard empty tab created by a previous Cmd+T
             if let Some(stack_e) = new_stack_ctx.stack.take() {
@@ -798,7 +879,7 @@ fn handle_open_command_bar(
                 {
                     for child in children.iter() {
                         if content_browsers.contains(child) {
-                            commands.entity(child).insert(CefKeyboardTarget);
+                            commands.entity(child).try_insert(CefKeyboardTarget);
                         }
                     }
                 }
@@ -819,7 +900,7 @@ fn handle_open_command_bar(
                             .map(|co| co.get() == tab)
                             .unwrap_or(false);
                         if is_child {
-                            commands.entity(browser_e).insert(CefKeyboardTarget);
+                            commands.entity(browser_e).try_insert(CefKeyboardTarget);
                         }
                     }
                 }
@@ -834,17 +915,17 @@ fn handle_open_command_bar(
     if should_dismiss_nav {
         let is_open = modal_q
             .single()
-            .map(|(_, n, _, has_keyboard_target, _, _, _, _)| {
+            .map(|(_, n, _, has_keyboard_target, _, _, _, _, _, _, _)| {
                 command_bar_modal_is_open(n.display, has_keyboard_target)
             })
             .unwrap_or(false);
         if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _)) = modal_q.single_mut()
+            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _, native_overlay, _, _)) =
+                modal_q.single_mut()
             else {
                 return;
             };
-            modal_node.display = Display::None;
-            *modal_vis = Visibility::Hidden;
+            close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
             commands
                 .entity(modal_e)
                 .insert(Pickable::IGNORE)
@@ -852,7 +933,8 @@ fn handle_open_command_bar(
                 .remove::<CefPointerTarget>()
                 .remove::<CommandBarRenderedOpen>()
                 .remove::<CommandBarPaintedOpen>()
-                .remove::<PendingCommandBarReveal>();
+                .remove::<PendingCommandBarReveal>()
+                .remove::<CommandBarRecreating>();
             let mut new_stack_ctx = snapshot_params.p2();
             new_stack_ctx.needs_open = false;
             return;
@@ -879,15 +961,15 @@ fn handle_open_command_bar(
     if should_toggle {
         let is_open = modal_q
             .single()
-            .map(|(_, n, visibility, has_keyboard_target, _, _, _, _)| {
-                command_bar_modal_is_visible(n.display, *visibility, has_keyboard_target)
-            })
+            .map(
+                |(_, n, visibility, has_keyboard_target, _, _, _, _, _, _, _)| {
+                    command_bar_modal_is_visible(n.display, *visibility, has_keyboard_target)
+                },
+            )
             .unwrap_or(false);
         if command_bar_toggle_should_open(is_open, space_switch) {
             should_open = true;
         }
-        // If already open, do nothing — the shortcut should not close the bar.
-        // Users can dismiss with Escape or click-outside.
     }
 
     if !should_open {
@@ -919,8 +1001,12 @@ fn handle_open_command_bar(
                 })
             })
         });
-        if command_bar_should_focus_start(is_new_stack, space_switch, start_browser.is_some())
-            && let Some(browser_e) = start_browser
+        if command_bar_should_focus_start(
+            is_new_stack,
+            space_switch,
+            start_browser.is_some(),
+            replace_active_stack,
+        ) && let Some(browser_e) = start_browser
         {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 browser_e,
@@ -940,22 +1026,22 @@ fn handle_open_command_bar(
         rendered_open,
         modal_pending_reveal,
         native_windowed,
+        native_overlay,
+        opened_once,
+        command_bar_recreating,
     )) = modal_q.single_mut()
     else {
         return;
     };
 
     let was_open = command_bar_modal_is_open(modal_node.display, has_keyboard_target);
-
     if !was_open {
-        // Open command bar — keep hidden until CEF resizes (see reveal_command_bar)
-        modal_node.display = Display::Flex;
-        *modal_vis = Visibility::Hidden;
+        prepare_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
     }
 
     if !was_open {
         for browser_e in &content_browsers {
-            commands.entity(browser_e).remove::<CefKeyboardTarget>();
+            commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
         }
     }
     commands
@@ -1009,7 +1095,6 @@ fn handle_open_command_bar(
         &space_name,
         &locale,
     );
-
     let has_browser = browsers.has_browser(modal_e);
     let host_emit_ready = browsers.host_emit_ready(&modal_e);
     let rendered_matches = rendered_open.is_some_and(|rendered| rendered.0 != 0);
@@ -1062,7 +1147,24 @@ fn handle_open_command_bar(
     let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
     let payload_bytes = event.payload.clone();
     let payload_bytes_len = payload_bytes.len();
-    commands.trigger(event);
+    let recreate_renderer =
+        command_bar_should_recreate_renderer(native_overlay, opened_once, was_open);
+    let wait_for_recreate = command_bar_recreating || recreate_renderer;
+    let reveal_started_at = (!wait_for_recreate).then(Instant::now);
+    if recreate_renderer {
+        browsers.close(&modal_e);
+        commands
+            .entity(modal_e)
+            .remove::<PageReady>()
+            .remove::<CommandBarReady>()
+            .insert(CommandBarRecreating);
+    }
+    if !native_windowed {
+        browsers.wake_osr_webview(&modal_e);
+    }
+    if !wait_for_recreate {
+        commands.trigger(event);
+    }
     if should_start_command_bar_reveal(
         has_browser,
         host_emit_ready,
@@ -1078,7 +1180,7 @@ fn handle_open_command_bar(
                 frames: reveal_start_frames,
                 open_id,
                 payload: Some(payload_bytes.clone()),
-                started_at: Some(Instant::now()),
+                started_at: reveal_started_at,
             });
     } else {
         commands
@@ -1089,7 +1191,7 @@ fn handle_open_command_bar(
                 frames: reveal_start_frames,
                 open_id,
                 payload: Some(payload_bytes),
-                started_at: Some(Instant::now()),
+                started_at: reveal_started_at,
             });
     }
     webview_debug_log(format!(
@@ -1433,7 +1535,15 @@ fn prompt_agent_url(
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
     search_engine: Option<Res<SearchEngine>>,
-    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    mut modal_q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut Visibility,
+            Has<WebviewNativeOverlay>,
+        ),
+        With<Modal>,
+    >,
     queries: CommandBarActionQueries,
     mut stack_params: ParamSet<(
         Query<Entity, With<Stack>>,
@@ -1480,7 +1590,6 @@ fn on_command_bar_action(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(|| requested_locale(None));
-
     match evt.action.as_str() {
         "prompt" => {
             let prompt = evt.value.trim();
@@ -1876,7 +1985,7 @@ fn on_command_bar_action(
                     {
                         for child in children.iter() {
                             if queries.content_browsers.contains(child) {
-                                commands.entity(child).insert(CefKeyboardTarget);
+                                commands.entity(child).try_insert(CefKeyboardTarget);
                             }
                         }
                     }
@@ -1888,9 +1997,8 @@ fn on_command_bar_action(
     }
 
     // Close command bar and restore keyboard
-    if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut() {
-        modal_node.display = Display::None;
-        *modal_vis = Visibility::Hidden;
+    if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut() {
+        close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
             .insert(Pickable::IGNORE)
@@ -1898,7 +2006,8 @@ fn on_command_bar_action(
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<CommandBarPaintedOpen>()
-            .remove::<PendingCommandBarReveal>();
+            .remove::<PendingCommandBarReveal>()
+            .remove::<CommandBarRecreating>();
     }
     if !custom_keyboard_restore {
         let (_, _, active_stack) = focused_stack(
@@ -1918,7 +2027,7 @@ fn on_command_bar_action(
                     .map(|co| co.get() == tab)
                     .unwrap_or(false);
                 if is_child {
-                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
                 }
             }
         }
@@ -1996,18 +2105,25 @@ fn sibling_tabs(
 
 fn deferred_dismiss_modal(
     mut new_stack_ctx: ResMut<NewStackContext>,
-    mut modal_q: Query<(Entity, &mut Node, &mut Visibility), With<Modal>>,
+    mut modal_q: Query<
+        (
+            Entity,
+            &mut Node,
+            &mut Visibility,
+            Has<WebviewNativeOverlay>,
+        ),
+        With<Modal>,
+    >,
     mut commands: Commands,
 ) {
     if !new_stack_ctx.dismiss_modal {
         return;
     }
     new_stack_ctx.dismiss_modal = false;
-    if let Ok((modal_e, mut modal_node, mut modal_vis)) = modal_q.single_mut()
+    if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut()
         && modal_node.display != Display::None
     {
-        modal_node.display = Display::None;
-        *modal_vis = Visibility::Hidden;
+        close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
             .insert(Pickable::IGNORE)
@@ -2015,7 +2131,8 @@ fn deferred_dismiss_modal(
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
             .remove::<CommandBarPaintedOpen>()
-            .remove::<PendingCommandBarReveal>();
+            .remove::<PendingCommandBarReveal>()
+            .remove::<CommandBarRecreating>();
     }
 }
 
@@ -2030,21 +2147,32 @@ fn reveal_command_bar(
             Option<&CommandBarPaintedOpen>,
             Option<&CommandBarNativeSize>,
             Has<WebviewWindowed>,
+            Has<WebviewNativeOverlay>,
         ),
         With<Modal>,
     >,
 ) {
-    for (entity, mut vis, mut pending, rendered, painted, native_size, native_windowed) in
-        &mut query
+    for (
+        entity,
+        mut vis,
+        mut pending,
+        rendered,
+        painted,
+        native_size,
+        native_windowed,
+        native_overlay,
+    ) in &mut query
     {
         let rendered_open_id = rendered.map(|rendered| rendered.0);
         let painted_open_id = painted.map(|painted| painted.0);
+        let elapsed = pending
+            .started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or_default();
         if native_command_bar_reveal_timed_out(
             native_windowed,
-            pending
-                .started_at
-                .map(|started_at| started_at.elapsed())
-                .unwrap_or_default(),
+            native_overlay,
+            elapsed,
             pending.open_id,
             rendered_open_id,
             native_size.is_some(),
@@ -2064,6 +2192,7 @@ fn reveal_command_bar(
         }
         match next_command_bar_reveal_frames_for_backend(
             native_windowed,
+            native_overlay,
             pending.frames,
             pending.open_id,
             rendered_open_id,
@@ -2088,11 +2217,15 @@ fn retry_pending_command_bar_open(
             Entity,
             &PendingCommandBarReveal,
             Option<&CommandBarRenderedOpen>,
+            Has<CommandBarRecreating>,
         ),
         With<Modal>,
     >,
 ) {
-    for (entity, pending, rendered) in &query {
+    for (entity, pending, rendered, recreating) in &query {
+        if recreating {
+            continue;
+        }
         let rendered_open_id = rendered.map(|rendered| rendered.0);
         let Some(payload) = pending.payload.as_deref() else {
             continue;
@@ -2365,6 +2498,26 @@ mod tests {
     }
 
     #[test]
+    fn closed_native_overlay_stays_renderable_without_being_open() {
+        let mut node = Node::default();
+        let mut visibility = Visibility::Hidden;
+
+        close_command_bar_surface(&mut node, &mut visibility, true);
+
+        assert_eq!(node.display, Display::Flex);
+        assert_eq!(visibility, Visibility::Inherited);
+        assert!(!command_bar_modal_is_open(node.display, false));
+    }
+
+    #[test]
+    fn closed_native_overlay_recreates_after_its_first_render() {
+        assert!(command_bar_should_recreate_renderer(true, true, false));
+        assert!(!command_bar_should_recreate_renderer(true, false, false));
+        assert!(!command_bar_should_recreate_renderer(true, true, true));
+        assert!(!command_bar_should_recreate_renderer(false, true, false));
+    }
+
+    #[test]
     fn command_bar_modal_prewarms_hidden_and_renderable() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -2502,15 +2655,15 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, None, None, true),
+            next_command_bar_reveal_frames_for_backend(true, false, 10, 7, None, None, true),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 10, 7, Some(7), None, false),
+            next_command_bar_reveal_frames_for_backend(true, false, 10, 7, Some(7), None, false,),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 2, 7, Some(7), None, true),
+            next_command_bar_reveal_frames_for_backend(true, false, 2, 7, Some(7), None, true,),
             None
         );
     }
@@ -2519,6 +2672,7 @@ mod tests {
     fn native_command_bar_aborts_stalled_reveal() {
         assert!(!native_command_bar_reveal_timed_out(
             true,
+            false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1),
             7,
             None,
@@ -2526,6 +2680,7 @@ mod tests {
         ));
         assert!(native_command_bar_reveal_timed_out(
             true,
+            false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
             7,
             None,
@@ -2533,6 +2688,7 @@ mod tests {
         ));
         assert!(native_command_bar_reveal_timed_out(
             true,
+            false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
             7,
             Some(7),
@@ -2540,18 +2696,32 @@ mod tests {
         ));
         assert!(!native_command_bar_reveal_timed_out(
             true,
+            false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
             7,
             Some(7),
             true,
         ));
         assert!(!native_command_bar_reveal_timed_out(
+            false,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
             7,
             None,
             false,
         ));
+    }
+
+    #[test]
+    fn native_overlay_waits_for_rendered_ack() {
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(false, true, 10, 7, None, None, false,),
+            Some(11)
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames_for_backend(false, true, 2, 7, Some(7), None, false,),
+            None
+        );
     }
 
     #[test]
@@ -2634,7 +2804,7 @@ mod tests {
             Some(&pending)
         ));
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, 0, 7, None, None, true),
+            next_command_bar_reveal_frames_for_backend(true, false, 0, 7, None, None, true),
             Some(1)
         );
     }
@@ -2779,15 +2949,16 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_focuses_start_only_for_non_space_switch_open() {
-        assert!(command_bar_should_focus_start(false, false, true));
-        assert!(!command_bar_should_focus_start(false, true, true));
-        assert!(!command_bar_should_focus_start(true, false, true));
-        assert!(!command_bar_should_focus_start(false, false, false));
+    fn command_bar_focuses_start_only_for_generic_open() {
+        assert!(command_bar_should_focus_start(false, false, true, false));
+        assert!(!command_bar_should_focus_start(false, true, true, false));
+        assert!(!command_bar_should_focus_start(true, false, true, false));
+        assert!(!command_bar_should_focus_start(false, false, false, false));
+        assert!(!command_bar_should_focus_start(false, false, true, true));
     }
 
     #[test]
-    fn space_switch_reopens_command_bar_even_when_visible() {
+    fn duplicate_open_is_ignored_while_command_bar_is_visible() {
         assert!(command_bar_toggle_should_open(false, false));
         assert!(!command_bar_toggle_should_open(true, false));
         assert!(command_bar_toggle_should_open(true, true));

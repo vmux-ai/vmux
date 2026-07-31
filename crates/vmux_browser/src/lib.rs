@@ -270,7 +270,7 @@ impl Plugin for BrowserPlugin {
                 PreUpdate,
                 (
                     sync_layout_cef_pointer_target,
-                    dismiss_windowed_command_bar_from_native_monitor,
+                    dismiss_command_bar_from_native_monitor,
                     dismiss_windowed_command_bar_on_outside_click
                         .run_if(on_message::<MouseButtonInput>),
                     forward_layout_cef_cursor_move.run_if(on_message::<CursorMoved>),
@@ -973,8 +973,8 @@ fn dismiss_windowed_command_bar_on_outside_click(
     }
 }
 
-fn dismiss_windowed_command_bar_from_native_monitor(
-    modal_q: Query<Entity, (With<Modal>, With<WebviewWindowed>)>,
+fn dismiss_command_bar_from_native_monitor(
+    modal_q: Query<Entity, With<Modal>>,
     mut commands: Commands,
 ) {
     if !take_native_command_bar_dismiss_requested() {
@@ -1034,10 +1034,10 @@ fn sync_keyboard_target(
         for (browser_e, has_kb) in &content_q {
             if browser_e == layout {
                 if !has_kb {
-                    commands.entity(browser_e).insert(CefKeyboardTarget);
+                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
                 }
             } else if has_kb {
-                commands.entity(browser_e).remove::<CefKeyboardTarget>();
+                commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
         suppress.0 = false;
@@ -1072,13 +1072,13 @@ fn sync_keyboard_target(
 
         if in_active {
             if !has_kb {
-                commands.entity(browser_e).insert(CefKeyboardTarget);
+                commands.entity(browser_e).try_insert(CefKeyboardTarget);
             }
             // Suppress CEF keyboard forwarding when a terminal is focused —
             // terminals receive input via the service, not CEF key events.
             suppress.0 = terminal_q.contains(browser_e);
         } else if has_kb {
-            commands.entity(browser_e).remove::<CefKeyboardTarget>();
+            commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
         }
     }
 }
@@ -1440,26 +1440,36 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     let mut query = world.query_filtered::<(
         Entity,
         Has<LayoutCef>,
+        Has<Modal>,
         Has<WebviewNativeOverlay>,
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<(Entity, bool, bool, bool)> = query.iter(world).collect();
-    let target_windowed = |_entity: Entity, is_layout: bool| base_windowed && !is_layout;
-    let target_native_overlay = |is_layout: bool| {
+    let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
+    let target_windowed =
+        |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
+    let target_native_overlay = |is_layout: bool, is_modal: bool| {
+        cfg!(target_os = "macos")
+            && mode == vmux_layout::scene::InteractionMode::User
+            && (is_layout || is_modal)
+    };
+    let target_native_direct_overlay = |is_layout: bool| {
         cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
     };
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &(entity, is_layout, actual_native_overlay, actual_direct_overlay) in &entities {
+        for &(entity, is_layout, is_modal, actual_native_overlay, actual_direct_overlay) in
+            &entities
+        {
             let has_browser = browsers.has_browser(entity);
             let actual_windowed = browsers.is_windowed(&entity);
-            let want_windowed = target_windowed(entity, is_layout);
-            let want_native_overlay = target_native_overlay(is_layout);
+            let want_windowed = target_windowed(is_layout, is_modal);
+            let want_native_overlay = target_native_overlay(is_layout, is_modal);
+            let want_native_direct_overlay = target_native_direct_overlay(is_layout);
             let needs_recreate = actual_windowed.is_some_and(|actual| actual != want_windowed)
                 || has_browser
                     && (actual_native_overlay != want_native_overlay
-                        || actual_direct_overlay != want_native_overlay);
+                        || actual_direct_overlay != want_native_direct_overlay);
             if needs_recreate {
                 recreate.push(entity);
             }
@@ -1471,14 +1481,15 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for (entity, is_layout, _, _) in entities {
-        let want_windowed = target_windowed(entity, is_layout);
-        let want_native_overlay = target_native_overlay(is_layout);
+    for (entity, is_layout, is_modal, _, _) in entities {
+        let want_windowed = target_windowed(is_layout, is_modal);
+        let want_native_overlay = target_native_overlay(is_layout, is_modal);
+        let want_native_direct_overlay = target_native_direct_overlay(is_layout);
         let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
         let overlay_matches =
             world.get::<WebviewNativeOverlay>(entity).is_some() == want_native_overlay;
         let direct_overlay_matches =
-            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_overlay;
+            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_direct_overlay;
         let needs_recreate = recreate.contains(&entity);
         if marker_matches && overlay_matches && direct_overlay_matches && !needs_recreate {
             continue;
@@ -1492,11 +1503,14 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
             entity_mut.remove::<WebviewWindowed>();
         }
         if want_native_overlay {
-            entity_mut.insert((WebviewNativeOverlay, WebviewNativeDirectOverlay));
+            entity_mut.insert(WebviewNativeOverlay);
         } else {
-            entity_mut
-                .remove::<WebviewNativeOverlay>()
-                .remove::<WebviewNativeDirectOverlay>();
+            entity_mut.remove::<WebviewNativeOverlay>();
+        }
+        if want_native_direct_overlay {
+            entity_mut.insert(WebviewNativeDirectOverlay);
+        } else {
+            entity_mut.remove::<WebviewNativeDirectOverlay>();
         }
         if needs_recreate {
             entity_mut
@@ -2346,6 +2360,7 @@ const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
 const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
 static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
     LazyLock::new(|| Mutex::new(None));
+static NATIVE_COMMAND_BAR_OPEN: AtomicBool = AtomicBool::new(false);
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -2458,6 +2473,14 @@ fn set_native_command_bar_click_frame(frame: Option<CommandBarWindowedFrame>) {
     }
 }
 
+pub fn request_native_command_bar_dismiss() -> bool {
+    if !NATIVE_COMMAND_BAR_OPEN.load(Ordering::Relaxed) {
+        return false;
+    }
+    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
+    true
+}
+
 pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
     if !x_px.is_finite() || !y_px.is_finite() {
         return false;
@@ -2487,6 +2510,10 @@ fn command_bar_windowed_view_should_show(
     display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
 }
 
+fn command_bar_windowed_view_is_open(display: Display, has_keyboard_target: bool) -> bool {
+    display != Display::None && has_keyboard_target
+}
+
 fn command_bar_windowed_view_should_render_hidden(
     display: Display,
     visibility: Visibility,
@@ -2503,24 +2530,31 @@ fn sync_windowed_command_bar(
             &Node,
             &Visibility,
             Has<CefKeyboardTarget>,
+            Has<WebviewWindowed>,
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
-        (With<Modal>, With<WebviewWindowed>),
+        With<Modal>,
     >,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut was_open: Local<bool>,
 ) {
     let matched = modal_q.single();
-    let Ok((entity, node, visibility, has_keyboard_target, host_window, native_size)) = matched
+    let Ok((entity, node, visibility, has_keyboard_target, is_windowed, host_window, native_size)) =
+        matched
     else {
+        NATIVE_COMMAND_BAR_OPEN.store(false, Ordering::Relaxed);
         set_native_command_bar_click_frame(None);
         *was_open = false;
         return;
     };
     let open =
         command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
+    NATIVE_COMMAND_BAR_OPEN.store(
+        command_bar_windowed_view_is_open(node.display, has_keyboard_target),
+        Ordering::Relaxed,
+    );
     let render_hidden = command_bar_windowed_view_should_render_hidden(
         node.display,
         *visibility,
@@ -2528,8 +2562,10 @@ fn sync_windowed_command_bar(
     );
     if !open && !render_hidden {
         set_native_command_bar_click_frame(None);
-        browsers.set_windowed_focus(&entity, false);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            browsers.set_windowed_focus(&entity, false);
+            hide_windowed_command_bar(&browsers, entity);
+        }
         *was_open = false;
         return;
     }
@@ -2542,15 +2578,34 @@ fn sync_windowed_command_bar(
         .or_else(|| primary_window.single().ok());
     let Some(window_entity) = window_entity else {
         set_native_command_bar_click_frame(None);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            hide_windowed_command_bar(&browsers, entity);
+        }
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
         set_native_command_bar_click_frame(None);
-        hide_windowed_command_bar(&browsers, entity);
+        if is_windowed {
+            hide_windowed_command_bar(&browsers, entity);
+        }
         return;
     };
     let scale = window.resolution.scale_factor();
+    if !is_windowed {
+        let frame = if open {
+            native_size.map(|size| CommandBarWindowedFrame {
+                left_px: size.shell_left * scale,
+                top_px: size.shell_top * scale,
+                width_px: size.shell_width * scale,
+                height_px: size.shell_height * scale,
+            })
+        } else {
+            None
+        };
+        set_native_command_bar_click_frame(frame);
+        *was_open = open;
+        return;
+    }
     if render_hidden {
         set_native_command_bar_click_frame(None);
         let frame = command_bar_hidden_windowed_frame();
@@ -2822,6 +2877,8 @@ fn sync_osr_webview_focus(
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
     let mut bookmark_input_target = None;
+    let window_visible = primary_window.visible;
+    let window_focused = primary_window.focused;
     for (
         entity,
         visibility,
@@ -2855,6 +2912,8 @@ fn sync_osr_webview_focus(
             if is_modal && has_keyboard_target {
                 modal_keyboard_target = Some((entity, is_windowed));
             }
+        } else if keep_hidden_osr_webview_warm(is_modal, is_windowed, window_visible) {
+            browsers.set_osr_not_hidden(&entity);
         } else {
             browsers.set_osr_hidden(&entity);
         }
@@ -2863,9 +2922,6 @@ fn sync_osr_webview_focus(
         return;
     }
     ready.sort_by_key(|e| e.to_bits());
-    let window_visible = primary_window.visible;
-    let window_focused = primary_window.focused;
-
     let active_stack_opt = focus.stack;
     let active_stack = active_stack_opt.and_then(|tab| {
         ready
@@ -2976,6 +3032,10 @@ fn webview_osr_should_run(
     pending_reveal: bool,
 ) -> bool {
     pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
+}
+
+fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visible: bool) -> bool {
+    is_modal && !is_windowed && window_visible
 }
 
 fn choose_osr_active_webview(
@@ -5656,6 +5716,14 @@ mod tests {
     }
 
     #[test]
+    fn hidden_osr_command_bar_stays_warm_for_reopen() {
+        assert!(keep_hidden_osr_webview_warm(true, false, true));
+        assert!(!keep_hidden_osr_webview_warm(false, false, true));
+        assert!(!keep_hidden_osr_webview_warm(true, true, true));
+        assert!(!keep_hidden_osr_webview_warm(true, false, false));
+    }
+
+    #[test]
     fn command_bar_modal_wins_osr_focus_for_keyboard_input() {
         let pane = Entity::from_bits(1);
         let modal = Entity::from_bits(2);
@@ -6184,7 +6252,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_shell_osr_for_wallpaper_glass() {
+    fn browser_mode_keeps_layout_and_command_bar_osr_for_native_overlays() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -6193,9 +6261,10 @@ mod tests {
             .unwrap_or_default();
 
         assert!(backend_fn.contains("Has<LayoutCef>"));
-        assert!(backend_fn.contains("!is_layout"));
+        assert!(backend_fn.contains("Has<Modal>"));
+        assert!(backend_fn.contains("!is_layout && !is_modal"));
         assert!(backend_fn.contains("WebviewNativeOverlay"));
-        assert!(!backend_fn.contains("With<Modal>"));
+        assert!(backend_fn.contains("target_native_direct_overlay"));
     }
 
     #[test]
@@ -6227,7 +6296,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_osr_and_windows_pages_and_modal_on_macos() {
+    fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -6268,13 +6337,14 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(terminal).is_some(),
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
+            app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -6325,8 +6395,14 @@ mod tests {
                 .is_some(),
             cfg!(target_os = "macos")
         );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert!(
+            app.world()
+                .get::<WebviewNativeDirectOverlay>(modal)
+                .is_none()
+        );
         assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
             cfg!(target_os = "macos")
         );
         assert_eq!(
@@ -6584,7 +6660,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_plugin_wires_windowed_command_bar_outside_click_dismiss() {
+    fn browser_plugin_wires_command_bar_outside_click_dismiss() {
         let source = include_str!("lib.rs");
         let plugin_build = source
             .split("impl Plugin for BrowserPlugin")
@@ -6592,7 +6668,7 @@ mod tests {
             .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
             .unwrap_or_default();
 
-        assert!(plugin_build.contains("dismiss_windowed_command_bar_from_native_monitor"));
+        assert!(plugin_build.contains("dismiss_command_bar_from_native_monitor"));
         assert!(plugin_build.contains("dismiss_windowed_command_bar_on_outside_click"));
         assert!(plugin_build.contains("run_if(on_message::<MouseButtonInput>)"));
     }
@@ -6886,6 +6962,7 @@ mod tests {
 
     #[test]
     fn command_bar_windowed_view_shows_hidden_pending_view_for_renderer_ack() {
+        assert!(command_bar_windowed_view_is_open(Display::Flex, true));
         assert!(!command_bar_windowed_view_should_show(
             Display::Flex,
             Visibility::Hidden,

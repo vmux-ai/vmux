@@ -516,7 +516,20 @@ impl Browsers {
         if let Some(b) = self.browsers.get(webview) {
             if b.hidden.replace(false) {
                 b.host.was_hidden(0);
+                b.host.invalidate(cef::PaintElementType::VIEW);
             }
+        }
+    }
+
+    pub fn wake_osr_webview(&self, webview: &Entity) {
+        if let Some(browser) = self.browsers.get(webview)
+            && !browser.windowed
+        {
+            if browser.hidden.replace(false) {
+                browser.host.was_hidden(0);
+            }
+            browser.host.set_focus(true as _);
+            browser.host.invalidate(cef::PaintElementType::VIEW);
         }
     }
 

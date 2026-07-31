@@ -112,7 +112,7 @@ pub struct PaletteProps {
     pub state: ReadSignal<CommandBarOpenEvent>,
     /// Presentation context (placeholder text and host expectations).
     pub variant: PaletteVariant,
-    /// Called after an entry executes (the modal hides itself; home is a no-op).
+    /// Called after an entry executes (the modal host closes it; home is a no-op).
     pub on_close: EventHandler<()>,
     /// Called when the user cancels (Esc / Ctrl-C).
     pub on_dismiss: EventHandler<()>,

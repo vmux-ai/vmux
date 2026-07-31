@@ -348,7 +348,7 @@ struct LayoutOverlay {
 
 #[derive(Default)]
 struct CommandBarOverlay {
-    view: Option<objc2::rc::Retained<objc2_app_kit::NSView>>,
+    layer: Option<objc2::rc::Retained<objc2_quartz_core::CALayer>>,
     shown: bool,
     /// Keeps the currently-displayed IOSurface alive while it's the overlay layer's contents.
     held: Option<bevy_cef_core::prelude::AcceleratedFrame>,
@@ -1237,29 +1237,44 @@ fn sync_layout_overlay(
 fn sync_command_bar_overlay(
     mut state: NonSendMut<CommandBarOverlay>,
     modal_open_q: Query<
-        (&Node, Has<bevy_cef::prelude::CefKeyboardTarget>),
+        (
+            &Node,
+            &Visibility,
+            Has<bevy_cef::prelude::CefKeyboardTarget>,
+        ),
         With<vmux_layout::window::Modal>,
     >,
     modal_e_q: Query<Entity, With<vmux_layout::window::Modal>>,
+    pending_q: Query<
+        (),
+        (
+            With<vmux_layout::window::Modal>,
+            With<vmux_layout::command_bar::handler::PendingCommandBarReveal>,
+        ),
+    >,
     window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
     windows: Query<&bevy::window::Window>,
     mut overlay_frames: ResMut<bevy_cef::prelude::NativeOverlayFrames>,
 ) {
-    use objc2::{MainThreadMarker, MainThreadOnly, runtime::AnyObject};
-    use objc2_app_kit::NSView;
+    use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
+    use objc2_app_kit::{NSColor, NSView};
+    use objc2_quartz_core::{CAAutoresizingMask, CALayer};
 
-    let open = vmux_layout::command_bar::handler::is_command_bar_open(&modal_open_q);
+    let open = vmux_layout::command_bar::handler::is_command_bar_visible(&modal_open_q)
+        && modal_e_q
+            .single()
+            .is_ok_and(|modal_e| !pending_q.contains(modal_e));
     if !open {
         if state.shown {
-            if let Some(view) = &state.view {
-                view.setHidden(true);
+            if let Some(layer) = &state.layer {
+                layer.setHidden(true);
             }
             state.shown = false;
             state.held = None;
         }
         return;
     }
-    let Some(mtm) = MainThreadMarker::new() else {
+    let Some(_mtm) = MainThreadMarker::new() else {
         return;
     };
     let (Ok(window_e), Ok(modal_e)) = (window_q.single(), modal_e_q.single()) else {
@@ -1275,40 +1290,47 @@ fn sync_command_bar_overlay(
         return;
     };
     let content: &NSView = unsafe { &*ns_view.cast::<NSView>() };
-    let bounds = content.bounds();
-
-    if state.view.is_none() {
-        let view = NSView::initWithFrame(NSView::alloc(mtm), bounds);
-        view.setWantsLayer(true);
-        state.view = Some(view);
-    }
-    let Some(view) = state.view.clone() else {
+    content.setWantsLayer(true);
+    let Some(host_layer) = content.layer() else {
         return;
     };
-    view.setFrame(bounds);
+    let bounds = content.bounds();
+
+    if state.layer.is_none() {
+        let clear_color = NSColor::clearColor();
+        let layer: Retained<CALayer> = CALayer::new();
+        layer.setOpaque(false);
+        layer.setBackgroundColor(Some(&clear_color.CGColor()));
+        layer.setZPosition(200.0);
+        layer.setAutoresizingMask(
+            CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable,
+        );
+        host_layer.addSublayer(&layer);
+        state.layer = Some(layer);
+    }
+    let Some(layer) = state.layer.clone() else {
+        return;
+    };
+    layer.setFrame(bounds);
+    layer.setContentsScale(
+        windows
+            .get(window_e)
+            .map(|w| w.resolution.scale_factor() as f64)
+            .unwrap_or(2.0),
+    );
 
     if let Some(frame) = next {
-        if let Some(layer) = view.layer() {
-            let io_surface = frame.io_surface as *mut AnyObject;
-            if !io_surface.is_null() {
-                let scale = windows
-                    .get(window_e)
-                    .map(|w| w.resolution.scale_factor() as f64)
-                    .unwrap_or(2.0);
-                layer.setOpaque(false);
-                layer.setContentsScale(scale);
-                unsafe { layer.setContents(Some(&*io_surface)) };
-            }
+        let io_surface = frame.io_surface as *mut AnyObject;
+        if !io_surface.is_null() {
+            unsafe { layer.setContents(Some(&*io_surface)) };
         }
         state.held = Some(frame);
     }
 
     if !state.shown {
-        view.setHidden(false);
+        layer.setHidden(false);
         state.shown = true;
     }
-    // Raise above the native pages (re-add reorders to front; pages re-raise each frame).
-    content.addSubview(&view);
 }
 
 #[cfg(test)]

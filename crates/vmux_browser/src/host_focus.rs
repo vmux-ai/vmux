@@ -58,9 +58,9 @@ pub(crate) fn compute_host_focus_intent(
     >,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    // While the command bar owns native focus, leave content focus alone — otherwise we would
-    // re-steal first-responder from the command bar every frame.
-    let next = if *mode != InteractionMode::User || is_command_bar_open(&modal_q) {
+    let next = if is_command_bar_open(&modal_q) {
+        HostFocusIntent::WinitHost
+    } else if *mode != InteractionMode::User {
         HostFocusIntent::Unmanaged
     } else if !bookmark_input_q.is_empty() {
         HostFocusIntent::WinitHost
@@ -172,6 +172,27 @@ mod tests {
     #[test]
     fn no_active_stack_intends_winit_host() {
         let mut app = app();
+        app.update();
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn open_command_bar_reclaims_winit_host_focus() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            CefKeyboardTarget,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }

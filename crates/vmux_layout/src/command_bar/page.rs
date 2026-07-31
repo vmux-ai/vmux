@@ -88,7 +88,7 @@ pub fn Page() -> Element {
     });
 
     use_effect(move || {
-        if !is_open() || !state().native_windowed {
+        if !is_open() {
             return;
         }
         let open_id = current_open_id();
@@ -118,12 +118,10 @@ pub fn Page() -> Element {
                 CommandPalette {
                     state,
                     variant: PaletteVariant::Modal,
-                    on_close: move |_| { is_open.set(false); },
+                    on_close: move |_| {},
                     on_dismiss: move |_| { dismiss_command_bar(is_open); },
                     on_activity: move |_| {
-                        if state().native_windowed {
-                            schedule_command_bar_size_emit(current_open_id());
-                        }
+                        schedule_command_bar_size_emit(current_open_id());
                     },
                 }
             }
@@ -131,11 +129,10 @@ pub fn Page() -> Element {
     }
 }
 
-fn dismiss_command_bar(mut is_open: Signal<bool>) {
+fn dismiss_command_bar(is_open: Signal<bool>) {
     if !is_open() {
         return;
     }
-    is_open.set(false);
     emit_action("dismiss", "");
 }
 
@@ -204,6 +201,11 @@ fn emit_command_bar_size(open_id: u64) {
         return;
     };
     let shell: web_sys::HtmlElement = el.unchecked_into();
+    let shell_rect = shell.get_bounding_client_rect();
+    let shell_left = shell_rect.left().round() as i32;
+    let shell_top = shell_rect.top().round() as i32;
+    let shell_width = shell_rect.width().round().max(1.0) as u32;
+    let shell_height = shell_rect.height().round().max(1.0) as u32;
     let document_width = document
         .document_element()
         .map(|el| el.scroll_width())
@@ -220,14 +222,41 @@ fn emit_command_bar_size(open_id: u64) {
         .offset_height()
         .max(shell.scroll_height() + result_list_extra_height)
         .max(1) as u32;
-    let should_emit =
-        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow().should_emit(open_id, width, height));
+    let should_emit = COMMAND_BAR_SIZE_EMISSION.with(|state| {
+        state.borrow().should_emit(
+            open_id,
+            width,
+            height,
+            shell_left,
+            shell_top,
+            shell_width,
+            shell_height,
+        )
+    });
     if !should_emit {
         return;
     }
-    if try_cef_bin_emit_rkyv(&CommandBarSizeEvent { width, height }).is_ok() {
-        COMMAND_BAR_SIZE_EMISSION
-            .with(|state| state.borrow_mut().mark_emitted(open_id, width, height));
+    if try_cef_bin_emit_rkyv(&CommandBarSizeEvent {
+        width,
+        height,
+        shell_left,
+        shell_top,
+        shell_width,
+        shell_height,
+    })
+    .is_ok()
+    {
+        COMMAND_BAR_SIZE_EMISSION.with(|state| {
+            state.borrow_mut().mark_emitted(
+                open_id,
+                width,
+                height,
+                shell_left,
+                shell_top,
+                shell_width,
+                shell_height,
+            )
+        });
     }
 }
 
