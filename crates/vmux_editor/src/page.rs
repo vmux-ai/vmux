@@ -2019,6 +2019,8 @@ pub fn Page() -> Element {
     let git_message = use_signal(String::new);
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
+    let mut ed_command_line = use_signal(String::new);
+    let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -2144,6 +2146,12 @@ pub fn Page() -> Element {
         }
         if source_sel.peek().as_slice() != c.source_selections.as_slice() {
             source_sel.set(c.source_selections.clone());
+        }
+        if ed_command_line.peek().ne(&c.command_line) {
+            ed_command_line.set(c.command_line.clone());
+        }
+        if search_spans.peek().as_slice() != c.search.as_slice() {
+            search_spans.set(c.search.clone());
         }
         let note_mode = *file_view_mode.peek() == FileViewMode::Note
             && is_markdown_file(git_path.peek().as_str());
@@ -3623,6 +3631,22 @@ pub fn Page() -> Element {
                                             }
                                         }
 
+                                        for s in search_spans().iter() {
+                                            {
+                                                let top = s.row as f64 * ch;
+                                                let left = gutter + s.start as f64 * cw;
+                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
+                                                rsx! {
+                                                    div {
+                                                        key: "search{s.row}-{s.start}",
+                                                        class: "pointer-events-none absolute z-0 bg-amber-400/30",
+                                                        style: "{style}",
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         for s in sel().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
@@ -3954,6 +3978,7 @@ pub fn Page() -> Element {
                 leading: rsx! {
                     {
                         let lbl = ed_label();
+                        let prompt = ed_command_line();
                         (!lbl.is_empty()
                             && mode() == Mode::Text
                             && keymap() == vmux_core::KeymapKind::Vim)
@@ -3961,6 +3986,12 @@ pub fn Page() -> Element {
                                 span {
                                     class: "-ml-4 flex h-7 shrink-0 items-center bg-cyan-400/20 px-3 text-[10px] font-semibold tracking-wider text-cyan-700 dark:text-cyan-100",
                                     "{lbl}"
+                                }
+                                if !prompt.is_empty() {
+                                    span {
+                                        class: "flex h-7 min-w-0 flex-1 items-center truncate px-3 font-mono text-[11px] text-neutral-700 dark:text-neutral-200",
+                                        "{prompt}"
+                                    }
                                 }
                             })
                     }

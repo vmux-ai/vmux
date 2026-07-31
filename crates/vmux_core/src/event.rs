@@ -1895,6 +1895,9 @@ pub struct FileCursorEvent {
     pub selections: Vec<crate::editor::SelSpan>,
     pub source_primary: crate::editor::CursorPos,
     pub source_selections: Vec<crate::editor::SelSpan>,
+    /// The `:`, `/`, or `?` prompt being typed, or empty when no prompt is open.
+    pub command_line: String,
+    pub search: Vec<crate::editor::SelSpan>,
 }
 
 #[derive(
@@ -2319,6 +2322,13 @@ mod tests {
                 row: 3,
                 start: 20,
                 end: 25,
+            }],
+            command_line: ":wq".into(),
+            search: vec![SelSpan {
+                line: 1,
+                row: 1,
+                start: 2,
+                end: 6,
             }],
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&e).unwrap();

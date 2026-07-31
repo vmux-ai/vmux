@@ -1,6 +1,7 @@
 pub mod buffer;
 pub mod command;
 pub mod core;
+pub mod ex;
 pub mod highlight_cache;
 pub mod register;
 pub mod search;

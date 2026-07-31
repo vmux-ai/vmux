@@ -847,6 +847,64 @@ impl EditCore {
         }
     }
 
+    /// Resolve an ex range to whole lines, including each line's newline.
+    fn ex_range(&self, range: crate::edit::ex::ExRange) -> std::ops::Range<usize> {
+        use crate::edit::ex::ExRange;
+        match range {
+            ExRange::CurrentLine => self.line_span(self.primary().head, 1),
+            ExRange::WholeFile => 0..self.buffer.len_chars(),
+            ExRange::Selection => self.expand_linewise(self.primary().range()),
+            ExRange::Lines(first, last) => {
+                let total = self.buffer.len_lines().saturating_sub(1);
+                let (first, last) = (first.min(total), last.min(total));
+                let (first, last) = (first.min(last), first.max(last));
+                let start = self.buffer.line_to_char(first);
+                let end = if last + 1 < self.buffer.len_lines() {
+                    self.buffer.line_to_char(last + 1)
+                } else {
+                    self.buffer.len_chars()
+                };
+                start..end
+            }
+        }
+    }
+
+    fn substitute(
+        &mut self,
+        range: crate::edit::ex::ExRange,
+        pattern: &str,
+        replacement: &str,
+        all: bool,
+    ) -> bool {
+        let span = self.ex_range(range);
+        if span.start >= span.end {
+            return false;
+        }
+        let Ok(re) = regex::Regex::new(&crate::edit::search::translate(pattern)) else {
+            return false;
+        };
+        let source: String = self.buffer.rope.slice(span.clone()).chars().collect();
+        let replacement = replacement.replace('&', "${0}");
+        let out = if all {
+            re.replace_all(&source, replacement.as_str()).into_owned()
+        } else {
+            // Vim substitutes the first match on each line unless the `g` flag is given.
+            source
+                .split_inclusive('\n')
+                .map(|line| re.replace(line, replacement.as_str()).into_owned())
+                .collect()
+        };
+        if out == source {
+            return false;
+        }
+        self.checkpoint(Group::Other);
+        self.buf_remove(span.clone());
+        self.buf_insert(span.start, &out);
+        let at = (span.start + out.chars().count()).min(self.buffer.len_chars());
+        self.set_caret(self.first_non_blank(at.saturating_sub(1)));
+        true
+    }
+
     fn apply_operator(
         &mut self,
         operator: Operator,
@@ -1259,6 +1317,36 @@ impl EditCore {
                 }
             }
             EditCommand::ClearSearchHighlight => self.search_highlight = false,
+            EditCommand::Substitute {
+                range,
+                pattern,
+                replacement,
+                all,
+            } => {
+                text_changed = self.substitute(range, &pattern, &replacement, all);
+            }
+            EditCommand::ExDelete(range) => {
+                let span = self.ex_range(range);
+                if span.start < span.end {
+                    let text: String = self.buffer.rope.slice(span.clone()).chars().collect();
+                    self.registers
+                        .write_delete(None, RegisterValue::linewise(text));
+                    self.checkpoint(Group::Other);
+                    self.buf_remove(span.clone());
+                    let at = span.start.min(self.buffer.len_chars());
+                    self.set_caret(self.first_non_blank(at));
+                    text_changed = true;
+                }
+            }
+            EditCommand::ExYank(range) => {
+                let span = self.ex_range(range);
+                if span.start < span.end {
+                    let text: String = self.buffer.rope.slice(span).chars().collect();
+                    let value = RegisterValue::linewise(text);
+                    self.registers.write_yank(None, value.clone());
+                    yank = Some(value);
+                }
+            }
             EditCommand::SetMark(name) => {
                 self.marks.insert(name, self.primary().head);
             }
@@ -1620,6 +1708,70 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::Column(4)));
         assert_eq!(c.primary().head, 3);
+    }
+
+    #[test]
+    fn substitute_replaces_the_first_match_per_line_without_g() {
+        let mut c = core("aa bb aa\naa cc\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::Substitute {
+            range: crate::edit::ex::ExRange::WholeFile,
+            pattern: "aa".into(),
+            replacement: "X".into(),
+            all: false,
+        });
+        assert_eq!(text_of(&c), "X bb aa\nX cc\n");
+    }
+
+    #[test]
+    fn substitute_with_g_replaces_every_match() {
+        let mut c = core("aa bb aa\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::Substitute {
+            range: crate::edit::ex::ExRange::WholeFile,
+            pattern: "aa".into(),
+            replacement: "X".into(),
+            all: true,
+        });
+        assert_eq!(text_of(&c), "X bb X\n");
+    }
+
+    #[test]
+    fn substitute_honours_a_line_range() {
+        let mut c = core("a\na\na\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::Substitute {
+            range: crate::edit::ex::ExRange::Lines(1, 1),
+            pattern: "a".into(),
+            replacement: "b".into(),
+            all: false,
+        });
+        assert_eq!(text_of(&c), "a\nb\na\n");
+    }
+
+    #[test]
+    fn substitute_expands_ampersand_to_the_match() {
+        let mut c = core("cat\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::Substitute {
+            range: crate::edit::ex::ExRange::WholeFile,
+            pattern: "cat".into(),
+            replacement: "[&]".into(),
+            all: false,
+        });
+        assert_eq!(text_of(&c), "[cat]\n");
+    }
+
+    #[test]
+    fn ex_delete_removes_lines_and_yanks_them_linewise() {
+        let mut c = core("one\ntwo\nthree\n");
+        c.mode = EditMode::Normal;
+        c.apply(EditCommand::ExDelete(crate::edit::ex::ExRange::Lines(0, 1)));
+        assert_eq!(text_of(&c), "three\n");
+        assert_eq!(
+            c.registers.read(None),
+            Some(&RegisterValue::linewise("one\ntwo\n"))
+        );
     }
 
     #[test]

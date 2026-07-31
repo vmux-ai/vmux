@@ -217,6 +217,14 @@ pub enum EditCommand {
         forward: bool,
     },
     ClearSearchHighlight,
+    Substitute {
+        range: crate::edit::ex::ExRange,
+        pattern: String,
+        replacement: String,
+        all: bool,
+    },
+    ExDelete(crate::edit::ex::ExRange),
+    ExYank(crate::edit::ex::ExRange),
     SetMark(char),
     GotoMark {
         name: char,

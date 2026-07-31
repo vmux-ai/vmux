@@ -19,6 +19,7 @@ pub enum EditMode {
     Insert,
     Visual,
     VisualLine,
+    CommandLine,
 }
 
 impl EditMode {
@@ -28,6 +29,7 @@ impl EditMode {
             EditMode::Insert => "INSERT",
             EditMode::Visual => "VISUAL",
             EditMode::VisualLine => "V-LINE",
+            EditMode::CommandLine => "COMMAND",
         }
     }
     pub fn is_visual(self) -> bool {

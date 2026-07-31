@@ -1000,9 +1000,16 @@ fn emit_cursor(
         .into_iter()
         .filter(|selection| !view.is_hidden(selection.line))
         .collect::<Vec<_>>();
+    let raw_search = edit
+        .core
+        .search_spans(0, total as u16)
+        .into_iter()
+        .filter(|span| !view.is_hidden(span.line))
+        .collect::<Vec<_>>();
     let wrap = wrapped_view(edit, vp);
     (primary.row, primary.col) = wrap.position(primary.line, primary.col);
     let selections = wrap.selections(raw_selections.iter().copied());
+    let search = wrap.selections(raw_search.iter().copied());
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
@@ -1013,6 +1020,8 @@ fn emit_cursor(
             selections,
             source_primary,
             source_selections: raw_selections,
+            command_line: keymap.command_line().unwrap_or_default(),
+            search,
         },
     ));
 }

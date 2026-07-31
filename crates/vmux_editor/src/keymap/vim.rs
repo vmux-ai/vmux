@@ -60,7 +60,8 @@ pub struct VimKeymap {
     replace_pending: bool,
     g_pending: bool,
     z_pending: bool,
-    ex: Option<String>,
+    ex: Option<(char, String)>,
+    mode_before_ex: EditMode,
     pending_change: Vec<Recorded>,
     last_change: Vec<Recorded>,
     in_change: bool,
@@ -650,7 +651,11 @@ impl VimKeymap {
                 vec![SetMode(EditMode::VisualLine)]
             }
             ":" => {
-                self.ex = Some(String::new());
+                self.enter_ex(':');
+                vec![]
+            }
+            "/" | "?" => {
+                self.enter_ex(key.chars().next().unwrap());
                 vec![]
             }
             "Escape" => {
@@ -908,29 +913,81 @@ impl VimKeymap {
     fn ex_key(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         match k.key.as_str() {
             "Enter" => {
-                let cmd = self.ex.take().unwrap_or_default();
-                match cmd.as_str() {
-                    "w" | "wq" | "x" => vec![EditCommand::Save],
-                    _ => vec![],
+                let Some((prompt, body)) = self.ex.take() else {
+                    return vec![];
+                };
+                self.mode = self.mode_before_ex;
+                if prompt == '/' || prompt == '?' {
+                    if body.is_empty() {
+                        return vec![];
+                    }
+                    return vec![EditCommand::SetSearch {
+                        pattern: body,
+                        forward: prompt == '/',
+                    }];
                 }
+                self.run_ex(&body)
             }
             "Escape" => {
                 self.ex = None;
+                self.mode = self.mode_before_ex;
                 vec![]
             }
             "Backspace" => {
-                if let Some(buf) = self.ex.as_mut() {
-                    buf.pop();
+                let empty = match self.ex.as_mut() {
+                    Some((_, buf)) => {
+                        buf.pop();
+                        buf.is_empty()
+                    }
+                    None => false,
+                };
+                if empty {
+                    self.ex = None;
+                    self.mode = self.mode_before_ex;
                 }
                 vec![]
             }
-            key if key.len() == 1 => {
-                if let Some(buf) = self.ex.as_mut() {
-                    buf.push_str(key);
+            key => {
+                if let Some(c) = single_char(key)
+                    && let Some((_, buf)) = self.ex.as_mut()
+                {
+                    buf.push(c);
                 }
                 vec![]
             }
-            _ => vec![],
+        }
+    }
+
+    fn enter_ex(&mut self, prompt: char) {
+        self.mode_before_ex = self.mode;
+        self.ex = Some((prompt, String::new()));
+        self.mode = EditMode::CommandLine;
+    }
+
+    fn run_ex(&mut self, body: &str) -> Vec<EditCommand> {
+        use crate::edit::ex::{ExCommand, parse};
+        let Some(cmd) = parse(body) else {
+            return vec![];
+        };
+        match cmd {
+            ExCommand::Write => vec![EditCommand::Save],
+            ExCommand::WriteQuit => vec![EditCommand::Save],
+            ExCommand::Quit { .. } => vec![],
+            ExCommand::NoHighlight => vec![EditCommand::ClearSearchHighlight],
+            ExCommand::Goto(line) => vec![EditCommand::Move(Motion::GotoLine(line as u32))],
+            ExCommand::Delete(range) => vec![EditCommand::ExDelete(range)],
+            ExCommand::Yank(range) => vec![EditCommand::ExYank(range)],
+            ExCommand::Substitute {
+                range,
+                pattern,
+                replacement,
+                all,
+            } => vec![EditCommand::Substitute {
+                range,
+                pattern,
+                replacement,
+                all,
+            }],
         }
     }
 }
@@ -938,6 +995,11 @@ impl VimKeymap {
 impl Keymap for VimKeymap {
     fn mode(&self) -> EditMode {
         self.mode
+    }
+    fn command_line(&self) -> Option<String> {
+        self.ex
+            .as_ref()
+            .map(|(prompt, body)| format!("{prompt}{body}"))
     }
     fn record_text(&mut self, text: &str) {
         if self.replaying {
@@ -1088,6 +1150,7 @@ impl VimKeymap {
         }
         if k.mods.ctrl && k.key.eq_ignore_ascii_case("c") {
             if self.ex.take().is_some() {
+                self.mode = self.mode_before_ex;
                 return vec![];
             }
             return match self.mode {
@@ -1103,7 +1166,7 @@ impl VimKeymap {
                     self.mode = EditMode::Normal;
                     vec![EditCommand::SetMode(EditMode::Normal)]
                 }
-                EditMode::Normal => {
+                EditMode::Normal | EditMode::CommandLine => {
                     self.reset();
                     vec![]
                 }
@@ -1115,7 +1178,7 @@ impl VimKeymap {
         match self.mode {
             EditMode::Insert => self.insert(k),
             EditMode::Visual | EditMode::VisualLine => self.visual(k),
-            EditMode::Normal => self.normal(k),
+            EditMode::Normal | EditMode::CommandLine => self.normal(k),
         }
     }
 }
@@ -1947,6 +2010,73 @@ mod tests {
         let mut km = VimKeymap::default();
         assert_eq!(run(&mut km, &[":", "w", "Enter"]), vec![EditCommand::Save]);
         assert_eq!(run(&mut km, &[":", "q", "Enter"]), vec![]);
+    }
+
+    #[test]
+    fn a_prompt_reports_command_line_mode_and_its_text() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &[":", "w", "q"]);
+        assert_eq!(km.mode(), EditMode::CommandLine);
+        assert_eq!(km.command_line().as_deref(), Some(":wq"));
+        run(&mut km, &["Escape"]);
+        assert_eq!(km.mode(), EditMode::Normal);
+        assert_eq!(km.command_line(), None);
+    }
+
+    #[test]
+    fn slash_starts_a_forward_search_and_question_a_backward_one() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["/", "f", "o", "o", "Enter"]),
+            vec![EditCommand::SetSearch {
+                pattern: "foo".into(),
+                forward: true
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["?", "b", "a", "r", "Enter"]),
+            vec![EditCommand::SetSearch {
+                pattern: "bar".into(),
+                forward: false
+            }]
+        );
+    }
+
+    #[test]
+    fn backspacing_an_empty_prompt_leaves_command_line_mode() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["/", "a", "Backspace"]);
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn ex_substitute_and_nohl_reach_the_core() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(
+                &mut km,
+                &[":", "%", "s", "/", "a", "/", "b", "/", "g", "Enter"]
+            ),
+            vec![EditCommand::Substitute {
+                range: crate::edit::ex::ExRange::WholeFile,
+                pattern: "a".into(),
+                replacement: "b".into(),
+                all: true,
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &[":", "n", "o", "h", "Enter"]),
+            vec![EditCommand::ClearSearchHighlight]
+        );
+    }
+
+    #[test]
+    fn a_bare_line_number_jumps() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &[":", "1", "2", "Enter"]),
+            vec![EditCommand::Move(Motion::GotoLine(11))]
+        );
     }
 
     #[test]
