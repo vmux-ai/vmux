@@ -134,6 +134,12 @@ fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
     }
 }
 
+/// Point an external agent's instruction file at the shared canonical config, without ever
+/// destroying a user's own config. A file vmux previously managed (it carries the
+/// `vmux-knowledge` marker) is migrated: its hand-authored preamble seeds the canonical once and
+/// the original is kept as `*.bak`. A pristine real file or a foreign symlink is left untouched
+/// (with a warning). A missing path is only wired up when the canonical already has content, so a
+/// user who has not populated the vmux vault is never touched.
 #[cfg(unix)]
 fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
     use std::os::unix::fs::symlink;
@@ -164,7 +170,9 @@ fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
             back_up(path)?;
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            ensure_canonical(canonical)?;
+            if read_optional(canonical)?.is_empty() {
+                return Ok(());
+            }
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -730,16 +738,32 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn link_instructions_creates_symlink_when_target_missing() {
+    fn link_instructions_skips_missing_path_when_vault_empty() {
         let temp = tempfile::tempdir().unwrap();
         let canonical = temp.path().join("knowledge/AGENTS.md");
         let path = temp.path().join("claude/CLAUDE.md");
 
         link_instructions(&path, &canonical).unwrap();
 
-        assert!(canonical.exists());
-        assert_eq!(std::fs::read_to_string(&canonical).unwrap(), "");
+        // A user who has not populated the vault is untouched: no file planted, no canonical created.
+        assert!(!path.exists());
+        assert!(std::fs::symlink_metadata(&path).is_err());
+        assert!(!canonical.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_wires_missing_path_when_canonical_has_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        std::fs::create_dir_all(canonical.parent().unwrap()).unwrap();
+        std::fs::write(&canonical, "shared config\n").unwrap();
+        let path = temp.path().join("claude/CLAUDE.md");
+
+        link_instructions(&path, &canonical).unwrap();
+
         assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "shared config\n");
     }
 
     #[cfg(unix)]
