@@ -2066,11 +2066,15 @@ fn run_commands(
             }
             continue;
         }
-        if matches!(cmd, EditCommand::Paste | EditCommand::PasteBefore)
+        if matches!(cmd, EditCommand::Put { .. })
             && let Some(cb) = clipboard.0.as_mut()
             && let Ok(s) = cb.get_text()
+            && s != edit.core.registers.clipboard_shadow
         {
-            edit.core.register = Some((s, false));
+            edit.core.registers.clipboard_shadow = s.clone();
+            edit.core
+                .registers
+                .set_unnamed(crate::edit::RegisterValue::charwise(s));
         }
         let out = edit.core.apply(cmd);
         if out.text_changed {
@@ -2080,10 +2084,11 @@ fn run_commands(
         }
         sel_or_mode |= out.sel_changed || out.mode_changed;
         dirty_changed |= out.dirty_changed;
-        if let Some((s, _)) = out.yank
+        if let Some(value) = out.yank
             && let Some(cb) = clipboard.0.as_mut()
         {
-            let _ = cb.set_text(s);
+            edit.core.registers.clipboard_shadow = value.text.clone();
+            let _ = cb.set_text(value.text);
         }
     }
     if text_changed {
@@ -2537,10 +2542,7 @@ fn on_file_completion_commit(
     edit.core.selections = vec![Selection { anchor: a, head: b }];
     run_commands(
         entity,
-        vec![
-            EditCommand::DeleteSelection,
-            EditCommand::InsertText(req.text),
-        ],
+        vec![EditCommand::InsertText(req.text)],
         &mut edit,
         &mut diff_source,
         keymap.0.as_ref(),

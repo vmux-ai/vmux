@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 use crate::edit::buffer::TextBuffer;
-use crate::edit::command::{CursorPos, EditCommand, EditMode, Motion, SelSpan, Selection};
+use crate::edit::command::{
+    CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
+};
+use crate::edit::register::{RegisterKind, RegisterValue, Registers};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -48,7 +51,7 @@ pub struct EditOutcome {
     pub mode_changed: bool,
     pub dirty_changed: bool,
     pub scroll_to: Option<u32>,
-    pub yank: Option<(String, bool)>,
+    pub yank: Option<RegisterValue>,
 }
 
 pub struct EditCore {
@@ -57,7 +60,7 @@ pub struct EditCore {
     pub mode: EditMode,
     pub rows: u16,
     pub dirty: bool,
-    pub register: Option<(String, bool)>,
+    pub registers: Registers,
     rev: u64,
     saved_rev: Option<u64>,
     undo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
@@ -69,20 +72,22 @@ pub struct EditCore {
 
 impl EditCore {
     pub fn new(path: PathBuf, language: String, text: &str, default_mode: EditMode) -> Self {
+        let buffer = TextBuffer::from_text(path, language, text);
+        let fold_view = crate::fold::FoldState::default().view(buffer.len_lines() as u32);
         Self {
-            buffer: TextBuffer::from_text(path, language, text),
+            buffer,
             selections: vec![Selection::caret(0)],
             mode: default_mode,
             rows: 0,
             dirty: false,
-            register: None,
+            registers: Registers::default(),
             rev: 0,
             saved_rev: Some(0),
             undo: Vec::new(),
             redo: Vec::new(),
             last_group: None,
             preferred_vertical_col: None,
-            fold_view: crate::fold::FoldView::default(),
+            fold_view,
         }
     }
 
@@ -133,12 +138,39 @@ impl EditCore {
         }
     }
 
+    /// The primary selection as an operator would see it.
+    ///
+    /// Vim's charwise visual selection covers the character under the cursor, and linewise visual
+    /// covers whole lines; the underlying anchor/head pair is exclusive, so widen it here and keep
+    /// rendering and effect in agreement.
+    pub fn visual_range(&self) -> std::ops::Range<usize> {
+        let sel = self.primary();
+        let r = sel.range();
+        match self.mode {
+            EditMode::Visual => {
+                r.start
+                    ..self
+                        .buffer
+                        .next_grapheme(r.end)
+                        .min(self.buffer.len_chars())
+            }
+            EditMode::VisualLine => self.expand_linewise(r),
+            _ => r,
+        }
+    }
+
     pub fn sel_spans(&self, first: u32, rows: u16) -> Vec<SelSpan> {
         let sel = self.primary();
-        if sel.is_empty() || rows == 0 {
+        if sel.is_empty() && !self.mode.is_visual() {
             return Vec::new();
         }
-        let r = sel.range();
+        if rows == 0 {
+            return Vec::new();
+        }
+        let r = self.visual_range();
+        if r.start >= r.end {
+            return Vec::new();
+        }
         let (l0, _) = self.buffer.char_to_coords(r.start);
         let (l1, _) = self.buffer.char_to_coords(r.end);
         let mut out = Vec::new();
@@ -362,7 +394,7 @@ impl EditCore {
         while i + 1 < len && Self::class(self.buffer.rope.char(i + 1)) == cls {
             i += 1;
         }
-        i + 1
+        i
     }
 
     fn insert_text(&mut self, text: &str) -> bool {
@@ -389,12 +421,307 @@ impl EditCore {
         true
     }
 
+    fn line_indent(&self, line: usize) -> String {
+        let base = self.buffer.line_to_char(line);
+        let llen = self.buffer.line_len_chars(line);
+        let mut out = String::new();
+        for i in 0..llen {
+            let ch = self.buffer.rope.char(base + i);
+            if ch == ' ' || ch == '\t' {
+                out.push(ch);
+            } else {
+                break;
+            }
+        }
+        out
+    }
+
+    fn outdent_width(&self, line: usize) -> usize {
+        let base = self.buffer.line_to_char(line);
+        let llen = self.buffer.line_len_chars(line);
+        if llen == 0 {
+            return 0;
+        }
+        if self.buffer.rope.char(base) == '\t' {
+            return 1;
+        }
+        let mut n = 0;
+        while n < llen.min(4) && self.buffer.rope.char(base + n) == ' ' {
+            n += 1;
+        }
+        n
+    }
+
+    fn expand_linewise(&self, r: std::ops::Range<usize>) -> std::ops::Range<usize> {
+        let (l0, _) = self.buffer.char_to_coords(r.start);
+        let (l1, _) = self.buffer.char_to_coords(r.end.max(r.start));
+        let start = self.buffer.line_to_char(l0);
+        let end = if l1 + 1 < self.buffer.len_lines() {
+            self.buffer.line_to_char(l1 + 1)
+        } else {
+            self.buffer.len_chars()
+        };
+        start..end
+    }
+
+    fn line_span(&self, from: usize, count: usize) -> std::ops::Range<usize> {
+        let (l0, _) = self.buffer.char_to_coords(from);
+        let last = (l0 + count.max(1) - 1).min(self.buffer.len_lines().saturating_sub(1));
+        let start = self.buffer.line_to_char(l0);
+        let end = if last + 1 < self.buffer.len_lines() {
+            self.buffer.line_to_char(last + 1)
+        } else {
+            self.buffer.len_chars()
+        };
+        start..end
+    }
+
+    fn resolve_motion_n(&self, from: usize, m: Motion, n: usize) -> usize {
+        let mut at = from;
+        for _ in 0..n.max(1) {
+            let next = self.resolve_motion(at, m);
+            if next == at {
+                break;
+            }
+            at = next;
+        }
+        at
+    }
+
+    fn operator_range(&self, target: Target) -> Option<(std::ops::Range<usize>, RegisterKind)> {
+        match target {
+            Target::Line(count) => Some((
+                self.line_span(self.primary().head, count),
+                RegisterKind::Linewise,
+            )),
+            Target::Selection => {
+                let r = self.visual_range();
+                if r.start >= r.end {
+                    return None;
+                }
+                let kind = if self.mode == EditMode::VisualLine {
+                    RegisterKind::Linewise
+                } else {
+                    RegisterKind::Charwise
+                };
+                Some((r, kind))
+            }
+            Target::Motion(m, count) => {
+                let from = self.primary().head;
+                let to = self.resolve_motion_n(from, m, count);
+                let start = from.min(to);
+                let mut end = from.max(to);
+                match m.kind() {
+                    MotionKind::Linewise => {
+                        return Some((self.expand_linewise(start..end), RegisterKind::Linewise));
+                    }
+                    MotionKind::Inclusive => {
+                        end = self.buffer.next_grapheme(end).min(self.buffer.len_chars());
+                    }
+                    MotionKind::Exclusive => {
+                        let (end_line, end_col) = self.buffer.char_to_coords(end);
+                        if end_col == 0 && end > start && end_line > 0 {
+                            let prev = end_line - 1;
+                            let prev_end =
+                                self.buffer.line_to_char(prev) + self.buffer.line_len_chars(prev);
+                            if prev_end >= start {
+                                end = prev_end;
+                                if start <= self.first_non_blank(start) {
+                                    return Some((
+                                        self.expand_linewise(start..end),
+                                        RegisterKind::Linewise,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+                if start >= end {
+                    return None;
+                }
+                Some((start..end, RegisterKind::Charwise))
+            }
+        }
+    }
+
+    fn apply_operator(
+        &mut self,
+        operator: Operator,
+        target: Target,
+        register: Option<char>,
+    ) -> (bool, Option<RegisterValue>) {
+        let Some((range, kind)) = self.operator_range(target) else {
+            return (false, None);
+        };
+        let was_visual = self.mode.is_visual();
+        match operator {
+            Operator::Yank => {
+                let text: String = self.buffer.rope.slice(range.clone()).chars().collect();
+                let value = RegisterValue { text, kind };
+                self.registers.write_yank(register, value.clone());
+                if was_visual {
+                    self.mode = EditMode::Normal;
+                }
+                self.set_caret(range.start);
+                (false, Some(value))
+            }
+            Operator::Delete | Operator::Change => {
+                let text: String = self.buffer.rope.slice(range.clone()).chars().collect();
+                let had_newline = text.ends_with('\n');
+                let value = RegisterValue { text, kind };
+                self.registers.write_delete(register, value.clone());
+                self.checkpoint(Group::Other);
+                if operator == Operator::Change && kind == RegisterKind::Linewise {
+                    let (line, _) = self.buffer.char_to_coords(range.start);
+                    let indent = self.line_indent(line);
+                    self.buffer.remove(range.clone());
+                    self.mode = EditMode::Insert;
+                    let tail = if had_newline { "\n" } else { "" };
+                    self.buffer.insert(range.start, &format!("{indent}{tail}"));
+                    self.set_caret(range.start + indent.chars().count());
+                } else {
+                    self.buffer.remove(range.clone());
+                    if operator == Operator::Change {
+                        self.mode = EditMode::Insert;
+                    } else if was_visual {
+                        self.mode = EditMode::Normal;
+                    }
+                    let at = range.start.min(self.buffer.len_chars());
+                    let caret = if kind == RegisterKind::Linewise {
+                        self.first_non_blank(at)
+                    } else {
+                        at
+                    };
+                    self.set_caret(caret);
+                }
+                (true, Some(value))
+            }
+            Operator::Indent | Operator::Outdent => {
+                let range = self.expand_linewise(range);
+                let (l0, _) = self.buffer.char_to_coords(range.start);
+                let (l1, _) = self
+                    .buffer
+                    .char_to_coords(range.end.saturating_sub(1).max(range.start));
+                self.checkpoint(Group::Other);
+                for line in (l0..=l1).rev() {
+                    let base = self.buffer.line_to_char(line);
+                    if operator == Operator::Indent {
+                        if self.buffer.line_len_chars(line) == 0 {
+                            continue;
+                        }
+                        self.buffer.insert(base, "\t");
+                    } else {
+                        let width = self.outdent_width(line);
+                        if width > 0 {
+                            self.buffer.remove(base..base + width);
+                        }
+                    }
+                }
+                if was_visual {
+                    self.mode = EditMode::Normal;
+                }
+                let caret = self.first_non_blank(self.buffer.line_to_char(l0));
+                self.set_caret(caret);
+                (true, None)
+            }
+            Operator::Upper | Operator::Lower | Operator::ToggleCase => {
+                let src: String = self.buffer.rope.slice(range.clone()).chars().collect();
+                let out: String = src
+                    .chars()
+                    .map(|c| match operator {
+                        Operator::Upper => c.to_uppercase().next().unwrap_or(c),
+                        Operator::Lower => c.to_lowercase().next().unwrap_or(c),
+                        _ if c.is_uppercase() => c.to_lowercase().next().unwrap_or(c),
+                        _ => c.to_uppercase().next().unwrap_or(c),
+                    })
+                    .collect();
+                if was_visual {
+                    self.mode = EditMode::Normal;
+                }
+                if out == src {
+                    self.set_caret(range.start);
+                    return (false, None);
+                }
+                self.checkpoint(Group::Other);
+                self.buffer.remove(range.clone());
+                self.buffer.insert(range.start, &out);
+                self.set_caret(range.start);
+                (true, None)
+            }
+        }
+    }
+
+    fn apply_put(&mut self, before: bool, count: usize, register: Option<char>) -> bool {
+        let Some(value) = self.registers.read(register).cloned() else {
+            return false;
+        };
+        let was_visual = self.mode.is_visual();
+        if was_visual {
+            let range = self.visual_range();
+            let kind = if self.mode == EditMode::VisualLine {
+                RegisterKind::Linewise
+            } else {
+                RegisterKind::Charwise
+            };
+            if range.start < range.end {
+                let text: String = self.buffer.rope.slice(range.clone()).chars().collect();
+                self.registers
+                    .write_delete(None, RegisterValue { text, kind });
+                self.checkpoint(Group::Other);
+                self.buffer.remove(range.clone());
+            }
+            self.mode = EditMode::Normal;
+            self.set_caret(range.start.min(self.buffer.len_chars()));
+        }
+        let count = count.max(1);
+        match value.kind {
+            RegisterKind::Charwise => {
+                let head = self.primary().head;
+                let line_end = self.resolve_motion(head, Motion::LineEnd);
+                let at = if before || was_visual {
+                    head
+                } else {
+                    self.buffer.next_grapheme(head).min(line_end)
+                };
+                let text = value.text.repeat(count);
+                self.checkpoint(Group::Other);
+                self.buffer.insert(at, &text);
+                let end = at + text.chars().count();
+                self.set_caret(end.saturating_sub(1).max(at));
+            }
+            RegisterKind::Linewise => {
+                let head = self.primary().head;
+                let (line, _) = self.buffer.char_to_coords(head);
+                let mut text = value.text.repeat(count);
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+                let mut at = if before {
+                    self.buffer.line_to_char(line)
+                } else if line + 1 < self.buffer.len_lines() {
+                    self.buffer.line_to_char(line + 1)
+                } else {
+                    self.buffer.len_chars()
+                };
+                self.checkpoint(Group::Other);
+                if at == self.buffer.len_chars() && at > 0 && self.buffer.rope.char(at - 1) != '\n'
+                {
+                    self.buffer.insert(at, "\n");
+                    at += 1;
+                }
+                self.buffer.insert(at, &text);
+                self.set_caret(self.first_non_blank(at));
+            }
+        }
+        true
+    }
+
     pub fn apply(&mut self, cmd: EditCommand) -> EditOutcome {
         let before_sel = self.primary();
         let before_mode = self.mode;
         let before_dirty = self.dirty;
         let mut text_changed = false;
-        let mut yank: Option<(String, bool)> = None;
+        let mut yank: Option<RegisterValue> = None;
 
         if !matches!(
             &cmd,
@@ -499,52 +826,93 @@ impl EditCore {
                     text_changed = true;
                 }
             }
-            EditCommand::DeleteToLineEnd => {
+            EditCommand::Op {
+                operator,
+                target,
+                register,
+            } => {
+                let (changed, value) = self.apply_operator(operator, target, register);
+                text_changed = changed;
+                yank = value;
+            }
+            EditCommand::Put {
+                before,
+                count,
+                register,
+            } => text_changed = self.apply_put(before, count, register),
+            EditCommand::ReplaceChar { ch, count } => {
                 let head = self.primary().head;
-                let end = self.resolve_motion(head, Motion::LineEnd);
-                if end > head {
+                let line_end = self.resolve_motion(head, Motion::LineEnd);
+                let mut end = head;
+                let mut fits = true;
+                for _ in 0..count.max(1) {
+                    end = self.buffer.next_grapheme(end);
+                    if end > line_end {
+                        fits = false;
+                        break;
+                    }
+                }
+                if fits && end > head {
+                    let n = self.buffer.rope.slice(head..end).chars().count();
                     self.checkpoint(Group::Other);
                     self.buffer.remove(head..end);
+                    self.buffer.insert(head, &ch.to_string().repeat(n));
+                    self.set_caret(head + n - 1);
                     text_changed = true;
                 }
             }
-            EditCommand::DeleteRange(m) => {
-                let head = self.primary().head;
-                let target = self.resolve_motion(head, m);
-                let (a, b) = (head.min(target), head.max(target));
-                if b > a {
-                    self.checkpoint(Group::Other);
-                    self.buffer.remove(a..b);
-                    self.set_caret(a);
+            EditCommand::JoinLines { count, spaces } => {
+                for _ in 0..count.max(2) - 1 {
+                    let (line, _) = self.buffer.char_to_coords(self.primary().head);
+                    if line + 1 >= self.buffer.len_lines() {
+                        break;
+                    }
+                    let start = self.buffer.line_to_char(line);
+                    let end = start + self.buffer.line_len_chars(line);
+                    let next = self.buffer.line_to_char(line + 1);
+                    let next_len = self.buffer.line_len_chars(line + 1);
+                    let mut skip = 0;
+                    while skip < next_len {
+                        let c = self.buffer.rope.char(next + skip);
+                        if c == ' ' || c == '\t' {
+                            skip += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if !text_changed {
+                        self.checkpoint(Group::Other);
+                    }
+                    self.buffer.remove(end..next + skip);
+                    if spaces
+                        && end > start
+                        && end < self.buffer.len_chars()
+                        && self.buffer.rope.char(end) != '\n'
+                        && self.buffer.rope.char(end) != ')'
+                        && self.buffer.rope.char(end - 1) != ' '
+                    {
+                        self.buffer.insert(end, " ");
+                    }
+                    self.set_caret(end);
                     text_changed = true;
                 }
             }
-            EditCommand::YankRange(m) => {
+            EditCommand::OpenLine { above } => {
                 let head = self.primary().head;
-                let target = self.resolve_motion(head, m);
-                let (a, b) = (head.min(target), head.max(target));
-                if b > a {
-                    let s: String = self.buffer.rope.slice(a..b).chars().collect();
-                    self.register = Some((s.clone(), false));
-                    yank = Some((s, false));
-                    self.set_caret(a);
-                }
-            }
-            EditCommand::DeleteSelection => text_changed = self.delete_selection(),
-            EditCommand::DeleteLine => {
-                let (l, _) = self.buffer.char_to_coords(self.primary().head);
-                let start = self.buffer.line_to_char(l);
-                let end = if l + 1 < self.buffer.len_lines() {
-                    self.buffer.line_to_char(l + 1)
+                let (line, _) = self.buffer.char_to_coords(head);
+                let indent = self.line_indent(line);
+                self.checkpoint(Group::Other);
+                self.mode = EditMode::Insert;
+                if above {
+                    let at = self.buffer.line_to_char(line);
+                    self.buffer.insert(at, &format!("{indent}\n"));
+                    self.set_caret(at + indent.chars().count());
                 } else {
-                    self.buffer.len_chars()
-                };
-                if end > start {
-                    self.checkpoint(Group::Other);
-                    self.buffer.remove(start..end);
-                    self.set_caret(start.min(self.buffer.len_chars()));
-                    text_changed = true;
+                    let at = self.buffer.line_to_char(line) + self.buffer.line_len_chars(line);
+                    self.buffer.insert(at, &format!("\n{indent}"));
+                    self.set_caret(at + 1 + indent.chars().count());
                 }
+                text_changed = true;
             }
             EditCommand::SetMode(m) => {
                 self.break_group();
@@ -577,69 +945,12 @@ impl EditCore {
                     text_changed = true;
                 }
             }
-            EditCommand::Yank => {
+            EditCommand::SwapSelectionEnds => {
                 let sel = self.primary();
-                if !sel.is_empty() {
-                    let s: String = self.buffer.rope.slice(sel.range()).chars().collect();
-                    self.register = Some((s.clone(), false));
-                    yank = Some((s, false));
-                    if self.mode.is_visual() {
-                        self.set_caret(sel.range().start);
-                        self.mode = EditMode::Normal;
-                    }
-                }
-            }
-            EditCommand::Cut => {
-                if !self.primary().is_empty() {
-                    let r = self.primary().range();
-                    let s: String = self.buffer.rope.slice(r.clone()).chars().collect();
-                    self.register = Some((s.clone(), false));
-                    yank = Some((s, false));
-                    self.checkpoint(Group::Other);
-                    self.buffer.remove(r.clone());
-                    self.set_caret(r.start);
-                    if self.mode.is_visual() {
-                        self.mode = EditMode::Normal;
-                    }
-                    text_changed = true;
-                }
-            }
-            EditCommand::Paste => {
-                if let Some((s, _linewise)) = self.register.clone() {
-                    let was_visual = self.mode.is_visual();
-                    if !self.primary().is_empty() {
-                        self.delete_selection();
-                    }
-                    self.mode = if was_visual {
-                        EditMode::Normal
-                    } else {
-                        self.mode
-                    };
-                    self.checkpoint(Group::Other);
-                    let at = if !was_visual && self.mode == EditMode::Normal {
-                        self.buffer.next_grapheme(self.primary().head)
-                    } else {
-                        self.primary().head
-                    };
-                    self.buffer.insert(at, &s);
-                    self.set_caret(at + s.chars().count());
-                    text_changed = true;
-                }
-            }
-            EditCommand::PasteBefore => {
-                if let Some((s, _linewise)) = self.register.clone() {
-                    if !self.primary().is_empty() {
-                        self.delete_selection();
-                    }
-                    if self.mode.is_visual() {
-                        self.mode = EditMode::Normal;
-                    }
-                    self.checkpoint(Group::Other);
-                    let at = self.primary().head;
-                    self.buffer.insert(at, &s);
-                    self.set_caret(at + s.chars().count());
-                    text_changed = true;
-                }
+                self.selections = vec![Selection {
+                    anchor: sel.head,
+                    head: sel.anchor,
+                }];
             }
             EditCommand::Save
             | EditCommand::ScrollViewport(_)
@@ -716,6 +1027,20 @@ mod tests {
     }
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
+    }
+    fn op(operator: Operator, target: Target) -> EditCommand {
+        EditCommand::Op {
+            operator,
+            target,
+            register: None,
+        }
+    }
+    fn put(before: bool) -> EditCommand {
+        EditCommand::Put {
+            before,
+            count: 1,
+            register: None,
+        }
     }
 
     #[test]
@@ -794,22 +1119,213 @@ mod tests {
     }
 
     #[test]
-    fn visual_select_then_delete() {
+    fn visual_delete_covers_the_character_under_the_cursor() {
         let mut c = core("abcdef");
         c.set_caret(1);
         c.mode = EditMode::Visual;
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(EditCommand::Select(Motion::Right));
-        c.apply(EditCommand::DeleteSelection);
-        assert_eq!(text_of(&c), "adef");
+        c.apply(op(Operator::Delete, Target::Selection));
+        assert_eq!(text_of(&c), "aef");
     }
 
     #[test]
     fn delete_range_word() {
         let mut c = core("foo bar");
         c.set_caret(0);
-        c.apply(EditCommand::DeleteRange(Motion::WordNext));
+        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
         assert_eq!(text_of(&c), "bar");
+    }
+
+    #[test]
+    fn operator_counts_multiply_the_motion() {
+        let mut c = core("one two three four");
+        c.set_caret(0);
+        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 3)));
+        assert_eq!(text_of(&c), "four");
+    }
+
+    #[test]
+    fn inclusive_motion_covers_its_last_character() {
+        let mut c = core("foo bar");
+        c.set_caret(0);
+        c.apply(op(Operator::Delete, Target::Motion(Motion::WordEnd, 1)));
+        assert_eq!(text_of(&c), " bar");
+    }
+
+    #[test]
+    fn linewise_motion_deletes_whole_lines() {
+        let mut c = core("one\ntwo\nthree\n");
+        c.set_caret(c.buffer.coords_to_char(0, 1));
+        c.apply(op(Operator::Delete, Target::Motion(Motion::Down, 1)));
+        assert_eq!(text_of(&c), "three\n");
+    }
+
+    #[test]
+    fn exclusive_motion_ending_in_column_one_stops_at_the_previous_line() {
+        let mut c = core("foo\nbar\n");
+        c.set_caret(1);
+        c.apply(op(Operator::Delete, Target::Motion(Motion::WordNext, 1)));
+        assert_eq!(text_of(&c), "f\nbar\n");
+    }
+
+    #[test]
+    fn delete_line_yanks_linewise_and_put_opens_a_new_line() {
+        let mut c = core("one\ntwo\nthree\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(op(Operator::Delete, Target::Line(1)));
+        assert_eq!(text_of(&c), "one\nthree\n");
+        assert_eq!(
+            c.registers.read(None),
+            Some(&RegisterValue::linewise("two\n"))
+        );
+        c.apply(put(false));
+        assert_eq!(text_of(&c), "one\nthree\ntwo\n");
+    }
+
+    #[test]
+    fn count_deletes_multiple_lines() {
+        let mut c = core("a\nb\nc\nd\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(op(Operator::Delete, Target::Line(3)));
+        assert_eq!(text_of(&c), "d\n");
+    }
+
+    #[test]
+    fn change_line_keeps_indentation() {
+        let mut c = core("    foo\nbar\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(c.buffer.coords_to_char(0, 4));
+        c.apply(op(Operator::Change, Target::Line(1)));
+        assert_eq!(text_of(&c), "    \nbar\n");
+        assert_eq!(c.primary().head, 4);
+        assert_eq!(c.mode, EditMode::Insert);
+    }
+
+    #[test]
+    fn indent_and_outdent_shift_whole_lines() {
+        let mut c = core("a\nb\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(op(Operator::Indent, Target::Line(2)));
+        assert_eq!(text_of(&c), "\ta\n\tb\n");
+        c.apply(op(Operator::Outdent, Target::Line(2)));
+        assert_eq!(text_of(&c), "a\nb\n");
+    }
+
+    #[test]
+    fn case_operators_transform_a_range() {
+        let mut c = core("hello");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(op(Operator::Upper, Target::Motion(Motion::LineEnd, 1)));
+        assert_eq!(text_of(&c), "HELLO");
+        c.apply(op(Operator::ToggleCase, Target::Motion(Motion::LineEnd, 1)));
+        assert_eq!(text_of(&c), "hello");
+    }
+
+    #[test]
+    fn replace_char_overwrites_without_entering_insert() {
+        let mut c = core("abcd");
+        c.mode = EditMode::Normal;
+        c.set_caret(1);
+        c.apply(EditCommand::ReplaceChar { ch: 'X', count: 2 });
+        assert_eq!(text_of(&c), "aXXd");
+        assert_eq!(c.primary().head, 2);
+    }
+
+    #[test]
+    fn replace_char_past_the_line_end_is_rejected() {
+        let mut c = core("ab\ncd\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(1);
+        c.apply(EditCommand::ReplaceChar { ch: 'X', count: 4 });
+        assert_eq!(text_of(&c), "ab\ncd\n");
+    }
+
+    #[test]
+    fn join_lines_collapses_indentation_to_one_space() {
+        let mut c = core("foo\n    bar\nbaz\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::JoinLines {
+            count: 2,
+            spaces: true,
+        });
+        assert_eq!(text_of(&c), "foo bar\nbaz\n");
+    }
+
+    #[test]
+    fn join_without_spaces_keeps_text_adjacent() {
+        let mut c = core("foo\n  bar\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::JoinLines {
+            count: 2,
+            spaces: false,
+        });
+        assert_eq!(text_of(&c), "foobar\n");
+    }
+
+    #[test]
+    fn open_line_inherits_indentation() {
+        let mut c = core("    foo\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(4);
+        c.apply(EditCommand::OpenLine { above: false });
+        assert_eq!(text_of(&c), "    foo\n    \n");
+        assert_eq!(c.mode, EditMode::Insert);
+
+        let mut c = core("    foo\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(4);
+        c.apply(EditCommand::OpenLine { above: true });
+        assert_eq!(text_of(&c), "    \n    foo\n");
+    }
+
+    #[test]
+    fn linewise_put_before_inserts_above_the_current_line() {
+        let mut c = core("one\ntwo\n");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue::linewise("new\n"));
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(put(true));
+        assert_eq!(text_of(&c), "one\nnew\ntwo\n");
+    }
+
+    #[test]
+    fn put_repeats_with_a_count() {
+        let mut c = core("a");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue::charwise("X"));
+        c.set_caret(0);
+        c.apply(EditCommand::Put {
+            before: false,
+            count: 3,
+            register: None,
+        });
+        assert_eq!(text_of(&c), "aXXX");
+    }
+
+    #[test]
+    fn named_register_round_trips_through_an_operator() {
+        let mut c = core("one\ntwo\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Op {
+            operator: Operator::Yank,
+            target: Target::Line(1),
+            register: Some('a'),
+        });
+        c.set_caret(c.buffer.coords_to_char(1, 0));
+        c.apply(EditCommand::Put {
+            before: false,
+            count: 1,
+            register: Some('a'),
+        });
+        assert_eq!(text_of(&c), "one\ntwo\none\n");
     }
 
     #[test]
@@ -885,12 +1401,12 @@ mod tests {
         c.mode = EditMode::Visual;
         c.apply(EditCommand::Select(Motion::Right));
         c.apply(EditCommand::Select(Motion::Right));
-        let out = c.apply(EditCommand::Yank);
-        assert_eq!(out.yank, Some(("ab".to_string(), false)));
+        let out = c.apply(op(Operator::Yank, Target::Selection));
+        assert_eq!(out.yank, Some(RegisterValue::charwise("abc")));
         c.mode = EditMode::Insert;
         c.set_caret(6);
-        c.apply(EditCommand::Paste);
-        assert_eq!(text_of(&c), "abcdefab");
+        c.apply(put(true));
+        assert_eq!(text_of(&c), "abcdefabc");
     }
 
     #[test]
@@ -925,27 +1441,27 @@ mod tests {
     #[test]
     fn paste_after_vs_before_in_normal() {
         let mut c = core("ac");
-        c.register = Some(("X".into(), false));
+        c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode = EditMode::Normal;
         c.set_caret(0);
-        c.apply(EditCommand::Paste);
+        c.apply(put(false));
         assert_eq!(text_of(&c), "aXc");
         let mut c2 = core("ac");
-        c2.register = Some(("X".into(), false));
+        c2.registers.set_unnamed(RegisterValue::charwise("X"));
         c2.mode = EditMode::Normal;
         c2.set_caret(0);
-        c2.apply(EditCommand::PasteBefore);
+        c2.apply(put(true));
         assert_eq!(text_of(&c2), "Xac");
     }
 
     #[test]
     fn repeated_pastes_undo_one_at_a_time() {
         let mut c = core("a");
-        c.register = Some(("X".into(), false));
+        c.registers.set_unnamed(RegisterValue::charwise("X"));
         c.mode = EditMode::Normal;
         c.set_caret(0);
-        c.apply(EditCommand::Paste);
-        c.apply(EditCommand::Paste);
+        c.apply(put(false));
+        c.apply(put(false));
         assert_eq!(text_of(&c), "aXX");
         c.apply(EditCommand::Undo);
         assert_eq!(text_of(&c), "aX");

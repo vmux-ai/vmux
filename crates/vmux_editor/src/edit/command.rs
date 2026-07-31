@@ -1,5 +1,16 @@
 pub use vmux_core::{CursorPos, EditMode, SelSpan};
 
+/// How an operator turns a motion's endpoint into a range.
+///
+/// Exclusive stops before the target character, inclusive covers it, and linewise expands the
+/// range to whole lines. Getting this wrong is what makes `de` and `dj` behave like `dw`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MotionKind {
+    Exclusive,
+    Inclusive,
+    Linewise,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Motion {
     Left,
@@ -23,6 +34,49 @@ pub enum Motion {
     GotoLine(u32),
 }
 
+impl Motion {
+    pub fn kind(self) -> MotionKind {
+        match self {
+            Motion::Up
+            | Motion::Down
+            | Motion::PageUp
+            | Motion::PageDown
+            | Motion::DocStart
+            | Motion::DocEnd
+            | Motion::GotoLine(_) => MotionKind::Linewise,
+            Motion::WordEnd | Motion::LineEnd => MotionKind::Inclusive,
+            _ => MotionKind::Exclusive,
+        }
+    }
+}
+
+/// A transformation applied to a range of text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operator {
+    Delete,
+    Change,
+    Yank,
+    Indent,
+    Outdent,
+    Upper,
+    Lower,
+    ToggleCase,
+}
+
+impl Operator {
+    pub fn is_linewise_only(self) -> bool {
+        matches!(self, Operator::Indent | Operator::Outdent)
+    }
+}
+
+/// What an operator acts on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    Motion(Motion, usize),
+    Line(usize),
+    Selection,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditCommand {
     Move(Motion),
@@ -34,15 +88,28 @@ pub enum EditCommand {
     DeleteBack,
     DeleteForward,
     DeleteWordBack,
-    DeleteToLineEnd,
-    DeleteRange(Motion),
-    YankRange(Motion),
-    DeleteSelection,
-    DeleteLine,
-    Yank,
-    Cut,
-    Paste,
-    PasteBefore,
+    Op {
+        operator: Operator,
+        target: Target,
+        register: Option<char>,
+    },
+    Put {
+        before: bool,
+        count: usize,
+        register: Option<char>,
+    },
+    ReplaceChar {
+        ch: char,
+        count: usize,
+    },
+    JoinLines {
+        count: usize,
+        spaces: bool,
+    },
+    OpenLine {
+        above: bool,
+    },
+    SwapSelectionEnds,
     ScrollViewport(i32),
     SetMode(EditMode),
     Undo,

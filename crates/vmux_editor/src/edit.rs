@@ -2,7 +2,9 @@ pub mod buffer;
 pub mod command;
 pub mod core;
 pub mod highlight_cache;
+pub mod register;
 
-pub use command::{EditCommand, Motion, Selection};
+pub use command::{EditCommand, Motion, Operator, Selection, Target};
 pub use core::{EditCore, EditOutcome};
+pub use register::{RegisterKind, RegisterValue, Registers};
 pub use vmux_core::{CursorPos, EditMode, SelSpan};

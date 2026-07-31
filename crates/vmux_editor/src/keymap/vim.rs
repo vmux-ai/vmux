@@ -1,18 +1,19 @@
-use crate::edit::command::{EditCommand, EditMode, Motion};
+use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target};
 use crate::keymap::{KeyInput, Keymap};
 
 #[derive(Default)]
 pub struct VimKeymap {
     mode: EditMode,
     count: Option<usize>,
-    pending_op: Option<char>,
+    op_count: Option<usize>,
+    pending_op: Option<Operator>,
+    pending_op_key: Option<char>,
+    register: Option<char>,
+    register_pending: bool,
+    replace_pending: bool,
     g_pending: bool,
     z_pending: bool,
     ex: Option<String>,
-}
-
-fn rep(cmd: EditCommand, n: usize) -> Vec<EditCommand> {
-    std::iter::repeat_n(cmd, n.max(1)).collect()
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -33,73 +34,158 @@ fn motion_for(key: &str) -> Option<Motion> {
     })
 }
 
+/// The operator a `g`-prefixed key introduces, and the key that doubles it (`guu`).
+fn g_operator(key: &str) -> Option<(Operator, char)> {
+    Some(match key {
+        "u" => (Operator::Lower, 'u'),
+        "U" => (Operator::Upper, 'U'),
+        "~" => (Operator::ToggleCase, '~'),
+        _ => return None,
+    })
+}
+
+fn operator_for(key: &str) -> Option<(Operator, char)> {
+    Some(match key {
+        "d" => (Operator::Delete, 'd'),
+        "c" => (Operator::Change, 'c'),
+        "y" => (Operator::Yank, 'y'),
+        ">" => (Operator::Indent, '>'),
+        "<" => (Operator::Outdent, '<'),
+        "=" => (Operator::Indent, '='),
+        _ => return None,
+    })
+}
+
+fn single_char(key: &str) -> Option<char> {
+    let mut chars = key.chars();
+    let c = chars.next()?;
+    chars.next().is_none().then_some(c)
+}
+
 impl VimKeymap {
     fn take_count(&mut self) -> usize {
         self.count.take().unwrap_or(1)
     }
+
+    /// Vim multiplies a count before the operator with one before the motion: `2d3w` is six words.
+    fn take_operator_count(&mut self) -> usize {
+        let outer = self.op_count.take().unwrap_or(1);
+        let inner = self.count.take().unwrap_or(1);
+        outer.saturating_mul(inner).max(1)
+    }
+
+    fn take_register(&mut self) -> Option<char> {
+        self.register.take()
+    }
+
     fn reset(&mut self) {
         self.count = None;
+        self.op_count = None;
         self.pending_op = None;
+        self.pending_op_key = None;
+        self.register = None;
+        self.register_pending = false;
+        self.replace_pending = false;
         self.g_pending = false;
         self.z_pending = false;
+    }
+
+    fn start_operator(&mut self, operator: Operator, key: char) {
+        self.pending_op = Some(operator);
+        self.pending_op_key = Some(key);
+        self.op_count = self.count.take();
+    }
+
+    fn enter_insert(&mut self) {
+        self.mode = EditMode::Insert;
+    }
+
+    fn op(&mut self, operator: Operator, target: Target) -> EditCommand {
+        EditCommand::Op {
+            operator,
+            target,
+            register: self.take_register(),
+        }
+    }
+
+    /// Apply a pending operator to a motion, a doubled key (`dd`), or abandon it.
+    fn operator_pending(&mut self, operator: Operator, key: &str) -> Vec<EditCommand> {
+        let doubled = single_char(key)
+            .zip(self.pending_op_key)
+            .is_some_and(|(a, b)| a == b);
+        let count = self.take_operator_count();
+        self.pending_op_key = None;
+
+        let target = if doubled {
+            Target::Line(count)
+        } else if let Some(m) = motion_for(key) {
+            Target::Motion(m, count)
+        } else if key == "G" {
+            Target::Motion(Motion::DocEnd, 1)
+        } else {
+            return vec![];
+        };
+
+        if operator == Operator::Change {
+            self.enter_insert();
+        }
+        vec![self.op(operator, target)]
     }
 
     fn normal(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         use EditCommand::*;
         let key = k.key.as_str();
 
-        if key.len() == 1 {
-            let c = key.chars().next().unwrap();
-            if c.is_ascii_digit() && !(c == '0' && self.count.is_none()) {
-                let d = c as usize - '0' as usize;
-                self.count = Some(self.count.unwrap_or(0) * 10 + d);
-                return vec![];
-            }
-        }
-
-        if let Some(op) = self.pending_op {
-            self.pending_op = None;
-            let n = self.take_count();
-            if key.len() == 1 && key.starts_with(op) {
-                return match op {
-                    'd' => vec![DeleteLine],
-                    'y' => vec![Move(Motion::LineStart), Select(Motion::LineEnd), Yank],
-                    'c' => {
-                        self.mode = EditMode::Insert;
-                        vec![
-                            Move(Motion::LineStart),
-                            DeleteToLineEnd,
-                            SetMode(EditMode::Insert),
-                        ]
-                    }
-                    _ => vec![],
-                };
-            }
-            if let Some(m) = motion_for(key) {
-                return match op {
-                    'd' => rep(DeleteRange(m), n),
-                    'y' => vec![YankRange(m)],
-                    'c' => {
-                        self.mode = EditMode::Insert;
-                        let mut cmds = rep(DeleteRange(m), n);
-                        cmds.push(SetMode(EditMode::Insert));
-                        cmds
-                    }
-                    _ => vec![],
-                };
+        if self.register_pending {
+            self.register_pending = false;
+            if let Some(c) = single_char(key) {
+                self.register = Some(c);
             }
             return vec![];
         }
 
+        if self.replace_pending {
+            self.replace_pending = false;
+            let count = self.take_count();
+            if let Some(ch) = single_char(key) {
+                return vec![ReplaceChar { ch, count }];
+            }
+            return vec![];
+        }
+
+        if let Some(c) = single_char(key)
+            && c.is_ascii_digit()
+            && !(c == '0' && self.count.is_none())
+        {
+            let d = c as usize - '0' as usize;
+            self.count = Some(self.count.unwrap_or(0) * 10 + d);
+            return vec![];
+        }
+
+        if let Some(operator) = self.pending_op.take() {
+            return self.operator_pending(operator, key);
+        }
+
         if self.g_pending {
             self.g_pending = false;
+            if let Some((operator, op_key)) = g_operator(key) {
+                self.start_operator(operator, op_key);
+                return vec![];
+            }
             return match key {
                 "g" => {
-                    self.count = None;
-                    vec![Move(Motion::DocStart)]
+                    let line = self.count.take();
+                    vec![match line {
+                        Some(n) => Move(Motion::GotoLine(n.saturating_sub(1) as u32)),
+                        None => Move(Motion::DocStart),
+                    }]
                 }
                 "d" => vec![GotoDefinition],
                 "r" => vec![FindReferences],
+                "J" => vec![JoinLines {
+                    count: self.take_count(),
+                    spaces: false,
+                }],
                 _ => vec![],
             };
         }
@@ -119,12 +205,17 @@ impl VimKeymap {
 
         if key == "r" && k.mods.ctrl {
             let n = self.take_count();
-            return rep(Redo, n);
+            return std::iter::repeat_n(Redo, n).collect();
         }
 
         if let Some(m) = motion_for(key) {
             let n = self.take_count();
-            return rep(Move(m), n);
+            return std::iter::repeat_n(Move(m), n).collect();
+        }
+
+        if let Some((operator, op_key)) = operator_for(key) {
+            self.start_operator(operator, op_key);
+            return vec![];
         }
 
         match key {
@@ -136,6 +227,14 @@ impl VimKeymap {
                 self.z_pending = true;
                 vec![]
             }
+            "\"" => {
+                self.register_pending = true;
+                vec![]
+            }
+            "r" => {
+                self.replace_pending = true;
+                vec![]
+            }
             "G" => {
                 let cmd = match self.count.take() {
                     Some(n) => Move(Motion::GotoLine(n.saturating_sub(1) as u32)),
@@ -144,81 +243,83 @@ impl VimKeymap {
                 vec![cmd]
             }
             "i" => {
-                self.mode = EditMode::Insert;
+                self.enter_insert();
                 vec![SetMode(EditMode::Insert)]
             }
             "a" => {
-                self.mode = EditMode::Insert;
+                self.enter_insert();
                 vec![Move(Motion::Right), SetMode(EditMode::Insert)]
             }
             "I" => {
-                self.mode = EditMode::Insert;
+                self.enter_insert();
                 vec![Move(Motion::FirstNonBlank), SetMode(EditMode::Insert)]
             }
             "A" => {
-                self.mode = EditMode::Insert;
+                self.enter_insert();
                 vec![Move(Motion::LineEnd), SetMode(EditMode::Insert)]
             }
             "o" => {
-                self.mode = EditMode::Insert;
-                vec![
-                    Move(Motion::LineEnd),
-                    InsertNewline,
-                    SetMode(EditMode::Insert),
-                ]
+                self.enter_insert();
+                vec![OpenLine { above: false }]
             }
             "O" => {
-                self.mode = EditMode::Insert;
-                vec![
-                    Move(Motion::LineStart),
-                    InsertNewline,
-                    Move(Motion::Up),
-                    SetMode(EditMode::Insert),
-                ]
+                self.enter_insert();
+                vec![OpenLine { above: true }]
             }
             "x" => {
-                let n = self.take_count();
-                rep(DeleteForward, n)
+                let count = self.take_count();
+                vec![self.op(Operator::Delete, Target::Motion(Motion::Right, count))]
             }
             "X" => {
-                let n = self.take_count();
-                rep(DeleteBack, n)
+                let count = self.take_count();
+                vec![self.op(Operator::Delete, Target::Motion(Motion::Left, count))]
             }
             "D" => {
                 let _ = self.take_count();
-                vec![DeleteToLineEnd]
+                vec![self.op(Operator::Delete, Target::Motion(Motion::LineEnd, 1))]
             }
             "C" => {
                 let _ = self.take_count();
-                self.mode = EditMode::Insert;
-                vec![DeleteToLineEnd, SetMode(EditMode::Insert)]
+                self.enter_insert();
+                vec![self.op(Operator::Change, Target::Motion(Motion::LineEnd, 1))]
             }
             "s" => {
-                let n = self.take_count();
-                self.mode = EditMode::Insert;
-                let mut ops = rep(DeleteForward, n);
-                ops.push(SetMode(EditMode::Insert));
-                ops
+                let count = self.take_count();
+                self.enter_insert();
+                vec![self.op(Operator::Change, Target::Motion(Motion::Right, count))]
             }
             "S" => {
-                let _ = self.take_count();
-                self.mode = EditMode::Insert;
-                vec![
-                    Move(Motion::LineStart),
-                    DeleteToLineEnd,
-                    SetMode(EditMode::Insert),
-                ]
+                let count = self.take_count();
+                self.enter_insert();
+                vec![self.op(Operator::Change, Target::Line(count))]
             }
-            "p" => vec![Paste],
-            "P" => vec![PasteBefore],
+            "Y" => {
+                let count = self.take_count();
+                vec![self.op(Operator::Yank, Target::Line(count))]
+            }
+            "J" => vec![JoinLines {
+                count: self.take_count(),
+                spaces: true,
+            }],
+            "~" => {
+                let count = self.take_count();
+                let mut cmds =
+                    vec![self.op(Operator::ToggleCase, Target::Motion(Motion::Right, count))];
+                cmds.extend(std::iter::repeat_n(Move(Motion::RightBounded), count));
+                cmds
+            }
+            "p" | "P" => {
+                let count = self.take_count();
+                vec![Put {
+                    before: key == "P",
+                    count,
+                    register: self.take_register(),
+                }]
+            }
             "K" => vec![Hover],
             "u" => {
                 let n = self.take_count();
-                rep(Undo, n)
-            }
-            "d" | "c" | "y" => {
-                self.pending_op = key.chars().next();
-                vec![]
+                std::iter::repeat_n(Undo, n).collect()
             }
             "v" => {
                 self.mode = EditMode::Visual;
@@ -243,28 +344,153 @@ impl VimKeymap {
     fn visual(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         use EditCommand::*;
         let key = k.key.as_str();
-        if let Some(m) = motion_for(key) {
-            return vec![Select(m)];
+
+        if self.register_pending {
+            self.register_pending = false;
+            if let Some(c) = single_char(key) {
+                self.register = Some(c);
+            }
+            return vec![];
         }
+
+        if self.replace_pending {
+            self.replace_pending = false;
+            if let Some(ch) = single_char(key) {
+                self.mode = EditMode::Normal;
+                return vec![
+                    Op {
+                        operator: Operator::Delete,
+                        target: Target::Selection,
+                        register: Some(crate::edit::register::BLACKHOLE),
+                    },
+                    InsertText(ch.to_string()),
+                    SetMode(EditMode::Normal),
+                ];
+            }
+            return vec![];
+        }
+
+        if let Some(c) = single_char(key)
+            && c.is_ascii_digit()
+            && !(c == '0' && self.count.is_none())
+        {
+            let d = c as usize - '0' as usize;
+            self.count = Some(self.count.unwrap_or(0) * 10 + d);
+            return vec![];
+        }
+
+        if let Some(m) = motion_for(key) {
+            let n = self.take_count();
+            return std::iter::repeat_n(Select(m), n).collect();
+        }
+
+        if self.g_pending {
+            self.g_pending = false;
+            return match key {
+                "u" => self.visual_op(Operator::Lower),
+                "U" => self.visual_op(Operator::Upper),
+                "~" => self.visual_op(Operator::ToggleCase),
+                "g" => vec![Select(Motion::DocStart)],
+                _ => vec![],
+            };
+        }
+
         match key {
-            "d" | "x" => {
+            "g" => {
+                self.g_pending = true;
+                vec![]
+            }
+            "\"" => {
+                self.register_pending = true;
+                vec![]
+            }
+            "r" => {
+                self.replace_pending = true;
+                vec![]
+            }
+            "d" | "x" => self.visual_op(Operator::Delete),
+            "y" => self.visual_op(Operator::Yank),
+            "u" => self.visual_op(Operator::Lower),
+            "U" => self.visual_op(Operator::Upper),
+            "~" => self.visual_op(Operator::ToggleCase),
+            ">" => self.visual_op(Operator::Indent),
+            "<" => self.visual_op(Operator::Outdent),
+            "c" | "s" => {
+                self.enter_insert();
+                vec![self.op(Operator::Change, Target::Selection)]
+            }
+            "D" | "X" => {
+                self.mode = EditMode::VisualLine;
+                let cmd = self.op(Operator::Delete, Target::Selection);
                 self.mode = EditMode::Normal;
-                vec![DeleteSelection, SetMode(EditMode::Normal)]
+                vec![
+                    SetMode(EditMode::VisualLine),
+                    cmd,
+                    SetMode(EditMode::Normal),
+                ]
             }
-            "c" => {
-                self.mode = EditMode::Insert;
-                vec![DeleteSelection, SetMode(EditMode::Insert)]
+            "C" | "S" | "R" => {
+                self.enter_insert();
+                let cmd = self.op(Operator::Change, Target::Selection);
+                vec![SetMode(EditMode::VisualLine), cmd]
             }
-            "y" => {
+            "Y" => {
                 self.mode = EditMode::Normal;
-                vec![Yank]
+                let cmd = self.op(Operator::Yank, Target::Selection);
+                vec![
+                    SetMode(EditMode::VisualLine),
+                    cmd,
+                    SetMode(EditMode::Normal),
+                ]
             }
-            "v" | "V" | "Escape" => {
+            "J" => {
+                self.mode = EditMode::Normal;
+                vec![
+                    JoinLines {
+                        count: 2,
+                        spaces: true,
+                    },
+                    SetMode(EditMode::Normal),
+                ]
+            }
+            "p" | "P" => {
+                self.mode = EditMode::Normal;
+                vec![Put {
+                    before: key == "P",
+                    count: self.take_count(),
+                    register: self.take_register(),
+                }]
+            }
+            "o" => vec![SwapSelectionEnds],
+            "v" => {
+                self.mode = if self.mode == EditMode::Visual {
+                    EditMode::Normal
+                } else {
+                    EditMode::Visual
+                };
+                vec![SetMode(self.mode)]
+            }
+            "V" => {
+                self.mode = if self.mode == EditMode::VisualLine {
+                    EditMode::Normal
+                } else {
+                    EditMode::VisualLine
+                };
+                vec![SetMode(self.mode)]
+            }
+            "Escape" => {
+                self.reset();
                 self.mode = EditMode::Normal;
                 vec![SetMode(EditMode::Normal)]
             }
             _ => vec![],
         }
+    }
+
+    fn visual_op(&mut self, operator: Operator) -> Vec<EditCommand> {
+        self.mode = EditMode::Normal;
+        let cmd = self.op(operator, Target::Selection);
+        vec![cmd, EditCommand::SetMode(EditMode::Normal)]
     }
 
     fn insert(&mut self, k: &KeyInput) -> Vec<EditCommand> {
@@ -337,9 +563,21 @@ impl Keymap for VimKeymap {
         #[cfg(target_os = "macos")]
         if k.mods.meta && !k.mods.ctrl && !k.mods.alt {
             let command = match k.key.to_ascii_lowercase().as_str() {
-                "c" => Some(EditCommand::Yank),
-                "x" => Some(EditCommand::Cut),
-                "v" => Some(EditCommand::Paste),
+                "c" => Some(EditCommand::Op {
+                    operator: Operator::Yank,
+                    target: Target::Selection,
+                    register: None,
+                }),
+                "x" => Some(EditCommand::Op {
+                    operator: Operator::Delete,
+                    target: Target::Selection,
+                    register: None,
+                }),
+                "v" => Some(EditCommand::Put {
+                    before: true,
+                    count: 1,
+                    register: None,
+                }),
                 "a" => Some(EditCommand::Move(Motion::DocStart)),
                 "s" => Some(EditCommand::Save),
                 "z" if k.mods.shift => Some(EditCommand::Redo),
@@ -394,6 +632,7 @@ impl Keymap for VimKeymap {
                     ]
                 }
                 EditMode::Visual | EditMode::VisualLine => {
+                    self.reset();
                     self.mode = EditMode::Normal;
                     vec![EditCommand::SetMode(EditMode::Normal)]
                 }
@@ -426,65 +665,78 @@ mod tests {
             repeat: false,
         }
     }
-    fn ctrl(key: &str) -> KeyInput {
+    fn chord(key: &str, mods: Mods) -> KeyInput {
         KeyInput {
             key: key.into(),
-            mods: Mods {
-                ctrl: true,
-                ..Default::default()
-            },
+            mods,
             repeat: false,
         }
     }
-    #[cfg(target_os = "macos")]
-    fn command(key: &str) -> KeyInput {
-        KeyInput {
-            key: key.into(),
-            mods: Mods {
-                meta: true,
-                ..Default::default()
-            },
-            repeat: false,
+    fn ctrl() -> Mods {
+        Mods {
+            ctrl: true,
+            ..Default::default()
+        }
+    }
+    fn run(km: &mut VimKeymap, seq: &[&str]) -> Vec<EditCommand> {
+        let mut out = Vec::new();
+        for s in seq {
+            out.extend(km.handle(&k(s)));
+        }
+        out
+    }
+    fn op(operator: Operator, target: Target) -> EditCommand {
+        EditCommand::Op {
+            operator,
+            target,
+            register: None,
         }
     }
 
     #[test]
-    fn dw_deletes_word() {
+    fn operators_pair_with_motions_and_doubled_keys() {
         let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("d")), vec![]);
         assert_eq!(
-            km.handle(&k("w")),
-            vec![EditCommand::DeleteRange(Motion::WordNext)]
+            run(&mut km, &["d", "w"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
         );
+        assert_eq!(
+            run(&mut km, &["d", "d"]),
+            vec![op(Operator::Delete, Target::Line(1))]
+        );
+        assert_eq!(
+            run(&mut km, &["y", "y"]),
+            vec![op(Operator::Yank, Target::Line(1))]
+        );
+        assert_eq!(
+            run(&mut km, &["c", "c"]),
+            vec![op(Operator::Change, Target::Line(1))]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
     }
 
     #[test]
-    fn dd_deletes_line() {
+    fn counts_multiply_across_operator_and_motion() {
         let mut km = VimKeymap::default();
-        km.handle(&k("d"));
-        assert_eq!(km.handle(&k("d")), vec![EditCommand::DeleteLine]);
-    }
-
-    #[test]
-    fn za_toggles_fold() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("z")), vec![]);
-        assert_eq!(km.handle(&k("a")), vec![EditCommand::FoldToggle]);
-    }
-
-    #[test]
-    fn zr_unfolds_all() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("z"));
-        assert_eq!(km.handle(&k("R")), vec![EditCommand::UnfoldAll]);
+        assert_eq!(
+            run(&mut km, &["d", "3", "w"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 3))]
+        );
+        assert_eq!(
+            run(&mut km, &["2", "d", "3", "w"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 6))]
+        );
+        assert_eq!(
+            run(&mut km, &["2", "d", "d"]),
+            vec![op(Operator::Delete, Target::Line(2))]
+        );
     }
 
     #[test]
     fn count_repeats_motion() {
         let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("3")), vec![]);
         assert_eq!(
-            km.handle(&k("j")),
+            run(&mut km, &["3", "j"]),
             vec![
                 EditCommand::Move(Motion::Down),
                 EditCommand::Move(Motion::Down),
@@ -494,37 +746,248 @@ mod tests {
     }
 
     #[test]
-    fn document_jump_bindings() {
+    fn register_prefix_routes_yank_and_put() {
         let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("G")), vec![EditCommand::Move(Motion::DocEnd)]);
-        assert_eq!(km.handle(&k("g")), vec![]);
         assert_eq!(
-            km.handle(&k("g")),
-            vec![EditCommand::Move(Motion::DocStart)]
+            run(&mut km, &["\"", "a", "y", "y"]),
+            vec![EditCommand::Op {
+                operator: Operator::Yank,
+                target: Target::Line(1),
+                register: Some('a'),
+            }]
         );
-        assert_eq!(km.handle(&k("4")), vec![]);
         assert_eq!(
-            km.handle(&k("G")),
-            vec![EditCommand::Move(Motion::GotoLine(3))]
+            run(&mut km, &["\"", "a", "p"]),
+            vec![EditCommand::Put {
+                before: false,
+                count: 1,
+                register: Some('a'),
+            }]
         );
     }
 
     #[test]
-    fn i_enters_insert() {
+    fn indent_operators_use_doubled_keys() {
         let mut km = VimKeymap::default();
         assert_eq!(
-            km.handle(&k("i")),
+            run(&mut km, &[">", ">"]),
+            vec![op(Operator::Indent, Target::Line(1))]
+        );
+        assert_eq!(
+            run(&mut km, &["3", "<", "<"]),
+            vec![op(Operator::Outdent, Target::Line(3))]
+        );
+    }
+
+    #[test]
+    fn g_prefixed_case_operators() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["g", "u", "w"]),
+            vec![op(Operator::Lower, Target::Motion(Motion::WordNext, 1))]
+        );
+        assert_eq!(
+            run(&mut km, &["g", "U", "U"]),
+            vec![op(Operator::Upper, Target::Line(1))]
+        );
+    }
+
+    #[test]
+    fn join_replace_and_toggle_case() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["3", "J"]),
+            vec![EditCommand::JoinLines {
+                count: 3,
+                spaces: true
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["g", "J"]),
+            vec![EditCommand::JoinLines {
+                count: 1,
+                spaces: false
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["2", "r", "x"]),
+            vec![EditCommand::ReplaceChar { ch: 'x', count: 2 }]
+        );
+        assert_eq!(
+            run(&mut km, &["~"]),
+            vec![
+                op(Operator::ToggleCase, Target::Motion(Motion::Right, 1)),
+                EditCommand::Move(Motion::RightBounded)
+            ]
+        );
+    }
+
+    #[test]
+    fn shift_d_c_s_and_y_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["D"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::LineEnd, 1))]
+        );
+        assert_eq!(
+            run(&mut km, &["C"]),
+            vec![op(Operator::Change, Target::Motion(Motion::LineEnd, 1))]
+        );
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["S"]),
+            vec![op(Operator::Change, Target::Line(1))]
+        );
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["2", "Y"]),
+            vec![op(Operator::Yank, Target::Line(2))]
+        );
+        assert_eq!(
+            run(&mut km, &["3", "x"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::Right, 3))]
+        );
+    }
+
+    #[test]
+    fn put_carries_a_count_and_direction() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["2", "p"]),
+            vec![EditCommand::Put {
+                before: false,
+                count: 2,
+                register: None
+            }]
+        );
+        assert_eq!(
+            run(&mut km, &["P"]),
+            vec![EditCommand::Put {
+                before: true,
+                count: 1,
+                register: None
+            }]
+        );
+    }
+
+    #[test]
+    fn open_line_replaces_the_newline_dance() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["o"]),
+            vec![EditCommand::OpenLine { above: false }]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["O"]),
+            vec![EditCommand::OpenLine { above: true }]
+        );
+    }
+
+    #[test]
+    fn visual_operators_act_on_the_selection() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["v"]),
+            vec![EditCommand::SetMode(EditMode::Visual)]
+        );
+        assert_eq!(
+            run(&mut km, &["l"]),
+            vec![EditCommand::Select(Motion::RightBounded)]
+        );
+        assert_eq!(
+            run(&mut km, &["y"]),
+            vec![
+                op(Operator::Yank, Target::Selection),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn visual_motions_take_counts() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["v"]);
+        assert_eq!(
+            run(&mut km, &["3", "j"]),
+            vec![
+                EditCommand::Select(Motion::Down),
+                EditCommand::Select(Motion::Down),
+                EditCommand::Select(Motion::Down)
+            ]
+        );
+    }
+
+    #[test]
+    fn visual_indent_and_swap_ends() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["v"]);
+        assert_eq!(run(&mut km, &["o"]), vec![EditCommand::SwapSelectionEnds]);
+        assert_eq!(
+            run(&mut km, &[">"]),
+            vec![
+                op(Operator::Indent, Target::Selection),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
+        );
+    }
+
+    #[test]
+    fn document_jump_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["g", "g"]),
+            vec![EditCommand::Move(Motion::DocStart)]
+        );
+        assert_eq!(
+            run(&mut km, &["G"]),
+            vec![EditCommand::Move(Motion::DocEnd)]
+        );
+        assert_eq!(
+            run(&mut km, &["5", "G"]),
+            vec![EditCommand::Move(Motion::GotoLine(4))]
+        );
+        assert_eq!(
+            run(&mut km, &["5", "g", "g"]),
+            vec![EditCommand::Move(Motion::GotoLine(4))]
+        );
+    }
+
+    #[test]
+    fn braces_move_by_paragraph() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["{"]),
+            vec![EditCommand::Move(Motion::ParagraphPrev)]
+        );
+        assert_eq!(
+            run(&mut km, &["}"]),
+            vec![EditCommand::Move(Motion::ParagraphNext)]
+        );
+    }
+
+    #[test]
+    fn fold_and_lsp_bindings() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &["z", "a"]), vec![EditCommand::FoldToggle]);
+        assert_eq!(run(&mut km, &["z", "R"]), vec![EditCommand::UnfoldAll]);
+        assert_eq!(run(&mut km, &["g", "d"]), vec![EditCommand::GotoDefinition]);
+        assert_eq!(run(&mut km, &["g", "r"]), vec![EditCommand::FindReferences]);
+        assert_eq!(run(&mut km, &["K"]), vec![EditCommand::Hover]);
+    }
+
+    #[test]
+    fn insert_mode_entry_and_escape() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["i"]),
             vec![EditCommand::SetMode(EditMode::Insert)]
         );
         assert_eq!(km.mode(), EditMode::Insert);
-    }
-
-    #[test]
-    fn esc_in_insert_returns_normal_and_steps_left() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("i"));
         assert_eq!(
-            km.handle(&k("Escape")),
+            run(&mut km, &["Escape"]),
             vec![
                 EditCommand::Move(Motion::LeftBounded),
                 EditCommand::SetMode(EditMode::Normal)
@@ -534,18 +997,72 @@ mod tests {
     }
 
     #[test]
-    fn visual_select_and_yank() {
+    fn arrow_keys_navigate_in_normal_mode() {
         let mut km = VimKeymap::default();
         assert_eq!(
-            km.handle(&k("v")),
-            vec![EditCommand::SetMode(EditMode::Visual)]
+            run(&mut km, &["ArrowDown"]),
+            vec![EditCommand::Move(Motion::Down)]
+        );
+    }
+
+    #[test]
+    fn ctrl_navigation_never_falls_through_to_vim_commands() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&chord("n", ctrl())),
+            vec![EditCommand::Move(Motion::Down)]
         );
         assert_eq!(
-            km.handle(&k("l")),
-            vec![EditCommand::Select(Motion::RightBounded)]
+            km.handle(&chord("p", ctrl())),
+            vec![EditCommand::Move(Motion::Up)]
         );
-        assert_eq!(km.handle(&k("y")), vec![EditCommand::Yank]);
         assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn ctrl_e_y_scroll_the_viewport_with_counts() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["3"]);
+        assert_eq!(
+            km.handle(&chord("e", ctrl())),
+            vec![EditCommand::ScrollViewport(3)]
+        );
+        assert_eq!(
+            km.handle(&chord("y", ctrl())),
+            vec![EditCommand::ScrollViewport(-1)]
+        );
+    }
+
+    #[test]
+    fn ctrl_r_redoes() {
+        let mut km = VimKeymap::default();
+        assert_eq!(km.handle(&chord("r", ctrl())), vec![EditCommand::Redo]);
+    }
+
+    #[test]
+    fn ctrl_c_escapes_insert_and_visual() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        assert_eq!(
+            km.handle(&chord("c", ctrl())),
+            vec![
+                EditCommand::Move(Motion::LeftBounded),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
+        );
+        run(&mut km, &["v"]);
+        assert_eq!(
+            km.handle(&chord("c", ctrl())),
+            vec![EditCommand::SetMode(EditMode::Normal)]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn ex_write_saves() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &[":", "w", "Enter"]), vec![EditCommand::Save]);
+        assert_eq!(run(&mut km, &[":", "q", "Enter"]), vec![]);
     }
 
     #[test]
@@ -559,161 +1076,6 @@ mod tests {
         assert_eq!(
             km.pointer_selection_mode(false),
             Some(EditCommand::SetMode(EditMode::Normal))
-        );
-        assert_eq!(km.mode(), EditMode::Normal);
-    }
-
-    #[test]
-    fn o_opens_line_below() {
-        let mut km = VimKeymap::default();
-        assert_eq!(
-            km.handle(&k("o")),
-            vec![
-                EditCommand::Move(Motion::LineEnd),
-                EditCommand::InsertNewline,
-                EditCommand::SetMode(EditMode::Insert)
-            ]
-        );
-    }
-
-    #[test]
-    fn ctrl_r_redo() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&ctrl("r")), vec![EditCommand::Redo]);
-    }
-
-    #[test]
-    fn ctrl_navigation_never_falls_through_to_vim_commands() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&ctrl("n")), vec![EditCommand::Move(Motion::Down)]);
-        assert_eq!(km.handle(&ctrl("p")), vec![EditCommand::Move(Motion::Up)]);
-        km.mode = EditMode::Insert;
-        assert_eq!(km.handle(&ctrl("p")), vec![EditCommand::Move(Motion::Up)]);
-    }
-
-    #[test]
-    fn ctrl_e_y_scroll_the_viewport_with_counts() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&ctrl("e")), vec![EditCommand::ScrollViewport(1)]);
-        km.handle(&k("3"));
-        assert_eq!(km.handle(&ctrl("y")), vec![EditCommand::ScrollViewport(-3)]);
-        km.mode = EditMode::Insert;
-        assert_eq!(km.handle(&ctrl("e")), vec![EditCommand::ScrollViewport(1)]);
-        assert_eq!(km.handle(&ctrl("y")), vec![EditCommand::ScrollViewport(-1)]);
-    }
-
-    #[test]
-    fn arrow_keys_navigate_in_normal_mode() {
-        let mut km = VimKeymap::default();
-        assert_eq!(
-            km.handle(&k("ArrowRight")),
-            vec![EditCommand::Move(Motion::RightBounded)]
-        );
-        assert_eq!(
-            km.handle(&k("ArrowDown")),
-            vec![EditCommand::Move(Motion::Down)]
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn command_z_undoes_in_vim_modes() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&command("z")), vec![EditCommand::Undo]);
-        km.mode = EditMode::Insert;
-        assert_eq!(km.handle(&command("z")), vec![EditCommand::Undo]);
-    }
-
-    #[test]
-    fn dw_count_repeats() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("d"));
-        km.handle(&k("2"));
-        assert_eq!(
-            km.handle(&k("w")),
-            vec![
-                EditCommand::DeleteRange(Motion::WordNext),
-                EditCommand::DeleteRange(Motion::WordNext)
-            ]
-        );
-    }
-
-    #[test]
-    fn lsp_actions() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("g"));
-        assert_eq!(km.handle(&k("d")), vec![EditCommand::GotoDefinition]);
-        km.handle(&k("g"));
-        assert_eq!(km.handle(&k("r")), vec![EditCommand::FindReferences]);
-        assert_eq!(km.handle(&k("K")), vec![EditCommand::Hover]);
-    }
-
-    #[test]
-    fn ex_write_saves() {
-        let mut km = VimKeymap::default();
-        km.handle(&k(":"));
-        km.handle(&k("w"));
-        assert_eq!(km.handle(&k("Enter")), vec![EditCommand::Save]);
-    }
-
-    #[test]
-    fn ctrl_c_acts_as_escape_from_insert() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("i"));
-        assert_eq!(km.mode(), EditMode::Insert);
-        assert_eq!(
-            km.handle(&ctrl("c")),
-            vec![
-                EditCommand::Move(Motion::LeftBounded),
-                EditCommand::SetMode(EditMode::Normal)
-            ]
-        );
-        assert_eq!(km.mode(), EditMode::Normal);
-    }
-
-    #[test]
-    fn ctrl_c_escapes_visual() {
-        let mut km = VimKeymap::default();
-        km.handle(&k("v"));
-        assert_eq!(
-            km.handle(&ctrl("c")),
-            vec![EditCommand::SetMode(EditMode::Normal)]
-        );
-        assert_eq!(km.mode(), EditMode::Normal);
-    }
-
-    #[test]
-    fn shift_d_c_and_s_bindings() {
-        let mut km = VimKeymap::default();
-        assert_eq!(km.handle(&k("D")), vec![EditCommand::DeleteToLineEnd]);
-        assert_eq!(
-            km.handle(&k("C")),
-            vec![
-                EditCommand::DeleteToLineEnd,
-                EditCommand::SetMode(EditMode::Insert)
-            ]
-        );
-        km.handle(&k("Escape"));
-        km.mode = EditMode::Normal;
-        assert_eq!(
-            km.handle(&k("s")),
-            vec![
-                EditCommand::DeleteForward,
-                EditCommand::SetMode(EditMode::Insert)
-            ]
-        );
-    }
-
-    #[test]
-    fn braces_move_by_paragraph() {
-        let mut km = VimKeymap::default();
-        assert_eq!(
-            km.handle(&k("}")),
-            vec![EditCommand::Move(Motion::ParagraphNext)]
-        );
-        assert_eq!(
-            km.handle(&k("{")),
-            vec![EditCommand::Move(Motion::ParagraphPrev)]
         );
     }
 }
