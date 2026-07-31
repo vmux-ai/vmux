@@ -353,8 +353,6 @@ impl EditCore {
             Motion::Right => self.buffer.next_grapheme(from).min(len),
             Motion::LeftBounded => self.line_left(from),
             Motion::RightBounded => self.line_right(from),
-            Motion::LeftFlow => self.line_left_flow(from),
-            Motion::RightFlow => self.line_right_flow(from),
             Motion::Up => self.vertical(from, -1),
             Motion::Down => self.vertical(from, 1),
             Motion::PageUp => self.vertical(from, -(self.rows.max(1) as i64)),
@@ -643,33 +641,6 @@ impl EditCore {
         } else {
             self.buffer.next_grapheme(from).min(last)
         }
-    }
-    /// Leftward step that treats a hard wrap as a space, landing on the previous line's last cell.
-    fn line_left_flow(&self, from: usize) -> usize {
-        let (line, col) = self.buffer.char_to_coords(from);
-        if col > 0 || line == 0 {
-            return self.line_left(from);
-        }
-        let prev = line - 1;
-        let start = self.buffer.line_to_char(prev);
-        let len = self.buffer.line_len_chars(prev);
-        if len == 0 {
-            return start;
-        }
-        self.buffer.prev_grapheme(start + len)
-    }
-
-    /// Rightward step that continues onto the next line's first cell instead of stopping at a wrap.
-    fn line_right_flow(&self, from: usize) -> usize {
-        let stepped = self.line_right(from);
-        if stepped != from {
-            return stepped;
-        }
-        let (line, _) = self.buffer.char_to_coords(from);
-        if line + 1 >= self.buffer.len_lines() {
-            return from;
-        }
-        self.buffer.line_to_char(line + 1)
     }
 
     fn normal_cursor_target(&self, at: usize) -> usize {
@@ -2098,41 +2069,6 @@ mod tests {
         c.set_caret(c.buffer.coords_to_char(1, 0));
         c.apply(EditCommand::Move(Motion::LeftBounded));
         assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 0));
-    }
-
-    #[test]
-    fn flow_motion_crosses_a_hard_wrap_in_both_directions() {
-        let mut c = core("alpha\nbeta\n");
-        c.mode = EditMode::Normal;
-        c.set_caret(c.buffer.coords_to_char(0, 4));
-        c.apply(EditCommand::Move(Motion::RightFlow));
-        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 0));
-        c.apply(EditCommand::Move(Motion::LeftFlow));
-        assert_eq!(c.buffer.char_to_coords(c.primary().head), (0, 4));
-    }
-
-    #[test]
-    fn flow_motion_still_stops_at_the_document_ends() {
-        let mut c = core("ab\n");
-        c.mode = EditMode::Normal;
-        c.set_caret(0);
-        c.apply(EditCommand::Move(Motion::LeftFlow));
-        assert_eq!(c.primary().head, 0);
-        c.set_caret(c.buffer.coords_to_char(0, 1));
-        c.apply(EditCommand::Move(Motion::RightFlow));
-        c.apply(EditCommand::Move(Motion::RightFlow));
-        assert_eq!(c.buffer.char_to_coords(c.primary().head).0, 1);
-    }
-
-    #[test]
-    fn flow_motion_lands_on_an_empty_line() {
-        let mut c = core("ab\n\ncd\n");
-        c.mode = EditMode::Normal;
-        c.set_caret(c.buffer.coords_to_char(0, 1));
-        c.apply(EditCommand::Move(Motion::RightFlow));
-        assert_eq!(c.buffer.char_to_coords(c.primary().head), (1, 0));
-        c.apply(EditCommand::Move(Motion::RightFlow));
-        assert_eq!(c.buffer.char_to_coords(c.primary().head), (2, 0));
     }
 
     #[test]
