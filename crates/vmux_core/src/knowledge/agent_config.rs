@@ -138,21 +138,33 @@ fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
 fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
     use std::os::unix::fs::symlink;
 
-    ensure_canonical(canonical)?;
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
-            let is_symlink = metadata.file_type().is_symlink();
-            if is_symlink && symlink_points_to(path, canonical)? {
+            if metadata.file_type().is_symlink() {
+                if symlink_points_to(path, canonical)? {
+                    return Ok(());
+                }
+                bevy::log::warn!(
+                    "vmux Knowledge: leaving existing symlink {} untouched (it points outside the Knowledge vault)",
+                    path.display()
+                );
                 return Ok(());
             }
-            adopt_existing_instructions(path, canonical)?;
-            if is_symlink {
-                std::fs::remove_file(path)?;
-            } else {
-                back_up(path)?;
+            let existing = read_optional(path)?;
+            if !existing.contains(KNOWLEDGE_START) {
+                bevy::log::warn!(
+                    "vmux Knowledge: leaving existing {} untouched; edit {} to share it across agents",
+                    path.display(),
+                    canonical.display()
+                );
+                return Ok(());
             }
+            ensure_canonical(canonical)?;
+            seed_canonical(canonical, &existing)?;
+            back_up(path)?;
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            ensure_canonical(canonical)?;
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -190,12 +202,11 @@ fn symlink_points_to(path: &Path, canonical: &Path) -> io::Result<bool> {
 }
 
 #[cfg(unix)]
-fn adopt_existing_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
+fn seed_canonical(canonical: &Path, existing: &str) -> io::Result<()> {
     if !read_optional(canonical)?.is_empty() {
         return Ok(());
     }
-    let existing = read_optional(path)?;
-    let leftover = merge_managed_section(&existing, "", KNOWLEDGE_START, KNOWLEDGE_END)?;
+    let leftover = merge_managed_section(existing, "", KNOWLEDGE_START, KNOWLEDGE_END)?;
     let leftover = leftover.trim();
     if leftover.is_empty() {
         return Ok(());
@@ -789,6 +800,56 @@ mod tests {
         let mut backup = path.clone().into_os_string();
         backup.push(".bak");
         assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_leaves_pristine_user_file_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let path = temp.path().join("claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "my own rules\n").unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert!(
+            !std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my own rules\n");
+        assert!(read_optional(&canonical).unwrap().is_empty());
+        let mut backup = path.clone().into_os_string();
+        backup.push(".bak");
+        assert!(!Path::new(&backup).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_leaves_foreign_symlink_untouched() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let dotfiles = temp.path().join("dotfiles/CLAUDE.md");
+        std::fs::create_dir_all(dotfiles.parent().unwrap()).unwrap();
+        std::fs::write(&dotfiles, "dotfiles rules\n").unwrap();
+        let path = temp.path().join("claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(&dotfiles, &path).unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_link(&path).unwrap(), dotfiles);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "dotfiles rules\n");
+        assert!(read_optional(&canonical).unwrap().is_empty());
     }
 
     #[test]
