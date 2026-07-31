@@ -1,7 +1,7 @@
 //! Per-session ACP driver: spawns the agent subprocess, runs the `Client` connection,
 //! and pumps prompts/approvals through it while projecting `session/update` to the UI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,14 @@ const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+/// Max wall-clock for the ACP handshake (`initialize`) before the agent is declared failed, so a
+/// stuck or slowly-failing spawn surfaces an error instead of an endless "Starting agent…".
+/// Generous enough for a first-run package install on a slow network.
+const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How many recent agent-stderr lines to retain for diagnostics.
+const STDERR_TAIL_CAPACITY: usize = 50;
+/// How many recent agent-stderr lines to include in a surfaced error.
+const STDERR_TAIL_SHOWN: usize = 8;
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -140,6 +148,9 @@ pub struct AcpShared {
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
+    /// Recent lines from the agent subprocess's stderr, surfaced in startup/connection errors so
+    /// the user sees the real cause (e.g. an npm registry failure) instead of a silent hang.
+    stderr_tail: Mutex<VecDeque<String>>,
 }
 
 impl AcpShared {
@@ -167,6 +178,7 @@ impl AcpShared {
             history_replay: AtomicBool::new(false),
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
+            stderr_tail: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -316,6 +328,35 @@ impl AcpShared {
             status,
         });
     }
+
+    fn push_stderr(&self, line: String) {
+        let mut tail = self.stderr_tail.lock().unwrap();
+        if tail.len() >= STDERR_TAIL_CAPACITY {
+            tail.pop_front();
+        }
+        tail.push_back(line);
+    }
+
+    /// The most recent non-empty stderr lines, formatted for appending to an error message
+    /// (empty when the agent printed nothing).
+    fn stderr_detail(&self) -> String {
+        stderr_detail_from(&self.stderr_tail.lock().unwrap(), STDERR_TAIL_SHOWN)
+    }
+}
+
+/// Format the last `shown` non-empty stderr lines as an error suffix (blank-line separated), or
+/// an empty string when there is nothing to show.
+fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
+    let lines: Vec<&str> = tail
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let start = lines.len().saturating_sub(shown);
+    format!("\n\n{}", lines[start..].join("\n"))
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
@@ -650,7 +691,7 @@ pub async fn run(
     let stdin = child.stdin.take().expect("piped stdin").compat_write();
     let stdout = child.stdout.take().expect("piped stdout").compat();
     if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(drain_stderr(stderr));
+        tokio::spawn(drain_stderr(stderr, shared.clone()));
     }
     let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
 
@@ -818,7 +859,27 @@ pub async fn run(
             // ACP-native terminals: the agent's shell/Bash execution flows through vmux's five
             // terminal methods, backed by real visible panes (see `create_terminal` et al.).
             init.client_capabilities.terminal = true;
-            let init_resp = cx.send_request(init).block_task().await?;
+            let init_resp =
+                match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
+                    .await
+                {
+                    Ok(Ok(resp)) => resp,
+                    Ok(Err(err)) => {
+                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                            "agent failed to start: {err}{}",
+                            main_shared.stderr_detail()
+                        )));
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                            "agent did not start within {}s{}",
+                            ACP_STARTUP_TIMEOUT.as_secs(),
+                            main_shared.stderr_detail()
+                        )));
+                        return Ok(());
+                    }
+                };
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
@@ -1041,7 +1102,8 @@ pub async fn run(
 
     if let Err(err) = result {
         shared.emit_status(AgentRunStatus::Errored(format!(
-            "acp connection ended: {err}"
+            "acp connection ended: {err}{}",
+            shared.stderr_detail()
         )));
     }
     let _ = child.kill().await;
@@ -1231,11 +1293,12 @@ fn session_meta_for_agent_with_knowledge(
     Some(meta)
 }
 
-async fn drain_stderr(stderr: tokio::process::ChildStderr) {
+async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared>) {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");
+        shared.push_stderr(line);
     }
 }
 
@@ -1656,6 +1719,31 @@ mod tests {
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
         SessionConfigSelectOption, ToolCall, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn stderr_detail_from_shows_last_lines_and_skips_blanks() {
+        let tail: VecDeque<String> = [
+            "npm warn old",
+            "",
+            "npm error 403 Forbidden",
+            "   ",
+            "Blocked by Security Policy",
+        ]
+        .iter()
+        .map(|line| line.to_string())
+        .collect();
+        assert_eq!(
+            stderr_detail_from(&tail, 2),
+            "\n\nnpm error 403 Forbidden\nBlocked by Security Policy"
+        );
+    }
+
+    #[test]
+    fn stderr_detail_from_is_empty_without_output() {
+        let blanks: VecDeque<String> = ["", "   "].iter().map(|line| line.to_string()).collect();
+        assert!(stderr_detail_from(&blanks, 8).is_empty());
+        assert!(stderr_detail_from(&VecDeque::new(), 8).is_empty());
+    }
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
