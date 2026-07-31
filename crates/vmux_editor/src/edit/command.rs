@@ -217,6 +217,8 @@ pub enum EditCommand {
     FinishBlockInsert {
         text: String,
     },
+    /// Add `delta` to the number at or after the caret on the current line.
+    Increment(i64),
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),
     SetSearch {

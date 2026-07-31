@@ -445,6 +445,35 @@ impl EditCore {
         out
     }
 
+    /// The decimal number at or after the caret on this line, with its char span.
+    ///
+    /// A `-` immediately before the digits is part of the number, matching `Ctrl-a` on `-3`.
+    fn number_at_caret(&self) -> Option<(std::ops::Range<usize>, i64)> {
+        let (line, col) = self.buffer.char_to_coords(self.primary().head);
+        let base = self.buffer.line_to_char(line);
+        let len = self.buffer.line_len_chars(line);
+        let digit = |i: usize| self.buffer.rope.char(base + i).is_ascii_digit();
+        let mut start = (col..len).find(|i| digit(*i))?;
+        while start > 0 && digit(start - 1) {
+            start -= 1;
+        }
+        let mut end = start;
+        while end < len && digit(end) {
+            end += 1;
+        }
+        let negative = start > 0 && self.buffer.rope.char(base + start - 1) == '-';
+        let text: String = self
+            .buffer
+            .rope
+            .slice(base + start..base + end)
+            .chars()
+            .collect();
+        let magnitude = text.parse::<i64>().ok()?;
+        let span_start = if negative { start - 1 } else { start };
+        let value = if negative { -magnitude } else { magnitude };
+        Some((base + span_start..base + end, value))
+    }
+
     /// The keyword under the cursor, used by `*` and `#`.
     fn word_under_cursor(&self) -> Option<String> {
         let len = self.buffer.len_chars();
@@ -1632,6 +1661,24 @@ impl EditCore {
                     text_changed = true;
                 }
             }
+            EditCommand::Increment(delta) => {
+                if let Some((span, value)) = self.number_at_caret() {
+                    let width = span.end - span.start;
+                    let digits: String = self.buffer.rope.slice(span.clone()).chars().collect();
+                    let padded = digits.starts_with('0') && digits.len() > 1;
+                    let next = value.saturating_add(delta);
+                    let text = if padded {
+                        format!("{:0>width$}", next, width = width)
+                    } else {
+                        next.to_string()
+                    };
+                    self.checkpoint(Group::Other);
+                    self.buf_remove(span.clone());
+                    self.buf_insert(span.start, &text);
+                    self.set_caret(span.start + text.chars().count() - 1);
+                    text_changed = true;
+                }
+            }
             EditCommand::SwapSelectionEnds => {
                 let sel = self.primary();
                 self.selections = vec![Selection {
@@ -1971,6 +2018,42 @@ mod tests {
             head: c.buffer.coords_to_char(to.0, to.1),
         }];
         c
+    }
+
+    #[test]
+    fn increment_finds_the_number_at_or_after_the_caret() {
+        let mut c = core("item 41 done");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Increment(1));
+        assert_eq!(text_of(&c), "item 42 done");
+    }
+
+    #[test]
+    fn increment_crosses_zero_on_a_negative_number() {
+        let mut c = core("x -1 y");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Increment(2));
+        assert_eq!(text_of(&c), "x 1 y");
+    }
+
+    #[test]
+    fn increment_preserves_zero_padding() {
+        let mut c = core("v007");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Increment(1));
+        assert_eq!(text_of(&c), "v008");
+    }
+
+    #[test]
+    fn increment_without_a_number_is_inert() {
+        let mut c = core("no digits");
+        c.mode = EditMode::Normal;
+        c.set_caret(0);
+        c.apply(EditCommand::Increment(1));
+        assert_eq!(text_of(&c), "no digits");
     }
 
     #[test]

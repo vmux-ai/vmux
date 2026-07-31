@@ -74,6 +74,8 @@ pub struct VimKeymap {
     mark_pending: Option<MarkAction>,
     block_insert: Option<bool>,
     block_text: String,
+    mappings: crate::keymap::mapping::Mappings,
+    map_pending: Vec<KeyInput>,
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -164,6 +166,14 @@ fn single_char(key: &str) -> Option<char> {
 }
 
 impl VimKeymap {
+    /// Build a keymap with the user's configured key mappings applied.
+    pub fn with_mappings(specs: &[vmux_core::editor::KeyMapping], leader: &str) -> Self {
+        Self {
+            mappings: crate::keymap::mapping::Mappings::new(specs, leader),
+            ..Self::default()
+        }
+    }
+
     fn take_count(&mut self) -> usize {
         self.count.take().unwrap_or(1)
     }
@@ -223,6 +233,49 @@ impl VimKeymap {
             || self.replace_pending
             || self.g_pending
             || self.z_pending
+    }
+
+    /// Feed a key through the user's mappings.
+    ///
+    /// Returns `None` when the key should be handled normally, `Some` when the mapping layer
+    /// consumed it — either holding it as part of a longer sequence or expanding a match.
+    fn route_through_mappings(&mut self, k: &KeyInput) -> Option<Vec<EditCommand>> {
+        use crate::keymap::mapping::MatchResult;
+        let mut pending = std::mem::take(&mut self.map_pending);
+        pending.push(k.clone());
+        match self.mappings.match_keys(self.mode, &pending) {
+            MatchResult::Pending => {
+                self.map_pending = pending;
+                Some(vec![])
+            }
+            MatchResult::Expand(rhs) => {
+                let mut out = Vec::new();
+                for key in rhs {
+                    out.extend(self.handle_unmapped(&key));
+                }
+                Some(out)
+            }
+            MatchResult::Miss => {
+                if pending.len() == 1 {
+                    return None;
+                }
+                // The buffered prefix turned out not to be a mapping; replay it as typed.
+                let mut out = Vec::new();
+                for key in pending {
+                    out.extend(self.handle_unmapped(&key));
+                }
+                Some(out)
+            }
+        }
+    }
+
+    /// Run one key through recording and dispatch, skipping the mapping layer.
+    fn handle_unmapped(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+        let was_replaying = self.replaying;
+        self.replaying = true;
+        let cmds = self.record_and_dispatch(k);
+        self.replaying = was_replaying;
+        cmds
     }
 
     fn replay(&mut self, inputs: &[Recorded], times: usize) -> Vec<EditCommand> {
@@ -1037,7 +1090,31 @@ impl Keymap for VimKeymap {
         if self.replaying {
             return self.dispatch(k);
         }
+        if !self.mappings.is_empty()
+            && let Some(cmds) = self.route_through_mappings(k)
+        {
+            return cmds;
+        }
+        self.record_and_dispatch(k)
+    }
+    fn pointer_selection_mode(&mut self, extend: bool) -> Option<EditCommand> {
+        match (extend, self.mode) {
+            (true, EditMode::Normal) => {
+                self.mode = EditMode::Visual;
+                Some(EditCommand::SetMode(EditMode::Visual))
+            }
+            (false, mode) if mode.is_visual() => {
+                self.mode = EditMode::Normal;
+                Some(EditCommand::SetMode(EditMode::Normal))
+            }
+            _ => None,
+        }
+    }
+}
 
+impl VimKeymap {
+    /// Dispatch one key while maintaining the dot-repeat and macro records.
+    fn record_and_dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         let stops_recording =
             self.macro_record.is_some() && k.key == "q" && self.mode == EditMode::Normal;
         if let Some((_, body)) = self.macro_record.as_mut()
@@ -1070,22 +1147,7 @@ impl Keymap for VimKeymap {
         }
         cmds
     }
-    fn pointer_selection_mode(&mut self, extend: bool) -> Option<EditCommand> {
-        match (extend, self.mode) {
-            (true, EditMode::Normal) => {
-                self.mode = EditMode::Visual;
-                Some(EditCommand::SetMode(EditMode::Visual))
-            }
-            (false, EditMode::Visual | EditMode::VisualLine) => {
-                self.mode = EditMode::Normal;
-                Some(EditCommand::SetMode(EditMode::Normal))
-            }
-            _ => None,
-        }
-    }
-}
 
-impl VimKeymap {
     /// Interpret one key without any dot-repeat or macro bookkeeping.
     fn dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         let armed = self.insert_after_next;
@@ -1143,6 +1205,12 @@ impl VimKeymap {
                 let count = self.take_count().min(i32::MAX as usize) as i32;
                 self.reset();
                 return vec![EditCommand::ScrollViewport(direction * count)];
+            }
+            if k.key == "a" || k.key == "x" {
+                let count = self.take_count() as i64;
+                self.reset();
+                let delta = if k.key == "a" { count } else { -count };
+                return vec![EditCommand::Increment(delta)];
             }
             if k.key.eq_ignore_ascii_case("v") {
                 self.reset();
@@ -1590,6 +1658,60 @@ mod tests {
                 count: 1,
                 register: Some('a'),
             }]
+        );
+    }
+
+    fn mapped(specs: &[(&str, &str, &str)]) -> VimKeymap {
+        let specs: Vec<_> = specs
+            .iter()
+            .map(|(mode, lhs, rhs)| vmux_core::editor::KeyMapping {
+                mode: (*mode).into(),
+                lhs: (*lhs).into(),
+                rhs: (*rhs).into(),
+            })
+            .collect();
+        VimKeymap::with_mappings(&specs, " ")
+    }
+
+    #[test]
+    fn jk_maps_to_escape_in_insert_mode() {
+        let mut km = mapped(&[("i", "jk", "<Esc>")]);
+        run(&mut km, &["i"]);
+        assert_eq!(run(&mut km, &["j"]), vec![]);
+        assert_eq!(
+            run(&mut km, &["k"]),
+            vec![
+                EditCommand::Move(Motion::LeftBounded),
+                EditCommand::SetMode(EditMode::Normal),
+            ]
+        );
+        assert_eq!(km.mode(), EditMode::Normal);
+    }
+
+    #[test]
+    fn an_abandoned_mapping_prefix_replays_as_typed() {
+        let mut km = mapped(&[("n", "gs", "0")]);
+        assert_eq!(run(&mut km, &["g"]), vec![]);
+        assert_eq!(
+            run(&mut km, &["d"]),
+            vec![EditCommand::GotoDefinition],
+            "the buffered g and the new d still form gd"
+        );
+    }
+
+    #[test]
+    fn leader_mappings_expand_through_the_configured_leader() {
+        let mut km = mapped(&[("n", "<leader>s", ":w<CR>")]);
+        assert_eq!(run(&mut km, &[" "]), vec![]);
+        assert_eq!(run(&mut km, &["s"]), vec![EditCommand::Save]);
+    }
+
+    #[test]
+    fn an_unmapped_key_is_untouched_by_the_mapping_layer() {
+        let mut km = mapped(&[("i", "jk", "<Esc>")]);
+        assert_eq!(
+            run(&mut km, &["x"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
         );
     }
 

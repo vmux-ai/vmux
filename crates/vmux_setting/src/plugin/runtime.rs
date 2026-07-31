@@ -81,6 +81,14 @@ pub struct EditorSettings {
     pub lsp: LspSettings,
     #[serde(default)]
     pub explorer: ExplorerSettings,
+    #[serde(default = "default_editor_leader")]
+    pub leader: String,
+    #[serde(default)]
+    pub mappings: Vec<vmux_core::editor::KeyMapping>,
+}
+
+fn default_editor_leader() -> String {
+    " ".to_string()
 }
 
 impl Default for EditorSettings {
@@ -91,6 +99,8 @@ impl Default for EditorSettings {
             word_wrap_column: default_word_wrap_column(),
             lsp: LspSettings::default(),
             explorer: ExplorerSettings::default(),
+            leader: default_editor_leader(),
+            mappings: Vec::new(),
         }
     }
 }

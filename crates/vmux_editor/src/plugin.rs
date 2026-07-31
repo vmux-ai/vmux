@@ -442,6 +442,15 @@ pub fn handle_file_page_open(
     }
 }
 
+fn settings_mappings(
+    settings: &Option<Res<vmux_setting::AppSettings>>,
+) -> (Vec<vmux_core::editor::KeyMapping>, String) {
+    settings
+        .as_ref()
+        .map(|s| (s.editor.mappings.clone(), s.editor.leader.clone()))
+        .unwrap_or_else(|| (Vec::new(), " ".to_string()))
+}
+
 fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_core::KeymapKind {
     settings
         .as_ref()
@@ -544,12 +553,13 @@ fn load_file_buffers(
             folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
+        let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
         let mut entity_commands = commands.entity(entity);
         entity_commands
             .insert((
                 EditState::new(core, hl, folds),
-                EditorKeymap(kind.make()),
+                EditorKeymap(kind.make(&maps, &leader)),
                 vmux_git::GitDiffSource {
                     content: text,
                     dirty: false,
@@ -587,8 +597,9 @@ fn reapply_keymap_on_change(
     if first {
         return;
     }
+    let (maps, leader) = settings_mappings(&settings);
     for (entity, mut edit, mut keymap, viewport) in &mut q {
-        keymap.0 = kind.make();
+        keymap.0 = kind.make(&maps, &leader);
         edit.core.mode = kind.initial_mode();
         if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
             emit_cursor(
@@ -4047,7 +4058,7 @@ mod edit_flow_tests {
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {
-        let mut km = vmux_core::KeymapKind::Vim.make();
+        let mut km = vmux_core::KeymapKind::Vim.make(&[], " ");
         let mut core = EditCore::new(
             std::path::PathBuf::from("a.txt"),
             "Plain Text".into(),

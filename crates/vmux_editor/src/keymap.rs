@@ -1,3 +1,4 @@
+pub mod mapping;
 pub mod vim;
 pub mod vscode;
 
@@ -50,15 +51,15 @@ pub trait Keymap: Send + Sync {
 }
 
 pub trait KeymapKindExt {
-    fn make(self) -> Box<dyn Keymap>;
+    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap>;
     fn initial_mode(self) -> EditMode;
 }
 
 impl KeymapKindExt for KeymapKind {
-    fn make(self) -> Box<dyn Keymap> {
+    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap> {
         match self {
             KeymapKind::Vscode => Box::new(vscode::VscodeKeymap),
-            KeymapKind::Vim => Box::new(vim::VimKeymap::default()),
+            KeymapKind::Vim => Box::new(vim::VimKeymap::with_mappings(mappings, leader)),
         }
     }
     fn initial_mode(self) -> EditMode {
