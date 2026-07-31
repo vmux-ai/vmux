@@ -7,6 +7,7 @@ use crate::edit::command::{
     CursorPos, EditCommand, EditMode, Motion, MotionKind, Operator, SelSpan, Selection, Target,
 };
 use crate::edit::register::{RegisterKind, RegisterValue, Registers};
+use crate::edit::text_object::char_class;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Group {
@@ -343,40 +344,31 @@ impl EditCore {
         base
     }
 
-    fn class(c: char) -> u8 {
-        if c.is_whitespace() {
-            0
-        } else if c.is_alphanumeric() || c == '_' {
-            1
-        } else {
-            2
-        }
-    }
     fn word_next(&self, from: usize) -> usize {
         let len = self.buffer.len_chars();
         let mut i = from;
         if i >= len {
             return len;
         }
-        let start_class = Self::class(self.buffer.rope.char(i));
-        while i < len && Self::class(self.buffer.rope.char(i)) == start_class && start_class != 0 {
+        let start_class = char_class(self.buffer.rope.char(i));
+        while i < len && char_class(self.buffer.rope.char(i)) == start_class && start_class != 0 {
             i += 1;
         }
-        while i < len && Self::class(self.buffer.rope.char(i)) == 0 {
+        while i < len && char_class(self.buffer.rope.char(i)) == 0 {
             i += 1;
         }
         i
     }
     fn word_prev(&self, from: usize) -> usize {
         let mut i = from;
-        while i > 0 && Self::class(self.buffer.rope.char(i - 1)) == 0 {
+        while i > 0 && char_class(self.buffer.rope.char(i - 1)) == 0 {
             i -= 1;
         }
         if i == 0 {
             return 0;
         }
-        let cls = Self::class(self.buffer.rope.char(i - 1));
-        while i > 0 && Self::class(self.buffer.rope.char(i - 1)) == cls {
+        let cls = char_class(self.buffer.rope.char(i - 1));
+        while i > 0 && char_class(self.buffer.rope.char(i - 1)) == cls {
             i -= 1;
         }
         i
@@ -384,14 +376,14 @@ impl EditCore {
     fn word_end(&self, from: usize) -> usize {
         let len = self.buffer.len_chars();
         let mut i = (from + 1).min(len);
-        while i < len && Self::class(self.buffer.rope.char(i)) == 0 {
+        while i < len && char_class(self.buffer.rope.char(i)) == 0 {
             i += 1;
         }
         if i >= len {
             return len;
         }
-        let cls = Self::class(self.buffer.rope.char(i));
-        while i + 1 < len && Self::class(self.buffer.rope.char(i + 1)) == cls {
+        let cls = char_class(self.buffer.rope.char(i));
+        while i + 1 < len && char_class(self.buffer.rope.char(i + 1)) == cls {
             i += 1;
         }
         i
@@ -494,6 +486,18 @@ impl EditCore {
                 self.line_span(self.primary().head, count),
                 RegisterKind::Linewise,
             )),
+            Target::TextObject(obj) => {
+                let r = crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)?;
+                if r.start >= r.end {
+                    return None;
+                }
+                let kind = if obj.kind.is_linewise() {
+                    RegisterKind::Linewise
+                } else {
+                    RegisterKind::Charwise
+                };
+                Some((r, kind))
+            }
             Target::Selection => {
                 let r = self.visual_range();
                 if r.start >= r.end {
@@ -951,6 +955,17 @@ impl EditCore {
                     anchor: sel.head,
                     head: sel.anchor,
                 }];
+            }
+            EditCommand::SelectTextObject(obj) => {
+                if let Some(r) =
+                    crate::edit::text_object::resolve(&self.buffer, self.primary().head, obj)
+                    && r.start < r.end
+                {
+                    self.selections = vec![Selection {
+                        anchor: r.start,
+                        head: self.buffer.prev_grapheme(r.end),
+                    }];
+                }
             }
             EditCommand::Save
             | EditCommand::ScrollViewport(_)

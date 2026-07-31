@@ -1,5 +1,13 @@
 use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target};
+use crate::edit::text_object::{TextObject, TextObjectKind};
 use crate::keymap::{KeyInput, Keymap};
+
+/// Whether a pending `i`/`a` prefix selects the object's interior or includes its delimiters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ObjectScope {
+    Inner,
+    Around,
+}
 
 #[derive(Default)]
 pub struct VimKeymap {
@@ -8,6 +16,7 @@ pub struct VimKeymap {
     op_count: Option<usize>,
     pending_op: Option<Operator>,
     pending_op_key: Option<char>,
+    pending_object: Option<ObjectScope>,
     register: Option<char>,
     register_pending: bool,
     replace_pending: bool,
@@ -56,6 +65,24 @@ fn operator_for(key: &str) -> Option<(Operator, char)> {
     })
 }
 
+fn text_object_kind(key: &str) -> Option<TextObjectKind> {
+    Some(match key {
+        "w" => TextObjectKind::Word,
+        "W" => TextObjectKind::BigWord,
+        "s" => TextObjectKind::Sentence,
+        "p" => TextObjectKind::Paragraph,
+        "(" | ")" | "b" => TextObjectKind::Paren,
+        "[" | "]" => TextObjectKind::Bracket,
+        "{" | "}" | "B" => TextObjectKind::Brace,
+        "<" | ">" => TextObjectKind::Angle,
+        "\"" => TextObjectKind::DoubleQuote,
+        "'" => TextObjectKind::SingleQuote,
+        "`" => TextObjectKind::BackQuote,
+        "t" => TextObjectKind::Tag,
+        _ => return None,
+    })
+}
+
 fn single_char(key: &str) -> Option<char> {
     let mut chars = key.chars();
     let c = chars.next()?;
@@ -83,6 +110,7 @@ impl VimKeymap {
         self.op_count = None;
         self.pending_op = None;
         self.pending_op_key = None;
+        self.pending_object = None;
         self.register = None;
         self.register_pending = false;
         self.replace_pending = false;
@@ -108,8 +136,35 @@ impl VimKeymap {
         }
     }
 
-    /// Apply a pending operator to a motion, a doubled key (`dd`), or abandon it.
+    /// Apply a pending operator to a motion, a text object, a doubled key (`dd`), or abandon it.
     fn operator_pending(&mut self, operator: Operator, key: &str) -> Vec<EditCommand> {
+        if let Some(scope) = self.pending_object.take() {
+            let count = self.take_operator_count();
+            self.pending_op_key = None;
+            let Some(kind) = text_object_kind(key) else {
+                return vec![];
+            };
+            let target = Target::TextObject(TextObject {
+                kind,
+                around: scope == ObjectScope::Around,
+                count,
+            });
+            if operator == Operator::Change {
+                self.enter_insert();
+            }
+            return vec![self.op(operator, target)];
+        }
+
+        if key == "i" || key == "a" {
+            self.pending_object = Some(if key == "i" {
+                ObjectScope::Inner
+            } else {
+                ObjectScope::Around
+            });
+            self.pending_op = Some(operator);
+            return vec![];
+        }
+
         let doubled = single_char(key)
             .zip(self.pending_op_key)
             .is_some_and(|(a, b)| a == b);
@@ -345,6 +400,18 @@ impl VimKeymap {
         use EditCommand::*;
         let key = k.key.as_str();
 
+        if let Some(scope) = self.pending_object.take() {
+            let count = self.take_count();
+            let Some(kind) = text_object_kind(key) else {
+                return vec![];
+            };
+            return vec![SelectTextObject(TextObject {
+                kind,
+                around: scope == ObjectScope::Around,
+                count,
+            })];
+        }
+
         if self.register_pending {
             self.register_pending = false;
             if let Some(c) = single_char(key) {
@@ -406,6 +473,14 @@ impl VimKeymap {
             }
             "r" => {
                 self.replace_pending = true;
+                vec![]
+            }
+            "i" | "a" => {
+                self.pending_object = Some(if key == "i" {
+                    ObjectScope::Inner
+                } else {
+                    ObjectScope::Around
+                });
                 vec![]
             }
             "d" | "x" => self.visual_op(Operator::Delete),
@@ -729,6 +804,67 @@ mod tests {
         assert_eq!(
             run(&mut km, &["2", "d", "d"]),
             vec![op(Operator::Delete, Target::Line(2))]
+        );
+    }
+
+    fn object(kind: TextObjectKind, around: bool, count: usize) -> Target {
+        Target::TextObject(TextObject {
+            kind,
+            around,
+            count,
+        })
+    }
+
+    #[test]
+    fn operators_take_text_objects() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["d", "i", "w"]),
+            vec![op(Operator::Delete, object(TextObjectKind::Word, false, 1))]
+        );
+        assert_eq!(
+            run(&mut km, &["c", "a", "\""]),
+            vec![op(
+                Operator::Change,
+                object(TextObjectKind::DoubleQuote, true, 1)
+            )]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
+    }
+
+    #[test]
+    fn text_object_counts_come_from_the_operator() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            run(&mut km, &["2", "d", "i", "("]),
+            vec![op(
+                Operator::Delete,
+                object(TextObjectKind::Paren, false, 2)
+            )]
+        );
+    }
+
+    #[test]
+    fn visual_mode_selects_text_objects() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["v"]);
+        assert_eq!(
+            run(&mut km, &["i", "p"]),
+            vec![EditCommand::SelectTextObject(TextObject {
+                kind: TextObjectKind::Paragraph,
+                around: false,
+                count: 1,
+            })]
+        );
+    }
+
+    #[test]
+    fn an_unknown_object_key_abandons_the_operator() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &["d", "i", "z"]), vec![]);
+        assert_eq!(
+            run(&mut km, &["d", "w"]),
+            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
         );
     }
 

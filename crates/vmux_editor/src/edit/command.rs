@@ -73,6 +73,7 @@ impl Operator {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
     Motion(Motion, usize),
+    TextObject(crate::edit::text_object::TextObject),
     Line(usize),
     Selection,
 }
@@ -110,6 +111,7 @@ pub enum EditCommand {
         above: bool,
     },
     SwapSelectionEnds,
+    SelectTextObject(crate::edit::text_object::TextObject),
     ScrollViewport(i32),
     SetMode(EditMode),
     Undo,
