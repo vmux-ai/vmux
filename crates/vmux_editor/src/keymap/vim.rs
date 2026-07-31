@@ -72,6 +72,8 @@ pub struct VimKeymap {
     last_macro: Option<char>,
     insert_after_next: bool,
     mark_pending: Option<MarkAction>,
+    block_insert: Option<bool>,
+    block_text: String,
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -830,6 +832,11 @@ impl VimKeymap {
                     register: self.take_register(),
                 }]
             }
+            "I" | "A" if self.mode == EditMode::VisualBlock => {
+                self.block_insert = Some(key == "A");
+                self.mode = EditMode::Insert;
+                vec![BeginBlockInsert { after: key == "A" }]
+            }
             "o" => vec![SwapSelectionEnds],
             "v" => {
                 self.mode = if self.mode == EditMode::Visual {
@@ -900,7 +907,15 @@ impl VimKeymap {
         match k.key.as_str() {
             "Escape" => {
                 self.mode = EditMode::Normal;
-                vec![Move(Motion::LeftBounded), SetMode(EditMode::Normal)]
+                let mut cmds = Vec::new();
+                if self.block_insert.take().is_some() {
+                    cmds.push(FinishBlockInsert {
+                        text: std::mem::take(&mut self.block_text),
+                    });
+                }
+                cmds.push(Move(Motion::LeftBounded));
+                cmds.push(SetMode(EditMode::Normal));
+                cmds
             }
             "Backspace" => vec![DeleteBack],
             "Delete" => vec![DeleteForward],
@@ -1011,6 +1026,9 @@ impl Keymap for VimKeymap {
         }
         if let Some((_, body)) = self.macro_record.as_mut() {
             body.push(Recorded::Text(text.to_string()));
+        }
+        if self.block_insert.is_some() {
+            self.block_text.push_str(text);
         }
         self.pending_change.push(Recorded::Text(text.to_string()));
         self.in_change = true;
@@ -1126,6 +1144,15 @@ impl VimKeymap {
                 self.reset();
                 return vec![EditCommand::ScrollViewport(direction * count)];
             }
+            if k.key.eq_ignore_ascii_case("v") {
+                self.reset();
+                self.mode = if self.mode == EditMode::VisualBlock {
+                    EditMode::Normal
+                } else {
+                    EditMode::VisualBlock
+                };
+                return vec![EditCommand::SetMode(self.mode)];
+            }
             if k.key.eq_ignore_ascii_case("o") || k.key == "i" || k.key == "Tab" {
                 let count = self.take_count();
                 self.reset();
@@ -1165,7 +1192,7 @@ impl VimKeymap {
                         EditCommand::SetMode(EditMode::Normal),
                     ]
                 }
-                EditMode::Visual | EditMode::VisualLine => {
+                EditMode::Visual | EditMode::VisualLine | EditMode::VisualBlock => {
                     self.reset();
                     self.mode = EditMode::Normal;
                     vec![EditCommand::SetMode(EditMode::Normal)]
@@ -1181,7 +1208,7 @@ impl VimKeymap {
         }
         match self.mode {
             EditMode::Insert | EditMode::Replace => self.insert(k),
-            EditMode::Visual | EditMode::VisualLine => self.visual(k),
+            EditMode::Visual | EditMode::VisualLine | EditMode::VisualBlock => self.visual(k),
             EditMode::Normal | EditMode::CommandLine => self.normal(k),
         }
     }
@@ -1563,6 +1590,53 @@ mod tests {
                 count: 1,
                 register: Some('a'),
             }]
+        );
+    }
+
+    #[test]
+    fn ctrl_v_toggles_visual_block() {
+        let mut km = VimKeymap::default();
+        assert_eq!(
+            km.handle(&chord("v", ctrl())),
+            vec![EditCommand::SetMode(EditMode::VisualBlock)]
+        );
+        assert_eq!(km.mode(), EditMode::VisualBlock);
+        assert_eq!(
+            km.handle(&chord("v", ctrl())),
+            vec![EditCommand::SetMode(EditMode::Normal)]
+        );
+    }
+
+    #[test]
+    fn block_insert_starts_then_replicates_on_escape() {
+        let mut km = VimKeymap::default();
+        km.handle(&chord("v", ctrl()));
+        assert_eq!(
+            run(&mut km, &["I"]),
+            vec![EditCommand::BeginBlockInsert { after: false }]
+        );
+        assert_eq!(km.mode(), EditMode::Insert);
+        km.record_text("xy");
+        assert_eq!(
+            run(&mut km, &["Escape"]),
+            vec![
+                EditCommand::FinishBlockInsert { text: "xy".into() },
+                EditCommand::Move(Motion::LeftBounded),
+                EditCommand::SetMode(EditMode::Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn block_operators_route_through_the_selection() {
+        let mut km = VimKeymap::default();
+        km.handle(&chord("v", ctrl()));
+        assert_eq!(
+            run(&mut km, &["d"]),
+            vec![
+                op(Operator::Delete, Target::Selection),
+                EditCommand::SetMode(EditMode::Normal)
+            ]
         );
     }
 

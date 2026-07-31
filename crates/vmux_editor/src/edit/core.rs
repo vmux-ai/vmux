@@ -45,6 +45,25 @@ fn translated_caret_after_replace(old: &str, new: &str, caret: usize) -> usize {
     .min(new.len())
 }
 
+/// What an operator acts on, resolved to concrete char ranges.
+///
+/// Charwise and linewise targets produce one range; a blockwise target produces one per row.
+struct OperatorSpan {
+    ranges: Vec<std::ops::Range<usize>>,
+    kind: RegisterKind,
+}
+
+fn transform_case(src: &str, operator: Operator) -> String {
+    src.chars()
+        .map(|c| match operator {
+            Operator::Upper => c.to_uppercase().next().unwrap_or(c),
+            Operator::Lower => c.to_lowercase().next().unwrap_or(c),
+            _ if c.is_uppercase() => c.to_lowercase().next().unwrap_or(c),
+            _ => c.to_uppercase().next().unwrap_or(c),
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct EditOutcome {
     pub text_changed: bool,
@@ -72,6 +91,7 @@ pub struct EditCore {
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
     replaced: Vec<Option<char>>,
+    block_insert: Option<(Vec<usize>, usize)>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
     jumps: Vec<usize>,
@@ -101,6 +121,7 @@ impl EditCore {
             fold_view,
             search: None,
             replaced: Vec::new(),
+            block_insert: None,
             search_highlight: false,
             marks: std::collections::HashMap::new(),
             jumps: Vec::new(),
@@ -243,6 +264,26 @@ impl EditCore {
         }
         if rows == 0 {
             return Vec::new();
+        }
+        if self.mode == EditMode::VisualBlock {
+            return self
+                .block_rows()
+                .into_iter()
+                .filter_map(|row| {
+                    let (line, _) = self.buffer.char_to_coords(row.start);
+                    if line < first as usize || line >= first as usize + rows as usize {
+                        return None;
+                    }
+                    let ls = self.buffer.line_to_char(line);
+                    Some(SelSpan {
+                        line: line as u32,
+                        row: line as u32,
+                        start: self.vis_col(ls, row.start - ls),
+                        end: self.vis_col(ls, row.end - ls),
+                    })
+                })
+                .filter(|span| span.end > span.start)
+                .collect();
         }
         let r = self.visual_range();
         if r.start >= r.end {
@@ -781,6 +822,45 @@ impl EditCore {
         at
     }
 
+    /// The rows of the current blockwise selection, as one char range per line.
+    ///
+    /// The rectangle spans the columns the anchor and head sit in; lines shorter than the left
+    /// edge contribute an empty range so the row count still lines up with the block's height.
+    pub fn block_rows(&self) -> Vec<std::ops::Range<usize>> {
+        let sel = self.primary();
+        let (l0, c0) = self.buffer.char_to_coords(sel.anchor);
+        let (l1, c1) = self.buffer.char_to_coords(sel.head);
+        let (first, last) = (l0.min(l1), l0.max(l1));
+        let (left, right) = (c0.min(c1), c0.max(c1) + 1);
+        (first..=last)
+            .map(|line| {
+                let base = self.buffer.line_to_char(line);
+                let len = self.buffer.line_len_chars(line);
+                let start = base + left.min(len);
+                let end = base + right.min(len);
+                start..end.max(start)
+            })
+            .collect()
+    }
+
+    fn operator_span(&self, target: Target) -> Option<OperatorSpan> {
+        if target == Target::Selection && self.mode == EditMode::VisualBlock {
+            let rows = self.block_rows();
+            if rows.iter().all(|r| r.is_empty()) {
+                return None;
+            }
+            return Some(OperatorSpan {
+                ranges: rows,
+                kind: RegisterKind::Blockwise,
+            });
+        }
+        let (range, kind) = self.operator_range(target)?;
+        Some(OperatorSpan {
+            ranges: vec![range],
+            kind,
+        })
+    }
+
     fn operator_range(&self, target: Target) -> Option<(std::ops::Range<usize>, RegisterKind)> {
         match target {
             Target::Line(count) => Some((
@@ -907,15 +987,124 @@ impl EditCore {
         true
     }
 
+    /// Apply an operator to a rectangle, row by row from the bottom so earlier rows keep their
+    /// indices. Only the operators that make sense on a block are handled; the rest fall through
+    /// to the enclosing charwise path.
+    /// Shift every line touched by `range` one indent level in or out.
+    fn apply_line_shift(
+        &mut self,
+        operator: Operator,
+        range: std::ops::Range<usize>,
+    ) -> (bool, Option<RegisterValue>) {
+        let range = self.expand_linewise(range);
+        let (l0, _) = self.buffer.char_to_coords(range.start);
+        let (l1, _) = self
+            .buffer
+            .char_to_coords(range.end.saturating_sub(1).max(range.start));
+        self.checkpoint(Group::Other);
+        for line in (l0..=l1).rev() {
+            let base = self.buffer.line_to_char(line);
+            if operator == Operator::Indent {
+                if self.buffer.line_len_chars(line) == 0 {
+                    continue;
+                }
+                self.buf_insert(base, "\t");
+            } else {
+                let width = self.outdent_width(line);
+                if width > 0 {
+                    self.buf_remove(base..base + width);
+                }
+            }
+        }
+        let caret = self.first_non_blank(self.buffer.line_to_char(l0));
+        self.set_caret(caret);
+        (true, None)
+    }
+
+    fn apply_block_operator(
+        &mut self,
+        operator: Operator,
+        rows: &[std::ops::Range<usize>],
+        register: Option<char>,
+    ) -> (bool, Option<RegisterValue>) {
+        let text = rows
+            .iter()
+            .map(|r| {
+                self.buffer
+                    .rope
+                    .slice(r.clone())
+                    .chars()
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let value = RegisterValue {
+            text,
+            kind: RegisterKind::Blockwise,
+        };
+        let caret = rows.first().map(|r| r.start).unwrap_or_default();
+        match operator {
+            Operator::Yank => {
+                self.registers.write_yank(register, value.clone());
+                self.mode = EditMode::Normal;
+                self.set_caret(caret);
+                (false, Some(value))
+            }
+            Operator::Delete | Operator::Change => {
+                self.registers.write_delete(register, value.clone());
+                self.checkpoint(Group::Other);
+                for row in rows.iter().rev() {
+                    if !row.is_empty() {
+                        self.buf_remove(row.clone());
+                    }
+                }
+                self.mode = if operator == Operator::Change {
+                    EditMode::Insert
+                } else {
+                    EditMode::Normal
+                };
+                self.set_caret(caret.min(self.buffer.len_chars()));
+                (true, Some(value))
+            }
+            Operator::Upper | Operator::Lower | Operator::ToggleCase => {
+                self.checkpoint(Group::Other);
+                for row in rows.iter().rev() {
+                    if row.is_empty() {
+                        continue;
+                    }
+                    let src: String = self.buffer.rope.slice(row.clone()).chars().collect();
+                    let out = transform_case(&src, operator);
+                    self.buf_remove(row.clone());
+                    self.buf_insert(row.start, &out);
+                }
+                self.mode = EditMode::Normal;
+                self.set_caret(caret);
+                (true, None)
+            }
+            Operator::Indent | Operator::Outdent => {
+                let span = rows.first().map(|r| r.start).unwrap_or_default()
+                    ..rows.last().map(|r| r.end).unwrap_or_default();
+                self.mode = EditMode::Normal;
+                self.apply_line_shift(operator, span)
+            }
+        }
+    }
+
     fn apply_operator(
         &mut self,
         operator: Operator,
         target: Target,
         register: Option<char>,
     ) -> (bool, Option<RegisterValue>) {
-        let Some((range, kind)) = self.operator_range(target) else {
+        let Some(span) = self.operator_span(target) else {
             return (false, None);
         };
+        if span.kind == RegisterKind::Blockwise {
+            let rows = span.ranges.clone();
+            return self.apply_block_operator(operator, &rows, register);
+        }
+        let kind = span.kind;
+        let range = span.ranges[0].clone();
         let was_visual = self.mode.is_visual();
         match operator {
             Operator::Yank => {
@@ -960,44 +1149,14 @@ impl EditCore {
                 (true, Some(value))
             }
             Operator::Indent | Operator::Outdent => {
-                let range = self.expand_linewise(range);
-                let (l0, _) = self.buffer.char_to_coords(range.start);
-                let (l1, _) = self
-                    .buffer
-                    .char_to_coords(range.end.saturating_sub(1).max(range.start));
-                self.checkpoint(Group::Other);
-                for line in (l0..=l1).rev() {
-                    let base = self.buffer.line_to_char(line);
-                    if operator == Operator::Indent {
-                        if self.buffer.line_len_chars(line) == 0 {
-                            continue;
-                        }
-                        self.buf_insert(base, "\t");
-                    } else {
-                        let width = self.outdent_width(line);
-                        if width > 0 {
-                            self.buf_remove(base..base + width);
-                        }
-                    }
-                }
                 if was_visual {
                     self.mode = EditMode::Normal;
                 }
-                let caret = self.first_non_blank(self.buffer.line_to_char(l0));
-                self.set_caret(caret);
-                (true, None)
+                self.apply_line_shift(operator, range)
             }
             Operator::Upper | Operator::Lower | Operator::ToggleCase => {
                 let src: String = self.buffer.rope.slice(range.clone()).chars().collect();
-                let out: String = src
-                    .chars()
-                    .map(|c| match operator {
-                        Operator::Upper => c.to_uppercase().next().unwrap_or(c),
-                        Operator::Lower => c.to_lowercase().next().unwrap_or(c),
-                        _ if c.is_uppercase() => c.to_lowercase().next().unwrap_or(c),
-                        _ => c.to_uppercase().next().unwrap_or(c),
-                    })
-                    .collect();
+                let out = transform_case(&src, operator);
                 if was_visual {
                     self.mode = EditMode::Normal;
                 }
@@ -1019,7 +1178,10 @@ impl EditCore {
             return false;
         };
         let was_visual = self.mode.is_visual();
-        if was_visual {
+        if self.mode == EditMode::VisualBlock {
+            let rows = self.block_rows();
+            self.apply_block_operator(Operator::Delete, &rows, None);
+        } else if was_visual {
             let range = self.visual_range();
             let kind = if self.mode == EditMode::VisualLine {
                 RegisterKind::Linewise
@@ -1051,6 +1213,29 @@ impl EditCore {
                 self.buf_insert(at, &text);
                 let end = at + text.chars().count();
                 self.set_caret(end.saturating_sub(1).max(at));
+            }
+            RegisterKind::Blockwise => {
+                let head = self.primary().head;
+                let (line, col) = self.buffer.char_to_coords(head);
+                let col = if before { col } else { col + 1 };
+                self.checkpoint(Group::Other);
+                for (offset, row) in value.text.split('\n').enumerate() {
+                    let target = line + offset;
+                    if target >= self.buffer.len_lines() {
+                        let end = self.buffer.len_chars();
+                        self.buf_insert(end, "\n");
+                    }
+                    let base = self.buffer.line_to_char(target);
+                    let len = self.buffer.line_len_chars(target);
+                    // Pad short lines out to the block's column before inserting.
+                    let pad = col.saturating_sub(len);
+                    if pad > 0 {
+                        self.buf_insert(base + len, &" ".repeat(pad));
+                    }
+                    let at = base + col.min(len + pad);
+                    self.buf_insert(at, &row.repeat(count));
+                }
+                self.set_caret(self.buffer.coords_to_char(line, col));
             }
             RegisterKind::Linewise => {
                 let head = self.primary().head;
@@ -1411,6 +1596,42 @@ impl EditCore {
                     self.set_caret(at.min(self.buffer.len_chars()));
                 }
             }
+            EditCommand::BeginBlockInsert { after } => {
+                let rows = self.block_rows();
+                let Some(first) = rows.first().cloned() else {
+                    return EditOutcome::default();
+                };
+                let (line, _) = self.buffer.char_to_coords(first.start);
+                let col = if after {
+                    self.buffer.char_to_coords(first.end).1
+                } else {
+                    self.buffer.char_to_coords(first.start).1
+                };
+                let lines = (0..rows.len()).map(|i| line + i).collect();
+                self.block_insert = Some((lines, col));
+                self.mode = EditMode::Insert;
+                self.set_caret(self.buffer.coords_to_char(line, col));
+            }
+            EditCommand::FinishBlockInsert { text } => {
+                if let Some((lines, col)) = self.block_insert.take()
+                    && !text.is_empty()
+                {
+                    self.checkpoint(Group::Other);
+                    // The first row already received the text as it was typed.
+                    for line in lines.into_iter().skip(1).rev() {
+                        if line >= self.buffer.len_lines() {
+                            continue;
+                        }
+                        let base = self.buffer.line_to_char(line);
+                        let len = self.buffer.line_len_chars(line);
+                        if col > len {
+                            continue;
+                        }
+                        self.buf_insert(base + col, &text);
+                    }
+                    text_changed = true;
+                }
+            }
             EditCommand::SwapSelectionEnds => {
                 let sel = self.primary();
                 self.selections = vec![Selection {
@@ -1740,6 +1961,105 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::Column(4)));
         assert_eq!(c.primary().head, 3);
+    }
+
+    fn block(text: &str, from: (usize, usize), to: (usize, usize)) -> EditCore {
+        let mut c = core(text);
+        c.mode = EditMode::VisualBlock;
+        c.selections = vec![Selection {
+            anchor: c.buffer.coords_to_char(from.0, from.1),
+            head: c.buffer.coords_to_char(to.0, to.1),
+        }];
+        c
+    }
+
+    #[test]
+    fn block_delete_removes_a_rectangle() {
+        let mut c = block("abcd\nefgh\nijkl\n", (0, 1), (2, 2));
+        c.apply(op(Operator::Delete, Target::Selection));
+        assert_eq!(text_of(&c), "ad\neh\nil\n");
+        assert_eq!(c.mode, EditMode::Normal);
+    }
+
+    #[test]
+    fn block_yank_joins_rows_with_newlines() {
+        let mut c = block("abcd\nefgh\n", (0, 1), (1, 2));
+        let out = c.apply(op(Operator::Yank, Target::Selection));
+        assert_eq!(
+            out.yank,
+            Some(RegisterValue {
+                text: "bc\nfg".into(),
+                kind: RegisterKind::Blockwise,
+            })
+        );
+    }
+
+    #[test]
+    fn block_rows_clamp_to_short_lines() {
+        let c = block("abcd\nx\nijkl\n", (0, 1), (2, 2));
+        let rows = c.block_rows();
+        assert_eq!(rows.len(), 3);
+        assert!(rows[1].is_empty(), "the short line contributes no columns");
+    }
+
+    #[test]
+    fn block_put_inserts_a_column_on_each_line() {
+        let mut c = core("ab\ncd\n");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue {
+            text: "X\nY".into(),
+            kind: RegisterKind::Blockwise,
+        });
+        c.set_caret(0);
+        c.apply(put(true));
+        assert_eq!(text_of(&c), "Xab\nYcd\n");
+    }
+
+    #[test]
+    fn block_put_pads_short_lines_out_to_the_column() {
+        let mut c = core("abcd\nx\n");
+        c.mode = EditMode::Normal;
+        c.registers.set_unnamed(RegisterValue {
+            text: "1\n2".into(),
+            kind: RegisterKind::Blockwise,
+        });
+        c.set_caret(c.buffer.coords_to_char(0, 3));
+        c.apply(put(true));
+        assert_eq!(text_of(&c), "abc1d\nx  2\n");
+    }
+
+    #[test]
+    fn block_case_operator_covers_every_row() {
+        let mut c = block("abcd\nefgh\n", (0, 0), (1, 1));
+        c.apply(op(Operator::Upper, Target::Selection));
+        assert_eq!(text_of(&c), "ABcd\nEFgh\n");
+    }
+
+    #[test]
+    fn block_insert_replicates_typed_text_down_the_column() {
+        let mut c = block("abc\ndef\nghi\n", (0, 1), (2, 1));
+        c.apply(EditCommand::BeginBlockInsert { after: false });
+        assert_eq!(c.mode, EditMode::Insert);
+        c.apply(EditCommand::InsertText("-".into()));
+        c.apply(EditCommand::FinishBlockInsert { text: "-".into() });
+        assert_eq!(text_of(&c), "a-bc\nd-ef\ng-hi\n");
+    }
+
+    #[test]
+    fn block_append_inserts_after_the_right_edge() {
+        let mut c = block("abc\ndef\n", (0, 0), (1, 0));
+        c.apply(EditCommand::BeginBlockInsert { after: true });
+        c.apply(EditCommand::InsertText("!".into()));
+        c.apply(EditCommand::FinishBlockInsert { text: "!".into() });
+        assert_eq!(text_of(&c), "a!bc\nd!ef\n");
+    }
+
+    #[test]
+    fn block_selection_renders_one_span_per_row() {
+        let c = block("abcd\nefgh\n", (0, 1), (1, 2));
+        let spans = c.sel_spans(0, 4);
+        assert_eq!(spans.len(), 2);
+        assert!(spans.iter().all(|s| s.start == 1 && s.end == 3));
     }
 
     #[test]

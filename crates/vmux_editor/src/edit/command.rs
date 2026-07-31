@@ -209,6 +209,14 @@ pub enum EditCommand {
     OpenLine {
         above: bool,
     },
+    /// Start a blockwise insert: remember the rectangle's rows and put the caret on its first row.
+    BeginBlockInsert {
+        after: bool,
+    },
+    /// Replicate the text typed during a blockwise insert onto the block's remaining rows.
+    FinishBlockInsert {
+        text: String,
+    },
     SwapSelectionEnds,
     SelectTextObject(crate::edit::text_object::TextObject),
     SetSearch {

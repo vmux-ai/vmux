@@ -6,6 +6,8 @@ pub enum RegisterKind {
     #[default]
     Charwise,
     Linewise,
+    /// A rectangle: each line of the text is one row of the block.
+    Blockwise,
 }
 
 /// Text captured by a yank or delete, tagged with the shape it should be put back in.

@@ -21,6 +21,7 @@ pub enum EditMode {
     VisualLine,
     CommandLine,
     Replace,
+    VisualBlock,
 }
 
 impl EditMode {
@@ -32,10 +33,14 @@ impl EditMode {
             EditMode::VisualLine => "V-LINE",
             EditMode::CommandLine => "COMMAND",
             EditMode::Replace => "REPLACE",
+            EditMode::VisualBlock => "V-BLOCK",
         }
     }
     pub fn is_visual(self) -> bool {
-        matches!(self, EditMode::Visual | EditMode::VisualLine)
+        matches!(
+            self,
+            EditMode::Visual | EditMode::VisualLine | EditMode::VisualBlock
+        )
     }
     pub fn accepts_text(self) -> bool {
         matches!(self, EditMode::Insert | EditMode::Replace)
