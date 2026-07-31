@@ -6,6 +6,7 @@ pub mod highlight_cache;
 pub mod register;
 pub mod search;
 pub mod text_object;
+pub mod undo;
 
 pub use command::{EditCommand, Motion, Operator, Selection, Target};
 pub use core::{EditCore, EditOutcome};

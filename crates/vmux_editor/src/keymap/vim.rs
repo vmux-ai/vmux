@@ -513,6 +513,14 @@ impl VimKeymap {
                 "$" => self.motion_command(Motion::LineEnd),
                 "j" => self.motion_command(Motion::Down),
                 "k" => self.motion_command(Motion::Up),
+                "-" => vec![UndoTime {
+                    forward: false,
+                    count: self.take_count(),
+                }],
+                "+" => vec![UndoTime {
+                    forward: true,
+                    count: self.take_count(),
+                }],
                 ";" | "," => vec![ChangeList {
                     back: key == ";",
                     count: self.take_count(),

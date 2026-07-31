@@ -217,6 +217,11 @@ pub enum EditCommand {
     FinishBlockInsert {
         text: String,
     },
+    /// Walk the undo tree by creation time rather than by branch, for `g-` and `g+`.
+    UndoTime {
+        forward: bool,
+        count: usize,
+    },
     /// Add `delta` to the number at or after the caret on the current line.
     Increment(i64),
     SwapSelectionEnds,

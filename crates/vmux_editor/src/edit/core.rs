@@ -84,8 +84,7 @@ pub struct EditCore {
     pub registers: Registers,
     rev: u64,
     saved_rev: Option<u64>,
-    undo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
-    redo: Vec<(ropey::Rope, Vec<Selection>, u64)>,
+    undo: crate::edit::undo::UndoTree,
     last_group: Option<Group>,
     preferred_vertical_col: Option<usize>,
     pub fold_view: crate::fold::FoldView,
@@ -104,6 +103,8 @@ impl EditCore {
     pub fn new(path: PathBuf, language: String, text: &str, default_mode: EditMode) -> Self {
         let buffer = TextBuffer::from_text(path, language, text);
         let fold_view = crate::fold::FoldState::default().view(buffer.len_lines() as u32);
+        let undo =
+            crate::edit::undo::UndoTree::new(buffer.rope.clone(), vec![Selection::caret(0)], 0);
         Self {
             buffer,
             selections: vec![Selection::caret(0)],
@@ -114,8 +115,7 @@ impl EditCore {
             registers: Registers::default(),
             rev: 0,
             saved_rev: Some(0),
-            undo: Vec::new(),
-            redo: Vec::new(),
+            undo,
             last_group: None,
             preferred_vertical_col: None,
             fold_view,
@@ -318,8 +318,19 @@ impl EditCore {
     }
     fn snapshot(&mut self) {
         self.undo
-            .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
-        self.redo.clear();
+            .push(&self.buffer.rope, &self.selections, self.rev);
+    }
+
+    fn restore(&mut self, state: crate::edit::undo::Restored) {
+        self.buffer.rope = state.rope;
+        self.selections = state.selections;
+        self.rev = state.rev;
+        self.dirty = self.saved_rev != Some(self.rev);
+        self.break_group();
+        let len = self.buffer.len_chars();
+        for mark in self.marks.values_mut() {
+            *mark = (*mark).min(len);
+        }
     }
     fn checkpoint(&mut self, group: Group) {
         if self.last_group != Some(group) || group == Group::Other {
@@ -1516,26 +1527,32 @@ impl EditCore {
                 }
             }
             EditCommand::Undo => {
-                if let Some((rope, sel, rev)) = self.undo.pop() {
-                    self.redo
-                        .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
-                    self.buffer.rope = rope;
-                    self.selections = sel;
-                    self.rev = rev;
-                    self.dirty = self.saved_rev != Some(self.rev);
-                    self.break_group();
+                if let Some(state) = self
+                    .undo
+                    .undo(&self.buffer.rope, &self.selections, self.rev)
+                {
+                    self.restore(state);
                     text_changed = true;
                 }
             }
             EditCommand::Redo => {
-                if let Some((rope, sel, rev)) = self.redo.pop() {
-                    self.undo
-                        .push((self.buffer.rope.clone(), self.selections.clone(), self.rev));
-                    self.buffer.rope = rope;
-                    self.selections = sel;
-                    self.rev = rev;
-                    self.dirty = self.saved_rev != Some(self.rev);
-                    self.break_group();
+                if let Some(state) = self
+                    .undo
+                    .redo(&self.buffer.rope, &self.selections, self.rev)
+                {
+                    self.restore(state);
+                    text_changed = true;
+                }
+            }
+            EditCommand::UndoTime { forward, count } => {
+                if let Some(state) = self.undo.step_time(
+                    &self.buffer.rope,
+                    &self.selections,
+                    self.rev,
+                    forward,
+                    count,
+                ) {
+                    self.restore(state);
                     text_changed = true;
                 }
             }
@@ -2018,6 +2035,27 @@ mod tests {
             head: c.buffer.coords_to_char(to.0, to.1),
         }];
         c
+    }
+
+    #[test]
+    fn a_new_edit_after_undo_branches_and_time_travel_reaches_the_old_one() {
+        let mut c = core("");
+        c.apply(EditCommand::InsertText("first".into()));
+        c.apply(EditCommand::Undo);
+        assert_eq!(text_of(&c), "");
+        c.apply(EditCommand::InsertText("second".into()));
+        assert_eq!(text_of(&c), "second");
+
+        c.apply(EditCommand::UndoTime {
+            forward: false,
+            count: 1,
+        });
+        assert_eq!(text_of(&c), "first", "g- reaches the abandoned branch");
+        c.apply(EditCommand::UndoTime {
+            forward: true,
+            count: 1,
+        });
+        assert_eq!(text_of(&c), "second");
     }
 
     #[test]
