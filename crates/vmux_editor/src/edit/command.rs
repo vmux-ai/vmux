@@ -180,6 +180,8 @@ pub enum EditCommand {
     Move(Motion),
     Select(Motion),
     InsertText(String),
+    /// Overtype at the caret for Replace mode, remembering what was covered so `Backspace` restores it.
+    OvertypeText(String),
     ReplaceText(String),
     InsertNewline,
     InsertTab,

@@ -71,6 +71,7 @@ pub struct EditCore {
     preferred_vertical_col: Option<usize>,
     pub fold_view: crate::fold::FoldView,
     pub search: Option<crate::edit::search::Search>,
+    replaced: Vec<Option<char>>,
     pub search_highlight: bool,
     marks: std::collections::HashMap<char, usize>,
     jumps: Vec<usize>,
@@ -99,6 +100,7 @@ impl EditCore {
             preferred_vertical_col: None,
             fold_view,
             search: None,
+            replaced: Vec::new(),
             search_highlight: false,
             marks: std::collections::HashMap::new(),
             jumps: Vec::new(),
@@ -1125,6 +1127,22 @@ impl EditCore {
                 self.set_head(h);
             }
             EditCommand::InsertText(t) => text_changed = self.insert_text(&t),
+            EditCommand::OvertypeText(t) => {
+                self.checkpoint(Group::Insert);
+                for ch in t.chars() {
+                    let at = self.primary().head;
+                    let line_end = self.resolve_motion(at, Motion::LineEnd);
+                    if at < line_end {
+                        self.replaced.push(Some(self.buffer.rope.char(at)));
+                        self.buf_remove(at..at + 1);
+                    } else {
+                        self.replaced.push(None);
+                    }
+                    self.buf_insert(at, &ch.to_string());
+                    self.set_caret(at + 1);
+                }
+                text_changed = true;
+            }
             EditCommand::ReplaceText(t) => {
                 let caret = self.primary().head;
                 let next_caret = translated_caret_after_replace(&self.buffer.text(), &t, caret);
@@ -1137,6 +1155,20 @@ impl EditCore {
             }
             EditCommand::InsertTab => text_changed = self.insert_text("\t"),
             EditCommand::InsertNewline => text_changed = self.insert_text("\n"),
+            EditCommand::DeleteBack if self.mode == EditMode::Replace => {
+                let head = self.primary().head;
+                if let Some(original) = self.replaced.pop()
+                    && head > 0
+                {
+                    self.checkpoint(Group::Delete);
+                    self.buf_remove(head - 1..head);
+                    if let Some(ch) = original {
+                        self.buf_insert(head - 1, &ch.to_string());
+                    }
+                    self.set_caret(head - 1);
+                    text_changed = true;
+                }
+            }
             EditCommand::DeleteBack => {
                 if self.primary().is_empty() {
                     let head = self.primary().head;
@@ -1708,6 +1740,28 @@ mod tests {
         c.set_caret(0);
         c.apply(EditCommand::Move(Motion::Column(4)));
         assert_eq!(c.primary().head, 3);
+    }
+
+    #[test]
+    fn overtype_replaces_characters_and_backspace_restores_them() {
+        let mut c = core("abcd");
+        c.mode = EditMode::Replace;
+        c.set_caret(0);
+        c.apply(EditCommand::OvertypeText("XY".into()));
+        assert_eq!(text_of(&c), "XYcd");
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "Xbcd");
+        c.apply(EditCommand::DeleteBack);
+        assert_eq!(text_of(&c), "abcd");
+    }
+
+    #[test]
+    fn overtype_past_the_line_end_appends() {
+        let mut c = core("ab\ncd\n");
+        c.mode = EditMode::Replace;
+        c.set_caret(2);
+        c.apply(EditCommand::OvertypeText("XY".into()));
+        assert_eq!(text_of(&c), "abXY\ncd\n");
     }
 
     #[test]

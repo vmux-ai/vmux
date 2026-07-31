@@ -2329,9 +2329,14 @@ fn on_file_text_input(
         return;
     }
     keymap.0.record_text(&text);
+    let command = if keymap.0.mode() == vmux_core::EditMode::Replace {
+        EditCommand::OvertypeText(text)
+    } else {
+        EditCommand::InsertText(text)
+    };
     run_commands(
         entity,
-        vec![EditCommand::InsertText(text)],
+        vec![command],
         &mut edit,
         &mut diff_source,
         keymap.0.as_ref(),

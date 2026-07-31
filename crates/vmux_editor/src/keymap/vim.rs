@@ -536,6 +536,10 @@ impl VimKeymap {
                 self.last_change = body;
                 out
             }
+            "R" => {
+                self.mode = EditMode::Replace;
+                vec![SetMode(EditMode::Replace)]
+            }
             "*" => vec![SearchWord { forward: true }],
             "#" => vec![SearchWord { forward: false }],
             "m" => {
@@ -1154,7 +1158,7 @@ impl VimKeymap {
                 return vec![];
             }
             return match self.mode {
-                EditMode::Insert => {
+                EditMode::Insert | EditMode::Replace => {
                     self.mode = EditMode::Normal;
                     vec![
                         EditCommand::Move(Motion::LeftBounded),
@@ -1176,7 +1180,7 @@ impl VimKeymap {
             return self.ex_key(k);
         }
         match self.mode {
-            EditMode::Insert => self.insert(k),
+            EditMode::Insert | EditMode::Replace => self.insert(k),
             EditMode::Visual | EditMode::VisualLine => self.visual(k),
             EditMode::Normal | EditMode::CommandLine => self.normal(k),
         }
