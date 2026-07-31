@@ -1666,16 +1666,77 @@ fn emit_prompt_action(
     });
 }
 
-fn focus_and_install_ctrl_bindings() {
+const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
+const COMMAND_BAR_FOCUS_PENDING: &str = "_commandBarFocusPending";
+
+fn set_command_bar_focus_pending(window: &web_sys::Window, pending: bool) {
+    let _ = js_sys::Reflect::set(
+        window,
+        &JsValue::from_str(COMMAND_BAR_FOCUS_PENDING),
+        &JsValue::from_bool(pending),
+    );
+}
+
+/// Whether the input genuinely holds focus now, re-asserting `focus()` when it does not.
+fn try_focus_command_bar_input_once() -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return true;
+    };
+    let Some(el) = document.get_element_by_id(COMMAND_BAR_INPUT_ID) else {
+        return false;
+    };
+    let active_is_input = document
+        .active_element()
+        .map(|a| a.id() == COMMAND_BAR_INPUT_ID)
+        .unwrap_or(false);
+    if !active_is_input {
+        let input: web_sys::HtmlInputElement = el.unchecked_into();
+        input.focus().ok();
+    }
+    document.has_focus().unwrap_or(false) && active_is_input
+}
+
+/// Keep asking for focus once per animation frame until the document actually holds it.
+///
+/// CEF grants an OSR browser keyboard focus a frame or more after the page mounts, so both the
+/// `autofocus` attribute and a single `focus()` call land too early and are dropped — no caret
+/// appears and typing goes nowhere. Chromium reports the dropped attribute as "Autofocus
+/// processing was blocked because a document already has a focused element".
+fn focus_command_bar_input_retry(window: web_sys::Window, frames_left: u32) {
+    let retry_window = window.clone();
+    let cb = Closure::once(move || {
+        if !try_focus_command_bar_input_once() && frames_left > 1 {
+            focus_command_bar_input_retry(retry_window, frames_left - 1);
+        } else {
+            set_command_bar_focus_pending(&retry_window, false);
+        }
+    });
+    match window.request_animation_frame(cb.as_ref().unchecked_ref()) {
+        Ok(_) => cb.forget(),
+        Err(_) => set_command_bar_focus_pending(&window, false),
+    }
+}
+
+fn focus_and_install_ctrl_bindings() {
+    let Some(window) = web_sys::window() else {
         return;
     };
-    let Some(el) = document.get_element_by_id("command-bar-input") else {
+    let Some(document) = window.document() else {
+        return;
+    };
+    let Some(el) = document.get_element_by_id(COMMAND_BAR_INPUT_ID) else {
         return;
     };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
     input.focus().ok();
     select_all_on_open(&input);
+    let pending = js_sys::Reflect::get(&window, &JsValue::from_str(COMMAND_BAR_FOCUS_PENDING))
+        .map(|v| v.is_truthy())
+        .unwrap_or(false);
+    if !pending {
+        set_command_bar_focus_pending(&window, true);
+        focus_command_bar_input_retry(window, 90);
+    }
 
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
         .map(|v| v.is_truthy())
