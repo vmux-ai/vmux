@@ -9,6 +9,34 @@ enum ObjectScope {
     Around,
 }
 
+/// One unit of replayable input.
+///
+/// Dot-repeat and macros both work by replaying what the user typed, and insert-mode characters
+/// bypass the keymap over the IME path, so the stream has to carry both kinds of event.
+#[derive(Clone)]
+enum Recorded {
+    Key(KeyInput),
+    Text(String),
+}
+
+/// Whether a command changes buffer text, which is what `.` repeats. Yanks and motions do not.
+fn is_change(cmd: &EditCommand) -> bool {
+    match cmd {
+        EditCommand::Op { operator, .. } => *operator != Operator::Yank,
+        EditCommand::Put { .. }
+        | EditCommand::ReplaceChar { .. }
+        | EditCommand::JoinLines { .. }
+        | EditCommand::OpenLine { .. }
+        | EditCommand::InsertText(_)
+        | EditCommand::InsertNewline
+        | EditCommand::InsertTab
+        | EditCommand::DeleteBack
+        | EditCommand::DeleteForward
+        | EditCommand::DeleteWordBack => true,
+        _ => false,
+    }
+}
+
 #[derive(Default)]
 pub struct VimKeymap {
     mode: EditMode,
@@ -25,6 +53,14 @@ pub struct VimKeymap {
     g_pending: bool,
     z_pending: bool,
     ex: Option<String>,
+    pending_change: Vec<Recorded>,
+    last_change: Vec<Recorded>,
+    in_change: bool,
+    replaying: bool,
+    macro_pending: Option<bool>,
+    macro_record: Option<(char, Vec<Recorded>)>,
+    macros: std::collections::HashMap<char, Vec<Recorded>>,
+    last_macro: Option<char>,
 }
 
 fn motion_for(key: &str) -> Option<Motion> {
@@ -142,6 +178,43 @@ impl VimKeymap {
         self.z_pending = false;
     }
 
+    /// No operator or prefix is half-typed. A pending count still counts as a command start,
+    /// because a count belongs to the command the next key names rather than to the previous one.
+    fn is_command_start(&self) -> bool {
+        self.pending_op.is_none()
+            && self.pending_object.is_none()
+            && self.pending_find.is_none()
+            && self.macro_pending.is_none()
+            && self.ex.is_none()
+            && !self.register_pending
+            && !self.replace_pending
+            && !self.g_pending
+            && !self.z_pending
+    }
+
+    /// Nothing at all is half-typed, so no keys are owed to a command in progress.
+    fn is_idle(&self) -> bool {
+        self.is_command_start() && self.count.is_none() && self.op_count.is_none()
+    }
+
+    fn replay(&mut self, inputs: &[Recorded], times: usize) -> Vec<EditCommand> {
+        if self.replaying {
+            return vec![];
+        }
+        self.replaying = true;
+        let mut out = Vec::new();
+        for _ in 0..times.max(1) {
+            for input in inputs {
+                match input {
+                    Recorded::Key(k) => out.extend(self.dispatch(k)),
+                    Recorded::Text(t) => out.push(EditCommand::InsertText(t.clone())),
+                }
+            }
+        }
+        self.replaying = false;
+        out
+    }
+
     fn start_operator(&mut self, operator: Operator, key: char) {
         self.pending_op = Some(operator);
         self.pending_op_key = Some(key);
@@ -253,6 +326,30 @@ impl VimKeymap {
 
         if let Some((forward, till)) = self.pending_find.take() {
             return self.resolve_find(forward, till, key);
+        }
+
+        if let Some(record) = self.macro_pending.take() {
+            let Some(reg) = single_char(key) else {
+                return vec![];
+            };
+            if record {
+                self.macro_record = Some((reg, Vec::new()));
+                return vec![];
+            }
+            let reg = if reg == '@' {
+                match self.last_macro {
+                    Some(r) => r,
+                    None => return vec![],
+                }
+            } else {
+                reg
+            };
+            self.last_macro = Some(reg);
+            let Some(body) = self.macros.get(&reg).cloned() else {
+                return vec![];
+            };
+            let times = self.take_count();
+            return self.replay(&body, times);
         }
 
         if self.register_pending {
@@ -384,6 +481,26 @@ impl VimKeymap {
             "|" => {
                 let col = self.take_count();
                 vec![Move(Motion::Column(col))]
+            }
+            "." => {
+                let times = self.take_count();
+                let body = std::mem::take(&mut self.last_change);
+                let out = self.replay(&body, times);
+                self.last_change = body;
+                out
+            }
+            "q" => {
+                if let Some((reg, body)) = self.macro_record.take() {
+                    self.macros.insert(reg, body);
+                    self.last_macro = Some(reg);
+                } else {
+                    self.macro_pending = Some(true);
+                }
+                vec![]
+            }
+            "@" => {
+                self.macro_pending = Some(false);
+                vec![]
             }
             "i" => {
                 self.enter_insert();
@@ -729,6 +846,53 @@ impl Keymap for VimKeymap {
     fn mode(&self) -> EditMode {
         self.mode
     }
+    fn record_text(&mut self, text: &str) {
+        if self.replaying {
+            return;
+        }
+        if let Some((_, body)) = self.macro_record.as_mut() {
+            body.push(Recorded::Text(text.to_string()));
+        }
+        self.pending_change.push(Recorded::Text(text.to_string()));
+        self.in_change = true;
+    }
+    fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+        if self.replaying {
+            return self.dispatch(k);
+        }
+
+        let stops_recording =
+            self.macro_record.is_some() && k.key == "q" && self.mode == EditMode::Normal;
+        if let Some((_, body)) = self.macro_record.as_mut()
+            && !stops_recording
+        {
+            body.push(Recorded::Key(k.clone()));
+        }
+
+        let repeating = k.key == "." && self.mode == EditMode::Normal && self.is_command_start();
+        if !repeating {
+            self.pending_change.push(Recorded::Key(k.clone()));
+        }
+
+        let cmds = self.dispatch(k);
+
+        if repeating {
+            self.pending_change.clear();
+            return cmds;
+        }
+        if cmds.iter().any(is_change) {
+            self.in_change = true;
+        }
+        if self.in_change {
+            if self.mode == EditMode::Normal {
+                self.last_change = std::mem::take(&mut self.pending_change);
+                self.in_change = false;
+            }
+        } else if self.mode == EditMode::Normal && self.is_idle() {
+            self.pending_change.clear();
+        }
+        cmds
+    }
     fn pointer_selection_mode(&mut self, extend: bool) -> Option<EditCommand> {
         match (extend, self.mode) {
             (true, EditMode::Normal) => {
@@ -742,7 +906,11 @@ impl Keymap for VimKeymap {
             _ => None,
         }
     }
-    fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
+}
+
+impl VimKeymap {
+    /// Interpret one key without any dot-repeat or macro bookkeeping.
+    fn dispatch(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         #[cfg(target_os = "macos")]
         if k.mods.meta && !k.mods.ctrl && !k.mods.alt {
             let command = match k.key.to_ascii_lowercase().as_str() {
@@ -1095,6 +1263,94 @@ mod tests {
             run(&mut km, &["z", "b"]),
             vec![EditCommand::ScrollCursorTo(ScrollPlacement::Bottom)]
         );
+    }
+
+    #[test]
+    fn dot_repeats_the_last_change_not_the_last_motion() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["d", "w"]);
+        run(&mut km, &["j", "l"]);
+        assert_eq!(
+            run(&mut km, &["."]),
+            vec![op(Operator::Delete, Target::Motion(Motion::WordNext, 1))]
+        );
+    }
+
+    #[test]
+    fn dot_takes_a_count_and_survives_reuse() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["x"]);
+        let expected = op(Operator::Delete, Target::Motion(Motion::Right, 1));
+        assert_eq!(
+            run(&mut km, &["2", "."]),
+            vec![expected.clone(), expected.clone()]
+        );
+        assert_eq!(run(&mut km, &["."]), vec![expected]);
+    }
+
+    #[test]
+    fn dot_repeats_an_insert_session_including_typed_text() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["i"]);
+        km.record_text("hi");
+        run(&mut km, &["Escape"]);
+        assert_eq!(
+            run(&mut km, &["."]),
+            vec![
+                EditCommand::SetMode(EditMode::Insert),
+                EditCommand::InsertText("hi".into()),
+                EditCommand::Move(Motion::LeftBounded),
+                EditCommand::SetMode(EditMode::Normal),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_yank_is_not_a_change() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["x"]);
+        run(&mut km, &["y", "y"]);
+        assert_eq!(
+            run(&mut km, &["."]),
+            vec![op(Operator::Delete, Target::Motion(Motion::Right, 1))]
+        );
+    }
+
+    #[test]
+    fn macros_record_and_replay_through_a_register() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["q", "a", "x", "j", "q"]);
+        assert_eq!(
+            run(&mut km, &["@", "a"]),
+            vec![
+                op(Operator::Delete, Target::Motion(Motion::Right, 1)),
+                EditCommand::Move(Motion::Down),
+            ]
+        );
+        assert_eq!(
+            run(&mut km, &["@", "@"]),
+            vec![
+                op(Operator::Delete, Target::Motion(Motion::Right, 1)),
+                EditCommand::Move(Motion::Down),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_counted_macro_replays_repeatedly() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["q", "b", "x", "q"]);
+        let once = op(Operator::Delete, Target::Motion(Motion::Right, 1));
+        assert_eq!(
+            run(&mut km, &["3", "@", "b"]),
+            vec![once.clone(), once.clone(), once]
+        );
+    }
+
+    #[test]
+    fn replaying_an_empty_register_is_inert() {
+        let mut km = VimKeymap::default();
+        assert_eq!(run(&mut km, &["@", "z"]), vec![]);
     }
 
     #[test]

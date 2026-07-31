@@ -2297,7 +2297,7 @@ fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
     mut q: Query<(
         &mut EditState,
-        &EditorKeymap,
+        &mut EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
     )>,
@@ -2313,12 +2313,13 @@ fn on_file_text_input(
     if text.is_empty() {
         return;
     }
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     if !keymap.0.mode().accepts_text() {
         return;
     }
+    keymap.0.record_text(&text);
     run_commands(
         entity,
         vec![EditCommand::InsertText(text)],
