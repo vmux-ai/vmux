@@ -8,7 +8,6 @@ use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonM
 use objc2_core_graphics::{
     CGEvent, CGEventField, CGEventFlags, CGEventMask, CGEventTapLocation, CGEventTapOptions,
     CGEventTapPlacement, CGEventTapProxy, CGEventType, CGPreflightListenEventAccess,
-    CGRequestListenEventAccess,
 };
 use vmux_command::AppCommand;
 
@@ -123,10 +122,12 @@ pub(crate) fn install_event_tap(proxy: Option<Res<EventLoopProxyWrapper>>) {
 }
 
 fn install(wake: Box<dyn Fn()>) {
-    // First run: show the Input Monitoring prompt. The grant only takes effect after a restart, so
-    // the tap below still returns None this launch and shortcuts fall back to the local monitor.
+    // Never prompt for Input Monitoring. "Receive keystrokes from any application" is far too
+    // broad to ask for while nothing shipping depends on the tap, and shortcuts already fall back
+    // to the local monitor. Restore the request alongside a feature that genuinely needs it.
     if !CGPreflightListenEventAccess() {
-        CGRequestListenEventAccess();
+        debug!("Input Monitoring not granted; shortcuts use the local monitor fallback");
+        return;
     }
 
     let mask: CGEventMask =
