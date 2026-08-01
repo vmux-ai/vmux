@@ -727,3 +727,7 @@ editor-property-kind-date = Rojek
 editor-property-kind-list = Rêzkirin
 editor-property-kind-link = Girêk
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

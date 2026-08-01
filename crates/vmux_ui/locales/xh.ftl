@@ -727,3 +727,7 @@ editor-property-kind-date = Umhla
 editor-property-kind-list = Uluhlu
 editor-property-kind-link = Ikhonkco
 editor-property-kind-tags = Iithegi
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

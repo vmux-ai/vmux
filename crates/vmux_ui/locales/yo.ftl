@@ -727,3 +727,7 @@ editor-property-kind-date = Ọjọ
 editor-property-kind-list = Akojọ
 editor-property-kind-link = Ọna asopọ
 editor-property-kind-tags = Awọn afi
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

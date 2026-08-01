@@ -727,3 +727,7 @@ editor-property-kind-date = Сана
 editor-property-kind-list = Рӯйхат
 editor-property-kind-link = Пайванд
 editor-property-kind-tags = Тегҳо
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

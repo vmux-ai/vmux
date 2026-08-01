@@ -727,3 +727,7 @@ editor-property-kind-date = Огноо
 editor-property-kind-list = Жагсаалт
 editor-property-kind-link = Холбоос
 editor-property-kind-tags = Шошго
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -871,6 +871,7 @@ fn parse_codex_config(
 fn drain_acp_installs(
     installs: Res<AcpInstallChannel>,
     service: Option<Res<ServiceClient>>,
+    settings: Option<Res<AppSettings>>,
     mut install_generation: ResMut<AcpInstallGeneration>,
     mut q: Query<(&AcpSession, &mut AgentRunState)>,
 ) {
@@ -931,6 +932,10 @@ fn drain_acp_installs(
                         mcp_args: mcp.map(|m| m.args).unwrap_or_default(),
                         resume_acp_session_id: session.resume.clone(),
                         managed_mcp_servers: crate::managed_mcp::acp_servers(),
+                        effort: settings
+                            .as_ref()
+                            .and_then(|settings| settings.agent.effort_for(&session.agent_id))
+                            .map(str::to_string),
                     });
                 }
             }

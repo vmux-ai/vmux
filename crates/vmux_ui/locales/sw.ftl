@@ -727,3 +727,7 @@ editor-property-kind-date = Tarehe
 editor-property-kind-list = Orodha
 editor-property-kind-link = Kiungo
 editor-property-kind-tags = Lebo
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

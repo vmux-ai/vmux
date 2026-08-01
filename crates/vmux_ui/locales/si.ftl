@@ -727,3 +727,7 @@ editor-property-kind-date = දිනය
 editor-property-kind-list = ලැයිස්තුව
 editor-property-kind-link = සබැඳිය
 editor-property-kind-tags = ටැග්
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

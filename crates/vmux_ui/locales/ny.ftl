@@ -727,3 +727,7 @@ editor-property-kind-date = Tsiku
 editor-property-kind-list = Mndandanda
 editor-property-kind-link = Lumikizani
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

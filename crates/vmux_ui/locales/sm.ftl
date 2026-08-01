@@ -727,3 +727,7 @@ editor-property-kind-date = Aso
 editor-property-kind-list = Lisi
 editor-property-kind-link = So'oga
 editor-property-kind-tags = Fa'ailoga
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -727,3 +727,7 @@ editor-property-kind-date = ਮਿਤੀ
 editor-property-kind-list = ਸੂਚੀ
 editor-property-kind-link = ਲਿੰਕ
 editor-property-kind-tags = ਟੈਗਸ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

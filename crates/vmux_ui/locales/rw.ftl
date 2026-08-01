@@ -727,3 +727,7 @@ editor-property-kind-date = Itariki
 editor-property-kind-list = Urutonde
 editor-property-kind-link = Ihuza
 editor-property-kind-tags = Etiquetas
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

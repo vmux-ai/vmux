@@ -184,6 +184,23 @@ pub struct AgentSettings {
     /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
     #[serde(default = "default_acp_agents")]
     pub acp: Vec<AcpAgentConfig>,
+    /// Default reasoning-effort level per agent, keyed by agent key (ACP agent id, or
+    /// `cli:<segment>` for a CLI agent). Applied when a session/process is launched — the
+    /// underlying agents fix effort at start, so this is a launch-time default, not a live
+    /// switch. Empty / missing = leave the agent's own default.
+    #[serde(default)]
+    pub effort: std::collections::BTreeMap<String, String>,
+}
+
+impl AgentSettings {
+    /// The launch-time reasoning-effort level for `key` (ACP agent id or `cli:<segment>`),
+    /// or `None` when unset or blank.
+    pub fn effort_for(&self, key: &str) -> Option<&str> {
+        self.effort
+            .get(key)
+            .map(|level| level.trim())
+            .filter(|level| !level.is_empty())
+    }
 }
 
 impl Default for AgentSettings {
@@ -205,6 +222,7 @@ fn default_agent_settings() -> AgentSettings {
         tidy_files_max: 5,
         tidy_files_auto: false,
         acp: default_acp_agents(),
+        effort: std::collections::BTreeMap::new(),
     }
 }
 

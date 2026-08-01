@@ -5557,6 +5557,8 @@ fn handle_spawn_agent_requests(
             continue;
         };
         let process_id = ProcessId::new();
+        let effort_key = format!("cli:{}", req.kind.as_url_segment());
+        let effort = settings.agent.effort_for(&effort_key);
         match crate::build_agent_launch(
             req.kind,
             &req.cwd,
@@ -5564,6 +5566,7 @@ fn handle_spawn_agent_requests(
             strategies,
             &exe_path,
             process_id,
+            effort,
         ) {
             Ok(launch) => {
                 clear_stack_children(req.stack, &children_q, &mut commands);

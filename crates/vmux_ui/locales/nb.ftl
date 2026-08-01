@@ -727,3 +727,7 @@ editor-property-kind-date = Dato
 editor-property-kind-list = Liste
 editor-property-kind-link = Link
 editor-property-kind-tags = Tagger
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

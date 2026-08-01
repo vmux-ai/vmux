@@ -727,3 +727,7 @@ editor-property-kind-date = Ceann-latha
 editor-property-kind-list = Liosta
 editor-property-kind-link = Ceangal
 editor-property-kind-tags = Tagaichean
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

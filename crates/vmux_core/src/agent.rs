@@ -69,6 +69,21 @@ impl AgentKind {
     }
 }
 
+/// Reasoning-effort levels selectable for an agent, keyed by agent key — an ACP agent id
+/// (`"claude"`) or a CLI key (`"cli:claude"`, `"cli:codex"`). Ordered low→high for display.
+/// Empty means the agent exposes no effort knob vmux can drive, and the selector is hidden.
+///
+/// Only keys vmux actually wires are listed: ACP `claude` (forwarded through the adapter's
+/// `claudeCode.options` session meta) and the CLI `claude`/`codex` launch flags. ACP `codex`
+/// and `gemini` return empty until their runtimes expose an effort control.
+pub fn effort_levels(agent_key: &str) -> &'static [&'static str] {
+    match agent_key {
+        "claude" | "cli:claude" => &["low", "medium", "high", "max"],
+        "cli:codex" => &["minimal", "low", "medium", "high"],
+        _ => &[],
+    }
+}
+
 impl From<AgentKind> for TerminalKind {
     fn from(kind: AgentKind) -> Self {
         match kind {
@@ -277,5 +292,23 @@ mod tests {
     #[test]
     fn parse_page_agent_url_rejects_non_agent_host() {
         assert!(parse_page_agent_url("https://google.com").is_none());
+    }
+
+    #[test]
+    fn effort_levels_exposed_only_for_wired_agents() {
+        assert_eq!(effort_levels("claude"), ["low", "medium", "high", "max"]);
+        assert_eq!(
+            effort_levels("cli:claude"),
+            ["low", "medium", "high", "max"]
+        );
+        assert_eq!(
+            effort_levels("cli:codex"),
+            ["minimal", "low", "medium", "high"]
+        );
+        // ACP codex/gemini and unknown agents have no vmux-driven effort control yet.
+        assert!(effort_levels("codex").is_empty());
+        assert!(effort_levels("gemini").is_empty());
+        assert!(effort_levels("vibe").is_empty());
+        assert!(effort_levels("cli:vibe").is_empty());
     }
 }

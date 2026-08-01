@@ -32,8 +32,8 @@ use crate::chat_page::event::{
     ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ComposerContext,
     MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
+    SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item_count};
@@ -249,6 +249,7 @@ impl Plugin for AgentChatPagePlugin {
                 ResumeSession,
                 RuntimeSwitchRequest,
                 SelectModel,
+                SetAgentEffort,
             )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatPickFiles,
@@ -279,6 +280,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_resume_session)
             .add_observer(on_runtime_switch_request)
             .add_observer(on_select_model)
+            .add_observer(on_set_agent_effort)
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_create_worktree)
             .add_observer(reset_chat_synced_on_page_ready)
@@ -895,6 +897,7 @@ fn sync_chat_to_ready_views(
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
     choices: Query<&crate::plugin::PendingAgentChoice>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -926,7 +929,7 @@ fn sync_chat_to_ready_views(
                 choices.get(webview).ok(),
             ),
         ));
-        let (cross, model_state) = acp_sessions
+        let (cross, model_state, agent_key) = acp_sessions
             .get(stack)
             .ok()
             .map(|(acp, model)| {
@@ -935,10 +938,18 @@ fn sync_chat_to_ready_views(
                         .map(kind_supports_cross_runtime)
                         .unwrap_or(false),
                     model,
+                    acp.agent_id.clone(),
                 )
             })
-            .unwrap_or((false, None));
-        emit_model_state(webview, model_state, cross, &mut commands);
+            .unwrap_or((false, None, String::new()));
+        emit_model_state(
+            webview,
+            model_state,
+            cross,
+            &agent_key,
+            effort_current_for(settings.as_ref(), &agent_key),
+            &mut commands,
+        );
         commands.entity(webview).insert(ChatSynced);
     }
 }
@@ -960,6 +971,7 @@ fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
                 description: model.description.clone().unwrap_or_default(),
             })
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -968,12 +980,21 @@ fn emit_model_state(
     webview: Entity,
     model_state: Option<&AcpModelState>,
     cross_runtime: bool,
+    agent_key: &str,
+    effort_current: &str,
     commands: &mut Commands,
 ) {
+    let mut state = model_state_of(model_state);
+    state.agent_key = agent_key.to_string();
+    state.effort_current = effort_current.to_string();
+    state.effort_levels = vmux_core::agent::effort_levels(agent_key)
+        .iter()
+        .map(|level| level.to_string())
+        .collect();
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
         MODEL_STATE_EVENT,
-        &model_state_of(model_state),
+        &state,
     ));
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
@@ -982,6 +1003,17 @@ fn emit_model_state(
             commands: slash_commands_for(cross_runtime, model_state.is_some()),
         },
     ));
+}
+
+/// The persisted launch-time effort for `agent_key`, or `""` (agent default).
+#[cfg(not(target_arch = "wasm32"))]
+fn effort_current_for<'a>(
+    settings: Option<&'a Res<vmux_setting::AppSettings>>,
+    agent_key: &str,
+) -> &'a str {
+    settings
+        .and_then(|settings| settings.agent.effort_for(agent_key))
+        .unwrap_or("")
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1150,6 +1182,7 @@ fn push_acp_model_state_to_page(
     sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1166,7 +1199,14 @@ fn push_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(webview, Some(model_state), cross, &mut commands);
+        emit_model_state(
+            webview,
+            Some(model_state),
+            cross,
+            &session.agent_id,
+            effort_current_for(settings.as_ref(), &session.agent_id),
+            &mut commands,
+        );
     }
 }
 
@@ -1176,6 +1216,7 @@ fn push_removed_acp_model_state_to_page(
     sessions: Query<&AcpSession>,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1195,7 +1236,14 @@ fn push_removed_acp_model_state_to_page(
         let cross = acp_agent_kind(&session.agent_id)
             .map(kind_supports_cross_runtime)
             .unwrap_or(false);
-        emit_model_state(webview, None, cross, &mut commands);
+        emit_model_state(
+            webview,
+            None,
+            cross,
+            &session.agent_id,
+            effort_current_for(settings.as_ref(), &session.agent_id),
+            &mut commands,
+        );
     }
 }
 
@@ -1721,6 +1769,49 @@ fn on_select_model(
         request_id,
         model_id,
     });
+}
+
+/// Persist the launch-time effort level for an agent. Blank `level` clears the override; only
+/// levels valid for the agent (see [`vmux_core::agent::effort_levels`]) are stored. Takes effect
+/// when the agent next launches a session/process.
+#[cfg(not(target_arch = "wasm32"))]
+fn on_set_agent_effort(
+    trigger: On<BinReceive<SetAgentEffort>>,
+    mut settings: ResMut<vmux_setting::AppSettings>,
+    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+) {
+    let payload = &trigger.event().payload;
+    let agent_key = payload.agent_key.trim();
+    let level = payload.level.trim();
+    if agent_key.is_empty() {
+        return;
+    }
+    if !level.is_empty() && !vmux_core::agent::effort_levels(agent_key).contains(&level) {
+        return;
+    }
+    let mut effort = settings.agent.effort.clone();
+    if level.is_empty() {
+        if effort.remove(agent_key).is_none() {
+            return;
+        }
+    } else if effort.get(agent_key).map(String::as_str) == Some(level) {
+        return;
+    } else {
+        effort.insert(agent_key.to_string(), level.to_string());
+    }
+    let value = match serde_json::to_value(&effort) {
+        Ok(value) => value,
+        Err(error) => {
+            bevy::log::warn!("effort: serialize failed: {error}");
+            return;
+        }
+    };
+    match vmux_setting::apply_settings_update(settings.as_mut(), "agent.effort", value) {
+        Ok(ron_bytes) => {
+            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+        }
+        Err(error) => bevy::log::warn!("effort: persist for {agent_key} failed: {error}"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

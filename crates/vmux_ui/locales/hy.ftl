@@ -727,3 +727,7 @@ editor-property-kind-date = Ամսաթիվ
 editor-property-kind-list = Ցուցակ
 editor-property-kind-link = Հղում
 editor-property-kind-tags = Պիտակներ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

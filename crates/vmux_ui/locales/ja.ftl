@@ -712,3 +712,7 @@ editor-property-kind-date = 日付
 editor-property-kind-list = リスト
 editor-property-kind-link = リンク
 editor-property-kind-tags = タグ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

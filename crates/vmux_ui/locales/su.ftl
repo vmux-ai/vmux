@@ -727,3 +727,7 @@ editor-property-kind-date = titimangsa
 editor-property-kind-list = Daptar
 editor-property-kind-link = Tumbu
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

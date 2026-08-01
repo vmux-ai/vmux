@@ -727,3 +727,7 @@ editor-property-kind-date = Date
 editor-property-kind-list = Liste
 editor-property-kind-link = Lien
 editor-property-kind-tags = Balises
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

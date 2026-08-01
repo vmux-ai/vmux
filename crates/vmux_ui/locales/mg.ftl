@@ -727,3 +727,7 @@ editor-property-kind-date = Daty
 editor-property-kind-list = Lisitra
 editor-property-kind-link = Rohy
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

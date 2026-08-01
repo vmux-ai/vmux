@@ -727,3 +727,7 @@ editor-property-kind-date = Tarix
 editor-property-kind-list = Siyahı
 editor-property-kind-link = Link
 editor-property-kind-tags = Teqlər
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

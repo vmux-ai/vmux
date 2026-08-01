@@ -727,3 +727,7 @@ editor-property-kind-date = Dagsetning
 editor-property-kind-list = Listi
 editor-property-kind-link = Tengill
 editor-property-kind-tags = Merki
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

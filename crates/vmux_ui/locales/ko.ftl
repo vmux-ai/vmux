@@ -727,3 +727,7 @@ editor-property-kind-date = 날짜
 editor-property-kind-list = 목록
 editor-property-kind-link = 링크
 editor-property-kind-tags = 태그
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

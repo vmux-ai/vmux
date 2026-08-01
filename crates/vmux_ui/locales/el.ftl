@@ -727,3 +727,7 @@ editor-property-kind-date = Ημερομηνία
 editor-property-kind-list = Λίστα
 editor-property-kind-link = Σύνδεσμος
 editor-property-kind-tags = Ετικέτες
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

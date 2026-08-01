@@ -727,3 +727,7 @@ editor-property-kind-date = Datum
 editor-property-kind-list = Lys
 editor-property-kind-link = Skakel
 editor-property-kind-tags = Merkers
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

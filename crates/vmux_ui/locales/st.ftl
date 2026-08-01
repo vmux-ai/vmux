@@ -727,3 +727,7 @@ editor-property-kind-date = Letsatsi
 editor-property-kind-list = Lenane
 editor-property-kind-link = Sehokelo
 editor-property-kind-tags = Li-tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

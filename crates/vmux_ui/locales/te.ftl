@@ -727,3 +727,7 @@ editor-property-kind-date = తేదీ
 editor-property-kind-list = జాబితా
 editor-property-kind-link = లింక్
 editor-property-kind-tags = ట్యాగ్‌లు
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

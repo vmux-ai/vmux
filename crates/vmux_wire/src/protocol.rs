@@ -675,6 +675,9 @@ pub enum ClientMessage {
         resume_acp_session_id: Option<String>,
         /// MCP servers imported into vmux Registry and managed for every launched agent.
         managed_mcp_servers: Vec<ManagedMcpServer>,
+        /// Launch-time reasoning-effort level for this session (agent-specific; e.g. Claude
+        /// forwards it through `claudeCode.options.effort`). `None` = the agent's own default.
+        effort: Option<String>,
     },
     Status,
     AgentInputWithAttachments {
@@ -1755,6 +1758,7 @@ mod tests {
                 url: Some("https://example.com/mcp".into()),
                 headers: Vec::new(),
             }],
+            effort: Some("high".into()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&client).unwrap();
         let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();

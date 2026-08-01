@@ -727,3 +727,7 @@ editor-property-kind-date = Data
 editor-property-kind-list = Listă
 editor-property-kind-link = Legătură
 editor-property-kind-tags = Etichete
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

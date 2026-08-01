@@ -45,6 +45,7 @@ impl AcpSessionManager {
         input_writers: Arc<tokio::sync::Mutex<HashMap<ProcessId, PtyInputWriter>>>,
         mcp_servers: Vec<agent_client_protocol::schema::v1::McpServer>,
         resume: Option<String>,
+        effort: Option<String>,
     ) {
         if self.sessions.contains_key(&sid) {
             return;
@@ -66,6 +67,7 @@ impl AcpSessionManager {
             agent_id,
             mcp_servers,
             resume,
+            effort,
             shared.clone(),
             input_rx,
         ));

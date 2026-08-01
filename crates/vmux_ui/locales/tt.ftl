@@ -727,3 +727,7 @@ editor-property-kind-date = Дата
 editor-property-kind-list = Исемлек
 editor-property-kind-link = Ссылка
 editor-property-kind-tags = Теги
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

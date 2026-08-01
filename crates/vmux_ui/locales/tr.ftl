@@ -727,3 +727,7 @@ editor-property-kind-date = Tarih
 editor-property-kind-list = Liste
 editor-property-kind-link = Bağlantı
 editor-property-kind-tags = Etiketler
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

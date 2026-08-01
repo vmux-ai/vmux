@@ -727,3 +727,7 @@ editor-property-kind-date = Petsa
 editor-property-kind-list = Listahan
 editor-property-kind-link = Link
 editor-property-kind-tags = Mga tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

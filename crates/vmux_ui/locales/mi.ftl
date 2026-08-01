@@ -727,3 +727,7 @@ editor-property-kind-date = Rā
 editor-property-kind-list = Rarangi
 editor-property-kind-link = Hononga
 editor-property-kind-tags = Tohutohu
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
