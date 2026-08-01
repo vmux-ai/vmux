@@ -145,12 +145,49 @@ fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element 
     }
 }
 
+fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &str) {
+    agents.with_mut(|list| {
+        if let Some(agent) = list.iter_mut().find(|agent| agent.id == id) {
+            agent.pinned_version = version.to_string();
+        }
+    });
+}
+
+/// A version-pin input, shown only for npx/uvx agents (native binaries can't be pinned).
+fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let id = agent.id.clone();
+    rsx! {
+        input {
+            class: "w-20 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] placeholder:text-muted-foreground focus:outline-none",
+            r#type: "text",
+            spellcheck: "false",
+            autocomplete: "off",
+            value: "{agent.pinned_version}",
+            placeholder: translate("agents-version-latest"),
+            title: translate("agents-version-hint"),
+            oninput: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+        }
+    }
+}
+
 fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let pinnable = agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
+    rsx! {
+        if pinnable {
+            {render_version_input(agent, agents)}
+        }
+        {render_status_buttons(agent, agents)}
+    }
+}
+
+fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
     let id = agent.id.clone();
     let install_id = agent.id.clone();
     let uninstall_id = agent.id.clone();
     let launch_url = agent.launch_url.clone();
     let source = agent.source.clone();
+    let update_version = agent.pinned_version.clone();
+    let install_version = agent.pinned_version.clone();
     match agent.status.as_str() {
         "installing" => rsx! { ManagerSpinner { detail: agent.detail.clone() } },
         "installed" => rsx! {
@@ -178,7 +215,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
                     set_status(agents, &id, "installing", &translate("agents-updating"));
-                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone() });
+                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version: update_version.clone() });
                 },
                 {translate("common-update")}
             }
@@ -193,7 +230,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-retry")}
@@ -208,7 +245,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-install")}

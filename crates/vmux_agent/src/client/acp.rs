@@ -495,6 +495,7 @@ fn install_acp_session_when_focused(
             .iter()
             .find(|config| crate::acp_install::agent_ids_match(&config.id, &session.agent_id))
             .cloned();
+        let pinned_version = fallback.as_ref().and_then(|config| config.version.clone());
 
         *state = AgentRunState::Installing {
             pct: None,
@@ -507,15 +508,18 @@ fn install_acp_session_when_focused(
         let shell = shell.clone();
 
         std::thread::spawn(move || {
-            let resolved =
-                crate::acp_install::resolve_from_registry(&agent_id, |phase, pct, msg| {
+            let resolved = crate::acp_install::resolve_from_registry(
+                &agent_id,
+                pinned_version.as_deref(),
+                |phase, pct, msg| {
                     let (pct, message) = display_install_progress(phase, pct, msg);
                     let _ = progress.send(InstallMsg::Progress {
                         sid: sid.clone(),
                         pct,
                         message,
                     });
-                });
+                },
+            );
             let login_env = vmux_terminal::shell_env::login_shell_env(&shell);
             let msg = match resolved {
                 Ok(r) => InstallMsg::Ready {
@@ -528,7 +532,7 @@ fn install_acp_session_when_focused(
                     ),
                 },
                 Err(reg_err) => match fallback {
-                    Some(cfg) => InstallMsg::Ready {
+                    Some(cfg) if !cfg.command.is_empty() => InstallMsg::Ready {
                         sid,
                         command: cfg.command,
                         args: cfg.args,
@@ -537,7 +541,7 @@ fn install_acp_session_when_focused(
                             build_agent_env(cfg.env, login_env, None),
                         ),
                     },
-                    None => InstallMsg::Failed {
+                    _ => InstallMsg::Failed {
                         sid,
                         message: reg_err,
                     },

@@ -47,6 +47,8 @@ pub struct AgentEntry {
     pub status: String,
     /// Progress text (while installing) or error message.
     pub detail: String,
+    /// Pinned package version for npx/uvx agents (`""` = latest). Editable on the page.
+    pub pinned_version: String,
 }
 
 /// Page → native: the page mounted and wants the catalog pushed to it.
@@ -75,6 +77,8 @@ pub struct AgentsCatalogRequest {}
 )]
 pub struct AgentsInstall {
     pub id: String,
+    /// Requested package version (`""` = latest). Persisted to the agent's settings entry.
+    pub version: String,
 }
 
 /// Page → native: remove an installed native-binary agent.
