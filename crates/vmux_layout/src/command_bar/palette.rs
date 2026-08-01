@@ -354,6 +354,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     use_effect(move || {
+        if is_start {
+            install_start_menu_click_outside(start_agent_menu_open);
+        }
+    });
+
+    use_effect(move || {
         let _ = query();
         let _ = selected();
         let _ = nav_mode();
@@ -710,6 +716,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         div { class: "flex min-w-0 items-center justify-between gap-1",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
                 button {
+                    id: "start-agent-selector-trigger",
                     class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
                     title: "Choose agent",
                     onmousedown: move |event| event.prevent_default(),
@@ -859,6 +866,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
         let go_up = (e.key() == Key::ArrowUp && !ctrl)
             || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+
+        if start_agent_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
+            e.prevent_default();
+            start_agent_menu_open.set(false);
+            return;
+        }
 
         if media_menu_open {
             if go_down {
@@ -1062,7 +1075,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if is_start {
                 if start_agent_menu_open() {
                     PromptPopup {
-                        placement: PromptPopupPlacement::Upward,
+                        placement: PromptPopupPlacement::Downward,
                         id: "start-agent-selector",
                         div { class: "p-1.5",
                             div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", "Agent" }
@@ -1811,6 +1824,50 @@ fn focus_and_install_ctrl_bindings() {
     opts.set_capture(true);
     let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
         "keydown",
+        closure.as_ref().unchecked_ref(),
+        &opts,
+    );
+    closure.forget();
+}
+
+/// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
+/// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
+/// on the trigger (`#start-agent-selector-trigger`) are left alone. Installed once per document.
+fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let flag = JsValue::from_str("_startMenuClickOutsideBound");
+    if js_sys::Reflect::get(&document, &flag)
+        .map(|v| v.is_truthy())
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let _ = js_sys::Reflect::set(&document, &flag, &JsValue::TRUE);
+
+    let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+        if !menu_open() {
+            return;
+        }
+        let inside = e
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .and_then(|el| {
+                el.closest("#start-agent-selector, #start-agent-selector-trigger")
+                    .ok()
+                    .flatten()
+            })
+            .is_some();
+        if !inside {
+            menu_open.set(false);
+        }
+    }) as Box<dyn FnMut(web_sys::Event)>);
+    let target: &web_sys::EventTarget = document.as_ref();
+    let opts = web_sys::AddEventListenerOptions::new();
+    opts.set_capture(true);
+    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
+        "mousedown",
         closure.as_ref().unchecked_ref(),
         &opts,
     );
