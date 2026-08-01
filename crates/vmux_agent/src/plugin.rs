@@ -6584,6 +6584,7 @@ mod tests {
             args: vec![],
             env: vec![],
             cwd: None,
+            version: None,
         };
         let catalog = crate::client::acp::AcpCatalog {
             agents: vec![RegistryAgent {
@@ -6621,6 +6622,7 @@ mod tests {
             args: vec![],
             env: vec![],
             cwd: None,
+            version: None,
         };
 
         assert_eq!(

@@ -218,6 +218,10 @@ fn default_tidy_files_max() -> usize {
 pub struct AcpAgentConfig {
     pub id: String,
     pub name: String,
+    /// Explicit escape-hatch command run when the agent is absent from (or unresolvable via) the
+    /// ACP registry. Empty means "registry-resolved, no override" — an entry may exist solely to
+    /// carry `version`.
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -225,6 +229,10 @@ pub struct AcpAgentConfig {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub cwd: Option<std::path::PathBuf>,
+    /// Pin the registry package to this version (`npx -y <pkg>@<version>` / `uvx <pkg>@<version>`).
+    /// `None` installs the latest.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 fn default_acp_agents() -> Vec<AcpAgentConfig> {
@@ -239,6 +247,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
         AcpAgentConfig {
             id: "codex".to_string(),
@@ -250,6 +259,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
         AcpAgentConfig {
             id: "gemini".to_string(),
@@ -263,6 +273,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
     ]
 }
@@ -1650,6 +1661,19 @@ mod tests {
             .unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(settings.auto_update, original_auto);
+    }
+
+    #[test]
+    fn acp_agent_config_allows_version_only_entry() {
+        let cfg: AcpAgentConfig = serde_json::from_value(serde_json::json!({
+            "id": "claude",
+            "name": "Claude Code",
+            "version": "0.11.0",
+        }))
+        .expect("a version-only acp entry (no command) must parse");
+        assert_eq!(cfg.command, "");
+        assert_eq!(cfg.version.as_deref(), Some("0.11.0"));
+        assert!(cfg.args.is_empty());
     }
 
     #[test]
