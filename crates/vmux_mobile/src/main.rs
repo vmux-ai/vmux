@@ -1514,8 +1514,8 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         if !matches!(base.scheme(), "http" | "https") {
             return Err("Pairing URL must use HTTPS or HTTP.".to_string());
         }
-        let base_url = base.origin().ascii_serialization();
-        if base_url == "null" {
+        let base_url = normalized_pairing_base(base)?;
+        if base_url.is_empty() {
             return Err("Pairing URL has no server address.".to_string());
         }
         return Ok(Credentials { base_url, token });
@@ -1538,11 +1538,24 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         })
         .filter(|token| !token.is_empty())
         .ok_or_else(|| "Pairing URL has no token.".to_string())?;
-    let base_url = parsed.origin().ascii_serialization();
-    if base_url == "null" {
+    let base_url = normalized_pairing_base(parsed)?;
+    if base_url.is_empty() {
         return Err("Pairing URL has no server address.".to_string());
     }
     Ok(Credentials { base_url, token })
+}
+
+fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
+    url.set_fragment(None);
+    url.set_query(None);
+    if url.origin().ascii_serialization() == "null" {
+        return Ok(String::new());
+    }
+    let mut value = url.to_string();
+    while value.ends_with('/') {
+        value.pop();
+    }
+    Ok(value)
 }
 
 fn take_opened_url() -> Option<String> {
@@ -1637,6 +1650,17 @@ mod tests {
             .unwrap(),
             Credentials {
                 base_url: "https://mac.example.ts.net:54821".to_string(),
+                token: "secret".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn pairing_url_preserves_relay_path() {
+        assert_eq!(
+            parse_pairing_url("http://localhost:8787/r/device-1/#token=secret").unwrap(),
+            Credentials {
+                base_url: "http://localhost:8787/r/device-1".to_string(),
                 token: "secret".to_string(),
             }
         );

@@ -27,6 +27,8 @@ use crate::remote::{
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent,
 };
 
+mod relay;
+
 const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
 const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
@@ -101,6 +103,7 @@ pub fn spawn(
             broker,
             client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
         };
+        let relay_handle = relay::spawn(state.clone());
         let address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port());
         let listener = match tokio::net::TcpListener::bind(address).await {
             Ok(listener) => listener,
@@ -113,6 +116,7 @@ pub fn spawn(
         if let Err(error) = axum::serve(listener, router(state)).await {
             tracing::error!(%error, "remote: server failed");
         }
+        relay_handle.abort();
     })
 }
 

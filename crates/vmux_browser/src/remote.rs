@@ -211,8 +211,14 @@ fn remote_worker(command_rx: Receiver<bool>, result_tx: Sender<RemoteWorkerResul
 
 fn enable_remote() -> Result<RemotePairingInfo, String> {
     let token = wait_for_token().map_err(|error| error.to_string())?;
-    let port = vmux_service::remote_port();
-    pairing_info(&format!("http://127.0.0.1:{port}"), &token)
+    let base_url = match relay_pairing_base_url()? {
+        Some(base_url) => base_url,
+        None => {
+            let port = vmux_service::remote_port();
+            format!("http://127.0.0.1:{port}")
+        }
+    };
+    pairing_info(&base_url, &token)
 }
 
 fn disable_remote() -> Result<(), String> {
@@ -232,6 +238,56 @@ fn pairing_info(base_url: &str, token: &str) -> Result<RemotePairingInfo, String
         pairing_url: pairing_url.to_string(),
         pairing_deep_link: pairing_deep_link.to_string(),
     })
+}
+
+fn relay_pairing_base_url() -> Result<Option<String>, String> {
+    let Some(relay_url) = std::env::var("VMUX_REMOTE_RELAY_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        let _ = std::fs::remove_file(vmux_service::remote_relay_url_path());
+        return Ok(None);
+    };
+    persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
+    let device_id = ensure_relay_device_id().map_err(|error| error.to_string())?;
+    let base = relay_url.trim_end_matches('/');
+    Ok(Some(format!("{base}/r/{device_id}")))
+}
+
+fn persist_relay_url(relay_url: &str) -> std::io::Result<()> {
+    let path = vmux_service::remote_relay_url_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, relay_url.trim().trim_end_matches('/'))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+fn ensure_relay_device_id() -> std::io::Result<String> {
+    let path = vmux_service::remote_relay_device_path();
+    if let Ok(existing) = std::fs::read_to_string(&path) {
+        let existing = existing.trim();
+        if !existing.is_empty() {
+            return Ok(existing.to_string());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let device_id = uuid::Uuid::new_v4().simple().to_string();
+    std::fs::write(&path, &device_id)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(device_id)
 }
 
 fn wait_for_token() -> std::io::Result<String> {
