@@ -60,6 +60,16 @@ pub fn remote_paired_path() -> PathBuf {
     profile_file("remote-paired")
 }
 
+/// Path to the stable relay device id for the active build and profile.
+pub fn remote_relay_device_path() -> PathBuf {
+    profile_file("remote-device")
+}
+
+/// Path to the configured local-development relay URL for the active build and profile.
+pub fn remote_relay_url_path() -> PathBuf {
+    profile_file("remote-relay-url")
+}
+
 /// Stable loopback port for the active build and profile.
 pub fn remote_port() -> u16 {
     let build = current_profile();

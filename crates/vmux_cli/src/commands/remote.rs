@@ -34,6 +34,8 @@ fn start_service(reset: bool) -> std::io::Result<()> {
         let _ = vmux_service::launchd::bootout(vmux_service::current_profile());
         let _ = std::fs::remove_file(vmux_service::remote_token_path());
         let _ = std::fs::remove_file(vmux_service::remote_paired_path());
+        let _ = std::fs::remove_file(vmux_service::remote_relay_device_path());
+        let _ = std::fs::remove_file(vmux_service::remote_relay_url_path());
     }
     vmux_service::launchd::ensure_running(
         vmux_service::current_profile(),
