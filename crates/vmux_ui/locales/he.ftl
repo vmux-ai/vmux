@@ -729,3 +729,7 @@ editor-property-kind-date = תַאֲרִיך
 editor-property-kind-list = רְשִׁימָה
 editor-property-kind-link = לְקַשֵׁר
 editor-property-kind-tags = תגים
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

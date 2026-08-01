@@ -729,3 +729,7 @@ editor-property-kind-date = Data
 editor-property-kind-list = Lista
 editor-property-kind-link = Collegamento
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -17,8 +17,8 @@ use crate::chat_page::event::{
     ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
     ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERB_IDS, latest_tool_location,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
+    SlashCommandEntry, SlashCommands, WORKING_VERB_IDS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -515,6 +515,10 @@ pub fn Page(
     let mut media_loading = use_signal(|| false);
     let mut current_model_id = use_signal(String::new);
     let mut current_model = use_signal(String::new);
+    let mut effort_levels = use_signal(Vec::<String>::new);
+    let mut effort_current = use_signal(String::new);
+    let mut effort_agent_key = use_signal(String::new);
+    let mut effort_menu_open = use_signal(|| false);
     let mut composer_context = use_signal(ComposerContext::default);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
@@ -643,6 +647,9 @@ pub fn Page(
         models.set(state.models.clone());
         current_model_id.set(state.current_model_id.clone());
         current_model.set(state.current_model_name.clone());
+        effort_levels.set(state.effort_levels.clone());
+        effort_current.set(state.effort_current.clone());
+        effort_agent_key.set(state.agent_key.clone());
         menu_sel.set(0);
     });
     let _composer_context =
@@ -1192,6 +1199,92 @@ pub fn Page(
                             stroke: "currentColor",
                             stroke_width: "2",
                             path { d: "m8 10 4 4 4-4" }
+                        }
+                    }
+                }
+                if !effort_levels().is_empty() {
+                    div { class: "relative shrink-0",
+                        button {
+                            id: "chat-effort-trigger",
+                            class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+                            title: translate("agent-effort-tooltip"),
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                let next = !effort_menu_open();
+                                effort_menu_open.set(next);
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            svg {
+                                class: "h-3.5 w-3.5 shrink-0",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.8",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M12 20a8 8 0 1 1 8-8" }
+                                path { d: "M12 12l3.5-2" }
+                            }
+                            span { class: "truncate capitalize",
+                                {if effort_current().is_empty() { translate("agent-effort") } else { effort_current() }}
+                            }
+                            svg {
+                                class: "h-3 w-3 shrink-0 opacity-50",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path { d: "m8 10 4 4 4-4" }
+                            }
+                        }
+                        if effort_menu_open() {
+                            div { class: "absolute bottom-full left-0 z-20 mb-2 min-w-[9rem] rounded-2xl border border-foreground/10 bg-background/95 p-1.5 shadow-xl backdrop-blur-xl",
+                                div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
+                                {
+                                    let key = effort_agent_key();
+                                    let is_default = effort_current().is_empty();
+                                    rsx! {
+                                        button {
+                                            class: if is_default { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                            onmousedown: move |event| event.prevent_default(),
+                                            onclick: move |_| {
+                                                effort_current.set(String::new());
+                                                effort_menu_open.set(false);
+                                                let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: String::new() });
+                                                focus_prompt_end(PROMPT_INPUT_ID);
+                                            },
+                                            span { class: "min-w-0 flex-1 truncate", {translate("agent-effort-default")} }
+                                            if is_default {
+                                                svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                            }
+                                        }
+                                    }
+                                }
+                                for level in effort_levels() {
+                                    {
+                                        let level_value = level.clone();
+                                        let key = effort_agent_key();
+                                        let selected = level == effort_current();
+                                        rsx! {
+                                            button {
+                                                key: "effort-{level}",
+                                                class: if selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                                onmousedown: move |event| event.prevent_default(),
+                                                onclick: move |_| {
+                                                    effort_current.set(level_value.clone());
+                                                    effort_menu_open.set(false);
+                                                    let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: level_value.clone() });
+                                                    focus_prompt_end(PROMPT_INPUT_ID);
+                                                },
+                                                span { class: "min-w-0 flex-1 truncate capitalize", "{level}" }
+                                                if selected {
+                                                    svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

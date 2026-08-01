@@ -729,3 +729,7 @@ editor-property-kind-date = Kuupäev
 editor-property-kind-list = Nimekiri
 editor-property-kind-link = Link
 editor-property-kind-tags = Sildid
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

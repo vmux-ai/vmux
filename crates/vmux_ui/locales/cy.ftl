@@ -729,3 +729,7 @@ editor-property-kind-date = Dyddiad
 editor-property-kind-list = Rhestr
 editor-property-kind-link = Cyswllt
 editor-property-kind-tags = Tagiau
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

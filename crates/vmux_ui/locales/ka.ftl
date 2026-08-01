@@ -729,3 +729,7 @@ editor-property-kind-date = თარიღი
 editor-property-kind-list = სია
 editor-property-kind-link = ბმული
 editor-property-kind-tags = ტეგები
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

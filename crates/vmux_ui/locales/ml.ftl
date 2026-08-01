@@ -729,3 +729,7 @@ editor-property-kind-date = തീയതി
 editor-property-kind-list = ലിസ്റ്റ്
 editor-property-kind-link = ലിങ്ക്
 editor-property-kind-tags = ടാഗുകൾ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -112,6 +112,10 @@ impl CliAgentStrategy for CodexStrategy {
         args
     }
 
+    fn effort_args(&self, level: &str) -> Vec<String> {
+        vec!["-c".to_string(), format!("model_reasoning_effort={level}")]
+    }
+
     fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
         vec![]
     }
@@ -555,6 +559,14 @@ mod tests {
             r#"{{"timestamp":"2026-04-30T11:41:00.170Z","type":"session_meta","payload":{{"id":"{id}","timestamp":"2026-04-30T09:56:21.846Z","cwd":"{cwd}"}}}}"#
         );
         std::fs::write(dir.join(file), format!("{line}\n")).unwrap();
+    }
+
+    #[test]
+    fn effort_args_pass_codex_reasoning_override() {
+        assert_eq!(
+            CodexStrategy.effort_args("high"),
+            ["-c", "model_reasoning_effort=high"]
+        );
     }
 
     #[test]

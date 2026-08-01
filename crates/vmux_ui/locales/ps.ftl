@@ -729,3 +729,7 @@ editor-property-kind-date = نیټه
 editor-property-kind-list = لیست
 editor-property-kind-link = لینک
 editor-property-kind-tags = ټګونه
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -729,3 +729,7 @@ editor-property-kind-date = Ụbọchị
 editor-property-kind-list = Ndepụta
 editor-property-kind-link = Njikọ
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

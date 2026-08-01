@@ -729,3 +729,7 @@ editor-property-kind-date = Күн
 editor-property-kind-list = Тізім
 editor-property-kind-link = Сілтеме
 editor-property-kind-tags = Тегтер
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

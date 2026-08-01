@@ -729,3 +729,7 @@ editor-property-kind-date = ቀን
 editor-property-kind-list = ዝርዝር
 editor-property-kind-link = አገናኝ
 editor-property-kind-tags = መለያዎች
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

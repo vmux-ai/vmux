@@ -729,3 +729,7 @@ editor-property-kind-date = Dáta
 editor-property-kind-list = Liosta
 editor-property-kind-link = Nasc
 editor-property-kind-tags = Clibeanna
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

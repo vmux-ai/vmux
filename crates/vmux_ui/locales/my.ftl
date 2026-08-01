@@ -729,3 +729,7 @@ editor-property-kind-date = ရက်စွဲ
 editor-property-kind-list = စာရင်း
 editor-property-kind-link = လင့်
 editor-property-kind-tags = တဂ်
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

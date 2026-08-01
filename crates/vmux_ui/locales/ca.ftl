@@ -729,3 +729,7 @@ editor-property-kind-date = Data
 editor-property-kind-list = Llista
 editor-property-kind-link = Enllaç
 editor-property-kind-tags = Etiquetes
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

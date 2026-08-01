@@ -729,3 +729,7 @@ editor-property-kind-date = 日期
 editor-property-kind-list = 列表
 editor-property-kind-link = 关联
 editor-property-kind-tags = 标签
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

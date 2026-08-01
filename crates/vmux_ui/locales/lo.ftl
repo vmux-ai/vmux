@@ -729,3 +729,7 @@ editor-property-kind-date = ວັນທີ
 editor-property-kind-list = ລາຍການ
 editor-property-kind-link = ເຊື່ອມຕໍ່
 editor-property-kind-tags = ປ້າຍກຳກັບ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

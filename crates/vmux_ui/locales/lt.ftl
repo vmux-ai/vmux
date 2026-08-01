@@ -729,3 +729,7 @@ editor-property-kind-date = Data
 editor-property-kind-list = Sąrašas
 editor-property-kind-link = Nuoroda
 editor-property-kind-tags = Žymos
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

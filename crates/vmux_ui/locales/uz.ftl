@@ -729,3 +729,7 @@ editor-property-kind-date = Sana
 editor-property-kind-list = Roʻyxat
 editor-property-kind-link = Havola
 editor-property-kind-tags = Teglar
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

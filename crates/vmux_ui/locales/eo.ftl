@@ -729,3 +729,7 @@ editor-property-kind-date = Dato
 editor-property-kind-list = Listo
 editor-property-kind-link = Ligo
 editor-property-kind-tags = Etikedoj
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

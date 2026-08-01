@@ -729,3 +729,7 @@ editor-property-kind-date = ದಿನಾಂಕ
 editor-property-kind-list = ಪಟ್ಟಿ
 editor-property-kind-link = ಲಿಂಕ್
 editor-property-kind-tags = ಟ್ಯಾಗ್‌ಗಳು
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

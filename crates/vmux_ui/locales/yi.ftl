@@ -729,3 +729,7 @@ editor-property-kind-date = טאָג
 editor-property-kind-list = רשימה
 editor-property-kind-link = לינק
 editor-property-kind-tags = טאַגס
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

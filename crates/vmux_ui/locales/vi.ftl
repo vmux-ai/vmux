@@ -729,3 +729,7 @@ editor-property-kind-date = Ngày
 editor-property-kind-list = Danh sách
 editor-property-kind-link = liên kết
 editor-property-kind-tags = Thẻ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

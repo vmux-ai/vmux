@@ -729,3 +729,7 @@ editor-property-kind-date = چېسلا
 editor-property-kind-list = تىزىملىك
 editor-property-kind-link = ئۇلىنىش
 editor-property-kind-tags = خەتكۈچ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

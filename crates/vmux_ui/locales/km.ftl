@@ -729,3 +729,7 @@ editor-property-kind-date = កាលបរិច្ឆេទ
 editor-property-kind-list = បញ្ជី
 editor-property-kind-link = តំណភ្ជាប់
 editor-property-kind-tags = ស្លាក
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

@@ -39,6 +39,12 @@ pub(crate) fn lines_skipping_invalid_utf8<R: std::io::BufRead>(
 pub trait CliAgentStrategy: AgentStrategy {
     fn sessions_root(&self) -> PathBuf;
     fn build_args(&self, mcp: &McpServerConfig, session_id: Option<&str>) -> Vec<String>;
+    /// Launch flags that pin the reasoning-effort `level` for this run, prepended ahead of
+    /// [`Self::build_args`] so any trailing `--resume`/`resume` stays last. `level` is already
+    /// validated against [`vmux_core::agent::effort_levels`]. Default: unsupported, no flags.
+    fn effort_args(&self, _level: &str) -> Vec<String> {
+        Vec::new()
+    }
     fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)>;
     /// Launch-time side effects (e.g. writing a managed hooks config file).
     /// Runs once per spawn, after the MCP config is resolved. Default: nothing.

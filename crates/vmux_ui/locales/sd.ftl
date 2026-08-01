@@ -729,3 +729,7 @@ editor-property-kind-date = تاريخ
 editor-property-kind-list = فهرست
 editor-property-kind-link = ڳنڍ
 editor-property-kind-tags = ٽيگ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

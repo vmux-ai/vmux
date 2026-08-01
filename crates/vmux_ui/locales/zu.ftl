@@ -729,3 +729,7 @@ editor-property-kind-date = Usuku
 editor-property-kind-list = Uhlu
 editor-property-kind-link = Isixhumanisi
 editor-property-kind-tags = Omaka
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

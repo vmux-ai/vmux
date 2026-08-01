@@ -648,6 +648,7 @@ pub async fn run(
     agent_id: String,
     mcp_servers: Vec<McpServer>,
     resume: Option<String>,
+    effort: Option<String>,
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
@@ -671,7 +672,7 @@ pub async fn run(
         Some(root) => root.apply_env(env),
         None => env,
     };
-    let session_meta = session_meta_for_agent(&agent_id);
+    let session_meta = session_meta_for_agent(&agent_id, effort.as_deref());
     let agent_cwd = shared.cwd();
     let mut child = match Command::new(&command)
         .args(&args)
@@ -1232,16 +1233,24 @@ If you invoke a required Skill tool, continue the original user request in the s
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
-fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+fn session_meta_for_agent(
+    agent_id: &str,
+    effort: Option<&str>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
         bevy::log::warn!("external agent Knowledge sync failed: {error}");
     }
-    session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_context_prompt())
+    session_meta_for_agent_with_knowledge(
+        agent_id,
+        &vmux_core::knowledge::agent_context_prompt(),
+        effort,
+    )
 }
 
 fn session_meta_for_agent_with_knowledge(
     agent_id: &str,
     knowledge: &str,
+    effort: Option<&str>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     let prompt = if agent_id == "claude" {
         if knowledge.is_empty() {
@@ -1267,7 +1276,7 @@ fn session_meta_for_agent_with_knowledge(
         };
         return Some(meta);
     }
-    let serde_json::Value::Object(meta) = serde_json::json!({
+    let serde_json::Value::Object(mut meta) = serde_json::json!({
         "systemPrompt": {
             "append": prompt,
         },
@@ -1290,6 +1299,18 @@ fn session_meta_for_agent_with_knowledge(
     }) else {
         unreachable!()
     };
+    if let Some(level) =
+        effort.filter(|level| vmux_core::agent::effort_levels("claude").contains(level))
+        && let Some(options) = meta
+            .get_mut("claudeCode")
+            .and_then(|claude_code| claude_code.get_mut("options"))
+            .and_then(|options| options.as_object_mut())
+    {
+        options.insert(
+            "effort".to_string(),
+            serde_json::Value::String(level.to_string()),
+        );
+    }
     Some(meta)
 }
 
@@ -2490,10 +2511,11 @@ mod tests {
 
     #[test]
     fn claude_acp_disables_native_shell_and_steers_skill_continuation() {
-        let meta = session_meta_for_agent_with_knowledge("claude", "memory context")
+        let meta = session_meta_for_agent_with_knowledge("claude", "memory context", Some("high"))
             .expect("Claude ACP metadata");
         let options = &meta["claudeCode"]["options"];
 
+        assert_eq!(options["effort"], "high");
         assert_eq!(
             options["disallowedTools"],
             serde_json::json!(["Bash", "Monitor", "WebSearch", "WebFetch"])
@@ -2517,8 +2539,15 @@ mod tests {
         assert!(prompt.contains("continue the original user request"));
         assert!(prompt.contains("memory context"));
         assert!(prompt.contains("mcp__vmux__set_conversation_title"));
-        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()
-            ["systemPrompt"]["append"]
+        let unset = session_meta_for_agent_with_knowledge("claude", "memory context", None)
+            .expect("Claude ACP metadata");
+        assert!(unset["claudeCode"]["options"].get("effort").is_none());
+        let bogus =
+            session_meta_for_agent_with_knowledge("claude", "memory context", Some("turbo"))
+                .expect("Claude ACP metadata");
+        assert!(bogus["claudeCode"]["options"].get("effort").is_none());
+        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context", None)
+            .unwrap()["systemPrompt"]["append"]
             .as_str()
             .unwrap()
             .to_string();

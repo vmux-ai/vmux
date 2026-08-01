@@ -729,3 +729,7 @@ editor-property-kind-date = ତାରିଖ
 editor-property-kind-list = ତାଲିକା |
 editor-property-kind-link = ଲିଙ୍କ୍ |
 editor-property-kind-tags = ଟ୍ୟାଗ୍ସ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

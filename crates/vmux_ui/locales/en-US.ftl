@@ -720,3 +720,7 @@ debug-simulate-update = Simulate update available
 debug-simulate-download = Simulate download
 debug-clear-update = Clear update
 debug-trigger-restart = Trigger restart
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

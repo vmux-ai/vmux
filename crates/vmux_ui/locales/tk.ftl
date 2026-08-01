@@ -729,3 +729,7 @@ editor-property-kind-date = Sene
 editor-property-kind-list = Sanaw
 editor-property-kind-link = Baglanyşyk
 editor-property-kind-tags = Bellikler
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

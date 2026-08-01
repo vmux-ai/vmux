@@ -729,3 +729,7 @@ editor-property-kind-date = วันที่
 editor-property-kind-list = รายการ
 editor-property-kind-link = ลิงค์
 editor-property-kind-tags = แท็ก
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

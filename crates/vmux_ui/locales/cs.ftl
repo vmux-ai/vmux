@@ -729,3 +729,7 @@ editor-property-kind-date = Datum
 editor-property-kind-list = Seznam
 editor-property-kind-link = Odkaz
 editor-property-kind-tags = Tagy
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

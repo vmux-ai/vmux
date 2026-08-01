@@ -729,3 +729,7 @@ editor-property-kind-date = Lā
 editor-property-kind-list = Papa inoa
 editor-property-kind-link = loulou
 editor-property-kind-tags = Nā huaʻōlelo
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

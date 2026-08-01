@@ -729,3 +729,7 @@ editor-property-kind-date = Hnub tim
 editor-property-kind-list = Sau npe
 editor-property-kind-link = Txuas
 editor-property-kind-tags = Cim npe
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

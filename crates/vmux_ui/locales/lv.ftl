@@ -729,3 +729,7 @@ editor-property-kind-date = Datums
 editor-property-kind-list = Saraksts
 editor-property-kind-link = Saite
 editor-property-kind-tags = Tagi
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

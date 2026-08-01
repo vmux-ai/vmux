@@ -729,3 +729,7 @@ editor-property-kind-date = Taariikhda
 editor-property-kind-list = Liiska
 editor-property-kind-link = Xiriirinta
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

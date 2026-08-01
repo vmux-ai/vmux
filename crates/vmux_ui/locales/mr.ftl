@@ -729,3 +729,7 @@ editor-property-kind-date = तारीख
 editor-property-kind-list = यादी
 editor-property-kind-link = दुवा
 editor-property-kind-tags = टॅग्ज
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)

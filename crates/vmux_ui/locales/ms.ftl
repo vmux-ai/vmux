@@ -729,3 +729,7 @@ editor-property-kind-date = tarikh
 editor-property-kind-list = Senaraikan
 editor-property-kind-link = Pautan
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
