@@ -1,1 +1,1 @@
-pub use vmux_chat_ui::{PromptBox, PromptBoxTone, PromptPopup, PromptPopupPlacement};
+pub use vmux_chat_ui::{PromptBox, PromptPopup, PromptPopupPlacement};

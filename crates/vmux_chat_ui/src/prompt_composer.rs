@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::{PromptBox, PromptBoxTone};
+use crate::PromptBox;
 
 /// Default DOM id for the shared prompt textarea.
 pub const PROMPT_INPUT_ID: &str = "vmux-prompt-input";
@@ -34,7 +34,6 @@ pub fn PromptComposer(
     placeholder: String,
     accent_color: String,
     accent_gradient: String,
-    #[props(default)] tone: PromptBoxTone,
     #[props(default = true)] autofocus: bool,
     #[props(default = true)] show_attach: bool,
     #[props(default)] disabled: bool,
@@ -56,9 +55,9 @@ pub fn PromptComposer(
     let action_class = if action_enabled {
         match action {
             PromptComposerAction::Send => format!(
-                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 sm:h-8 sm:w-8 sm:rounded-lg sm:hover:brightness-110 {accent_gradient}"
+                "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-lg transition active:scale-95 hover:brightness-110 sm:h-8 sm:w-8 sm:rounded-lg {accent_gradient}"
             ),
-            PromptComposerAction::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 sm:hover:bg-white/60 sm:hover:text-foreground dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:sm:hover:bg-white/[0.14]".to_string(),
+            PromptComposerAction::Stop => "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl bg-white/10 text-foreground/70 shadow-sm ring-1 ring-inset ring-white/10 transition active:scale-95 hover:bg-white/60 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/40 sm:ring-black/10 dark:sm:bg-white/[0.08] dark:sm:ring-white/10 dark:hover:bg-white/[0.14]".to_string(),
         }
     } else {
         "relative z-10 mr-0.5 flex h-11 w-11 shrink-0 cursor-default self-center items-center justify-center rounded-xl bg-white/[0.055] text-muted-foreground/35 shadow-sm ring-1 ring-inset ring-white/[0.08] sm:h-8 sm:w-8 sm:rounded-lg sm:bg-white/25 sm:ring-black/[0.06] dark:sm:bg-white/[0.055] dark:sm:ring-white/[0.08]".to_string()
@@ -66,12 +65,11 @@ pub fn PromptComposer(
 
     rsx! {
         PromptBox {
-            tone,
             class: "vmux-prompt-composer flex-wrap",
             style: "--vmux-prompt-accent:{accent_color};",
             if show_attach {
                 button {
-                    class: "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground sm:h-8 sm:w-8 sm:rounded-lg sm:hover:bg-foreground/10 sm:hover:text-foreground",
+                    class: "relative z-10 ml-0.5 flex h-11 w-11 shrink-0 self-center items-center justify-center rounded-xl text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground sm:h-8 sm:w-8 sm:rounded-lg",
                     r#type: "button",
                     disabled,
                     title: "{attach_title}",
@@ -108,7 +106,7 @@ pub fn PromptComposer(
                         span { class: "min-w-0 max-w-40 truncate", "{attachment.name}" }
                         if let Some(remove_index) = attachment.remove_index {
                             button {
-                                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition active:bg-foreground/10 active:text-foreground sm:hover:bg-foreground/10 sm:hover:text-foreground",
+                                class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-foreground/45 transition active:bg-foreground/10 active:text-foreground hover:bg-foreground/10 hover:text-foreground",
                                 r#type: "button",
                                 title: "{remove_attachment_title}",
                                 onmousedown: move |event| event.prevent_default(),

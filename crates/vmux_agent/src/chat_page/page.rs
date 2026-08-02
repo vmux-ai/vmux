@@ -1456,7 +1456,7 @@ pub fn Page(
                     }
                 }
             }
-            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-5 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)]",
+            header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] sm:px-5",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 div { class: "min-w-0 flex-1",
@@ -1468,7 +1468,7 @@ pub fn Page(
             }
             div {
                 id: "chat-scroll",
-                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto overscroll-contain px-4 py-6",
+                class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 py-6 sm:px-4 md:px-6",
                 onscroll: move |_| {
                     if let Some(el) = chat_scroll_element() {
                         let top = el.scroll_top();
@@ -1488,7 +1488,7 @@ pub fn Page(
                         }
                     }
                 },
-                div { class: "mx-auto flex min-h-full max-w-3xl flex-col gap-5",
+                div { class: "mx-auto flex min-h-full max-w-none flex-col gap-5 md:max-w-3xl",
                     if loaded_start() > 0 {
                         button {
                             id: "chat-load-older",

@@ -3,6 +3,7 @@
 mod native_transition;
 mod qr_scanner;
 
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -13,9 +14,9 @@ use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat_ui::{
-    AssistantTurn, DiffBlock, PlanBlock, PlanItem, PromptBoxTone, PromptComposer,
-    PromptComposerAction, PromptComposerAttachment, PromptMediaOption, PromptMediaOptions,
-    PromptPopup, PromptPopupPlacement, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
+    AssistantTurn, DiffBlock, PlanBlock, PlanItem, PromptComposer, PromptComposerAction,
+    PromptComposerAttachment, PromptMediaOption, PromptMediaOptions, PromptPopup,
+    PromptPopupPlacement, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
     ToolUseBlock, UserBubble, WorkingIndicator,
 };
 use vmux_remote::{
@@ -24,6 +25,7 @@ use vmux_remote::{
     RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
     replace_inline_media_query,
 };
+use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
@@ -89,8 +91,9 @@ enum ApiError {
 
 impl Api {
     fn new(credentials: Credentials) -> Self {
+        let client = api_client(&credentials.base_url);
         Self {
-            client: Client::new(),
+            client,
             credentials,
         }
     }
@@ -188,6 +191,33 @@ impl Api {
             .await
             .map_err(|error| ApiError::Message(error.to_string()))
     }
+}
+
+fn api_client(base_url: &str) -> Client {
+    let mut builder = Client::builder();
+    if accepts_local_development_cert(base_url) {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder.build().unwrap_or_else(|_| Client::new())
+}
+
+fn accepts_local_development_cert(url: &str) -> bool {
+    let Ok(url) = Url::parse(url) else {
+        return false;
+    };
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" {
+        return true;
+    }
+    host.parse::<IpAddr>().is_ok_and(|ip| match ip {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    })
 }
 
 fn submit_remote_prompt(
@@ -581,8 +611,8 @@ fn App() -> Element {
     if auth() == AuthState::Loading {
         return rsx! {
             AppHead {}
-            div { class: "flex h-dvh items-center justify-center bg-zinc-950 text-white",
-                div { class: "h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" }
+            div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
+                div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
             }
         };
     }
@@ -698,11 +728,10 @@ fn App() -> Element {
     rsx! {
         AppHead {}
         div {
-            class: "flex h-dvh min-h-0 flex-col bg-zinc-950 text-zinc-100",
-            style: "--background:#09090b;--foreground:#f4f4f5;--muted-foreground:#a1a1aa;",
-            header { class: "flex shrink-0 items-center gap-3 border-b border-white/10 bg-zinc-950/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl",
+            class: "flex h-dvh min-h-0 flex-col bg-background text-foreground",
+            header { class: "flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl sm:px-5",
                 button {
-                    class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/[0.06] text-lg text-zinc-300 active:bg-white/10",
+                    class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-lg text-accent-foreground active:bg-accent/70",
                     onclick: move |_| leave_session(
                         current,
                         room,
@@ -727,7 +756,7 @@ fn App() -> Element {
                 div { class: "min-w-0 flex-1",
                     if let Some(session) = current_value.as_ref() {
                         div { class: "truncate text-sm font-semibold", "{session.name}" }
-                        div { class: "mt-1 flex items-center gap-1.5 truncate text-[11px] text-zinc-500",
+                        div { class: "mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground",
                             span { class: status_dot(&status()) }
                             span { "{session.runtime}" }
                             if let Some(model) = session.model.as_ref() {
@@ -737,19 +766,19 @@ fn App() -> Element {
                         }
                     } else {
                         div { class: "text-sm font-semibold", "Vmux" }
-                        div { class: "mt-1 text-[11px] text-zinc-500", "No active session" }
+                        div { class: "mt-1 text-[11px] text-muted-foreground", "No active session" }
                     }
                 }
-                div { class: if connected() { "h-2 w-2 rounded-full bg-emerald-400" } else { "h-2 w-2 rounded-full bg-zinc-700" } }
+                div { class: if connected() { "h-2 w-2 rounded-full bg-emerald-400" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
             }
 
-            main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5",
+            main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 sm:px-4 md:px-6",
                 if room_value.events.is_empty() && live_delta_value.is_empty() && !is_streaming {
-                    div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-zinc-600",
+                    div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground",
                         "No messages yet."
                     }
                 }
-                div { class: "mx-auto flex w-full max-w-3xl flex-col",
+                div { class: "mx-auto flex w-full max-w-none flex-col md:max-w-3xl",
                     for (index, item) in group_messages(room_value.events).into_iter().enumerate() {
                         MessageView { key: "{index}", item }
                     }
@@ -770,19 +799,19 @@ fn App() -> Element {
                         }
                     }
                     if let RemoteStatus::Errored(message) = status() {
-                        div { class: "mb-4 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-xs text-red-200", "{message}" }
+                        div { class: "mb-4 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-xs text-destructive", "{message}" }
                     }
                 }
             }
 
             if let Some(pending) = approval_value {
-                div { class: "shrink-0 border-t border-amber-300/10 bg-amber-300/[0.04] px-3 py-3",
-                    div { class: "mx-auto max-w-3xl rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-3",
-                        div { class: "text-sm font-semibold text-amber-100", "Allow {pending.name}?" }
-                        pre { class: "mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-zinc-500", "{pending.args_json}" }
+                div { class: "shrink-0 border-t border-amber-300/10 bg-amber-300/[0.04] px-3 py-3 sm:px-4 md:px-6",
+                    div { class: "mx-auto max-w-none rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-3 md:max-w-3xl",
+                        div { class: "text-sm font-semibold text-foreground", "Allow {pending.name}?" }
+                        pre { class: "mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground", "{pending.args_json}" }
                         div { class: "mt-3 flex gap-2",
                             button {
-                                class: "h-10 flex-1 rounded-xl bg-white font-semibold text-black active:scale-[0.99]",
+                                class: "h-10 flex-1 rounded-xl bg-primary font-semibold text-primary-foreground active:scale-[0.99]",
                                 onclick: {
                                     let call_id = pending.call_id.clone();
                                     let sid = approval_sid.clone();
@@ -802,7 +831,7 @@ fn App() -> Element {
                                 "Allow"
                             }
                             button {
-                                class: "h-10 flex-1 rounded-xl bg-white/10 font-semibold text-zinc-200 active:scale-[0.99]",
+                                class: "h-10 flex-1 rounded-xl bg-secondary font-semibold text-secondary-foreground active:scale-[0.99]",
                                 onclick: {
                                     let call_id = pending.call_id.clone();
                                     let sid = approval_sid.clone();
@@ -827,17 +856,15 @@ fn App() -> Element {
             }
 
             div {
-                class: "shrink-0 border-t border-white/10 bg-zinc-950/95 px-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl",
-                div { class: "relative mx-auto w-full max-w-3xl",
+                class: "shrink-0 border-t border-border bg-background/95 px-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl sm:px-4 md:px-6",
+                div { class: "relative mx-auto w-full max-w-none md:max-w-3xl",
                     if media_menu_open {
                         PromptPopup {
                             placement: PromptPopupPlacement::Upward,
-                            tone: PromptBoxTone::Dark,
                             PromptMediaOptions {
                                 items: prompt_media_options,
                                 selected: media_selected(),
                                 loading: media_loading(),
-                                tone: PromptBoxTone::Dark,
                                 on_hover: move |index| media_selected.set(index),
                                 on_select: move |index| {
                                     if let Some(entry) = media_entries.peek().get(index).cloned() {
@@ -858,7 +885,6 @@ fn App() -> Element {
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
                         accent_color: "#a78bfa".to_string(),
                         accent_gradient: "from-violet-500 to-violet-700".to_string(),
-                        tone: PromptBoxTone::Dark,
                         autofocus: true,
                         disabled: current_value.is_none(),
                         action: prompt_action,
@@ -998,37 +1024,37 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
     let on_open = props.on_open;
 
     rsx! {
-        div { class: "flex h-dvh min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_50%_8%,rgba(124,58,237,0.12),transparent_32%),#09090b] text-zinc-100",
-            header { class: "flex shrink-0 items-center gap-2 px-5 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))]",
-                span { class: "text-sm font-semibold tracking-tight text-zinc-300", "Vmux" }
-                span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-emerald-400/15 bg-emerald-400/[0.06] px-2.5 py-1 text-[10px] font-medium text-emerald-300" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-white/[0.06] bg-white/[0.03] px-2.5 py-1 text-[10px] font-medium text-zinc-500" },
-                    span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-emerald-400" } else { "h-1.5 w-1.5 rounded-full bg-zinc-600" } }
+        div {
+            class: "relative isolate flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground",
+            style: START_BACKDROP_STYLE,
+            StartBackdrop {}
+            header { class: "flex shrink-0 items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
+                span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
+                span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.08] px-2.5 py-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
+                    span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-emerald-500" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
                     if props.paired { "Connected" } else { "Not connected" }
                 }
                 if props.paired {
                     button {
-                        class: "ml-2 rounded-lg px-2 py-1 text-xs text-zinc-500 active:bg-white/10",
+                        class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_disconnect.call(()),
                         "Disconnect"
                     }
                 }
             }
-            main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(2rem+env(safe-area-inset-bottom))]",
-                div { class: if props.paired { "mx-auto flex w-full max-w-3xl flex-col pt-20" } else { "mx-auto flex w-full max-w-md flex-col pt-14" },
-                    div { class: "flex flex-col items-center text-center",
-                        div { class: "mb-4 flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-br from-violet-500/80 to-cyan-400/80 text-sm font-bold text-white shadow-lg shadow-violet-950/40", "V" }
-                        h1 { class: "bg-gradient-to-b from-white to-white/55 bg-clip-text text-4xl font-semibold leading-none tracking-tight text-transparent", "vmux" }
-                        p { class: "mt-2 text-sm text-zinc-500", "Your work, wherever you are." }
-                    }
+            main { class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-14 sm:px-6 md:pt-20",
+                StartHero {
+                    mark: rsx! {
+                        div { class: "flex h-11 w-11 items-center justify-center rounded-2xl border border-border bg-gradient-to-br from-violet-500/80 to-cyan-400/80 text-sm font-bold text-white shadow-lg shadow-violet-950/40", "V" }
+                    },
                     if props.paired {
-                        div { class: "mt-8 w-full",
+                        div { class: "w-full",
                             PromptComposer {
                                 value: props.draft.clone(),
                                 placeholder: "Search or ask…".to_string(),
                                 accent_color: "#a78bfa".to_string(),
                                 accent_gradient: "from-violet-500 to-violet-700".to_string(),
-                                tone: PromptBoxTone::Dark,
                                 autofocus: true,
                                 show_attach: false,
                                 action: PromptComposerAction::Send,
@@ -1047,22 +1073,22 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                 on_action: move |_| submit_from_action.call(()),
                             }
                             if !props.error.is_empty() {
-                                div { class: "mt-3 rounded-xl border border-red-400/20 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200", "{props.error}" }
+                                div { class: "mt-3 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-xs leading-5 text-destructive", "{props.error}" }
                             }
                         }
-                        section { class: "mt-12",
+                        section { class: "mt-6 w-full",
                             div { class: "mb-3 flex items-center gap-2 px-1",
-                                h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500", "Stacks" }
-                                span { class: "rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] text-zinc-500", "{props.sessions.len()}" }
+                                h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground", "Stacks" }
+                                span { class: "rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground", "{props.sessions.len()}" }
                             }
                             div { class: "flex flex-col gap-2",
                                 if props.sessions.is_empty() {
-                                    div { class: "rounded-2xl border border-dashed border-white/10 px-4 py-8 text-center text-sm text-zinc-600", "No open stacks" }
+                                    div { class: "rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground", "No open stacks" }
                                 }
                                 for session in props.sessions.iter().cloned() {
                                     button {
                                         key: "{session.sid}",
-                                        class: "flex w-full items-center gap-3 rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-white/[0.065]",
+                                        class: "flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-accent",
                                         r#type: "button",
                                         onclick: {
                                             let next = session.clone();
@@ -1070,8 +1096,8 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                         },
                                         span { class: status_dot(&session.status) }
                                         div { class: "min-w-0 flex-1",
-                                            div { class: "truncate text-sm font-medium text-zinc-200", "{session.title}" }
-                                            div { class: "mt-1 truncate text-[11px] text-zinc-600",
+                                            div { class: "truncate text-sm font-medium text-card-foreground", "{session.title}" }
+                                            div { class: "mt-1 truncate text-[11px] text-muted-foreground",
                                                 "{session.name} · {session.runtime} · {cwd_name(&session.cwd)}"
                                                 if let Some(model) = session.model.as_ref() {
                                                     " · {model}"
@@ -1079,7 +1105,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                             }
                                         }
                                         svg {
-                                            class: "h-4 w-4 shrink-0 text-zinc-700",
+                                            class: "h-4 w-4 shrink-0 text-muted-foreground",
                                             view_box: "0 0 24 24",
                                             fill: "none",
                                             stroke: "currentColor",
@@ -1113,7 +1139,7 @@ fn AppHead() -> Element {
     rsx! {
         document::Title { "Vmux" }
         document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
-        document::Meta { name: "theme-color", content: "#09090b" }
+        document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }
     }
 }
@@ -1133,13 +1159,13 @@ fn PairCard(props: PairCardProps) -> Element {
     let mut show_link = use_signal(|| !props.value.trim().is_empty());
 
     rsx! {
-        div { class: "mt-10 w-full",
+        div { class: "w-full",
             div { class: "mb-5 text-center",
-                h2 { class: "text-base font-semibold text-zinc-200", "Connect to your Mac" }
-                p { class: "mt-1 text-xs leading-5 text-zinc-500", "In Vmux, open Remote and choose Connect device." }
+                h2 { class: "text-base font-semibold text-foreground", "Connect to your Mac" }
+                p { class: "mt-1 text-xs leading-5 text-muted-foreground", "In Vmux, open Remote and choose Connect device." }
             }
             button {
-                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-zinc-100 text-sm font-semibold text-zinc-950 shadow-xl shadow-black/20 active:scale-[0.99] active:bg-white",
+                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 active:scale-[0.99] active:bg-primary/90",
                 r#type: "button",
                 onclick: move |_| props.on_scan.call(()),
                 svg {
@@ -1162,20 +1188,20 @@ fn PairCard(props: PairCardProps) -> Element {
                 "Scan QR code"
             }
             button {
-                class: "mx-auto mt-4 block rounded-lg px-3 py-2 text-xs font-medium text-zinc-400 active:bg-white/[0.05] active:text-zinc-200",
+                class: "mx-auto mt-4 block rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground active:bg-accent active:text-accent-foreground",
                 r#type: "button",
                 onclick: move |_| show_link.set(!show_link()),
                 if show_link() { "Hide pairing link" } else { "Enter pairing link manually" }
             }
             if show_link() {
                 form {
-                    class: "mt-2 flex items-center gap-2 rounded-2xl border border-white/[0.08] bg-black/20 p-1.5",
+                    class: "mt-2 flex items-center gap-2 rounded-2xl border border-border bg-muted p-1.5",
                     onsubmit: move |event| {
                         event.prevent_default();
                         props.on_pair.call(());
                     },
                     input {
-                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-xs text-zinc-200 outline-none placeholder:text-zinc-600",
+                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground",
                         r#type: "url",
                         inputmode: "url",
                         autocomplete: "off",
@@ -1185,7 +1211,7 @@ fn PairCard(props: PairCardProps) -> Element {
                         oninput: move |event| props.on_value.call(event.value()),
                     }
                     button {
-                        class: "h-10 shrink-0 rounded-xl bg-white/[0.09] px-4 text-xs font-semibold text-zinc-200 disabled:opacity-50 active:bg-white/[0.14]",
+                        class: "h-10 shrink-0 rounded-xl bg-secondary px-4 text-xs font-semibold text-secondary-foreground disabled:opacity-50 active:bg-secondary/80",
                         r#type: "submit",
                         disabled: props.pairing,
                         if props.pairing { "Connecting…" } else { "Connect" }
@@ -1193,7 +1219,7 @@ fn PairCard(props: PairCardProps) -> Element {
                 }
             }
             if !props.error.is_empty() {
-                p { class: "mt-3 rounded-xl border border-red-400/10 bg-red-400/[0.04] px-3 py-2 text-xs leading-5 text-red-300", "{props.error}" }
+                p { class: "mt-3 rounded-xl border border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-xs leading-5 text-destructive", "{props.error}" }
             }
         }
     }

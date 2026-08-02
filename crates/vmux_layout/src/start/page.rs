@@ -3,6 +3,7 @@
 use dioxus::prelude::*;
 use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
+use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
@@ -49,29 +50,12 @@ pub fn Page(
         install_keep_input_focused_on_click();
     });
 
-    let reveal = if mounted() {
-        "opacity-100 blur-0 translate-y-0"
-    } else {
-        "opacity-0 blur-sm translate-y-4"
-    };
-
     rsx! {
         main {
-            class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-6 text-foreground",
-            style: "background-image:radial-gradient(140% 100% at 50% -12%, rgba(129,140,248,0.05), transparent 55%);",
-            div { class: "pointer-events-none absolute inset-0 -z-10 overflow-hidden",
-                div { class: "absolute left-1/2 top-[16%] h-[36rem] w-[36rem] -translate-x-1/2 rounded-full blur-[150px] dark:bg-indigo-500/15" }
-                div { class: "absolute left-[12%] top-1/3 h-80 w-80 rounded-full blur-[130px] dark:bg-cyan-400/10" }
-                div { class: "absolute right-[12%] top-1/4 h-80 w-80 rounded-full blur-[130px] dark:bg-violet-500/12" }
-                div { class: "absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-transparent to-transparent dark:from-black/40" }
-            }
-            div { class: "relative z-10 flex w-full max-w-3xl flex-col items-center gap-8 transition-all duration-700 ease-out motion-reduce:transition-none {reveal}",
-                div { class: "flex flex-col items-center gap-2",
-                    h1 { class: "bg-gradient-to-b from-foreground to-foreground/55 bg-clip-text text-6xl font-semibold leading-none tracking-tight text-transparent",
-                        "vmux"
-                    }
-                    p { class: "text-base text-muted-foreground", {translate("start-tagline")} }
-                }
+            class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground sm:px-6",
+            style: START_BACKDROP_STYLE,
+            StartBackdrop {}
+            StartHero { revealed: mounted(),
                 div { class: "relative w-full",
                     CommandPalette {
                         state,

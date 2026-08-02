@@ -1,149 +1,241 @@
-use std::time::Duration;
+use std::{net::IpAddr, time::Duration};
 
 use axum::http::StatusCode;
 use futures_util::StreamExt;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value;
+use vmux_remote::{DesktopCommand, DesktopCommandKind, DesktopResponse};
 
 use super::*;
 
 const SSE_BUFFER_LIMIT: usize = 2 * 1024 * 1024;
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
-#[derive(Debug, Deserialize)]
-struct DesktopCommand {
-    id: String,
-    kind: DesktopCommandKind,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum DesktopCommandKind {
-    ListSessions,
-    CreateChat { body: Value },
-    SendPrompt { sid: String, body: Value },
-    Cancel { sid: String },
-    Approve { sid: String, body: Value },
-    ListMedia { sid: String, query: String },
-    SubscribeSession { sid: String, stream_id: String },
-}
-
-#[derive(Debug, Serialize)]
-struct DesktopResponse {
-    status: u16,
-    body: Value,
+#[derive(Clone)]
+struct DesktopRelayClient {
+    http: reqwest::Client,
+    relay_url: String,
+    device_id: String,
+    state: RemoteState,
 }
 
 pub(super) fn spawn(state: RemoteState) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let client = reqwest::Client::new();
-        loop {
-            if !remote_enabled() {
-                tokio::time::sleep(RECONNECT_DELAY).await;
-                continue;
-            }
-            let Some(relay_url) = configured_relay_url() else {
-                tokio::time::sleep(RECONNECT_DELAY).await;
-                continue;
-            };
-            let device_id = match ensure_device_id() {
-                Ok(device_id) => device_id,
-                Err(error) => {
-                    tracing::warn!(%error, "remote relay: failed to create device id");
-                    tokio::time::sleep(RECONNECT_DELAY).await;
-                    continue;
+    DesktopRelayClient::run(state)
+}
+
+impl DesktopRelayClient {
+    fn run(state: RemoteState) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            loop {
+                match Self::from_config(state.clone()) {
+                    Ok(Some(client)) => {
+                        tracing::info!(
+                            relay_url = %client.relay_url,
+                            device_id = %client.device_id,
+                            "remote relay: connecting"
+                        );
+                        if let Err(error) = client.command_loop().await {
+                            tracing::warn!(%error, "remote relay: disconnected");
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => tracing::warn!(%error, "remote relay: failed to configure"),
                 }
-            };
-            tracing::info!(%relay_url, %device_id, "remote relay: connecting");
-            if let Err(error) = command_loop(&client, &relay_url, &device_id, state.clone()).await {
-                tracing::warn!(%error, "remote relay: disconnected");
+                tokio::time::sleep(RECONNECT_DELAY).await;
             }
-            tokio::time::sleep(RECONNECT_DELAY).await;
-        }
-    })
-}
-
-async fn command_loop(
-    client: &reqwest::Client,
-    relay_url: &str,
-    device_id: &str,
-    state: RemoteState,
-) -> Result<(), String> {
-    let endpoint = format!("{relay_url}/desktop/{device_id}/commands");
-    let response = client
-        .get(&endpoint)
-        .bearer_auth(state.token.as_ref())
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!(
-            "command stream returned HTTP {}",
-            response.status()
-        ));
+        })
     }
-    tracing::info!("remote relay: command stream open");
-    let mut parser = SseParser::default();
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| error.to_string())?;
-        for payload in parser.push(&chunk)? {
-            let command: DesktopCommand =
-                serde_json::from_str(&payload).map_err(|error| error.to_string())?;
-            let client = client.clone();
-            let relay_url = relay_url.to_string();
-            let device_id = device_id.to_string();
-            let state = state.clone();
-            tokio::spawn(async move {
-                handle_command(&client, &relay_url, &device_id, state, command).await;
-            });
+
+    fn from_config(state: RemoteState) -> Result<Option<Self>, String> {
+        if !remote_enabled() {
+            return Ok(None);
+        }
+        let Some(relay_url) = configured_relay_url() else {
+            return Ok(None);
+        };
+        let device_id =
+            ensure_device_id().map_err(|error| format!("failed to create device id: {error}"))?;
+        let http = relay_client(&relay_url)
+            .map_err(|error| format!("failed to create HTTP client: {error}"))?;
+        Ok(Some(Self {
+            http,
+            relay_url,
+            device_id,
+            state,
+        }))
+    }
+
+    async fn command_loop(&self) -> Result<(), String> {
+        let endpoint = format!("{}/desktop/{}/commands", self.relay_url, self.device_id);
+        let response = self
+            .http
+            .get(&endpoint)
+            .bearer_auth(self.state.token.as_ref())
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "command stream returned HTTP {}",
+                response.status()
+            ));
+        }
+        tracing::info!("remote relay: command stream open");
+        let mut parser = SseParser::default();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|error| error.to_string())?;
+            for payload in parser.push(&chunk)? {
+                let command: DesktopCommand =
+                    serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+                let client = self.clone();
+                tokio::spawn(async move {
+                    client.handle_command(command).await;
+                });
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_command(&self, command: DesktopCommand) {
+        let DesktopCommand { id, kind } = command;
+        let response = match kind {
+            DesktopCommandKind::ListSessions => list_sessions_response(self.state.clone()).await,
+            DesktopCommandKind::CreateChat { body } => {
+                create_chat_response(self.state.clone(), body).await
+            }
+            DesktopCommandKind::SendPrompt { sid, body } => {
+                send_prompt_response(self.state.clone(), sid, body).await
+            }
+            DesktopCommandKind::Cancel { sid } => cancel_response(self.state.clone(), sid).await,
+            DesktopCommandKind::Approve { sid, body } => {
+                approve_response(self.state.clone(), sid, body).await
+            }
+            DesktopCommandKind::ListMedia { sid, query } => {
+                list_media_response(self.state.clone(), sid, query).await
+            }
+            DesktopCommandKind::SubscribeSession { sid, stream_id } => {
+                self.subscribe_session(sid, stream_id).await;
+                return;
+            }
+        };
+        if let Err(error) = self.post_response(&id, &response).await {
+            tracing::warn!(%error, "remote relay: failed to post command response");
         }
     }
-    Ok(())
-}
 
-async fn handle_command(
-    client: &reqwest::Client,
-    relay_url: &str,
-    device_id: &str,
-    state: RemoteState,
-    command: DesktopCommand,
-) {
-    let token = state.token.clone();
-    let response = match command.kind {
-        DesktopCommandKind::ListSessions => list_sessions_response(state).await,
-        DesktopCommandKind::CreateChat { body } => create_chat_response(state, body).await,
-        DesktopCommandKind::SendPrompt { sid, body } => {
-            send_prompt_response(state, sid, body).await
-        }
-        DesktopCommandKind::Cancel { sid } => cancel_response(state, sid).await,
-        DesktopCommandKind::Approve { sid, body } => approve_response(state, sid, body).await,
-        DesktopCommandKind::ListMedia { sid, query } => {
-            list_media_response(state, sid, query).await
-        }
-        DesktopCommandKind::SubscribeSession { sid, stream_id } => {
-            subscribe_session(
-                client.clone(),
-                relay_url.to_string(),
-                device_id.to_string(),
-                state,
-                sid,
-                stream_id,
-            )
-            .await;
+    async fn post_response(
+        &self,
+        command_id: &str,
+        response: &DesktopResponse,
+    ) -> Result<(), reqwest::Error> {
+        let endpoint = format!(
+            "{}/desktop/{}/responses/{command_id}",
+            self.relay_url, self.device_id
+        );
+        self.http
+            .post(endpoint)
+            .bearer_auth(self.state.token.as_ref())
+            .json(response)
+            .send()
+            .await?;
+        Ok(())
+    }
+
+    async fn subscribe_session(&self, sid: String, stream_id: String) {
+        let Some((session, events, mut receiver)) = session_stream(&self.state, &sid).await else {
+            let _ = self
+                .post_stream_event(
+                    &stream_id,
+                    &RemoteEvent::Status {
+                        status: RemoteStatus::Errored("Session not found.".to_string()),
+                    },
+                )
+                .await;
             return;
+        };
+        let room_id = session.room_id.clone();
+        let through_seq = events
+            .last()
+            .map(|event| event.server_seq)
+            .unwrap_or_default();
+        let initial = [
+            RemoteEvent::Session { session },
+            RemoteEvent::Snapshot {
+                room_id,
+                through_seq,
+                events,
+            },
+        ];
+        for event in initial {
+            if self.post_stream_event(&stream_id, &event).await.is_err() {
+                return;
+            }
         }
-    };
-    let endpoint = format!("{relay_url}/desktop/{device_id}/responses/{}", command.id);
-    if let Err(error) = client
-        .post(endpoint)
-        .bearer_auth(token.as_ref())
-        .json(&response)
-        .send()
-        .await
-    {
-        tracing::warn!(%error, "remote relay: failed to post command response");
+        loop {
+            match receiver.recv().await {
+                Ok(message) => {
+                    if let Some(event) = service_event(&self.state, &sid, message).await
+                        && self.post_stream_event(&stream_id, &event).await.is_err()
+                    {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    if let Some(event) = session_snapshot(&self.state, &sid).await {
+                        let _ = self.post_stream_event(&stream_id, &event).await;
+                    }
+                }
+                Err(broadcast::error::RecvError::Closed) => return,
+            }
+        }
     }
+
+    async fn post_stream_event(
+        &self,
+        stream_id: &str,
+        event: &RemoteEvent,
+    ) -> Result<(), reqwest::Error> {
+        let endpoint = format!(
+            "{}/desktop/{}/streams/{stream_id}/events",
+            self.relay_url, self.device_id
+        );
+        self.http
+            .post(endpoint)
+            .bearer_auth(self.state.token.as_ref())
+            .json(event)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+}
+
+fn relay_client(relay_url: &str) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder();
+    if accepts_local_development_cert(relay_url) {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder.build().map_err(|error| error.to_string())
+}
+
+fn accepts_local_development_cert(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host == "localhost" {
+        return true;
+    }
+    host.parse::<IpAddr>().is_ok_and(|ip| match ip {
+        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
+    })
 }
 
 async fn list_sessions_response(state: RemoteState) -> DesktopResponse {
@@ -306,111 +398,6 @@ async fn list_media_response(state: RemoteState, sid: String, query: String) -> 
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
     json_response(StatusCode::OK, entries)
-}
-
-async fn subscribe_session(
-    client: reqwest::Client,
-    relay_url: String,
-    device_id: String,
-    state: RemoteState,
-    sid: String,
-    stream_id: String,
-) {
-    let Some((session, events, mut receiver)) = session_stream(&state, &sid).await else {
-        let _ = post_stream_event(
-            &client,
-            &relay_url,
-            &device_id,
-            &stream_id,
-            state.token.as_ref(),
-            &RemoteEvent::Status {
-                status: RemoteStatus::Errored("Session not found.".to_string()),
-            },
-        )
-        .await;
-        return;
-    };
-    let room_id = session.room_id.clone();
-    let through_seq = events
-        .last()
-        .map(|event| event.server_seq)
-        .unwrap_or_default();
-    let initial = [
-        RemoteEvent::Session { session },
-        RemoteEvent::Snapshot {
-            room_id,
-            through_seq,
-            events,
-        },
-    ];
-    for event in initial {
-        if post_stream_event(
-            &client,
-            &relay_url,
-            &device_id,
-            &stream_id,
-            state.token.as_ref(),
-            &event,
-        )
-        .await
-        .is_err()
-        {
-            return;
-        }
-    }
-    loop {
-        match receiver.recv().await {
-            Ok(message) => {
-                if let Some(event) = service_event(&state, &sid, message).await
-                    && post_stream_event(
-                        &client,
-                        &relay_url,
-                        &device_id,
-                        &stream_id,
-                        state.token.as_ref(),
-                        &event,
-                    )
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                if let Some(event) = session_snapshot(&state, &sid).await {
-                    let _ = post_stream_event(
-                        &client,
-                        &relay_url,
-                        &device_id,
-                        &stream_id,
-                        state.token.as_ref(),
-                        &event,
-                    )
-                    .await;
-                }
-            }
-            Err(broadcast::error::RecvError::Closed) => return,
-        }
-    }
-}
-
-async fn post_stream_event(
-    client: &reqwest::Client,
-    relay_url: &str,
-    device_id: &str,
-    stream_id: &str,
-    token: &str,
-    event: &RemoteEvent,
-) -> Result<(), reqwest::Error> {
-    let endpoint = format!("{relay_url}/desktop/{device_id}/streams/{stream_id}/events");
-    client
-        .post(endpoint)
-        .bearer_auth(token)
-        .json(event)
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(())
 }
 
 fn status_response(status: StatusCode) -> DesktopResponse {

@@ -13,17 +13,7 @@ pub use prompt_composer::{
 pub use prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 
 const PROMPT_BOX_ROOT: &str = "vmux-prompt-box relative flex items-center overflow-hidden rounded-2xl bg-white/45 p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-black/10 backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/55 focus-within:ring-black/20 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)] dark:bg-white/[0.045] dark:ring-white/[0.16] dark:focus-within:bg-white/[0.065] dark:focus-within:ring-white/25";
-const PROMPT_BOX_DARK_ROOT: &str = "vmux-prompt-box relative flex items-center overflow-hidden rounded-2xl bg-white/[0.045] p-1 shadow-[0_18px_55px_-24px_rgba(0,0,0,0.65),inset_0_1px_0_rgba(255,255,255,0.18),inset_0_-1px_0_rgba(255,255,255,0.04)] ring-1 ring-inset ring-white/[0.16] backdrop-blur-3xl backdrop-saturate-150 transition-all duration-200 focus-within:bg-white/[0.065] focus-within:ring-white/25 focus-within:shadow-[0_22px_65px_-24px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.22)]";
 const PROMPT_POPUP_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-foreground/10 bg-background/95 shadow-xl backdrop-blur-xl";
-const PROMPT_POPUP_DARK_ROOT: &str = "vmux-prompt-popup absolute left-0 z-20 max-h-80 w-full overflow-x-hidden overflow-y-auto rounded-2xl border border-white/10 bg-zinc-900/95 text-zinc-100 shadow-xl shadow-black/40 backdrop-blur-xl";
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-/// Color treatment for the shared prompt surface.
-pub enum PromptBoxTone {
-    #[default]
-    Adaptive,
-    Dark,
-}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 /// Placement of a prompt-related popup relative to its composer.
@@ -38,35 +28,19 @@ pub enum PromptPopupPlacement {
 /// Shared glass prompt surface used by desktop and mobile composers.
 pub fn PromptBox(
     #[props(default = true)] glass: bool,
-    #[props(default)] tone: PromptBoxTone,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let class = if glass {
-        match tone {
-            PromptBoxTone::Adaptive => PROMPT_BOX_ROOT,
-            PromptBoxTone::Dark => PROMPT_BOX_DARK_ROOT,
-        }
-    } else {
-        ""
-    };
+    let class = if glass { PROMPT_BOX_ROOT } else { "" };
     let base = attributes!(div {
         class,
         "data-slot": "prompt-box",
     });
     let merged = merge_attributes(vec![base, attributes]);
-    let highlight_class = match tone {
-        PromptBoxTone::Adaptive => {
-            "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]"
-        }
-        PromptBoxTone::Dark => {
-            "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.10] via-white/[0.025] to-transparent"
-        }
-    };
     rsx! {
         div { ..merged,
             if glass {
-                div { class: highlight_class }
+                div { class: "pointer-events-none absolute inset-px rounded-[0.9rem] bg-gradient-to-b from-white/[0.12] via-white/[0.025] to-transparent dark:from-white/[0.10]" }
                 div { class: "pointer-events-none absolute -left-12 -top-12 h-24 w-72 rotate-[-5deg] rounded-full bg-white/[0.09] blur-2xl" }
             }
             {children}
@@ -78,14 +52,10 @@ pub fn PromptBox(
 /// Shared popup surface for prompt suggestions and selectors.
 pub fn PromptPopup(
     #[props(default)] placement: PromptPopupPlacement,
-    #[props(default)] tone: PromptBoxTone,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let root = match tone {
-        PromptBoxTone::Adaptive => PROMPT_POPUP_ROOT,
-        PromptBoxTone::Dark => PROMPT_POPUP_DARK_ROOT,
-    };
+    let root = PROMPT_POPUP_ROOT;
     let class = match placement {
         PromptPopupPlacement::Upward => {
             format!("{root} vmux-prompt-popup-upward bottom-full mb-2")
@@ -164,7 +134,7 @@ pub fn AssistantTurn(
 pub fn TextBlock(text: String) -> Element {
     rsx! {
         div {
-            class: "min-w-0 break-words px-0.5 text-sm leading-6 text-[var(--foreground,#f4f4f5)] [&_a]:text-violet-400 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-500/30 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-zinc-500/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.82em] [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:font-semibold [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-black/25 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5",
+            class: "min-w-0 break-words px-0.5 text-sm leading-6 text-foreground [&_a]:text-violet-400 [&_a]:underline [&_blockquote]:my-3 [&_blockquote]:border-l-2 [&_blockquote]:border-zinc-500/30 [&_blockquote]:pl-3 [&_code]:rounded [&_code]:bg-zinc-500/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.82em] [&_h1]:mb-3 [&_h1]:mt-5 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:mt-4 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-3 [&_h3]:font-semibold [&_li]:my-1 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-3 [&_p:last-child]:mb-0 [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-foreground/[0.06] [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5",
             dangerous_inner_html: markdown_html(&text),
         }
     }

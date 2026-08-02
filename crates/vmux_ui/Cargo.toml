@@ -11,10 +11,18 @@ default = []
 gallery = ["dep:regex", "dep:sha2"]
 
 [dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false }
 fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 unic-langid = { workspace = true }
+vmux_chat_ui = { path = "../vmux_chat_ui" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sys-locale = { workspace = true }
@@ -41,7 +49,6 @@ web-sys = { version = "0.3", features = [
     "ScrollIntoViewOptions", "ScrollLogicalPosition",
 ] }
 dioxus = { workspace = true }
-vmux_chat_ui = { path = "../vmux_chat_ui" }
 time = { version = "0.3", default-features = false, features = [
     "wasm-bindgen",
 ] }
