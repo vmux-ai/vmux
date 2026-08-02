@@ -419,6 +419,49 @@ pub fn ensure_installed(
     }
 }
 
+/// Published versions for an agent's npx package, newest-first (capped). Best-effort: returns
+/// empty for native/uvx agents or when the registry can't be queried, so callers fall back to
+/// free-text entry. Reads metadata only — never downloads a tarball or a managed runtime, so it
+/// works even when a specific tarball is blocked by a registry security policy.
+pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
+    match agent.preferred_runtime() {
+        acp_registry::Runtime::Node => agent
+            .distribution
+            .npx
+            .as_ref()
+            .map(|dist| npm_versions(&dist.package))
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// `npm view <package> versions --json`, newest-first. Prefers the managed Node's `npm`, falling
+/// back to a `PATH` `npm`; uses the user's npm config (so it honors their registry/proxy).
+fn npm_versions(package: &str) -> Vec<String> {
+    let npm = node_bindir(&store_root())
+        .map(|bindir| bindir.join("npm"))
+        .filter(|npm| npm.exists())
+        .unwrap_or_else(|| PathBuf::from("npm"));
+    let output = match std::process::Command::new(&npm)
+        .args(["view", package, "versions", "--json"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output.stdout,
+        _ => return Vec::new(),
+    };
+    let mut versions: Vec<String> = match serde_json::from_slice(&output) {
+        Ok(serde_json::Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        Ok(serde_json::Value::String(one)) => vec![one],
+        _ => return Vec::new(),
+    };
+    versions.reverse();
+    versions.truncate(100);
+    versions
+}
+
 #[allow(clippy::too_many_arguments)]
 fn install_binary(
     agent: &RegistryAgent,

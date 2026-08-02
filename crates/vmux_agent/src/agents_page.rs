@@ -80,6 +80,30 @@ impl Default for AgentsInstallChannel {
     }
 }
 
+/// Published-version lists per agent id, fetched lazily in the background so the version selector
+/// can offer a dropdown. `requested` guards against re-fetching an agent every catalog push.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
+struct AgentVersions {
+    fetched: HashMap<String, Vec<String>>,
+    requested: HashSet<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource)]
+struct AgentVersionsChannel {
+    tx: Sender<(String, Vec<String>)>,
+    rx: Receiver<(String, Vec<String>)>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for AgentVersionsChannel {
+    fn default() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Self { tx, rx }
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentsManagerPlugin;
 
@@ -99,6 +123,8 @@ impl Plugin for AgentsManagerPlugin {
         app.init_resource::<AgentsPageWebviews>()
             .init_resource::<AgentsStatus>()
             .init_resource::<AgentsInstallChannel>()
+            .init_resource::<AgentVersions>()
+            .init_resource::<AgentVersionsChannel>()
             .init_resource::<AcpInstallGeneration>()
             .add_plugins(BinEventEmitterPlugin::<(
                 AgentsCatalogRequest,
@@ -110,7 +136,15 @@ impl Plugin for AgentsManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_open_request)
-            .add_systems(Update, (push_agents, drain_agent_installs));
+            .add_systems(
+                Update,
+                (
+                    kick_off_version_fetches,
+                    drain_version_fetches,
+                    push_agents,
+                    drain_agent_installs,
+                ),
+            );
     }
 }
 
@@ -131,6 +165,7 @@ fn catalog_snapshot(
     catalog: &AcpCatalog,
     status: &AgentsStatus,
     acp_configs: &[vmux_setting::AcpAgentConfig],
+    versions: &AgentVersions,
 ) -> AgentsCatalog {
     let mut agents: Vec<AgentEntry> = catalog
         .agents
@@ -167,6 +202,7 @@ fn catalog_snapshot(
                 status: st,
                 detail,
                 pinned_version,
+                available_versions: versions.fetched.get(&a.id).cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -199,6 +235,7 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
                 },
                 detail: String::new(),
                 pinned_version: String::new(),
+                available_versions: Vec::new(),
             }
         })
         .collect()
@@ -335,6 +372,42 @@ fn drain_agent_installs(
     }
 }
 
+/// For each npx registry agent not yet queried, spawn a background `npm view` to populate its
+/// version list. Runs when the catalog (re)loads; `requested` guards one fetch per agent.
+#[cfg(not(target_arch = "wasm32"))]
+fn kick_off_version_fetches(
+    catalog: Res<AcpCatalog>,
+    channel: Res<AgentVersionsChannel>,
+    mut versions: ResMut<AgentVersions>,
+) {
+    if !catalog.is_changed() {
+        return;
+    }
+    for agent in &catalog.agents {
+        if !matches!(agent.preferred_runtime(), Runtime::Node) {
+            continue;
+        }
+        if !versions.requested.insert(agent.id.clone()) {
+            continue;
+        }
+        let agent = agent.clone();
+        let tx = channel.tx.clone();
+        std::thread::spawn(move || {
+            let list = crate::acp_install::fetch_package_versions(&agent);
+            let _ = tx.send((agent.id, list));
+        });
+    }
+}
+
+/// Fold completed version fetches into the cache; the resulting change re-pushes the catalog so
+/// the selector becomes a dropdown.
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMut<AgentVersions>) {
+    while let Ok((id, list)) = channel.rx.try_recv() {
+        versions.fetched.insert(id, list);
+    }
+}
+
 /// Push the catalog (with per-agent status) whenever it (re)loads, status changes, or a page
 /// requests it.
 #[cfg(not(target_arch = "wasm32"))]
@@ -342,12 +415,17 @@ fn push_agents(
     catalog: Res<AcpCatalog>,
     status: Res<AgentsStatus>,
     webviews: Res<AgentsPageWebviews>,
+    versions: Res<AgentVersions>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
     let settings_changed = settings.as_ref().is_some_and(|s| s.is_changed());
-    if !catalog.is_changed() && !status.is_changed() && !webviews.is_changed() && !settings_changed
+    if !catalog.is_changed()
+        && !status.is_changed()
+        && !webviews.is_changed()
+        && !versions.is_changed()
+        && !settings_changed
     {
         return;
     }
@@ -355,7 +433,7 @@ fn push_agents(
         .as_ref()
         .map(|s| s.agent.acp.as_slice())
         .unwrap_or(&[]);
-    let payload = catalog_snapshot(&catalog, &status, acp_configs);
+    let payload = catalog_snapshot(&catalog, &status, acp_configs, &versions);
     for &webview in &webviews.0 {
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
             continue;
@@ -462,7 +540,12 @@ mod tests {
             cwd: None,
             version: Some("0.11.0".into()),
         }];
-        let snapshot = catalog_snapshot(&catalog, &AgentsStatus::default(), &acp);
+        let snapshot = catalog_snapshot(
+            &catalog,
+            &AgentsStatus::default(),
+            &acp,
+            &AgentVersions::default(),
+        );
         let row = snapshot
             .agents
             .iter()

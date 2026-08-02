@@ -153,19 +153,39 @@ fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &s
     });
 }
 
-/// A version-pin input, shown only for npx/uvx agents (native binaries can't be pinned).
+/// A version-pin control, shown only for npx/uvx agents (native binaries can't be pinned). Renders
+/// a dropdown of published versions when they've been fetched, else a free-text fallback (so it
+/// still works before the fetch lands or when the registry can't be queried).
 fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
     let id = agent.id.clone();
+    if agent.available_versions.is_empty() {
+        return rsx! {
+            input {
+                class: "w-20 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] placeholder:text-muted-foreground focus:outline-none",
+                r#type: "text",
+                spellcheck: "false",
+                autocomplete: "off",
+                value: "{agent.pinned_version}",
+                placeholder: translate("agents-version-latest"),
+                title: translate("agents-version-hint"),
+                oninput: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            }
+        };
+    }
     rsx! {
-        input {
-            class: "w-20 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] placeholder:text-muted-foreground focus:outline-none",
-            r#type: "text",
-            spellcheck: "false",
-            autocomplete: "off",
-            value: "{agent.pinned_version}",
-            placeholder: translate("agents-version-latest"),
+        select {
+            class: "w-24 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
             title: translate("agents-version-hint"),
-            oninput: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            onchange: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            option { value: "", selected: agent.pinned_version.is_empty(), {translate("agents-version-latest")} }
+            for version in agent.available_versions.iter() {
+                option {
+                    key: "{version}",
+                    value: "{version}",
+                    selected: version == &agent.pinned_version,
+                    "{version}"
+                }
+            }
         }
     }
 }

@@ -49,6 +49,9 @@ pub struct AgentEntry {
     pub detail: String,
     /// Pinned package version for npx/uvx agents (`""` = latest). Editable on the page.
     pub pinned_version: String,
+    /// Published versions (newest-first) offered in the version selector. Empty = not (yet)
+    /// fetched or unavailable; the page falls back to free-text entry.
+    pub available_versions: Vec<String>,
 }
 
 /// Page → native: the page mounted and wants the catalog pushed to it.
