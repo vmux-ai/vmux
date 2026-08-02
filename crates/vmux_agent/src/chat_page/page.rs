@@ -1607,8 +1607,7 @@ pub fn Page(
                                         div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
                                             p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
                                             button {
-                                                class: "inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
-                                                style: "border: 1.5px solid transparent; background: linear-gradient(transparent, transparent) padding-box, linear-gradient(135deg, #6366f1, #a855f7, #ec4899) border-box;",
+                                                class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
                                                 onclick: move |_| {
                                                     let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
                                                 },

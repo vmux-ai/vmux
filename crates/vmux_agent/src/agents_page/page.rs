@@ -172,7 +172,6 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
             }
         };
     }
-    let status = agent.status.clone();
     // "latest" tracks npm's latest dist-tag: the newest *released* version. Prereleases (semver
     // build suffix, e.g. `-prerelease.5`) are not what `@latest` installs, so skip them here.
     let latest = agent
@@ -191,14 +190,7 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
         select {
             class: "w-32 truncate rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
             title: translate("agents-version-hint"),
-            onchange: move |event: FormEvent| {
-                let version = event.value();
-                set_pinned_version(agents, &id, &version);
-                if matches!(status.as_str(), "installed" | "update") {
-                    set_status(agents, &id, "installing", &translate("agents-updating"));
-                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version });
-                }
-            },
+            onchange: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
             option { value: "", selected: agent.pinned_version.is_empty(), "{latest_label}" }
             for version in agent.available_versions.iter().filter(|version| *version != &latest) {
                 option {
@@ -226,11 +218,14 @@ fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) ->
     let id = agent.id.clone();
     let install_id = agent.id.clone();
     let uninstall_id = agent.id.clone();
+    let apply_id = agent.id.clone();
     let launch_url = agent.launch_url.clone();
     let source = agent.source.clone();
     let update_version = agent.pinned_version.clone();
     let install_version = agent.pinned_version.clone();
-    // Agents that render a version selector don't need a redundant "Installed" label next to it.
+    let apply_version = agent.pinned_version.clone();
+    // Agents that render a version selector don't need a redundant "Installed" label next to it,
+    // but they do need an explicit way to apply a version change after picking one.
     let has_version_selector =
         agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     match agent.status.as_str() {
@@ -238,6 +233,16 @@ fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) ->
         "installed" => rsx! {
             if !has_version_selector {
                 span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+            }
+            if has_version_selector {
+                ManagerButton {
+                    variant: ManagerButtonVariant::Primary,
+                    onclick: move |_| {
+                        set_status(agents, &apply_id, "installing", &translate("agents-updating"));
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: apply_id.clone(), version: apply_version.clone() });
+                    },
+                    {translate("agents-apply-version")}
+                }
             }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
