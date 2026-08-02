@@ -47,8 +47,12 @@ pub struct AgentEntry {
     pub status: String,
     /// Progress text (while installing) or error message.
     pub detail: String,
-    /// Pinned package version for npx/uvx agents (`""` = latest). Editable on the page.
+    /// Pinned package version for npx/uvx agents (`""` = latest). Reflects the dropdown selection;
+    /// edited in place on the page.
     pub pinned_version: String,
+    /// The applied/installed version (`""` = latest) at push time — the immutable baseline the
+    /// dropdown starts from. The "Apply" button shows only while `pinned_version` differs from it.
+    pub installed_version: String,
     /// Published versions (newest-first) offered in the version selector. Empty = not (yet)
     /// fetched or unavailable; the page falls back to free-text entry.
     pub available_versions: Vec<String>,

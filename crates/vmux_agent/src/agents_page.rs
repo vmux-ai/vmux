@@ -201,6 +201,7 @@ fn catalog_snapshot(
                 .to_string(),
                 status: st,
                 detail,
+                installed_version: pinned_version.clone(),
                 pinned_version,
                 available_versions: versions.fetched.get(&a.id).cloned().unwrap_or_default(),
             }
@@ -235,6 +236,7 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
                 },
                 detail: String::new(),
                 pinned_version: String::new(),
+                installed_version: String::new(),
                 available_versions: Vec::new(),
             }
         })

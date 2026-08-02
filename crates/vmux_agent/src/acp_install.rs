@@ -49,11 +49,22 @@ fn write_agent_receipt(
     .map_err(|e| e.to_string())
 }
 
+/// The package name without a trailing `@version`, keeping a leading scope `@`. The ACP registry
+/// may ship a version baked into the package (`@scope/name@1.1.9`); stripping it lets us re-pin
+/// cleanly instead of producing an invalid double spec (`@scope/name@1.1.9@1.1.8`).
+fn package_base(package: &str) -> &str {
+    match package.rfind('@') {
+        Some(at) if at > 0 => &package[..at],
+        _ => package,
+    }
+}
+
 /// The package argument for `npx`/`uvx`, optionally pinned to a version (`<package>@<version>`).
-/// A blank version means "latest" (the bare package name).
+/// A blank version means "latest" (the registry's package as-is, including any baked version); a
+/// pin replaces any baked version rather than appending to it.
 fn package_spec(package: &str, version: Option<&str>) -> String {
     match version.map(str::trim) {
-        Some(v) if !v.is_empty() => format!("{package}@{v}"),
+        Some(v) if !v.is_empty() => format!("{}@{v}", package_base(package)),
         _ => package.to_string(),
     }
 }
@@ -429,7 +440,7 @@ pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
             .distribution
             .npx
             .as_ref()
-            .map(|dist| npm_versions(&dist.package))
+            .map(|dist| npm_versions(package_base(&dist.package)))
             .unwrap_or_default(),
         _ => Vec::new(),
     }
@@ -549,6 +560,19 @@ mod tests {
         );
         assert_eq!(package_spec("pkg", Some("  ")), "pkg");
         assert_eq!(package_spec("pkg", Some("1.0.0")), "pkg@1.0.0");
+    }
+
+    #[test]
+    fn package_spec_replaces_a_baked_registry_version() {
+        // The registry may ship a versioned package; pinning must replace, not append.
+        assert_eq!(
+            package_spec("@scope/pkg@1.1.9", Some("1.1.8")),
+            "@scope/pkg@1.1.8"
+        );
+        assert_eq!(package_spec("pkg@1.1.9", Some("1.1.8")), "pkg@1.1.8");
+        // No pin keeps the registry's package (including its baked version) untouched.
+        assert_eq!(package_spec("@scope/pkg@1.1.9", None), "@scope/pkg@1.1.9");
+        assert_eq!(package_base("@scope/pkg"), "@scope/pkg");
     }
 
     #[test]

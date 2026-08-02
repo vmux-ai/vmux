@@ -234,7 +234,7 @@ fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) ->
             if !has_version_selector {
                 span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
             }
-            if has_version_selector {
+            if has_version_selector && agent.pinned_version != agent.installed_version {
                 ManagerButton {
                     variant: ManagerButtonVariant::Primary,
                     onclick: move |_| {

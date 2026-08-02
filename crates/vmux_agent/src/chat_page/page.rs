@@ -106,11 +106,21 @@ fn copy_to_clipboard(text: &str) {
 /// policy, forbidden version) — where the fix is usually pinning a different version.
 fn is_version_error(message: &str) -> bool {
     let lower = message.to_lowercase();
-    lower.contains("403")
-        || lower.contains("forbidden")
-        || lower.contains("security policy")
-        || lower.contains("blocked")
-        || lower.contains("eacces")
+    [
+        "403",
+        "404",
+        "forbidden",
+        "security policy",
+        "blocked",
+        "eacces",
+        "invalid tag",
+        "einvalidtagname",
+        "etarget",
+        "no matching version",
+        "notarget",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
