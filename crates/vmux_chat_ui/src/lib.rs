@@ -589,14 +589,64 @@ fn CodePanel(value: String) -> Element {
     }
 }
 
+/// Whether a markdown link or image destination is safe to emit as an `href`/`src`.
+///
+/// Relative destinations carry no scheme and are always safe. Everything else must match a
+/// known-inert scheme: `javascript:` and `data:` reach script execution once the rendered
+/// HTML lands in `dangerous_inner_html`. Whitespace and control characters are stripped
+/// first because browsers ignore them when resolving a scheme, so `java&#9;script:`
+/// dispatches exactly like `javascript:`.
+fn is_safe_markdown_url(url: &str) -> bool {
+    let stripped = url
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .collect::<String>();
+    let Some(colon) = stripped.find(':') else {
+        return true;
+    };
+    let scheme = &stripped[..colon];
+    if scheme.contains(['/', '?', '#']) {
+        return true;
+    }
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "mailto"
+    )
+}
+
 fn markdown_html(markdown: &str) -> String {
-    use pulldown_cmark::Event;
+    use pulldown_cmark::{Event, Tag};
 
     let parser = pulldown_cmark::Parser::new_ext(
         markdown,
         pulldown_cmark::Options::ENABLE_STRIKETHROUGH | pulldown_cmark::Options::ENABLE_TABLES,
     )
-    .filter(|event| !matches!(event, Event::Html(_) | Event::InlineHtml(_)));
+    .filter(|event| !matches!(event, Event::Html(_) | Event::InlineHtml(_)))
+    .map(|event| match event {
+        Event::Start(Tag::Link {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) if !is_safe_markdown_url(&dest_url) => Event::Start(Tag::Link {
+            link_type,
+            dest_url: "".into(),
+            title,
+            id,
+        }),
+        Event::Start(Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        }) if !is_safe_markdown_url(&dest_url) => Event::Start(Tag::Image {
+            link_type,
+            dest_url: "".into(),
+            title,
+            id,
+        }),
+        other => other,
+    });
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, parser);
     html
@@ -775,6 +825,35 @@ mod tests {
         let html = markdown_html("**safe**<script>alert('x')</script>");
         assert!(html.contains("<strong>safe</strong>"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn markdown_neutralizes_script_bearing_urls() {
+        for source in [
+            "[x](javascript:alert(1))",
+            "[x](JaVaScRiPt:alert(1))",
+            "[x](java\tscript:alert(1))",
+            "<javascript:alert(1)>",
+            "![x](data:text/html;base64,PHNjcmlwdD4=)",
+            "![x](vbscript:msgbox)",
+        ] {
+            let html = markdown_html(source);
+            let lowered = html.to_ascii_lowercase();
+            assert!(
+                !lowered.contains("=\"javascript")
+                    && !lowered.contains("=\"vbscript")
+                    && !lowered.contains("=\"data:"),
+                "{source} rendered an executable destination: {html}"
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_keeps_benign_urls() {
+        assert!(markdown_html("[x](https://vmux.ai/docs)").contains("https://vmux.ai/docs"));
+        assert!(markdown_html("[x](mailto:hi@vmux.ai)").contains("mailto:hi@vmux.ai"));
+        assert!(markdown_html("[x](./relative/path.md)").contains("./relative/path.md"));
+        assert!(markdown_html("![x](https://vmux.ai/a.png)").contains("https://vmux.ai/a.png"));
     }
 
     #[test]
