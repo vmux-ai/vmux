@@ -151,6 +151,10 @@ pub struct AcpShared {
     /// Recent lines from the agent subprocess's stderr, surfaced in startup/connection errors so
     /// the user sees the real cause (e.g. an npm registry failure) instead of a silent hang.
     stderr_tail: Mutex<VecDeque<String>>,
+    /// Set once the session is established (handshake + `session/new` done). Until then, the
+    /// subprocess dying is a startup failure to surface immediately rather than waiting out the
+    /// handshake timeout.
+    startup_ready: AtomicBool,
 }
 
 impl AcpShared {
@@ -179,7 +183,16 @@ impl AcpShared {
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
             stderr_tail: Mutex::new(VecDeque::new()),
+            startup_ready: AtomicBool::new(false),
         }
+    }
+
+    fn mark_startup_ready(&self) {
+        self.startup_ready.store(true, Ordering::SeqCst);
+    }
+
+    fn startup_ready(&self) -> bool {
+        self.startup_ready.load(Ordering::SeqCst)
     }
 
     pub fn snapshot_message(&self) -> ServiceMessage {
@@ -953,6 +966,7 @@ pub async fn run(
                     }
                 }
             }
+            main_shared.mark_startup_ready();
             main_shared.emit_status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
@@ -1320,6 +1334,15 @@ async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");
         shared.push_stderr(line);
+    }
+    // stderr closed = the subprocess exited. If that happens before the session is established
+    // (e.g. `npx` fails with a registry 403), surface it now instead of waiting out the handshake
+    // timeout so the GUI stops showing "Starting agent…" immediately.
+    if !shared.startup_ready() {
+        shared.emit_status(AgentRunStatus::Errored(format!(
+            "agent exited during startup{}",
+            shared.stderr_detail()
+        )));
     }
 }
 

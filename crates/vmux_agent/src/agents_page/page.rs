@@ -172,13 +172,31 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
             }
         };
     }
+    let status = agent.status.clone();
+    let newest = agent
+        .available_versions
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let latest_label = if newest.is_empty() {
+        translate("agents-version-latest")
+    } else {
+        format!("{} ({newest})", translate("agents-version-latest"))
+    };
     rsx! {
         select {
-            class: "w-24 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
+            class: "w-28 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
             title: translate("agents-version-hint"),
-            onchange: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
-            option { value: "", selected: agent.pinned_version.is_empty(), {translate("agents-version-latest")} }
-            for version in agent.available_versions.iter() {
+            onchange: move |event: FormEvent| {
+                let version = event.value();
+                set_pinned_version(agents, &id, &version);
+                if matches!(status.as_str(), "installed" | "update") {
+                    set_status(agents, &id, "installing", &translate("agents-updating"));
+                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version });
+                }
+            },
+            option { value: "", selected: agent.pinned_version.is_empty(), "{latest_label}" }
+            for version in agent.available_versions.iter().filter(|version| *version != &newest) {
                 option {
                     key: "{version}",
                     value: "{version}",
@@ -208,10 +226,15 @@ fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) ->
     let source = agent.source.clone();
     let update_version = agent.pinned_version.clone();
     let install_version = agent.pinned_version.clone();
+    // Agents that render a version selector don't need a redundant "Installed" label next to it.
+    let has_version_selector =
+        agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     match agent.status.as_str() {
         "installing" => rsx! { ManagerSpinner { detail: agent.detail.clone() } },
         "installed" => rsx! {
-            span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+            if !has_version_selector {
+                span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+            }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
