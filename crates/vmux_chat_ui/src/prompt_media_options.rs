@@ -1,7 +1,5 @@
 use dioxus::prelude::*;
 
-use crate::PromptBoxTone;
-
 /// One selectable Mac file or directory in the prompt media menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptMediaOption {
@@ -19,46 +17,25 @@ pub fn PromptMediaOptions(
     items: Vec<PromptMediaOption>,
     selected: usize,
     loading: bool,
-    #[props(default)] tone: PromptBoxTone,
     #[props(default = "Loading media…".to_string())] loading_label: String,
     #[props(default = "No matching media".to_string())] empty_label: String,
     on_select: EventHandler<usize>,
     on_hover: EventHandler<usize>,
 ) -> Element {
-    let muted_class = match tone {
-        PromptBoxTone::Adaptive => "text-muted-foreground",
-        PromptBoxTone::Dark => "text-zinc-500",
-    };
     if loading {
         return rsx! {
-            div { class: "px-3.5 py-2 text-sm {muted_class}", "{loading_label}" }
+            div { class: "px-3.5 py-2 text-sm text-muted-foreground", "{loading_label}" }
         };
     }
     if items.is_empty() {
         return rsx! {
-            div { class: "px-3.5 py-2 text-sm {muted_class}", "{empty_label}" }
+            div { class: "px-3.5 py-2 text-sm text-muted-foreground", "{empty_label}" }
         };
     }
 
-    let selected_class = match tone {
-        PromptBoxTone::Adaptive => {
-            "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2"
-        }
-        PromptBoxTone::Dark => "flex cursor-pointer items-center gap-3 bg-white/10 px-3.5 py-2",
-    };
+    let selected_class = "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2";
     let item_class = "flex cursor-pointer items-center gap-3 px-3.5 py-2";
-    let preview_class = match tone {
-        PromptBoxTone::Adaptive => {
-            "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10"
-        }
-        PromptBoxTone::Dark => {
-            "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/[0.06] text-zinc-500 ring-1 ring-inset ring-white/10"
-        }
-    };
-    let name_class = match tone {
-        PromptBoxTone::Adaptive => "truncate text-sm text-foreground",
-        PromptBoxTone::Dark => "truncate text-sm text-zinc-100",
-    };
+    let preview_class = "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10";
 
     rsx! {
         for (index, item) in items.iter().cloned().enumerate() {
@@ -92,8 +69,8 @@ pub fn PromptMediaOptions(
                     }
                 }
                 div { class: "min-w-0 flex-1",
-                    div { class: name_class, "{item.name}" }
-                    div { class: "truncate text-xs {muted_class}", "{item.display_path}" }
+                    div { class: "truncate text-sm text-foreground", "{item.name}" }
+                    div { class: "truncate text-xs text-muted-foreground", "{item.display_path}" }
                 }
             }
         }

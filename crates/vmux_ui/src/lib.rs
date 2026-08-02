@@ -29,13 +29,10 @@ mod listener_guard;
 #[cfg(target_arch = "wasm32")]
 pub mod hooks;
 
-#[cfg(target_arch = "wasm32")]
 pub mod components;
 
-#[cfg(target_arch = "wasm32")]
 pub mod util;
 
-#[cfg(target_arch = "wasm32")]
 pub mod dioxus_ext {
     pub use dioxus_primitives::dioxus_attributes::attributes;
     pub use dioxus_primitives::merge_attributes;

@@ -11413,6 +11413,7 @@ dependencies = [
  "url",
  "vmux_chat_ui",
  "vmux_remote",
+ "vmux_ui",
 ]
 
 [[package]]

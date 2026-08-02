@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use unicode_segmentation::UnicodeSegmentation;
 pub use vmux_wire::protocol::AgentAttachment;
 use vmux_wire::protocol::AgentRunStatus;
@@ -40,6 +41,31 @@ string_id!(MemberId);
 string_id!(EventId);
 string_id!(ClientOpId);
 string_id!(DeviceId);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DesktopCommand {
+    pub id: String,
+    pub kind: DesktopCommandKind,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DesktopCommandKind {
+    ListSessions,
+    CreateChat { body: Value },
+    SendPrompt { sid: String, body: Value },
+    Cancel { sid: String },
+    Approve { sid: String, body: Value },
+    ListMedia { sid: String, query: String },
+    SubscribeSession { sid: String, stream_id: String },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct DesktopResponse {
+    pub status: u16,
+    #[serde(default)]
+    pub body: Value,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
