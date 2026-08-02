@@ -5,9 +5,10 @@ use crate::prelude::{
 use crate::util::{IntoString, v8_value_to_json};
 use cef::rc::{Rc, RcImpl};
 use cef::{
-    CefString, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Context, ImplV8Handler,
-    ImplV8Value, ProcessId, V8Value, WrapV8Handler, binary_value_create, process_message_create,
-    sys, v8_context_get_current_context, v8_value_create_promise, v8_value_create_string,
+    CefString, ImplBrowser, ImplFrame, ImplListValue, ImplProcessMessage, ImplV8Context,
+    ImplV8Handler, ImplV8Value, ProcessId, V8Value, WrapV8Handler, binary_value_create,
+    process_message_create, sys, v8_context_get_current_context, v8_value_create_promise,
+    v8_value_create_string,
 };
 use cef_dll_sys::cef_process_id_t;
 use std::os::raw::c_int;
@@ -241,11 +242,12 @@ impl CefApiHandler {
             && id.is_string().is_positive()
             && let Some(Some(callback)) = arguments.get(1)
             && callback.is_function().is_positive()
+            && let Some(browser) = context.browser()
         {
-            LISTEN_EVENTS
-                .lock()
-                .unwrap()
-                .insert(id.string_value().into_string(), callback.clone());
+            LISTEN_EVENTS.lock().unwrap().insert(
+                (browser.identifier(), id.string_value().into_string()),
+                callback.clone(),
+            );
             crate::util::webview_debug_log("render cef.listen registered");
         }
         1

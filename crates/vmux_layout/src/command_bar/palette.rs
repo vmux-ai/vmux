@@ -1693,15 +1693,14 @@ fn try_focus_command_bar_input_once() -> bool {
         let input: web_sys::HtmlInputElement = el.unchecked_into();
         input.focus().ok();
     }
-    document.has_focus().unwrap_or(false) && active_is_input
+    document.has_focus().unwrap_or(false)
+        && document
+            .active_element()
+            .map(|active| active.id() == COMMAND_BAR_INPUT_ID)
+            .unwrap_or(false)
 }
 
-/// Keep asking for focus once per animation frame until the document actually holds it.
-///
-/// CEF grants an OSR browser keyboard focus a frame or more after the page mounts, so both the
-/// `autofocus` attribute and a single `focus()` call land too early and are dropped — no caret
-/// appears and typing goes nowhere. Chromium reports the dropped attribute as "Autofocus
-/// processing was blocked because a document already has a focused element".
+/// Keep asking for focus until the document actually holds it.
 fn focus_command_bar_input_retry(window: web_sys::Window, frames_left: u32) {
     let retry_window = window.clone();
     let cb = Closure::once(move || {
@@ -1711,7 +1710,9 @@ fn focus_command_bar_input_retry(window: web_sys::Window, frames_left: u32) {
             set_command_bar_focus_pending(&retry_window, false);
         }
     });
-    match window.request_animation_frame(cb.as_ref().unchecked_ref()) {
+    match window
+        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 16)
+    {
         Ok(_) => cb.forget(),
         Err(_) => set_command_bar_focus_pending(&window, false),
     }

@@ -667,7 +667,9 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         if pointer_position_changed && let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        let layout_pointer = pointer_position_changed
+        let over_command_bar =
+            location.is_some_and(|(x, y)| vmux_browser::native_command_bar_contains_point(x, y));
+        let layout_pointer = (pointer_position_changed && !over_command_bar)
             .then(|| {
                 location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
             })
@@ -676,6 +678,24 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             && let Some((x_px, y_px)) = location
         {
             vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
+        }
+        // The command bar is the frontmost sibling `NSView`, so AppKit routes pointer events to it
+        // by itself. Hand-delivering them to `window.firstResponder()` and swallowing skips
+        // `NSWindow.sendEvent:`, which is what drives Chromium's tracking areas, cursor updates and
+        // mouse-down loop — the events arrive but nothing responds. Only the layout OSR overlay
+        // needs synthetic injection, and `over_command_bar` already excludes the bar from that.
+        if button_event {
+            bevy::log::info!(
+                ?event_type,
+                ?location,
+                over_command_bar,
+                bar_open = vmux_browser::native_command_bar_is_open(),
+                "command bar mouse monitor decision"
+            );
+        }
+        if over_command_bar {
+            local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+            return event.as_ptr();
         }
         if motion {
             let interval = if event_type == NSEventType::MouseMoved {

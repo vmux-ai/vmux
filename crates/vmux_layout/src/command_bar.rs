@@ -15,4 +15,6 @@ pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod shortcut;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod state;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod work_snapshot;

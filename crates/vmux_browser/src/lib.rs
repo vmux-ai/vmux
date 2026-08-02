@@ -43,6 +43,7 @@ use vmux_core::{
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
 use vmux_layout::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
+use vmux_layout::command_bar::state::{CommandBarState, CommandBarStateQuery};
 use vmux_layout::event::SideSheetCommandEvent;
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -329,10 +330,12 @@ impl Plugin for BrowserPlugin {
                 (
                     sync_keyboard_target,
                     sync_windowed_content_mesh_materials,
+                    sync_modal_mesh_visibility,
                     sync_children_to_ui,
                     sync_windowed_layout,
                     sync_windowed_frames,
                     sync_windowed_command_bar,
+                    flush_native_command_bar_pointer_events,
                     apply_repaint_nudge,
                     sync_cef_webview_resize_after_ui,
                     sync_webview_pane_corner_clip,
@@ -357,6 +360,10 @@ impl Plugin for BrowserPlugin {
             .init_resource::<PendingNavSnapshots>()
             .init_resource::<RecentBrowserInteraction>()
             .init_resource::<HostSpawnRegistry>()
+            .add_systems(
+                PreUpdate,
+                log_command_bar_keyboard_input.after(bevy_cef::prelude::CefKeyboardInputSet),
+            )
             .add_systems(Update, track_browser_interaction)
             .add_systems(
                 PostUpdate,
@@ -370,6 +377,20 @@ impl Plugin for BrowserPlugin {
                     .after(sync_windowed_frames)
                     .after(sync_windowed_command_bar),
             );
+    }
+}
+
+fn log_command_bar_keyboard_input(
+    mut events: MessageReader<KeyboardInput>,
+    modal_q: CommandBarStateQuery,
+) {
+    if !vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+        return;
+    }
+    for event in events.read() {
+        if event.state == ButtonState::Pressed {
+            bevy::log::info!(key = ?event.key_code, repeat = event.repeat, "command bar keyboard received");
+        }
     }
 }
 
@@ -911,27 +932,16 @@ fn dismiss_windowed_command_bar_on_outside_click(
     mut events: MessageReader<MouseButtonInput>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    modal_q: Query<
-        (
-            Entity,
-            &Node,
-            &Visibility,
-            Has<CefKeyboardTarget>,
-            Option<&HostWindow>,
-            Option<&CommandBarNativeSize>,
-        ),
-        (With<Modal>, With<WebviewWindowed>),
-    >,
+    modal_q: Query<(Entity, Option<&HostWindow>), (With<Modal>, With<WebviewWindowed>)>,
     mut commands: Commands,
 ) {
-    let Ok((modal_e, node, visibility, has_keyboard_target, host_window, native_size)) =
-        modal_q.single()
-    else {
+    let Ok((modal_e, host_window)) = modal_q.single() else {
         for _ in events.read() {}
         return;
     };
-    let open =
-        command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
+    // Read the same published rectangle the AppKit monitor tests against. Recomputing it here
+    // gave one click two different answers depending on which path saw it first.
+    let route = native_command_bar_route();
     let window_entity = host_window
         .map(|h| h.0)
         .or_else(|| primary_window.single().ok());
@@ -943,12 +953,6 @@ fn dismiss_windowed_command_bar_on_outside_click(
         for _ in events.read() {}
         return;
     };
-    let frame = command_bar_windowed_frame(
-        window.resolution.physical_width() as f32,
-        window.resolution.physical_height() as f32,
-        window.resolution.scale_factor(),
-        native_size.map(|size| Vec2::new(size.width, size.height)),
-    );
     for event in events.read() {
         if event.window != window_entity {
             continue;
@@ -956,8 +960,13 @@ fn dismiss_windowed_command_bar_on_outside_click(
         let cursor = window
             .physical_cursor_position()
             .map(|pos| Vec2::new(pos.x, pos.y));
-        if command_bar_windowed_click_should_dismiss(open, event.button, event.state, cursor, frame)
-        {
+        if command_bar_windowed_click_should_dismiss(
+            route.owns_input,
+            event.button,
+            event.state,
+            cursor,
+            route.frame,
+        ) {
             commands.trigger(BinReceive::<CommandBarActionEvent> {
                 webview: modal_e,
                 payload: CommandBarActionEvent {
@@ -1010,7 +1019,7 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<Modal>>,
     bookmark_input_q: Query<
         Entity,
         (
@@ -1026,7 +1035,15 @@ fn sync_keyboard_target(
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
     mut commands: Commands,
 ) {
-    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+    if let Some(modal) = modal_q.iter().find_map(|(entity, node, keyboard_target)| {
+        (node.display != Display::None && keyboard_target).then_some(entity)
+    }) {
+        for (browser_e, has_kb) in &content_q {
+            if browser_e != modal && has_kb {
+                commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
+            }
+        }
+        suppress.0 = false;
         return;
     }
 
@@ -1400,6 +1417,23 @@ fn sync_windowed_content_mesh_materials(
     }
 }
 
+fn sync_modal_mesh_visibility(
+    modal_q: Query<
+        (
+            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
+            Has<WebviewWindowed>,
+        ),
+        With<Modal>,
+    >,
+    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
+) {
+    for (handle, windowed) in &modal_q {
+        if let Some(mut material) = materials.get_mut(handle.id()) {
+            set_windowed_content_mesh_material(&mut material, windowed);
+        }
+    }
+}
+
 /// The layout renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
 /// frame, so it tracks a live window resize (a native overlay cannot — its frame only updates from a
 /// Bevy schedule the macOS resize loop starves). Keep the material visible.
@@ -1445,12 +1479,11 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
-    let target_windowed =
-        |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
+    let target_windowed = |is_layout: bool, _is_modal: bool| base_windowed && !is_layout;
     let target_native_overlay = |is_layout: bool, is_modal: bool| {
         cfg!(target_os = "macos")
             && mode == vmux_layout::scene::InteractionMode::User
-            && (is_layout || is_modal)
+            && (is_layout || (is_modal && !base_windowed))
     };
     let target_native_direct_overlay = |is_layout: bool| {
         cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
@@ -1771,6 +1804,16 @@ fn sync_windowed_frames(
             );
             let changed = last_raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible {
+                bevy::log::info!(
+                    ?entity,
+                    ?pane_entity,
+                    ?pane_frame,
+                    ?header_frame,
+                    visible_pane_count,
+                    ?frame,
+                    scale,
+                    "native page frame changed"
+                );
                 browsers.raise_windowed_to_front(&entity);
             }
         }
@@ -1879,11 +1922,14 @@ fn windowed_page_frame_rect(
     let Some(header) = header else {
         return pane;
     };
-    if layout_hidden || visible_pane_count != 1 {
+    if layout_hidden {
         return pane;
     }
-    let left = header.left.ceil();
-    let right = header.right().floor();
+    let (left, right) = if visible_pane_count == 1 {
+        (header.left.ceil(), header.right().floor())
+    } else {
+        (pane.left.ceil(), pane.right().floor())
+    };
     let top = header.bottom().ceil().max(pane.top.ceil());
     let bottom = pane.bottom().floor();
     if right <= left || bottom <= top {
@@ -2175,7 +2221,7 @@ fn refresh_active_windowed_hover(
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    modal_q: CommandBarStateQuery,
     active_q: Query<
         (
             Entity,
@@ -2346,7 +2392,7 @@ fn sync_layout_cef_frame_rate(
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct CommandBarWindowedFrame {
     left_px: f32,
     top_px: f32,
@@ -2354,15 +2400,82 @@ struct CommandBarWindowedFrame {
     height_px: f32,
 }
 
-const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-/// `zPosition` for the windowed command bar, above the layout overlay (`zPosition` 100) so
-/// the sidebar/header/stack panel never covers it.
-const COMMAND_BAR_NATIVE_Z: f64 = 200.0;
-static NATIVE_COMMAND_BAR_CLICK_FRAME: LazyLock<Mutex<Option<CommandBarWindowedFrame>>> =
-    LazyLock::new(|| Mutex::new(None));
-static NATIVE_COMMAND_BAR_OPEN: AtomicBool = AtomicBool::new(false);
+/// One consistent view of the command bar for the AppKit event thread.
+///
+/// The `NSEvent` monitor samples this on every key and mouse event, at arbitrary points relative to
+/// the Bevy frame that wrote it. Publishing openness, hit frame, and scale as a single value stops
+/// it observing a combination no frame ever produced — a stored frame left behind by a closed bar
+/// used to turn clicks inside that rectangle into dismiss requests.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct CommandBarRoute {
+    generation: u64,
+    owns_input: bool,
+    /// Present only while the surface is on screen; a revealing bar has no clickable rectangle.
+    frame: Option<CommandBarWindowedFrame>,
+    scale: f32,
+}
+
+static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
+    LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
+#[cfg(target_os = "macos")]
+static NATIVE_COMMAND_BAR_POINTER_EVENTS: LazyLock<Mutex<Vec<NativeCommandBarPointerEvent>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
+
+fn native_command_bar_route() -> CommandBarRoute {
+    *NATIVE_COMMAND_BAR_ROUTE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn publish_native_command_bar_route(
+    owns_input: bool,
+    frame: Option<CommandBarWindowedFrame>,
+    scale: f32,
+) {
+    let mut stored = NATIVE_COMMAND_BAR_ROUTE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let generation = stored.generation.wrapping_add(1);
+    *stored = CommandBarRoute {
+        generation,
+        owns_input,
+        frame,
+        scale,
+    };
+    if !owns_input {
+        NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
+    }
+}
+
+pub fn native_command_bar_is_open() -> bool {
+    native_command_bar_route().owns_input
+}
+
+#[cfg(target_os = "macos")]
+pub fn native_command_bar_contains_point(x_px: f32, y_px: f32) -> bool {
+    native_command_bar_local_position(x_px, y_px).is_some()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn native_command_bar_contains_point(_: f32, _: f32) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy)]
+enum NativeCommandBarPointerEvent {
+    Move {
+        position: Vec2,
+        buttons: NativeMouseButtons,
+    },
+    Button {
+        position: Vec2,
+        button: PointerButton,
+        released: bool,
+    },
+}
 
 pub fn set_native_left_mouse_down(down: bool) {
     NATIVE_LEFT_MOUSE_DOWN.store(down, Ordering::Relaxed);
@@ -2372,11 +2485,70 @@ pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
 }
 
+#[cfg(target_os = "macos")]
+fn native_command_bar_local_position(x_px: f32, y_px: f32) -> Option<Vec2> {
+    let route = native_command_bar_route();
+    if !route.owns_input {
+        return None;
+    }
+    let frame = route
+        .frame
+        .filter(|frame| command_bar_windowed_frame_contains(*frame, Vec2::new(x_px, y_px)))?;
+    let scale = route.scale.max(1.0e-6);
+    Some(Vec2::new(
+        (x_px - frame.left_px) / scale,
+        (y_px - frame.top_px) / scale,
+    ))
+}
+
+#[cfg(target_os = "macos")]
+pub fn queue_native_command_bar_pointer_move(
+    x_px: f32,
+    y_px: f32,
+    buttons: NativeMouseButtons,
+) -> bool {
+    let Some(position) = native_command_bar_local_position(x_px, y_px) else {
+        return false;
+    };
+    NATIVE_COMMAND_BAR_POINTER_EVENTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(NativeCommandBarPointerEvent::Move { position, buttons });
+    true
+}
+
+#[cfg(target_os = "macos")]
+pub fn queue_native_command_bar_pointer_button(
+    x_px: f32,
+    y_px: f32,
+    button: u8,
+    released: bool,
+) -> bool {
+    let Some(position) = native_command_bar_local_position(x_px, y_px) else {
+        return false;
+    };
+    let button = match button {
+        1 => PointerButton::Secondary,
+        2 => PointerButton::Middle,
+        _ => PointerButton::Primary,
+    };
+    NATIVE_COMMAND_BAR_POINTER_EVENTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(NativeCommandBarPointerEvent::Button {
+            position,
+            button,
+            released,
+        });
+    true
+}
+
 fn command_bar_windowed_frame(
     window_width_px: f32,
     window_height_px: f32,
     scale: f32,
     measured_size: Option<Vec2>,
+    bounds: Option<WindowedFrameRect>,
 ) -> Option<CommandBarWindowedFrame> {
     if !window_width_px.is_finite()
         || !window_height_px.is_finite()
@@ -2394,20 +2566,29 @@ fn command_bar_windowed_frame(
     const MIN_H: f32 = 56.0;
     const FALLBACK_H: f32 = 360.0;
 
-    let win_w = window_width_px / scale;
-    let win_h = window_height_px / scale;
-    let top = win_h * 0.15;
-    let available_w = (win_w - MARGIN * 2.0).max(1.0);
+    let window_bounds = WindowedFrameRect {
+        left: 0.0,
+        top: 0.0,
+        width: window_width_px,
+        height: window_height_px,
+    };
+    let bounds = bounds.unwrap_or(window_bounds);
+    let area_left = bounds.left / scale;
+    let area_top = bounds.top / scale;
+    let area_w = bounds.width / scale;
+    let area_h = bounds.height / scale;
+    let top = area_top + area_h * 0.15;
+    let available_w = (area_w - MARGIN * 2.0).max(1.0);
     let min_w = MIN_W.min(available_w);
     let box_w = available_w.min(MAX_W).max(min_w);
-    let available_h = (win_h - top - MARGIN).max(1.0);
+    let available_h = (area_top + area_h - top - MARGIN).max(1.0);
     let min_h = MIN_H.min(available_h);
     let measured_h = measured_size
         .map(|size| size.y)
         .filter(|height| height.is_finite() && *height > 0.0)
         .unwrap_or(FALLBACK_H);
     let box_h = measured_h.min(available_h).max(min_h);
-    let box_x = ((win_w - box_w) * 0.5).max(0.0);
+    let box_x = area_left + ((area_w - box_w) * 0.5).max(0.0);
 
     Some(CommandBarWindowedFrame {
         left_px: box_x * scale,
@@ -2417,27 +2598,41 @@ fn command_bar_windowed_frame(
     })
 }
 
-fn command_bar_hidden_windowed_frame() -> CommandBarWindowedFrame {
-    CommandBarWindowedFrame {
-        left_px: 0.0,
-        top_px: 0.0,
-        width_px: 1.0,
-        height_px: 1.0,
+fn windowed_frames_union(frames: &[WindowedFrameRect]) -> Option<WindowedFrameRect> {
+    let first = *frames.first()?;
+    let mut left = first.left;
+    let mut top = first.top;
+    let mut right = first.right();
+    let mut bottom = first.bottom();
+    for frame in &frames[1..] {
+        left = left.min(frame.left);
+        top = top.min(frame.top);
+        right = right.max(frame.right());
+        bottom = bottom.max(frame.bottom());
     }
+    Some(WindowedFrameRect {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn native_windowed_page_bounds() -> Option<WindowedFrameRect> {
+    let frames = NATIVE_WINDOWED_PAGE_FRAMES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    windowed_frames_union(&frames)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn native_windowed_page_bounds() -> Option<WindowedFrameRect> {
+    None
 }
 
 fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
-    let frame = command_bar_hidden_windowed_frame();
     browsers.set_windowed_hidden(&entity, true);
-    browsers.resize(&entity, Vec2::new(frame.width_px, frame.height_px), 1.0);
-    browsers.set_windowed_frame(
-        &entity,
-        frame.left_px,
-        frame.top_px,
-        frame.width_px,
-        frame.height_px,
-        1.0,
-    );
 }
 
 fn command_bar_windowed_click_should_dismiss(
@@ -2463,18 +2658,8 @@ fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: V
         && cursor.y <= frame.top_px + frame.height_px
 }
 
-fn set_native_command_bar_click_frame(frame: Option<CommandBarWindowedFrame>) {
-    let mut stored = NATIVE_COMMAND_BAR_CLICK_FRAME
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *stored = frame;
-    if frame.is_none() {
-        NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
-    }
-}
-
 pub fn request_native_command_bar_dismiss() -> bool {
-    if !NATIVE_COMMAND_BAR_OPEN.load(Ordering::Relaxed) {
+    if !native_command_bar_route().owns_input {
         return false;
     }
     NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
@@ -2485,10 +2670,11 @@ pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -
     if !x_px.is_finite() || !y_px.is_finite() {
         return false;
     }
-    let frame = *NATIVE_COMMAND_BAR_CLICK_FRAME
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(frame) = frame else {
+    let route = native_command_bar_route();
+    if !route.owns_input {
+        return false;
+    }
+    let Some(frame) = route.frame else {
         return false;
     };
     if command_bar_windowed_frame_contains(frame, Vec2::new(x_px, y_px)) {
@@ -2502,24 +2688,14 @@ pub fn take_native_command_bar_dismiss_requested() -> bool {
     NATIVE_COMMAND_BAR_DISMISS_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
-fn command_bar_windowed_view_should_show(
-    display: Display,
-    visibility: Visibility,
-    has_keyboard_target: bool,
-) -> bool {
-    display != Display::None && visibility != Visibility::Hidden && has_keyboard_target
-}
-
-fn command_bar_windowed_view_is_open(display: Display, has_keyboard_target: bool) -> bool {
-    display != Display::None && has_keyboard_target
-}
-
+/// The surface exists but must stay off screen — either prewarmed before any open, or revealing
+/// while the page paints. Both keep the native view alive and parked outside the window so it can
+/// still hold first responder.
 fn command_bar_windowed_view_should_render_hidden(
     display: Display,
     visibility: Visibility,
-    has_keyboard_target: bool,
 ) -> bool {
-    display != Display::None && visibility == Visibility::Hidden && has_keyboard_target
+    display != Display::None && visibility == Visibility::Hidden
 }
 
 fn sync_windowed_command_bar(
@@ -2536,6 +2712,7 @@ fn sync_windowed_command_bar(
         ),
         With<Modal>,
     >,
+    native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut was_open: Local<bool>,
@@ -2544,47 +2721,54 @@ fn sync_windowed_command_bar(
     let Ok((entity, node, visibility, has_keyboard_target, is_windowed, host_window, native_size)) =
         matched
     else {
-        NATIVE_COMMAND_BAR_OPEN.store(false, Ordering::Relaxed);
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(false, None, 1.0);
         *was_open = false;
         return;
     };
-    let open =
-        command_bar_windowed_view_should_show(node.display, *visibility, has_keyboard_target);
-    NATIVE_COMMAND_BAR_OPEN.store(
-        command_bar_windowed_view_is_open(node.display, has_keyboard_target),
-        Ordering::Relaxed,
-    );
-    let render_hidden = command_bar_windowed_view_should_render_hidden(
-        node.display,
-        *visibility,
-        has_keyboard_target,
-    );
+    let state = CommandBarState::from_modal(node.display, *visibility, has_keyboard_target);
+    let open = state.is_shown();
+    let owns_input = state.owns_input();
+    let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
+    if open != *was_open {
+        bevy::log::info!(
+            ?entity,
+            open,
+            render_hidden,
+            is_windowed,
+            has_keyboard_target,
+            visibility = ?*visibility,
+            native_size = ?native_size.map(|size| (size.width, size.height, size.shell_width, size.shell_height)),
+            has_browser = browsers.has_browser(entity),
+            host_emit_ready = browsers.host_emit_ready(&entity),
+            native_focus = ?browsers.windowed_has_native_focus(&entity),
+            "command bar native state changed"
+        );
+    }
     if !open && !render_hidden {
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
-            browsers.set_windowed_focus(&entity, false);
+            browsers.set_windowed_renderer_focus(&entity, false);
             hide_windowed_command_bar(&browsers, entity);
         }
         *was_open = false;
         return;
     }
     if !browsers.has_browser(entity) {
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(owns_input, None, 1.0);
         return;
     }
     let window_entity = host_window
         .map(|h| h.0)
         .or_else(|| primary_window.single().ok());
     let Some(window_entity) = window_entity else {
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
             hide_windowed_command_bar(&browsers, entity);
         }
         return;
     };
     let Ok(window) = windows.get(window_entity) else {
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
             hide_windowed_command_bar(&browsers, entity);
         }
@@ -2602,38 +2786,61 @@ fn sync_windowed_command_bar(
         } else {
             None
         };
-        set_native_command_bar_click_frame(frame);
+        publish_native_command_bar_route(owns_input, frame, scale);
         *was_open = open;
         return;
     }
     if render_hidden {
-        set_native_command_bar_click_frame(None);
-        let frame = command_bar_hidden_windowed_frame();
-        browsers.set_windowed_focus(&entity, false);
-        browsers.set_windowed_hidden(&entity, false);
-        browsers.resize(&entity, Vec2::new(frame.width_px, frame.height_px), 1.0);
+        publish_native_command_bar_route(owns_input, None, scale);
+        let Some(frame) = command_bar_windowed_frame(
+            window.resolution.physical_width() as f32,
+            window.resolution.physical_height() as f32,
+            scale,
+            native_size.map(|size| Vec2::new(size.shell_width, size.shell_height)),
+            native_windowed_page_bounds(),
+        ) else {
+            hide_windowed_command_bar(&browsers, entity);
+            return;
+        };
+        // A revealing bar already owns input, so keep the renderer focused; only a prewarmed,
+        // never-opened surface gets unfocused here.
+        if !owns_input {
+            browsers.set_windowed_renderer_focus(&entity, false);
+        }
+        browsers.resize(
+            &entity,
+            Vec2::new(frame.width_px / scale, frame.height_px / scale),
+            scale,
+        );
         browsers.set_windowed_frame(
             &entity,
-            frame.left_px,
-            frame.top_px,
+            -frame.width_px - 16.0 * scale,
+            -frame.height_px - 16.0 * scale,
             frame.width_px,
             frame.height_px,
-            1.0,
+            scale,
         );
+        browsers.set_windowed_hidden(&entity, false);
+        *was_open = false;
         return;
     }
-    let measured = native_size.map(|size| Vec2::new(size.width, size.height));
+    let measured = native_size.map(|size| Vec2::new(size.shell_width, size.shell_height));
     let Some(frame) = command_bar_windowed_frame(
         window.resolution.physical_width() as f32,
         window.resolution.physical_height() as f32,
         scale,
         measured,
+        native_windowed_page_bounds(),
     ) else {
-        set_native_command_bar_click_frame(None);
+        publish_native_command_bar_route(owns_input, None, scale);
         hide_windowed_command_bar(&browsers, entity);
         return;
     };
-    set_native_command_bar_click_frame(Some(frame));
+    publish_native_command_bar_route(owns_input, Some(frame), scale);
+
+    if !*was_open {
+        bevy::log::info!(?entity, ?frame, scale, "command bar native frame shown");
+    }
 
     browsers.set_windowed_frame(
         &entity,
@@ -2643,23 +2850,85 @@ fn sync_windowed_command_bar(
         frame.height_px,
         scale,
     );
-    browsers.set_windowed_corner_radius(&entity, COMMAND_BAR_NATIVE_RADIUS_PX * scale, scale, true);
     browsers.resize(
         &entity,
         Vec2::new(frame.width_px / scale, frame.height_px / scale),
         scale,
     );
     browsers.set_windowed_hidden(&entity, false);
+    // Frontmost sibling wins AppKit hit-testing; the raise is a no-op once it already is.
+    // Nothing else touches this view's layer — `setWantsLayer`, `zPosition`, `cornerRadius` and
+    // `masksToBounds` all mutate Chromium's own layer tree, which leaves the view painting its
+    // background and nothing else. The page draws the rounded shell itself.
     browsers.raise_windowed_to_front(&entity);
-    // The layout (sidebar/header/stack panel) composites as a native overlay at zPosition
-    // 100; raise alone (subview order) leaves the command bar under it. Lift it above.
-    browsers.set_windowed_z_position(&entity, COMMAND_BAR_NATIVE_Z);
-    browsers.set_windowed_focus(&entity, true);
-    if !*was_open {
+    // Focus the renderer, but leave AppKit first responder with winit. Keyboard reaches windowed
+    // browsers through `CefKeyboardTarget` forwarding, which needs winit to see the keystroke
+    // first; taking first responder here starves that path without replacing it.
+    browsers.set_windowed_renderer_focus(&entity, true);
+    if !*was_open || native_size_changed.contains(entity) {
         browsers.nudge_windowed_repaint(&entity);
+        browsers.log_windowed_input_state(&entity);
+        // TEMPORARY: ask the page whether the renderer sees input at all. Everything native checks
+        // out (frontmost, hit-tested, focused, first responder), so the remaining fork is whether
+        // Chromium delivers events to the renderer or whether only DOM focus is wrong.
+        browsers.execute_js(
+            &entity,
+            r#"(function(){
+if (window.__vmuxProbe) { return; }
+window.__vmuxProbe = 1;
+var log = function(m) { console.log('VMUXPROBE ' + m); };
+var describe = function(el) { return el ? (el.id || el.tagName) : 'none'; };
+log('installed hasFocus=' + document.hasFocus() + ' active=' + describe(document.activeElement));
+['pointerdown', 'mousedown', 'click', 'keydown', 'focusin'].forEach(function(type) {
+  window.addEventListener(type, function(event) {
+    log(type + ' target=' + describe(event.target) + ' hasFocus=' + document.hasFocus() + ' active=' + describe(document.activeElement));
+  }, true);
+});
+})();"#,
+        );
         *was_open = true;
     }
 }
+
+#[cfg(target_os = "macos")]
+fn flush_native_command_bar_pointer_events(
+    browsers: NonSend<Browsers>,
+    modal_q: Query<Entity, (With<Modal>, With<WebviewWindowed>)>,
+) {
+    let Ok(entity) = modal_q.single() else {
+        return;
+    };
+    let events = {
+        let mut pending = NATIVE_COMMAND_BAR_POINTER_EVENTS
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        std::mem::take(&mut *pending)
+    };
+    for event in events {
+        match event {
+            NativeCommandBarPointerEvent::Move { position, buttons } => {
+                browsers.send_native_mouse_move(&entity, buttons, position, false);
+            }
+            NativeCommandBarPointerEvent::Button {
+                position,
+                button,
+                released,
+            } => {
+                bevy::log::info!(
+                    ?entity,
+                    ?position,
+                    ?button,
+                    released,
+                    "command bar native pointer forwarded"
+                );
+                browsers.send_mouse_click(&entity, position, button, released);
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn flush_native_command_bar_pointer_events() {}
 
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
     for entity in &ready {
@@ -5746,6 +6015,34 @@ mod tests {
     }
 
     #[test]
+    fn open_command_bar_is_exclusive_cef_keyboard_target() {
+        let mut app = App::new();
+        app.insert_resource(vmux_layout::scene::InteractionMode::User)
+            .init_resource::<vmux_layout::stack::FocusedStack>()
+            .insert_resource(CefSuppressKeyboardInput(true))
+            .add_systems(Update, sync_keyboard_target);
+        let page = app.world_mut().spawn((Browser, CefKeyboardTarget)).id();
+        let modal = app
+            .world_mut()
+            .spawn((
+                Browser,
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                CefKeyboardTarget,
+            ))
+            .id();
+
+        app.update();
+
+        assert!(app.world().get::<CefKeyboardTarget>(modal).is_some());
+        assert!(app.world().get::<CefKeyboardTarget>(page).is_none());
+        assert!(!app.world().resource::<CefSuppressKeyboardInput>().0);
+    }
+
+    #[test]
     fn layout_shell_is_auxiliary_osr_focus_target() {
         let active = Entity::from_bits(1);
         let layout = Entity::from_bits(2);
@@ -6158,6 +6455,34 @@ mod tests {
     }
 
     #[test]
+    fn split_pane_windowed_frame_starts_below_header_without_changing_width() {
+        let pane = WindowedFrameRect {
+            left: 610.2,
+            top: 24.0,
+            width: 560.6,
+            height: 720.0,
+        };
+        let header = WindowedFrameRect {
+            left: 150.0,
+            top: 24.0,
+            width: 1020.0,
+            height: 72.2,
+        };
+
+        let frame = windowed_page_frame_rect(pane, Some(header), false, 2);
+
+        assert_eq!(
+            frame,
+            WindowedFrameRect {
+                left: 611.0,
+                top: 97.0,
+                width: 559.0,
+                height: 647.0,
+            }
+        );
+    }
+
+    #[test]
     fn windowed_frame_hit_test_uses_physical_page_bounds() {
         let frame = WindowedFrameRect {
             left: 100.0,
@@ -6252,7 +6577,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_and_command_bar_osr_for_native_overlays() {
+    fn browser_mode_keeps_layout_osr_and_windows_command_bar() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -6262,7 +6587,6 @@ mod tests {
 
         assert!(backend_fn.contains("Has<LayoutCef>"));
         assert!(backend_fn.contains("Has<Modal>"));
-        assert!(backend_fn.contains("!is_layout && !is_modal"));
         assert!(backend_fn.contains("WebviewNativeOverlay"));
         assert!(backend_fn.contains("target_native_direct_overlay"));
     }
@@ -6296,7 +6620,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
+    fn browser_mode_keeps_layout_osr_and_windows_modal_and_pages_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -6336,15 +6660,15 @@ mod tests {
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -6395,16 +6719,16 @@ mod tests {
                 .is_some(),
             cfg!(target_os = "macos")
         );
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert!(
             app.world()
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -6603,7 +6927,8 @@ mod tests {
     #[test]
     fn command_bar_windowed_frame_uses_measured_height() {
         let frame =
-            command_bar_windowed_frame(1600.0, 1000.0, 2.0, Some(Vec2::new(500.0, 220.0))).unwrap();
+            command_bar_windowed_frame(1600.0, 1000.0, 2.0, Some(Vec2::new(500.0, 220.0)), None)
+                .unwrap();
 
         assert!((frame.left_px - 224.0).abs() < 0.01);
         assert!((frame.top_px - 150.0).abs() < 0.01);
@@ -6614,10 +6939,33 @@ mod tests {
     #[test]
     fn command_bar_windowed_frame_clamps_height_to_window() {
         let frame =
-            command_bar_windowed_frame(800.0, 500.0, 1.0, Some(Vec2::new(500.0, 1000.0))).unwrap();
+            command_bar_windowed_frame(800.0, 500.0, 1.0, Some(Vec2::new(500.0, 1000.0)), None)
+                .unwrap();
 
         assert!((frame.top_px - 75.0).abs() < 0.01);
         assert!((frame.height_px - 409.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn command_bar_windowed_frame_centers_in_page_workspace() {
+        let frame = command_bar_windowed_frame(
+            1600.0,
+            1000.0,
+            2.0,
+            Some(Vec2::new(500.0, 220.0)),
+            Some(WindowedFrameRect {
+                left: 300.0,
+                top: 100.0,
+                width: 1200.0,
+                height: 800.0,
+            }),
+        )
+        .unwrap();
+
+        assert!((frame.left_px - 332.0).abs() < 0.01);
+        assert!((frame.top_px - 220.0).abs() < 0.01);
+        assert!((frame.width_px - 1136.0).abs() < 0.01);
+        assert!((frame.height_px - 440.0).abs() < 0.01);
     }
 
     #[test]
@@ -6904,94 +7252,75 @@ mod tests {
         assert!(refresh_fn.contains("return;"));
     }
 
+    /// One test, because every case here mutates the process-wide published route and the test
+    /// runner is multi-threaded.
     #[test]
-    fn native_command_bar_mouse_down_outside_requests_dismiss() {
-        set_native_command_bar_click_frame(Some(CommandBarWindowedFrame {
+    fn published_route_is_the_only_source_of_command_bar_hit_state() {
+        let frame = CommandBarWindowedFrame {
             left_px: 100.0,
             top_px: 50.0,
             width_px: 200.0,
             height_px: 100.0,
-        }));
+        };
+
+        let before = native_command_bar_route().generation;
+        publish_native_command_bar_route(true, Some(frame), 2.0);
+        let published = native_command_bar_route();
+        assert_eq!(published.generation, before.wrapping_add(1));
+        assert_eq!(published.scale, 2.0);
+
+        // A frame published by a bar that no longer owns input must not turn an unrelated click
+        // into a dismiss.
+        publish_native_command_bar_route(false, Some(frame), 1.0);
+        assert!(!request_native_command_bar_dismiss_for_mouse_down(
+            90.0, 60.0
+        ));
         assert!(!take_native_command_bar_dismiss_requested());
 
+        publish_native_command_bar_route(true, Some(frame), 1.0);
         assert!(!request_native_command_bar_dismiss_for_mouse_down(
             120.0, 60.0
         ));
         assert!(!take_native_command_bar_dismiss_requested());
-
         assert!(request_native_command_bar_dismiss_for_mouse_down(
             90.0, 60.0
         ));
         assert!(take_native_command_bar_dismiss_requested());
         assert!(!take_native_command_bar_dismiss_requested());
 
-        set_native_command_bar_click_frame(None);
+        // Revealing: owns input, but no rectangle is on screen to click outside of yet.
+        publish_native_command_bar_route(true, None, 1.0);
         assert!(!request_native_command_bar_dismiss_for_mouse_down(
             90.0, 60.0
         ));
+
+        // Closing drops a dismiss that was requested while open.
+        assert!(request_native_command_bar_dismiss());
+        publish_native_command_bar_route(false, None, 1.0);
+        assert!(!take_native_command_bar_dismiss_requested());
     }
 
     #[test]
-    fn command_bar_hidden_windowed_frame_collapses_native_view() {
-        let frame = command_bar_hidden_windowed_frame();
+    fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
+        let revealing = CommandBarState::from_modal(Display::Flex, Visibility::Hidden, true);
 
-        assert_eq!(frame.left_px, 0.0);
-        assert_eq!(frame.top_px, 0.0);
-        assert_eq!(frame.width_px, 1.0);
-        assert_eq!(frame.height_px, 1.0);
-    }
-
-    #[test]
-    fn command_bar_windowed_view_requires_display_and_keyboard_target() {
-        assert!(!command_bar_windowed_view_should_show(
-            Display::None,
-            Visibility::Hidden,
-            true
-        ));
-        assert!(!command_bar_windowed_view_should_show(
-            Display::Flex,
-            Visibility::Hidden,
-            false
-        ));
-        assert!(command_bar_windowed_view_should_show(
-            Display::Flex,
-            Visibility::Inherited,
-            true
-        ));
-    }
-
-    #[test]
-    fn command_bar_windowed_view_shows_hidden_pending_view_for_renderer_ack() {
-        assert!(command_bar_windowed_view_is_open(Display::Flex, true));
-        assert!(!command_bar_windowed_view_should_show(
-            Display::Flex,
-            Visibility::Hidden,
-            true
-        ));
+        assert!(revealing.owns_input());
+        assert!(!revealing.is_shown());
         assert!(command_bar_windowed_view_should_render_hidden(
             Display::Flex,
-            Visibility::Hidden,
-            true
+            Visibility::Hidden
         ));
-        assert!(!command_bar_windowed_view_should_show(
-            Display::None,
-            Visibility::Hidden,
-            true
-        ));
-        assert!(!command_bar_windowed_view_should_show(
-            Display::Flex,
-            Visibility::Hidden,
-            false
-        ));
+    }
+
+    #[test]
+    fn collapsed_command_bar_view_is_never_render_hidden() {
         assert!(!command_bar_windowed_view_should_render_hidden(
             Display::None,
-            Visibility::Hidden,
-            true
+            Visibility::Hidden
         ));
         assert!(!command_bar_windowed_view_should_render_hidden(
             Display::Flex,
-            Visibility::Hidden,
-            false
+            Visibility::Inherited
         ));
     }
 
@@ -7025,10 +7354,14 @@ mod tests {
             .unwrap_or_default();
 
         assert!(sync_fn.contains("browsers.resize"));
+        assert!(sync_fn.contains("native_size_changed.contains(entity)"));
+        assert!(sync_fn.contains("browsers.nudge_windowed_repaint(&entity)"));
     }
 
+    /// Keyboard reaches windowed browsers through `CefKeyboardTarget` forwarding, which needs winit
+    /// to keep AppKit first responder. The modal must focus the renderer only.
     #[test]
-    fn command_bar_windowed_sync_focuses_visible_native_modal() {
+    fn command_bar_windowed_sync_never_takes_appkit_first_responder() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_command_bar")
@@ -7036,22 +7369,9 @@ mod tests {
             .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
             .unwrap_or_default();
 
-        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, true)"));
-        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, false)"));
-    }
-
-    #[test]
-    fn command_bar_windowed_sync_clips_native_view_to_shell_radius() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_command_bar")
-            .nth(1)
-            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
-            .unwrap_or_default();
-
-        assert!(source.contains("const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0"));
-        assert!(sync_fn.contains("browsers.set_windowed_corner_radius"));
-        assert!(sync_fn.contains("COMMAND_BAR_NATIVE_RADIUS_PX * scale"));
+        assert!(sync_fn.contains("browsers.set_windowed_renderer_focus(&entity, true)"));
+        assert!(sync_fn.contains("browsers.set_windowed_renderer_focus(&entity, false)"));
+        assert!(!sync_fn.contains("browsers.set_windowed_focus("));
     }
 
     #[test]

@@ -1,9 +1,9 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, CefKeyboardTarget};
+use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
 use vmux_layout::Header;
 use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
-use vmux_layout::command_bar::handler::is_command_bar_open;
+use vmux_layout::command_bar::state::CommandBarState;
 use vmux_layout::scene::InteractionMode;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
@@ -45,7 +45,16 @@ pub(crate) fn compute_host_focus_intent(
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
     terminal_q: Query<(), With<Terminal>>,
-    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
+    modal_q: Query<
+        (
+            Entity,
+            &Node,
+            Option<&Visibility>,
+            Has<CefKeyboardTarget>,
+            Has<WebviewWindowed>,
+        ),
+        With<Modal>,
+    >,
     bookmark_input_q: Query<
         (),
         (
@@ -58,7 +67,19 @@ pub(crate) fn compute_host_focus_intent(
     >,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if is_command_bar_open(&modal_q) {
+    let next = if modal_q
+        .iter()
+        .any(|(_, node, visibility, keyboard_target, _)| {
+            CommandBarState::from_modal(
+                node.display,
+                visibility.copied().unwrap_or_default(),
+                keyboard_target,
+            )
+            .owns_input()
+        }) {
+        // The command bar takes keys through `CefKeyboardTarget` forwarding like every other
+        // browser here, so winit must keep first responder. Handing it to the modal's native view
+        // stops winit seeing the keystroke, which starves the forwarding path it depends on.
         HostFocusIntent::WinitHost
     } else if *mode != InteractionMode::User {
         HostFocusIntent::Unmanaged
@@ -177,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn open_command_bar_reclaims_winit_host_focus() {
+    fn open_osr_command_bar_reclaims_winit_host_focus() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
@@ -194,6 +215,81 @@ mod tests {
             ..default()
         });
         app.update();
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    /// A windowed modal must not take first responder: keys reach it through `CefKeyboardTarget`
+    /// forwarding, which only runs if winit sees the keystroke.
+    #[test]
+    fn open_windowed_command_bar_leaves_first_responder_with_winit() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            CefKeyboardTarget,
+            WebviewWindowed,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn revealing_windowed_command_bar_keeps_focus_off_the_page() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            Visibility::Hidden,
+            CefKeyboardTarget,
+            WebviewWindowed,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    #[test]
+    fn revealing_osr_command_bar_keeps_focus_off_the_page() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            Visibility::Hidden,
+            CefKeyboardTarget,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
 
