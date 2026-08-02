@@ -145,16 +145,105 @@ fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element 
     }
 }
 
+fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &str) {
+    agents.with_mut(|list| {
+        if let Some(agent) = list.iter_mut().find(|agent| agent.id == id) {
+            agent.pinned_version = version.to_string();
+        }
+    });
+}
+
+/// A version-pin control, shown only for npx/uvx agents (native binaries can't be pinned). Renders
+/// a dropdown of published versions when they've been fetched, else a free-text fallback (so it
+/// still works before the fetch lands or when the registry can't be queried).
+fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let id = agent.id.clone();
+    if agent.available_versions.is_empty() {
+        return rsx! {
+            input {
+                class: "w-20 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] placeholder:text-muted-foreground focus:outline-none",
+                r#type: "text",
+                spellcheck: "false",
+                autocomplete: "off",
+                value: "{agent.pinned_version}",
+                placeholder: translate("agents-version-latest"),
+                title: translate("agents-version-hint"),
+                oninput: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            }
+        };
+    }
+    // "latest" tracks npm's latest dist-tag: the newest *released* version. Prereleases (semver
+    // build suffix, e.g. `-prerelease.5`) are not what `@latest` installs, so skip them here.
+    let latest = agent
+        .available_versions
+        .iter()
+        .find(|version| !version.contains('-'))
+        .or_else(|| agent.available_versions.first())
+        .cloned()
+        .unwrap_or_default();
+    let latest_label = if latest.is_empty() {
+        translate("agents-version-latest")
+    } else {
+        format!("{} ({latest})", translate("agents-version-latest"))
+    };
+    rsx! {
+        select {
+            class: "w-32 truncate rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
+            title: translate("agents-version-hint"),
+            onchange: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            option { value: "", selected: agent.pinned_version.is_empty(), "{latest_label}" }
+            for version in agent.available_versions.iter().filter(|version| *version != &latest) {
+                option {
+                    key: "{version}",
+                    value: "{version}",
+                    selected: version == &agent.pinned_version,
+                    "{version}"
+                }
+            }
+        }
+    }
+}
+
 fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let pinnable = agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
+    rsx! {
+        if pinnable {
+            {render_version_input(agent, agents)}
+        }
+        {render_status_buttons(agent, agents)}
+    }
+}
+
+fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
     let id = agent.id.clone();
     let install_id = agent.id.clone();
     let uninstall_id = agent.id.clone();
+    let apply_id = agent.id.clone();
     let launch_url = agent.launch_url.clone();
     let source = agent.source.clone();
+    let update_version = agent.pinned_version.clone();
+    let install_version = agent.pinned_version.clone();
+    let apply_version = agent.pinned_version.clone();
+    // Agents that render a version selector don't need a redundant "Installed" label next to it,
+    // but they do need an explicit way to apply a version change after picking one.
+    let has_version_selector =
+        agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     match agent.status.as_str() {
         "installing" => rsx! { ManagerSpinner { detail: agent.detail.clone() } },
         "installed" => rsx! {
-            span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+            if !has_version_selector {
+                span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+            }
+            if has_version_selector && agent.pinned_version != agent.installed_version {
+                ManagerButton {
+                    variant: ManagerButtonVariant::Primary,
+                    onclick: move |_| {
+                        set_status(agents, &apply_id, "installing", &translate("agents-updating"));
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: apply_id.clone(), version: apply_version.clone() });
+                    },
+                    {translate("agents-apply-version")}
+                }
+            }
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
@@ -178,7 +267,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
                     set_status(agents, &id, "installing", &translate("agents-updating"));
-                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone() });
+                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version: update_version.clone() });
                 },
                 {translate("common-update")}
             }
@@ -193,7 +282,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-retry")}
@@ -208,7 +297,7 @@ fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone() });
+                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-install")}

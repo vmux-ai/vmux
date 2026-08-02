@@ -128,6 +128,8 @@ agents-empty = Chan eil àidseantan co-ionnan ann
 agents-empty-detail = Feuch ainm, runtime, no ACP/CLI.
 agents-install-failed = Dh’fhàillig an stàladh
 agents-updating = Ag ùrachadh…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = A’ feuchainn ris a-rithist…
 agents-preparing = Ag ullachadh…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Ceann-latha
 editor-property-kind-list = Liosta
 editor-property-kind-link = Ceangal
 editor-property-kind-tags = Tagaichean
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

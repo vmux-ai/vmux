@@ -128,6 +128,8 @@ agents-empty = 没有匹配的 Agent
 agents-empty-detail = 试试名称、运行时，或 ACP/CLI。
 agents-install-failed = 安装失败
 agents-updating = 正在更新…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = 正在重试…
 agents-preparing = 正在准备…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = 日期
 editor-property-kind-list = 列表
 editor-property-kind-link = 关联
 editor-property-kind-tags = 标签
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

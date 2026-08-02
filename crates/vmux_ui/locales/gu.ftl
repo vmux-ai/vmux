@@ -128,6 +128,8 @@ agents-empty = મેળ ખાતા એજન્ટ્સ નથી
 agents-empty-detail = નામ, runtime અથવા ACP/CLI અજમાવો.
 agents-install-failed = ઇન્સ્ટોલ નિષ્ફળ
 agents-updating = અપડેટ થઈ રહ્યું છે…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ફરી પ્રયાસ થઈ રહ્યો છે…
 agents-preparing = તૈયારી થઈ રહી છે…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = તારીખ
 editor-property-kind-list = યાદી
 editor-property-kind-link = લિંક
 editor-property-kind-tags = ટૅગ્સ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

@@ -128,6 +128,8 @@ agents-empty = Mos agent topilmadi
 agents-empty-detail = Nomi, runtime yoki ACP/CLI bo‘yicha urinib ko‘ring.
 agents-install-failed = O‘rnatilmadi
 agents-updating = Yangilanmoqda…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Qayta urinilmoqda…
 agents-preparing = Tayyorlanmoqda…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Sana
 editor-property-kind-list = Roʻyxat
 editor-property-kind-link = Havola
 editor-property-kind-tags = Teglar
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

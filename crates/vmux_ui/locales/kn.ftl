@@ -128,6 +128,8 @@ agents-empty = ಹೊಂದುವ ಏಜೆಂಟ್‌ಗಳಿಲ್ಲ
 agents-empty-detail = ಹೆಸರು, runtime, ಅಥವಾ ACP/CLI ಪ್ರಯತ್ನಿಸಿ.
 agents-install-failed = ಸ್ಥಾಪನೆ ವಿಫಲವಾಗಿದೆ
 agents-updating = ನವೀಕರಿಸಲಾಗುತ್ತಿದೆ…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಲಾಗುತ್ತಿದೆ…
 agents-preparing = ಸಿದ್ಧಪಡಿಸಲಾಗುತ್ತಿದೆ…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = ದಿನಾಂಕ
 editor-property-kind-list = ಪಟ್ಟಿ
 editor-property-kind-link = ಲಿಂಕ್
 editor-property-kind-tags = ಟ್ಯಾಗ್‌ಗಳು
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

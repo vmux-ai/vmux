@@ -184,6 +184,23 @@ pub struct AgentSettings {
     /// External ACP (Agent Client Protocol) agents available at `vmux://agent/<id>`.
     #[serde(default = "default_acp_agents")]
     pub acp: Vec<AcpAgentConfig>,
+    /// Default reasoning-effort level per agent, keyed by agent key (ACP agent id, or
+    /// `cli:<segment>` for a CLI agent). Applied when a session/process is launched — the
+    /// underlying agents fix effort at start, so this is a launch-time default, not a live
+    /// switch. Empty / missing = leave the agent's own default.
+    #[serde(default)]
+    pub effort: std::collections::BTreeMap<String, String>,
+}
+
+impl AgentSettings {
+    /// The launch-time reasoning-effort level for `key` (ACP agent id or `cli:<segment>`),
+    /// or `None` when unset or blank.
+    pub fn effort_for(&self, key: &str) -> Option<&str> {
+        self.effort
+            .get(key)
+            .map(|level| level.trim())
+            .filter(|level| !level.is_empty())
+    }
 }
 
 impl Default for AgentSettings {
@@ -205,6 +222,7 @@ fn default_agent_settings() -> AgentSettings {
         tidy_files_max: 5,
         tidy_files_auto: false,
         acp: default_acp_agents(),
+        effort: std::collections::BTreeMap::new(),
     }
 }
 
@@ -218,6 +236,10 @@ fn default_tidy_files_max() -> usize {
 pub struct AcpAgentConfig {
     pub id: String,
     pub name: String,
+    /// Explicit escape-hatch command run when the agent is absent from (or unresolvable via) the
+    /// ACP registry. Empty means "registry-resolved, no override" — an entry may exist solely to
+    /// carry `version`.
+    #[serde(default)]
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
@@ -225,6 +247,10 @@ pub struct AcpAgentConfig {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub cwd: Option<std::path::PathBuf>,
+    /// Pin the registry package to this version (`npx -y <pkg>@<version>` / `uvx <pkg>@<version>`).
+    /// `None` installs the latest.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 fn default_acp_agents() -> Vec<AcpAgentConfig> {
@@ -239,6 +265,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
         AcpAgentConfig {
             id: "codex".to_string(),
@@ -250,6 +277,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
         AcpAgentConfig {
             id: "gemini".to_string(),
@@ -263,6 +291,7 @@ fn default_acp_agents() -> Vec<AcpAgentConfig> {
             ],
             env: vec![],
             cwd: None,
+            version: None,
         },
     ]
 }
@@ -1650,6 +1679,19 @@ mod tests {
             .unwrap_err();
         assert!(!err.is_empty());
         assert_eq!(settings.auto_update, original_auto);
+    }
+
+    #[test]
+    fn acp_agent_config_allows_version_only_entry() {
+        let cfg: AcpAgentConfig = serde_json::from_value(serde_json::json!({
+            "id": "claude",
+            "name": "Claude Code",
+            "version": "0.11.0",
+        }))
+        .expect("a version-only acp entry (no command) must parse");
+        assert_eq!(cfg.command, "");
+        assert_eq!(cfg.version.as_deref(), Some("0.11.0"));
+        assert!(cfg.args.is_empty());
     }
 
     #[test]

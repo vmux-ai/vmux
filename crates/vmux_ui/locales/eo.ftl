@@ -128,6 +128,8 @@ agents-empty = Neniuj kongruaj agentoj
 agents-empty-detail = Provu nomon, rultempon aŭ ACP/CLI.
 agents-install-failed = Instalado malsukcesis
 agents-updating = Ĝisdatigante…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Reprovante…
 agents-preparing = Preparante…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Dato
 editor-property-kind-list = Listo
 editor-property-kind-link = Ligo
 editor-property-kind-tags = Etikedoj
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

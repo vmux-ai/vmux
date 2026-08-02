@@ -128,6 +128,8 @@ agents-empty = মিল থাকা কোনো এজেন্ট নেই
 agents-empty-detail = নাম, রানটাইম, অথবা ACP/CLI দিয়ে চেষ্টা করুন।
 agents-install-failed = ইনস্টল ব্যর্থ হয়েছে
 agents-updating = আপডেট হচ্ছে…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = আবার চেষ্টা করা হচ্ছে…
 agents-preparing = প্রস্তুত হচ্ছে…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = তারিখ
 editor-property-kind-list = তালিকা
 editor-property-kind-link = লিঙ্ক
 editor-property-kind-tags = ট্যাগ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

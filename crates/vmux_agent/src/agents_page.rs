@@ -80,6 +80,30 @@ impl Default for AgentsInstallChannel {
     }
 }
 
+/// Published-version lists per agent id, fetched lazily in the background so the version selector
+/// can offer a dropdown. `requested` guards against re-fetching an agent every catalog push.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource, Default)]
+struct AgentVersions {
+    fetched: HashMap<String, Vec<String>>,
+    requested: HashSet<String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Resource)]
+struct AgentVersionsChannel {
+    tx: Sender<(String, Vec<String>)>,
+    rx: Receiver<(String, Vec<String>)>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Default for AgentVersionsChannel {
+    fn default() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Self { tx, rx }
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub struct AgentsManagerPlugin;
 
@@ -99,6 +123,8 @@ impl Plugin for AgentsManagerPlugin {
         app.init_resource::<AgentsPageWebviews>()
             .init_resource::<AgentsStatus>()
             .init_resource::<AgentsInstallChannel>()
+            .init_resource::<AgentVersions>()
+            .init_resource::<AgentVersionsChannel>()
             .init_resource::<AcpInstallGeneration>()
             .add_plugins(BinEventEmitterPlugin::<(
                 AgentsCatalogRequest,
@@ -110,7 +136,15 @@ impl Plugin for AgentsManagerPlugin {
             .add_observer(on_install_request)
             .add_observer(on_uninstall_request)
             .add_observer(on_open_request)
-            .add_systems(Update, (push_agents, drain_agent_installs));
+            .add_systems(
+                Update,
+                (
+                    kick_off_version_fetches,
+                    drain_version_fetches,
+                    push_agents,
+                    drain_agent_installs,
+                ),
+            );
     }
 }
 
@@ -127,7 +161,12 @@ fn on_open_request(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn catalog_snapshot(catalog: &AcpCatalog, status: &AgentsStatus) -> AgentsCatalog {
+fn catalog_snapshot(
+    catalog: &AcpCatalog,
+    status: &AgentsStatus,
+    acp_configs: &[vmux_setting::AcpAgentConfig],
+    versions: &AgentVersions,
+) -> AgentsCatalog {
     let mut agents: Vec<AgentEntry> = catalog
         .agents
         .iter()
@@ -141,6 +180,11 @@ fn catalog_snapshot(catalog: &AcpCatalog, status: &AgentsStatus) -> AgentsCatalo
                     ("available".to_string(), String::new())
                 }
             });
+            let pinned_version = acp_configs
+                .iter()
+                .find(|c| crate::acp_install::agent_ids_match(&c.id, &a.id))
+                .and_then(|c| c.version.clone())
+                .unwrap_or_default();
             AgentEntry {
                 id: a.id.clone(),
                 name: a.name.clone(),
@@ -157,6 +201,9 @@ fn catalog_snapshot(catalog: &AcpCatalog, status: &AgentsStatus) -> AgentsCatalo
                 .to_string(),
                 status: st,
                 detail,
+                installed_version: pinned_version.clone(),
+                pinned_version,
+                available_versions: versions.fetched.get(&a.id).cloned().unwrap_or_default(),
             }
         })
         .collect();
@@ -188,6 +235,9 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
                     "available".to_string()
                 },
                 detail: String::new(),
+                pinned_version: String::new(),
+                installed_version: String::new(),
+                available_versions: Vec::new(),
             }
         })
         .collect()
@@ -202,31 +252,81 @@ fn on_catalog_request(
     webviews.0.insert(trigger.event().webview);
 }
 
-/// Kick a background install (or update) for the requested agent.
+/// Upsert the per-agent version pin into the settings ACP list: update a matching entry, or append
+/// a version-only entry (empty command) for a registry agent the user has not otherwise configured.
+#[cfg(not(target_arch = "wasm32"))]
+fn upsert_acp_version(
+    acp: &mut Vec<vmux_setting::AcpAgentConfig>,
+    catalog_id: &str,
+    name: &str,
+    version: Option<String>,
+) {
+    if let Some(cfg) = acp
+        .iter_mut()
+        .find(|c| crate::acp_install::agent_ids_match(&c.id, catalog_id))
+    {
+        cfg.version = version;
+    } else {
+        acp.push(vmux_setting::AcpAgentConfig {
+            id: crate::acp_install::agent_url_id(catalog_id).to_string(),
+            name: name.to_string(),
+            command: String::new(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            version,
+        });
+    }
+}
+
+/// Kick a background install (or update) for the requested agent, persisting its version pin first.
 #[cfg(not(target_arch = "wasm32"))]
 fn on_install_request(
     trigger: On<BinReceive<AgentsInstall>>,
     catalog: Res<AcpCatalog>,
     installs: Res<AgentsInstallChannel>,
     mut status: ResMut<AgentsStatus>,
+    mut settings: ResMut<vmux_setting::AppSettings>,
+    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
 ) {
-    let id = trigger.event().payload.id.clone();
+    let payload = trigger.event().payload.clone();
+    let id = payload.id.clone();
     let Some(agent) = catalog.agents.iter().find(|a| a.id == id).cloned() else {
         return;
     };
+    let version = {
+        let trimmed = payload.version.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    let mut acp = settings.agent.acp.clone();
+    upsert_acp_version(&mut acp, &agent.id, &agent.name, version.clone());
+    match serde_json::to_value(&acp) {
+        Ok(value) => {
+            match vmux_setting::apply_settings_update(settings.as_mut(), "agent.acp", value) {
+                Ok(ron_bytes) => {
+                    writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                }
+                Err(error) => bevy::log::warn!("agents: persist version for {id} failed: {error}"),
+            }
+        }
+        Err(error) => bevy::log::warn!("agents: serialize acp config failed: {error}"),
+    }
+
     status.0.insert(
         id.clone(),
         ("installing".to_string(), "Preparing…".to_string()),
     );
     let tx = installs.tx.clone();
     std::thread::spawn(move || {
-        let result = crate::acp_install::ensure_installed(&agent, |_phase, pct, msg| {
-            let _ = tx.send(AgentMsg::Progress {
-                id: id.clone(),
-                pct,
-                message: msg.to_string(),
+        let result =
+            crate::acp_install::ensure_installed(&agent, version.as_deref(), |_phase, pct, msg| {
+                let _ = tx.send(AgentMsg::Progress {
+                    id: id.clone(),
+                    pct,
+                    message: msg.to_string(),
+                });
             });
-        });
         let _ = match result {
             Ok(_) => tx.send(AgentMsg::Done { id }),
             Err(message) => tx.send(AgentMsg::Failed { id, message }),
@@ -274,6 +374,42 @@ fn drain_agent_installs(
     }
 }
 
+/// For each npx registry agent not yet queried, spawn a background `npm view` to populate its
+/// version list. Runs when the catalog (re)loads; `requested` guards one fetch per agent.
+#[cfg(not(target_arch = "wasm32"))]
+fn kick_off_version_fetches(
+    catalog: Res<AcpCatalog>,
+    channel: Res<AgentVersionsChannel>,
+    mut versions: ResMut<AgentVersions>,
+) {
+    if !catalog.is_changed() {
+        return;
+    }
+    for agent in &catalog.agents {
+        if !matches!(agent.preferred_runtime(), Runtime::Node) {
+            continue;
+        }
+        if !versions.requested.insert(agent.id.clone()) {
+            continue;
+        }
+        let agent = agent.clone();
+        let tx = channel.tx.clone();
+        std::thread::spawn(move || {
+            let list = crate::acp_install::fetch_package_versions(&agent);
+            let _ = tx.send((agent.id, list));
+        });
+    }
+}
+
+/// Fold completed version fetches into the cache; the resulting change re-pushes the catalog so
+/// the selector becomes a dropdown.
+#[cfg(not(target_arch = "wasm32"))]
+fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMut<AgentVersions>) {
+    while let Ok((id, list)) = channel.rx.try_recv() {
+        versions.fetched.insert(id, list);
+    }
+}
+
 /// Push the catalog (with per-agent status) whenever it (re)loads, status changes, or a page
 /// requests it.
 #[cfg(not(target_arch = "wasm32"))]
@@ -281,13 +417,25 @@ fn push_agents(
     catalog: Res<AcpCatalog>,
     status: Res<AgentsStatus>,
     webviews: Res<AgentsPageWebviews>,
+    versions: Res<AgentVersions>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
-    if !catalog.is_changed() && !status.is_changed() && !webviews.is_changed() {
+    let settings_changed = settings.as_ref().is_some_and(|s| s.is_changed());
+    if !catalog.is_changed()
+        && !status.is_changed()
+        && !webviews.is_changed()
+        && !versions.is_changed()
+        && !settings_changed
+    {
         return;
     }
-    let payload = catalog_snapshot(&catalog, &status);
+    let acp_configs = settings
+        .as_ref()
+        .map(|s| s.agent.acp.as_slice())
+        .unwrap_or(&[]);
+    let payload = catalog_snapshot(&catalog, &status, acp_configs, &versions);
     for &webview in &webviews.0 {
         if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
             continue;
@@ -337,5 +485,74 @@ mod tests {
                 .filter(|row| row.id != "cli:codex")
                 .all(|row| row.status == "available")
         );
+    }
+
+    #[test]
+    fn upsert_acp_version_updates_match_or_appends() {
+        let mut acp = vec![vmux_setting::AcpAgentConfig {
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+            version: None,
+        }];
+        upsert_acp_version(&mut acp, "claude-acp", "Claude", Some("1.2.3".into()));
+        assert_eq!(acp.len(), 1);
+        assert_eq!(acp[0].version.as_deref(), Some("1.2.3"));
+
+        upsert_acp_version(&mut acp, "other-acp", "Other", Some("9.9.9".into()));
+        assert_eq!(acp.len(), 2);
+        let added = acp.iter().find(|c| c.id == "other").unwrap();
+        assert_eq!(added.command, "");
+        assert_eq!(added.version.as_deref(), Some("9.9.9"));
+
+        upsert_acp_version(&mut acp, "claude-acp", "Claude", None);
+        assert_eq!(acp[0].version, None);
+    }
+
+    #[test]
+    fn catalog_snapshot_carries_pinned_version() {
+        let catalog = AcpCatalog {
+            agents: vec![crate::acp_registry::RegistryAgent {
+                id: "claude-acp".into(),
+                name: "Claude".into(),
+                version: None,
+                description: None,
+                icon: None,
+                repository: None,
+                distribution: crate::acp_registry::Distribution {
+                    binary: None,
+                    npx: Some(crate::acp_registry::PackageDist {
+                        package: "@zed-industries/claude-code-acp".into(),
+                        args: vec![],
+                        env: Default::default(),
+                    }),
+                    uvx: None,
+                },
+            }],
+        };
+        let acp = vec![vmux_setting::AcpAgentConfig {
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+            version: Some("0.11.0".into()),
+        }];
+        let snapshot = catalog_snapshot(
+            &catalog,
+            &AgentsStatus::default(),
+            &acp,
+            &AgentVersions::default(),
+        );
+        let row = snapshot
+            .agents
+            .iter()
+            .find(|a| a.id == "claude-acp")
+            .expect("claude row present");
+        assert_eq!(row.pinned_version, "0.11.0");
     }
 }

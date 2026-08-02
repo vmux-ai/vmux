@@ -140,6 +140,8 @@ agents-empty = No matching agents
 agents-empty-detail = Try a name, runtime, or ACP/CLI.
 agents-install-failed = Install failed
 agents-updating = Updating…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Retrying…
 agents-preparing = Preparing…
 
@@ -718,3 +720,11 @@ debug-simulate-update = Simulate update available
 debug-simulate-download = Simulate download
 debug-clear-update = Clear update
 debug-trigger-restart = Trigger restart
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

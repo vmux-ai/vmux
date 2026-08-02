@@ -128,6 +128,8 @@ agents-empty = Няма съвпадащи агенти
 agents-empty-detail = Опитайте с име, среда за изпълнение или ACP/CLI.
 agents-install-failed = Инсталирането е неуспешно
 agents-updating = Обновяване…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Нов опит…
 agents-preparing = Подготовка…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Дата
 editor-property-kind-list = списък
 editor-property-kind-link = Връзка
 editor-property-kind-tags = Тагове
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

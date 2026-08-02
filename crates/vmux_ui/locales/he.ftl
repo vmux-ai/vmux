@@ -128,6 +128,8 @@ agents-empty = לא נמצאו סוכנים תואמים
 agents-empty-detail = נסו שם, סביבת הרצה או ACP/CLI.
 agents-install-failed = ההתקנה נכשלה
 agents-updating = מתעדכן…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = מנסה שוב…
 agents-preparing = מתכונן…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = תַאֲרִיך
 editor-property-kind-list = רְשִׁימָה
 editor-property-kind-link = לְקַשֵׁר
 editor-property-kind-tags = תגים
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

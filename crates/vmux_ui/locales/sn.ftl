@@ -128,6 +128,8 @@ agents-empty = Hapana maagent anoenderana
 agents-empty-detail = Edza zita, runtime, kana ACP/CLI.
 agents-install-failed = Kuisa kwaramba
 agents-updating = Kugadziridza…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Kuedzazve…
 agents-preparing = Kugadzirira…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Date
 editor-property-kind-list = List
 editor-property-kind-link = Link
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

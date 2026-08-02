@@ -128,6 +128,8 @@ agents-empty = Համապատասխան գործակալներ չկան
 agents-empty-detail = Փորձեք անուն, runtime կամ ACP/CLI։
 agents-install-failed = Տեղադրումը ձախողվեց
 agents-updating = Թարմացվում է…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Կրկին փորձ է արվում…
 agents-preparing = Նախապատրաստվում է…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Ամսաթիվ
 editor-property-kind-list = Ցուցակ
 editor-property-kind-link = Հղում
 editor-property-kind-tags = Պիտակներ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

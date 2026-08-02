@@ -128,6 +128,8 @@ agents-empty = Hakuna ajenti zinazolingana
 agents-empty-detail = Jaribu jina, runtime, au ACP/CLI.
 agents-install-failed = Usakinishaji umeshindikana
 agents-updating = Inasasishwa…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Inajaribu tena…
 agents-preparing = Inaandaa…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Tarehe
 editor-property-kind-list = Orodha
 editor-property-kind-link = Kiungo
 editor-property-kind-tags = Lebo
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

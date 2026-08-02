@@ -30,17 +30,43 @@ fn store_root() -> PathBuf {
     acp_registry::agents_dir()
 }
 
-fn write_agent_receipt(root: &Path, agent: &RegistryAgent) -> Result<(), String> {
+fn write_agent_receipt(
+    root: &Path,
+    agent: &RegistryAgent,
+    version: Option<&str>,
+) -> Result<(), String> {
     store::write_receipt(
         root,
         &store::Receipt {
             name: agent.id.clone(),
-            version: agent.version.clone(),
+            version: version
+                .map(str::to_string)
+                .or_else(|| agent.version.clone()),
             source_id: format!("acp:{}", agent.id),
             bin: std::collections::BTreeMap::new(),
         },
     )
     .map_err(|e| e.to_string())
+}
+
+/// The package name without a trailing `@version`, keeping a leading scope `@`. The ACP registry
+/// may ship a version baked into the package (`@scope/name@1.1.9`); stripping it lets us re-pin
+/// cleanly instead of producing an invalid double spec (`@scope/name@1.1.9@1.1.8`).
+fn package_base(package: &str) -> &str {
+    match package.rfind('@') {
+        Some(at) if at > 0 => &package[..at],
+        _ => package,
+    }
+}
+
+/// The package argument for `npx`/`uvx`, optionally pinned to a version (`<package>@<version>`).
+/// A blank version means "latest" (the registry's package as-is, including any baked version); a
+/// pin replaces any baked version rather than appending to it.
+fn package_spec(package: &str, version: Option<&str>) -> String {
+    match version.map(str::trim) {
+        Some(v) if !v.is_empty() => format!("{}@{v}", package_base(package)),
+        _ => package.to_string(),
+    }
 }
 
 /// Final path component of a manifest `cmd` (`"./bin/agent"` → `"agent"`), used as the output
@@ -167,6 +193,7 @@ fn ensure_node(
 /// `npx -y <package> <args>` launch spec that resolves `node` via the managed `bin/`.
 pub fn ensure_npx_installed(
     agent: &RegistryAgent,
+    version: Option<&str>,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let dist = agent
@@ -176,10 +203,10 @@ pub fn ensure_npx_installed(
         .ok_or_else(|| format!("no npx distribution: {}", agent.id))?;
     let root = store_root();
     let bindir = ensure_node(&root, &mut emit)?;
-    write_agent_receipt(&root, agent)?;
+    write_agent_receipt(&root, agent, version)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
-    let mut args = vec!["-y".to_string(), dist.package.clone()];
+    let mut args = vec!["-y".to_string(), package_spec(&dist.package, version)];
     args.extend(dist.args.iter().cloned());
     Ok(ResolvedAgent {
         command: bindir.join("npx").to_string_lossy().into_owned(),
@@ -257,6 +284,7 @@ fn ensure_uv(
 /// `uvx <package> <args>` launch spec that resolves `uv` via the managed dir.
 pub fn ensure_uvx_installed(
     agent: &RegistryAgent,
+    version: Option<&str>,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let dist = agent
@@ -266,10 +294,10 @@ pub fn ensure_uvx_installed(
         .ok_or_else(|| format!("no uvx distribution: {}", agent.id))?;
     let root = store_root();
     let bindir = ensure_uv(&root, &mut emit)?;
-    write_agent_receipt(&root, agent)?;
+    write_agent_receipt(&root, agent, version)?;
     emit(InstallPhase::Done, Some(100), "ready");
 
-    let mut args = vec![dist.package.clone()];
+    let mut args = vec![package_spec(&dist.package, version)];
     args.extend(dist.args.iter().cloned());
     Ok(ResolvedAgent {
         command: bindir.join("uvx").to_string_lossy().into_owned(),
@@ -366,6 +394,7 @@ pub(crate) fn agent_ids_match(left: &str, right: &str) -> bool {
 /// installed, returning how to launch it. Runs on a background thread (blocking I/O).
 pub fn resolve_from_registry(
     agent_id: &str,
+    version: Option<&str>,
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     let reg_id = registry_id_alias(agent_id);
@@ -382,21 +411,66 @@ pub fn resolve_from_registry(
             .find(|agent| agent_ids_match(&agent.id, agent_id))
             .ok_or_else(|| format!("agent not in ACP registry: {agent_id} ({reg_id})"))?,
     };
-    ensure_installed(&agent, emit)
+    ensure_installed(&agent, version, emit)
 }
 
 /// Ensure any registry agent is installed and return how to launch it, preferring a native
-/// binary, then npx (managed Node), then uvx (managed uv).
+/// binary, then npx (managed Node), then uvx (managed uv). `version` pins the npx/uvx package
+/// (`<pkg>@<version>`); it is ignored for native binaries, which the registry ships single-versioned.
 pub fn ensure_installed(
     agent: &RegistryAgent,
+    version: Option<&str>,
     emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
     use acp_registry::Runtime;
     match agent.preferred_runtime() {
         Runtime::None => ensure_binary_installed(agent, emit),
-        Runtime::Node => ensure_npx_installed(agent, emit),
-        Runtime::Uv => ensure_uvx_installed(agent, emit),
+        Runtime::Node => ensure_npx_installed(agent, version, emit),
+        Runtime::Uv => ensure_uvx_installed(agent, version, emit),
     }
+}
+
+/// Published versions for an agent's npx package, newest-first (capped). Best-effort: returns
+/// empty for native/uvx agents or when the registry can't be queried, so callers fall back to
+/// free-text entry. Reads metadata only — never downloads a tarball or a managed runtime, so it
+/// works even when a specific tarball is blocked by a registry security policy.
+pub fn fetch_package_versions(agent: &RegistryAgent) -> Vec<String> {
+    match agent.preferred_runtime() {
+        acp_registry::Runtime::Node => agent
+            .distribution
+            .npx
+            .as_ref()
+            .map(|dist| npm_versions(package_base(&dist.package)))
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// `npm view <package> versions --json`, newest-first. Prefers the managed Node's `npm`, falling
+/// back to a `PATH` `npm`; uses the user's npm config (so it honors their registry/proxy).
+fn npm_versions(package: &str) -> Vec<String> {
+    let npm = node_bindir(&store_root())
+        .map(|bindir| bindir.join("npm"))
+        .filter(|npm| npm.exists())
+        .unwrap_or_else(|| PathBuf::from("npm"));
+    let output = match std::process::Command::new(&npm)
+        .args(["view", package, "versions", "--json"])
+        .output()
+    {
+        Ok(output) if output.status.success() => output.stdout,
+        _ => return Vec::new(),
+    };
+    let mut versions: Vec<String> = match serde_json::from_slice(&output) {
+        Ok(serde_json::Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|item| item.as_str().map(str::to_string))
+            .collect(),
+        Ok(serde_json::Value::String(one)) => vec![one],
+        _ => return Vec::new(),
+    };
+    versions.reverse();
+    versions.truncate(100);
+    versions
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -447,7 +521,7 @@ fn install_binary(
         ));
     }
 
-    write_agent_receipt(root, agent)?;
+    write_agent_receipt(root, agent, None)?;
     let _ = std::fs::remove_dir_all(&staging);
     emit(InstallPhase::Done, Some(100), "installed");
     Ok(())
@@ -475,6 +549,30 @@ mod tests {
                 uvx: None,
             },
         }
+    }
+
+    #[test]
+    fn package_spec_pins_version_when_present() {
+        assert_eq!(package_spec("@scope/pkg", None), "@scope/pkg");
+        assert_eq!(
+            package_spec("@scope/pkg", Some("1.2.3")),
+            "@scope/pkg@1.2.3"
+        );
+        assert_eq!(package_spec("pkg", Some("  ")), "pkg");
+        assert_eq!(package_spec("pkg", Some("1.0.0")), "pkg@1.0.0");
+    }
+
+    #[test]
+    fn package_spec_replaces_a_baked_registry_version() {
+        // The registry may ship a versioned package; pinning must replace, not append.
+        assert_eq!(
+            package_spec("@scope/pkg@1.1.9", Some("1.1.8")),
+            "@scope/pkg@1.1.8"
+        );
+        assert_eq!(package_spec("pkg@1.1.9", Some("1.1.8")), "pkg@1.1.8");
+        // No pin keeps the registry's package (including its baked version) untouched.
+        assert_eq!(package_spec("@scope/pkg@1.1.9", None), "@scope/pkg@1.1.9");
+        assert_eq!(package_base("@scope/pkg"), "@scope/pkg");
     }
 
     #[test]
@@ -549,7 +647,7 @@ mod tests {
         assert!(!is_agent_installed_at(&root, &installed));
         assert!(!is_agent_installed_at(&root, &available));
 
-        write_agent_receipt(&root, &installed).unwrap();
+        write_agent_receipt(&root, &installed, None).unwrap();
 
         assert!(is_agent_installed_at(&root, &installed));
         assert!(!is_agent_installed_at(&root, &available));

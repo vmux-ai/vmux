@@ -972,6 +972,7 @@ async fn handle_client(
                 mcp_args,
                 resume_acp_session_id,
                 managed_mcp_servers,
+                effort,
             } => {
                 let mut mcp_servers = mcp_command
                     .map(|cmd| {
@@ -1001,6 +1002,7 @@ async fn handle_client(
                     Arc::clone(&input_writers),
                     mcp_servers,
                     resume_acp_session_id,
+                    effort,
                 );
                 // ACP has no separate Attach message; forward this session's stream now.
                 let rx = acp_manager.lock().await.subscribe(&sid);

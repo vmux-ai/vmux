@@ -386,6 +386,12 @@ pub struct ModelState {
     pub current_model_id: String,
     pub current_model_name: String,
     pub models: Vec<ModelOptionEntry>,
+    /// Agent key for the effort selector (ACP agent id, e.g. `claude`). Empty when unknown.
+    pub agent_key: String,
+    /// Currently selected launch-time reasoning-effort level (`""` = agent default).
+    pub effort_current: String,
+    /// Effort levels this agent supports, low→high. Empty hides the effort selector.
+    pub effort_levels: Vec<String>,
 }
 
 /// Page → native selected ACP model.
@@ -401,6 +407,39 @@ pub struct ModelState {
 )]
 pub struct SelectModel {
     pub model_id: String,
+}
+
+/// Page → native: set the launch-time reasoning-effort level for an agent. `level` empty clears
+/// it back to the agent's default. Applied to the next session/process the agent launches.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct SetAgentEffort {
+    pub agent_key: String,
+    pub level: String,
+}
+
+/// Page → native: open a vmux page URL in a new stack (e.g. the error card's "change version"
+/// action opening `vmux://agents`).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatOpenPage {
+    pub url: String,
 }
 
 /// Page → native: open the `/resume` picker (native replies with [`ResumableSessions`]).

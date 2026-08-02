@@ -128,6 +128,8 @@ agents-empty = Ha ho di-agent tse tshwanelanang
 agents-empty-detail = Leka lebitso, runtime, kapa ACP/CLI.
 agents-install-failed = Ho kenya ho hlolehile
 agents-updating = E a ntjhafatswa…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = E leka hape…
 agents-preparing = E a lokisetswa…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Letsatsi
 editor-property-kind-list = Lenane
 editor-property-kind-link = Sehokelo
 editor-property-kind-tags = Li-tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

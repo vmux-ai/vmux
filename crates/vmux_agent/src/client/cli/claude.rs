@@ -77,6 +77,10 @@ impl CliAgentStrategy for ClaudeStrategy {
         args
     }
 
+    fn effort_args(&self, level: &str) -> Vec<String> {
+        vec!["--effort".to_string(), level.to_string()]
+    }
+
     fn build_env(&self, _mcp: &McpServerConfig) -> Vec<(String, String)> {
         vec![(
             "MCP_TOOL_TIMEOUT".to_string(),
@@ -411,6 +415,11 @@ mod tests {
         let id = discover_claude_session_id(&dir, spawn, &claimed);
         assert_eq!(id.as_deref(), Some("session-b"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn effort_args_pass_claude_effort_flag() {
+        assert_eq!(ClaudeStrategy.effort_args("high"), ["--effort", "high"]);
     }
 
     #[test]

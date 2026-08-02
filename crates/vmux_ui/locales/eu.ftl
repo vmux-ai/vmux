@@ -128,6 +128,8 @@ agents-empty = Ez dago bat datorren agenterik
 agents-empty-detail = Saiatu izen, exekuzio-ingurune edo ACP/CLI batekin.
 agents-install-failed = Instalazioak huts egin du
 agents-updating = Eguneratzen…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Berriro saiatzen…
 agents-preparing = Prestatzen…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Data
 editor-property-kind-list = Zerrenda
 editor-property-kind-link = Esteka
 editor-property-kind-tags = Etiketak
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

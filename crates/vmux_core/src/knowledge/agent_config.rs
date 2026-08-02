@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 
 use super::{
-    agent_memories_prompt, configured_skill_dirs_from, memories_dir, migrate_external_memories,
-    skills_dir,
+    configured_skill_dirs_from, knowledge_dir, memories_dir, migrate_external_memories, skills_dir,
 };
 
 const KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
@@ -63,11 +62,12 @@ pub fn sync_external_agent_configs() -> io::Result<()> {
     let memories = memories_dir();
     std::fs::create_dir_all(&skills)?;
     std::fs::create_dir_all(&memories)?;
+    let canonical = knowledge_dir().join("AGENTS.md");
     sync_external_agent_configs_from(
         &AgentConfigPaths::from_env(),
         &skills,
         &memories,
-        &agent_memories_prompt(),
+        &canonical,
     )
 }
 
@@ -75,13 +75,13 @@ fn sync_external_agent_configs_from(
     paths: &AgentConfigPaths,
     skills_root: &Path,
     memories_root: &Path,
-    memories: &str,
+    canonical: &Path,
 ) -> io::Result<()> {
     let skills = configured_skill_dirs_from(skills_root);
     let mut error = None;
     keep_first_error(
         &mut error,
-        sync_markdown(&paths.claude_instructions, memories),
+        link_instructions(&paths.claude_instructions, canonical),
     );
     let claude_memories = memories_root.join("claude").join("auto");
     keep_first_error(
@@ -95,11 +95,11 @@ fn sync_external_agent_configs_from(
     );
     keep_first_error(
         &mut error,
-        sync_markdown(&paths.codex_instructions, memories),
+        link_instructions(&paths.codex_instructions, canonical),
     );
     keep_first_error(
         &mut error,
-        sync_codex_config(&paths.codex_config, &skills, memories.len()),
+        sync_codex_config(&paths.codex_config, &skills, 0),
     );
     keep_first_error(
         &mut error,
@@ -117,7 +117,7 @@ fn sync_external_agent_configs_from(
     );
     keep_first_error(
         &mut error,
-        sync_markdown(&paths.vibe_instructions, memories),
+        link_instructions(&paths.vibe_instructions, canonical),
     );
     keep_first_error(
         &mut error,
@@ -134,10 +134,99 @@ fn keep_first_error(first: &mut Option<io::Error>, result: io::Result<()>) {
     }
 }
 
-fn sync_markdown(path: &Path, memories: &str) -> io::Result<()> {
-    let existing = read_optional(path)?;
-    let updated = merge_managed_section(&existing, memories, KNOWLEDGE_START, KNOWLEDGE_END)?;
-    write_changed(path, &existing, &updated)
+/// Point an external agent's instruction file at the shared canonical config, without ever
+/// destroying a user's own config. A file vmux previously managed (it carries the
+/// `vmux-knowledge` marker) is migrated: its hand-authored preamble seeds the canonical once and
+/// the original is kept as `*.bak`. A pristine real file or a foreign symlink is left untouched
+/// (with a warning). A missing path is only wired up when the canonical already has content, so a
+/// user who has not populated the vmux vault is never touched.
+#[cfg(unix)]
+fn link_instructions(path: &Path, canonical: &Path) -> io::Result<()> {
+    use std::os::unix::fs::symlink;
+
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                if symlink_points_to(path, canonical)? {
+                    return Ok(());
+                }
+                bevy::log::warn!(
+                    "vmux Knowledge: leaving existing symlink {} untouched (it points outside the Knowledge vault)",
+                    path.display()
+                );
+                return Ok(());
+            }
+            let existing = read_optional(path)?;
+            if !existing.contains(KNOWLEDGE_START) {
+                bevy::log::warn!(
+                    "vmux Knowledge: leaving existing {} untouched; edit {} to share it across agents",
+                    path.display(),
+                    canonical.display()
+                );
+                return Ok(());
+            }
+            ensure_canonical(canonical)?;
+            seed_canonical(canonical, &existing)?;
+            back_up(path)?;
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            if read_optional(canonical)?.is_empty() {
+                return Ok(());
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        Err(error) => return Err(error),
+    }
+    symlink(canonical, path)
+}
+
+#[cfg(not(unix))]
+fn link_instructions(_path: &Path, _canonical: &Path) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_canonical(canonical: &Path) -> io::Result<()> {
+    if canonical.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = canonical.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(canonical, "")
+}
+
+#[cfg(unix)]
+fn symlink_points_to(path: &Path, canonical: &Path) -> io::Result<bool> {
+    let target = std::fs::read_link(path)?;
+    let target = if target.is_absolute() {
+        target
+    } else {
+        path.parent().unwrap_or_else(|| Path::new("/")).join(target)
+    };
+    Ok(target == canonical)
+}
+
+#[cfg(unix)]
+fn seed_canonical(canonical: &Path, existing: &str) -> io::Result<()> {
+    if !read_optional(canonical)?.is_empty() {
+        return Ok(());
+    }
+    let leftover = merge_managed_section(existing, "", KNOWLEDGE_START, KNOWLEDGE_END)?;
+    let leftover = leftover.trim();
+    if leftover.is_empty() {
+        return Ok(());
+    }
+    std::fs::write(canonical, format!("{leftover}\n"))
+}
+
+#[cfg(unix)]
+fn back_up(path: &Path) -> io::Result<()> {
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(".bak");
+    std::fs::rename(path, backup)
 }
 
 fn merge_managed_section(
@@ -536,21 +625,27 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn syncs_native_agent_config_and_preserves_user_content() {
+    fn syncs_native_agent_config_and_points_agents_at_canonical() {
         let temp = tempfile::tempdir().unwrap();
         let paths = paths(temp.path());
         let skills = temp.path().join("knowledge/skills");
         let memories = temp.path().join("knowledge/memories");
+        let canonical = temp.path().join("knowledge/AGENTS.md");
         std::fs::create_dir_all(skills.join("caveman")).unwrap();
         std::fs::create_dir_all(&paths.codex_memories).unwrap();
         std::fs::write(skills.join("caveman/SKILL.md"), "skill").unwrap();
         std::fs::create_dir_all(paths.claude_instructions.parent().unwrap()).unwrap();
         std::fs::create_dir_all(paths.codex_config.parent().unwrap()).unwrap();
         std::fs::create_dir_all(paths.vibe_config.parent().unwrap()).unwrap();
-        std::fs::write(&paths.claude_instructions, "claude user\n").unwrap();
+        let claude_file =
+            format!("claude user\n\n{KNOWLEDGE_START}\nold memory\n{KNOWLEDGE_END}\n");
+        let block_only = format!("{KNOWLEDGE_START}\nold memory\n{KNOWLEDGE_END}\n");
+        std::fs::write(&paths.claude_instructions, &claude_file).unwrap();
         std::fs::write(&paths.claude_settings, "{\"userSetting\":true}\n").unwrap();
-        std::fs::write(&paths.codex_instructions, "codex user\n").unwrap();
+        std::fs::write(&paths.codex_instructions, &block_only).unwrap();
+        std::fs::write(&paths.vibe_instructions, &block_only).unwrap();
         std::fs::write(&paths.codex_config, "model = \"gpt\"\n").unwrap();
         std::fs::write(
             &paths.vibe_config,
@@ -558,29 +653,34 @@ mod tests {
         )
         .unwrap();
 
-        sync_external_agent_configs_from(&paths, &skills, &memories, "memory one").unwrap();
-        sync_external_agent_configs_from(&paths, &skills, &memories, "memory two").unwrap();
+        sync_external_agent_configs_from(&paths, &skills, &memories, &canonical).unwrap();
+        sync_external_agent_configs_from(&paths, &skills, &memories, &canonical).unwrap();
 
+        let canonical_text = std::fs::read_to_string(&canonical).unwrap();
+        assert_eq!(canonical_text, "claude user\n");
+        assert!(!canonical_text.contains("old memory"));
+        assert_eq!(canonical_text.matches(KNOWLEDGE_START).count(), 0);
         for path in [
             &paths.claude_instructions,
             &paths.codex_instructions,
             &paths.vibe_instructions,
         ] {
-            let text = std::fs::read_to_string(path).unwrap();
-            assert!(text.contains("memory two"));
-            assert!(!text.contains("memory one"));
-            assert_eq!(text.matches(KNOWLEDGE_START).count(), 1);
+            assert!(
+                std::fs::symlink_metadata(path)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            assert_eq!(std::fs::read_link(path).unwrap(), canonical);
+            assert_eq!(std::fs::read_to_string(path).unwrap(), "claude user\n");
         }
-        assert!(
-            std::fs::read_to_string(&paths.claude_instructions)
-                .unwrap()
-                .starts_with("claude user\n")
+        let mut claude_backup = paths.claude_instructions.clone().into_os_string();
+        claude_backup.push(".bak");
+        assert_eq!(
+            std::fs::read_to_string(&claude_backup).unwrap(),
+            claude_file
         );
-        assert!(
-            std::fs::read_to_string(&paths.codex_instructions)
-                .unwrap()
-                .starts_with("codex user\n")
-        );
+
         let claude_settings = std::fs::read_to_string(&paths.claude_settings)
             .unwrap()
             .parse::<serde_json::Value>()
@@ -622,21 +722,158 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["/existing", skills.to_string_lossy().as_ref()]
         );
-        #[cfg(unix)]
-        {
-            assert_eq!(
-                std::fs::read_link(paths.claude_skills.join("caveman")).unwrap(),
-                skills.join("caveman")
-            );
-            assert_eq!(
-                std::fs::read_link(&paths.codex_memories).unwrap(),
-                memories.join("codex/local")
-            );
-            assert_eq!(
-                std::fs::read_link(&paths.codex_extension_memories).unwrap(),
-                memories.join("codex/extensions")
-            );
-        }
+        assert_eq!(
+            std::fs::read_link(paths.claude_skills.join("caveman")).unwrap(),
+            skills.join("caveman")
+        );
+        assert_eq!(
+            std::fs::read_link(&paths.codex_memories).unwrap(),
+            memories.join("codex/local")
+        );
+        assert_eq!(
+            std::fs::read_link(&paths.codex_extension_memories).unwrap(),
+            memories.join("codex/extensions")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_skips_missing_path_when_vault_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let path = temp.path().join("claude/CLAUDE.md");
+
+        link_instructions(&path, &canonical).unwrap();
+
+        // A user who has not populated the vault is untouched: no file planted, no canonical created.
+        assert!(!path.exists());
+        assert!(std::fs::symlink_metadata(&path).is_err());
+        assert!(!canonical.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_wires_missing_path_when_canonical_has_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        std::fs::create_dir_all(canonical.parent().unwrap()).unwrap();
+        std::fs::write(&canonical, "shared config\n").unwrap();
+        let path = temp.path().join("claude/CLAUDE.md");
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "shared config\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_migrates_preamble_backs_up_and_is_idempotent() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let path = temp.path().join("claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = format!("hand config\n\n{KNOWLEDGE_START}\nmemory\n{KNOWLEDGE_END}\n");
+        std::fs::write(&path, &original).unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            "hand config\n"
+        );
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
+        let mut backup = path.clone().into_os_string();
+        backup.push(".bak");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+
+        std::fs::write(&canonical, "hand config\nedited\n").unwrap();
+        link_instructions(&path, &canonical).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            "hand config\nedited\n"
+        );
+        assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_keeps_existing_canonical_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        std::fs::create_dir_all(canonical.parent().unwrap()).unwrap();
+        std::fs::write(&canonical, "shared config\n").unwrap();
+        let path = temp.path().join("codex/AGENTS.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let original = format!("codex preamble\n{KNOWLEDGE_START}\nmemory\n{KNOWLEDGE_END}\n");
+        std::fs::write(&path, &original).unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&canonical).unwrap(),
+            "shared config\n"
+        );
+        assert_eq!(std::fs::read_link(&path).unwrap(), canonical);
+        let mut backup = path.clone().into_os_string();
+        backup.push(".bak");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_leaves_pristine_user_file_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let path = temp.path().join("claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "my own rules\n").unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert!(
+            !std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "my own rules\n");
+        assert!(read_optional(&canonical).unwrap().is_empty());
+        let mut backup = path.clone().into_os_string();
+        backup.push(".bak");
+        assert!(!Path::new(&backup).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_instructions_leaves_foreign_symlink_untouched() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir().unwrap();
+        let canonical = temp.path().join("knowledge/AGENTS.md");
+        let dotfiles = temp.path().join("dotfiles/CLAUDE.md");
+        std::fs::create_dir_all(dotfiles.parent().unwrap()).unwrap();
+        std::fs::write(&dotfiles, "dotfiles rules\n").unwrap();
+        let path = temp.path().join("claude/CLAUDE.md");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        symlink(&dotfiles, &path).unwrap();
+
+        link_instructions(&path, &canonical).unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_link(&path).unwrap(), dotfiles);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "dotfiles rules\n");
+        assert!(read_optional(&canonical).unwrap().is_empty());
     }
 
     #[test]

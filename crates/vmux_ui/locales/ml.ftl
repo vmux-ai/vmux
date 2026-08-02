@@ -128,6 +128,8 @@ agents-empty = പൊരുത്തപ്പെടുന്ന ഏജന്റ�
 agents-empty-detail = പേര്, റൺടൈം, അല്ലെങ്കിൽ ACP/CLI ഉപയോഗിച്ച് നോക്കൂ.
 agents-install-failed = ഇൻസ്റ്റാൾ ചെയ്യാനായില്ല
 agents-updating = അപ്ഡേറ്റ് ചെയ്യുന്നു…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = വീണ്ടും ശ്രമിക്കുന്നു…
 agents-preparing = തയ്യാറാക്കുന്നു…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = തീയതി
 editor-property-kind-list = ലിസ്റ്റ്
 editor-property-kind-link = ലിങ്ക്
 editor-property-kind-tags = ടാഗുകൾ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

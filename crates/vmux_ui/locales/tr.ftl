@@ -128,6 +128,8 @@ agents-empty = Eşleşen ajan yok
 agents-empty-detail = Ad, çalışma zamanı ya da ACP/CLI deneyin.
 agents-install-failed = Yükleme başarısız
 agents-updating = Güncelleniyor…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Yeniden deneniyor…
 agents-preparing = Hazırlanıyor…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Tarih
 editor-property-kind-list = Liste
 editor-property-kind-link = Bağlantı
 editor-property-kind-tags = Etiketler
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

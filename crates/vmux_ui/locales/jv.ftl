@@ -128,6 +128,8 @@ agents-empty = Ora ana agen sing cocog
 agents-empty-detail = Coba nganggo jeneng, runtime, utawa ACP/CLI.
 agents-install-failed = Pamasangan gagal
 agents-updating = Lagi dianyari…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Lagi dicoba maneh…
 agents-preparing = Lagi disiapaké…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Tanggal
 editor-property-kind-list = Dhaptar
 editor-property-kind-link = Link
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

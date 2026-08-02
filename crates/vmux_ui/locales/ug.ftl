@@ -128,6 +128,8 @@ agents-empty = ماس كېلىدىغان ئاگېنت يوق
 agents-empty-detail = نام، ئىجرا مۇھىتى ياكى ACP/CLI نى سىناپ بېقىڭ.
 agents-install-failed = ئورنىتىش مەغلۇپ بولدى
 agents-updating = يېڭىلىنىۋاتىدۇ…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = قايتا سىنىلىۋاتىدۇ…
 agents-preparing = تەييارلىنىۋاتىدۇ…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = چېسلا
 editor-property-kind-list = تىزىملىك
 editor-property-kind-link = ئۇلىنىش
 editor-property-kind-tags = خەتكۈچ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

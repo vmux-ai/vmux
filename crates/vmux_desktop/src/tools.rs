@@ -1656,7 +1656,7 @@ fn install_provider(provider: ToolProvider, id: &str) -> Result<(), String> {
             command_output("npm", &["install", "--global", id], true)?;
         }
         ToolProvider::Acp => {
-            vmux_agent::acp_install::resolve_from_registry(id, |_, _, _| {})?;
+            vmux_agent::acp_install::resolve_from_registry(id, None, |_, _, _| {})?;
         }
         ToolProvider::Lsp => {
             let root = vmux_editor::lsp::store::default_root();

@@ -128,6 +128,8 @@ agents-empty = ไม่พบเอเจนต์ที่ตรงกัน
 agents-empty-detail = ลองค้นหาชื่อ รันไทม์ หรือ ACP/CLI
 agents-install-failed = ติดตั้งไม่สำเร็จ
 agents-updating = กำลังอัปเดต…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = กำลังลองอีกครั้ง…
 agents-preparing = กำลังเตรียม…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = วันที่
 editor-property-kind-list = รายการ
 editor-property-kind-link = ลิงค์
 editor-property-kind-tags = แท็ก
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

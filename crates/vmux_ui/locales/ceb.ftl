@@ -128,6 +128,8 @@ agents-empty = Walay matching nga agents
 agents-empty-detail = Sulayi ang ngalan, runtime, o ACP/CLI.
 agents-install-failed = Napakyas ang pag-install
 agents-updating = Nag-update…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Gisulayan pag-usab…
 agents-preparing = Nag-andam…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Petsa
 editor-property-kind-list = Listahan
 editor-property-kind-link = Link
 editor-property-kind-tags = Mga tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

@@ -128,6 +128,8 @@ agents-empty = ကိုက်ညီသည့် agent မရှိပါ
 agents-empty-detail = အမည်၊ runtime သို့မဟုတ် ACP/CLI ဖြင့် ရှာကြည့်ပါ။
 agents-install-failed = ထည့်သွင်းမှု မအောင်မြင်ပါ
 agents-updating = အပ်ဒိတ်လုပ်နေသည်…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ထပ်ကြိုးစားနေသည်…
 agents-preparing = ပြင်ဆင်နေသည်…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = ရက်စွဲ
 editor-property-kind-list = စာရင်း
 editor-property-kind-link = လင့်
 editor-property-kind-tags = တဂ်
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

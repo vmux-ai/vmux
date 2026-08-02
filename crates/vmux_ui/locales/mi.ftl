@@ -128,6 +128,8 @@ agents-empty = Kāore he āpiha e ōrite ana
 agents-empty-detail = Whakamātauria he ingoa, he wāhaere, he ACP/CLI rānei.
 agents-install-failed = I rahua te tāuta
 agents-updating = E whakahōu ana…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = E ngana anō ana…
 agents-preparing = E whakarite ana…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Rā
 editor-property-kind-list = Rarangi
 editor-property-kind-link = Hononga
 editor-property-kind-tags = Tohutohu
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

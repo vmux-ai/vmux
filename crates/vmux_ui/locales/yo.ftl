@@ -128,6 +128,8 @@ agents-empty = Kò sí agent tó bá a mu
 agents-empty-detail = Gbìyànjú orúkọ, runtime, tàbí ACP/CLI.
 agents-install-failed = Fífì sílẹ̀ kùnà
 agents-updating = Ń ṣe àfikún tuntun…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Ń gbìyànjú lẹ́ẹ̀kansi…
 agents-preparing = Ń pèsè…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Ọjọ
 editor-property-kind-list = Akojọ
 editor-property-kind-link = Ọna asopọ
 editor-property-kind-tags = Awọn afi
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

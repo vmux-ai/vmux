@@ -128,6 +128,8 @@ agents-empty = የሚዛመድ ኤጀንት የለም
 agents-empty-detail = ስም፣ runtime፣ ወይም ACP/CLI ይሞክሩ።
 agents-install-failed = መጫን አልተሳካም
 agents-updating = እየተዘመነ…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = እንደገና እየተሞከረ…
 agents-preparing = እየተዘጋጀ…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = ቀን
 editor-property-kind-list = ዝርዝር
 editor-property-kind-link = አገናኝ
 editor-property-kind-tags = መለያዎች
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

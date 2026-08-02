@@ -128,6 +128,8 @@ agents-empty = பொருந்தும் ஏஜென்ட்கள் இ
 agents-empty-detail = பெயர், runtime, அல்லது ACP/CLI மூலம் முயற்சிக்கவும்.
 agents-install-failed = நிறுவல் தோல்வியடைந்தது
 agents-updating = புதுப்பிக்கிறது…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = மீண்டும் முயற்சிக்கிறது…
 agents-preparing = தயாராகிறது…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = தேதி
 editor-property-kind-list = பட்டியல்
 editor-property-kind-link = இணைப்பு
 editor-property-kind-tags = குறிச்சொற்கள்
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

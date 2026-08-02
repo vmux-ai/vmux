@@ -128,6 +128,8 @@ agents-empty = ମେଳ ଖାଉଥିବା ଏଜେଣ୍ଟ ନାହି�
 agents-empty-detail = ନାମ, ରନ୍‌ଟାଇମ୍, କିମ୍ବା ACP/CLI ଦେଇ ଚେଷ୍ଟା କରନ୍ତୁ।
 agents-install-failed = ଇନ୍‌ଷ୍ଟଲ୍ ବିଫଳ ହେଲା
 agents-updating = ଅପଡେଟ୍ ହେଉଛି…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ପୁଣି ଚେଷ୍ଟା ହେଉଛି…
 agents-preparing = ପ୍ରସ୍ତୁତ ହେଉଛି…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = ତାରିଖ
 editor-property-kind-list = ତାଲିକା |
 editor-property-kind-link = ଲିଙ୍କ୍ |
 editor-property-kind-tags = ଟ୍ୟାଗ୍ସ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

@@ -128,6 +128,8 @@ agents-empty = Geen ooreenstemmende agente nie
 agents-empty-detail = Probeer ’n naam, looptyd, of ACP/CLI.
 agents-install-failed = Installering het misluk
 agents-updating = Werk by…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Probeer weer…
 agents-preparing = Berei voor…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Datum
 editor-property-kind-list = Lys
 editor-property-kind-link = Skakel
 editor-property-kind-tags = Merkers
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

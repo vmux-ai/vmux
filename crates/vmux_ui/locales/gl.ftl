@@ -128,6 +128,8 @@ agents-empty = Non hai axentes coincidentes
 agents-empty-detail = Proba cun nome, contorno de execución ou ACP/CLI.
 agents-install-failed = Fallou a instalación
 agents-updating = Actualizando…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Tentando de novo…
 agents-preparing = Preparando…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Data
 editor-property-kind-list = Lista
 editor-property-kind-link = Ligazón
 editor-property-kind-tags = Etiquetas
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

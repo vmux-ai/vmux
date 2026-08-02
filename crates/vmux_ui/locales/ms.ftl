@@ -128,6 +128,8 @@ agents-empty = Tiada agen yang sepadan
 agents-empty-detail = Cuba nama, runtime, atau ACP/CLI.
 agents-install-failed = Pemasangan gagal
 agents-updating = Mengemas kini…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Mencuba lagi…
 agents-preparing = Menyediakan…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = tarikh
 editor-property-kind-list = Senaraikan
 editor-property-kind-link = Pautan
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

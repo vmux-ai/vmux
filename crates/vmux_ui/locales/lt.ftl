@@ -128,6 +128,8 @@ agents-empty = Atitinkančių agentų nėra
 agents-empty-detail = Bandykite įvesti pavadinimą, vykdymo aplinką arba ACP/CLI.
 agents-install-failed = Įdiegti nepavyko
 agents-updating = Atnaujinama…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Bandoma dar kartą…
 agents-preparing = Ruošiama…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Data
 editor-property-kind-list = Sąrašas
 editor-property-kind-link = Nuoroda
 editor-property-kind-tags = Žymos
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

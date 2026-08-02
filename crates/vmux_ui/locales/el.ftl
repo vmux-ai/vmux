@@ -128,6 +128,8 @@ agents-empty = Δεν βρέθηκαν agents
 agents-empty-detail = Δοκιμάστε όνομα, runtime ή ACP/CLI.
 agents-install-failed = Η εγκατάσταση απέτυχε
 agents-updating = Γίνεται ενημέρωση…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Γίνεται νέα προσπάθεια…
 agents-preparing = Γίνεται προετοιμασία…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Ημερομηνία
 editor-property-kind-list = Λίστα
 editor-property-kind-link = Σύνδεσμος
 editor-property-kind-tags = Ετικέτες
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

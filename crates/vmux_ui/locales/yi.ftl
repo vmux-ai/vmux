@@ -128,6 +128,8 @@ agents-empty = נישטאָ קיין פּאַסיקע אַגענטן
 agents-empty-detail = פּרוּווט אַ נאָמען, runtime, אָדער ACP/CLI.
 agents-install-failed = אינסטאַלירונג דורכגעפֿאַלן
 agents-updating = דערהײַנטיקט זיך…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = פּרוּווט ווידער…
 agents-preparing = גרייט זיך…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = טאָג
 editor-property-kind-list = רשימה
 editor-property-kind-link = לינק
 editor-property-kind-tags = טאַגס
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

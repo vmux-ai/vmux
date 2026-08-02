@@ -10,6 +10,7 @@ pub fn build_agent_launch(
     strategies: &AgentStrategies,
     exe_path: &Path,
     anchor: vmux_core::ProcessId,
+    effort: Option<&str>,
 ) -> Result<TerminalLaunch, String> {
     let strategy = strategies
         .get_cli(kind)
@@ -19,7 +20,13 @@ pub fn build_agent_launch(
         bevy::log::warn!("external agent Knowledge sync failed: {error}");
     }
     strategy.prepare_launch(&mcp_cfg);
-    let args = strategy.build_args(&mcp_cfg, session_id);
+    let effort_key = format!("cli:{}", kind.as_url_segment());
+    let mut args =
+        match effort.filter(|level| vmux_core::agent::effort_levels(&effort_key).contains(level)) {
+            Some(level) => strategy.effort_args(level),
+            None => Vec::new(),
+        };
+    args.extend(strategy.build_args(&mcp_cfg, session_id));
     let mut env: Vec<(String, String)> = std::env::vars().collect();
     env.extend(strategy.build_env(&mcp_cfg));
     env.push(("VMUX_ANCHOR".to_string(), anchor.to_string()));

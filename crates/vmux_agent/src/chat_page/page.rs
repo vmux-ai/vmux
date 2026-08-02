@@ -13,12 +13,12 @@ use crate::chat_page::event::{
     ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
     ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatCreateWorktree, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
-    ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
-    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
-    SlashCommands, WORKING_VERB_IDS, latest_tool_location,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatOpenPage, ChatPasteMedia,
+    ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ChatTurn, ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SetAgentEffort, SlashCommandEntry, SlashCommands, WORKING_VERB_IDS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -100,6 +100,27 @@ fn copy_to_clipboard(text: &str) {
     if let Some(window) = web_sys::window() {
         let _ = window.navigator().clipboard().write_text(text);
     }
+}
+
+/// Whether a startup/run error looks like a package registry/version block (npm 403, security
+/// policy, forbidden version) — where the fix is usually pinning a different version.
+fn is_version_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "403",
+        "404",
+        "forbidden",
+        "security policy",
+        "blocked",
+        "eacces",
+        "invalid tag",
+        "einvalidtagname",
+        "etarget",
+        "no matching version",
+        "notarget",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
@@ -515,6 +536,10 @@ pub fn Page(
     let mut media_loading = use_signal(|| false);
     let mut current_model_id = use_signal(String::new);
     let mut current_model = use_signal(String::new);
+    let mut effort_levels = use_signal(Vec::<String>::new);
+    let mut effort_current = use_signal(String::new);
+    let mut effort_agent_key = use_signal(String::new);
+    let mut effort_menu_open = use_signal(|| false);
     let mut composer_context = use_signal(ComposerContext::default);
     let mut menu_sel = use_signal(|| 0usize);
     let mut resume_requested = use_signal(|| false);
@@ -643,6 +668,9 @@ pub fn Page(
         models.set(state.models.clone());
         current_model_id.set(state.current_model_id.clone());
         current_model.set(state.current_model_name.clone());
+        effort_levels.set(state.effort_levels.clone());
+        effort_current.set(state.effort_current.clone());
+        effort_agent_key.set(state.agent_key.clone());
         menu_sel.set(0);
     });
     let _composer_context =
@@ -1195,6 +1223,92 @@ pub fn Page(
                         }
                     }
                 }
+                if !effort_levels().is_empty() {
+                    div { class: "relative shrink-0",
+                        button {
+                            id: "chat-effort-trigger",
+                            class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
+                            title: translate("agent-effort-tooltip"),
+                            onmousedown: move |event| event.prevent_default(),
+                            onclick: move |_| {
+                                let next = !effort_menu_open();
+                                effort_menu_open.set(next);
+                                focus_prompt_end(PROMPT_INPUT_ID);
+                            },
+                            svg {
+                                class: "h-3.5 w-3.5 shrink-0",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.8",
+                                stroke_linecap: "round",
+                                stroke_linejoin: "round",
+                                path { d: "M12 20a8 8 0 1 1 8-8" }
+                                path { d: "M12 12l3.5-2" }
+                            }
+                            span { class: "truncate capitalize",
+                                {if effort_current().is_empty() { translate("agent-effort") } else { effort_current() }}
+                            }
+                            svg {
+                                class: "h-3 w-3 shrink-0 opacity-50",
+                                view_box: "0 0 24 24",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "2",
+                                path { d: "m8 10 4 4 4-4" }
+                            }
+                        }
+                        if effort_menu_open() {
+                            div { class: "absolute bottom-full left-0 z-20 mb-2 min-w-[9rem] rounded-2xl border border-foreground/10 bg-background/95 p-1.5 shadow-xl backdrop-blur-xl",
+                                div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
+                                {
+                                    let key = effort_agent_key();
+                                    let is_default = effort_current().is_empty();
+                                    rsx! {
+                                        button {
+                                            class: if is_default { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                            onmousedown: move |event| event.prevent_default(),
+                                            onclick: move |_| {
+                                                effort_current.set(String::new());
+                                                effort_menu_open.set(false);
+                                                let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: String::new() });
+                                                focus_prompt_end(PROMPT_INPUT_ID);
+                                            },
+                                            span { class: "min-w-0 flex-1 truncate", {translate("agent-effort-default")} }
+                                            if is_default {
+                                                svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                            }
+                                        }
+                                    }
+                                }
+                                for level in effort_levels() {
+                                    {
+                                        let level_value = level.clone();
+                                        let key = effort_agent_key();
+                                        let selected = level == effort_current();
+                                        rsx! {
+                                            button {
+                                                key: "effort-{level}",
+                                                class: if selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
+                                                onmousedown: move |event| event.prevent_default(),
+                                                onclick: move |_| {
+                                                    effort_current.set(level_value.clone());
+                                                    effort_menu_open.set(false);
+                                                    let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: level_value.clone() });
+                                                    focus_prompt_end(PROMPT_INPUT_ID);
+                                                },
+                                                span { class: "min-w-0 flex-1 truncate capitalize", "{level}" }
+                                                if selected {
+                                                    svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 span {
                     class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] text-muted-foreground",
                     title: "Tools ask before protected actions; Allow always is remembered per agent, repository or working directory, and tool",
@@ -1435,8 +1549,98 @@ pub fn Page(
                         }
                     }
                     if status() == "errored" {
-                        div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
-                            "{error}"
+                        {
+                            let message = error();
+                            let is_startup = message.to_lowercase().contains("startup");
+                            let version_hint = is_version_error(&message);
+                            let title = if is_startup {
+                                translate("agent-error-startup-title")
+                            } else {
+                                translate("common-error")
+                            };
+                            let copy_label = translate("common-copy");
+                            let copy_text = message.clone();
+                            rsx! {
+                                div { class: "flex flex-col gap-2 rounded-xl bg-red-500/[0.07] px-4 py-3 ring-1 ring-inset ring-red-500/20",
+                                    div { class: "flex items-center gap-2",
+                                        svg {
+                                            class: "h-4 w-4 shrink-0 text-red-500",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "1.8",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" }
+                                            path { d: "M12 9v4" }
+                                            path { d: "M12 17h.01" }
+                                        }
+                                        span { class: "text-sm font-semibold text-red-600 dark:text-red-300", "{title}" }
+                                        button {
+                                            class: "ml-auto flex h-6 w-6 items-center justify-center rounded-md text-red-500/70 transition hover:bg-red-500/10 hover:text-red-500",
+                                            title: "{copy_label}",
+                                            aria_label: "{copy_label}",
+                                            onclick: move |_| copy_to_clipboard(&copy_text),
+                                            svg {
+                                                class: "h-3.5 w-3.5",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "1.8",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
+                                                path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+                                            }
+                                        }
+                                    }
+                                    div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-red-500/[0.06] px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
+                                        "{message}"
+                                    }
+                                }
+                                if version_hint {
+                                    div { class: "flex items-start gap-3 rounded-xl bg-foreground/[0.04] px-4 py-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-500",
+                                            svg {
+                                                class: "h-4 w-4",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "1.8",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                path { d: "M9 18h6" }
+                                                path { d: "M10 22h4" }
+                                                path { d: "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" }
+                                            }
+                                        }
+                                        div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
+                                            p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
+                                            button {
+                                                class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
+                                                onclick: move |_| {
+                                                    let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
+                                                },
+                                                svg {
+                                                    class: "h-4 w-4 text-indigo-500",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "1.8",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M15 3h6v6" }
+                                                    path { d: "M10 14 21 3" }
+                                                    path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
+                                                }
+                                                span { class: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent",
+                                                    {translate("agent-error-open-agents")}
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     if paused() {

@@ -128,6 +128,8 @@ agents-empty = មិនមានភ្នាក់ងារដែលត្រ�
 agents-empty-detail = សាកល្បងឈ្មោះ runtime ឬ ACP/CLI។
 agents-install-failed = ដំឡើងបរាជ័យ
 agents-updating = កំពុងធ្វើបច្ចុប្បន្នភាព…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = កំពុងសាកល្បងម្ដងទៀត…
 agents-preparing = កំពុងរៀបចំ…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = កាលបរិច្ឆេទ
 editor-property-kind-list = បញ្ជី
 editor-property-kind-link = តំណភ្ជាប់
 editor-property-kind-tags = ស្លាក
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

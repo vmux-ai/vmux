@@ -128,6 +128,8 @@ agents-empty = Gabat gelýän agent ýok
 agents-empty-detail = At, ýerine ýetiriş gurşawy ýa-da ACP/CLI boýunça synap görüň.
 agents-install-failed = Gurnamak başartmady
 agents-updating = Täzelenýär…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Gaýtadan synalýar…
 agents-preparing = Taýýarlanýar…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Sene
 editor-property-kind-list = Sanaw
 editor-property-kind-link = Baglanyşyk
 editor-property-kind-tags = Bellikler
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

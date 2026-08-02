@@ -128,6 +128,8 @@ agents-empty = సరిపడే ఏజెంట్లు లేవు
 agents-empty-detail = పేరు, రన్‌టైమ్, లేదా ACP/CLI ప్రయత్నించండి.
 agents-install-failed = ఇన్‌స్టాల్ విఫలమైంది
 agents-updating = అప్‌డేట్ అవుతోంది…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = మళ్లీ ప్రయత్నిస్తోంది…
 agents-preparing = సిద్ధం చేస్తోంది…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = తేదీ
 editor-property-kind-list = జాబితా
 editor-property-kind-link = లింక్
 editor-property-kind-tags = ట్యాగ్‌లు
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

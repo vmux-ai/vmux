@@ -128,6 +128,8 @@ agents-empty = Nuk ka agjentë që përputhen
 agents-empty-detail = Provo me emër, runtime ose ACP/CLI.
 agents-install-failed = Instalimi dështoi
 agents-updating = Po përditësohet…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Po provohet përsëri…
 agents-preparing = Po përgatitet…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Data
 editor-property-kind-list = Lista
 editor-property-kind-link = Lidhje
 editor-property-kind-tags = Etiketat
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

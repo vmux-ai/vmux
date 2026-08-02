@@ -1,23 +1,23 @@
 use bevy::prelude::*;
 
 use crate::client::acp::AcpSession;
-use crate::components::{AgentMessages, AgentSession};
-use crate::message::{AssistantBlock, Message};
+use crate::components::AgentSession;
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use crate::toast::{AgentToast, ToastLevel};
 
+/// On a transition into `Errored`, fire a toast. The chat page renders the errored run-state as a
+/// styled inline card, so the error is not also pushed into the transcript (which duplicated it).
 pub fn surface_errors(
     mut writer: MessageWriter<AgentToast>,
     mut q: Query<(
         &AgentRunState,
         &mut LastRunStateKind,
-        &mut AgentMessages,
         Option<&AgentSession>,
         Option<&AcpSession>,
     )>,
 ) {
-    for (state, mut last, mut messages, page, acp) in &mut q {
+    for (state, mut last, page, acp) in &mut q {
         // Resolve the session id from either a Page/CLI session or an ACP session.
         let Some(sid) = page
             .map(|s| s.sid.clone())
@@ -36,9 +36,6 @@ pub fn surface_errors(
         let AgentRunState::Errored(msg) = state else {
             continue;
         };
-        messages.0.push(Message::Assistant {
-            blocks: vec![AssistantBlock::Text(format!("\u{26A0} {msg}"))],
-        });
         writer.write(AgentToast {
             session_sid: sid,
             level: ToastLevel::Error,
@@ -71,27 +68,14 @@ mod tests {
     }
 
     #[test]
-    fn errored_transition_appends_inline_and_fires_toast() {
+    fn errored_transition_fires_toast() {
         let mut app = make_app();
-        let entity = app
-            .world_mut()
-            .spawn((
-                make_session(),
-                AgentMessages::default(),
-                LastRunStateKind::default(),
-                AgentRunState::Errored("boom".into()),
-            ))
-            .id();
+        app.world_mut().spawn((
+            make_session(),
+            LastRunStateKind::default(),
+            AgentRunState::Errored("boom".into()),
+        ));
         app.update();
-        let msgs = app.world().get::<AgentMessages>(entity).unwrap();
-        assert_eq!(msgs.0.len(), 1);
-        match &msgs.0[0] {
-            Message::Assistant { blocks } => match &blocks[0] {
-                AssistantBlock::Text(t) => assert!(t.contains("boom")),
-                _ => panic!("expected text block"),
-            },
-            _ => panic!("expected assistant message"),
-        }
         let events: Vec<AgentToast> = app
             .world_mut()
             .resource_mut::<bevy::ecs::message::Messages<AgentToast>>()
@@ -115,7 +99,6 @@ mod tests {
                 anchor: vmux_core::ProcessId::new(),
                 resume: None,
             },
-            AgentMessages::default(),
             LastRunStateKind::default(),
             AgentRunState::Errored("kaboom".into()),
         ));
@@ -133,18 +116,12 @@ mod tests {
     #[test]
     fn no_op_when_state_kind_unchanged() {
         let mut app = make_app();
-        let _entity = app
-            .world_mut()
-            .spawn((
-                make_session(),
-                AgentMessages::default(),
-                LastRunStateKind(AgentRunStateKind::Errored),
-                AgentRunState::Errored("old".into()),
-            ))
-            .id();
+        app.world_mut().spawn((
+            make_session(),
+            LastRunStateKind(AgentRunStateKind::Errored),
+            AgentRunState::Errored("old".into()),
+        ));
         app.update();
-        let msgs = app.world().get::<AgentMessages>(_entity).unwrap();
-        assert!(msgs.0.is_empty());
         let events: Vec<AgentToast> = app
             .world_mut()
             .resource_mut::<bevy::ecs::message::Messages<AgentToast>>()

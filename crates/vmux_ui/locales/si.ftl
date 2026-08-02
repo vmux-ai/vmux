@@ -128,6 +128,8 @@ agents-empty = ගැලපෙන ඒජන්ට් නැත
 agents-empty-detail = නමක්, runtime එකක්, හෝ ACP/CLI උත්සාහ කරන්න.
 agents-install-failed = ස්ථාපනය අසාර්ථකයි
 agents-updating = යාවත්කාලීන වෙමින්…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = නැවත උත්සාහ කරමින්…
 agents-preparing = සූදානම් කරමින්…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = දිනය
 editor-property-kind-list = ලැයිස්තුව
 editor-property-kind-link = සබැඳිය
 editor-property-kind-tags = ටැග්
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

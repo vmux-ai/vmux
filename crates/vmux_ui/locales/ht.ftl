@@ -128,6 +128,8 @@ agents-empty = Pa gen ajan ki koresponn
 agents-empty-detail = Eseye yon non, yon runtime, oswa ACP/CLI.
 agents-install-failed = Enstalasyon an echwe
 agents-updating = Ap mete ajou…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Ap reeseye…
 agents-preparing = Ap prepare…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Dat
 editor-property-kind-list = Lis
 editor-property-kind-link = Link
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

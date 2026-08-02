@@ -128,6 +128,8 @@ agents-empty = هیچ ئەیجەنتێکی هاوتا نییە
 agents-empty-detail = ناو، ژینگەی جێبەجێکردن، یان ACP/CLI تاقی بکەرەوە.
 agents-install-failed = دامەزراندن سەرکەوتوو نەبوو
 agents-updating = نوێ دەکرێتەوە…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = دووبارە هەوڵ دەدرێت…
 agents-preparing = ئامادە دەکرێت…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Rojek
 editor-property-kind-list = Rêzkirin
 editor-property-kind-link = Girêk
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

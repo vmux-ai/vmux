@@ -128,6 +128,8 @@ agents-empty = ملندڙ ايجنٽ ڪونهي
 agents-empty-detail = نالو، رن ٽائيم، يا ACP/CLI آزمايو.
 agents-install-failed = انسٽال ناڪام
 agents-updating = اپڊيٽ ٿي رهيو آهي…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ٻيهر ڪوشش ٿي رهي آهي…
 agents-preparing = تياري ٿي رهي آهي…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = تاريخ
 editor-property-kind-list = فهرست
 editor-property-kind-link = ڳنڍ
 editor-property-kind-tags = ٽيگ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

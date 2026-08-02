@@ -128,6 +128,8 @@ agents-empty = Nema odgovarajućih agenata
 agents-empty-detail = Pokušaj s nazivom, okruženjem ili ACP/CLI.
 agents-install-failed = Instalacija nije uspjela
 agents-updating = Ažuriranje…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Ponovni pokušaj…
 agents-preparing = Priprema…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Datum
 editor-property-kind-list = Lista
 editor-property-kind-link = Link
 editor-property-kind-tags = Oznake
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

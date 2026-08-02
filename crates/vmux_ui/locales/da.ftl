@@ -128,6 +128,8 @@ agents-empty = Ingen matchende agenter
 agents-empty-detail = Prøv et navn, runtime eller ACP/CLI.
 agents-install-failed = Installationen mislykkedes
 agents-updating = Opdaterer…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Prøver igen…
 agents-preparing = Forbereder…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Dato
 editor-property-kind-list = Liste
 editor-property-kind-link = Forbindelse
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

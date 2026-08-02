@@ -128,6 +128,8 @@ agents-empty = Akukho arhente zingqinelanayo
 agents-empty-detail = Zama igama, indawo yokuqhuba, okanye ACP/CLI.
 agents-install-failed = Ufakelo aluphumelelanga
 agents-updating = Kuyahlaziywa…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Kuyazanywa kwakhona…
 agents-preparing = Kuyalungiselelwa…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Umhla
 editor-property-kind-list = Uluhlu
 editor-property-kind-link = Ikhonkco
 editor-property-kind-tags = Iithegi
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

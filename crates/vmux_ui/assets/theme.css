@@ -356,3 +356,33 @@ body {
 .truncate-start::before {
   content: "\200E";
 }
+
+/* Ghost button with a gradient outline: transparent fill, gradient painted only on the border,
+   following the element's border-radius (the padding-box/border-box shorthand can't do a
+   transparent center, so mask out the interior). */
+.vmux-gradient-outline {
+  position: relative;
+  background: transparent;
+}
+
+.vmux-gradient-outline::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.vmux-gradient-outline > * {
+  position: relative;
+}

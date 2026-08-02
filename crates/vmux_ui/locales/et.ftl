@@ -128,6 +128,8 @@ agents-empty = Sobivaid agente pole
 agents-empty-detail = Proovi nime, käituskeskkonda või ACP/CLI-d.
 agents-install-failed = Paigaldamine nurjus
 agents-updating = Värskendatakse…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Proovitakse uuesti…
 agents-preparing = Valmistatakse ette…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Kuupäev
 editor-property-kind-list = Nimekiri
 editor-property-kind-link = Link
 editor-property-kind-tags = Sildid
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

@@ -128,6 +128,8 @@ agents-empty = Palibe maajenti ofanana
 agents-empty-detail = Yesani dzina, runtime, kapena ACP/CLI.
 agents-install-failed = Kuyika kwalephera
 agents-updating = Ikusintha…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Ikuyesanso…
 agents-preparing = Ikukonzekera…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Tsiku
 editor-property-kind-list = Mndandanda
 editor-property-kind-link = Lumikizani
 editor-property-kind-tags = Tags
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

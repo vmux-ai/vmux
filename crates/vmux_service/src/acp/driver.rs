@@ -1,7 +1,7 @@
 //! Per-session ACP driver: spawns the agent subprocess, runs the `Client` connection,
 //! and pumps prompts/approvals through it while projecting `session/update` to the UI.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -41,6 +41,14 @@ const HISTORY_REPLAY_SNAPSHOT_INTERVAL: usize = 8;
 const PROMPT_MEDIA_FILE_LIMIT: u64 = 8 * 1024 * 1024;
 const PROMPT_MEDIA_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const APPROVAL_DETAILS_WAIT: std::time::Duration = std::time::Duration::from_millis(250);
+/// Max wall-clock for the ACP handshake (`initialize`) before the agent is declared failed, so a
+/// stuck or slowly-failing spawn surfaces an error instead of an endless "Starting agent…".
+/// Generous enough for a first-run package install on a slow network.
+const ACP_STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How many recent agent-stderr lines to retain for diagnostics.
+const STDERR_TAIL_CAPACITY: usize = 50;
+/// How many recent agent-stderr lines to include in a surfaced error.
+const STDERR_TAIL_SHOWN: usize = 8;
 
 /// A command pushed into a live ACP session from the GUI side.
 pub enum AcpInput {
@@ -140,6 +148,13 @@ pub struct AcpShared {
     /// Set by `AcpInput::Cancel`; read (and reset) when the in-flight prompt resolves so it
     /// reports `Interrupted` rather than `Idle`.
     pub cancel_requested: AtomicBool,
+    /// Recent lines from the agent subprocess's stderr, surfaced in startup/connection errors so
+    /// the user sees the real cause (e.g. an npm registry failure) instead of a silent hang.
+    stderr_tail: Mutex<VecDeque<String>>,
+    /// Set once the session is established (handshake + `session/new` done). Until then, the
+    /// subprocess dying is a startup failure to surface immediately rather than waiting out the
+    /// handshake timeout.
+    startup_ready: AtomicBool,
 }
 
 impl AcpShared {
@@ -167,7 +182,17 @@ impl AcpShared {
             history_replay: AtomicBool::new(false),
             history_replay_updates: AtomicUsize::new(0),
             cancel_requested: AtomicBool::new(false),
+            stderr_tail: Mutex::new(VecDeque::new()),
+            startup_ready: AtomicBool::new(false),
         }
+    }
+
+    fn mark_startup_ready(&self) {
+        self.startup_ready.store(true, Ordering::SeqCst);
+    }
+
+    fn startup_ready(&self) -> bool {
+        self.startup_ready.load(Ordering::SeqCst)
     }
 
     pub fn snapshot_message(&self) -> ServiceMessage {
@@ -316,6 +341,35 @@ impl AcpShared {
             status,
         });
     }
+
+    fn push_stderr(&self, line: String) {
+        let mut tail = self.stderr_tail.lock().unwrap();
+        if tail.len() >= STDERR_TAIL_CAPACITY {
+            tail.pop_front();
+        }
+        tail.push_back(line);
+    }
+
+    /// The most recent non-empty stderr lines, formatted for appending to an error message
+    /// (empty when the agent printed nothing).
+    fn stderr_detail(&self) -> String {
+        stderr_detail_from(&self.stderr_tail.lock().unwrap(), STDERR_TAIL_SHOWN)
+    }
+}
+
+/// Format the last `shown` non-empty stderr lines as an error suffix (blank-line separated), or
+/// an empty string when there is nothing to show.
+fn stderr_detail_from(tail: &VecDeque<String>, shown: usize) -> String {
+    let lines: Vec<&str> = tail
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    let start = lines.len().saturating_sub(shown);
+    format!("\n\n{}", lines[start..].join("\n"))
 }
 
 fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
@@ -607,6 +661,7 @@ pub async fn run(
     agent_id: String,
     mcp_servers: Vec<McpServer>,
     resume: Option<String>,
+    effort: Option<String>,
     shared: Arc<AcpShared>,
     mut input_rx: mpsc::UnboundedReceiver<AcpInput>,
 ) {
@@ -630,7 +685,7 @@ pub async fn run(
         Some(root) => root.apply_env(env),
         None => env,
     };
-    let session_meta = session_meta_for_agent(&agent_id);
+    let session_meta = session_meta_for_agent(&agent_id, effort.as_deref());
     let agent_cwd = shared.cwd();
     let mut child = match Command::new(&command)
         .args(&args)
@@ -650,7 +705,7 @@ pub async fn run(
     let stdin = child.stdin.take().expect("piped stdin").compat_write();
     let stdout = child.stdout.take().expect("piped stdout").compat();
     if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(drain_stderr(stderr));
+        tokio::spawn(drain_stderr(stderr, shared.clone()));
     }
     let transport = agent_client_protocol::ByteStreams::new(stdin, stdout);
 
@@ -818,7 +873,27 @@ pub async fn run(
             // ACP-native terminals: the agent's shell/Bash execution flows through vmux's five
             // terminal methods, backed by real visible panes (see `create_terminal` et al.).
             init.client_capabilities.terminal = true;
-            let init_resp = cx.send_request(init).block_task().await?;
+            let init_resp =
+                match tokio::time::timeout(ACP_STARTUP_TIMEOUT, cx.send_request(init).block_task())
+                    .await
+                {
+                    Ok(Ok(resp)) => resp,
+                    Ok(Err(err)) => {
+                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                            "agent failed to start: {err}{}",
+                            main_shared.stderr_detail()
+                        )));
+                        return Ok(());
+                    }
+                    Err(_) => {
+                        main_shared.emit_status(AgentRunStatus::Errored(format!(
+                            "agent did not start within {}s{}",
+                            ACP_STARTUP_TIMEOUT.as_secs(),
+                            main_shared.stderr_detail()
+                        )));
+                        return Ok(());
+                    }
+                };
             let prompt_capabilities = init_resp.agent_capabilities.prompt_capabilities.clone();
 
             if let Some(name) = acp_display_name(init_resp.agent_info.as_ref()) {
@@ -891,6 +966,7 @@ pub async fn run(
                     }
                 }
             }
+            main_shared.mark_startup_ready();
             main_shared.emit_status(AgentRunStatus::Idle);
 
             while let Some(input) = input_rx.recv().await {
@@ -1041,7 +1117,8 @@ pub async fn run(
 
     if let Err(err) = result {
         shared.emit_status(AgentRunStatus::Errored(format!(
-            "acp connection ended: {err}"
+            "acp connection ended: {err}{}",
+            shared.stderr_detail()
         )));
     }
     let _ = child.kill().await;
@@ -1170,16 +1247,24 @@ If you invoke a required Skill tool, continue the original user request in the s
 the skill loads. Never end the turn after skill activation or answer only Ready.";
 const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
-fn session_meta_for_agent(agent_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+fn session_meta_for_agent(
+    agent_id: &str,
+    effort: Option<&str>,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
         bevy::log::warn!("external agent Knowledge sync failed: {error}");
     }
-    session_meta_for_agent_with_knowledge(agent_id, &vmux_core::knowledge::agent_context_prompt())
+    session_meta_for_agent_with_knowledge(
+        agent_id,
+        &vmux_core::knowledge::agent_context_prompt(),
+        effort,
+    )
 }
 
 fn session_meta_for_agent_with_knowledge(
     agent_id: &str,
     knowledge: &str,
+    effort: Option<&str>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     let prompt = if agent_id == "claude" {
         if knowledge.is_empty() {
@@ -1205,7 +1290,7 @@ fn session_meta_for_agent_with_knowledge(
         };
         return Some(meta);
     }
-    let serde_json::Value::Object(meta) = serde_json::json!({
+    let serde_json::Value::Object(mut meta) = serde_json::json!({
         "systemPrompt": {
             "append": prompt,
         },
@@ -1228,14 +1313,36 @@ fn session_meta_for_agent_with_knowledge(
     }) else {
         unreachable!()
     };
+    if let Some(level) =
+        effort.filter(|level| vmux_core::agent::effort_levels("claude").contains(level))
+        && let Some(options) = meta
+            .get_mut("claudeCode")
+            .and_then(|claude_code| claude_code.get_mut("options"))
+            .and_then(|options| options.as_object_mut())
+    {
+        options.insert(
+            "effort".to_string(),
+            serde_json::Value::String(level.to_string()),
+        );
+    }
     Some(meta)
 }
 
-async fn drain_stderr(stderr: tokio::process::ChildStderr) {
+async fn drain_stderr(stderr: tokio::process::ChildStderr, shared: Arc<AcpShared>) {
     use tokio::io::{AsyncBufReadExt, BufReader};
     let mut lines = BufReader::new(stderr).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         tracing::warn!(target: "acp", "{line}");
+        shared.push_stderr(line);
+    }
+    // stderr closed = the subprocess exited. If that happens before the session is established
+    // (e.g. `npx` fails with a registry 403), surface it now instead of waiting out the handshake
+    // timeout so the GUI stops showing "Starting agent…" immediately.
+    if !shared.startup_ready() {
+        shared.emit_status(AgentRunStatus::Errored(format!(
+            "agent exited during startup{}",
+            shared.stderr_detail()
+        )));
     }
 }
 
@@ -1656,6 +1763,31 @@ mod tests {
         ContentChunk, Implementation, PermissionOptionKind, SessionConfigSelectGroup,
         SessionConfigSelectOption, ToolCall, ToolCallUpdateFields,
     };
+
+    #[test]
+    fn stderr_detail_from_shows_last_lines_and_skips_blanks() {
+        let tail: VecDeque<String> = [
+            "npm warn old",
+            "",
+            "npm error 403 Forbidden",
+            "   ",
+            "Blocked by Security Policy",
+        ]
+        .iter()
+        .map(|line| line.to_string())
+        .collect();
+        assert_eq!(
+            stderr_detail_from(&tail, 2),
+            "\n\nnpm error 403 Forbidden\nBlocked by Security Policy"
+        );
+    }
+
+    #[test]
+    fn stderr_detail_from_is_empty_without_output() {
+        let blanks: VecDeque<String> = ["", "   "].iter().map(|line| line.to_string()).collect();
+        assert!(stderr_detail_from(&blanks, 8).is_empty());
+        assert!(stderr_detail_from(&VecDeque::new(), 8).is_empty());
+    }
 
     fn opt(id: &str, kind: PermissionOptionKind) -> PermissionOption {
         PermissionOption::new(id.to_string(), id.to_string(), kind)
@@ -2402,10 +2534,11 @@ mod tests {
 
     #[test]
     fn claude_acp_disables_native_shell_and_steers_skill_continuation() {
-        let meta = session_meta_for_agent_with_knowledge("claude", "memory context")
+        let meta = session_meta_for_agent_with_knowledge("claude", "memory context", Some("high"))
             .expect("Claude ACP metadata");
         let options = &meta["claudeCode"]["options"];
 
+        assert_eq!(options["effort"], "high");
         assert_eq!(
             options["disallowedTools"],
             serde_json::json!(["Bash", "Monitor", "WebSearch", "WebFetch"])
@@ -2429,8 +2562,15 @@ mod tests {
         assert!(prompt.contains("continue the original user request"));
         assert!(prompt.contains("memory context"));
         assert!(prompt.contains("mcp__vmux__set_conversation_title"));
-        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context").unwrap()
-            ["systemPrompt"]["append"]
+        let unset = session_meta_for_agent_with_knowledge("claude", "memory context", None)
+            .expect("Claude ACP metadata");
+        assert!(unset["claudeCode"]["options"].get("effort").is_none());
+        let bogus =
+            session_meta_for_agent_with_knowledge("claude", "memory context", Some("turbo"))
+                .expect("Claude ACP metadata");
+        assert!(bogus["claudeCode"]["options"].get("effort").is_none());
+        let generic = session_meta_for_agent_with_knowledge("vibe-acp", "skill context", None)
+            .unwrap()["systemPrompt"]["append"]
             .as_str()
             .unwrap()
             .to_string();

@@ -128,6 +128,8 @@ agents-empty = Awekho ama-ejenti afanayo
 agents-empty-detail = Zama igama, indawo yokusebenza, noma i-ACP/CLI.
 agents-install-failed = Ukufaka kuhlulekile
 agents-updating = Kuyabuyekezwa…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Kuyazanywa futhi…
 agents-preparing = Kuyalungiswa…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Usuku
 editor-property-kind-list = Uhlu
 editor-property-kind-link = Isixhumanisi
 editor-property-kind-tags = Omaka
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

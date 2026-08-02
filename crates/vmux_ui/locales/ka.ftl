@@ -128,6 +128,8 @@ agents-empty = შესატყვისი აგენტები არ �
 agents-empty-detail = სცადეთ სახელი, გაშვების გარემო ან ACP/CLI.
 agents-install-failed = დაყენება ვერ მოხერხდა
 agents-updating = ახლდება…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = ხელახლა ვცდით…
 agents-preparing = მზადდება…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = თარიღი
 editor-property-kind-list = სია
 editor-property-kind-link = ბმული
 editor-property-kind-tags = ტეგები
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

@@ -128,6 +128,8 @@ agents-empty = E leai ni sui AI e fetaui
 agents-empty-detail = Taumafai i se igoa, runtime, po o le ACP/CLI.
 agents-install-failed = Lē manuia le faapipiiina
 agents-updating = O loo faafou…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = O loo toe taumafai…
 agents-preparing = O loo saunia…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Aso
 editor-property-kind-list = Lisi
 editor-property-kind-link = So'oga
 editor-property-kind-tags = Fa'ailoga
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

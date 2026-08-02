@@ -128,6 +128,8 @@ agents-empty = Tsis muaj agent phim
 agents-empty-detail = Sim nrhiav npe, runtime, lossis ACP/CLI.
 agents-install-failed = Nruab tsis tiav
 agents-updating = Tab tom hloov tshiab…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Tab tom sim dua…
 agents-preparing = Tab tom npaj…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Hnub tim
 editor-property-kind-list = Sau npe
 editor-property-kind-link = Txuas
 editor-property-kind-tags = Cim npe
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

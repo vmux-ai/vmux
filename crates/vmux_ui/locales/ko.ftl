@@ -128,6 +128,8 @@ agents-empty = 일치하는 에이전트 없음
 agents-empty-detail = 이름, 런타임 또는 ACP/CLI로 검색해 보세요.
 agents-install-failed = 설치 실패
 agents-updating = 업데이트 중…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = 다시 시도 중…
 agents-preparing = 준비 중…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = 날짜
 editor-property-kind-list = 목록
 editor-property-kind-link = 링크
 editor-property-kind-tags = 태그
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

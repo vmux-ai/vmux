@@ -128,6 +128,8 @@ agents-empty = Dim asiantiaid sy’n cyfateb
 agents-empty-detail = Rhowch enw, runtime, neu ACP/CLI.
 agents-install-failed = Methodd y gosod
 agents-updating = Yn diweddaru…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Yn ceisio eto…
 agents-preparing = Yn paratoi…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Dyddiad
 editor-property-kind-list = Rhestr
 editor-property-kind-link = Cyswllt
 editor-property-kind-tags = Tagiau
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

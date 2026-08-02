@@ -128,6 +128,8 @@ agents-empty = Teu aya agén nu cocog
 agents-empty-detail = Cobian ku ngaran, runtime, atawa ACP/CLI.
 agents-install-failed = Gagal masang
 agents-updating = Ngapdet…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Nyobian deui…
 agents-preparing = Nyiapkeun…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = titimangsa
 editor-property-kind-list = Daptar
 editor-property-kind-link = Tumbu
 editor-property-kind-tags = Tag
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

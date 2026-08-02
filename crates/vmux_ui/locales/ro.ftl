@@ -128,6 +128,8 @@ agents-empty = Nu există agenți potriviți
 agents-empty-detail = Încearcă un nume, un runtime sau ACP/CLI.
 agents-install-failed = Instalarea a eșuat
 agents-updating = Se actualizează…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Se reîncearcă…
 agents-preparing = Se pregătește…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Data
 editor-property-kind-list = Listă
 editor-property-kind-link = Legătură
 editor-property-kind-tags = Etichete
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

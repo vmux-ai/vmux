@@ -128,6 +128,8 @@ agents-empty = Không có tác nhân phù hợp
 agents-empty-detail = Thử tìm theo tên, runtime hoặc ACP/CLI.
 agents-install-failed = Cài đặt thất bại
 agents-updating = Đang cập nhật…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Đang thử lại…
 agents-preparing = Đang chuẩn bị…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Ngày
 editor-property-kind-list = Danh sách
 editor-property-kind-link = liên kết
 editor-property-kind-tags = Thẻ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

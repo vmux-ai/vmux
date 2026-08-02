@@ -125,6 +125,8 @@ agents-empty = 一致するエージェントがありません
 agents-empty-detail = 名前、ランタイム、ACP／CLI で検索してください。
 agents-install-failed = インストールに失敗しました
 agents-updating = 更新中…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = 再試行中…
 agents-preparing = 準備中…
 
@@ -712,3 +714,11 @@ editor-property-kind-date = 日付
 editor-property-kind-list = リスト
 editor-property-kind-link = リンク
 editor-property-kind-tags = タグ
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply

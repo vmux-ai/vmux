@@ -128,6 +128,8 @@ agents-empty = Nta bajenti bihuye
 agents-empty-detail = Gerageza izina, runtime, cyangwa ACP/CLI.
 agents-install-failed = Gushyiramo byanze
 agents-updating = Biravugururwa…
+agents-version-latest = latest
+agents-version-hint = Pin the package version; leave blank for latest
 agents-retrying = Birongera kugeragezwa…
 agents-preparing = Birategurwa…
 
@@ -727,3 +729,11 @@ editor-property-kind-date = Itariki
 editor-property-kind-list = Urutonde
 editor-property-kind-link = Ihuza
 editor-property-kind-tags = Etiquetas
+
+agent-effort = Effort
+agent-effort-default = Default
+agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents Page
+agents-apply-version = Apply
