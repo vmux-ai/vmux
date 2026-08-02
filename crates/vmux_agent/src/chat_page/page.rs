@@ -1587,13 +1587,44 @@ pub fn Page(
                                     div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-red-500/[0.06] px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
                                         "{message}"
                                     }
-                                    if version_hint {
-                                        button {
-                                            class: "self-start rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-500/25 transition hover:bg-red-500/25 dark:text-red-200",
-                                            onclick: move |_| {
-                                                let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
-                                            },
-                                            {translate("agent-error-change-version")}
+                                }
+                                if version_hint {
+                                    div { class: "flex items-start gap-3 rounded-xl bg-foreground/[0.04] px-4 py-3 ring-1 ring-inset ring-foreground/10",
+                                        div { class: "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-500",
+                                            svg {
+                                                class: "h-4 w-4",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "1.8",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                path { d: "M9 18h6" }
+                                                path { d: "M10 22h4" }
+                                                path { d: "M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1h6c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z" }
+                                            }
+                                        }
+                                        div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
+                                            p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
+                                            button {
+                                                class: "inline-flex items-center gap-2 self-start rounded-xl bg-foreground px-4 py-2 text-xs font-semibold text-background shadow-sm transition hover:bg-foreground/90 active:scale-[0.98]",
+                                                onclick: move |_| {
+                                                    let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
+                                                },
+                                                svg {
+                                                    class: "h-3.5 w-3.5",
+                                                    view_box: "0 0 24 24",
+                                                    fill: "none",
+                                                    stroke: "currentColor",
+                                                    stroke_width: "1.8",
+                                                    stroke_linecap: "round",
+                                                    stroke_linejoin: "round",
+                                                    path { d: "M15 3h6v6" }
+                                                    path { d: "M10 14 21 3" }
+                                                    path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
+                                                }
+                                                {translate("agent-error-open-agents")}
+                                            }
                                         }
                                     }
                                 }

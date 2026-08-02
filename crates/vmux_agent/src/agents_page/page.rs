@@ -173,19 +173,23 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
         };
     }
     let status = agent.status.clone();
-    let newest = agent
+    // "latest" tracks npm's latest dist-tag: the newest *released* version. Prereleases (semver
+    // build suffix, e.g. `-prerelease.5`) are not what `@latest` installs, so skip them here.
+    let latest = agent
         .available_versions
-        .first()
+        .iter()
+        .find(|version| !version.contains('-'))
+        .or_else(|| agent.available_versions.first())
         .cloned()
         .unwrap_or_default();
-    let latest_label = if newest.is_empty() {
+    let latest_label = if latest.is_empty() {
         translate("agents-version-latest")
     } else {
-        format!("{} ({newest})", translate("agents-version-latest"))
+        format!("{} ({latest})", translate("agents-version-latest"))
     };
     rsx! {
         select {
-            class: "w-28 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
+            class: "w-32 truncate rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
             title: translate("agents-version-hint"),
             onchange: move |event: FormEvent| {
                 let version = event.value();
@@ -196,7 +200,7 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
                 }
             },
             option { value: "", selected: agent.pinned_version.is_empty(), "{latest_label}" }
-            for version in agent.available_versions.iter().filter(|version| *version != &newest) {
+            for version in agent.available_versions.iter().filter(|version| *version != &latest) {
                 option {
                     key: "{version}",
                     value: "{version}",

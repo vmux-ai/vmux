@@ -734,4 +734,5 @@ agent-effort = Effort
 agent-effort-default = Default
 agent-effort-tooltip = Reasoning effort (applies to new sessions)
 agent-error-startup-title = Agent failed to start
-agent-error-change-version = Change agent version
+agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
+agent-error-open-agents = Open Agents
