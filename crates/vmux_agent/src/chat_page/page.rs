@@ -1607,12 +1607,13 @@ pub fn Page(
                                         div { class: "flex min-w-0 flex-1 flex-col gap-2.5",
                                             p { class: "text-sm leading-relaxed text-foreground", {translate("agent-error-version-suggestion")} }
                                             button {
-                                                class: "inline-flex items-center gap-2 self-start rounded-xl bg-foreground px-4 py-2 text-xs font-semibold text-background shadow-sm transition hover:bg-foreground/90 active:scale-[0.98]",
+                                                class: "inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
+                                                style: "border: 1.5px solid transparent; background: linear-gradient(transparent, transparent) padding-box, linear-gradient(135deg, #6366f1, #a855f7, #ec4899) border-box;",
                                                 onclick: move |_| {
                                                     let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
                                                 },
                                                 svg {
-                                                    class: "h-3.5 w-3.5",
+                                                    class: "h-4 w-4 text-indigo-500",
                                                     view_box: "0 0 24 24",
                                                     fill: "none",
                                                     stroke: "currentColor",
@@ -1623,7 +1624,9 @@ pub fn Page(
                                                     path { d: "M10 14 21 3" }
                                                     path { d: "M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" }
                                                 }
-                                                {translate("agent-error-open-agents")}
+                                                span { class: "bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 bg-clip-text text-transparent",
+                                                    {translate("agent-error-open-agents")}
+                                                }
                                             }
                                         }
                                     }
