@@ -724,3 +724,5 @@ debug-trigger-restart = Trigger restart
 agent-effort = Effort
 agent-effort-default = Default
 agent-effort-tooltip = Reasoning effort (applies to new sessions)
+agent-error-startup-title = Agent failed to start
+agent-error-change-version = Change agent version

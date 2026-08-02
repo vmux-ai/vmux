@@ -426,6 +426,22 @@ pub struct SetAgentEffort {
     pub level: String,
 }
 
+/// Page → native: open a vmux page URL in a new stack (e.g. the error card's "change version"
+/// action opening `vmux://agents`).
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ChatOpenPage {
+    pub url: String,
+}
+
 /// Page → native: open the `/resume` picker (native replies with [`ResumableSessions`]).
 #[derive(
     Clone,

@@ -13,12 +13,12 @@ use crate::chat_page::event::{
     ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
     ChatBlock, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatCreateWorktree, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
-    ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment, ChatTurn,
-    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
-    SlashCommandEntry, SlashCommands, WORKING_VERB_IDS, latest_tool_location,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatOpenPage, ChatPasteMedia,
+    ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ChatTurn, ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState,
+    QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions,
+    ResumeListRequest, ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel,
+    SetAgentEffort, SlashCommandEntry, SlashCommands, WORKING_VERB_IDS, latest_tool_location,
 };
 use dioxus::prelude::*;
 use std::cell::Cell;
@@ -100,6 +100,17 @@ fn copy_to_clipboard(text: &str) {
     if let Some(window) = web_sys::window() {
         let _ = window.navigator().clipboard().write_text(text);
     }
+}
+
+/// Whether a startup/run error looks like a package registry/version block (npm 403, security
+/// policy, forbidden version) — where the fix is usually pinning a different version.
+fn is_version_error(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("403")
+        || lower.contains("forbidden")
+        || lower.contains("security policy")
+        || lower.contains("blocked")
+        || lower.contains("eacces")
 }
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
@@ -1528,8 +1539,65 @@ pub fn Page(
                         }
                     }
                     if status() == "errored" {
-                        div { class: "rounded-xl bg-red-500/10 px-4 py-3 text-sm text-red-600 ring-1 ring-inset ring-red-500/20 dark:text-red-300",
-                            "{error}"
+                        {
+                            let message = error();
+                            let is_startup = message.to_lowercase().contains("startup");
+                            let version_hint = is_version_error(&message);
+                            let title = if is_startup {
+                                translate("agent-error-startup-title")
+                            } else {
+                                translate("common-error")
+                            };
+                            let copy_label = translate("common-copy");
+                            let copy_text = message.clone();
+                            rsx! {
+                                div { class: "flex flex-col gap-2 rounded-xl bg-red-500/[0.07] px-4 py-3 ring-1 ring-inset ring-red-500/20",
+                                    div { class: "flex items-center gap-2",
+                                        svg {
+                                            class: "h-4 w-4 shrink-0 text-red-500",
+                                            view_box: "0 0 24 24",
+                                            fill: "none",
+                                            stroke: "currentColor",
+                                            stroke_width: "1.8",
+                                            stroke_linecap: "round",
+                                            stroke_linejoin: "round",
+                                            path { d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" }
+                                            path { d: "M12 9v4" }
+                                            path { d: "M12 17h.01" }
+                                        }
+                                        span { class: "text-sm font-semibold text-red-600 dark:text-red-300", "{title}" }
+                                        button {
+                                            class: "ml-auto flex h-6 w-6 items-center justify-center rounded-md text-red-500/70 transition hover:bg-red-500/10 hover:text-red-500",
+                                            title: "{copy_label}",
+                                            aria_label: "{copy_label}",
+                                            onclick: move |_| copy_to_clipboard(&copy_text),
+                                            svg {
+                                                class: "h-3.5 w-3.5",
+                                                view_box: "0 0 24 24",
+                                                fill: "none",
+                                                stroke: "currentColor",
+                                                stroke_width: "1.8",
+                                                stroke_linecap: "round",
+                                                stroke_linejoin: "round",
+                                                rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
+                                                path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
+                                            }
+                                        }
+                                    }
+                                    div { class: "max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-red-500/[0.06] px-3 py-2 font-mono text-[11px] leading-relaxed text-red-700/90 dark:text-red-200/80",
+                                        "{message}"
+                                    }
+                                    if version_hint {
+                                        button {
+                                            class: "self-start rounded-lg bg-red-500/15 px-3 py-1.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-500/25 transition hover:bg-red-500/25 dark:text-red-200",
+                                            onclick: move |_| {
+                                                let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
+                                            },
+                                            {translate("agent-error-change-version")}
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     if paused() {

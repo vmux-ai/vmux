@@ -28,9 +28,9 @@ use crate::chat_page::event::{
     CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
     ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
     ChatChoiceSelected, ChatClearQueue, ChatCreateWorktree, ChatEscape, ChatHistoryPage,
-    ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia,
-    ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit, ComposerContext,
-    MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatOpenPage,
+    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit,
+    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
     SlashCommandEntry, SlashCommands,
@@ -261,6 +261,7 @@ impl Plugin for AgentChatPagePlugin {
                 ChatHistoryRequest,
                 ChatSelectWorkspace,
                 ChatCreateWorktree,
+                ChatOpenPage,
             )>::for_hosts(&["agent", "start"]))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
@@ -281,6 +282,7 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_runtime_switch_request)
             .add_observer(on_select_model)
             .add_observer(on_set_agent_effort)
+            .add_observer(on_chat_open_page)
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_create_worktree)
             .add_observer(reset_chat_synced_on_page_ready)
@@ -1812,6 +1814,23 @@ fn on_set_agent_effort(
         }
         Err(error) => bevy::log::warn!("effort: persist for {agent_key} failed: {error}"),
     }
+}
+
+/// Open a vmux page URL in a new stack (the error card's "change version" action → `vmux://agents`).
+#[cfg(not(target_arch = "wasm32"))]
+fn on_chat_open_page(
+    trigger: On<BinReceive<ChatOpenPage>>,
+    mut commands: MessageWriter<vmux_command::AppCommand>,
+) {
+    let url = trigger.event().payload.url.clone();
+    if url.is_empty() {
+        return;
+    }
+    commands.write(vmux_command::AppCommand::Browser(
+        vmux_command::BrowserCommand::Open(vmux_command::open::OpenCommand::InNewStack {
+            url: Some(url),
+        }),
+    ));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
