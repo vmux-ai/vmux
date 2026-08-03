@@ -1,8 +1,26 @@
-use crate::edit::command::{EditCommand, EditMode, Motion};
+use crate::edit::command::{EditCommand, EditMode, Motion, Operator, Target};
 use crate::keymap::{KeyInput, Keymap};
 
 #[derive(Default)]
 pub struct VscodeKeymap;
+
+fn selection_op(operator: Operator) -> EditCommand {
+    EditCommand::Op {
+        operator,
+        target: Target::Selection,
+        register: None,
+    }
+}
+
+/// Only the macOS emacs-style `Ctrl-K` binding uses this, so it is dead code elsewhere.
+#[cfg(target_os = "macos")]
+fn delete_to_line_end() -> EditCommand {
+    EditCommand::Op {
+        operator: Operator::Delete,
+        target: Target::Motion(Motion::LineEnd, 1),
+        register: None,
+    }
+}
 
 impl Keymap for VscodeKeymap {
     fn mode(&self) -> EditMode {
@@ -43,9 +61,13 @@ impl Keymap for VscodeKeymap {
         }
         if gui && !m.alt {
             let cmd = match k.key.to_ascii_lowercase().as_str() {
-                "c" => Some(vec![Yank]),
-                "x" => Some(vec![Cut]),
-                "v" => Some(vec![Paste]),
+                "c" => Some(vec![selection_op(Operator::Yank)]),
+                "x" => Some(vec![selection_op(Operator::Delete)]),
+                "v" => Some(vec![Put {
+                    before: true,
+                    count: 1,
+                    register: None,
+                }]),
                 "a" => Some(vec![Move(Motion::DocStart), Select(Motion::DocEnd)]),
                 "s" => Some(vec![Save]),
                 "z" if m.shift => Some(vec![Redo]),
@@ -80,7 +102,7 @@ impl Keymap for VscodeKeymap {
                 "p" | "P" => Some(mv(Motion::Up)),
                 "d" | "D" => Some(vec![DeleteForward]),
                 "h" | "H" => Some(vec![DeleteBack]),
-                "k" | "K" => Some(vec![DeleteToLineEnd]),
+                "k" | "K" => Some(vec![delete_to_line_end()]),
                 "w" | "W" => Some(vec![DeleteWordBack]),
                 _ => None,
             };
@@ -161,7 +183,10 @@ mod tests {
             meta: true,
             ..Default::default()
         };
-        assert_eq!(km.handle(&key("c", cmd)), vec![EditCommand::Yank]);
+        assert_eq!(
+            km.handle(&key("c", cmd)),
+            vec![selection_op(Operator::Yank)]
+        );
         assert_eq!(km.handle(&key("s", cmd)), vec![EditCommand::Save]);
         let cmd_shift = Mods {
             meta: true,
@@ -241,10 +266,7 @@ mod tests {
             km.handle(&key("p", ctrl)),
             vec![EditCommand::Move(Motion::Up)]
         );
-        assert_eq!(
-            km.handle(&key("k", ctrl)),
-            vec![EditCommand::DeleteToLineEnd]
-        );
+        assert_eq!(km.handle(&key("k", ctrl)), vec![delete_to_line_end()]);
         assert_eq!(km.handle(&key("h", ctrl)), vec![EditCommand::DeleteBack]);
     }
 
@@ -280,7 +302,10 @@ mod tests {
             meta: true,
             ..Default::default()
         };
-        assert_eq!(km.handle(&key("c", meta)), vec![EditCommand::Yank]);
+        assert_eq!(
+            km.handle(&key("c", meta)),
+            vec![selection_op(Operator::Yank)]
+        );
     }
 
     #[test]

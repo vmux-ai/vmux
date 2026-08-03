@@ -442,6 +442,15 @@ pub fn handle_file_page_open(
     }
 }
 
+fn settings_mappings(
+    settings: &Option<Res<vmux_setting::AppSettings>>,
+) -> (Vec<vmux_core::editor::KeyMapping>, String) {
+    settings
+        .as_ref()
+        .map(|s| (s.editor.mappings.clone(), s.editor.leader.clone()))
+        .unwrap_or_else(|| (Vec::new(), " ".to_string()))
+}
+
 fn settings_keymap(settings: &Option<Res<vmux_setting::AppSettings>>) -> vmux_core::KeymapKind {
     settings
         .as_ref()
@@ -544,12 +553,13 @@ fn load_file_buffers(
             folds.reconcile();
         }
         core.fold_view = folds.view(core.buffer.len_lines() as u32);
+        let (maps, leader) = settings_mappings(&settings);
         let markdown = crate::markdown::is_markdown_path(&fv.path);
         let mut entity_commands = commands.entity(entity);
         entity_commands
             .insert((
                 EditState::new(core, hl, folds),
-                EditorKeymap(kind.make()),
+                EditorKeymap(kind.make(&maps, &leader)),
                 vmux_git::GitDiffSource {
                     content: text,
                     dirty: false,
@@ -562,13 +572,24 @@ fn load_file_buffers(
     }
 }
 
-/// Re-apply the editor keymap to already-open files when `editor.keymap`
-/// changes at runtime (the keymap is otherwise only set at file open). Swaps
-/// the keymap and resets each editor to the new keymap's initial mode (Vim ->
-/// Normal, VSCode -> Insert) so switching to Vim engages without reopening.
+/// Everything about the editor keymap that a settings edit can change. Comparing the whole thing
+/// is what makes a mappings-only or leader-only edit reach already-open editors.
+#[derive(PartialEq, Eq)]
+struct KeymapConfig {
+    kind: vmux_core::KeymapKind,
+    maps: Vec<vmux_core::editor::KeyMapping>,
+    leader: String,
+}
+
+/// Re-apply the editor keymap to already-open files when `editor.keymap`,
+/// `editor.mappings` or `editor.leader` changes at runtime (the keymap is otherwise only set at
+/// file open). Swaps the keymap, and when the kind itself changed also resets each editor to that
+/// keymap's initial mode (Vim -> Normal, VSCode -> Insert) so switching to Vim engages without
+/// reopening. A mappings-only edit keeps the current mode — being thrown back to Normal mid-insert
+/// because a binding changed would be surprising.
 fn reapply_keymap_on_change(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut last: Local<Option<vmux_core::KeymapKind>>,
+    mut last: Local<Option<KeymapConfig>>,
     mut q: Query<(
         Entity,
         &mut EditState,
@@ -578,18 +599,30 @@ fn reapply_keymap_on_change(
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
-    let kind = settings_keymap(&settings);
-    if *last == Some(kind) {
+    let (maps, leader) = settings_mappings(&settings);
+    let next = KeymapConfig {
+        kind: settings_keymap(&settings),
+        maps,
+        leader,
+    };
+    if last.as_ref() == Some(&next) {
         return;
     }
     let first = last.is_none();
-    *last = Some(kind);
+    let kind_changed = last.as_ref().is_none_or(|prev| prev.kind != next.kind);
+    let kind = next.kind;
+    *last = Some(next);
     if first {
         return;
     }
+    let Some(config) = last.as_ref() else {
+        return;
+    };
     for (entity, mut edit, mut keymap, viewport) in &mut q {
-        keymap.0 = kind.make();
-        edit.core.mode = kind.initial_mode();
+        keymap.0 = kind.make(&config.maps, &config.leader);
+        if kind_changed {
+            edit.core.mode = kind.initial_mode();
+        }
         if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
             emit_cursor(
                 entity,
@@ -1000,9 +1033,16 @@ fn emit_cursor(
         .into_iter()
         .filter(|selection| !view.is_hidden(selection.line))
         .collect::<Vec<_>>();
+    let raw_search = edit
+        .core
+        .search_spans(0, total as u16)
+        .into_iter()
+        .filter(|span| !view.is_hidden(span.line))
+        .collect::<Vec<_>>();
     let wrap = wrapped_view(edit, vp);
     (primary.row, primary.col) = wrap.position(primary.line, primary.col);
     let selections = wrap.selections(raw_selections.iter().copied());
+    let search = wrap.selections(raw_search.iter().copied());
     commands.trigger(BinHostEmitEvent::from_rkyv(
         entity,
         FILE_CURSOR_EVENT,
@@ -1013,6 +1053,8 @@ fn emit_cursor(
             selections,
             source_primary,
             source_selections: raw_selections,
+            command_line: keymap.command_line().unwrap_or_default(),
+            search,
         },
     ));
 }
@@ -1189,6 +1231,7 @@ fn on_file_resize(
     vp.wrap_columns = evt.wrap_columns;
     if let Some(mut edit) = edit {
         edit.core.rows = vp.rows;
+        edit.core.top_row = vp.top_row;
         let vpc = *vp;
         emit_window(entity, &mut edit, &vpc, &browsers, &mut commands);
         if let Some(keymap) = keymap {
@@ -1962,6 +2005,21 @@ fn run_commands(
             }
             continue;
         }
+        if let EditCommand::ScrollCursorTo(placement) = &cmd {
+            let row = edit
+                .folds
+                .view(edit.core.buffer.len_lines() as u32)
+                .buffer_to_row(edit.core.cursor_pos().line);
+            let rows = vp.rows.max(1) as u32;
+            vp.top_row = match placement {
+                crate::edit::command::ScrollPlacement::Top => row,
+                crate::edit::command::ScrollPlacement::Center => row.saturating_sub(rows / 2),
+                crate::edit::command::ScrollPlacement::Bottom => row.saturating_sub(rows - 1),
+            };
+            edit.core.top_row = vp.top_row;
+            viewport_changed = true;
+            continue;
+        }
         if matches!(
             cmd,
             EditCommand::FoldToggle
@@ -2066,11 +2124,15 @@ fn run_commands(
             }
             continue;
         }
-        if matches!(cmd, EditCommand::Paste | EditCommand::PasteBefore)
+        if matches!(cmd, EditCommand::Put { .. })
             && let Some(cb) = clipboard.0.as_mut()
             && let Ok(s) = cb.get_text()
+            && s != edit.core.registers.clipboard_shadow
         {
-            edit.core.register = Some((s, false));
+            edit.core.registers.clipboard_shadow = s.clone();
+            edit.core
+                .registers
+                .set_unnamed(crate::edit::RegisterValue::charwise(s));
         }
         let out = edit.core.apply(cmd);
         if out.text_changed {
@@ -2080,10 +2142,11 @@ fn run_commands(
         }
         sel_or_mode |= out.sel_changed || out.mode_changed;
         dirty_changed |= out.dirty_changed;
-        if let Some((s, _)) = out.yank
+        if let Some(value) = out.yank
             && let Some(cb) = clipboard.0.as_mut()
         {
-            let _ = cb.set_text(s);
+            edit.core.registers.clipboard_shadow = value.text.clone();
+            let _ = cb.set_text(value.text);
         }
     }
     if text_changed {
@@ -2276,7 +2339,7 @@ fn on_file_text_input(
     trigger: On<BinReceive<FileTextInput>>,
     mut q: Query<(
         &mut EditState,
-        &EditorKeymap,
+        &mut EditorKeymap,
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
     )>,
@@ -2292,15 +2355,21 @@ fn on_file_text_input(
     if text.is_empty() {
         return;
     }
-    let Ok((mut edit, keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
+    let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };
     if !keymap.0.mode().accepts_text() {
         return;
     }
+    keymap.0.record_text(&text);
+    let command = if keymap.0.mode() == vmux_core::EditMode::Replace {
+        EditCommand::OvertypeText(text)
+    } else {
+        EditCommand::InsertText(text)
+    };
     run_commands(
         entity,
-        vec![EditCommand::InsertText(text)],
+        vec![command],
         &mut edit,
         &mut diff_source,
         keymap.0.as_ref(),
@@ -2537,10 +2606,7 @@ fn on_file_completion_commit(
     edit.core.selections = vec![Selection { anchor: a, head: b }];
     run_commands(
         entity,
-        vec![
-            EditCommand::DeleteSelection,
-            EditCommand::InsertText(req.text),
-        ],
+        vec![EditCommand::InsertText(req.text)],
         &mut edit,
         &mut diff_source,
         keymap.0.as_ref(),
@@ -4014,7 +4080,7 @@ mod edit_flow_tests {
 
     #[test]
     fn vim_dd_deletes_line_via_keymap_and_core() {
-        let mut km = vmux_core::KeymapKind::Vim.make();
+        let mut km = vmux_core::KeymapKind::Vim.make(&[], " ");
         let mut core = EditCore::new(
             std::path::PathBuf::from("a.txt"),
             "Plain Text".into(),

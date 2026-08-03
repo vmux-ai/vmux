@@ -2019,6 +2019,8 @@ pub fn Page() -> Element {
     let git_message = use_signal(String::new);
     let mut ed_mode = use_signal(|| vmux_core::editor::EditMode::Insert);
     let mut ed_label = use_signal(String::new);
+    let mut ed_command_line = use_signal(String::new);
+    let mut search_spans = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
     let mut keymap = use_signal(vmux_core::KeymapKind::default);
     let mut cursor = use_signal(vmux_core::editor::CursorPos::default);
     let mut sel = use_signal(Vec::<vmux_core::editor::SelSpan>::new);
@@ -2144,6 +2146,12 @@ pub fn Page() -> Element {
         }
         if source_sel.peek().as_slice() != c.source_selections.as_slice() {
             source_sel.set(c.source_selections.clone());
+        }
+        if ed_command_line.peek().ne(&c.command_line) {
+            ed_command_line.set(c.command_line.clone());
+        }
+        if search_spans.peek().as_slice() != c.search.as_slice() {
+            search_spans.set(c.search.clone());
         }
         let note_mode = *file_view_mode.peek() == FileViewMode::Note
             && is_markdown_file(git_path.peek().as_str());
@@ -3623,6 +3631,22 @@ pub fn Page() -> Element {
                                             }
                                         }
 
+                                        for s in search_spans().iter() {
+                                            {
+                                                let top = s.row as f64 * ch;
+                                                let left = gutter + s.start as f64 * cw;
+                                                let w = (s.end.saturating_sub(s.start)) as f64 * cw;
+                                                let style = format!("left:{left}px;top:{top}px;height:{ch}px;width:{w}px;");
+                                                rsx! {
+                                                    div {
+                                                        key: "search{s.row}-{s.start}",
+                                                        class: "pointer-events-none absolute z-0 bg-amber-400/30",
+                                                        style: "{style}",
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         for s in sel().iter() {
                                             {
                                                 let top = s.row as f64 * ch;
@@ -3858,6 +3882,19 @@ pub fn Page() -> Element {
                             },
                             {translate("editor-find-references")}
                         }
+                    }
+                })
+            }
+
+            {
+                // Vim puts the command line on the last screen row; mirror that rather than
+                // tucking it in the header, where it reads as a label instead of a prompt.
+                (!ed_command_line().is_empty()).then(|| rsx! {
+                    div {
+                        id: "vim-command-line",
+                        class: "pointer-events-none absolute bottom-0 left-0 z-50 flex h-6 max-w-full items-center gap-px overflow-hidden bg-background/95 pl-2 pr-3 font-mono text-xs text-foreground",
+                        span { class: "truncate", "{ed_command_line()}" }
+                        span { class: "inline-block h-[1.05em] w-[0.5em] shrink-0 bg-foreground/70" }
                     }
                 })
             }

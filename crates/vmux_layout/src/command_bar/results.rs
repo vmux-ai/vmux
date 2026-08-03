@@ -173,6 +173,15 @@ pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str)
             || url.to_lowercase().contains(&search_lower))
 }
 
+/// Whether the query should offer "Terminal".
+///
+/// Display and activation share this so a partially typed `ter` cannot list Terminal while
+/// Enter quietly routes the text to an agent instead.
+pub fn terminal_matches_query(query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    !query.is_empty() && "terminal".starts_with(&query)
+}
+
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) fn prepend_prompt_agents(
     results: &mut Vec<CommandBarResultItem>,
@@ -181,9 +190,6 @@ pub(crate) fn prepend_prompt_agents(
     query: &str,
 ) {
     if !vmux_command::event::is_start_prompt_query(query)
-        || results
-            .iter()
-            .any(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
         || results.iter().any(|item| agent_page_url(item).is_some())
     {
         return;
@@ -204,7 +210,12 @@ pub(crate) fn prepend_prompt_agents(
             break;
         }
     }
-    results.splice(0..0, suggestions);
+    // Terminal stays first when the query named it, so Enter still opens a terminal.
+    let at = results
+        .iter()
+        .take_while(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
+        .count();
+    results.splice(at..at, suggestions);
 }
 
 pub fn start_page_results(
@@ -215,15 +226,18 @@ pub fn start_page_results(
     query: &str,
 ) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
-    if !search_lower.is_empty() && "terminal".starts_with(&search_lower) {
-        return vec![CommandBarResultItem::Terminal {
+    // Terminal leads when the query names it, but never at the cost of the other options.
+    let mut results = Vec::new();
+    if terminal_matches_query(query) {
+        results.push(CommandBarResultItem::Terminal {
             path: String::new(),
-        }];
+        });
     }
-    let mut results = agent_page_results(pages, query)
-        .into_iter()
-        .filter(|item| agent_page_matches_query(item, query))
-        .collect::<Vec<_>>();
+    results.extend(
+        agent_page_results(pages, query)
+            .into_iter()
+            .filter(|item| agent_page_matches_query(item, query)),
+    );
     let mut app_pages: Vec<_> = pages
         .iter()
         .filter(|page| page.host != "agent" && page.host != "start" && page.host != "terminal")
@@ -920,18 +934,48 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stays_the_only_result() {
+    fn terminal_leads_but_agents_and_search_stay_available() {
         let agent = agent_page_results(&sample_pages(), "").remove(0);
         let mut results = start_page_results(&sample_pages(), &[], &[], &[], "terminal");
 
         prepend_prompt_agents(&mut results, Some(&agent), &[], "terminal");
 
-        assert_eq!(
-            results,
-            vec![CommandBarResultItem::Terminal {
-                path: String::new()
-            }]
+        assert!(
+            matches!(results.first(), Some(CommandBarResultItem::Terminal { .. })),
+            "terminal keeps the default selection: {results:?}"
         );
+        assert!(
+            results.iter().any(|item| agent_page_url(item).is_some()),
+            "asking an agent stays reachable: {results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|item| matches!(item, CommandBarResultItem::Search { .. })),
+            "search stays reachable: {results:?}"
+        );
+    }
+
+    #[test]
+    fn a_terminal_prefix_offers_terminal_alongside_the_other_options() {
+        let results = start_page_results(&sample_pages(), &[], &[], &[], "ter");
+        assert!(matches!(
+            results.first(),
+            Some(CommandBarResultItem::Terminal { .. })
+        ));
+        assert!(results.len() > 1, "prefix match is not the only option");
+    }
+
+    #[test]
+    fn terminal_query_predicate_matches_display_and_activation() {
+        assert!(terminal_matches_query("t"));
+        assert!(terminal_matches_query("ter"));
+        assert!(terminal_matches_query("Terminal"));
+        assert!(terminal_matches_query("  term  "));
+        assert!(!terminal_matches_query(""));
+        assert!(!terminal_matches_query("   "));
+        assert!(!terminal_matches_query("terminals"));
+        assert!(!terminal_matches_query("xterm"));
     }
 
     #[test]
@@ -946,11 +990,24 @@ mod tests {
             shortcut: String::new(),
         });
         let results = start_page_results(&pages, &[], &[], &[], "terminal");
+        assert!(matches!(
+            results.first(),
+            Some(CommandBarResultItem::Terminal { .. })
+        ));
         assert_eq!(
-            results,
-            vec![CommandBarResultItem::Terminal {
-                path: String::new()
-            }]
+            results
+                .iter()
+                .filter(|item| matches!(item, CommandBarResultItem::Terminal { .. }))
+                .count(),
+            1,
+            "an open terminal page must not duplicate the terminal action: {results:?}"
+        );
+        assert!(
+            !results.iter().any(|item| matches!(
+                item,
+                CommandBarResultItem::Page { url, .. } if url.starts_with("vmux://terminal")
+            )),
+            "the terminal host is offered as the action, not as a page: {results:?}"
         );
     }
 

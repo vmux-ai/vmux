@@ -1,3 +1,4 @@
+pub mod mapping;
 pub mod vim;
 pub mod vscode;
 
@@ -32,6 +33,15 @@ pub struct KeyInput {
 pub trait Keymap: Send + Sync {
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand>;
     fn mode(&self) -> EditMode;
+    /// Report text that reached the buffer without passing through [`Keymap::handle`].
+    ///
+    /// Insert-mode characters arrive over the IME path, so a keymap that replays input — for
+    /// dot-repeat or macros — only sees a whole change if the host reports them here.
+    fn record_text(&mut self, _text: &str) {}
+    /// The `:`, `/`, or `?` prompt currently being typed, prompt character included.
+    fn command_line(&self) -> Option<String> {
+        None
+    }
     fn pointer_selection_mode(&mut self, _extend: bool) -> Option<EditCommand> {
         None
     }
@@ -41,15 +51,15 @@ pub trait Keymap: Send + Sync {
 }
 
 pub trait KeymapKindExt {
-    fn make(self) -> Box<dyn Keymap>;
+    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap>;
     fn initial_mode(self) -> EditMode;
 }
 
 impl KeymapKindExt for KeymapKind {
-    fn make(self) -> Box<dyn Keymap> {
+    fn make(self, mappings: &[vmux_core::editor::KeyMapping], leader: &str) -> Box<dyn Keymap> {
         match self {
             KeymapKind::Vscode => Box::new(vscode::VscodeKeymap),
-            KeymapKind::Vim => Box::new(vim::VimKeymap::default()),
+            KeymapKind::Vim => Box::new(vim::VimKeymap::with_mappings(mappings, leader)),
         }
     }
     fn initial_mode(self) -> EditMode {

@@ -9788,6 +9788,7 @@ dependencies = [
  "notify 6.1.1",
  "percent-encoding",
  "pulldown-cmark",
+ "regex",
  "reqwest",
  "rkyv",
  "ron 0.8.1",

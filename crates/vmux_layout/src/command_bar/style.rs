@@ -1,8 +1,8 @@
 pub fn result_item_class(is_selected: bool) -> &'static str {
     if is_selected {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-cyan-400/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
+        "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden bg-cyan-400/12 px-3.5 py-2.5 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
     } else {
-        "flex min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
+        "flex min-h-15 min-w-0 w-full cursor-pointer items-center justify-between overflow-hidden px-3.5 py-2.5 hover:bg-foreground/5"
     }
 }
 
