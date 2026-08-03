@@ -12,6 +12,8 @@ fn selection_op(operator: Operator) -> EditCommand {
     }
 }
 
+/// Only the macOS emacs-style `Ctrl-K` binding uses this, so it is dead code elsewhere.
+#[cfg(target_os = "macos")]
 fn delete_to_line_end() -> EditCommand {
     EditCommand::Op {
         operator: Operator::Delete,
