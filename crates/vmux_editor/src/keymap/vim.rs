@@ -800,11 +800,8 @@ impl VimKeymap {
             return self.repeat_find(key == ",");
         }
 
-        if let Some(m) = motion_for(key) {
-            let n = self.take_count();
-            return std::iter::repeat_n(Select(m), n).collect();
-        }
-
+        // Before `motion_for`, which maps bare `e`, `E` and `_` and would otherwise shadow the
+        // `g`-prefixed arms below and leave `g_pending` set. `normal` orders it the same way.
         if self.g_pending {
             self.g_pending = false;
             return match key {
@@ -817,6 +814,11 @@ impl VimKeymap {
                 "_" => self.motion_command(Motion::LastNonBlank),
                 _ => vec![],
             };
+        }
+
+        if let Some(m) = motion_for(key) {
+            let n = self.take_count();
+            return std::iter::repeat_n(Select(m), n).collect();
         }
 
         match key {
@@ -1055,6 +1057,9 @@ impl VimKeymap {
         };
         match cmd {
             ExCommand::Write => vec![EditCommand::Save],
+            // Closing is a pane operation, and `EditCommand` has no way to ask for one — the
+            // editor cannot close the surface hosting it. `:wq` therefore saves without closing
+            // and `:q` does nothing. Wiring these needs a close command routed to the stack.
             ExCommand::WriteQuit => vec![EditCommand::Save],
             ExCommand::Quit { .. } => vec![],
             ExCommand::NoHighlight => vec![EditCommand::ClearSearchHighlight],
@@ -1521,6 +1526,33 @@ mod tests {
         assert_eq!(
             run(&mut km, &["8", "|"]),
             vec![EditCommand::Move(Motion::Column(8))]
+        );
+    }
+
+    /// `motion_for` maps bare `e`, `E` and `_`, so a visual-mode `g` prefix has to be consumed
+    /// before the motion lookup or it resolves the wrong motion and leaves `g_pending` set.
+    #[test]
+    fn visual_g_prefixed_motions_are_not_shadowed() {
+        let mut km = VimKeymap::default();
+        run(&mut km, &["v"]);
+        assert_eq!(km.mode(), EditMode::Visual);
+
+        assert_eq!(
+            run(&mut km, &["g", "e"]),
+            vec![EditCommand::Select(Motion::WordEndPrev)]
+        );
+        assert_eq!(
+            run(&mut km, &["g", "E"]),
+            vec![EditCommand::Select(Motion::BigWordEndPrev)]
+        );
+        assert_eq!(
+            run(&mut km, &["g", "_"]),
+            vec![EditCommand::Select(Motion::LastNonBlank)]
+        );
+        // The prefix must not leak into the next key.
+        assert_eq!(
+            run(&mut km, &["e"]),
+            vec![EditCommand::Select(Motion::WordEnd)]
         );
     }
 

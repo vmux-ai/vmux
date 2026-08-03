@@ -72,9 +72,12 @@ impl Motion {
             | Motion::BigWordEnd
             | Motion::WordEndPrev
             | Motion::BigWordEndPrev
-            | Motion::LineEnd
             | Motion::LastNonBlank
             | Motion::MatchPair => MotionKind::Inclusive,
+            // `resolve_motion` already returns the index of the line's `\n`, one past the last
+            // character. Counting that as inclusive steps over the newline, so `D` and Ctrl-K
+            // would join the following line.
+            Motion::LineEnd => MotionKind::Exclusive,
             Motion::FindChar { forward, .. } if forward => MotionKind::Inclusive,
             _ => MotionKind::Exclusive,
         }

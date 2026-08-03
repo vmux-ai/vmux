@@ -572,13 +572,24 @@ fn load_file_buffers(
     }
 }
 
-/// Re-apply the editor keymap to already-open files when `editor.keymap`
-/// changes at runtime (the keymap is otherwise only set at file open). Swaps
-/// the keymap and resets each editor to the new keymap's initial mode (Vim ->
-/// Normal, VSCode -> Insert) so switching to Vim engages without reopening.
+/// Everything about the editor keymap that a settings edit can change. Comparing the whole thing
+/// is what makes a mappings-only or leader-only edit reach already-open editors.
+#[derive(PartialEq, Eq)]
+struct KeymapConfig {
+    kind: vmux_core::KeymapKind,
+    maps: Vec<vmux_core::editor::KeyMapping>,
+    leader: String,
+}
+
+/// Re-apply the editor keymap to already-open files when `editor.keymap`,
+/// `editor.mappings` or `editor.leader` changes at runtime (the keymap is otherwise only set at
+/// file open). Swaps the keymap, and when the kind itself changed also resets each editor to that
+/// keymap's initial mode (Vim -> Normal, VSCode -> Insert) so switching to Vim engages without
+/// reopening. A mappings-only edit keeps the current mode — being thrown back to Normal mid-insert
+/// because a binding changed would be surprising.
 fn reapply_keymap_on_change(
     settings: Option<Res<vmux_setting::AppSettings>>,
-    mut last: Local<Option<vmux_core::KeymapKind>>,
+    mut last: Local<Option<KeymapConfig>>,
     mut q: Query<(
         Entity,
         &mut EditState,
@@ -588,19 +599,30 @@ fn reapply_keymap_on_change(
     browsers: Option<NonSend<Browsers>>,
     mut commands: Commands,
 ) {
-    let kind = settings_keymap(&settings);
-    if *last == Some(kind) {
+    let (maps, leader) = settings_mappings(&settings);
+    let next = KeymapConfig {
+        kind: settings_keymap(&settings),
+        maps,
+        leader,
+    };
+    if last.as_ref() == Some(&next) {
         return;
     }
     let first = last.is_none();
-    *last = Some(kind);
+    let kind_changed = last.as_ref().is_none_or(|prev| prev.kind != next.kind);
+    let kind = next.kind;
+    *last = Some(next);
     if first {
         return;
     }
-    let (maps, leader) = settings_mappings(&settings);
+    let Some(config) = last.as_ref() else {
+        return;
+    };
     for (entity, mut edit, mut keymap, viewport) in &mut q {
-        keymap.0 = kind.make(&maps, &leader);
-        edit.core.mode = kind.initial_mode();
+        keymap.0 = kind.make(&config.maps, &config.leader);
+        if kind_changed {
+            edit.core.mode = kind.initial_mode();
+        }
         if let (Some(viewport), Some(browsers)) = (viewport, browsers.as_deref()) {
             emit_cursor(
                 entity,

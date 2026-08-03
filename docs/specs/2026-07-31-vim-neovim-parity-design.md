@@ -14,7 +14,7 @@ Counts, registers, and linewise semantics become operands on a structured operat
 
 Dot-repeat and macros share one mechanism. Both replay input, and insert-mode text bypasses the keymap through the IME path, so replay must live above the keymap where both key events and text input are visible.
 
-Search patterns are translated from vim syntax to `fancy-regex`, already in the tree via syntect. The translation covers `\<`, `\>`, `\v`, `\V`, and character-class aliases. Patterns that do not translate are reported rather than silently reinterpreted.
+Search patterns are translated from vim syntax to the `regex` crate. The translation covers `\<`, `\>`, `\v`, `\V`, and the character-class aliases — `\a`, `\l`, `\u`, `\d`, `\x`, `\o`, `\h` and their negations. `regex` has no backreferences or lookaround, so vim patterns using `\1` or `\@=` are out of scope: they fail to compile and the search is dropped rather than silently reinterpreted.
 
 `:sp`, `:vs`, `Ctrl-w`, `:bn`, and `:ls` operate on vmux panes and stacks. The editor does not grow its own window abstraction.
 

@@ -406,15 +406,18 @@ impl EditCore {
             return Vec::new();
         };
         let text = self.buffer.text();
-        search
-            .matches(&text)
-            .into_iter()
-            .map(|r| {
-                let start = text[..r.start].chars().count();
-                let len = text[r.clone()].chars().count();
-                start..start + len
-            })
-            .collect()
+        // Walk the byte offsets once, carrying the running char count. Counting `text[..r.start]`
+        // per match is O(buffer) each time, and `emit_cursor` calls this on every cursor move.
+        let mut out = Vec::new();
+        let mut byte = 0usize;
+        let mut chars = 0usize;
+        for r in search.matches(&text) {
+            chars += text[byte..r.start].chars().count();
+            byte = r.start;
+            let len = text[r.clone()].chars().count();
+            out.push(chars..chars + len);
+        }
+        out
     }
 
     fn search_step(&self, from: usize, reverse: bool) -> Option<usize> {
@@ -1028,9 +1031,6 @@ impl EditCore {
         true
     }
 
-    /// Apply an operator to a rectangle, row by row from the bottom so earlier rows keep their
-    /// indices. Only the operators that make sense on a block are handled; the rest fall through
-    /// to the enclosing charwise path.
     /// Shift every line touched by `range` one indent level in or out.
     fn apply_line_shift(
         &mut self,
@@ -1062,6 +1062,9 @@ impl EditCore {
         (true, None)
     }
 
+    /// Apply an operator to a rectangle, row by row from the bottom so earlier rows keep their
+    /// indices. Only the operators that make sense on a block are handled; the rest fall through
+    /// to the enclosing charwise path.
     fn apply_block_operator(
         &mut self,
         operator: Operator,
@@ -2556,6 +2559,19 @@ mod tests {
         assert_eq!(text_of(&c), "HELLO");
         c.apply(op(Operator::ToggleCase, Target::Motion(Motion::LineEnd, 1)));
         assert_eq!(text_of(&c), "hello");
+    }
+
+    /// `D` clears to the end of the line without joining the next one. A single-line fixture hides
+    /// this: the range gets clamped to the buffer length, so the extra step past `\n` is invisible.
+    #[test]
+    fn line_end_operator_stops_before_the_newline() {
+        let mut c = core("abc\ndef\n");
+        c.mode = EditMode::Normal;
+        c.set_caret(2);
+
+        c.apply(op(Operator::Delete, Target::Motion(Motion::LineEnd, 1)));
+
+        assert_eq!(text_of(&c), "ab\ndef\n");
     }
 
     #[test]

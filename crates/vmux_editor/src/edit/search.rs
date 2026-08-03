@@ -30,6 +30,23 @@ pub fn translate(pattern: &str) -> String {
             Some(esc @ ('+' | '?' | '(' | ')' | '{' | '}' | '|')) => out.push(esc),
             Some('c') => out.insert_str(0, "(?i)"),
             Some('C') => {}
+            // Vim character-class aliases. Passing these through would silently mean something
+            // else: `\a` is alphabetic in vim but BEL in `regex`, while `\l`, `\u` and `\x` are
+            // not valid `regex` escapes at all, so the whole pattern would be dropped.
+            Some('a') => out.push_str("[A-Za-z]"),
+            Some('A') => out.push_str("[^A-Za-z]"),
+            Some('l') => out.push_str("[a-z]"),
+            Some('L') => out.push_str("[^a-z]"),
+            Some('u') => out.push_str("[A-Z]"),
+            Some('U') => out.push_str("[^A-Z]"),
+            Some('d') => out.push_str("[0-9]"),
+            Some('D') => out.push_str("[^0-9]"),
+            Some('x') => out.push_str("[0-9A-Fa-f]"),
+            Some('X') => out.push_str("[^0-9A-Fa-f]"),
+            Some('o') => out.push_str("[0-7]"),
+            Some('O') => out.push_str("[^0-7]"),
+            Some('h') => out.push_str("[A-Za-z_]"),
+            Some('H') => out.push_str("[^A-Za-z_]"),
             Some(other) => {
                 out.push('\\');
                 out.push(other);
@@ -113,6 +130,19 @@ mod tests {
     #[test]
     fn case_insensitive_flag_is_hoisted() {
         assert_eq!(translate("foo\\c"), "(?i)foo");
+    }
+
+    /// `\a` used to reach `regex` as BEL and match the wrong thing; `\l`, `\u` and `\x` are not
+    /// `regex` escapes at all, so `Search::new` dropped the pattern entirely.
+    #[test]
+    fn character_class_aliases_translate_rather_than_leak() {
+        assert_eq!(translate("\\a"), "[A-Za-z]");
+        assert_eq!(translate("\\l\\u"), "[a-z][A-Z]");
+        assert_eq!(translate("\\d\\x"), "[0-9][0-9A-Fa-f]");
+        assert_eq!(translate("\\h"), "[A-Za-z_]");
+
+        assert!(Search::new("\\afoo", true).is_some());
+        assert!(Search::new("\\x2", true).is_some());
     }
 
     #[test]
