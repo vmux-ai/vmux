@@ -67,20 +67,27 @@ pub(crate) fn compute_host_focus_intent(
     >,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if modal_q
-        .iter()
-        .any(|(_, node, visibility, keyboard_target, _)| {
-            CommandBarState::from_modal(
-                node.display,
-                visibility.copied().unwrap_or_default(),
-                keyboard_target,
-            )
-            .owns_input()
-        }) {
-        // The command bar takes keys through `CefKeyboardTarget` forwarding like every other
-        // browser here, so winit must keep first responder. Handing it to the modal's native view
-        // stops winit seeing the keystroke, which starves the forwarding path it depends on.
-        HostFocusIntent::WinitHost
+    let next = if let Some((modal, windowed)) =
+        modal_q
+            .iter()
+            .find_map(|(entity, node, visibility, keyboard_target, windowed)| {
+                CommandBarState::from_modal(
+                    node.display,
+                    visibility.copied().unwrap_or_default(),
+                    keyboard_target,
+                )
+                .owns_input()
+                .then_some((entity, windowed))
+            }) {
+        // A windowed command bar hosts a real DOM text field, so Chromium must receive the
+        // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no DOM
+        // key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor before the
+        // event reaches the view, so dismiss still works while the bar holds first responder.
+        if windowed {
+            HostFocusIntent::Windowed(modal)
+        } else {
+            HostFocusIntent::WinitHost
+        }
     } else if *mode != InteractionMode::User {
         HostFocusIntent::Unmanaged
     } else if !bookmark_input_q.is_empty() {
@@ -218,22 +225,25 @@ mod tests {
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
 
-    /// A windowed modal must not take first responder: keys reach it through `CefKeyboardTarget`
-    /// forwarding, which only runs if winit sees the keystroke.
+    /// A windowed modal hosts a real DOM text field, so Chromium has to receive the keystrokes
+    /// itself — `send_key_event` forwarding produces no DOM key events for a windowed browser.
     #[test]
-    fn open_windowed_command_bar_leaves_first_responder_with_winit() {
+    fn open_windowed_command_bar_takes_native_focus() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().spawn((
-            Modal,
-            Node {
-                display: Display::Flex,
-                ..default()
-            },
-            CefKeyboardTarget,
-            WebviewWindowed,
-        ));
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                CefKeyboardTarget,
+                WebviewWindowed,
+            ))
+            .id();
         app.insert_resource(FocusedStack {
             stack: Some(stack),
             ..default()
@@ -241,24 +251,29 @@ mod tests {
 
         app.update();
 
-        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
     }
 
+    /// Focus must move to the bar the moment it owns input, not when its surface is revealed —
+    /// otherwise keys typed during the reveal frames land in the page behind it.
     #[test]
     fn revealing_windowed_command_bar_keeps_focus_off_the_page() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().spawn((
-            Modal,
-            Node {
-                display: Display::Flex,
-                ..default()
-            },
-            Visibility::Hidden,
-            CefKeyboardTarget,
-            WebviewWindowed,
-        ));
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Hidden,
+                CefKeyboardTarget,
+                WebviewWindowed,
+            ))
+            .id();
         app.insert_resource(FocusedStack {
             stack: Some(stack),
             ..default()
@@ -266,7 +281,7 @@ mod tests {
 
         app.update();
 
-        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
     }
 
     #[test]

@@ -423,10 +423,10 @@ fn setup(
             Modal,
             HostWindow(pw),
             Browser,
-            // Transparent, with no opaque background override: the page paints its own themed
-            // `bg-background` shell and its own rounded corners, so nothing here has to mutate
-            // Chromium's layer tree to make the modal look right.
+            // OSR, composited as a native overlay above the windowed pages. The page paints its
+            // own themed shell through the transparent surface.
             WebviewTransparent,
+            WebviewNativeLiquidGlass,
             WebviewWindowedNativeFocus,
             bevy_cef::prelude::WebviewNativeOverlay,
             bevy_cef::prelude::CefIgnorePinchZoom,
@@ -1238,15 +1238,14 @@ mod tests {
                 .map(|rate| rate.0),
             Some(30)
         );
-        // The modal paints its own themed shell, so nothing may override its background or
-        // otherwise reach into Chromium's layer tree to style it.
+        // The modal renders OSR through a transparent surface, so no opaque background override.
         assert!(app.world().get::<WebviewTransparent>(modal).is_some());
         assert!(
             app.world()
                 .get::<WebviewOpaqueWindowedBackground>(modal)
                 .is_none()
         );
-        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_none());
+        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_some());
     }
 
     #[test]

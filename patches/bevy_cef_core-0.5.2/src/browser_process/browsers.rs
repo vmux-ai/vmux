@@ -167,12 +167,17 @@ pub struct WebviewBrowser {
     last_corner_radius_all_corners: Cell<Option<bool>>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_focus_ring: Cell<Option<(f64, f64, f64, f64)>>,
-    /// Last value passed to [`Browsers::set_windowed_renderer_focus`]. Re-asserting focus every
-    /// frame resets the renderer's input state, so only transitions are forwarded.
+    /// Last value passed to [`Browsers::set_windowed_focus`]. Re-asserting focus every frame
+    /// resets the renderer's input state, so only transitions are forwarded.
     last_renderer_focus: Cell<Option<bool>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
-    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
-    /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
+    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
+    /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
+    ///
+    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal).
+    /// `send_key_event` is a windowless API and produces no DOM key events, and a windowed child
+    /// view here never receives usable `NSEvent`s either — so a surface hosting a real DOM text
+    /// field cannot be windowed. That is why the command bar stays OSR.
     windowed: bool,
     allow_native_focus: bool,
     webview_popup_sender: WebviewPopupSenderInner,
@@ -765,22 +770,6 @@ impl Browsers {
         None
     }
 
-    /// Focus a windowed browser at the Chromium level **without** making its `NSView` the macOS
-    /// first responder.
-    ///
-    /// Keyboard for windowed browsers is forwarded from winit through `CefKeyboardTarget` and
-    /// `send_key_event`. Taking first responder breaks that: AppKit hands keys to the CEF view, so
-    /// winit never sees them and Bevy never produces the `KeyboardInput` the forwarding path needs.
-    /// The renderer still needs `set_focus` so the focused DOM element receives the forwarded keys.
-    pub fn set_windowed_renderer_focus(&self, webview: &Entity, focused: bool) {
-        if let Some(browser) = self.browsers.get(webview)
-            && browser.windowed
-            && browser.last_renderer_focus.replace(Some(focused)) != Some(focused)
-        {
-            browser.host.set_focus(focused as _);
-        }
-    }
-
     pub fn set_windowed_focus(&self, webview: &Entity, focused: bool) {
         if let Some(browser) = self.browsers.get(webview)
             && browser.windowed
@@ -809,36 +798,11 @@ impl Browsers {
                     }
                 }
             }
-            browser.host.set_focus(focused as _);
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn log_native_view_tree(webview: Entity, view: &objc2_app_kit::NSView, depth: usize) {
-        use objc2_app_kit::NSResponder;
-
-        let frame = view.frame();
-        let responder: &NSResponder = view;
-        let subviews = view.subviews();
-        bevy::log::info!(
-            ?webview,
-            depth,
-            class = %view.class().name().to_string_lossy(),
-            pointer = ?(view as *const objc2_app_kit::NSView),
-            hidden = view.isHidden(),
-            accepts_first_responder = responder.acceptsFirstResponder(),
-            subviews = subviews.len(),
-            x = frame.origin.x,
-            y = frame.origin.y,
-            width = frame.size.width,
-            height = frame.size.height,
-            "command bar native view tree"
-        );
-        if depth >= 5 {
-            return;
-        }
-        for child in subviews.to_vec() {
-            Self::log_native_view_tree(webview, &child, depth + 1);
+            // Re-asserting focus every frame resets the renderer's input state, so only forward
+            // transitions.
+            if browser.last_renderer_focus.replace(Some(focused)) != Some(focused) {
+                browser.host.set_focus(focused as _);
+            }
         }
     }
 
@@ -953,8 +917,6 @@ impl Browsers {
 
     #[allow(dead_code)]
     pub fn emit_event_bytes(&self, webview: &Entity, id: impl Into<String>, payload: &[u8]) {
-        let id = id.into();
-        let mut outcome = "missing process message";
         if let Some(mut process_message) =
             process_message_create(Some(&PROCESS_MESSAGE_BIN_HOST_EMIT.into()))
             && let Some(argument_list) = process_message.argument_list()
@@ -962,7 +924,7 @@ impl Browsers {
             && let Some(frame) = browser.client.main_frame()
             && crate::util::is_trusted_embedded_page(&frame.url().into_string())
         {
-            argument_list.set_string(0, Some(&id.as_str().into()));
+            argument_list.set_string(0, Some(&id.into().as_str().into()));
             // CEF's BinaryValue rejects zero-length data. For unit-shaped payloads
             // we send only the id; the receiver (handle_bin_listen_message) treats
             // a missing binary arg as Vec::new().
@@ -975,16 +937,7 @@ impl Browsers {
                 ProcessId::from(cef_dll_sys::cef_process_id_t::PID_RENDERER),
                 Some(&mut process_message),
             );
-            outcome = "sent";
         };
-        if id == "command-bar-open" {
-            bevy::log::info!(
-                ?webview,
-                payload_len = payload.len(),
-                outcome,
-                "CEF binary host emit"
-            );
-        }
     }
 
     pub fn resize(&self, webview: &Entity, size: Vec2, device_scale_factor: f32) {
@@ -1741,136 +1694,6 @@ impl Browsers {
 
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_z_position(&self, _: &Entity, _: f64) {}
-
-    #[cfg(target_os = "macos")]
-    pub fn log_windowed_input_state(&self, webview: &Entity) {
-        use objc2_app_kit::{NSResponder, NSView};
-        use objc2_foundation::NSPoint;
-
-        let Some(browser) = self.browsers.get(webview) else {
-            return;
-        };
-        let handle = browser.host.window_handle();
-        if handle.is_null() {
-            return;
-        }
-        let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        let Some(parent) = (unsafe { view.superview() }) else {
-            return;
-        };
-        let frame = view.frame();
-        let center = NSPoint::new(
-            frame.origin.x + frame.size.width * 0.5,
-            frame.origin.y + frame.size.height * 0.5,
-        );
-        // `hitTest:` takes a point in the *receiver's superview* space, but `view.frame()` is in the
-        // parent's own space. Convert, or the probe silently tests the wrong point.
-        let hit_point = unsafe { parent.superview() }
-            .map(|superview| parent.convertPoint_toView(center, Some(&superview)))
-            .unwrap_or(center);
-        let hit = parent.hitTest(hit_point);
-        let hit_is_command_bar = hit
-            .as_deref()
-            .is_some_and(|hit_view| core::ptr::eq(hit_view, view) || hit_view.isDescendantOf(view));
-        let hit_webview = hit.as_deref().and_then(|hit_view| {
-            self.browsers.iter().find_map(|(entity, candidate)| {
-                if !candidate.windowed {
-                    return None;
-                }
-                let candidate_handle = candidate.host.window_handle();
-                if candidate_handle.is_null() {
-                    return None;
-                }
-                let candidate_view: &NSView = unsafe { &*candidate_handle.cast::<NSView>() };
-                (core::ptr::eq(hit_view, candidate_view) || hit_view.isDescendantOf(candidate_view))
-                    .then_some(*entity)
-            })
-        });
-        let hit_is_parent = hit
-            .as_deref()
-            .is_some_and(|hit_view| core::ptr::eq(hit_view, &*parent));
-        let bounds = view.bounds();
-        let local_center = NSPoint::new(bounds.size.width * 0.5, bounds.size.height * 0.5);
-        let local_hit = view.hitTest(local_center);
-        let local_hit_is_command_bar = local_hit
-            .as_deref()
-            .is_some_and(|hit_view| core::ptr::eq(hit_view, view) || hit_view.isDescendantOf(view));
-        let native_focus = self.windowed_has_native_focus(webview);
-        let (first_responder_class, first_responder_pointer, first_responder_accepts) = view
-            .window()
-            .and_then(|window| window.firstResponder())
-            .map(|responder| {
-                (
-                    responder.class().name().to_string_lossy().into_owned(),
-                    (&*responder) as *const NSResponder,
-                    responder.acceptsFirstResponder(),
-                )
-            })
-            .map_or_else(
-                || (String::from("none"), std::ptr::null(), false),
-                |state| state,
-            );
-        let parent_class = parent.class().name().to_string_lossy().into_owned();
-        let parent_frame = parent.frame();
-        bevy::log::info!(
-            ?webview,
-            hidden = view.isHidden(),
-            key_window = view.window().is_some_and(|window| window.isKeyWindow()),
-            ?native_focus,
-            hit_is_command_bar,
-            ?hit_webview,
-            hit_is_parent,
-            local_hit_is_command_bar,
-            %parent_class,
-            parent_flipped = parent.isFlipped(),
-            parent_w = parent_frame.size.width,
-            parent_h = parent_frame.size.height,
-            probe_x = hit_point.x,
-            probe_y = hit_point.y,
-            %first_responder_class,
-            ?first_responder_pointer,
-            first_responder_accepts,
-            x = frame.origin.x,
-            y = frame.origin.y,
-            width = frame.size.width,
-            height = frame.size.height,
-            "command bar native input state"
-        );
-        for (index, sibling) in parent.subviews().to_vec().into_iter().enumerate() {
-            let sibling_webview = self.browsers.iter().find_map(|(entity, candidate)| {
-                if !candidate.windowed {
-                    return None;
-                }
-                let candidate_handle = candidate.host.window_handle();
-                if candidate_handle.is_null() {
-                    return None;
-                }
-                let candidate_view: &NSView = unsafe { &*candidate_handle.cast::<NSView>() };
-                (core::ptr::eq(&*sibling, candidate_view)
-                    || sibling.isDescendantOf(candidate_view)
-                    || candidate_view.isDescendantOf(&sibling))
-                .then_some(*entity)
-            });
-            let sibling_frame = sibling.frame();
-            bevy::log::info!(
-                ?webview,
-                index,
-                class = %sibling.class().name().to_string_lossy(),
-                pointer = ?(&*sibling as *const NSView),
-                ?sibling_webview,
-                hidden = sibling.isHidden(),
-                x = sibling_frame.origin.x,
-                y = sibling_frame.origin.y,
-                width = sibling_frame.size.width,
-                height = sibling_frame.size.height,
-                "command bar native parent subview"
-            );
-        }
-        Self::log_native_view_tree(*webview, view, 0);
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn log_windowed_input_state(&self, _: &Entity) {}
 
     #[cfg(target_os = "macos")]
     pub fn lower_windowed_to_back(&self, webview: &Entity) {

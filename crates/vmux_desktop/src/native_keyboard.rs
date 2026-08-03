@@ -225,57 +225,14 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
     let block = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let ev = unsafe { event.as_ref() };
         wake();
-        let event_type = ev.r#type();
-        if !matches!(event_type, NSEventType::KeyDown | NSEventType::KeyUp) {
+        if ev.r#type() != NSEventType::KeyDown {
             return event.as_ptr();
         }
         let key_code = ev.keyCode();
         let flags = ev.modifierFlags();
-        let command_bar_open = vmux_browser::native_command_bar_is_open();
-        let command_bar_responder = command_bar_open
-            .then(objc2::MainThreadMarker::new)
-            .flatten()
-            .and_then(|mtm| ev.window(mtm))
-            .and_then(|window| window.firstResponder());
-        if command_bar_open {
-            use objc2_app_kit::NSResponder;
-
-            let responder = command_bar_responder.as_ref();
-            let responder_class = responder
-                .map(|responder| responder.class().name().to_string_lossy().into_owned())
-                .unwrap_or_else(|| String::from("none"));
-            let responder_pointer = responder
-                .map(|responder| (&**responder) as *const NSResponder)
-                .unwrap_or(std::ptr::null());
-            bevy::log::info!(
-                ?event_type,
-                key_code,
-                modifier_flags = flags.bits(),
-                %responder_class,
-                ?responder_pointer,
-                "command bar native key event"
-            );
-        }
         let Some(combo) = translate(key_code, flags) else {
             return event.as_ptr();
         };
-        if event_type == NSEventType::KeyDown
-            && is_command_bar_dismiss_combo(&combo)
-            && vmux_browser::request_native_command_bar_dismiss()
-        {
-            return std::ptr::null_mut();
-        }
-        // The command bar's own native view holds first responder while it owns input, so AppKit
-        // already routes keys to it. Hand-delivering `keyDown:` from here instead skips
-        // `NSWindow.sendEvent:` and with it Chromium's `interpretKeyEvents:`, so keystrokes reach
-        // the widget but never become typed characters. Pass through, and skip app shortcut
-        // classification so chords do not fire while the user is typing a query.
-        if command_bar_open {
-            return event.as_ptr();
-        }
-        if event_type != NSEventType::KeyDown {
-            return event.as_ptr();
-        }
         if handle_key_action(classify(combo), &wake, |cmd| {
             PENDING_COMMANDS.lock().push(cmd);
         }) {

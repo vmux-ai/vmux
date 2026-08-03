@@ -546,7 +546,6 @@ fn on_command_bar_ready(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    bevy::log::info!(?webview, "command bar page ready");
     if let Ok(mut pending) = pending_q.get_mut(webview)
         && pending.open_id != 0
         && pending.started_at.is_none()
@@ -568,12 +567,7 @@ fn on_command_bar_rendered(
     browsers.set_windowed_focus(&webview, true);
     browsers.execute_js(
         &webview,
-        "const input = document.getElementById('command-bar-input'); console.error('command-bar focus before', document.activeElement?.id, document.hasFocus()); if (input) { input.focus({ preventScroll: true }); console.error('command-bar focus after', document.activeElement === input, document.hasFocus()); } else { console.error('command-bar input missing at host focus'); }",
-    );
-    bevy::log::info!(
-        ?webview,
-        open_id = trigger.event().payload.open_id,
-        "command bar page rendered"
+        "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
     );
     webview_debug_log(format!(
         "command_bar rendered entity={:?} open_id={}",
@@ -609,15 +603,6 @@ fn on_command_bar_size(
         return;
     }
     let payload = trigger.event().payload;
-    bevy::log::info!(
-        ?webview,
-        open_id = pending_reveal.map(|pending| pending.open_id),
-        width = payload.width,
-        height = payload.height,
-        shell_width = payload.shell_width,
-        shell_height = payload.shell_height,
-        "command bar page size"
-    );
     if native_windowed
         && let Some(open_id) = pending_reveal
             .filter(|pending| pending.open_id != 0)
@@ -626,7 +611,7 @@ fn on_command_bar_size(
         browsers.set_windowed_focus(&webview, true);
         browsers.execute_js(
             &webview,
-            "const input = document.getElementById('command-bar-input'); console.error('command-bar focus before', document.activeElement?.id, document.hasFocus()); if (input) { input.focus({ preventScroll: true }); console.error('command-bar focus after', document.activeElement === input, document.hasFocus()); } else { console.error('command-bar input missing at host focus'); }",
+            "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
         );
         commands
             .entity(webview)
@@ -1140,18 +1125,6 @@ fn handle_open_command_bar(
         modal_pending_reveal.is_some(),
         *modal_vis
     ));
-    bevy::log::info!(
-        ?modal_e,
-        was_open,
-        has_browser,
-        host_emit_ready,
-        command_bar_ready,
-        native_windowed,
-        native_overlay,
-        visibility = ?*modal_vis,
-        "command bar open request state"
-    );
-
     if !command_bar_open_delivery_ready(has_browser, host_emit_ready, command_bar_ready) {
         commands
             .entity(modal_e)
@@ -1211,12 +1184,6 @@ fn handle_open_command_bar(
         browsers.wake_osr_webview(&modal_e);
     }
     if !wait_for_recreate && !native_windowed {
-        bevy::log::info!(
-            ?modal_e,
-            open_id,
-            payload_bytes_len,
-            "command bar sending open payload"
-        );
         commands.trigger(event);
     }
     if should_start_command_bar_reveal(

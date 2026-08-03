@@ -210,9 +210,8 @@ pub fn embedded_page_host_of(url: &str) -> Option<String> {
     }
 }
 
-// TEMPORARY: forced on to diagnose the command bar listener dispatch. Restore the env gate.
 pub fn webview_debug_log_enabled() -> bool {
-    true
+    std::env::var_os("VMUX_WEBVIEW_DEBUG").is_some()
 }
 
 fn webview_debug_log_path() -> PathBuf {

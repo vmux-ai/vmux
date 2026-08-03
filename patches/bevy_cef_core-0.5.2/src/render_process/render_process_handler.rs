@@ -367,49 +367,27 @@ fn handle_bin_listen_message(message: &ProcessMessage, browser_id: c_int, mut ct
     };
     let len = buffer.len();
 
-    let probe = id == "command-bar-open";
     let callback = {
         let Ok(events) = LISTEN_EVENTS.lock() else {
             return;
         };
-        if probe {
-            let keys: Vec<String> = events
-                .keys()
-                .map(|(bid, key)| format!("{bid}:{key}"))
-                .collect();
-            crate::util::webview_debug_log(format!(
-                "PROBE bin-host-emit id={id} browser_id={browser_id} found={} registered=[{}]",
-                events.contains_key(&(browser_id, id.clone())),
-                keys.join(", ")
-            ));
-        }
         events.get(&(browser_id, id)).cloned()
     };
     let Some(callback) = callback else {
         return;
     };
 
-    let entered = ctx.enter().is_positive();
-    if probe {
-        crate::util::webview_debug_log(format!("PROBE bin-host-emit entered={entered}"));
-    }
-    if entered {
+    if ctx.enter().is_positive() {
         let array_buffer = v8_value_create_array_buffer_with_copy(buffer.as_mut_ptr(), len);
         let mut this = v8_value_create_object(
             Some(&mut V8DefaultAccessorBuilder::build()),
             Some(&mut V8DefaultInterceptorBuilder::build()),
         );
-        let result = callback.execute_function_with_context(
+        let _ = callback.execute_function_with_context(
             Some(&mut ctx),
             this.as_mut(),
             Some(&[array_buffer]),
         );
-        if probe {
-            crate::util::webview_debug_log(format!(
-                "PROBE bin-host-emit executed returned_value={}",
-                result.is_some()
-            ));
-        }
         ctx.exit();
     }
 }

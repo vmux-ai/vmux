@@ -1151,6 +1151,7 @@ fn sync_children_to_ui(
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
             Has<LayoutCef>,
+            Has<WebviewWindowed>,
         ),
         With<Browser>,
     >,
@@ -1182,6 +1183,7 @@ fn sync_children_to_ui(
         pending_webview_reveal,
         pending_command_bar_reveal,
         is_layout_cef,
+        is_windowed,
     ) in browser_q.iter_mut()
     {
         let parent = child_of.get();
@@ -1280,6 +1282,13 @@ fn sync_children_to_ui(
             0.0
         };
         tf.translation = Vec3::new(tx + history_swipe_tx, ty, z);
+
+        // A windowed modal's node fills the whole layout area, but its native view is a small
+        // centred box that `sync_windowed_command_bar` sizes. Writing the node size here makes the
+        // page lay out at the full width inside that box, so the shell renders far too wide.
+        if modal.is_some() && is_windowed {
+            continue;
+        }
 
         let dip = (size_px * computed.inverse_scale_factor).max(Vec2::splat(1.0));
         if webview_size.0 != dip {
@@ -1479,11 +1488,16 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
-    let target_windowed = |is_layout: bool, _is_modal: bool| base_windowed && !is_layout;
+    // The command bar stays OSR. A windowed CEF child view never receives DOM input here: real
+    // `NSEvent`s are dropped even when it holds first responder, and `send_key_event` forwarding is
+    // a windowless API that produces no DOM key events. The bar is the one surface hosting a real
+    // text field, so it needs the OSR path that input injection actually reaches.
+    let target_windowed =
+        |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
     let target_native_overlay = |is_layout: bool, is_modal: bool| {
         cfg!(target_os = "macos")
             && mode == vmux_layout::scene::InteractionMode::User
-            && (is_layout || (is_modal && !base_windowed))
+            && (is_layout || is_modal)
     };
     let target_native_direct_overlay = |is_layout: bool| {
         cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
@@ -1804,16 +1818,6 @@ fn sync_windowed_frames(
             );
             let changed = last_raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible {
-                bevy::log::info!(
-                    ?entity,
-                    ?pane_entity,
-                    ?pane_frame,
-                    ?header_frame,
-                    visible_pane_count,
-                    ?frame,
-                    scale,
-                    "native page frame changed"
-                );
                 browsers.raise_windowed_to_front(&entity);
             }
         }
@@ -2400,6 +2404,8 @@ struct CommandBarWindowedFrame {
     height_px: f32,
 }
 
+const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
+
 /// One consistent view of the command bar for the AppKit event thread.
 ///
 /// The `NSEvent` monitor samples this on every key and mouse event, at arbitrary points relative to
@@ -2729,25 +2735,10 @@ fn sync_windowed_command_bar(
     let open = state.is_shown();
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
-    if open != *was_open {
-        bevy::log::info!(
-            ?entity,
-            open,
-            render_hidden,
-            is_windowed,
-            has_keyboard_target,
-            visibility = ?*visibility,
-            native_size = ?native_size.map(|size| (size.width, size.height, size.shell_width, size.shell_height)),
-            has_browser = browsers.has_browser(entity),
-            host_emit_ready = browsers.host_emit_ready(&entity),
-            native_focus = ?browsers.windowed_has_native_focus(&entity),
-            "command bar native state changed"
-        );
-    }
     if !open && !render_hidden {
         publish_native_command_bar_route(owns_input, None, 1.0);
         if is_windowed {
-            browsers.set_windowed_renderer_focus(&entity, false);
+            browsers.set_windowed_focus(&entity, false);
             hide_windowed_command_bar(&browsers, entity);
         }
         *was_open = false;
@@ -2805,7 +2796,7 @@ fn sync_windowed_command_bar(
         // A revealing bar already owns input, so keep the renderer focused; only a prewarmed,
         // never-opened surface gets unfocused here.
         if !owns_input {
-            browsers.set_windowed_renderer_focus(&entity, false);
+            browsers.set_windowed_focus(&entity, false);
         }
         browsers.resize(
             &entity,
@@ -2838,10 +2829,6 @@ fn sync_windowed_command_bar(
     };
     publish_native_command_bar_route(owns_input, Some(frame), scale);
 
-    if !*was_open {
-        bevy::log::info!(?entity, ?frame, scale, "command bar native frame shown");
-    }
-
     browsers.set_windowed_frame(
         &entity,
         frame.left_px,
@@ -2855,37 +2842,17 @@ fn sync_windowed_command_bar(
         Vec2::new(frame.width_px / scale, frame.height_px / scale),
         scale,
     );
+    // A windowed CEF view cannot be transparent, so the page's own `rounded-2xl` leaves opaque
+    // square corners behind it. Clip the outer view instead. This only touches the outermost
+    // `CefBrowserHostView` layer, unlike `set_windowed_z_position`, which reorders that layer among
+    // its siblings and leaves the view painting nothing but its background.
+    browsers.set_windowed_corner_radius(&entity, COMMAND_BAR_NATIVE_RADIUS_PX * scale, scale, true);
     browsers.set_windowed_hidden(&entity, false);
     // Frontmost sibling wins AppKit hit-testing; the raise is a no-op once it already is.
-    // Nothing else touches this view's layer — `setWantsLayer`, `zPosition`, `cornerRadius` and
-    // `masksToBounds` all mutate Chromium's own layer tree, which leaves the view painting its
-    // background and nothing else. The page draws the rounded shell itself.
     browsers.raise_windowed_to_front(&entity);
-    // Focus the renderer, but leave AppKit first responder with winit. Keyboard reaches windowed
-    // browsers through `CefKeyboardTarget` forwarding, which needs winit to see the keystroke
-    // first; taking first responder here starves that path without replacing it.
-    browsers.set_windowed_renderer_focus(&entity, true);
+    browsers.set_windowed_focus(&entity, true);
     if !*was_open || native_size_changed.contains(entity) {
         browsers.nudge_windowed_repaint(&entity);
-        browsers.log_windowed_input_state(&entity);
-        // TEMPORARY: ask the page whether the renderer sees input at all. Everything native checks
-        // out (frontmost, hit-tested, focused, first responder), so the remaining fork is whether
-        // Chromium delivers events to the renderer or whether only DOM focus is wrong.
-        browsers.execute_js(
-            &entity,
-            r#"(function(){
-if (window.__vmuxProbe) { return; }
-window.__vmuxProbe = 1;
-var log = function(m) { console.log('VMUXPROBE ' + m); };
-var describe = function(el) { return el ? (el.id || el.tagName) : 'none'; };
-log('installed hasFocus=' + document.hasFocus() + ' active=' + describe(document.activeElement));
-['pointerdown', 'mousedown', 'click', 'keydown', 'focusin'].forEach(function(type) {
-  window.addEventListener(type, function(event) {
-    log(type + ' target=' + describe(event.target) + ' hasFocus=' + document.hasFocus() + ' active=' + describe(document.activeElement));
-  }, true);
-});
-})();"#,
-        );
         *was_open = true;
     }
 }
@@ -6577,7 +6544,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_osr_and_windows_command_bar() {
+    fn browser_mode_keeps_layout_and_command_bar_osr_for_native_overlays() {
         let source = include_str!("lib.rs");
         let backend_fn = source
             .split("fn sync_cef_backend_for_interaction_mode")
@@ -6587,6 +6554,7 @@ mod tests {
 
         assert!(backend_fn.contains("Has<LayoutCef>"));
         assert!(backend_fn.contains("Has<Modal>"));
+        assert!(backend_fn.contains("!is_layout && !is_modal"));
         assert!(backend_fn.contains("WebviewNativeOverlay"));
         assert!(backend_fn.contains("target_native_direct_overlay"));
     }
@@ -6620,7 +6588,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_osr_and_windows_modal_and_pages_on_macos() {
+    fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
         app.insert_resource(vmux_layout::scene::InteractionMode::User);
@@ -6660,15 +6628,15 @@ mod tests {
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -6719,16 +6687,16 @@ mod tests {
                 .is_some(),
             cfg!(target_os = "macos")
         );
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
         assert!(
             app.world()
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -7358,10 +7326,11 @@ mod tests {
         assert!(sync_fn.contains("browsers.nudge_windowed_repaint(&entity)"));
     }
 
-    /// Keyboard reaches windowed browsers through `CefKeyboardTarget` forwarding, which needs winit
-    /// to keep AppKit first responder. The modal must focus the renderer only.
+    /// The command bar is the one windowed browser that hosts a real DOM text field, so it takes
+    /// AppKit first responder and lets Chromium handle typing natively. `send_key_event` forwarding
+    /// is a windowless API and does not produce DOM key events for a windowed browser.
     #[test]
-    fn command_bar_windowed_sync_never_takes_appkit_first_responder() {
+    fn command_bar_windowed_sync_takes_native_focus() {
         let source = include_str!("lib.rs");
         let sync_fn = source
             .split("fn sync_windowed_command_bar")
@@ -7369,9 +7338,8 @@ mod tests {
             .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
             .unwrap_or_default();
 
-        assert!(sync_fn.contains("browsers.set_windowed_renderer_focus(&entity, true)"));
-        assert!(sync_fn.contains("browsers.set_windowed_renderer_focus(&entity, false)"));
-        assert!(!sync_fn.contains("browsers.set_windowed_focus("));
+        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, true)"));
+        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, false)"));
     }
 
     #[test]
