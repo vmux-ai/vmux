@@ -1,5 +1,5 @@
 @import "../../vmux_ui/assets/theme.css";
 @import "tailwindcss";
 @source "../src";
-@source "../../vmux_chat_ui/src";
+@source "../../vmux_chat/src";
 @source "../../vmux_ui/src";

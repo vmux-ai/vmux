@@ -3,6 +3,7 @@
 mod native_transition;
 mod qr_scanner;
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -13,11 +14,7 @@ use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
-use vmux_chat::transcript::{AssistantTurn, UserBubble, WorkingIndicator};
-use vmux_chat_ui::{
-    DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
-    ToolUseBlock,
-};
+use vmux_chat::transcript::{AssistantTurn, ChatItemRow, WorkingIndicator};
 use vmux_remote::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
     PromptRequest, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus,
@@ -30,6 +27,10 @@ use vmux_ui::components::prompt_composer::{
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
+use vmux_wire::chat::{
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
+};
+use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
@@ -728,6 +729,9 @@ fn App() -> Element {
     let approval_value = approval();
     let live_delta_value = live_delta();
     let room_value = room();
+    let transcript_items = group_messages(room_value.events, &live_delta_value, is_streaming);
+    let latest_tool = latest_tool_location(&transcript_items);
+    let attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
 
     rsx! {
         AppHead {}
@@ -777,29 +781,26 @@ fn App() -> Element {
             }
 
             main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 sm:px-4 md:px-6",
-                if room_value.events.is_empty() && live_delta_value.is_empty() && !is_streaming {
+                if transcript_items.is_empty() && !is_streaming {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground",
                         "No messages yet."
                     }
                 }
-                div { class: "mx-auto flex w-full max-w-none flex-col md:max-w-3xl",
-                    for (index, item) in group_messages(room_value.events).into_iter().enumerate() {
-                        MessageView { key: "{index}", item }
-                    }
-                    if !live_delta_value.is_empty() {
-                        div { class: "mb-4 flex flex-col",
-                            AssistantTurn {
-                                TextBlock { text: live_delta_value.clone() }
-                                if is_streaming {
-                                    WorkingIndicator {}
-                                }
-                            }
+                div { class: "mx-auto flex w-full max-w-none flex-col gap-5 md:max-w-3xl",
+                    for (index, item) in transcript_items.iter().cloned().enumerate() {
+                        ChatItemRow {
+                            key: "{index}",
+                            absolute_index: index,
+                            item,
+                            attachment_previews,
+                            latest_tool_block: (latest_tool.map(|(i, _)| i) == Some(index))
+                                .then(|| latest_tool.map(|(_, b)| b))
+                                .flatten(),
                         }
-                    } else if is_streaming {
-                        div { class: "mb-4 flex flex-col",
-                            AssistantTurn {
-                                WorkingIndicator {}
-                            }
+                    }
+                    if is_streaming {
+                        div { class: "flex flex-col",
+                            AssistantTurn { WorkingIndicator {} }
                         }
                     }
                     if let RemoteStatus::Errored(message) = status() {
@@ -1229,122 +1230,126 @@ fn PairCard(props: PairCardProps) -> Element {
     }
 }
 
-#[derive(Clone, PartialEq)]
-enum MobileChatItem {
-    User { text: String },
-    Turn { blocks: Vec<MobileChatBlock> },
-}
-
-#[derive(Clone, PartialEq)]
-enum MobileChatBlock {
-    Assistant(AssistantBlock),
-    ToolResult { content: String, is_error: bool },
-}
-
-#[derive(Props, Clone, PartialEq)]
-struct MessageViewProps {
-    item: MobileChatItem,
-}
-
-#[component]
-fn MessageView(props: MessageViewProps) -> Element {
-    match props.item {
-        MobileChatItem::User { text } => rsx! {
-            div { class: "mb-4 flex flex-col",
-                UserBubble {
-                    div { class: "whitespace-pre-wrap break-words", "{text}" }
+/// Fold the room's event log into the shared transcript model. The desktop gets this from
+/// `group_turns` on the daemon side; the relay does not pre-group yet, so mobile folds locally.
+fn group_messages(events: Vec<RoomEvent>, live_delta: &str, running: bool) -> Vec<ChatItem> {
+    let mut items: Vec<ChatItem> = Vec::new();
+    let mut turn: Vec<ChatBlock> = Vec::new();
+    for event in events {
+        match event.message {
+            Message::User { text, attachments } => {
+                if !turn.is_empty() {
+                    items.push(ChatItem::Turn(chat_turn(std::mem::take(&mut turn), false)));
                 }
+                items.push(ChatItem::User {
+                    text,
+                    context: None,
+                    attachments: attachments
+                        .into_iter()
+                        .map(|attachment| ChatSubmitAttachment {
+                            path: attachment.path,
+                            name: attachment.name,
+                            mime_type: attachment.mime_type,
+                            size: attachment.size,
+                        })
+                        .collect(),
+                });
             }
-        },
-        MobileChatItem::Turn { blocks } => rsx! {
-            div { class: "mb-4 flex flex-col",
-                AssistantTurn {
-                    for (index, block) in blocks.into_iter().enumerate() {
-                        match block {
-                            MobileChatBlock::Assistant(block) => rsx! {
-                                AssistantBlockView { key: "{index}", block }
-                            },
-                            MobileChatBlock::ToolResult { content, is_error } => rsx! {
-                                ToolResultBlock { key: "{index}", content, is_error }
-                            },
-                        }
-                    }
+            Message::Assistant { blocks } => turn.extend(blocks.into_iter().map(chat_block)),
+            Message::ToolResult {
+                call_id,
+                content,
+                is_error,
+            } => turn.push(ChatBlock::ToolResult {
+                call_id,
+                content,
+                is_error,
+            }),
+        }
+    }
+    if !live_delta.is_empty() {
+        turn.push(ChatBlock::Text(live_delta.to_string()));
+    }
+    if !turn.is_empty() {
+        items.push(ChatItem::Turn(chat_turn(turn, running)));
+    }
+    items
+}
+
+fn chat_turn(blocks: Vec<ChatBlock>, running: bool) -> ChatTurn {
+    let step_count = blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, block)| {
+            !matches!(block, ChatBlock::Text(_))
+                && ChatTurn {
+                    blocks: blocks.clone(),
+                    ..ChatTurn::default()
                 }
-            }
-        },
+                .parent_tool_index(*index)
+                .is_none()
+        })
+        .count() as u32;
+    ChatTurn {
+        blocks,
+        running,
+        duration_secs: None,
+        step_count,
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
-struct AssistantBlockViewProps {
-    block: AssistantBlock,
-}
-
-#[component]
-fn AssistantBlockView(props: AssistantBlockViewProps) -> Element {
-    match props.block {
-        AssistantBlock::Text(text) => rsx! { TextBlock { text } },
-        AssistantBlock::Thinking(text) => rsx! { ThinkingBlock { text } },
-        AssistantBlock::ToolUse { name, args, .. } => rsx! { ToolUseBlock { name, args } },
+fn chat_block(block: AssistantBlock) -> ChatBlock {
+    match block {
+        AssistantBlock::Text(text) => ChatBlock::Text(text),
+        AssistantBlock::Thinking(text) => ChatBlock::Thinking(text),
+        AssistantBlock::ToolUse {
+            call_id,
+            name,
+            args,
+            parent_call_id,
+        } => ChatBlock::ToolUse {
+            call_id,
+            name,
+            args,
+            parent_call_id,
+        },
+        AssistantBlock::Subagent(subagent) => ChatBlock::Subagent(Box::new(ChatSubagent {
+            call_id: subagent.call_id,
+            provider: subagent.provider,
+            title: subagent.title,
+            status: subagent.status,
+            action: subagent.action,
+            agent_name: subagent.agent_name,
+            thread_id: subagent.thread_id,
+            parent_thread_id: subagent.parent_thread_id,
+            child_thread_ids: subagent.child_thread_ids,
+            parent_call_id: subagent.parent_call_id,
+            prompt: subagent.prompt,
+            model: subagent.model,
+            reasoning_effort: subagent.reasoning_effort,
+            raw_input: subagent.raw_input,
+        })),
         AssistantBlock::Diff {
+            call_id,
             path,
             old_text,
             new_text,
-            ..
-        } => rsx! { DiffBlock { path, old_text, new_text } },
-        AssistantBlock::Plan { steps } => rsx! {
-            PlanBlock {
-                steps: steps.into_iter().map(|step| PlanItem {
+        } => ChatBlock::Diff {
+            call_id,
+            path,
+            old_text,
+            new_text,
+        },
+        AssistantBlock::Plan { steps } => ChatBlock::Plan {
+            steps: steps
+                .into_iter()
+                .map(|step| ChatPlanStep {
                     content: step.content,
                     status: step.status,
-                }).collect()
-            }
-        },
-        AssistantBlock::Subagent(subagent) => rsx! {
-            SubagentActivity {
-                title: subagent.title,
-                status: subagent.status,
-                provider: subagent.provider,
-                action: subagent.action,
-                agent_name: subagent.agent_name,
-                model: subagent.model,
-                reasoning_effort: subagent.reasoning_effort,
-                prompt: subagent.prompt,
-                thread_id: subagent.thread_id,
-                parent_thread_id: subagent.parent_thread_id,
-                child_thread_ids: subagent.child_thread_ids,
-                call_id: subagent.call_id,
-                raw_input: subagent.raw_input,
-            }
+                })
+                .collect(),
         },
     }
-}
-
-fn group_messages(events: Vec<RoomEvent>) -> Vec<MobileChatItem> {
-    let mut items = Vec::new();
-    let mut turn = Vec::new();
-    for event in events {
-        match event.message {
-            Message::User { text, .. } => {
-                if !turn.is_empty() {
-                    items.push(MobileChatItem::Turn {
-                        blocks: std::mem::take(&mut turn),
-                    });
-                }
-                items.push(MobileChatItem::User { text });
-            }
-            Message::Assistant { blocks } => {
-                turn.extend(blocks.into_iter().map(MobileChatBlock::Assistant))
-            }
-            Message::ToolResult {
-                content, is_error, ..
-            } => turn.push(MobileChatBlock::ToolResult { content, is_error }),
-        }
-    }
-    if !turn.is_empty() {
-        items.push(MobileChatItem::Turn { blocks: turn });
-    }
-    items
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1712,9 +1717,8 @@ mod tests {
         assert!(buffer.is_empty());
     }
 
-    #[test]
-    fn groups_agent_activity_into_one_turn() {
-        let items = group_messages(vmux_remote::room_events_from_messages(
+    fn sample_events() -> Vec<RoomEvent> {
+        vmux_remote::room_events_from_messages(
             "s",
             0,
             &[
@@ -1731,13 +1735,32 @@ mod tests {
                     blocks: vec![AssistantBlock::Text("answer".to_string())],
                 },
             ],
-        ));
+        )
+    }
+
+    #[test]
+    fn groups_agent_activity_into_one_turn() {
+        let items = group_messages(sample_events(), "", false);
 
         assert_eq!(items.len(), 2);
-        assert!(matches!(items[0], MobileChatItem::User { .. }));
+        assert!(matches!(items[0], ChatItem::User { .. }));
         assert!(matches!(
             &items[1],
-            MobileChatItem::Turn { blocks } if blocks.len() == 3
+            ChatItem::Turn(turn) if turn.blocks.len() == 3 && !turn.running
         ));
+    }
+
+    #[test]
+    fn streaming_delta_extends_the_live_turn() {
+        let items = group_messages(sample_events(), "partial", true);
+
+        let ChatItem::Turn(turn) = &items[1] else {
+            panic!("expected a turn");
+        };
+        assert!(turn.running);
+        assert_eq!(
+            turn.blocks.last(),
+            Some(&ChatBlock::Text("partial".to_string()))
+        );
     }
 }
