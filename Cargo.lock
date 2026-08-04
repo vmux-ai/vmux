@@ -11030,6 +11030,7 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "uuid",
+ "vmux_chat",
  "vmux_chat_ui",
  "vmux_command",
  "vmux_core",
@@ -11086,6 +11087,22 @@ dependencies = [
  "vmux_terminal",
  "vmux_ui",
  "zip",
+]
+
+[[package]]
+name = "vmux_chat"
+version = "0.0.30"
+dependencies = [
+ "dioxus",
+ "dioxus-primitives",
+ "gloo-timers",
+ "js-sys",
+ "pulldown-cmark",
+ "serde_json",
+ "similar",
+ "tokio",
+ "vmux_ui",
+ "vmux_wire",
 ]
 
 [[package]]
