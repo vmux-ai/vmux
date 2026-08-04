@@ -33,7 +33,6 @@ pub mod pagination;
 pub mod popover;
 pub mod progress;
 pub mod prompt_box;
-#[cfg(target_arch = "wasm32")]
 pub mod prompt_composer;
 pub mod prompt_media_options;
 pub mod radio_group;

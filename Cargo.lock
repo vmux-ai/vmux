@@ -11642,7 +11642,6 @@ dependencies = [
  "sys-locale",
  "time",
  "unic-langid",
- "vmux_chat_ui",
  "vmux_core",
  "wasm-bindgen",
  "web-sys",
