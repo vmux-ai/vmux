@@ -11,6 +11,8 @@ pub mod style;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod handler;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod panel;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod plugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod shortcut;

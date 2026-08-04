@@ -49,6 +49,7 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, LayoutCef, NavigationState, Open, PendingWebviewReveal, UpdateState,
     bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive},
+    command_bar::panel::CommandBarPanelActive,
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
         HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
@@ -1013,6 +1014,15 @@ fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton
     }
 }
 
+/// The layout page owns the keyboard whenever one of its own DOM surfaces has focus — the bookmark
+/// field, a context menu, or the command bar panel. One rule rather than a special case per
+/// surface, since every consumer has to agree or the keyboard lands somewhere else.
+pub(crate) type LayoutKeyboardCapture = Or<(
+    With<BookmarkTextInputActive>,
+    With<BookmarkContextMenuActive>,
+    With<CommandBarPanelActive>,
+)>;
+
 fn sync_keyboard_target(
     mode: Res<vmux_layout::scene::InteractionMode>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -1020,16 +1030,7 @@ fn sync_keyboard_target(
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<Modal>>,
-    bookmark_input_q: Query<
-        Entity,
-        (
-            With<LayoutCef>,
-            Or<(
-                With<BookmarkTextInputActive>,
-                With<BookmarkContextMenuActive>,
-            )>,
-        ),
-    >,
+    layout_keyboard_q: Query<Entity, (With<LayoutCef>, LayoutKeyboardCapture)>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
@@ -1047,7 +1048,7 @@ fn sync_keyboard_target(
         return;
     }
 
-    if let Ok(layout) = bookmark_input_q.single() {
+    if let Ok(layout) = layout_keyboard_q.single() {
         for (browser_e, has_kb) in &content_q {
             if browser_e == layout {
                 if !has_kb {
@@ -3093,6 +3094,7 @@ fn sync_osr_webview_focus(
             Has<LayoutCef>,
             Has<BookmarkTextInputActive>,
             Has<BookmarkContextMenuActive>,
+            Has<CommandBarPanelActive>,
         ),
         With<WebviewSource>,
     >,
@@ -3112,7 +3114,7 @@ fn sync_osr_webview_focus(
     ready.clear();
     let mut layout_shells = Vec::new();
     let mut modal_keyboard_target = None;
-    let mut bookmark_input_target = None;
+    let mut layout_keyboard_target = None;
     let window_visible = primary_window.visible;
     let window_focused = primary_window.focused;
     for (
@@ -3127,6 +3129,7 @@ fn sync_osr_webview_focus(
         is_layout,
         bookmark_text_input_active,
         bookmark_context_menu_active,
+        command_bar_panel_active,
     ) in webviews.iter()
     {
         if !browsers.has_browser(entity) {
@@ -3141,8 +3144,11 @@ fn sync_osr_webview_focus(
             ready.push(entity);
             if is_layout {
                 layout_shells.push(entity);
-                if bookmark_text_input_active || bookmark_context_menu_active {
-                    bookmark_input_target = Some(entity);
+                if bookmark_text_input_active
+                    || bookmark_context_menu_active
+                    || command_bar_panel_active
+                {
+                    layout_keyboard_target = Some(entity);
                 }
             }
             if is_modal && has_keyboard_target {
@@ -3165,7 +3171,7 @@ fn sync_osr_webview_focus(
             .copied()
             .find(|&b| child_of_q.get(b).ok().map(|co| co.get()) == Some(tab))
     });
-    let active = bookmark_input_target
+    let active = layout_keyboard_target
         .or_else(|| choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]));
 
     if !window_visible {
@@ -3188,7 +3194,7 @@ fn sync_osr_webview_focus(
         let (active, next_auxiliary) = osr_focus_targets(
             ready.as_slice(),
             active,
-            bookmark_input_target.is_some(),
+            layout_keyboard_target.is_some(),
             |e| layout_shells.contains(&e),
         );
         auxiliary.extend(next_auxiliary);

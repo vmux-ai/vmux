@@ -2,7 +2,6 @@ use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
 use vmux_layout::Header;
-use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
 use vmux_layout::command_bar::state::CommandBarState;
 use vmux_layout::scene::InteractionMode;
 use vmux_layout::side_sheet::SideSheet;
@@ -55,16 +54,7 @@ pub(crate) fn compute_host_focus_intent(
         ),
         With<Modal>,
     >,
-    bookmark_input_q: Query<
-        (),
-        (
-            With<Browser>,
-            Or<(
-                With<BookmarkTextInputActive>,
-                With<BookmarkContextMenuActive>,
-            )>,
-        ),
-    >,
+    layout_keyboard_q: Query<(), (With<Browser>, crate::LayoutKeyboardCapture)>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed)) =
@@ -90,7 +80,7 @@ pub(crate) fn compute_host_focus_intent(
         }
     } else if *mode != InteractionMode::User {
         HostFocusIntent::Unmanaged
-    } else if !bookmark_input_q.is_empty() {
+    } else if !layout_keyboard_q.is_empty() {
         HostFocusIntent::WinitHost
     } else {
         let active = focus.stack.and_then(|stack| {
@@ -156,6 +146,7 @@ pub(crate) fn apply_windowed_host_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
 
     fn app() -> App {
         let mut app = App::new();

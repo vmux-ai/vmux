@@ -7,6 +7,30 @@ pub const SERVICES_PAGE_URL: &str = "vmux://services/";
 pub const LAYOUT_STATE_EVENT: &str = "layout-state";
 pub const STACKS_EVENT: &str = "stacks";
 pub const RELOAD_EVENT: &str = "reload";
+/// Host -> layout page: open the command bar panel with a fresh payload. Distinct from
+/// `COMMAND_BAR_OPEN_EVENT` so the layout page and the start page can be addressed separately.
+pub const LAYOUT_COMMAND_BAR_OPEN_EVENT: &str = "layout-command-bar-open";
+
+/// Layout page -> host: the command bar panel took or released the keyboard.
+///
+/// Mirrors `BookmarkTextInputEvent`: while the panel holds a focused DOM field the layout shell
+/// must own `CefKeyboardTarget`, or keystrokes go to the focused pane instead.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarPanelActiveEvent {
+    pub active: bool,
+}
 
 #[derive(
     Clone,

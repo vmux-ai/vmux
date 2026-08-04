@@ -49,7 +49,11 @@ impl Plugin for HistoryPlugin {
                     HistoryOpenRequest,
                     HistoryChangedEvent,
                 )>::for_hosts(&["history"]),
-                BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&["command-bar", "start"]),
+                BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&[
+                    "command-bar",
+                    "start",
+                    "layout",
+                ]),
             ))
             .add_observer(on_history_query_request)
             .add_observer(on_history_delete_request)
