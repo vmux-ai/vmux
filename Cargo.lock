@@ -11103,6 +11103,7 @@ dependencies = [
  "tokio",
  "vmux_ui",
  "vmux_wire",
+ "web-sys",
 ]
 
 [[package]]
@@ -11430,6 +11431,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "vmux_chat",
  "vmux_chat_ui",
  "vmux_remote",
  "vmux_ui",
