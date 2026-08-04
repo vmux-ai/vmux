@@ -5,7 +5,7 @@ pub mod event;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod open;
 pub mod open_target;
-pub mod prompt_media;
+pub use vmux_wire::prompt_media;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bundle;

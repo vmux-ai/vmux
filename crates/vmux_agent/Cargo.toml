@@ -16,6 +16,7 @@ similar = "2"
 unicode-segmentation = "1"
 vmux_command = { path = "../vmux_command" }
 vmux_terminal = { path = "../vmux_terminal" }
+vmux_wire = { path = "../vmux_wire" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 base64 = "0.22"

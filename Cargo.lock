@@ -11044,6 +11044,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "vmux_wire",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -11129,6 +11130,7 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_macro",
+ "vmux_wire",
 ]
 
 [[package]]
