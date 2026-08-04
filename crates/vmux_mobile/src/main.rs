@@ -13,9 +13,10 @@ use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_chat::transcript::{AssistantTurn, UserBubble, WorkingIndicator};
 use vmux_chat_ui::{
-    AssistantTurn, DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock,
-    ToolResultBlock, ToolUseBlock, UserBubble, WorkingIndicator,
+    DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
+    ToolUseBlock,
 };
 use vmux_remote::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
