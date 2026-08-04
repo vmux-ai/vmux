@@ -3,15 +3,17 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
-    BookmarksCommandEvent, BookmarksHostEvent, FolderRow, HeaderCommandEvent, LAYOUT_STATE_EVENT,
-    LayoutStateEvent, PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent,
-    STACKS_EVENT, StackNode, StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent,
-    TabsHostEvent,
+    BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent, FolderRow,
+    HeaderCommandEvent, LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent,
+    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode,
+    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use vmux_command::event::CommandBarOpenEvent;
 use vmux_core::event::extension::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
@@ -173,6 +175,19 @@ pub fn Page() -> Element {
         listener_ready(pane_tree_state_received(), &pane_tree_error),
         listener_ready(spaces_state_received(), &spaces_error),
     );
+    // Command bar panel. No open/ready/rendered handshake: the host pushes a payload, the panel
+    // renders. `panel_open` is the entire lifecycle.
+    let mut panel_state = use_signal(CommandBarOpenEvent::default);
+    let mut panel_open = use_signal(|| false);
+    let _panel_listener = use_bin_event_listener::<CommandBarOpenEvent, _>(
+        LAYOUT_COMMAND_BAR_OPEN_EVENT,
+        move |data| {
+            panel_state.set(data);
+            panel_open.set(true);
+            set_command_bar_panel_active(true);
+        },
+    );
+
     let radius_px = state.radius;
     let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
     use_effect(move || {
@@ -279,6 +294,46 @@ pub fn Page() -> Element {
                         stacks_error: stacks_error.clone(),
                         tabs_error: tabs_error.clone(),
                     }
+                }
+            }
+            // Last child: stacking here is DOM order, so the panel floats above the header and
+            // side sheet without a z-index.
+            if panel_open() {
+                CommandBarPanel { state: panel_state, open: panel_open }
+            }
+        }
+    }
+}
+
+/// Tell the host the panel holds a focused DOM field, so the layout shell takes
+/// `CefKeyboardTarget`. Must be cleared on every close path or no pane can reclaim the keyboard.
+fn set_command_bar_panel_active(active: bool) {
+    let _ = try_cef_bin_emit_rkyv(&CommandBarPanelActiveEvent { active });
+}
+
+/// The floating command bar. Drag and resize are DOM concerns; the host only learns the final
+/// rectangle so it can persist it and mirror it into the pointer-injection regions.
+#[component]
+fn CommandBarPanel(state: Signal<CommandBarOpenEvent>, open: Signal<bool>) -> Element {
+    let mut open = open;
+    let mut close = move || {
+        open.set(false);
+        set_command_bar_panel_active(false);
+    };
+    use_drop(move || set_command_bar_panel_active(false));
+
+    rsx! {
+        div {
+            class: "pointer-events-auto fixed left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2",
+            div {
+                id: "command-bar-shell",
+                class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
+                CommandPalette {
+                    state: ReadSignal::from(state),
+                    variant: PaletteVariant::Modal,
+                    on_close: move |_| close(),
+                    on_dismiss: move |_| close(),
+                    on_activity: move |_| {},
                 }
             }
         }
