@@ -12,7 +12,7 @@ use bevy_ecs::component::Component;
 #[cfg(feature = "bevy_reflect")]
 use bevy_ecs::reflect::ReflectComponent;
 #[cfg(feature = "bevy_reflect")]
-use bevy_reflect::{Reflect, std_traits::ReflectDefault};
+use bevy_reflect::{std_traits::ReflectDefault, Reflect};
 
 #[cfg(feature = "custom_cursor")]
 pub use crate::cursor::{CustomCursor, CustomCursorImage};
