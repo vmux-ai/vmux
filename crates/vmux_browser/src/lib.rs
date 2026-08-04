@@ -747,7 +747,7 @@ pub fn forward_native_layout_scroll(position_px: Vec2, delta: Vec2) -> bool {
     if !native_layout_pointer_is_inside() {
         return false;
     }
-    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
+    let forwarded = NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
         let Some(presenter) = state.presenter.as_ref() else {
             return false;
         };
@@ -756,7 +756,33 @@ pub fn forward_native_layout_scroll(position_px: Vec2, delta: Vec2) -> bool {
         }
         presenter.send_wheel(position_px / state.scale, delta);
         true
-    })
+    });
+    if forwarded {
+        NATIVE_LAYOUT_SCROLL_AT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .replace(std::time::Instant::now());
+    }
+    forwarded
+}
+
+/// When the AppKit monitor last handed the layout webview a wheel event.
+///
+/// Swallowing the `NSEvent` keeps it out of winit, so `MouseWheel` never reaches Bevy and the
+/// frame-rate governor would leave the layout at its idle rate for the whole scroll.
+#[cfg(target_os = "macos")]
+static NATIVE_LAYOUT_SCROLL_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn native_layout_scroll_at() -> Option<std::time::Instant> {
+    *NATIVE_LAYOUT_SCROLL_AT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn native_layout_scroll_at() -> Option<std::time::Instant> {
+    None
 }
 
 pub fn set_native_layout_activity(active: bool) -> bool {
@@ -2424,9 +2450,20 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
+    // The AppKit monitor raises the activity flag on every layout-owned pointer move but only
+    // lowers it on a move the layout does not own. While the command bar panel captures the whole
+    // window there is no such move, so a flag left standing would pin the webview at the active
+    // frame rate for as long as the panel is open. A frame with no new pointer sample means the
+    // pointer stopped.
+    if !native_changed && native_layout_activity_active() {
+        set_native_layout_activity(false);
+    }
     let desired = layout_frame_rate(
         now,
-        state.last_input.max(burst.last_emit),
+        state
+            .last_input
+            .max(burst.last_emit)
+            .max(native_layout_scroll_at()),
         native_layout_activity_active(),
         state.dragging_layout,
     );
@@ -7248,6 +7285,21 @@ mod tests {
                 .last_emit
                 .is_some()
         );
+        assert_eq!(
+            app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
+
+        // The command bar panel animates open on the layout surface, so it has to burst too or
+        // the reveal plays at the idle rate.
+        app.world_mut()
+            .entity_mut(layout)
+            .insert(WebviewMaxFrameRate(LAYOUT_IDLE_FRAME_RATE));
+        app.world_mut().trigger(BinHostEmitEvent::from_bytes(
+            layout,
+            LAYOUT_COMMAND_BAR_OPEN_EVENT,
+            Vec::new(),
+        ));
         assert_eq!(
             app.world().get::<WebviewMaxFrameRate>(layout).unwrap().0,
             LAYOUT_ACTIVE_FRAME_RATE
