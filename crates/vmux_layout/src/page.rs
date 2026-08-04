@@ -6,10 +6,11 @@ use std::rc::Rc;
 use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
-    BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent, FolderRow,
-    HeaderCommandEvent, LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent,
-    PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode,
-    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent,
+    CommandBarPanelCloseEvent, FolderRow, HeaderCommandEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT,
+    LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
+    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
+    TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -186,6 +187,10 @@ pub fn Page() -> Element {
             panel_open.set(true);
             set_command_bar_panel_active(true);
         },
+    );
+    let _panel_close_listener = use_bin_event_listener::<CommandBarPanelCloseEvent, _>(
+        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
+        move |_| panel_open.set(false),
     );
 
     let radius_px = state.radius;

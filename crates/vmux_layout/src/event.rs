@@ -11,6 +11,27 @@ pub const RELOAD_EVENT: &str = "reload";
 /// `COMMAND_BAR_OPEN_EVENT` so the layout page and the start page can be addressed separately.
 pub const LAYOUT_COMMAND_BAR_OPEN_EVENT: &str = "layout-command-bar-open";
 
+/// Host -> layout page: close the command bar panel.
+///
+/// The host cannot close the panel by mutating a surface the way the modal allowed, so dismiss
+/// and the `Cmd+K`-while-open toggle both have to ask the page to unmount it.
+pub const LAYOUT_COMMAND_BAR_CLOSE_EVENT: &str = "layout-command-bar-close";
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct CommandBarPanelCloseEvent;
+
 /// Layout page -> host: the command bar panel took or released the keyboard.
 ///
 /// Mirrors `BookmarkTextInputEvent`: while the panel holds a focused DOM field the layout shell

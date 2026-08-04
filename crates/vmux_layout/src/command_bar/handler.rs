@@ -1,9 +1,13 @@
 pub(crate) use crate::NewStackContext;
 use std::time::{Duration, Instant};
 
-use crate::cef::Browser;
-use crate::command_bar::state::{CommandBarState, CommandBarStateQuery, command_bar_state};
+use crate::cef::{Browser, LayoutCef};
+use crate::command_bar::panel::CommandBarPanelActive;
+use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
+use crate::event::{
+    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
+};
 use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
 use crate::{
     Header,
@@ -40,7 +44,7 @@ use vmux_core::agent::{
     PendingAgentPromptAttachments,
 };
 use vmux_core::event::space::SpaceCommandEvent;
-use vmux_core::page::{PageReady, SettingsPageSpawnRequest, SpacesPageSpawnRequest};
+use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, Terminal, TerminalSpawnRequest};
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_history::{LastActivatedAt, now_millis};
@@ -375,14 +379,6 @@ fn prepare_command_bar_surface(
     };
 }
 
-fn command_bar_open_visibility(native_windowed: bool, native_overlay: bool) -> Visibility {
-    if native_windowed || native_overlay {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    }
-}
-
 fn close_command_bar_surface(
     modal_node: &mut Node,
     modal_vis: &mut Visibility,
@@ -434,23 +430,6 @@ fn prewarm_command_bar_modal(
             payload: None,
             started_at: None,
         });
-}
-
-fn command_bar_open_delivery_ready(
-    has_browser: bool,
-    host_emit_ready: bool,
-    _command_bar_ready: bool,
-) -> bool {
-    has_browser && host_emit_ready
-}
-
-fn command_bar_reveal_ready(
-    has_browser: bool,
-    _host_emit_ready: bool,
-    _command_bar_ready: bool,
-    rendered_open: bool,
-) -> bool {
-    has_browser && rendered_open
 }
 
 fn next_command_bar_reveal_frames(
@@ -507,41 +486,12 @@ fn native_command_bar_reveal_timed_out(
         && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
 }
 
-fn command_bar_reveal_start_frames(was_prewarmed: bool) -> u8 {
-    if was_prewarmed {
-        COMMAND_BAR_REVEAL_FRAMES
-    } else {
-        0
-    }
-}
-
-fn should_start_command_bar_reveal(
-    has_browser: bool,
-    host_emit_ready: bool,
-    command_bar_ready: bool,
-    rendered_open: bool,
-    pending_reveal: bool,
-    visibility: Visibility,
-) -> bool {
-    command_bar_reveal_ready(
-        has_browser,
-        host_emit_ready,
-        command_bar_ready,
-        rendered_open,
-    ) && !pending_reveal
-        && visibility == Visibility::Hidden
-}
-
 fn should_retry_command_bar_open_payload(
     open_id: u64,
     payload: Option<&[u8]>,
     rendered_open_id: Option<u64>,
 ) -> bool {
     open_id != 0 && payload.is_some() && rendered_open_id != Some(open_id)
-}
-
-fn should_requeue_command_bar_open_after_emit(_command_bar_ready: bool) -> bool {
-    false
 }
 
 fn on_command_bar_ready(
@@ -771,34 +721,9 @@ fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
     !is_open || space_switch
 }
 
-fn command_bar_should_recreate_renderer(
-    native_overlay: bool,
-    opened_once: bool,
-    was_open: bool,
-) -> bool {
-    native_overlay && opened_once && !was_open
-}
-
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
-    mut modal_q: Query<
-        (
-            Entity,
-            &mut Node,
-            &mut Visibility,
-            Has<CefKeyboardTarget>,
-            Has<CommandBarReady>,
-            Option<&CommandBarRenderedOpen>,
-            Option<&PendingCommandBarReveal>,
-            Has<WebviewWindowed>,
-            Has<WebviewNativeOverlay>,
-            Has<CommandBarOpenedOnce>,
-            Has<CommandBarRecreating>,
-        ),
-        With<Modal>,
-    >,
-    mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
-    mut browsers: NonSendMut<Browsers>,
+    layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<LayoutCef>>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -829,6 +754,9 @@ fn handle_open_command_bar(
     )>,
     mut commands: Commands,
 ) {
+    let Ok((layout_e, is_open)) = layout_q.single() else {
+        return;
+    };
     let active_stack_count = stack_q.iter().count();
     let spaces_snapshot = snapshot_params.p1().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
@@ -864,104 +792,53 @@ fn handle_open_command_bar(
         }
     }
 
-    if should_dismiss {
-        let is_open = modal_q
-            .single()
-            .map(
-                |(_, n, visibility, has_keyboard_target, _, _, _, _, _, _, _)| {
-                    CommandBarState::from_modal(n.display, *visibility, has_keyboard_target)
-                        .owns_input()
-                },
-            )
-            .unwrap_or(false);
-        if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _, native_overlay, _, _)) =
-                modal_q.single_mut()
-            else {
-                return;
-            };
-            close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
-            commands
-                .entity(modal_e)
-                .insert(Pickable::IGNORE)
-                .remove::<CefKeyboardTarget>()
-                .remove::<CefPointerTarget>()
-                .remove::<CommandBarRenderedOpen>()
-                .remove::<CommandBarPaintedOpen>()
-                .remove::<PendingCommandBarReveal>()
-                .remove::<CommandBarRecreating>();
-            let mut new_stack_ctx = snapshot_params.p2();
-            // Discard empty tab created by a previous Cmd+T
-            if let Some(stack_e) = new_stack_ctx.stack.take() {
-                commands.entity(stack_e).despawn();
-                if let Some(prev) = new_stack_ctx.previous_stack.take()
-                    && let Ok(children) = all_children.get(prev)
-                {
-                    for child in children.iter() {
-                        if content_browsers.contains(child) {
-                            commands.entity(child).try_insert(CefKeyboardTarget);
-                        }
-                    }
-                }
-            } else {
-                let (_, _, active_stack) = focused_stack(
-                    active_tab_param.get(),
-                    &all_children,
-                    &leaf_panes,
-                    &pane_ts,
-                    &pane_children,
-                    &stack_ts,
-                );
-                if let Some(tab) = active_stack {
-                    for browser_e in &content_browsers {
-                        let is_child = child_of_q
-                            .get(browser_e)
-                            .ok()
-                            .map(|co| co.get() == tab)
-                            .unwrap_or(false);
-                        if is_child {
-                            commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                        }
+    if should_dismiss && is_open {
+        close_command_bar_panel(layout_e, &mut commands);
+        let mut new_stack_ctx = snapshot_params.p2();
+        // Discard empty tab created by a previous Cmd+T
+        if let Some(stack_e) = new_stack_ctx.stack.take() {
+            commands.entity(stack_e).despawn();
+            if let Some(prev) = new_stack_ctx.previous_stack.take()
+                && let Ok(children) = all_children.get(prev)
+            {
+                for child in children.iter() {
+                    if content_browsers.contains(child) {
+                        commands.entity(child).try_insert(CefKeyboardTarget);
                     }
                 }
             }
-            new_stack_ctx.needs_open = false;
-            return;
+        } else {
+            let (_, _, active_stack) = focused_stack(
+                active_tab_param.get(),
+                &all_children,
+                &leaf_panes,
+                &pane_ts,
+                &pane_children,
+                &stack_ts,
+            );
+            if let Some(tab) = active_stack {
+                for browser_e in &content_browsers {
+                    let is_child = child_of_q
+                        .get(browser_e)
+                        .ok()
+                        .map(|co| co.get() == tab)
+                        .unwrap_or(false);
+                    if is_child {
+                        commands.entity(browser_e).try_insert(CefKeyboardTarget);
+                    }
+                }
+            }
         }
+        new_stack_ctx.needs_open = false;
+        return;
     }
 
-    // Navigation dismiss: close modal only, leave empty tab for
+    // Navigation dismiss: close the panel only, leave empty tab for
     // handle_tab_commands / on_pane_select to clean up.
-    if should_dismiss_nav {
-        let is_open = modal_q
-            .single()
-            .map(
-                |(_, n, visibility, has_keyboard_target, _, _, _, _, _, _, _)| {
-                    CommandBarState::from_modal(n.display, *visibility, has_keyboard_target)
-                        .owns_input()
-                },
-            )
-            .unwrap_or(false);
-        if is_open {
-            let Ok((modal_e, mut modal_node, mut modal_vis, _, _, _, _, _, native_overlay, _, _)) =
-                modal_q.single_mut()
-            else {
-                return;
-            };
-            close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
-            commands
-                .entity(modal_e)
-                .insert(Pickable::IGNORE)
-                .remove::<CefKeyboardTarget>()
-                .remove::<CefPointerTarget>()
-                .remove::<CommandBarRenderedOpen>()
-                .remove::<CommandBarPaintedOpen>()
-                .remove::<PendingCommandBarReveal>()
-                .remove::<CommandBarRecreating>();
-            let mut new_stack_ctx = snapshot_params.p2();
-            new_stack_ctx.needs_open = false;
-            return;
-        }
+    if should_dismiss_nav && is_open {
+        close_command_bar_panel(layout_e, &mut commands);
+        snapshot_params.p2().needs_open = false;
+        return;
     }
 
     let startup_request = {
@@ -982,17 +859,11 @@ fn handle_open_command_bar(
     }
 
     if should_toggle {
-        let is_open = modal_q
-            .single()
-            .map(
-                |(_, n, visibility, has_keyboard_target, _, _, _, _, _, _, _)| {
-                    CommandBarState::from_modal(n.display, *visibility, has_keyboard_target)
-                        .owns_input()
-                },
-            )
-            .unwrap_or(false);
         if command_bar_toggle_should_open(is_open, space_switch) {
             should_open = true;
+        } else {
+            close_command_bar_panel(layout_e, &mut commands);
+            return;
         }
     }
 
@@ -1041,45 +912,6 @@ fn handle_open_command_bar(
         }
     }
 
-    let Ok((
-        modal_e,
-        mut modal_node,
-        mut modal_vis,
-        has_keyboard_target,
-        command_bar_ready,
-        rendered_open,
-        modal_pending_reveal,
-        native_windowed,
-        native_overlay,
-        opened_once,
-        command_bar_recreating,
-    )) = modal_q.single_mut()
-    else {
-        return;
-    };
-
-    let was_open = CommandBarState::from_modal(modal_node.display, *modal_vis, has_keyboard_target)
-        .owns_input();
-    if !was_open {
-        prepare_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
-        *modal_vis = command_bar_open_visibility(native_windowed, native_overlay);
-    }
-
-    if !was_open {
-        for browser_e in &content_browsers {
-            commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
-        }
-    }
-    commands
-        .entity(modal_e)
-        .insert(Pickable::default())
-        .insert(CefKeyboardTarget)
-        .insert(CefPointerTarget)
-        .remove::<CommandBarNativeSize>();
-
-    // Command bar is a CEF webview — allow keyboard forwarding
-    suppress.0 = false;
-
     // Gather current URL (empty for new tab mode)
     let current_url = if let Some(override_url) = url_override {
         override_url
@@ -1121,32 +953,7 @@ fn handle_open_command_bar(
         &space_name,
         &locale,
     );
-    let has_browser = browsers.has_browser(modal_e);
-    let host_emit_ready = browsers.host_emit_ready(&modal_e);
-    let rendered_matches = rendered_open.is_some_and(|rendered| rendered.0 != 0);
-    webview_debug_log(format!(
-        "command_bar open entity={modal_e:?} was_open={was_open} has_browser={has_browser} host_emit_ready={host_emit_ready} command_bar_ready={command_bar_ready} rendered={rendered_matches} pending_reveal={} visibility={:?} is_new_stack={is_new_stack}",
-        modal_pending_reveal.is_some(),
-        *modal_vis
-    ));
-    if !command_bar_open_delivery_ready(has_browser, host_emit_ready, command_bar_ready) {
-        commands
-            .entity(modal_e)
-            .remove::<CommandBarPaintedOpen>()
-            .insert(PendingCommandBarReveal {
-                frames: 0,
-                open_id: 0,
-                payload: None,
-                started_at: None,
-            });
-        snapshot_params.p2().needs_open = true;
-        return;
-    }
 
-    let open_id = now_millis() as u64;
-    let reveal_start_frames = command_bar_reveal_start_frames(
-        modal_pending_reveal.is_some_and(|pending| pending.open_id == 0),
-    );
     let target = if replace_active_stack {
         Some(vmux_command::open_target::OpenTarget::InPlace)
     } else if is_new_stack {
@@ -1155,8 +962,8 @@ fn handle_open_command_bar(
         None
     };
     let mut payload = build_command_bar_open_payload(
-        open_id,
-        native_windowed,
+        now_millis() as u64,
+        false,
         space_name,
         current_url,
         &spaces_snapshot,
@@ -1169,65 +976,24 @@ fn handle_open_command_bar(
         target,
     );
     payload.space_switch = space_switch;
-    let event = BinHostEmitEvent::from_rkyv(modal_e, COMMAND_BAR_OPEN_EVENT, &payload);
-    let payload_bytes = event.payload.clone();
-    let payload_bytes_len = payload_bytes.len();
-    let recreate_renderer =
-        command_bar_should_recreate_renderer(native_overlay, opened_once, was_open);
-    let wait_for_recreate = command_bar_recreating || recreate_renderer;
-    let reveal_started_at = (!wait_for_recreate && !native_windowed).then(Instant::now);
-    if recreate_renderer {
-        browsers.close(&modal_e);
-        commands
-            .entity(modal_e)
-            .remove::<PageReady>()
-            .remove::<CommandBarReady>()
-            .insert(CommandBarRecreating);
-    }
-    if !native_windowed {
-        browsers.wake_osr_webview(&modal_e);
-    }
-    if !wait_for_recreate && !native_windowed {
-        commands.trigger(event);
-    }
-    if should_start_command_bar_reveal(
-        has_browser,
-        host_emit_ready,
-        command_bar_ready,
-        rendered_open.is_some_and(|rendered| rendered.0 == open_id),
-        modal_pending_reveal.is_some(),
-        *modal_vis,
-    ) {
-        commands
-            .entity(modal_e)
-            .remove::<CommandBarPaintedOpen>()
-            .insert(PendingCommandBarReveal {
-                frames: reveal_start_frames,
-                open_id,
-                payload: Some(payload_bytes.clone()),
-                started_at: reveal_started_at,
-            });
-    } else {
-        commands
-            .entity(modal_e)
-            .remove::<CommandBarRenderedOpen>()
-            .remove::<CommandBarPaintedOpen>()
-            .insert(PendingCommandBarReveal {
-                frames: reveal_start_frames,
-                open_id,
-                payload: Some(payload_bytes),
-                started_at: reveal_started_at,
-            });
-    }
-    webview_debug_log(format!(
-        "command_bar emit open entity={modal_e:?} payload_len={} tabs={} commands={}",
-        payload_bytes_len,
-        payload.tabs.len(),
-        payload.commands.len()
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        layout_e,
+        LAYOUT_COMMAND_BAR_OPEN_EVENT,
+        &payload,
     ));
-    if should_requeue_command_bar_open_after_emit(command_bar_ready) {
-        snapshot_params.p2().needs_open = true;
-    }
+}
+
+/// Asks the layout page to unmount the panel.
+///
+/// The host cannot clear `CommandBarPanelActive` itself: the page owns the marker and removes it
+/// on unmount, so clearing it here would hand the keyboard back to the pane a frame before the
+/// panel actually goes away.
+fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
+    commands.trigger(BinHostEmitEvent::from_rkyv(
+        layout,
+        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
+        &CommandBarPanelCloseEvent,
+    ));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2393,16 +2159,11 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_bar::state::CommandBarState;
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use vmux_command::event::CommandBarSpace;
     use vmux_command::{CommandPlugin, ReadAppCommands};
     use vmux_core::agent::AgentKind;
-
-    #[test]
-    fn command_bar_open_does_not_block_on_command_bar_listener() {
-        assert!(command_bar_open_delivery_ready(true, true, false));
-        assert!(command_bar_open_delivery_ready(true, true, true));
-    }
 
     #[test]
     fn build_payload_includes_commands_and_target() {
@@ -2479,30 +2240,6 @@ mod tests {
         assert!(!retry_fn.contains("HostEmitEvent::new"));
     }
 
-    #[test]
-    fn command_bar_open_emit_does_not_requeue_without_ready_event() {
-        assert!(!should_requeue_command_bar_open_after_emit(false));
-        assert!(!should_requeue_command_bar_open_after_emit(true));
-    }
-
-    #[test]
-    fn command_bar_reveal_does_not_block_on_host_or_ui_listener() {
-        assert!(command_bar_reveal_ready(true, false, true, true));
-        assert!(command_bar_reveal_ready(true, true, false, true));
-        assert!(command_bar_reveal_ready(true, true, true, true));
-    }
-
-    #[test]
-    fn command_bar_reveal_requires_rendered_open_payload() {
-        assert!(!command_bar_reveal_ready(true, true, true, false));
-        assert!(command_bar_reveal_ready(true, true, true, true));
-    }
-
-    #[test]
-    fn command_bar_reveal_requires_browser() {
-        assert!(!command_bar_reveal_ready(false, true, true, true));
-    }
-
     #[derive(Resource, Default)]
     struct CapturedCommandBarOpen(bool);
 
@@ -2543,30 +2280,6 @@ mod tests {
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Inherited);
         assert!(!CommandBarState::from_modal(node.display, visibility, false).owns_input());
-    }
-
-    #[test]
-    fn closed_native_overlay_recreates_after_its_first_render() {
-        assert!(command_bar_should_recreate_renderer(true, true, false));
-        assert!(!command_bar_should_recreate_renderer(true, false, false));
-        assert!(!command_bar_should_recreate_renderer(true, true, true));
-        assert!(!command_bar_should_recreate_renderer(false, true, false));
-    }
-
-    #[test]
-    fn native_windowed_command_bar_opens_visible() {
-        assert_eq!(
-            command_bar_open_visibility(true, false),
-            Visibility::Inherited
-        );
-        assert_eq!(
-            command_bar_open_visibility(false, true),
-            Visibility::Inherited
-        );
-        assert_eq!(
-            command_bar_open_visibility(false, false),
-            Visibility::Hidden
-        );
     }
 
     #[test]
@@ -2629,49 +2342,6 @@ mod tests {
         assert_eq!(node.display, Display::Flex);
         assert_eq!(*visibility, Visibility::Hidden);
         assert_eq!(reveal.open_id, 0);
-    }
-
-    #[test]
-    fn command_bar_open_requires_browser_main_frame() {
-        assert!(!command_bar_open_delivery_ready(false, true, true));
-        assert!(!command_bar_open_delivery_ready(true, false, true));
-        assert!(command_bar_open_delivery_ready(true, true, true));
-    }
-
-    #[test]
-    fn command_bar_reveal_starts_before_ui_listener() {
-        assert!(should_start_command_bar_reveal(
-            true,
-            true,
-            false,
-            true,
-            false,
-            Visibility::Hidden
-        ));
-    }
-
-    #[test]
-    fn command_bar_reveal_does_not_start_before_main_frame() {
-        assert!(!should_start_command_bar_reveal(
-            false,
-            false,
-            true,
-            true,
-            false,
-            Visibility::Hidden
-        ));
-    }
-
-    #[test]
-    fn command_bar_retry_does_not_restart_pending_reveal() {
-        assert!(!should_start_command_bar_reveal(
-            true,
-            true,
-            true,
-            true,
-            true,
-            Visibility::Hidden
-        ));
     }
 
     #[test]
@@ -2922,24 +2592,6 @@ mod tests {
     }
 
     #[test]
-    fn prewarmed_command_bar_starts_reveal_at_ready_frame() {
-        assert_eq!(
-            command_bar_reveal_start_frames(true),
-            COMMAND_BAR_REVEAL_FRAMES
-        );
-        assert_eq!(command_bar_reveal_start_frames(false), 0);
-        assert_eq!(
-            next_command_bar_reveal_frames(
-                command_bar_reveal_start_frames(true),
-                7,
-                Some(7),
-                Some(7)
-            ),
-            None
-        );
-    }
-
-    #[test]
     fn command_bar_payload_includes_space_name() {
         let payload = command_bar_open_payload(
             7,
@@ -3046,17 +2698,128 @@ mod tests {
         assert_eq!(request.url_override, None);
     }
 
+    #[derive(Resource, Default)]
+    struct EmittedToPage(Vec<(Entity, String, Vec<u8>)>);
+
+    fn capture_page_emit(trigger: On<BinHostEmitEvent>, mut emitted: ResMut<EmittedToPage>) {
+        emitted
+            .0
+            .push((trigger.webview, trigger.id.clone(), trigger.payload.clone()));
+    }
+
+    fn panel_app() -> App {
+        let mut app = App::new();
+        app.add_message::<AppCommand>()
+            .add_message::<PageOpenRequest>()
+            .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarSpacesSnapshot>()
+            .init_resource::<CommandBarPagesSnapshot>()
+            .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
+            .init_resource::<NewStackContext>()
+            .init_resource::<EmittedToPage>()
+            .add_observer(capture_page_emit)
+            .add_systems(Update, handle_open_command_bar);
+        app
+    }
+
+    fn emitted_to_page(app: &App) -> Vec<(Entity, String)> {
+        app.world()
+            .resource::<EmittedToPage>()
+            .0
+            .iter()
+            .map(|(webview, id, _)| (*webview, id.clone()))
+            .collect()
+    }
+
+    fn open_payload(app: &App) -> CommandBarOpenEvent {
+        let (_, _, bytes) = app
+            .world()
+            .resource::<EmittedToPage>()
+            .0
+            .iter()
+            .find(|(_, id, _)| id == LAYOUT_COMMAND_BAR_OPEN_EVENT)
+            .expect("no open payload emitted");
+        rkyv::from_bytes::<CommandBarOpenEvent, rkyv::rancor::Error>(bytes)
+            .expect("open payload should round-trip")
+    }
+
+    fn send(app: &mut App, command: AppCommand) {
+        app.world_mut().write_message(command);
+        app.update();
+    }
+
+    /// The panel lives in the layout page, so the payload has to reach the layout webview under the
+    /// layout-specific id. Addressing the modal instead leaves the bar permanently empty.
+    #[test]
+    fn opening_the_command_bar_pushes_the_payload_to_the_layout_page() {
+        let mut app = panel_app();
+        let layout = app.world_mut().spawn(LayoutCef).id();
+
+        send(
+            &mut app,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
+        );
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+        );
+    }
+
+    /// `Cmd+K` while the panel is up must close it. The host cannot unmount the panel itself, so a
+    /// missing close event turns the toggle into a no-op and the bar can never be dismissed.
+    #[test]
+    fn toggling_an_open_command_bar_asks_the_page_to_close_it() {
+        let mut app = panel_app();
+        let layout = app
+            .world_mut()
+            .spawn((LayoutCef, CommandBarPanelActive))
+            .id();
+
+        send(
+            &mut app,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
+        );
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
+        );
+    }
+
+    /// A space switch reopens rather than toggles, so the bar survives switching spaces from
+    /// inside it.
+    #[test]
+    fn space_switch_reopens_an_already_open_command_bar() {
+        let mut app = panel_app();
+        let layout = app
+            .world_mut()
+            .spawn((LayoutCef, CommandBarPanelActive))
+            .id();
+
+        send(
+            &mut app,
+            AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)),
+        );
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_OPEN_EVENT.to_string())]
+        );
+        assert!(open_payload(&app).space_switch);
+    }
+
     #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
-        let source = include_str!("handler.rs");
-        let open_fn = source
-            .split("fn handle_open_command_bar")
-            .nth(1)
-            .and_then(|tail| tail.split("fn command_bar_open_payload").next())
-            .unwrap_or_default();
+        let mut app = panel_app();
+        app.world_mut().spawn(LayoutCef);
 
-        assert!(open_fn.contains("if replace_active_stack"));
-        assert!(open_fn.contains("OpenTarget::InPlace"));
+        send(
+            &mut app,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenPageInCommandBar)),
+        );
+
+        assert_eq!(open_payload(&app).target, Some(OpenTarget::InPlace));
     }
 
     #[test]

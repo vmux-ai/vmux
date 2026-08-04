@@ -786,7 +786,7 @@ fn cef_pointer_regions_contains(
 fn sync_layout_cef_pointer_target(
     windows: Query<&Window, With<PrimaryWindow>>,
     layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
-    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
+    pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut commands: Commands,
@@ -797,7 +797,7 @@ fn sync_layout_cef_pointer_target(
     };
     #[cfg(target_os = "macos")]
     let should_target = {
-        let inside = !bookmark_context_menu_q.is_empty()
+        let inside = !pointer_capture_q.is_empty()
             || windows
                 .single()
                 .ok()
@@ -814,7 +814,7 @@ fn sync_layout_cef_pointer_target(
     };
     #[cfg(not(target_os = "macos"))]
     let should_target = modal_pointer_targets.is_empty()
-        && (!bookmark_context_menu_q.is_empty()
+        && (!pointer_capture_q.is_empty()
             || windows
                 .single()
                 .ok()
@@ -840,7 +840,7 @@ fn forward_layout_cef_cursor_move(
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
     layout_q: Query<Entity, With<LayoutCef>>,
-    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
+    pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut was_in_region: Local<bool>,
@@ -856,7 +856,7 @@ fn forward_layout_cef_cursor_move(
         return;
     };
     for event in events.read() {
-        let in_region = !bookmark_context_menu_q.is_empty()
+        let in_region = !pointer_capture_q.is_empty()
             || cef_pointer_regions_contains(event.position, &cef_regions);
         if in_region {
             browsers.send_mouse_move(&layout, buttons.get_pressed(), event.position, false);
@@ -873,7 +873,7 @@ fn forward_layout_cef_mouse_button(
     suppress: Res<CefSuppressPointerInput>,
     browsers: NonSend<Browsers>,
     layout_q: Query<Entity, With<LayoutCef>>,
-    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
+    pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut captured: Local<bool>,
@@ -906,8 +906,8 @@ fn forward_layout_cef_mouse_button(
         let Some(position) = position else {
             continue;
         };
-        let inside = !bookmark_context_menu_q.is_empty()
-            || cef_pointer_regions_contains(position, &cef_regions);
+        let inside =
+            !pointer_capture_q.is_empty() || cef_pointer_regions_contains(position, &cef_regions);
         if event.state == ButtonState::Pressed && inside {
             *captured = true;
         }
@@ -1022,6 +1022,15 @@ pub(crate) type LayoutKeyboardCapture = Or<(
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
 )>;
+
+/// Layout-page surfaces that float free of the laid-out regions and must own the whole window's
+/// pointer input while they are up.
+///
+/// A context menu or the command bar panel can extend past any published hit rect, and both
+/// dismiss on an outside click, so the layout webview has to see every move and click. A focused
+/// bookmark field does not qualify — it stays inside the side sheet's own region.
+pub(crate) type LayoutPointerCapture =
+    Or<(With<BookmarkContextMenuActive>, With<CommandBarPanelActive>)>;
 
 fn sync_keyboard_target(
     mode: Res<vmux_layout::scene::InteractionMode>,
@@ -2113,7 +2122,7 @@ fn refresh_layout_cef_hover(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     suppress: Res<CefSuppressPointerInput>,
     layout_q: Query<Entity, With<LayoutCef>>,
-    bookmark_context_menu_q: Query<(), (With<LayoutCef>, With<BookmarkContextMenuActive>)>,
+    pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
     modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
     mut state: Local<LayoutHoverRefreshState>,
@@ -2147,10 +2156,10 @@ fn refresh_layout_cef_hover(
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
-    let context_menu_active = !bookmark_context_menu_q.is_empty();
+    let pointer_capture = !pointer_capture_q.is_empty();
     #[cfg(target_os = "macos")]
     {
-        if context_menu_active {
+        if pointer_capture {
             set_native_layout_pointer_regions([physical_cef_pointer_hit_rect(
                 CefPointerHitRect {
                     center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
@@ -2196,7 +2205,7 @@ fn refresh_layout_cef_hover(
         };
         let sequence = 0;
         let position = cursor_px / scale;
-        let in_region = context_menu_active || cef_pointer_regions_contains(position, &cef_regions);
+        let in_region = pointer_capture || cef_pointer_regions_contains(position, &cef_regions);
         NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
         let unchanged = state.sequence == sequence
             && state.position == Some(position)
