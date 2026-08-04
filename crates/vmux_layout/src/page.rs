@@ -311,7 +311,11 @@ pub fn Page() -> Element {
 }
 
 /// Tell the host the panel holds a focused DOM field, so the layout shell takes
-/// `CefKeyboardTarget`. Must be cleared on every close path or no pane can reclaim the keyboard.
+/// `CefKeyboardTarget`.
+///
+/// Cleared from the panel's `use_drop` rather than from each close path: a missed clear strands
+/// the keyboard on the layout shell and no pane can ever reclaim it, and unmount is the one event
+/// every close route has in common.
 fn set_command_bar_panel_active(active: bool) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarPanelActiveEvent { active });
 }
@@ -321,24 +325,25 @@ fn set_command_bar_panel_active(active: bool) {
 #[component]
 fn CommandBarPanel(state: Signal<CommandBarOpenEvent>, open: Signal<bool>) -> Element {
     let mut open = open;
-    let mut close = move || {
-        open.set(false);
-        set_command_bar_panel_active(false);
-    };
     use_drop(move || set_command_bar_panel_active(false));
 
     rsx! {
         div {
-            class: "pointer-events-auto fixed left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2",
+            class: "pointer-events-auto fixed inset-0",
+            onclick: move |_| open.set(false),
             div {
-                id: "command-bar-shell",
-                class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
-                CommandPalette {
-                    state: ReadSignal::from(state),
-                    variant: PaletteVariant::Modal,
-                    on_close: move |_| close(),
-                    on_dismiss: move |_| close(),
-                    on_activity: move |_| {},
+                class: "absolute left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2",
+                onclick: move |e| e.stop_propagation(),
+                div {
+                    id: "command-bar-shell",
+                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
+                    CommandPalette {
+                        state: ReadSignal::from(state),
+                        variant: PaletteVariant::Modal,
+                        on_close: move |_| open.set(false),
+                        on_dismiss: move |_| open.set(false),
+                        on_activity: move |_| {},
+                    }
                 }
             }
         }
