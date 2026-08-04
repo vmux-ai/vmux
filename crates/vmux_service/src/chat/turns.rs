@@ -1,11 +1,10 @@
-//! Folds a flat agent transcript (`vmux_service::message::Message`) into rendered `ChatItem`s:
+//! Folds a flat agent transcript ([`crate::message::Message`]) into rendered `ChatItem`s:
 //! user bubbles and grouped assistant turns. Pure + unit-tested — the brain for the dumb chat
 //! page (see the context-collapse design).
 
-use crate::chat_page::event::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatSubmitAttachment, ChatTurn,
-};
-use vmux_service::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
+use crate::message::{AssistantBlock, Message, PlanStep, SubagentBlock};
+use vmux_wire::chat::{ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn};
+use vmux_wire::prompt_media::ChatSubmitAttachment;
 
 /// Group `messages` into `ChatItem`s: one `ChatItem::User` per user message, followed by one
 /// `ChatItem::Turn` per started turn. `durations[i]` is the finished seconds of the `i`-th
@@ -32,7 +31,7 @@ pub fn grouped_item_count(imported: &[Message], live: &[Message]) -> usize {
                 if current_turn {
                     count += 1;
                 }
-                let text = vmux_service::protocol::extract_display_prompt(text).unwrap_or(text);
+                let text = crate::protocol::extract_display_prompt(text).unwrap_or(text);
                 if !text.trim().is_empty() || !attachments.is_empty() {
                     count += 1;
                 }
@@ -117,7 +116,7 @@ fn group_turns_page_with_total(
         match message {
             Message::User { text, attachments } => {
                 builder.flush_turn();
-                let (context, text) = vmux_service::protocol::split_private_context_prompt(text)
+                let (context, text) = crate::protocol::split_private_context_prompt(text)
                     .map(|(context, display)| (Some(context), display))
                     .unwrap_or((None, text));
                 if !text.trim().is_empty() || !attachments.is_empty() {
@@ -206,7 +205,7 @@ impl<'a> PageBuilder<'a> {
         &mut self,
         text: &str,
         context: Option<&str>,
-        attachments: &[vmux_service::protocol::AgentAttachment],
+        attachments: &[crate::protocol::AgentAttachment],
     ) {
         if self.captures() {
             self.items.push(ChatItem::User {
@@ -413,7 +412,7 @@ mod tests {
     fn user_attachments_are_projected_into_chat_items() {
         let messages = vec![Message::user_with_attachments(
             "inspect",
-            vec![vmux_service::protocol::AgentAttachment {
+            vec![crate::protocol::AgentAttachment {
                 path: "/tmp/image.png".into(),
                 name: "image.png".into(),
                 mime_type: "image/png".into(),
@@ -491,7 +490,7 @@ mod tests {
 
     #[test]
     fn private_continuation_starts_hidden_turn() {
-        let private = vmux_service::protocol::compose_agent_prompt(
+        let private = crate::protocol::compose_agent_prompt(
             "",
             Some("Project selected. Continue the original request."),
         );
@@ -520,10 +519,8 @@ mod tests {
 
     #[test]
     fn private_context_is_collapsed_separately_from_display_prompt() {
-        let private = vmux_service::protocol::compose_agent_prompt(
-            "show me something fun",
-            Some("project policy"),
-        );
+        let private =
+            crate::protocol::compose_agent_prompt("show me something fun", Some("project policy"));
         let messages = vec![Message::user(format!("show me something fun{private}"))];
 
         let items = group_turns(&messages, &[], false);

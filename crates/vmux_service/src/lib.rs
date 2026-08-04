@@ -6,6 +6,7 @@ pub use vmux_service_client::{
     read_message, read_message_blocking, write_message, write_message_blocking,
 };
 
+pub mod chat;
 pub mod event;
 
 #[cfg(target_arch = "wasm32")]
