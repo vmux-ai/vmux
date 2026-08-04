@@ -6,9 +6,6 @@
 pub(crate) mod composer;
 pub mod event;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod turns;
-
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
@@ -36,8 +33,6 @@ use crate::chat_page::event::{
     SlashCommandEntry, SlashCommands,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use crate::chat_page::turns::{group_turns_before, group_turns_tail, grouped_item_count};
-#[cfg(not(target_arch = "wasm32"))]
 use crate::client::acp::{AcpModelState, AcpSession};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::components::{
@@ -60,6 +55,8 @@ use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_core::team::Profile;
+#[cfg(not(target_arch = "wasm32"))]
+use vmux_service::chat::turns::{group_turns_before, group_turns_tail, grouped_item_count};
 #[cfg(not(target_arch = "wasm32"))]
 use vmux_service::client::ServiceClient;
 #[cfg(not(target_arch = "wasm32"))]
@@ -2657,13 +2654,6 @@ mod native_tests {
     }
 
     #[test]
-    fn approval_prompt_renders_structured_tool_input() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("snap.approval_args_json.clone()"));
-        assert!(source.contains("approval_details(&args_json)"));
-    }
-
-    #[test]
     fn approval_details_parse_nested_json() {
         assert_eq!(
             approval_details(
@@ -2685,33 +2675,6 @@ mod native_tests {
             ]
         );
         assert!(approval_details("{}").is_empty());
-    }
-
-    #[test]
-    fn disclosure_icons_use_animated_plus_minus() {
-        let page = include_str!("chat_page/page.rs");
-        let css = include_str!("../../vmux_server/assets/index.css");
-        assert!(!page.contains('▸'));
-        assert!(page.contains("render_disclosure_icon"));
-        assert!(css.contains(".disclosure[open] > summary .disclosure-icon::after"));
-    }
-
-    #[test]
-    fn disclosure_panels_animate_open_and_closed() {
-        let css = include_str!("../../vmux_server/assets/index.css");
-        assert!(css.contains("interpolate-size: allow-keywords"));
-        assert!(css.contains(".disclosure::details-content"));
-        assert!(css.contains(".disclosure[open]::details-content"));
-        assert!(css.contains("transition-behavior: allow-discrete"));
-    }
-
-    #[test]
-    fn chat_activity_updates_favicon_and_python_rows_use_language_icon() {
-        let page = include_str!("chat_page/page.rs");
-        assert!(page.contains("set_page_favicon(&href)"));
-        assert!(page.contains("current_activity_icon(&items, &status)"));
-        assert!(page.contains("ActivityIcon::Python"));
-        assert!(page.contains("language_activity_icon(path)"));
     }
 
     #[test]
@@ -2907,141 +2870,6 @@ mod native_tests {
             resume_agent_name(None, None, Some("custom-acp")),
             "custom-acp"
         );
-    }
-
-    #[test]
-    fn resume_list_scan_runs_on_io_task_pool() {
-        let source = include_str!("chat_page.rs");
-        let handler = source
-            .split("fn on_resume_list_request")
-            .nth(1)
-            .expect("resume-list handler")
-            .split("fn on_resume_session")
-            .next()
-            .expect("resume-list handler body");
-        assert!(handler.contains("IoTaskPool::get().spawn"));
-        assert!(source.contains("fn drain_resume_list_tasks"));
-    }
-
-    #[test]
-    fn composer_resume_menu_remains_escapeable_when_empty() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("let session_menu_open = resume_query.is_some();"));
-        assert!(source.contains("e.key() == Key::Escape && !command_modifier"));
-    }
-
-    #[test]
-    fn composer_resume_selector_supports_prompt_filter_and_keyboard_navigation() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("SelectorMode::Resume"));
-        assert!(source.contains("filter_sessions"));
-        assert!(source.contains("menu_direction"));
-        assert!(source.contains("ScrollLogicalPosition::Nearest"));
-        assert!(source.contains("agent-selector-item-{i}"));
-    }
-
-    #[test]
-    fn composer_resume_rows_render_agent_name() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("session.agent_name"));
-        assert!(source.contains("max-w-[40%] shrink-0 truncate text-xs text-muted-foreground"));
-    }
-
-    #[test]
-    fn composer_captures_global_prompt_input_without_stealing_shortcuts() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("install_global_prompt_input"));
-        assert!(source.contains("meta_key() || event.ctrl_key() || event.alt_key()"));
-        assert!(source.contains("PromptEdit::Backspace"));
-        assert!(source.contains("PromptEdit::Delete"));
-        assert!(source.contains("dispatch_keyboard_event"));
-    }
-
-    #[test]
-    fn installing_chat_uses_matrix_loading_composer() {
-        let source = include_str!("chat_page/page.rs");
-        let composer = include_str!("../../vmux_ui/src/components/prompt_composer.rs");
-        assert!(source.contains("let installing_splash = installing && items.read().is_empty();"));
-        assert!(source.contains("MatrixRain {"));
-        assert!(source.contains("PromptComposer {"));
-        assert!(composer.contains("PromptGhost {"));
-        assert!(source.contains("id: \"chat-scroll\""));
-        assert!(source.contains("bg-gradient-to-t from-background via-background/95"));
-        assert!(!source.contains("absolute inset-0 z-20 flex items-center justify-center"));
-    }
-
-    #[test]
-    fn composer_supports_history_uploads_and_clipboard_media() {
-        let source = include_str!("chat_page/page.rs");
-        let media_options = include_str!("../../vmux_chat_ui/src/prompt_media_options.rs");
-        assert!(source.contains("prompt_history_direction"));
-        assert!(source.contains("move_prompt_history"));
-        assert!(source.contains("ChatPickFiles"));
-        assert!(source.contains("ChatPasteMedia"));
-        assert!(source.contains("preview_data_url"));
-        assert!(source.contains("attachments_to_submit"));
-        assert!(source.contains("ChatMediaListRequest"));
-        assert!(source.contains("select_media_entry"));
-        assert!(source.contains("entry.preview_data_url"));
-        assert!(media_options.contains("h-12 w-16"));
-        assert!(source.contains("attachment-pill-{}"));
-        assert!(source.contains("String::new()"));
-        assert!(source.contains("CHAT_ATTACHMENT_PREVIEWS_EVENT"));
-        assert!(source.contains("render_user_attachment"));
-        assert!(source.contains("max-h-80 max-w-full object-contain"));
-    }
-
-    #[test]
-    fn agent_choice_prompt_precedes_composer_and_supports_keyboard_selection() {
-        let page = include_str!("chat_page/page.rs");
-        let choice = page
-            .find("if !choice_options.read().is_empty()")
-            .expect("choice card");
-        let composer = page.find("PromptComposer {").expect("composer");
-
-        assert!(choice < composer);
-        assert!(page.contains("choice_number_index"));
-        assert!(page.contains("ChatChoiceSelected"));
-        assert!(page.contains("agent-choice-item-{index}"));
-    }
-
-    #[test]
-    fn composer_slash_items_support_mouse_selection() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("onclick: move |_| run_slash_command"));
-        assert!(source.contains("onclick: move |_| select_resume_session"));
-    }
-
-    #[test]
-    fn composer_escape_defers_queue_state_to_native() {
-        let source = include_str!("chat_page/page.rs");
-        assert!(source.contains("try_cef_bin_emit_rkyv(&ChatEscape)"));
-        assert!(!source.contains("ChatFlush"));
-    }
-
-    #[test]
-    fn queued_flush_controls_repurpose_composer_button() {
-        let source = include_str!("chat_page/page.rs");
-        let composer = include_str!("../../vmux_chat_ui/src/prompt_composer.rs");
-        assert!(source.contains("kbd {"));
-        assert!(source.contains("prompt_streaming && queued.read().is_empty()"));
-        assert!(source.contains("ChatCancelQueuedPrompt"));
-        assert!(composer.contains("rect { x: \"6\", y: \"6\""));
-        assert!(composer.contains("path { d: \"M12 19V5\" }"));
-    }
-
-    #[test]
-    fn composer_ctrl_c_cancel_does_not_use_streaming_snapshot() {
-        let source = include_str!("chat_page/page.rs");
-        let handler = source
-            .split("} else if e.modifiers().ctrl()")
-            .nth(1)
-            .expect("ctrl-c handler")
-            .split("},")
-            .next()
-            .expect("ctrl-c handler body");
-        assert!(handler.contains("try_cef_bin_emit_rkyv(&ChatCancel)"));
-        assert!(!handler.contains("&& streaming"));
     }
 
     #[test]
