@@ -52,11 +52,11 @@ use vmux_layout::{
     command_bar::panel::CommandBarPanelActive,
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HEADER_HEIGHT_PX,
-        HeaderCommandEvent, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-        PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
-        StacksHostEvent, TAB_BOUNDARY_EVENT, TABS_EVENT, TabBoundary, TabBoundaryEvent, TabRow,
-        TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_PROGRESS_EVENT, UPDATE_READY_EVENT,
-        UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
+        HeaderCommandEvent, LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent,
+        PANE_TREE_EVENT, PaneNode, PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT,
+        StackNode, StackRow, StacksHostEvent, TAB_BOUNDARY_EVENT, TABS_EVENT, TabBoundary,
+        TabBoundaryEvent, TabRow, TabsHostEvent, UPDATE_CLEARED_EVENT, UPDATE_PROGRESS_EVENT,
+        UPDATE_READY_EVENT, UpdateClearedEvent, UpdateProgressEvent, UpdateReadyEvent,
     },
     pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed, first_stack_in_pane},
     side_sheet::{
@@ -735,6 +735,28 @@ pub fn flush_native_layout_pointer_move() -> bool {
 
 pub fn native_layout_pointer_is_inside() -> bool {
     NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
+}
+
+/// Hand a wheel event to the layout webview, reporting whether it took it.
+///
+/// The layout shell is offscreen-rendered into a `CALayer` above the panes, but a `CALayer` is not
+/// in AppKit's hit-test chain: a native windowed page underneath wins every `scrollWheel` aimed at
+/// whatever the layout is drawing on top. The monitor swallows the event when this returns true.
+#[cfg(target_os = "macos")]
+pub fn forward_native_layout_scroll(position_px: Vec2, delta: Vec2) -> bool {
+    if !native_layout_pointer_is_inside() {
+        return false;
+    }
+    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
+        let Some(presenter) = state.presenter.as_ref() else {
+            return false;
+        };
+        if !state.scale.is_finite() || state.scale <= 0.0 {
+            return false;
+        }
+        presenter.send_wheel(position_px / state.scale, delta);
+        true
+    })
 }
 
 pub fn set_native_layout_activity(active: bool) -> bool {
@@ -2327,7 +2349,10 @@ fn request_layout_frame_burst(
     mut burst: ResMut<LayoutFrameRateBurst>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
-    if trigger.id != TABS_EVENT && trigger.id != STACKS_EVENT {
+    if !matches!(
+        trigger.id.as_str(),
+        TABS_EVENT | STACKS_EVENT | LAYOUT_COMMAND_BAR_OPEN_EVENT
+    ) {
         return;
     }
     let Ok(mut cap) = layouts.get_mut(trigger.webview) else {
@@ -2361,11 +2386,13 @@ fn sync_layout_cef_frame_rate(
     mut cursor_events: MessageReader<CursorMoved>,
     mut button_events: MessageReader<MouseButtonInput>,
     mut wheel_events: MessageReader<MouseWheel>,
+    mut key_events: MessageReader<KeyboardInput>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut layout_q: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
+    mut layout_q: Query<(&mut WebviewMaxFrameRate, Has<CefKeyboardTarget>), With<LayoutCef>>,
     burst: Res<LayoutFrameRateBurst>,
     mut state: Local<LayoutFrameRateState>,
 ) {
+    let owns_keyboard = layout_q.iter().any(|(_, keyboard_target)| keyboard_target);
     let inside = native_layout_pointer_is_inside();
     let pointer = vmux_layout::native_pointer::snapshot();
     let native_changed = pointer.is_some_and(|pointer| {
@@ -2378,9 +2405,14 @@ fn sync_layout_cef_frame_rate(
     let pointer_moved = native_changed || cursor_events.read().count() > 0;
     let button_changed = button_events.read().count() > 0;
     let wheel_changed = wheel_events.read().count() > 0;
+    // Typing into the command bar panel or the bookmark field moves no pointer, so without this
+    // the layout webview paints those keystrokes at the idle rate and they look dropped.
+    let key_changed = key_events.read().count() > 0;
     let input_changed = pointer_moved || button_changed || wheel_changed;
     let now = std::time::Instant::now();
-    if (inside || state.dragging_layout) && (button_changed || wheel_changed) {
+    if (inside || state.dragging_layout) && (button_changed || wheel_changed)
+        || (owns_keyboard && key_changed)
+    {
         state.last_input = Some(now);
     }
     let native_dragging = pointer.is_some_and(|pointer| {
@@ -2398,7 +2430,7 @@ fn sync_layout_cef_frame_rate(
         native_layout_activity_active(),
         state.dragging_layout,
     );
-    let Ok(mut cap) = layout_q.single_mut() else {
+    let Ok((mut cap, _)) = layout_q.single_mut() else {
         return;
     };
     if cap.0 != desired {

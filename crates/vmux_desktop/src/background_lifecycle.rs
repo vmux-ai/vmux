@@ -712,6 +712,12 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
             ) {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
+            if let Some((x, y)) = location {
+                let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
+                if vmux_browser::forward_native_layout_scroll(Vec2::new(x, y), delta) {
+                    return std::ptr::null_mut();
+                }
+            }
         } else {
             if let Some(result) = layout_pointer
                 && result.owns_pointer

@@ -112,6 +112,18 @@ impl NativeMouseMovePresenter {
         self.host
             .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
     }
+
+    /// Inject a wheel event from the AppKit event thread.
+    ///
+    /// An offscreen webview composited over native windowed views never wins AppKit hit-testing,
+    /// so scroll aimed at it is dispatched to the page underneath unless the monitor swallows the
+    /// event and hands it here instead.
+    pub fn send_wheel(&self, position: Vec2, delta: Vec2) {
+        if let Some((mouse_event, delta_x, delta_y)) = cef_mouse_wheel_event(position, delta) {
+            self.host
+                .send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
+        }
+    }
 }
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
