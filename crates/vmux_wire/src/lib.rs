@@ -1,8 +1,10 @@
 //! Lightweight types serialized between vmux processes and pages.
 
+pub mod chat;
 pub mod icon;
 pub mod layout;
 pub mod process_id;
+pub mod prompt_media;
 pub mod protocol;
 pub mod terminal;
 

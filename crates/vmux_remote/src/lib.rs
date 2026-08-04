@@ -422,35 +422,9 @@ pub struct ApprovalRequest {
     pub allow: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InlineMediaQuery<'a> {
-    pub start: usize,
-    pub query: &'a str,
-}
-
-pub fn inline_media_query(draft: &str) -> Option<InlineMediaQuery<'_>> {
-    draft.rmatch_indices('@').find_map(|(start, _)| {
-        let boundary = start == 0
-            || draft[..start]
-                .chars()
-                .next_back()
-                .is_some_and(char::is_whitespace);
-        let query = &draft[start + 1..];
-        (boundary && !query.chars().any(char::is_whitespace))
-            .then_some(InlineMediaQuery { start, query })
-    })
-}
-
-pub fn replace_inline_media_query(
-    draft: &str,
-    query: InlineMediaQuery<'_>,
-    replacement: &str,
-) -> String {
-    let mut value = String::with_capacity(draft.len() + replacement.len());
-    value.push_str(&draft[..query.start]);
-    value.push_str(replacement);
-    value
-}
+pub use vmux_wire::prompt_media::{
+    InlineMediaQuery, inline_media_query, replace_inline_media_query,
+};
 
 pub fn media_reference(entry: &RemoteMediaEntry) -> String {
     let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
