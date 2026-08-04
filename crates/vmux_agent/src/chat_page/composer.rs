@@ -1,4 +1,4 @@
-use super::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry, is_guardian_tool};
+use super::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry};
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
@@ -35,26 +35,6 @@ pub(crate) enum ResumeMenuState {
     Empty,
     NoMatch,
     Results,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ToolActivity {
-    Guardian,
-    ReadFile,
-    WriteFile,
-    Layout,
-    Worktree,
-    Image,
-    Screenshot,
-    OpenPage,
-    Browser,
-    Search,
-    Command,
-    Other,
-}
-
-pub(crate) fn should_expand_thinking(block_index: usize, block_count: usize) -> bool {
-    block_index + 1 == block_count
 }
 
 pub(crate) fn approval_decision_for_index(index: usize) -> Option<u8> {
@@ -260,95 +240,6 @@ pub(crate) fn chat_page_title(generated_title: &str, agent_name: &str) -> String
     }
 }
 
-pub(crate) fn tool_activity(name: &str) -> ToolActivity {
-    let lower = name.to_ascii_lowercase();
-    if is_guardian_tool(name) {
-        ToolActivity::Guardian
-    } else if lower.contains("read_file")
-        || lower.contains("read file")
-        || lower.contains("open_file")
-        || lower.contains("open file")
-    {
-        ToolActivity::ReadFile
-    } else if matches!(lower.as_str(), "edit" | "write")
-        || lower.contains("editing file")
-        || lower.contains("edited file")
-        || lower.contains("write file")
-        || lower.contains("apply_patch")
-        || lower.contains("edit_file")
-        || lower.contains("write_file")
-        || lower.contains("multi_edit")
-    {
-        ToolActivity::WriteFile
-    } else if lower.contains("worktree")
-        || lower.contains("workspace")
-        || lower == "select_project"
-        || lower.contains("repository")
-    {
-        ToolActivity::Worktree
-    } else if lower.contains("layout")
-        || lower.contains("list_spaces")
-        || lower.contains("create_space")
-        || lower.contains("rename_space")
-        || lower.contains("delete_space")
-    {
-        ToolActivity::Layout
-    } else if lower.contains("screenshot") {
-        ToolActivity::Screenshot
-    } else if lower.contains("open_page") || lower.contains("open page") {
-        ToolActivity::OpenPage
-    } else if lower.contains("view_image") || lower.contains("view image") {
-        ToolActivity::Image
-    } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
-        ToolActivity::Browser
-    } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
-        ToolActivity::Search
-    } else if lower.contains("run")
-        || lower.contains("exec")
-        || lower.contains("command")
-        || lower.contains("shell")
-        || lower.contains("terminal")
-    {
-        ToolActivity::Command
-    } else {
-        ToolActivity::Other
-    }
-}
-
-pub(crate) fn tool_args_read_skill(args: &str) -> bool {
-    fn skill_path(value: &serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
-                matches!(key.as_str(), "path" | "file" | "file_path" | "filename")
-                    && value.as_str().is_some_and(|path| {
-                        std::path::Path::new(path)
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .is_some_and(|name| name.eq_ignore_ascii_case("SKILL.md"))
-                    })
-                    || skill_path(value)
-            }),
-            serde_json::Value::Array(values) => values.iter().any(skill_path),
-            _ => false,
-        }
-    }
-
-    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(args) else {
-        return false;
-    };
-    while let serde_json::Value::Object(map) = &value {
-        let Some(arguments) = map.get("arguments") else {
-            break;
-        };
-        if map.contains_key("server") || map.contains_key("tool") || map.contains_key("name") {
-            value = arguments.clone();
-        } else {
-            break;
-        }
-    }
-    skill_path(&value)
-}
-
 fn normalize_chat_page_title(value: &str) -> String {
     let mut title = String::new();
     let mut graphemes_written = 0;
@@ -493,12 +384,6 @@ mod tests {
             SelectorMode::Resume("SID-9")
         );
         assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
-    }
-
-    #[test]
-    fn thinking_expands_only_until_the_next_block() {
-        assert!(should_expand_thinking(0, 1));
-        assert!(!should_expand_thinking(0, 2));
     }
 
     #[test]
@@ -696,34 +581,6 @@ mod tests {
             chat_page_title("Keep 👩‍💻 and فارسی\u{200C}", "Codex"),
             "Keep 👩‍💻 and فارسی\u{200C}"
         );
-    }
-
-    #[test]
-    fn tool_activity_classifies_timeline_icons() {
-        assert_eq!(tool_activity("guardian_review"), ToolActivity::Guardian);
-        assert_eq!(tool_activity("read_file"), ToolActivity::ReadFile);
-        assert_eq!(tool_activity("apply_patch"), ToolActivity::WriteFile);
-        assert_eq!(tool_activity("read_layout"), ToolActivity::Layout);
-        assert_eq!(tool_activity("create_worktree"), ToolActivity::Worktree);
-        assert_eq!(tool_activity("select_project"), ToolActivity::Worktree);
-        assert_eq!(tool_activity("view_image"), ToolActivity::Image);
-        assert_eq!(tool_activity("vmux_screenshot"), ToolActivity::Screenshot);
-        assert_eq!(tool_activity("vmux_open_page"), ToolActivity::OpenPage);
-        assert_eq!(tool_activity("vmux_open_file"), ToolActivity::ReadFile);
-        assert_eq!(tool_activity("browser_navigate"), ToolActivity::Browser);
-        assert_eq!(tool_activity("search_files"), ToolActivity::Search);
-        assert_eq!(tool_activity("exec_command"), ToolActivity::Command);
-        assert_eq!(tool_activity("custom_tool"), ToolActivity::Other);
-    }
-
-    #[test]
-    fn skill_reads_are_identified_from_nested_tool_arguments() {
-        assert!(tool_args_read_skill(
-            r#"{"arguments":{"path":"/tmp/skills/caveman/SKILL.md"},"server":"vmux","tool":"read_file"}"#
-        ));
-        assert!(!tool_args_read_skill(
-            r#"{"arguments":{"path":"/tmp/src/lib.rs"},"server":"vmux","tool":"read_file"}"#
-        ));
     }
 
     #[test]

@@ -14,6 +14,7 @@ serde_json = { workspace = true }
 rkyv = { workspace = true }
 similar = "2"
 unicode-segmentation = "1"
+vmux_chat = { path = "../vmux_chat" }
 vmux_command = { path = "../vmux_command" }
 vmux_terminal = { path = "../vmux_terminal" }
 vmux_wire = { path = "../vmux_wire" }

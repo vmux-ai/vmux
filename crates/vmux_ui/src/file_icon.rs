@@ -164,10 +164,8 @@ pub fn file_icon_kind(path: &str, is_dir: bool) -> FileIcon {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
 pub use components::type_icon;
 
-#[cfg(target_arch = "wasm32")]
 mod components {
     use super::{FileIcon, file_icon_kind};
     use crate::components::icon::Icon;
