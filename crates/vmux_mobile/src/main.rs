@@ -14,10 +14,8 @@ use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat_ui::{
-    AssistantTurn, DiffBlock, PlanBlock, PlanItem, PromptComposer, PromptComposerAction,
-    PromptComposerAttachment, PromptMediaOption, PromptMediaOptions, PromptPopup,
-    PromptPopupPlacement, SubagentActivity, TextBlock, ThinkingBlock, ToolResultBlock,
-    ToolUseBlock, UserBubble, WorkingIndicator,
+    AssistantTurn, DiffBlock, PlanBlock, PlanItem, SubagentActivity, TextBlock, ThinkingBlock,
+    ToolResultBlock, ToolUseBlock, UserBubble, WorkingIndicator,
 };
 use vmux_remote::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
@@ -25,6 +23,11 @@ use vmux_remote::{
     RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
     replace_inline_media_query,
 };
+use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
+use vmux_ui::components::prompt_composer::{
+    PromptComposer, PromptComposerAction, PromptComposerAttachment,
+};
+use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
