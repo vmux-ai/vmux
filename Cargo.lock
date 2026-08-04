@@ -11031,7 +11031,6 @@ dependencies = [
  "url",
  "uuid",
  "vmux_chat",
- "vmux_chat_ui",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -11104,19 +11103,6 @@ dependencies = [
  "vmux_ui",
  "vmux_wire",
  "web-sys",
-]
-
-[[package]]
-name = "vmux_chat_ui"
-version = "0.0.30"
-dependencies = [
- "dioxus",
- "dioxus-primitives",
- "gloo-timers",
- "js-sys",
- "pulldown-cmark",
- "similar",
- "tokio",
 ]
 
 [[package]]
@@ -11432,9 +11418,9 @@ dependencies = [
  "tokio",
  "url",
  "vmux_chat",
- "vmux_chat_ui",
  "vmux_remote",
  "vmux_ui",
+ "vmux_wire",
 ]
 
 [[package]]
