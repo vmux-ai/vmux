@@ -1,0 +1,21 @@
+[package]
+name = "vmux_start"
+description = "The shared launcher: result ranking, row rendering, and the start page"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false }
+serde_json = { workspace = true }
+vmux_ui = { path = "../vmux_ui" }
+vmux_wire = { path = "../vmux_wire" }

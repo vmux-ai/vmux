@@ -1,9 +1,9 @@
-use vmux_command::event::{
+use vmux_ui::i18n::translate;
+use vmux_wire::PageIcon;
+use vmux_wire::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarRecentFile, CommandBarSpace, CommandBarTab,
     CommandBarWorkDir, HistoryEntry, SearchEngine,
 };
-use vmux_core::PageIcon;
-use vmux_ui::i18n::translate;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommandBarResultItem {
@@ -65,7 +65,7 @@ pub enum CommandBarResultItem {
 }
 
 fn looks_like_path(s: &str) -> bool {
-    if vmux_command::event::is_data_uri(s) {
+    if vmux_wire::command_bar::is_data_uri(s) {
         return false;
     }
     s.starts_with('/')
@@ -160,7 +160,7 @@ pub fn agent_page_url(item: &CommandBarResultItem) -> Option<&str> {
     }
 }
 
-pub(crate) fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
+pub fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
     let CommandBarResultItem::Page { url, title, .. } = item else {
         return false;
     };
@@ -182,14 +182,13 @@ pub fn terminal_matches_query(query: &str) -> bool {
     !query.is_empty() && "terminal".starts_with(&query)
 }
 
-#[cfg(any(target_arch = "wasm32", test))]
-pub(crate) fn prepend_prompt_agents(
+pub fn prepend_prompt_agents(
     results: &mut Vec<CommandBarResultItem>,
     selected_agent: Option<&CommandBarResultItem>,
     recent_agents: &[CommandBarResultItem],
     query: &str,
 ) {
-    if !vmux_command::event::is_start_prompt_query(query)
+    if !vmux_wire::command_bar::is_start_prompt_query(query)
         || results.iter().any(|item| agent_page_url(item).is_some())
     {
         return;
@@ -257,7 +256,7 @@ pub fn start_page_results(
     results.extend(work_dir_results(work_dirs, &search_lower));
     results.extend(recent_file_results(recent_files, &search_lower));
     let trimmed = query.trim();
-    if vmux_command::event::is_start_prompt_query(trimmed) {
+    if vmux_wire::command_bar::is_start_prompt_query(trimmed) {
         let engines = if search_engines.is_empty() {
             SearchEngine::ALL.as_slice()
         } else {
@@ -504,7 +503,7 @@ pub fn filter_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::event::{CommandBarCommandEntry, CommandBarTab};
+    use vmux_wire::command_bar::{CommandBarCommandEntry, CommandBarTab};
 
     fn space(id: &str, name: &str, active: bool) -> CommandBarSpace {
         CommandBarSpace {
@@ -523,7 +522,7 @@ mod tests {
                 url: "vmux://settings/".into(),
                 title: "Settings".into(),
                 keywords: vec!["preferences".into()],
-                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Settings),
+                icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Settings),
                 shortcut: String::new(),
             },
             CommandBarPage {
@@ -531,7 +530,7 @@ mod tests {
                 url: "vmux://spaces/".into(),
                 title: "Spaces".into(),
                 keywords: vec!["space".into()],
-                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
+                icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
                 shortcut: String::new(),
             },
             CommandBarPage {
@@ -539,7 +538,7 @@ mod tests {
                 url: "vmux://history/".into(),
                 title: "History".into(),
                 keywords: vec!["recent".into()],
-                icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Clock),
+                icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Clock),
                 shortcut: "\u{2318}Y".into(),
             },
             CommandBarPage {
@@ -547,7 +546,7 @@ mod tests {
                 url: "vmux://agent/vibe/".into(),
                 title: "Vibe".into(),
                 keywords: vec!["vibe".into(), "agent".into()],
-                icon: vmux_core::PageIcon::None,
+                icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
             },
         ]
@@ -619,7 +618,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
+            icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.iter().any(|r| matches!(
@@ -653,7 +652,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
+            icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
@@ -686,7 +685,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://spaces/".into(),
             title: "Spaces".into(),
-            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Layers),
+            icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
@@ -737,7 +736,7 @@ mod tests {
         assert!(results.contains(&CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
-            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Settings),
+            icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Settings),
             shortcut: String::new(),
         }));
     }
@@ -758,7 +757,7 @@ mod tests {
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { url, icon, .. }
-                if url == "vmux://agent/vibe/" && matches!(icon, vmux_core::PageIcon::None)
+                if url == "vmux://agent/vibe/" && matches!(icon, vmux_wire::PageIcon::None)
         )));
     }
 
@@ -768,7 +767,7 @@ mod tests {
         assert!(results.iter().any(|r| matches!(
             r,
             CommandBarResultItem::Page { title, icon, .. }
-                if title == "Vibe" && matches!(icon, vmux_core::PageIcon::None)
+                if title == "Vibe" && matches!(icon, vmux_wire::PageIcon::None)
         )));
     }
 
@@ -780,7 +779,7 @@ mod tests {
             url: "vmux://agent/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         });
 
@@ -804,7 +803,7 @@ mod tests {
             url: "vmux://agent/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         });
 
@@ -825,7 +824,7 @@ mod tests {
             url: "vmux://agent/codex-acp".into(),
             title: "Codex".into(),
             keywords: vec!["codex-acp".into(), "acp".into(), "agent".into()],
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         });
         let codex = agent_page_results(&pages, "cod").remove(0);
@@ -844,7 +843,7 @@ mod tests {
             url: "vmux://agent/codex/cli".into(),
             title: "Codex (CLI)".into(),
             keywords: vec!["codex".into(), "agent".into()],
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         });
 
@@ -898,7 +897,7 @@ mod tests {
                 url: "vmux://agent/codex/cli".into(),
                 title: "Codex".into(),
                 keywords: vec!["codex".into(), "agent".into()],
-                icon: vmux_core::PageIcon::None,
+                icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
             },
             CommandBarPage {
@@ -906,7 +905,7 @@ mod tests {
                 url: "vmux://agent/claude".into(),
                 title: "Claude".into(),
                 keywords: vec!["claude".into(), "agent".into()],
-                icon: vmux_core::PageIcon::None,
+                icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
             },
         ]);
@@ -986,7 +985,7 @@ mod tests {
             url: "vmux://terminal/".into(),
             title: "Terminal".into(),
             keywords: vec!["shell".into()],
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         });
         let results = start_page_results(&pages, &[], &[], &[], "terminal");
@@ -1042,7 +1041,7 @@ mod tests {
         let settings = CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
-            icon: vmux_core::PageIcon::None,
+            icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
         };
 

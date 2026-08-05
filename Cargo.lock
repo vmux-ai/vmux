@@ -11369,6 +11369,7 @@ dependencies = [
  "vmux_core",
  "vmux_git",
  "vmux_history",
+ "vmux_start",
  "vmux_ui",
  "vmux_wire",
  "wasm-bindgen",
@@ -11575,6 +11576,17 @@ dependencies = [
  "vmux_ui",
  "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "vmux_start"
+version = "0.0.30"
+dependencies = [
+ "dioxus",
+ "dioxus-primitives",
+ "serde_json",
+ "vmux_ui",
+ "vmux_wire",
 ]
 
 [[package]]
