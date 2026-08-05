@@ -271,6 +271,7 @@ async fn create_chat_response(state: RemoteState, body: Value) -> DesktopRespons
     }
     let command = crate::protocol::AgentCommand::NewAgentChat {
         prompt: prompt.to_string(),
+        agent_url: request.agent_url.clone(),
     };
     match state
         .broker

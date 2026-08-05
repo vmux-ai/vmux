@@ -294,7 +294,12 @@ pub enum AgentCommand {
     /// Appended to preserve existing positional enum discriminants.
     NewAgentChat {
         prompt: String,
+        /// Launch URL of the agent to start with; `None` uses the default.
+        agent_url: Option<String>,
     },
+    /// Ask the GUI for the installed-agent list. Answered as JSON in
+    /// [`AgentCommandResult::Text`], because only the GUI holds the registry.
+    ListAgents,
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -500,7 +505,7 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         {
             Err("read_knowledge requires a path and limit between 1 and 2000")
         }
-        AgentCommand::NewAgentChat { prompt } if prompt.trim().is_empty() => {
+        AgentCommand::NewAgentChat { prompt, .. } if prompt.trim().is_empty() => {
             Err("new_agent_chat.prompt is empty")
         }
         _ => Ok(()),
@@ -1179,11 +1184,13 @@ mod tests {
         assert_eq!(
             validate_agent_command(&AgentCommand::NewAgentChat {
                 prompt: "  ".to_string(),
+                agent_url: None,
             }),
             Err("new_agent_chat.prompt is empty")
         );
         let command = AgentCommand::NewAgentChat {
             prompt: "continue from my phone".to_string(),
+            agent_url: Some("vmux://agent/claude".to_string()),
         };
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
         let back: AgentCommand =

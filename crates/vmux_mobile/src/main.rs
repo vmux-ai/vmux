@@ -17,8 +17,8 @@ use url::Url;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, WorkingIndicator};
 use vmux_remote::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
-    PromptRequest, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession, RemoteStatus,
-    RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
+    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
+    RemoteStatus, RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
     replace_inline_media_query,
 };
 use vmux_start::results::CommandBarResultItem;
@@ -114,6 +114,27 @@ impl Api {
         self.client
             .request(method, self.endpoint(path))
             .bearer_auth(&self.credentials.token)
+    }
+
+    async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
+        let response = self
+            .request(Method::GET, "/api/agents")
+            .send()
+            .await
+            .map_err(|error| ApiError::Message(error.to_string()))?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return Err(ApiError::Unauthorized);
+        }
+        if !response.status().is_success() {
+            return Err(ApiError::Message(format!(
+                "Mac returned HTTP {}.",
+                response.status()
+            )));
+        }
+        response
+            .json()
+            .await
+            .map_err(|error| ApiError::Message(error.to_string()))
     }
 
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
@@ -318,6 +339,7 @@ fn start_new_chat(
     mut draft: Signal<String>,
     mut error: Signal<String>,
     mut creating: Signal<bool>,
+    agent_url: Option<String>,
 ) {
     let text = draft.peek().trim().to_string();
     let Some(client) = api() else { return };
@@ -338,6 +360,7 @@ fn start_new_chat(
                 &NewChatRequest {
                     client_op_id: next_client_op_id(),
                     text,
+                    agent_url,
                 },
             )
             .await
@@ -409,6 +432,8 @@ fn App() -> Element {
     let mut error = use_signal(String::new);
     let mut api = use_signal(|| None::<Api>);
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
+    let mut agents = use_signal(Vec::<RemoteAgent>::new);
+    let selected_agent = use_signal(|| Option::<String>::None);
     let current = use_signal(|| None::<RemoteSession>);
     let room = use_signal(MobileRoomProjection::default);
     let live_delta = use_signal(String::new);
@@ -509,6 +534,7 @@ fn App() -> Element {
             Ok(next) => {
                 api.set(Some(client.clone()));
                 sessions.set(next);
+                agents.set(client.agents().await.unwrap_or_default());
                 auth.set(AuthState::Paired);
             }
             Err(ApiError::Unauthorized) => {
@@ -631,6 +657,7 @@ fn App() -> Element {
             MobileStartPage {
                 paired: auth() == AuthState::Paired,
                 sessions: sessions(),
+                agents: agents(),
                 draft: new_chat_draft(),
                 error: new_chat_error(),
                 creating: creating_chat(),
@@ -651,6 +678,22 @@ fn App() -> Element {
                     new_chat_draft,
                     new_chat_error,
                     creating_chat,
+                    selected_agent(),
+                ),
+                on_start_agent: move |url: String| start_new_chat(
+                    api,
+                    sessions,
+                    current,
+                    room,
+                    live_delta,
+                    status,
+                    approval,
+                    connected,
+                    stream_generation,
+                    new_chat_draft,
+                    new_chat_error,
+                    creating_chat,
+                    Some(url),
                 ),
                 on_open: move |session| {
                     let Some(client) = api() else { return };
@@ -1009,6 +1052,7 @@ fn App() -> Element {
 struct MobileStartPageProps {
     paired: bool,
     sessions: Vec<RemoteSession>,
+    agents: Vec<RemoteAgent>,
     draft: String,
     error: String,
     creating: bool,
@@ -1018,6 +1062,7 @@ struct MobileStartPageProps {
     on_draft: EventHandler<String>,
     on_submit: EventHandler<()>,
     on_open: EventHandler<RemoteSession>,
+    on_start_agent: EventHandler<String>,
     on_pair_value: EventHandler<String>,
     on_pair: EventHandler<()>,
     on_scan: EventHandler<()>,
@@ -1030,6 +1075,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
     let submit_from_key = props.on_submit;
     let submit_from_action = props.on_submit;
     let on_open = props.on_open;
+    let on_start_agent = props.on_start_agent;
 
     rsx! {
         div {
@@ -1104,6 +1150,28 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                             move |_| on_open.call(next.clone())
                                         },
                                         on_hover: move |_| {},
+                                    }
+                                }
+                            }
+                        }
+                        if !props.agents.is_empty() {
+                            section { class: "mt-6 w-full",
+                                div { class: "mb-3 flex items-center gap-2 px-1",
+                                    h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground", "Start a chat" }
+                                }
+                                div { class: "overflow-hidden rounded-2xl border border-border bg-card",
+                                    for (index, agent) in props.agents.iter().cloned().enumerate() {
+                                        ResultRow {
+                                            key: "{agent.id}",
+                                            index,
+                                            item: agent_result_item(&agent),
+                                            selected: false,
+                                            on_activate: {
+                                                let url = agent.url.clone();
+                                                move |_| on_start_agent.call(url.clone())
+                                            },
+                                            on_hover: move |_| {},
+                                        }
                                     }
                                 }
                             }
@@ -1633,6 +1701,20 @@ fn file_extension_label(name: &str) -> String {
         .map(|extension| extension.to_ascii_uppercase())
         .filter(|extension| !extension.is_empty())
         .unwrap_or_else(|| "FILE".to_string())
+}
+
+/// Present an installed agent as a launcher result, matching the desktop's agent rows.
+fn agent_result_item(agent: &RemoteAgent) -> CommandBarResultItem {
+    CommandBarResultItem::Page {
+        url: agent.url.clone(),
+        title: agent.name.clone(),
+        icon: if agent.icon.is_empty() {
+            PageIcon::None
+        } else {
+            PageIcon::Favicon(agent.icon.clone())
+        },
+        shortcut: String::new(),
+    }
 }
 
 /// Present a relayed session as a launcher result, so the phone and the desktop draw the same row.

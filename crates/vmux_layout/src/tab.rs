@@ -309,7 +309,9 @@ fn handle_tab_commands(
     }
 
     for request in new_agent_chats.read() {
-        let Some(agent_url) = crate::command_bar::handler::prompt_agent_url(&agents, None) else {
+        let Some(agent_url) =
+            crate::command_bar::handler::prompt_agent_url(&agents, request.agent_url.as_deref())
+        else {
             warn!("remote new chat ignored because no installed agent is available");
             continue;
         };
@@ -793,6 +795,7 @@ mod tests {
             .resource_mut::<Messages<crate::NewAgentChatRequest>>()
             .write(crate::NewAgentChatRequest {
                 prompt: "continue from my phone".to_string(),
+                agent_url: None,
             });
 
         app.update();

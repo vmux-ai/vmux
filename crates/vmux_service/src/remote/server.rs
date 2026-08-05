@@ -122,6 +122,7 @@ pub fn spawn(
 
 fn router(state: RemoteState) -> Router {
     let api = Router::new()
+        .route("/api/agents", get(list_agents))
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/{sid}/events", get(session_events))
         .route("/api/sessions/{sid}/media", get(list_media))
@@ -154,6 +155,7 @@ async fn create_chat(
     }
     let command = crate::protocol::AgentCommand::NewAgentChat {
         prompt: prompt.to_string(),
+        agent_url: request.agent_url.clone(),
     };
     match state
         .broker
@@ -198,6 +200,24 @@ fn request_token(headers: &HeaderMap) -> Option<&str> {
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(str::trim)
+}
+
+/// The installed agents, so a remote client can offer the same launcher rows the desktop does.
+///
+/// Only the GUI holds the registry, so this is a broker round-trip rather than local state.
+async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::RemoteAgent>> {
+    let result = state
+        .broker
+        .command(
+            crate::protocol::AgentRequestId::new(),
+            None,
+            crate::protocol::AgentCommand::ListAgents,
+        )
+        .await;
+    let Ok(crate::protocol::AgentCommandResult::Text(json)) = result else {
+        return Json(Vec::new());
+    };
+    Json(serde_json::from_str(&json).unwrap_or_default())
 }
 
 async fn list_sessions(State(state): State<RemoteState>) -> Json<Vec<RemoteSession>> {
