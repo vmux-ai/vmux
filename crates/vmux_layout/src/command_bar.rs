@@ -3,10 +3,9 @@ pub mod page;
 #[cfg(target_arch = "wasm32")]
 pub mod palette;
 
-pub mod keyboard;
-pub mod results;
+pub use vmux_start::{keyboard, results, style};
+
 pub mod size;
-pub mod style;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod handler;
