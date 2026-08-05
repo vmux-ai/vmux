@@ -423,6 +423,8 @@ fn setup(
             Modal,
             HostWindow(pw),
             Browser,
+            // OSR, composited as a native overlay above the windowed pages. The page paints its
+            // own themed shell through the transparent surface.
             WebviewTransparent,
             WebviewNativeLiquidGlass,
             WebviewWindowedNativeFocus,
@@ -1236,6 +1238,8 @@ mod tests {
                 .map(|rate| rate.0),
             Some(30)
         );
+        // The modal renders OSR through a transparent surface, so no opaque background override.
+        assert!(app.world().get::<WebviewTransparent>(modal).is_some());
         assert!(
             app.world()
                 .get::<WebviewOpaqueWindowedBackground>(modal)

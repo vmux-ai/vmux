@@ -16,7 +16,7 @@ pub fn command_bar_root_class(native_windowed: bool) -> &'static str {
 
 pub fn command_bar_shell_class(native_windowed: bool) -> &'static str {
     if native_windowed {
-        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-transparent shadow-2xl"
+        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
     } else {
         "relative flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
     }
@@ -169,11 +169,11 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_native_shell_uses_transparent_background() {
+    fn command_bar_native_shell_paints_its_own_background() {
         let class = command_bar_shell_class(true);
 
-        assert!(class.contains("bg-transparent"));
-        assert!(!class.contains("bg-background"));
+        assert!(class.contains("bg-background"));
+        assert!(!class.contains("bg-transparent"));
     }
 
     #[test]

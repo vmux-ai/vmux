@@ -1,9 +1,8 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
-use bevy_cef::prelude::{Browsers, CefKeyboardTarget};
+use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
 use vmux_layout::Header;
-use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
-use vmux_layout::command_bar::handler::is_command_bar_open;
+use vmux_layout::command_bar::state::CommandBarState;
 use vmux_layout::scene::InteractionMode;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
@@ -45,24 +44,43 @@ pub(crate) fn compute_host_focus_intent(
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
     terminal_q: Query<(), With<Terminal>>,
-    modal_q: Query<(&Node, Has<CefKeyboardTarget>), With<Modal>>,
-    bookmark_input_q: Query<
-        (),
+    modal_q: Query<
         (
-            With<Browser>,
-            Or<(
-                With<BookmarkTextInputActive>,
-                With<BookmarkContextMenuActive>,
-            )>,
+            Entity,
+            &Node,
+            Option<&Visibility>,
+            Has<CefKeyboardTarget>,
+            Has<WebviewWindowed>,
         ),
+        With<Modal>,
     >,
+    layout_keyboard_q: Query<(), (With<Browser>, crate::LayoutKeyboardCapture)>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if is_command_bar_open(&modal_q) {
-        HostFocusIntent::WinitHost
+    let next = if let Some((modal, windowed)) =
+        modal_q
+            .iter()
+            .find_map(|(entity, node, visibility, keyboard_target, windowed)| {
+                CommandBarState::from_modal(
+                    node.display,
+                    visibility.copied().unwrap_or_default(),
+                    keyboard_target,
+                )
+                .owns_input()
+                .then_some((entity, windowed))
+            }) {
+        // A windowed command bar hosts a real DOM text field, so Chromium must receive the
+        // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no DOM
+        // key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor before the
+        // event reaches the view, so dismiss still works while the bar holds first responder.
+        if windowed {
+            HostFocusIntent::Windowed(modal)
+        } else {
+            HostFocusIntent::WinitHost
+        }
     } else if *mode != InteractionMode::User {
         HostFocusIntent::Unmanaged
-    } else if !bookmark_input_q.is_empty() {
+    } else if !layout_keyboard_q.is_empty() {
         HostFocusIntent::WinitHost
     } else {
         let active = focus.stack.and_then(|stack| {
@@ -128,6 +146,7 @@ pub(crate) fn apply_windowed_host_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
 
     fn app() -> App {
         let mut app = App::new();
@@ -177,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn open_command_bar_reclaims_winit_host_focus() {
+    fn open_osr_command_bar_reclaims_winit_host_focus() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
@@ -194,6 +213,89 @@ mod tests {
             ..default()
         });
         app.update();
+        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+    }
+
+    /// A windowed modal hosts a real DOM text field, so Chromium has to receive the keystrokes
+    /// itself — `send_key_event` forwarding produces no DOM key events for a windowed browser.
+    #[test]
+    fn open_windowed_command_bar_takes_native_focus() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                CefKeyboardTarget,
+                WebviewWindowed,
+            ))
+            .id();
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
+    }
+
+    /// Focus must move to the bar the moment it owns input, not when its surface is revealed —
+    /// otherwise keys typed during the reveal frames land in the page behind it.
+    #[test]
+    fn revealing_windowed_command_bar_keeps_focus_off_the_page() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        let modal = app
+            .world_mut()
+            .spawn((
+                Modal,
+                Node {
+                    display: Display::Flex,
+                    ..default()
+                },
+                Visibility::Hidden,
+                CefKeyboardTarget,
+                WebviewWindowed,
+            ))
+            .id();
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
+        assert_eq!(intent(&app), HostFocusIntent::Windowed(modal));
+    }
+
+    #[test]
+    fn revealing_osr_command_bar_keeps_focus_off_the_page() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((
+            Modal,
+            Node {
+                display: Display::Flex,
+                ..default()
+            },
+            Visibility::Hidden,
+            CefKeyboardTarget,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+
+        app.update();
+
         assert_eq!(intent(&app), HostFocusIntent::WinitHost);
     }
 

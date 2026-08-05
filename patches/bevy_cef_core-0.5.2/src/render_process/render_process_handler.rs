@@ -41,7 +41,11 @@ type RenderBrpResult = Result<serde_json::Value, RenderBrpError>;
 
 pub(crate) static BRP_PROMISES: LazyLock<Mutex<HashMap<String, V8Value>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-pub(crate) static LISTEN_EVENTS: LazyLock<Mutex<HashMap<String, V8Value>>> =
+/// Listeners are keyed by browser so two embedded pages can register the same event id, and hold
+/// only the callback. A `V8Context` handle is scoped to the callback that produced it — caching one
+/// here made every dispatch after the first silently fail `is_valid()`, so the context is
+/// re-derived from the frame on each message instead.
+pub(crate) static LISTEN_EVENTS: LazyLock<Mutex<HashMap<(c_int, String), V8Value>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 struct InitScript {
@@ -154,6 +158,15 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
         }
     }
 
+    fn on_browser_destroyed(&self, browser: Option<&mut Browser>) {
+        if let Some(browser) = browser
+            && let Ok(mut events) = LISTEN_EVENTS.lock()
+        {
+            let browser_id = browser.identifier();
+            events.retain(|(registered_browser_id, _), _| *registered_browser_id != browser_id);
+        }
+    }
+
     fn on_process_message_received(
         &self,
         _browser: Option<&mut Browser>,
@@ -172,20 +185,27 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
             }
             return 1;
         }
-        if let Some(message) = message
+        if let Some(browser) = _browser
+            && let Some(message) = message
             && let Some(frame) = frame
             && crate::util::has_embedded_scheme(&frame.url().into_string())
-            && let Some(ctx) = frame.v8_context()
         {
+            let browser_id = browser.identifier();
             match message.name().into_string().as_str() {
                 PROCESS_MESSAGE_BRP => {
-                    handle_brp_message(message, ctx);
+                    if let Some(ctx) = frame.v8_context() {
+                        handle_brp_message(message, ctx);
+                    }
                 }
                 PROCESS_MESSAGE_HOST_EMIT => {
-                    handle_listen_message(message, ctx);
+                    if let Some(ctx) = frame.v8_context() {
+                        handle_listen_message(message, browser_id, ctx);
+                    }
                 }
                 PROCESS_MESSAGE_BIN_HOST_EMIT => {
-                    handle_bin_listen_message(message, ctx);
+                    if let Some(ctx) = frame.v8_context() {
+                        handle_bin_listen_message(message, browser_id, ctx);
+                    }
                 }
                 _ => {}
             }
@@ -290,7 +310,7 @@ fn handle_brp_message(message: &ProcessMessage, ctx: V8Context) {
     }
 }
 
-fn handle_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
+fn handle_listen_message(message: &ProcessMessage, browser_id: c_int, mut ctx: V8Context) {
     let Some(argument_list) = message.argument_list() else {
         return;
     };
@@ -307,28 +327,29 @@ fn handle_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
         let Ok(events) = LISTEN_EVENTS.lock() else {
             return;
         };
-        events.get(&id).cloned()
+        events.get(&(browser_id, id)).cloned()
     };
     let Some(callback) = callback else {
         return;
     };
 
-    ctx.enter();
-    let mut obj = v8_value_create_object(
-        Some(&mut V8DefaultAccessorBuilder::build()),
-        Some(&mut V8DefaultInterceptorBuilder::build()),
-    );
-    if let Some(arg) = json_to_v8(value) {
-        let _ = callback.execute_function_with_context(
-            Some(&mut ctx),
-            obj.as_mut(),
-            Some(&[Some(arg)]),
+    if ctx.enter().is_positive() {
+        let mut obj = v8_value_create_object(
+            Some(&mut V8DefaultAccessorBuilder::build()),
+            Some(&mut V8DefaultInterceptorBuilder::build()),
         );
+        if let Some(arg) = json_to_v8(value) {
+            let _ = callback.execute_function_with_context(
+                Some(&mut ctx),
+                obj.as_mut(),
+                Some(&[Some(arg)]),
+            );
+        }
+        ctx.exit();
     }
-    ctx.exit();
 }
 
-fn handle_bin_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
+fn handle_bin_listen_message(message: &ProcessMessage, browser_id: c_int, mut ctx: V8Context) {
     let Some(argument_list) = message.argument_list() else {
         return;
     };
@@ -350,7 +371,7 @@ fn handle_bin_listen_message(message: &ProcessMessage, mut ctx: V8Context) {
         let Ok(events) = LISTEN_EVENTS.lock() else {
             return;
         };
-        events.get(&id).cloned()
+        events.get(&(browser_id, id)).cloned()
     };
     let Some(callback) = callback else {
         return;

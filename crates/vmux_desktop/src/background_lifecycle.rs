@@ -37,6 +37,14 @@ const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 #[cfg(target_os = "macos")]
 const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
+/// How often Bevy has to run while the layout webview is being scrolled.
+///
+/// The layout is composited as a native overlay: CEF paints into an `IOSurface` and the presenter
+/// hands it to the `CALayer` on the main dispatch queue, so no Bevy frame stands between a scrolled
+/// pixel and the screen. The app only has to tick often enough to keep the frame-rate governor from
+/// falling back to the idle rate, which it does after `LAYOUT_INPUT_BURST`.
+#[cfg(target_os = "macos")]
+const NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 struct RenderFrameDemand(bool);
@@ -60,6 +68,21 @@ fn windowed_pointer_inside_after_event(
         sampled
     } else {
         previous
+    }
+}
+
+/// Which pointer button an `NSEvent` type carries, if any.
+#[cfg(target_os = "macos")]
+fn native_pointer_button(
+    event_type: objc2_app_kit::NSEventType,
+) -> Option<bevy::picking::pointer::PointerButton> {
+    use bevy::picking::pointer::PointerButton;
+    use objc2_app_kit::NSEventType;
+    match event_type {
+        NSEventType::LeftMouseDown | NSEventType::LeftMouseUp => Some(PointerButton::Primary),
+        NSEventType::RightMouseDown | NSEventType::RightMouseUp => Some(PointerButton::Secondary),
+        NSEventType::OtherMouseDown | NSEventType::OtherMouseUp => Some(PointerButton::Middle),
+        _ => None,
     }
 }
 
@@ -706,6 +729,14 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 }
             }
         } else if scroll {
+            let forwarded = location.is_some_and(|(x, y)| {
+                let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
+                vmux_browser::forward_native_layout_scroll(Vec2::new(x, y), delta)
+            });
+            if forwarded {
+                local_wake(NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL);
+                return std::ptr::null_mut();
+            }
             if native_scroll_should_wake(
                 vmux_browser::native_layout_pointer_is_inside(),
                 sampled_over_windowed_page,
@@ -713,6 +744,24 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
+            // A click over a native windowed pane never reaches winit, so the layout overlay's own
+            // DOM — result rows, the dismiss backdrop — would never see it.
+            if button_event
+                && sampled_over_windowed_page
+                && let Some((x, y)) = location
+                && let Some(button) = native_pointer_button(event_type)
+            {
+                let mouse_up = matches!(
+                    event_type,
+                    NSEventType::LeftMouseUp
+                        | NSEventType::RightMouseUp
+                        | NSEventType::OtherMouseUp
+                );
+                if vmux_browser::forward_native_layout_click(Vec2::new(x, y), button, mouse_up) {
+                    local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+                    return std::ptr::null_mut();
+                }
+            }
             if let Some(result) = layout_pointer
                 && result.owns_pointer
                 && result.presenter_active

@@ -112,6 +112,45 @@ impl NativeMouseMovePresenter {
         self.host
             .send_mouse_move_event(Some(&mouse_event), mouse_leave as _);
     }
+
+    /// Inject a wheel event from the AppKit event thread.
+    ///
+    /// An offscreen webview composited over native windowed views never wins AppKit hit-testing,
+    /// so scroll aimed at it is dispatched to the page underneath unless the monitor swallows the
+    /// event and hands it here instead.
+    pub fn send_wheel(&self, position: Vec2, delta: Vec2) {
+        if let Some((mouse_event, delta_x, delta_y)) = cef_mouse_wheel_event(position, delta) {
+            self.host
+                .send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
+        }
+    }
+
+    /// Inject a click from the AppKit event thread, for the same reason as [`Self::send_wheel`].
+    pub fn send_click(&self, position: Vec2, button: PointerButton, mouse_up: bool) {
+        if !position.is_finite() {
+            return;
+        }
+        let mouse_event = cef::MouseEvent {
+            x: position.x as i32,
+            y: position.y as i32,
+            modifiers: match button {
+                PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
+                PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
+                PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
+            } as _,
+        };
+        let mouse_button = match button {
+            PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
+            PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
+            _ => cef_mouse_button_type_t::MBT_LEFT,
+        };
+        self.host.send_mouse_click_event(
+            Some(&mouse_event),
+            MouseButtonType::from(mouse_button),
+            mouse_up as _,
+            1,
+        );
+    }
 }
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
@@ -167,9 +206,17 @@ pub struct WebviewBrowser {
     last_corner_radius_all_corners: Cell<Option<bool>>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     last_focus_ring: Cell<Option<(f64, f64, f64, f64)>>,
+    /// Last value passed to [`Browsers::set_windowed_focus`]. Re-asserting focus every frame
+    /// resets the renderer's input state, so only transitions are forwarded.
+    last_renderer_focus: Cell<Option<bool>>,
     /// True for native (windowed) browsers. `set_focus(true)` makes a windowed browser's `NSView`
-    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die. Keyboard is
-    /// routed via `CefKeyboardTarget` forwarding instead, so windowed browsers must not be focused.
+    /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
+    /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
+    ///
+    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal).
+    /// `send_key_event` is a windowless API and produces no DOM key events, and a windowed child
+    /// view here never receives usable `NSEvent`s either — so a surface hosting a real DOM text
+    /// field cannot be windowed. That is why the command bar stays OSR.
     windowed: bool,
     allow_native_focus: bool,
     webview_popup_sender: WebviewPopupSenderInner,
@@ -467,6 +514,7 @@ impl Browsers {
             last_corner_radius: Cell::new(None),
             last_corner_radius_all_corners: Cell::new(None),
             last_focus_ring: Cell::new(None),
+            last_renderer_focus: Cell::new(None),
             windowed,
             allow_native_focus,
             webview_popup_sender,
@@ -511,9 +559,15 @@ impl Browsers {
             .is_some_and(|b| b.client.main_frame().is_some())
     }
 
+    /// `WasHidden` for a windowed browser is driven by its native view, not by OSR bookkeeping.
+    /// Applying it here hides the `RenderWidgetHost`, which keeps presenting its last composited
+    /// frame — so the view still looks alive — while silently dropping all input.
     #[inline]
     pub fn set_osr_not_hidden(&self, webview: &Entity) {
         if let Some(b) = self.browsers.get(webview) {
+            if b.windowed {
+                return;
+            }
             if b.hidden.replace(false) {
                 b.host.was_hidden(0);
                 b.host.invalidate(cef::PaintElementType::VIEW);
@@ -536,6 +590,9 @@ impl Browsers {
     #[inline]
     pub fn set_osr_hidden(&self, webview: &Entity) {
         if let Some(b) = self.browsers.get(webview) {
+            if b.windowed {
+                return;
+            }
             if !b.hidden.replace(true) {
                 b.host.was_hidden(1);
             }
@@ -544,6 +601,9 @@ impl Browsers {
 
     pub fn set_all_osr_hidden(&self) {
         for browser in self.browsers.values() {
+            if browser.windowed {
+                continue;
+            }
             if !browser.hidden.replace(true) {
                 browser.host.was_hidden(1);
             }
@@ -754,7 +814,34 @@ impl Browsers {
             && browser.windowed
             && browser.allow_native_focus
         {
-            browser.host.set_focus(focused as _);
+            #[cfg(target_os = "macos")]
+            if focused {
+                use objc2_app_kit::{NSResponder, NSView};
+
+                let handle = browser.host.window_handle();
+                if !handle.is_null() {
+                    let view: &NSView = unsafe { &*handle.cast::<NSView>() };
+                    if let Some(window) = view.window() {
+                        let owns_focus = window.firstResponder().is_some_and(|responder| {
+                            responder
+                                .downcast_ref::<NSView>()
+                                .is_some_and(|responder_view| {
+                                    core::ptr::eq(responder_view, view)
+                                        || responder_view.isDescendantOf(view)
+                                })
+                        });
+                        if !owns_focus {
+                            let responder: &NSResponder = view;
+                            let _ = window.makeFirstResponder(Some(responder));
+                        }
+                    }
+                }
+            }
+            // Re-asserting focus every frame resets the renderer's input state, so only forward
+            // transitions.
+            if browser.last_renderer_focus.replace(Some(focused)) != Some(focused) {
+                browser.host.set_focus(focused as _);
+            }
         }
     }
 
@@ -1577,6 +1664,11 @@ impl Browsers {
     #[cfg(not(target_os = "macos"))]
     pub fn set_windowed_hidden(&self, _: &Entity, _: bool) {}
 
+    /// Move a windowed browser's native view to the front of its siblings.
+    ///
+    /// `addSubview:positioned:relativeTo:` removes and re-inserts the view, which drops the
+    /// compositor surface Chromium is drawing into and silently clears first responder. Callers
+    /// run this every frame, so it must no-op when the view is already frontmost.
     #[cfg(target_os = "macos")]
     pub fn raise_windowed_to_front(&self, webview: &Entity) {
         use objc2::ClassType;
@@ -1592,18 +1684,18 @@ impl Browsers {
             return;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
-        if let Some(glass) = &browser.native_liquid_glass {
-            let glass_view = glass.as_super();
-            let Some(parent) = (unsafe { glass_view.superview() }) else {
-                return;
-            };
-            parent.addSubview_positioned_relativeTo(glass_view, NSWindowOrderingMode::Above, None);
-        } else {
-            let Some(parent) = (unsafe { view.superview() }) else {
-                return;
-            };
-            parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+        let target = browser
+            .native_liquid_glass
+            .as_ref()
+            .map(|glass| glass.as_super())
+            .unwrap_or(view);
+        let Some(parent) = (unsafe { target.superview() }) else {
+            return;
+        };
+        if view_is_frontmost_subview(&parent, target) {
+            return;
         }
+        parent.addSubview_positioned_relativeTo(target, NSWindowOrderingMode::Above, None);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -2360,6 +2452,14 @@ pub fn effective_windowless_frame_rate(monitor_rate: i32, visible: bool, focused
 
 fn normalize_windowless_frame_rate(frame_rate: i32) -> i32 {
     frame_rate.max(1)
+}
+
+/// `subviews` is ordered back-to-front, so the frontmost sibling is the last element.
+#[cfg(target_os = "macos")]
+fn view_is_frontmost_subview(parent: &objc2_app_kit::NSView, view: &objc2_app_kit::NSView) -> bool {
+    let subviews = parent.subviews();
+    let count = subviews.count();
+    count > 0 && core::ptr::eq(&*subviews.objectAtIndex(count - 1), view)
 }
 
 #[cfg(test)]

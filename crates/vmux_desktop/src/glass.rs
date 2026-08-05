@@ -266,10 +266,7 @@ fn sync_window_glass_visibility(
             With<bevy_cef::prelude::CefKeyboardTarget>,
         ),
     >,
-    modal_open_q: Query<
-        (&Node, Has<bevy_cef::prelude::CefKeyboardTarget>),
-        With<vmux_layout::window::Modal>,
-    >,
+    modal_open_q: vmux_layout::command_bar::state::CommandBarStateQuery,
     mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
 ) {
     use objc2::ClassType;
@@ -1236,14 +1233,7 @@ fn sync_layout_overlay(
 /// produced by the OSR modal and routed here via `NativeOverlayFrames`.
 fn sync_command_bar_overlay(
     mut state: NonSendMut<CommandBarOverlay>,
-    modal_open_q: Query<
-        (
-            &Node,
-            &Visibility,
-            Has<bevy_cef::prelude::CefKeyboardTarget>,
-        ),
-        With<vmux_layout::window::Modal>,
-    >,
+    modal_open_q: vmux_layout::command_bar::state::CommandBarStateQuery,
     modal_e_q: Query<Entity, With<vmux_layout::window::Modal>>,
     pending_q: Query<
         (),
