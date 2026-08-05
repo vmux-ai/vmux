@@ -27,7 +27,7 @@ use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
     CommandBarSpace, CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
-    PathCompleteResponse, PathEntry, SearchEngine,
+    PathCompleteResponse, PathEntry, SearchEngine, SearchEngineSetting,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
@@ -1325,7 +1325,7 @@ pub(crate) fn prompt_agent_url(
 
 fn on_command_bar_action(
     trigger: On<BinReceive<CommandBarActionEvent>>,
-    search_engine: Option<Res<SearchEngine>>,
+    search_engine: Option<Res<SearchEngineSetting>>,
     mut modal_q: Query<
         (
             Entity,
@@ -1481,7 +1481,7 @@ fn on_command_bar_action(
             } else {
                 let url = normalize_url(
                     &evt.value,
-                    search_engine.as_deref().copied().unwrap_or_default(),
+                    search_engine.map(|setting| setting.0).unwrap_or_default(),
                 );
                 let inline_transition = if matches!(evt.target, None | Some(OpenTarget::InPlace))
                     && crate::start::supports_inline_agent_transition(&url)

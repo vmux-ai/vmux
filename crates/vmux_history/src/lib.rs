@@ -1,7 +1,7 @@
 //! Browsing history: records visits, prunes old entries, serves history queries and
 //! command-bar suggestions, and renders the history webview.
 
-pub mod event;
+pub use vmux_wire::history as event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 #[cfg(not(target_arch = "wasm32"))]
