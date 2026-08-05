@@ -66,7 +66,7 @@ use bevy::window::{
 };
 
 use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
-use {vmux_browser::BrowserPlugin, vmux_command::WriteAppCommands, vmux_layout::LayoutPlugin};
+use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
 
 /// The top-level aggregator: adds `DefaultPlugins` and the four plugin groups — core,
 /// layout, features, browser, and desktop — that make up the app.
@@ -133,77 +133,6 @@ impl Plugin for VmuxPlugin {
             BrowserPlugin,
             DesktopPlugins,
         ));
-
-        #[cfg(not(feature = "updater"))]
-        app.add_systems(Startup, disabled_features::mark_updater_unavailable)
-            .add_systems(Update, disabled_features::reject_update_checks);
-
-        app.init_resource::<boot_status::SplashStatus>()
-            .init_resource::<boot_status::RestoreComplete>()
-            .add_systems(
-                Update,
-                boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    browser_snapshot::drive_pending_nav_snapshots,
-                    browser_scroll::run_scrolls,
-                    browser_snapshot::start_snapshots,
-                    browser_snapshot::shape_snapshot_results,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            )
-            .add_systems(Startup, appearance::seed_system_appearance);
-
-        #[cfg(feature = "screenshots")]
-        app.init_resource::<screenshot::ScreenshotBridge>()
-            .add_systems(
-                Update,
-                (screenshot::start_screenshots, screenshot::drain_screenshots)
-                    .chain()
-                    .after(WriteAppCommands),
-            );
-
-        #[cfg(not(feature = "screenshots"))]
-        app.add_systems(
-            Update,
-            disabled_features::reject_screenshots.after(WriteAppCommands),
-        );
-
-        #[cfg(feature = "recording")]
-        app.init_resource::<recording::RecordingBridge>()
-            .init_resource::<recording::RecordingStatus>()
-            .add_message::<recording::RecordingControl>()
-            .add_systems(
-                Update,
-                (
-                    recording::start_recording,
-                    recording::handle_recording_control,
-                    recording::auto_stop_recordings,
-                    recording::drain_recordings,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            );
-
-        #[cfg(not(feature = "recording"))]
-        app.add_systems(
-            Update,
-            (
-                disabled_features::reject_recording_starts,
-                disabled_features::reject_recording_stops,
-            )
-                .after(WriteAppCommands),
-        );
-
-        #[cfg(feature = "native-notifications")]
-        app.add_systems(Startup, notify::request_notification_auth)
-            .add_systems(Update, notify::post_os_notifications);
-
-        #[cfg(target_os = "macos")]
-        app.add_systems(Last, focus_native::apply_winit_host_focus);
     }
 }
 

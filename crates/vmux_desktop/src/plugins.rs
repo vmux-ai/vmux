@@ -4,7 +4,9 @@
 //! `CefEmbeddedHosts` while it builds, so every group that registers a page — [`FeaturePlugins`]
 //! and `LayoutPlugin` — must be added before it.
 
-use bevy::app::{PluginGroup, PluginGroupBuilder};
+use bevy::app::PluginGroupBuilder;
+use bevy::prelude::*;
+use vmux_command::WriteAppCommands;
 
 use crate::{
     background_lifecycle::BackgroundLifecyclePlugin, display::DisplayPlugin,
@@ -43,16 +45,19 @@ impl PluginGroup for DesktopPlugins {
             .add(MediaPermissionPlugin)
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
-            .add(LeChatBridgePlugin);
+            .add(LeChatBridgePlugin)
+            .add(NativeFocusPlugin)
+            .add(NotificationPlugin)
+            .add(BootStatusPlugin)
+            .add(AppearancePlugin)
+            .add(BrowserAutomationPlugin)
+            .add(ScreenshotPlugin)
+            .add(RecordingPlugin)
+            .add(UpdaterPlugin);
 
         #[cfg(feature = "tray")]
         {
             builder = builder.add(crate::tray::TrayPlugin);
-        }
-
-        #[cfg(feature = "updater")]
-        {
-            builder = builder.add(crate::updater::VmuxUpdater::builder().build().plugin());
         }
 
         #[cfg(all(target_os = "macos", feature = "native-glass"))]
@@ -63,6 +68,141 @@ impl PluginGroup for DesktopPlugins {
         }
 
         builder
+    }
+}
+
+/// Tracks how far startup has progressed so the splash screen knows when to step aside.
+struct BootStatusPlugin;
+
+impl Plugin for BootStatusPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<crate::boot_status::SplashStatus>()
+            .init_resource::<crate::boot_status::RestoreComplete>()
+            .add_systems(
+                Update,
+                crate::boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
+            );
+    }
+}
+
+/// Seeds the system light/dark appearance before the first frame.
+struct AppearancePlugin;
+
+impl Plugin for AppearancePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, crate::appearance::seed_system_appearance);
+    }
+}
+
+/// Serves the agent-driven browser automation requests: page snapshots and scrolling.
+struct BrowserAutomationPlugin;
+
+impl Plugin for BrowserAutomationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                crate::browser_snapshot::drive_pending_nav_snapshots,
+                crate::browser_scroll::run_scrolls,
+                crate::browser_snapshot::start_snapshots,
+                crate::browser_snapshot::shape_snapshot_results,
+            )
+                .chain()
+                .after(WriteAppCommands),
+        );
+    }
+}
+
+/// Serves agent screenshot requests, or rejects them when the feature is compiled out.
+struct ScreenshotPlugin;
+
+impl Plugin for ScreenshotPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(feature = "screenshots")]
+        app.init_resource::<crate::screenshot::ScreenshotBridge>()
+            .add_systems(
+                Update,
+                (
+                    crate::screenshot::start_screenshots,
+                    crate::screenshot::drain_screenshots,
+                )
+                    .chain()
+                    .after(WriteAppCommands),
+            );
+
+        #[cfg(not(feature = "screenshots"))]
+        app.add_systems(
+            Update,
+            crate::disabled_features::reject_screenshots.after(WriteAppCommands),
+        );
+    }
+}
+
+/// Serves agent screen-recording requests, or rejects them when the feature is compiled out.
+struct RecordingPlugin;
+
+impl Plugin for RecordingPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(feature = "recording")]
+        app.init_resource::<crate::recording::RecordingBridge>()
+            .init_resource::<crate::recording::RecordingStatus>()
+            .add_message::<crate::recording::RecordingControl>()
+            .add_systems(
+                Update,
+                (
+                    crate::recording::start_recording,
+                    crate::recording::handle_recording_control,
+                    crate::recording::auto_stop_recordings,
+                    crate::recording::drain_recordings,
+                )
+                    .chain()
+                    .after(WriteAppCommands),
+            );
+
+        #[cfg(not(feature = "recording"))]
+        app.add_systems(
+            Update,
+            (
+                crate::disabled_features::reject_recording_starts,
+                crate::disabled_features::reject_recording_stops,
+            )
+                .after(WriteAppCommands),
+        );
+    }
+}
+
+/// Drives the auto-updater, or reports it as unavailable when the feature is compiled out.
+struct UpdaterPlugin;
+
+impl Plugin for UpdaterPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(feature = "updater")]
+        app.add_plugins(crate::updater::VmuxUpdater::builder().build().plugin());
+
+        #[cfg(not(feature = "updater"))]
+        app.add_systems(Startup, crate::disabled_features::mark_updater_unavailable)
+            .add_systems(Update, crate::disabled_features::reject_update_checks);
+    }
+}
+
+/// Posts OS notifications when the platform supports them.
+struct NotificationPlugin;
+
+impl Plugin for NotificationPlugin {
+    fn build(&self, _app: &mut App) {
+        #[cfg(feature = "native-notifications")]
+        _app.add_systems(Startup, crate::notify::request_notification_auth)
+            .add_systems(Update, crate::notify::post_os_notifications);
+    }
+}
+
+/// Mirrors the layout's focused host into the native window on macOS.
+struct NativeFocusPlugin;
+
+impl Plugin for NativeFocusPlugin {
+    fn build(&self, _app: &mut App) {
+        #[cfg(target_os = "macos")]
+        _app.add_systems(Last, crate::focus_native::apply_winit_host_focus);
     }
 }
 

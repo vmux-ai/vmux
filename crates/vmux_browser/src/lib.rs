@@ -7574,49 +7574,54 @@ mod tests {
             }
         }
 
-        fn add_consumer_systems(app: &mut App) {
-            app.add_message::<vmux_layout::BrowserNavigateRequest>()
-                .add_message::<vmux_layout::BrowserGoBackRequest>()
-                .add_message::<vmux_layout::BrowserGoForwardRequest>()
-                .add_message::<vmux_layout::OpenInNewStackRequest>()
-                .add_message::<vmux_layout::ExtensionInstallRequest>()
-                .add_message::<PageOpenRequest>()
-                .add_message::<CefPageAttachRequest>()
-                .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-                .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-                .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-                .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
-                .add_message::<vmux_terminal::TerminalSendRequest>()
-                .add_message::<vmux_terminal::RunShellRequest>()
-                .add_message::<vmux_setting::SettingsWriteRequest>()
-                .add_message::<vmux_space::SpaceCommandRequest>()
-                .add_message::<vmux_history::query::HistoryOpenIntent>()
-                .add_message::<vmux_layout::active_panes::ActivatePane>()
-                .init_resource::<crate::PendingNavSnapshots>()
-                .init_resource::<crate::RecentBrowserInteraction>()
-                .configure_sets(
-                    Update,
-                    (
-                        PageOpenSet::ResolveTarget,
-                        PageOpenSet::HandleKnownPages,
-                        PageOpenSet::Fallback,
-                        PageOpenSet::Respond,
+        struct ConsumerPlugin;
+
+        impl Plugin for ConsumerPlugin {
+            fn build(&self, app: &mut App) {
+                app.add_message::<vmux_layout::BrowserNavigateRequest>()
+                    .add_message::<vmux_layout::BrowserGoBackRequest>()
+                    .add_message::<vmux_layout::BrowserGoForwardRequest>()
+                    .add_message::<vmux_layout::OpenInNewStackRequest>()
+                    .add_message::<vmux_layout::ExtensionInstallRequest>()
+                    .add_message::<PageOpenRequest>()
+                    .add_message::<CefPageAttachRequest>()
+                    .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+                    .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+                    .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+                    .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+                    .add_message::<vmux_terminal::TerminalSendRequest>()
+                    .add_message::<vmux_terminal::RunShellRequest>()
+                    .add_message::<vmux_setting::SettingsWriteRequest>()
+                    .add_message::<vmux_space::SpaceCommandRequest>()
+                    .add_message::<vmux_history::query::HistoryOpenIntent>()
+                    .add_message::<vmux_layout::active_panes::ActivatePane>()
+                    .init_resource::<crate::PendingNavSnapshots>()
+                    .init_resource::<crate::RecentBrowserInteraction>()
+                    .configure_sets(
+                        Update,
+                        (
+                            PageOpenSet::ResolveTarget,
+                            PageOpenSet::HandleKnownPages,
+                            PageOpenSet::Fallback,
+                            PageOpenSet::Respond,
+                        )
+                            .chain(),
                     )
-                        .chain(),
-                )
-                .add_systems(
-                    Update,
-                    (
-                        crate::handle_browser_navigate_requests.before(PageOpenSet::ResolveTarget),
-                        crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
-                        handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                        crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                        crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                        crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
-                        vmux_terminal::handle_terminal_send_requests,
-                        vmux_terminal::handle_run_shell_requests,
-                    ),
-                );
+                    .add_systems(
+                        Update,
+                        (
+                            crate::handle_browser_navigate_requests
+                                .before(PageOpenSet::ResolveTarget),
+                            crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
+                            handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
+                            crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
+                            crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
+                            crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
+                            vmux_terminal::handle_terminal_send_requests,
+                            vmux_terminal::handle_run_shell_requests,
+                        ),
+                    );
+            }
         }
 
         type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
@@ -7651,8 +7656,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -7704,8 +7709,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -7761,8 +7766,7 @@ mod tests {
         #[test]
         fn agent_browser_navigate_stacks_new_page_and_waits_for_snapshot() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            add_consumer_systems(&mut app);
+            app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
                 .init_resource::<Assets<Mesh>>()
@@ -7820,8 +7824,7 @@ mod tests {
         #[test]
         fn agent_browser_navigate_does_not_raise_new_stack_during_user_interaction() {
             let mut app = App::new();
-            app.add_plugins(MinimalPlugins);
-            add_consumer_systems(&mut app);
+            app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
                 .init_resource::<Assets<Mesh>>()
@@ -7874,8 +7877,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -7922,8 +7925,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -7971,8 +7974,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -8024,8 +8027,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
@@ -8075,8 +8078,7 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin));
-            add_consumer_systems(&mut app);
+            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
                 .init_resource::<Assets<Mesh>>()
@@ -8129,8 +8131,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Claude, true)]),
@@ -8177,8 +8179,8 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 AgentSessionPlugin,
+                ConsumerPlugin,
             ));
-            add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Codex, true)]),
