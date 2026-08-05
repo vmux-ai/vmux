@@ -71,6 +71,21 @@ fn windowed_pointer_inside_after_event(
     }
 }
 
+/// Which pointer button an `NSEvent` type carries, if any.
+#[cfg(target_os = "macos")]
+fn native_pointer_button(
+    event_type: objc2_app_kit::NSEventType,
+) -> Option<bevy::picking::pointer::PointerButton> {
+    use bevy::picking::pointer::PointerButton;
+    use objc2_app_kit::NSEventType;
+    match event_type {
+        NSEventType::LeftMouseDown | NSEventType::LeftMouseUp => Some(PointerButton::Primary),
+        NSEventType::RightMouseDown | NSEventType::RightMouseUp => Some(PointerButton::Secondary),
+        NSEventType::OtherMouseDown | NSEventType::OtherMouseUp => Some(PointerButton::Middle),
+        _ => None,
+    }
+}
+
 #[cfg(any(target_os = "macos", test))]
 fn native_scroll_should_wake(
     layout_pointer_inside: bool,
@@ -729,6 +744,24 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
+            // A click over a native windowed pane never reaches winit, so the layout overlay's own
+            // DOM — result rows, the dismiss backdrop — would never see it.
+            if button_event
+                && sampled_over_windowed_page
+                && let Some((x, y)) = location
+                && let Some(button) = native_pointer_button(event_type)
+            {
+                let mouse_up = matches!(
+                    event_type,
+                    NSEventType::LeftMouseUp
+                        | NSEventType::RightMouseUp
+                        | NSEventType::OtherMouseUp
+                );
+                if vmux_browser::forward_native_layout_click(Vec2::new(x, y), button, mouse_up) {
+                    local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
+                    return std::ptr::null_mut();
+                }
+            }
             if let Some(result) = layout_pointer
                 && result.owns_pointer
                 && result.presenter_active

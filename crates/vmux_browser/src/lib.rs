@@ -766,6 +766,32 @@ pub fn forward_native_layout_scroll(position_px: Vec2, delta: Vec2) -> bool {
     forwarded
 }
 
+/// Hand a click to the layout webview, reporting whether it took it.
+///
+/// Only for clicks AppKit would otherwise deliver to a native windowed pane. Everywhere else the
+/// winit content view is the hit-test target, winit raises `MouseButtonInput`, and the ordinary
+/// Bevy pointer path already works — swallowing those would trade a working route for this one.
+#[cfg(target_os = "macos")]
+pub fn forward_native_layout_click(
+    position_px: Vec2,
+    button: bevy::picking::pointer::PointerButton,
+    mouse_up: bool,
+) -> bool {
+    if !native_layout_pointer_is_inside() {
+        return false;
+    }
+    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
+        let Some(presenter) = state.presenter.as_ref() else {
+            return false;
+        };
+        if !state.scale.is_finite() || state.scale <= 0.0 {
+            return false;
+        }
+        presenter.send_click(position_px / state.scale, button, mouse_up);
+        true
+    })
+}
+
 /// When the AppKit monitor last handed the layout webview a wheel event.
 ///
 /// Swallowing the `NSEvent` keeps it out of winit, so `MouseWheel` never reaches Bevy and the

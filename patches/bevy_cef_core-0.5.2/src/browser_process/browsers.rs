@@ -124,6 +124,33 @@ impl NativeMouseMovePresenter {
                 .send_mouse_wheel_event(Some(&mouse_event), delta_x, delta_y);
         }
     }
+
+    /// Inject a click from the AppKit event thread, for the same reason as [`Self::send_wheel`].
+    pub fn send_click(&self, position: Vec2, button: PointerButton, mouse_up: bool) {
+        if !position.is_finite() {
+            return;
+        }
+        let mouse_event = cef::MouseEvent {
+            x: position.x as i32,
+            y: position.y as i32,
+            modifiers: match button {
+                PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
+                PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
+                PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
+            } as _,
+        };
+        let mouse_button = match button {
+            PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
+            PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
+            _ => cef_mouse_button_type_t::MBT_LEFT,
+        };
+        self.host.send_mouse_click_event(
+            Some(&mouse_event),
+            MouseButtonType::from(mouse_button),
+            mouse_up as _,
+            1,
+        );
+    }
 }
 
 static REGISTER_GLOBAL_SCHEME_HANDLER_FACTORIES: Once = Once::new();
