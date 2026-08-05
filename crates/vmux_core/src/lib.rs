@@ -31,6 +31,8 @@ pub mod agent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod archive;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod browser;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod extension;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod notify;

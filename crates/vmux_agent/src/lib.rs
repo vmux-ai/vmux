@@ -65,20 +65,13 @@ pub mod variant;
 pub use vmux_service::{http, message, stream};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use agents_page::AgentsManagerPlugin;
-#[cfg(not(target_arch = "wasm32"))]
-pub use chat_page::AgentChatPagePlugin;
-#[cfg(not(target_arch = "wasm32"))]
-pub use client::acp::{AcpAgentPlugin, AcpSession};
+pub use client::acp::AcpSession;
 #[cfg(not(target_arch = "wasm32"))]
 pub use client::cli::strategy::CliAgentStrategy;
-#[cfg(not(target_arch = "wasm32"))]
-pub use client::page::plugin::PageAgentPlugin;
 #[cfg(not(target_arch = "wasm32"))]
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue, QueuedPrompt};
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };
@@ -104,5 +97,3 @@ pub use tools::mcp_tool_defs;
 pub use url::{AgentKind, AgentUrl};
 #[cfg(not(target_arch = "wasm32"))]
 pub use variant::AgentVariant;
-#[cfg(not(target_arch = "wasm32"))]
-pub use vibe::setup::AgentSetupPlugin;

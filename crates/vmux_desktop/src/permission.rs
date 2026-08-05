@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-pub struct MediaPermissionPlugin;
+/// Resolves permission requests: per-origin camera, microphone, and screen capture for
+/// embedded pages, plus the app's own OS notification authorization.
+pub struct PermissionsPlugin;
 
-impl Plugin for MediaPermissionPlugin {
+impl Plugin for PermissionsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MediaPermissionStore::load())
             .add_systems(Update, drain_media_permission_requests);
+
+        #[cfg(feature = "native-notifications")]
+        app.add_systems(Startup, crate::notify::request_notification_auth);
     }
 }
 

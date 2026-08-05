@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::Browsers;
-use vmux_agent::{BrowserScrollRequest, BrowserSnapshotRequest};
 use vmux_core::LastActivatedAt;
+use vmux_core::browser::{BrowserScrollRequest, BrowserSnapshotRequest};
 use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::Browser;
 use vmux_layout::active_panes::ActivePanes;
@@ -49,9 +49,7 @@ pub(crate) fn run_scrolls(
                         )
                     })
             })
-            .or_else(|| {
-                crate::browser_snapshot::most_recent_browser(&browsers, &terminals, &stack_ts)
-            });
+            .or_else(|| crate::snapshot::most_recent_browser(&browsers, &terminals, &stack_ts));
         if let Some(webview) = webview {
             let js = match (request.to.as_deref(), request.delta) {
                 (Some("top"), _) => "window.scrollTo(0,0)".to_string(),

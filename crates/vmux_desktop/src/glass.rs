@@ -224,7 +224,7 @@ fn ensure_window_active_after_reveal(
     let Ok(entity) = window.single() else {
         return;
     };
-    if crate::background_lifecycle::ensure_native_window_active(entity) {
+    if crate::runtime::ensure_native_window_active(entity) {
         state.active_confirmed = true;
     } else if let Some(proxy) = proxy {
         let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);

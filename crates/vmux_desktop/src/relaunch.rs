@@ -1,22 +1,9 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive, JsEmitEventPlugin, Receive};
+use bevy_cef::prelude::{BinReceive, Receive};
 use vmux_layout::event::RestartRequestEvent;
 
-pub(crate) struct RelaunchPlugin;
-
-impl Plugin for RelaunchPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
-            &["debug", "extensions", "layout"],
-        ))
-        .add_plugins(JsEmitEventPlugin::<PageRelaunchRequest>::default())
-        .add_observer(on_restart_request)
-        .add_observer(on_page_relaunch);
-    }
-}
-
 #[derive(serde::Deserialize)]
-struct PageRelaunchRequest {
+pub(crate) struct PageRelaunchRequest {
     channel: String,
 }
 
@@ -72,14 +59,17 @@ fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
     exit.write(AppExit::Success);
 }
 
-fn on_restart_request(
+pub(crate) fn on_restart_request(
     _trigger: On<BinReceive<RestartRequestEvent>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     relaunch_now(&mut exit);
 }
 
-fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
+pub(crate) fn on_page_relaunch(
+    trigger: On<Receive<PageRelaunchRequest>>,
+    mut exit: MessageWriter<AppExit>,
+) {
     if trigger.payload.channel == "vmux-relaunch" {
         relaunch_now(&mut exit);
     }

@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::ReadAppCommands;
 
-pub struct SpacePlugin;
+pub struct SpaceLayoutPlugin;
 
-impl Plugin for SpacePlugin {
+impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
             .register_type::<SpaceId>()

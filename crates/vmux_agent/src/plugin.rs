@@ -38,9 +38,8 @@ use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
     AgentChoiceSelected, AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest,
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin,
-    NavAwaitingSnapshot, RecordStartRequest, RecordStartResponse, RecordStopRequest,
-    RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+    CommandOrigin, RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse,
+    RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
     snapshot_response_to_query_result,
 };
 use crate::session::{
@@ -48,6 +47,9 @@ use crate::session::{
     PendingAgentSession, SessionId, agent_session_dirty_run_condition,
 };
 use crate::strategy::AgentStrategies;
+use vmux_core::browser::{
+    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+};
 
 pub use vmux_space::cwd::valid_cwd;
 
@@ -159,11 +161,38 @@ fn detect_agent_provider_availability(
     }
 }
 
-/// Wires the agent domain: CLI agent strategies, session watching, discovery and exit
-/// detection, and handling of agent commands, queries, tool calls, screenshots, and recordings.
+/// Root plugin for the agent domain, aggregating session lifecycle, the agent pages, and
+/// the agent clients (ACP and in-page providers).
 pub struct AgentPlugin;
 
 impl Plugin for AgentPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            AgentSessionPlugin,
+            AgentPagesPlugin,
+            crate::client::AgentClientPlugin,
+        ));
+    }
+}
+
+/// Wires the agent-owned pages: the chat page, the agents manager page, and the setup flow.
+pub struct AgentPagesPlugin;
+
+impl Plugin for AgentPagesPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            crate::chat_page::AgentChatPagePlugin,
+            crate::agents_page::AgentsManagerPlugin,
+            crate::vibe::setup::AgentSetupPlugin,
+        ));
+    }
+}
+
+/// Wires the agent domain: CLI agent strategies, session watching, discovery and exit
+/// detection, and handling of agent commands, queries, tool calls, screenshots, and recordings.
+pub struct AgentSessionPlugin;
+
+impl Plugin for AgentSessionPlugin {
     fn build(&self, app: &mut App) {
         vmux_core::register_host_spawn(app, "agent");
         let mut strategies = AgentStrategies::default();
@@ -7747,7 +7776,11 @@ mod tests {
     #[test]
     fn agent_plugin_registers_all_three_provider_entries() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            AgentSessionPlugin,
+        ));
         app.world_mut().run_schedule(Startup);
         let mut q = app.world_mut().query::<&AgentProviderTargetKind>();
         let ids: std::collections::HashSet<&'static str> =
@@ -7760,7 +7793,11 @@ mod tests {
     #[test]
     fn agent_plugin_registers_three_cli_strategies() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            AgentSessionPlugin,
+        ));
         let strategies = app.world().resource::<AgentStrategies>();
         assert!(strategies.get_cli(AgentKind::Vibe).is_some());
         assert!(strategies.get_cli(AgentKind::Claude).is_some());
@@ -7785,26 +7822,30 @@ mod tests {
     #[test]
     fn run_placement_override_settings_update_rejects_agents_and_allows_users() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
-            .add_message::<vmux_layout::BrowserNavigateRequest>()
-            .add_message::<vmux_layout::BrowserGoBackRequest>()
-            .add_message::<vmux_layout::BrowserGoForwardRequest>()
-            .add_message::<vmux_layout::OpenInNewStackRequest>()
-            .add_message::<vmux_layout::ExtensionInstallRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
-            .add_message::<vmux_terminal::TerminalSendRequest>()
-            .add_message::<vmux_terminal::RunShellRequest>()
-            .add_message::<vmux_setting::SettingsWriteRequest>()
-            .add_message::<vmux_space::SpaceCommandRequest>()
-            .add_message::<vmux_history::query::HistoryOpenIntent>()
-            .insert_resource(FocusedStack::default())
-            .insert_resource(test_settings())
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            AgentSessionPlugin,
+        ))
+        .add_message::<vmux_layout::BrowserNavigateRequest>()
+        .add_message::<vmux_layout::BrowserGoBackRequest>()
+        .add_message::<vmux_layout::BrowserGoForwardRequest>()
+        .add_message::<vmux_layout::OpenInNewStackRequest>()
+        .add_message::<vmux_layout::ExtensionInstallRequest>()
+        .add_message::<vmux_layout::OpenBesideRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+        .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+        .add_message::<vmux_terminal::TerminalSendRequest>()
+        .add_message::<vmux_terminal::RunShellRequest>()
+        .add_message::<vmux_setting::SettingsWriteRequest>()
+        .add_message::<vmux_space::SpaceCommandRequest>()
+        .add_message::<vmux_history::query::HistoryOpenIntent>()
+        .insert_resource(FocusedStack::default())
+        .insert_resource(test_settings())
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
         agent_value["allow_run_placement_override"] = serde_json::json!(true);
@@ -7860,27 +7901,31 @@ mod tests {
     #[test]
     fn terminal_send_writes_raw_text_to_active_terminal() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin))
-            .add_message::<vmux_layout::BrowserNavigateRequest>()
-            .add_message::<vmux_layout::BrowserGoBackRequest>()
-            .add_message::<vmux_layout::BrowserGoForwardRequest>()
-            .add_message::<vmux_layout::OpenInNewStackRequest>()
-            .add_message::<vmux_layout::ExtensionInstallRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-            .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
-            .add_message::<vmux_terminal::TerminalSendRequest>()
-            .add_message::<vmux_terminal::RunShellRequest>()
-            .add_message::<vmux_setting::SettingsWriteRequest>()
-            .add_message::<vmux_space::SpaceCommandRequest>()
-            .add_message::<vmux_history::query::HistoryOpenIntent>()
-            .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
-            .insert_resource(FocusedStack::default())
-            .insert_resource(test_settings())
-            .init_resource::<Assets<Mesh>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_command::CommandPlugin,
+            AgentSessionPlugin,
+        ))
+        .add_message::<vmux_layout::BrowserNavigateRequest>()
+        .add_message::<vmux_layout::BrowserGoBackRequest>()
+        .add_message::<vmux_layout::BrowserGoForwardRequest>()
+        .add_message::<vmux_layout::OpenInNewStackRequest>()
+        .add_message::<vmux_layout::ExtensionInstallRequest>()
+        .add_message::<vmux_layout::OpenBesideRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
+        .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
+        .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+        .add_message::<vmux_terminal::TerminalSendRequest>()
+        .add_message::<vmux_terminal::RunShellRequest>()
+        .add_message::<vmux_setting::SettingsWriteRequest>()
+        .add_message::<vmux_space::SpaceCommandRequest>()
+        .add_message::<vmux_history::query::HistoryOpenIntent>()
+        .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
+        .insert_resource(FocusedStack::default())
+        .insert_resource(test_settings())
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app

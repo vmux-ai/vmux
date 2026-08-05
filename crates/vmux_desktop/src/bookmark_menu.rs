@@ -3,9 +3,10 @@ use bevy::prelude::*;
 pub(crate) struct BookmarkMenuPlugin;
 
 impl Plugin for BookmarkMenuPlugin {
-    fn build(&self, _app: &mut App) {
+    fn build(&self, app: &mut App) {
+        app.add_message::<vmux_layout::bookmark::ShowBookmarkMenuRequest>();
         #[cfg(target_os = "macos")]
-        _app.add_systems(Update, macos::show_bookmark_menu);
+        app.add_systems(Update, macos::show_bookmark_menu);
     }
 }
 

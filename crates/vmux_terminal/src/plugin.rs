@@ -358,7 +358,7 @@ impl Plugin for TerminalPlugin {
                     .run_if(on_message::<KeyboardInput>)
                     .after(InputSystems),
             );
-        add_terminal_update_systems(app)
+        app.add_plugins(TerminalUpdatePlugin)
             .add_systems(
                 Update,
                 (
@@ -439,42 +439,48 @@ fn on_terminal_removed(
     });
 }
 
-fn add_terminal_update_systems(app: &mut App) -> &mut App {
-    app.add_message::<ProcessExitedEvent>()
-        .add_message::<CommandLifecycleEvent>()
-        .add_message::<TerminalReinputRequest>()
-        .add_message::<OscTitleChanged>()
-        .add_message::<vmux_core::notify::BellReceived>()
-        .add_systems(
-            Update,
-            handle_terminal_reinput_requests
-                .after(poll_service_messages)
-                .before(flush_pending_terminal_input),
-        )
-        .add_systems(Update, apply_osc_title.after(poll_service_messages))
-        .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-        .add_systems(Update, sync_agent_focus.after(poll_service_messages))
-        .add_systems(
-            Update,
-            handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
-        )
-        .add_systems(
-            Update,
-            spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
-        )
-        .add_systems(
-            Update,
-            (
-                try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
-                poll_service_messages
-                    .in_set(WriteAppCommands)
-                    .in_set(ServiceMessageSet),
-                flush_pending_terminal_input,
-                handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
+/// Drives a terminal's per-frame work: the service connection, PTY input and output, OSC
+/// title updates, and the page/layout spawn requests that create new terminals.
+struct TerminalUpdatePlugin;
+
+impl Plugin for TerminalUpdatePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ProcessExitedEvent>()
+            .add_message::<CommandLifecycleEvent>()
+            .add_message::<TerminalReinputRequest>()
+            .add_message::<OscTitleChanged>()
+            .add_message::<vmux_core::notify::BellReceived>()
+            .add_systems(
+                Update,
+                handle_terminal_reinput_requests
+                    .after(poll_service_messages)
+                    .before(flush_pending_terminal_input),
             )
-                .chain(),
-        )
-        .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size))
+            .add_systems(Update, apply_osc_title.after(poll_service_messages))
+            .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
+            .add_systems(Update, sync_agent_focus.after(poll_service_messages))
+            .add_systems(
+                Update,
+                handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
+            .add_systems(
+                Update,
+                spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    poll_service_messages
+                        .in_set(WriteAppCommands)
+                        .in_set(ServiceMessageSet),
+                    flush_pending_terminal_input,
+                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
+                )
+                    .chain(),
+            )
+            .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
+    }
 }
 
 fn spawn_layout_requested_content(
@@ -4478,8 +4484,8 @@ mod tests {
             vmux_command::CommandPlugin,
             vmux_layout::stack::StackPlugin,
         ))
-        .add_message::<LayoutSpawnRequest>();
-        add_terminal_update_systems(&mut app);
+        .add_message::<LayoutSpawnRequest>()
+        .add_plugins(TerminalUpdatePlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
         let mut update = schedules.remove(Update).unwrap();

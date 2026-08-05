@@ -5,6 +5,7 @@ use vmux_core::page::{PAGE_READY_BIN_EVENT_ID, PageReady, mark_webview_page_read
 use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
+use crate::cef::LayoutCefPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::command_bar::panel::CommandBarPanelPlugin;
 #[cfg(feature = "player-mode")]
@@ -14,13 +15,13 @@ use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::scene::ScenePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
-use crate::space::SpacePlugin;
+use crate::space::SpaceLayoutPlugin;
 use crate::stack::StackPlugin;
 use crate::tab::TabPlugin;
 use crate::toggle::TogglePlugin;
 use crate::warm_page::PrewarmPagesPlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
-use crate::window::WindowPlugin;
+use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
@@ -81,9 +82,9 @@ impl Plugin for LayoutPlugin {
             .add_observer(mark_webview_page_ready)
             .add_plugins((
                 ProfilePlugin,
-                SpacePlugin,
+                SpaceLayoutPlugin,
                 ScenePlugin,
-                WindowPlugin,
+                WindowLayoutPlugin,
                 TabPlugin,
                 PanePlugin,
                 StackPlugin,
@@ -100,6 +101,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 BookmarkPlugin,
                 CommandBarPanelPlugin,
+                LayoutCefPlugin,
             ));
         #[cfg(feature = "player-mode")]
         app.add_plugins(FocusRingPlugin);

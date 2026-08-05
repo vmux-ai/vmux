@@ -257,10 +257,11 @@ mod tests {
     }
 
     #[test]
-    fn splash_plugin_registered_in_lib() {
-        let source = include_str!("lib.rs");
-        assert!(source.contains("splash::SplashPlugin"));
-        assert!(source.contains("mod splash;"));
+    fn splash_plugin_registered_by_native_window_plugin() {
+        let mut app = App::new();
+        app.add_plugins(crate::plugins::NativeWindowPlugin);
+
+        assert!(app.is_plugin_added::<SplashPlugin>());
     }
 
     #[test]

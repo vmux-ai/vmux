@@ -10,12 +10,9 @@
 )]
 
 mod appearance;
-mod background_lifecycle;
 mod bookmark_menu;
 mod bookmark_persistence;
 mod boot_status;
-mod browser_scroll;
-mod browser_snapshot;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
 #[cfg(any(
@@ -27,23 +24,22 @@ mod disabled_features;
 mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
-#[cfg(target_os = "macos")]
-mod focus_native;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
-mod lechat_bridge;
 mod log_forward;
-mod media_permission;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
 pub mod panic_hook;
+mod permission;
 mod persistence;
+pub mod plugins;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
+mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
 mod tools;
@@ -64,20 +60,11 @@ use bevy::window::{
     WindowPosition, WindowResolution,
 };
 
-use {
-    bookmark_menu::BookmarkMenuPlugin, bookmark_persistence::BookmarkPersistencePlugin,
-    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
-    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_command::WriteAppCommands,
-    vmux_core::page::ServerPlugin, vmux_editor::EditorPlugin, vmux_git::GitPlugin,
-    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
-    vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
-    vmux_terminal::TerminalPlugin,
-};
+use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
+use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
 
-use vmux_agent::AgentPlugin;
-
-/// The top-level aggregator: adds `DefaultPlugins`, every feature plugin, and the
-/// macOS-native integrations that make up the desktop app.
+/// The top-level aggregator: adds `DefaultPlugins` and the four plugin groups — core,
+/// layout, features, browser, and desktop — that make up the app.
 pub struct VmuxPlugin;
 
 /// First-launch window size (logical px) when no geometry is persisted in
@@ -123,139 +110,24 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        let winit_settings = background_lifecycle::foreground_winit_settings(false, false, false);
-        app.insert_resource(winit_settings)
-            .add_plugins((
-                vmux_core::CorePlugin,
-                DefaultPlugins
-                    .set(WebAssetPlugin {
-                        silence_startup_warning: true,
-                    })
-                    .set(window_plugin)
-                    .set(bevy::log::LogPlugin {
-                        filter: "bevy_camera_controller=warn".into(),
-                        custom_layer: crate::log_forward::file_log_layer,
-                        ..default()
-                    }),
-                ServerPlugin,
-                SettingsPlugin,
-                CommandPlugin,
-                ShortcutPlugin,
-                OsMenuPlugin,
-                TerminalPlugin,
-                EditorPlugin,
-                GitPlugin,
-                ServicePlugin,
-                SpacePlugin,
-            ))
-            .add_plugins((
-                vmux_team::TeamPlugin,
-                vmux_history::HistoryPlugin,
-                vmux_knowledge::KnowledgePlugin,
-                tools::ToolsPlugin,
-                vmux_agent::AgentChatPagePlugin,
-                vmux_agent::AgentsManagerPlugin,
-                vmux_agent::AgentSetupPlugin,
-                vmux_layout::start::StartPlugin,
-                LayoutCefPlugin,
-                vmux_browser::ExtensionsPlugin,
-                BrowserPlugin,
-                media_permission::MediaPermissionPlugin,
-                lechat_bridge::LeChatBridgePlugin,
-            ))
-            .add_plugins((
-                AgentPlugin,
-                vmux_agent::PageAgentPlugin,
-                vmux_agent::AcpAgentPlugin,
-                PersistencePlugin,
-                BookmarkPersistencePlugin,
-                BookmarkMenuPlugin,
-                LayoutPlugin,
-                background_lifecycle::BackgroundLifecyclePlugin,
-                display::DisplayPlugin,
-                relaunch::RelaunchPlugin,
-                window_state::WindowStatePlugin,
-            ));
-
-        #[cfg(feature = "updater")]
-        app.add_plugins(updater::VmuxUpdater::builder().build().plugin());
-
-        #[cfg(not(feature = "updater"))]
-        app.add_systems(Startup, disabled_features::mark_updater_unavailable)
-            .add_systems(Update, disabled_features::reject_update_checks);
-
-        #[cfg(feature = "tray")]
-        app.add_plugins(tray::TrayPlugin);
-
-        app.init_resource::<boot_status::SplashStatus>()
-            .init_resource::<boot_status::RestoreComplete>()
-            .add_systems(
-                Update,
-                boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    browser_snapshot::drive_pending_nav_snapshots,
-                    browser_scroll::run_scrolls,
-                    browser_snapshot::start_snapshots,
-                    browser_snapshot::shape_snapshot_results,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            )
-            .add_systems(Startup, appearance::seed_system_appearance);
-
-        #[cfg(feature = "screenshots")]
-        app.init_resource::<screenshot::ScreenshotBridge>()
-            .add_systems(
-                Update,
-                (screenshot::start_screenshots, screenshot::drain_screenshots)
-                    .chain()
-                    .after(WriteAppCommands),
-            );
-
-        #[cfg(not(feature = "screenshots"))]
-        app.add_systems(
-            Update,
-            disabled_features::reject_screenshots.after(WriteAppCommands),
-        );
-
-        #[cfg(feature = "recording")]
-        app.init_resource::<recording::RecordingBridge>()
-            .init_resource::<recording::RecordingStatus>()
-            .add_message::<recording::RecordingControl>()
-            .add_systems(
-                Update,
-                (
-                    recording::start_recording,
-                    recording::handle_recording_control,
-                    recording::auto_stop_recordings,
-                    recording::drain_recordings,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            );
-
-        #[cfg(not(feature = "recording"))]
-        app.add_systems(
-            Update,
-            (
-                disabled_features::reject_recording_starts,
-                disabled_features::reject_recording_stops,
-            )
-                .after(WriteAppCommands),
-        );
-
-        #[cfg(feature = "native-notifications")]
-        app.add_systems(Startup, notify::request_notification_auth)
-            .add_systems(Update, notify::post_os_notifications);
-
-        #[cfg(all(target_os = "macos", feature = "native-glass"))]
-        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin));
-
-        #[cfg(target_os = "macos")]
-        app.add_systems(Last, focus_native::apply_winit_host_focus);
+        let winit_settings = runtime::foreground_winit_settings(false, false, false);
+        app.insert_resource(winit_settings).add_plugins((
+            VmuxCorePlugins,
+            DefaultPlugins
+                .set(WebAssetPlugin {
+                    silence_startup_warning: true,
+                })
+                .set(window_plugin)
+                .set(bevy::log::LogPlugin {
+                    filter: "bevy_camera_controller=warn".into(),
+                    custom_layer: crate::log_forward::file_log_layer,
+                    ..default()
+                }),
+            LayoutPlugin,
+            FeaturePlugins,
+            BrowserPlugin,
+            DesktopPlugins,
+        ));
     }
 }
 

@@ -56,7 +56,7 @@ const _: () = {
     assert!(WEBVIEW_MESH_DEPTH_BIAS >= 0.0);
 };
 
-pub struct WindowPlugin;
+pub struct WindowLayoutPlugin;
 
 #[cfg(feature = "player-mode")]
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
@@ -140,7 +140,7 @@ fn window_background_material(
     }
 }
 
-impl Plugin for WindowPlugin {
+impl Plugin for WindowLayoutPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "player-mode")]
         load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);

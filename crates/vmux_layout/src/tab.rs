@@ -865,7 +865,7 @@ mod tests {
     fn new_tab_becomes_active_in_single_update() {
         let mut app = build_app();
         app.init_resource::<crate::pane::PendingCursorWarp>()
-            .add_plugins((crate::space::SpacePlugin, crate::stack::StackPlugin));
+            .add_plugins((crate::space::SpaceLayoutPlugin, crate::stack::StackPlugin));
         build_main_and_tab(&mut app);
         let old_tab = app
             .world_mut()
@@ -1016,19 +1016,23 @@ mod tests {
     #[test]
     fn closing_active_rightmost_tab_activates_left_neighbor_not_first() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_message::<CloseTabRequest>()
-            .init_resource::<LastTabCloseAt>()
-            .add_systems(
-                Update,
-                (
-                    handle_tab_commands,
-                    crate::archive::handle_close_tab_requests,
-                )
-                    .chain()
-                    .in_set(ReadAppCommands),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            crate::space::SpaceLayoutPlugin,
+        ))
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .add_message::<CloseTabRequest>()
+        .init_resource::<LastTabCloseAt>()
+        .add_systems(
+            Update,
+            (
+                handle_tab_commands,
+                crate::archive::handle_close_tab_requests,
+            )
+                .chain()
+                .in_set(ReadAppCommands),
+        );
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(MainNode).id();
@@ -1137,11 +1141,15 @@ mod tests {
     #[test]
     fn tab_next_activates_and_reveals_target_in_a_single_update() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, CommandPlugin, crate::space::SpacePlugin))
-            .add_message::<crate::TabLayoutSpawnRequest>()
-            .add_message::<CloseTabRequest>()
-            .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
-            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
+        app.add_plugins((
+            MinimalPlugins,
+            CommandPlugin,
+            crate::space::SpaceLayoutPlugin,
+        ))
+        .add_message::<crate::TabLayoutSpawnRequest>()
+        .add_message::<CloseTabRequest>()
+        .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
+        .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(MainNode).id();

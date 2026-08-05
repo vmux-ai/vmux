@@ -29,40 +29,42 @@ use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
+/// Persists and restores the session: the space/layout world plus bookmarks.
 pub(crate) struct PersistencePlugin;
 
 impl Plugin for PersistencePlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(AutoSave {
-            debounce: Timer::from_seconds(0.5, TimerMode::Once),
-            periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
-            dirty: false,
-        })
-        .init_resource::<crate::boot_status::RestoreComplete>()
-        .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-        .add_message::<vmux_space::SaveSpaceRequest>()
-        .add_observer(save_on_default_event)
-        .add_observer(load_on_default_event)
-        .add_systems(
-            Startup,
-            load_space_on_startup.in_set(LayoutStartupSet::Persistence),
-        )
-        .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
-        .add_observer(mark_space_views_need_rebuild)
-        .add_systems(
-            Update,
-            (rebuild_space_views, clear_space_views_need_rebuild)
-                .chain()
-                .run_if(resource_exists::<SpaceViewsNeedRebuild>),
-        )
-        .add_systems(
-            Update,
-            (
-                (mark_dirty_on_change, auto_save_system).chain(),
-                sync_launch_to_stack,
-                handle_save_space_requests,
-            ),
-        );
+        app.add_plugins(crate::bookmark_persistence::BookmarkPersistencePlugin)
+            .insert_resource(AutoSave {
+                debounce: Timer::from_seconds(0.5, TimerMode::Once),
+                periodic: Timer::from_seconds(60.0, TimerMode::Repeating),
+                dirty: false,
+            })
+            .init_resource::<crate::boot_status::RestoreComplete>()
+            .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
+            .add_message::<vmux_space::SaveSpaceRequest>()
+            .add_observer(save_on_default_event)
+            .add_observer(load_on_default_event)
+            .add_systems(
+                Startup,
+                load_space_on_startup.in_set(LayoutStartupSet::Persistence),
+            )
+            .add_systems(Startup, rebuild_space_views.in_set(LayoutStartupSet::Post))
+            .add_observer(mark_space_views_need_rebuild)
+            .add_systems(
+                Update,
+                (rebuild_space_views, clear_space_views_need_rebuild)
+                    .chain()
+                    .run_if(resource_exists::<SpaceViewsNeedRebuild>),
+            )
+            .add_systems(
+                Update,
+                (
+                    (mark_dirty_on_change, auto_save_system).chain(),
+                    sync_launch_to_stack,
+                    handle_save_space_requests,
+                ),
+            );
     }
 }
 
