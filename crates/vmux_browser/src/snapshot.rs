@@ -1,9 +1,9 @@
+use crate::PendingNavSnapshots;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, SnapshotResult};
-use vmux_agent::{BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot};
-use vmux_browser::PendingNavSnapshots;
 use vmux_core::LastActivatedAt;
+use vmux_core::browser::{BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot};
 use vmux_core::dom_snapshot::{RawSnapshot, shape_snapshot};
 use vmux_core::terminal::{ProcessExited, Terminal};
 use vmux_layout::active_panes::ActivePanes;

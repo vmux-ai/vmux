@@ -45,9 +45,7 @@ impl PluginGroup for DesktopPlugins {
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
             .add(NotificationPlugin)
-            .add(BrowserAutomationPlugin)
-            .add(ScreenshotPlugin)
-            .add(RecordingPlugin)
+            .add(MediaPlugin)
             .add(UpdaterPlugin);
 
         #[cfg(feature = "tray")]
@@ -84,29 +82,11 @@ impl Plugin for NativeWindowPlugin {
     }
 }
 
-/// Serves the agent-driven browser automation requests: page snapshots and scrolling.
-struct BrowserAutomationPlugin;
+/// Captures the app for the agent: still screenshots and screen recordings. Either half can
+/// be compiled out, in which case its requests are rejected rather than silently dropped.
+struct MediaPlugin;
 
-impl Plugin for BrowserAutomationPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                crate::browser_snapshot::drive_pending_nav_snapshots,
-                crate::browser_scroll::run_scrolls,
-                crate::browser_snapshot::start_snapshots,
-                crate::browser_snapshot::shape_snapshot_results,
-            )
-                .chain()
-                .after(WriteAppCommands),
-        );
-    }
-}
-
-/// Serves agent screenshot requests, or rejects them when the feature is compiled out.
-struct ScreenshotPlugin;
-
-impl Plugin for ScreenshotPlugin {
+impl Plugin for MediaPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "screenshots")]
         app.init_resource::<crate::screenshot::ScreenshotBridge>()
@@ -125,14 +105,7 @@ impl Plugin for ScreenshotPlugin {
             Update,
             crate::disabled_features::reject_screenshots.after(WriteAppCommands),
         );
-    }
-}
 
-/// Serves agent screen-recording requests, or rejects them when the feature is compiled out.
-struct RecordingPlugin;
-
-impl Plugin for RecordingPlugin {
-    fn build(&self, app: &mut App) {
         #[cfg(feature = "recording")]
         app.init_resource::<crate::recording::RecordingBridge>()
             .init_resource::<crate::recording::RecordingStatus>()

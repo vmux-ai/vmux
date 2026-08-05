@@ -13,8 +13,6 @@ mod appearance;
 mod bookmark_menu;
 mod bookmark_persistence;
 mod boot_status;
-mod browser_scroll;
-mod browser_snapshot;
 #[cfg(any(feature = "recording", feature = "screenshots"))]
 mod capture_output;
 #[cfg(any(

@@ -38,9 +38,8 @@ use crate::client::cli::codex::CodexStrategy;
 use crate::client::cli::vibe::VibeStrategy;
 use crate::events::{
     AgentChoiceSelected, AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest,
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, CommandOrigin,
-    NavAwaitingSnapshot, RecordStartRequest, RecordStartResponse, RecordStopRequest,
-    RecordStopResponse, RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
+    CommandOrigin, RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse,
+    RecordingInfo, ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
     snapshot_response_to_query_result,
 };
 use crate::session::{
@@ -48,6 +47,9 @@ use crate::session::{
     PendingAgentSession, SessionId, agent_session_dirty_run_condition,
 };
 use crate::strategy::AgentStrategies;
+use vmux_core::browser::{
+    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
+};
 
 pub use vmux_space::cwd::valid_cwd;
 

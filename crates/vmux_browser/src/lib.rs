@@ -6,6 +6,8 @@ mod extensions;
 mod host_focus;
 #[cfg(target_os = "macos")]
 mod host_focus_native;
+mod scroll;
+mod snapshot;
 pub use host_focus::HostFocusIntent;
 
 use bevy::{
@@ -35,7 +37,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
+    LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands, event::CommandBarActionEvent,
+    open::OpenCommand,
 };
 use vmux_core::{
     CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenError,
@@ -380,6 +383,18 @@ impl Plugin for BrowserPlugin {
                     .after(sync_windowed_frames)
                     .after(sync_windowed_command_bar),
             );
+
+        app.add_systems(
+            Update,
+            (
+                snapshot::drive_pending_nav_snapshots,
+                scroll::run_scrolls,
+                snapshot::start_snapshots,
+                snapshot::shape_snapshot_results,
+            )
+                .chain()
+                .after(WriteAppCommands),
+        );
 
         #[cfg(target_os = "macos")]
         app.add_systems(Last, host_focus_native::apply_winit_host_focus);

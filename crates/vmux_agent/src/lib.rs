@@ -72,7 +72,6 @@ pub use client::cli::strategy::CliAgentStrategy;
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue, QueuedPrompt};
 #[cfg(not(target_arch = "wasm32"))]
 pub use events::{
-    BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };
