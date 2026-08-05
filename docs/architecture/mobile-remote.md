@@ -70,6 +70,6 @@ verifies them against the API, and persists them locally.
 The API rejects requests while Remote is off, rejects unauthenticated requests, caps prompt size,
 and listens only on loopback. Resetting the token restarts the daemon and invalidates paired phones.
 
-The production transport will replace direct loopback access with outbound encrypted WebSockets to
-the Rust Cloudflare relay. Direct `wasm-bindgen` bindings cover Worker APIs unavailable in Rust; no
-handwritten TypeScript is required.
+Loopback reaches the Mac from the iOS Simulator but not from a physical phone. Pairing a real
+device needs the endpoint reachable over the network; the desktop reads that endpoint from
+`VMUX_REMOTE_RELAY_URL` and pairs against it instead of loopback when it is set.
