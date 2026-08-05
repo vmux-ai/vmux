@@ -9,8 +9,8 @@ use crate::event::{
     BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent,
     CommandBarPanelCloseEvent, FolderRow, HeaderCommandEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT,
     LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow, StacksHostEvent,
-    TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    PaneTreeEvent, PanelPlacement, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
+    StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent, clamp_panel_placement,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -320,29 +320,199 @@ fn set_command_bar_panel_active(active: bool) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarPanelActiveEvent { active });
 }
 
-/// The floating command bar. Drag and resize are DOM concerns; the host only learns the final
-/// rectangle so it can persist it and mirror it into the pointer-injection regions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PanelDragMode {
+    Move,
+    Resize,
+}
+
+#[derive(Clone, Copy)]
+struct PanelDrag {
+    mode: PanelDragMode,
+    pointer_x: f64,
+    pointer_y: f64,
+    start: PanelPlacement,
+}
+
+fn apply_panel_drag(drag: PanelDrag, pointer_x: f64, pointer_y: f64) -> PanelPlacement {
+    let dx = pointer_x - drag.pointer_x;
+    let dy = pointer_y - drag.pointer_y;
+    match drag.mode {
+        PanelDragMode::Move => PanelPlacement {
+            left: drag.start.left + dx,
+            top: drag.start.top + dy,
+            ..drag.start
+        },
+        PanelDragMode::Resize => PanelPlacement {
+            width: drag.start.width + dx,
+            height: drag.start.height + dy,
+            ..drag.start
+        },
+    }
+}
+
+fn panel_pointer(event: &Event<PointerData>) -> Option<web_sys::PointerEvent> {
+    event.data().downcast::<web_sys::PointerEvent>().cloned()
+}
+
+fn panel_card_rect(pointer: &web_sys::PointerEvent) -> Option<PanelPlacement> {
+    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
+    let card = target.closest("[data-command-bar-card]").ok().flatten()?;
+    let rect = card.get_bounding_client_rect();
+    Some(PanelPlacement {
+        left: rect.left(),
+        top: rect.top(),
+        width: rect.width(),
+        height: rect.height(),
+    })
+}
+
+fn panel_viewport() -> (f64, f64) {
+    let Some(window) = web_sys::window() else {
+        return (f64::MAX, f64::MAX);
+    };
+    let width = window
+        .inner_width()
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or(f64::MAX);
+    let height = window
+        .inner_height()
+        .ok()
+        .and_then(|value| value.as_f64())
+        .unwrap_or(f64::MAX);
+    (width, height)
+}
+
+fn set_panel_pointer_capture(pointer: &web_sys::PointerEvent, capture: bool) {
+    let Some(element) = pointer
+        .current_target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    else {
+        return;
+    };
+    if capture {
+        let _ = element.set_pointer_capture(pointer.pointer_id());
+    } else {
+        let _ = element.release_pointer_capture(pointer.pointer_id());
+    }
+}
+
+fn advance_panel_drag(
+    drag: Signal<Option<PanelDrag>>,
+    mut placement: Signal<Option<PanelPlacement>>,
+    event: Event<PointerData>,
+) {
+    let Some(active) = drag() else {
+        return;
+    };
+    let Some(pointer) = panel_pointer(&event) else {
+        return;
+    };
+    let (viewport_width, viewport_height) = panel_viewport();
+    placement.set(Some(clamp_panel_placement(
+        apply_panel_drag(active, pointer.client_x() as f64, pointer.client_y() as f64),
+        viewport_width,
+        viewport_height,
+    )));
+}
+
+fn finish_panel_drag(mut drag: Signal<Option<PanelDrag>>, event: Event<PointerData>) {
+    if drag().is_none() {
+        return;
+    }
+    if let Some(pointer) = panel_pointer(&event) {
+        set_panel_pointer_capture(&pointer, false);
+    }
+    drag.set(None);
+}
+
+/// The floating command bar.
+///
+/// Drag and resize never leave the page: they move a DOM node, so routing them through the ECS
+/// would put an IPC round trip and a Bevy frame between the pointer and the pixels. Only the
+/// settled rectangle is worth telling the host about.
 #[component]
 fn CommandBarPanel(state: Signal<CommandBarOpenEvent>, open: Signal<bool>) -> Element {
     let mut open = open;
+    let mut placement = use_signal(|| None::<PanelPlacement>);
+    let mut drag = use_signal(|| None::<PanelDrag>);
     use_drop(move || set_command_bar_panel_active(false));
+
+    let mut begin = move |event: Event<PointerData>, mode: PanelDragMode| {
+        event.stop_propagation();
+        let Some(pointer) = panel_pointer(&event) else {
+            return;
+        };
+        let Some(start) = panel_card_rect(&pointer) else {
+            return;
+        };
+        set_panel_pointer_capture(&pointer, true);
+        drag.set(Some(PanelDrag {
+            mode,
+            pointer_x: pointer.client_x() as f64,
+            pointer_y: pointer.client_y() as f64,
+            start,
+        }));
+        placement.set(Some(start));
+    };
+
+    let placed = placement();
+    let card_class = if placed.is_some() {
+        "absolute"
+    } else {
+        "absolute left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2"
+    };
+    let shell_class = if placed.is_some() {
+        "relative flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+    } else {
+        "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl"
+    };
+    let card_style = placed
+        .map(|p| {
+            format!(
+                "left:{}px;top:{}px;width:{}px;height:{}px;",
+                p.left, p.top, p.width, p.height
+            )
+        })
+        .unwrap_or_default();
 
     rsx! {
         div {
             class: "pointer-events-auto fixed inset-0",
             onclick: move |_| open.set(false),
             div {
-                class: "absolute left-1/2 top-[15%] w-[576px] max-w-[calc(100vw-32px)] -translate-x-1/2",
+                class: card_class,
+                style: card_style,
+                "data-command-bar-card": "",
                 onclick: move |e| e.stop_propagation(),
                 div {
                     id: "command-bar-shell",
-                    class: "relative flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-background shadow-2xl",
-                    CommandPalette {
-                        state: ReadSignal::from(state),
-                        variant: PaletteVariant::Modal,
-                        on_close: move |_| open.set(false),
-                        on_dismiss: move |_| open.set(false),
-                        on_activity: move |_| {},
+                    class: shell_class,
+                    div {
+                        class: "flex h-3 w-full shrink-0 cursor-grab items-center justify-center active:cursor-grabbing",
+                        onpointerdown: move |e| begin(e, PanelDragMode::Move),
+                        onpointermove: move |e| advance_panel_drag(drag, placement, e),
+                        onpointerup: move |e| finish_panel_drag(drag, e),
+                        onpointercancel: move |e| finish_panel_drag(drag, e),
+                        div { class: "h-1 w-8 rounded-full bg-border" }
+                    }
+                    div {
+                        class: "flex min-h-0 flex-1 flex-col",
+                        CommandPalette {
+                            state: ReadSignal::from(state),
+                            variant: PaletteVariant::Modal,
+                            on_close: move |_| open.set(false),
+                            on_dismiss: move |_| open.set(false),
+                            on_activity: move |_| {},
+                        }
+                    }
+                    div {
+                        class: "absolute bottom-0 right-0 h-4 w-4 cursor-nwse-resize",
+                        onpointerdown: move |e| begin(e, PanelDragMode::Resize),
+                        onpointermove: move |e| advance_panel_drag(drag, placement, e),
+                        onpointerup: move |e| finish_panel_drag(drag, e),
+                        onpointercancel: move |e| finish_panel_drag(drag, e),
                     }
                 }
             }
