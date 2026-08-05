@@ -777,10 +777,15 @@ pub fn forward_native_layout_click(
     button: bevy::picking::pointer::PointerButton,
     mouse_up: bool,
 ) -> bool {
-    if !native_layout_pointer_is_inside() {
+    // The release has to follow the press that was forwarded, even if the pointer has since left
+    // the hit region — the regions track the cursor, and a press delivered without its release
+    // leaves the DOM latched in a pressed state.
+    let latched = NATIVE_LAYOUT_CLICK_LATCH.load(Ordering::Relaxed);
+    let owed_release = mouse_up && latched;
+    if !native_layout_pointer_is_inside() && !owed_release {
         return false;
     }
-    NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
+    let forwarded = NATIVE_LAYOUT_MOUSE_PRESENTER.with_borrow(|state| {
         let Some(presenter) = state.presenter.as_ref() else {
             return false;
         };
@@ -789,8 +794,16 @@ pub fn forward_native_layout_click(
         }
         presenter.send_click(position_px / state.scale, button, mouse_up);
         true
-    })
+    });
+    if forwarded {
+        NATIVE_LAYOUT_CLICK_LATCH.store(!mouse_up, Ordering::Relaxed);
+    }
+    forwarded
 }
+
+/// Whether a press was handed to the layout webview and still owes it a release.
+#[cfg(target_os = "macos")]
+static NATIVE_LAYOUT_CLICK_LATCH: AtomicBool = AtomicBool::new(false);
 
 /// When the AppKit monitor last handed the layout webview a wheel event.
 ///
@@ -2709,6 +2722,7 @@ fn command_bar_windowed_frame(
     })
 }
 
+#[cfg(target_os = "macos")]
 fn windowed_frames_union(frames: &[WindowedFrameRect]) -> Option<WindowedFrameRect> {
     let first = *frames.first()?;
     let mut left = first.left;

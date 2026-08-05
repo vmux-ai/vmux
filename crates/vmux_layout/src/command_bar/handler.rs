@@ -779,6 +779,11 @@ fn handle_open_command_bar(
     let url_override = request.url_override;
     let space_switch = request.space_switch;
 
+    // `Cmd+K` on an open bar closes it, and that has to run the same cleanup as an explicit
+    // dismiss: a pending `Cmd+T` stack left alive is an orphan tab, and no browser reclaims
+    // `CefKeyboardTarget`.
+    let toggle_closes = should_toggle && !command_bar_toggle_should_open(is_open, space_switch);
+
     let mut active_stack_override = None;
     let canceled_pending_stack = {
         let mut new_stack_ctx = snapshot_params.p2();
@@ -792,7 +797,7 @@ fn handle_open_command_bar(
         }
     }
 
-    if should_dismiss && is_open {
+    if (should_dismiss || toggle_closes) && is_open {
         close_command_bar_panel(layout_e, &mut commands);
         let mut new_stack_ctx = snapshot_params.p2();
         // Discard empty tab created by a previous Cmd+T
@@ -858,13 +863,8 @@ fn handle_open_command_bar(
         should_open = true;
     }
 
-    if should_toggle {
-        if command_bar_toggle_should_open(is_open, space_switch) {
-            should_open = true;
-        } else {
-            close_command_bar_panel(layout_e, &mut commands);
-            return;
-        }
+    if should_toggle && !toggle_closes {
+        should_open = true;
     }
 
     if !should_open {
@@ -2785,6 +2785,39 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
         );
+    }
+
+    /// `Cmd+T` then `Cmd+K` must discard the empty stack the first command staged. Closing by
+    /// toggle used to return before the dismiss cleanup, orphaning the tab and leaving no browser
+    /// holding `CefKeyboardTarget`.
+    #[test]
+    fn toggling_closed_discards_the_stack_a_pending_new_tab_staged() {
+        let mut app = panel_app();
+        let layout = app
+            .world_mut()
+            .spawn((LayoutCef, CommandBarPanelActive))
+            .id();
+        let pending = app.world_mut().spawn_empty().id();
+        app.insert_resource(NewStackContext {
+            stack: Some(pending),
+            previous_stack: None,
+            needs_open: true,
+            dismiss_modal: false,
+        });
+
+        send(
+            &mut app,
+            AppCommand::Browser(BrowserCommand::Bar(BrowserBarCommand::OpenCommandBar)),
+        );
+
+        assert_eq!(
+            emitted_to_page(&app),
+            vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
+        );
+        assert!(app.world().get_entity(pending).is_err());
+        let ctx = app.world().resource::<NewStackContext>();
+        assert!(ctx.stack.is_none());
+        assert!(!ctx.needs_open);
     }
 
     /// A space switch reopens rather than toggles, so the bar survives switching spaces from

@@ -370,21 +370,15 @@ fn panel_card_rect(pointer: &web_sys::PointerEvent) -> Option<PanelPlacement> {
     })
 }
 
-fn panel_viewport() -> (f64, f64) {
-    let Some(window) = web_sys::window() else {
-        return (f64::MAX, f64::MAX);
-    };
-    let width = window
-        .inner_width()
-        .ok()
-        .and_then(|value| value.as_f64())
-        .unwrap_or(f64::MAX);
-    let height = window
-        .inner_height()
-        .ok()
-        .and_then(|value| value.as_f64())
-        .unwrap_or(f64::MAX);
-    (width, height)
+/// The viewport, or `None` when the browser will not report it.
+///
+/// Never substitute a sentinel: `clamp_panel_placement` would then bound the panel against it and
+/// happily let a drag carry the bar off screen, which is the one thing the clamp exists to stop.
+fn panel_viewport() -> Option<(f64, f64)> {
+    let window = web_sys::window()?;
+    let width = window.inner_width().ok()?.as_f64()?;
+    let height = window.inner_height().ok()?.as_f64()?;
+    (width > 0.0 && height > 0.0).then_some((width, height))
 }
 
 fn set_panel_pointer_capture(pointer: &web_sys::PointerEvent, capture: bool) {
@@ -412,7 +406,9 @@ fn advance_panel_drag(
     let Some(pointer) = panel_pointer(&event) else {
         return;
     };
-    let (viewport_width, viewport_height) = panel_viewport();
+    let Some((viewport_width, viewport_height)) = panel_viewport() else {
+        return;
+    };
     placement.set(Some(clamp_panel_placement(
         apply_panel_drag(active, pointer.client_x() as f64, pointer.client_y() as f64),
         viewport_width,

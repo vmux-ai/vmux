@@ -119,3 +119,26 @@ Styling stays untested per repository policy.
 Build the panel behind the existing `OpenCommandBar` command and delete the old surface in the same
 change. Leaving both alive would mean two command bars racing for the same keyboard, which is the
 class of bug this design exists to remove.
+
+## What actually shipped
+
+The panel landed in PR #342; two parts of this design did not, and the deletion list above still
+describes the intended end state rather than the tree.
+
+**The old modal surface is still present.** `window.rs` spawns the `Modal` webview, and
+`command_bar/handler.rs` keeps `prewarm_command_bar_modal`, `reveal_command_bar`,
+`retry_pending_command_bar_open`, `CommandBarSizeEvent`, `CommandBarNativeSize`, and
+`PendingCommandBarReveal`. Only the reveal *predicates* that the rewrite made unreachable were
+deleted.
+
+The keyboard race this section warns about does not occur, because nothing opens the modal any
+more: `handle_open_command_bar` addresses the layout webview alone, so the modal stays
+`Display::None`, never takes `CefKeyboardTarget`, and `CommandBarState::from_modal` reports it
+closed. The surface is inert, not competing. That is what made deferring safe — but it is a
+property of the current call graph, not a guarantee, so the deletion should still land before
+anything else learns to open that modal.
+
+**Placement is not persisted to settings.** It lives in a page signal held above the panel
+component, so it survives close and reopen but not a restart. The `AppSettings` half, and the
+clamp-on-restore for a panel saved on a larger display, are still to do; `clamp_panel_placement`
+already exists and is the piece restore would call.
