@@ -58,5 +58,5 @@ CRDTs do not own:
 1. Project current one-user agent sessions into implicit rooms.
 2. Persist canonical room events outside layout persistence.
 3. Replace deterministic legacy projection IDs with stored event IDs.
-4. Add relay-backed subscriptions and membership.
+4. Add remote subscriptions and membership.
 5. Add a CRDT engine behind the collaborative-document seam.
