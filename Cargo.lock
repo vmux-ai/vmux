@@ -11661,6 +11661,7 @@ dependencies = [
  "time",
  "unic-langid",
  "vmux_core",
+ "vmux_wire",
  "wasm-bindgen",
  "web-sys",
 ]

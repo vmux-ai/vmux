@@ -22,6 +22,7 @@ fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 unic-langid = { workspace = true }
+vmux_wire = { path = "../vmux_wire" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sys-locale = { workspace = true }
