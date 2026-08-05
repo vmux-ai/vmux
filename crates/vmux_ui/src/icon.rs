@@ -1,13 +1,11 @@
-#[cfg(target_arch = "wasm32")]
 pub use wasm::{PageIconView, builtin_icon};
 
-#[cfg(target_arch = "wasm32")]
 mod wasm {
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::type_icon;
     use dioxus::prelude::*;
-    use vmux_core::icon::{BuiltinIcon, PageIcon};
+    use vmux_wire::icon::{BuiltinIcon, PageIcon};
 
     pub fn builtin_icon(icon: BuiltinIcon, class: &str) -> Element {
         match icon {
