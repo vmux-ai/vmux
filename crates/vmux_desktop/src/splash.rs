@@ -257,10 +257,14 @@ mod tests {
     }
 
     #[test]
-    fn splash_plugin_registered_in_lib() {
-        let source = include_str!("lib.rs");
-        assert!(source.contains("splash::SplashPlugin"));
-        assert!(source.contains("mod splash;"));
+    fn splash_plugin_registered_in_desktop_group() {
+        use bevy::app::PluginGroup;
+
+        assert!(
+            crate::plugins::DesktopPlugins
+                .build()
+                .contains::<SplashPlugin>()
+        );
     }
 
     #[test]

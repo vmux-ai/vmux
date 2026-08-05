@@ -41,6 +41,7 @@ mod notify;
 mod os_menu;
 pub mod panic_hook;
 mod persistence;
+pub mod plugins;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
@@ -64,20 +65,11 @@ use bevy::window::{
     WindowPosition, WindowResolution,
 };
 
-use {
-    bookmark_menu::BookmarkMenuPlugin, bookmark_persistence::BookmarkPersistencePlugin,
-    os_menu::OsMenuPlugin, persistence::PersistencePlugin, shortcut::ShortcutPlugin,
-    vmux_browser::BrowserPlugin, vmux_command::CommandPlugin, vmux_command::WriteAppCommands,
-    vmux_core::page::ServerPlugin, vmux_editor::EditorPlugin, vmux_git::GitPlugin,
-    vmux_layout::LayoutPlugin, vmux_layout::cef::LayoutCefPlugin,
-    vmux_service::plugin::ServicePlugin, vmux_setting::SettingsPlugin, vmux_space::SpacePlugin,
-    vmux_terminal::TerminalPlugin,
-};
+use crate::plugins::{DesktopPlugins, FeaturePlugins, VmuxCorePlugins};
+use {vmux_browser::BrowserPlugin, vmux_command::WriteAppCommands, vmux_layout::LayoutPlugin};
 
-use vmux_agent::AgentPlugin;
-
-/// The top-level aggregator: adds `DefaultPlugins`, every feature plugin, and the
-/// macOS-native integrations that make up the desktop app.
+/// The top-level aggregator: adds `DefaultPlugins` and the four plugin groups — core,
+/// layout, features, browser, and desktop — that make up the app.
 pub struct VmuxPlugin;
 
 /// First-launch window size (logical px) when no geometry is persisted in
@@ -124,68 +116,27 @@ impl Plugin for VmuxPlugin {
         };
 
         let winit_settings = background_lifecycle::foreground_winit_settings(false, false, false);
-        app.insert_resource(winit_settings)
-            .add_plugins((
-                vmux_core::CorePlugin,
-                DefaultPlugins
-                    .set(WebAssetPlugin {
-                        silence_startup_warning: true,
-                    })
-                    .set(window_plugin)
-                    .set(bevy::log::LogPlugin {
-                        filter: "bevy_camera_controller=warn".into(),
-                        custom_layer: crate::log_forward::file_log_layer,
-                        ..default()
-                    }),
-                ServerPlugin,
-                SettingsPlugin,
-                CommandPlugin,
-                ShortcutPlugin,
-                OsMenuPlugin,
-                TerminalPlugin,
-                EditorPlugin,
-                GitPlugin,
-                ServicePlugin,
-                SpacePlugin,
-            ))
-            .add_plugins((
-                vmux_team::TeamPlugin,
-                vmux_history::HistoryPlugin,
-                vmux_knowledge::KnowledgePlugin,
-                tools::ToolsPlugin,
-                vmux_agent::AgentChatPagePlugin,
-                vmux_agent::AgentsManagerPlugin,
-                vmux_agent::AgentSetupPlugin,
-                vmux_layout::start::StartPlugin,
-                LayoutCefPlugin,
-                vmux_browser::ExtensionsPlugin,
-                BrowserPlugin,
-                media_permission::MediaPermissionPlugin,
-                lechat_bridge::LeChatBridgePlugin,
-            ))
-            .add_plugins((
-                AgentPlugin,
-                vmux_agent::PageAgentPlugin,
-                vmux_agent::AcpAgentPlugin,
-                PersistencePlugin,
-                BookmarkPersistencePlugin,
-                BookmarkMenuPlugin,
-                LayoutPlugin,
-                background_lifecycle::BackgroundLifecyclePlugin,
-                display::DisplayPlugin,
-                relaunch::RelaunchPlugin,
-                window_state::WindowStatePlugin,
-            ));
-
-        #[cfg(feature = "updater")]
-        app.add_plugins(updater::VmuxUpdater::builder().build().plugin());
+        app.insert_resource(winit_settings).add_plugins((
+            VmuxCorePlugins,
+            DefaultPlugins
+                .set(WebAssetPlugin {
+                    silence_startup_warning: true,
+                })
+                .set(window_plugin)
+                .set(bevy::log::LogPlugin {
+                    filter: "bevy_camera_controller=warn".into(),
+                    custom_layer: crate::log_forward::file_log_layer,
+                    ..default()
+                }),
+            LayoutPlugin,
+            FeaturePlugins,
+            BrowserPlugin,
+            DesktopPlugins,
+        ));
 
         #[cfg(not(feature = "updater"))]
         app.add_systems(Startup, disabled_features::mark_updater_unavailable)
             .add_systems(Update, disabled_features::reject_update_checks);
-
-        #[cfg(feature = "tray")]
-        app.add_plugins(tray::TrayPlugin);
 
         app.init_resource::<boot_status::SplashStatus>()
             .init_resource::<boot_status::RestoreComplete>()
@@ -250,9 +201,6 @@ impl Plugin for VmuxPlugin {
         #[cfg(feature = "native-notifications")]
         app.add_systems(Startup, notify::request_notification_auth)
             .add_systems(Update, notify::post_os_notifications);
-
-        #[cfg(all(target_os = "macos", feature = "native-glass"))]
-        app.add_plugins((glass::GlassPlugin, splash::SplashPlugin));
 
         #[cfg(target_os = "macos")]
         app.add_systems(Last, focus_native::apply_winit_host_focus);

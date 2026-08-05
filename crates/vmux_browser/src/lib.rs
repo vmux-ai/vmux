@@ -3,7 +3,6 @@
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
 mod extensions;
-pub use extensions::ExtensionsPlugin;
 mod host_focus;
 pub use host_focus::HostFocusIntent;
 
@@ -149,6 +148,7 @@ impl Plugin for BrowserPlugin {
         if crate::extensions::broker::extension_conformance_enabled() {
             app.init_resource::<crate::extensions::broker::ConformanceWakeTimer>();
         }
+        app.add_plugins(extensions::ExtensionsPlugin);
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
             manifests
@@ -7535,7 +7535,7 @@ mod tests {
         use bevy::prelude::*;
         use bevy_cef::prelude::WebviewExtendStandardMaterial;
         use vmux_agent::events::AgentCommandRequest;
-        use vmux_agent::plugin::AgentPlugin;
+        use vmux_agent::plugin::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_core::{
             CefPageAttachRequest, LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled,
@@ -7647,7 +7647,11 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -7696,7 +7700,11 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -7862,7 +7870,11 @@ mod tests {
         #[test]
         fn browser_navigate_targets_specific_pane_when_id_provided() {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -7906,7 +7918,11 @@ mod tests {
         #[test]
         fn browser_navigate_with_terminal_url_spawns_terminal_in_focused_pane() {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -7951,7 +7967,11 @@ mod tests {
         #[test]
         fn browser_navigate_with_terminal_url_and_target_pane_uses_target() {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -8000,7 +8020,11 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
@@ -8101,7 +8125,11 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
@@ -8145,7 +8173,11 @@ mod tests {
             use vmux_layout::Browser;
 
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, AgentPlugin));
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                AgentSessionPlugin,
+            ));
             add_consumer_systems(&mut app);
             app.init_resource::<AgentStrategies>()
                 .insert_resource(vmux_agent::plugin::AgentExecutableOverride(

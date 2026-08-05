@@ -78,11 +78,13 @@ impl InteractiveModeMenuItems {
     }
 }
 
+/// Wires the native application menu bar, including the bookmark context menu.
 pub struct OsMenuPlugin;
 
 impl Plugin for OsMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LastMenuCommandAt>()
+        app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
+            .init_resource::<LastMenuCommandAt>()
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
             .init_resource::<CloseMenuItemEnabled>()
