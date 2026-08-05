@@ -12,6 +12,7 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

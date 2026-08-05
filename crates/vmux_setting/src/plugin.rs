@@ -3,7 +3,7 @@ pub mod view;
 
 use bevy::{ecs::message::MessageReader, prelude::*};
 use bevy_cef::prelude::BinEventEmitterPlugin;
-use vmux_command::event::SearchEngine;
+use vmux_command::event::SearchEngineSetting;
 use vmux_command::{ReadAppCommands, WriteAppCommands};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_layout::warm_page::WarmPagePlugin;
@@ -32,7 +32,7 @@ impl Plugin for SettingsPlugin {
         vmux_core::register_host_spawn(app, "settings");
         app.init_resource::<LastSelfWriteHash>()
             .init_resource::<SettingsSaveDebounce>()
-            .init_resource::<SearchEngine>()
+            .init_resource::<SearchEngineSetting>()
             .init_resource::<CurrentUpdateCheckStatus>()
             .add_message::<SettingsWriteRequest>()
             .add_message::<SettingsSaveRequest>()
@@ -95,13 +95,13 @@ impl Plugin for SettingsPlugin {
 
 fn sync_search_engine(
     settings: Option<Res<runtime::AppSettings>>,
-    mut search_engine: ResMut<SearchEngine>,
+    mut search_engine: ResMut<SearchEngineSetting>,
 ) {
     let Some(settings) = settings else {
         return;
     };
-    if *search_engine != settings.browser.search_engine {
-        *search_engine = settings.browser.search_engine;
+    if search_engine.0 != settings.browser.search_engine {
+        search_engine.0 = settings.browser.search_engine;
     }
 }
 
