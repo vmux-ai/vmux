@@ -34,6 +34,7 @@ url = { workspace = true }
 vmux_remote = { path = "../vmux_remote" }
 vmux_wire = { path = "../vmux_wire" }
 vmux_chat = { path = "../vmux_chat" }
+vmux_start = { path = "../vmux_start" }
 vmux_ui = { path = "../vmux_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]

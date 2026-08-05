@@ -21,12 +21,15 @@ use vmux_remote::{
     RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
     replace_inline_media_query,
 };
+use vmux_start::results::CommandBarResultItem;
+use vmux_start::row::ResultRow;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
     PromptComposer, PromptComposerAction, PromptComposerAttachment,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
+use vmux_wire::PageIcon;
 use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
 };
@@ -1086,39 +1089,21 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                 h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground", "Stacks" }
                                 span { class: "rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground", "{props.sessions.len()}" }
                             }
-                            div { class: "flex flex-col gap-2",
+                            div { class: "overflow-hidden rounded-2xl border border-border bg-card",
                                 if props.sessions.is_empty() {
-                                    div { class: "rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground", "No open stacks" }
+                                    div { class: "px-4 py-8 text-center text-sm text-muted-foreground", "No open stacks" }
                                 }
-                                for session in props.sessions.iter().cloned() {
-                                    button {
+                                for (index, session) in props.sessions.iter().cloned().enumerate() {
+                                    ResultRow {
                                         key: "{session.sid}",
-                                        class: "flex w-full items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3.5 text-left shadow-lg shadow-black/10 active:scale-[0.995] active:bg-accent",
-                                        r#type: "button",
-                                        onclick: {
+                                        index,
+                                        item: session_result_item(&session),
+                                        selected: false,
+                                        on_activate: {
                                             let next = session.clone();
                                             move |_| on_open.call(next.clone())
                                         },
-                                        span { class: status_dot(&session.status) }
-                                        div { class: "min-w-0 flex-1",
-                                            div { class: "truncate text-sm font-medium text-card-foreground", "{session.title}" }
-                                            div { class: "mt-1 truncate text-[11px] text-muted-foreground",
-                                                "{session.name} · {session.runtime} · {cwd_name(&session.cwd)}"
-                                                if let Some(model) = session.model.as_ref() {
-                                                    " · {model}"
-                                                }
-                                            }
-                                        }
-                                        svg {
-                                            class: "h-4 w-4 shrink-0 text-muted-foreground",
-                                            view_box: "0 0 24 24",
-                                            fill: "none",
-                                            stroke: "currentColor",
-                                            stroke_width: "2",
-                                            stroke_linecap: "round",
-                                            stroke_linejoin: "round",
-                                            path { d: "m9 18 6-6-6-6" }
-                                        }
+                                        on_hover: move |_| {},
                                     }
                                 }
                             }
@@ -1648,6 +1633,27 @@ fn file_extension_label(name: &str) -> String {
         .map(|extension| extension.to_ascii_uppercase())
         .filter(|extension| !extension.is_empty())
         .unwrap_or_else(|| "FILE".to_string())
+}
+
+/// Present a relayed session as a launcher result, so the phone and the desktop draw the same row.
+fn session_result_item(session: &RemoteSession) -> CommandBarResultItem {
+    let mut location = format!("{} \u{b7} {}", session.runtime, cwd_name(&session.cwd));
+    if let Some(model) = session.model.as_deref() {
+        location.push_str(" \u{b7} ");
+        location.push_str(model);
+    }
+    CommandBarResultItem::Stack {
+        title: if session.title.is_empty() {
+            session.name.clone()
+        } else {
+            session.title.clone()
+        },
+        url: format!("vmux://agent/{}", session.sid),
+        icon: PageIcon::default(),
+        pane_id: 0,
+        tab_index: 0,
+        location,
+    }
 }
 
 fn status_dot(status: &RemoteStatus) -> &'static str {
