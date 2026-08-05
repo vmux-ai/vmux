@@ -4,9 +4,9 @@ use std::sync::LazyLock;
 use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tray_icon::{TrayIcon, TrayIconBuilder};
 
-use crate::background_lifecycle::LifecycleEvent;
 #[cfg(feature = "recording")]
 use crate::recording::{RecordingControl, RecordingStatus};
+use crate::runtime::LifecycleEvent;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::{register_catalog, requested_locale, translate_for};
 

@@ -6,13 +6,14 @@
 
 use bevy::app::PluginGroupBuilder;
 use bevy::prelude::*;
+use bevy_cef::prelude::{BinEventEmitterPlugin, JsEmitEventPlugin};
 use vmux_command::WriteAppCommands;
+use vmux_layout::event::RestartRequestEvent;
 
 use crate::{
-    background_lifecycle::BackgroundLifecyclePlugin, display::DisplayPlugin,
-    lechat_bridge::LeChatBridgePlugin, media_permission::MediaPermissionPlugin,
-    os_menu::OsMenuPlugin, persistence::PersistencePlugin, relaunch::RelaunchPlugin,
-    shortcut::ShortcutPlugin, tools::ToolsPlugin, window_state::WindowStatePlugin,
+    display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
+    persistence::PersistencePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
+    tools::ToolsPlugin, window_state::WindowStatePlugin,
 };
 
 /// Foundation plugins: shared type registration, the page server, command routing, settings,
@@ -30,8 +31,8 @@ impl PluginGroup for VmuxCorePlugins {
     }
 }
 
-/// The OS-facing layer of the desktop app: window and display management, background
-/// lifecycle, the native menu bar and tray, global shortcuts, permissions, and updates.
+/// The OS-facing layer of the desktop app: window and display management, wake and render
+/// pacing, the native menu bar and tray, global shortcuts, permissions, and updates.
 pub struct DesktopPlugins;
 
 impl PluginGroup for DesktopPlugins {
@@ -40,12 +41,10 @@ impl PluginGroup for DesktopPlugins {
         let mut builder = PluginGroupBuilder::start::<Self>()
             .add(WindowStatePlugin)
             .add(DisplayPlugin)
-            .add(BackgroundLifecyclePlugin)
-            .add(RelaunchPlugin)
-            .add(MediaPermissionPlugin)
+            .add(RuntimePlugin)
+            .add(PermissionsPlugin)
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
-            .add(LeChatBridgePlugin)
             .add(NativeFocusPlugin)
             .add(NotificationPlugin)
             .add(BootStatusPlugin)
@@ -171,11 +170,19 @@ impl Plugin for RecordingPlugin {
     }
 }
 
-/// Drives the auto-updater, or reports it as unavailable when the feature is compiled out.
+/// Checks for and installs releases, and restarts the app to apply them. Restart is also
+/// reachable on its own from the debug, extensions, and layout pages.
 struct UpdaterPlugin;
 
 impl Plugin for UpdaterPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
+            &["debug", "extensions", "layout"],
+        ))
+        .add_plugins(JsEmitEventPlugin::<crate::relaunch::PageRelaunchRequest>::default())
+        .add_observer(crate::relaunch::on_restart_request)
+        .add_observer(crate::relaunch::on_page_relaunch);
+
         #[cfg(feature = "updater")]
         app.add_plugins(crate::updater::VmuxUpdater::builder().build().plugin());
 
@@ -185,14 +192,14 @@ impl Plugin for UpdaterPlugin {
     }
 }
 
-/// Posts OS notifications when the platform supports them.
+/// Posts OS notifications when the platform supports them. Authorization is requested by
+/// [`PermissionsPlugin`].
 struct NotificationPlugin;
 
 impl Plugin for NotificationPlugin {
     fn build(&self, _app: &mut App) {
         #[cfg(feature = "native-notifications")]
-        _app.add_systems(Startup, crate::notify::request_notification_auth)
-            .add_systems(Update, crate::notify::post_os_notifications);
+        _app.add_systems(Update, crate::notify::post_os_notifications);
     }
 }
 

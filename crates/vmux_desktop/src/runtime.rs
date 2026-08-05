@@ -192,9 +192,9 @@ pub enum LifecycleEvent {
     QuitVmux,
 }
 
-pub struct BackgroundLifecyclePlugin;
+pub struct RuntimePlugin;
 
-impl Plugin for BackgroundLifecyclePlugin {
+impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<LifecycleEvent>()
             .init_resource::<RenderFrameDemand>()
@@ -1349,12 +1349,12 @@ mod tests {
 
     #[test]
     fn player_frame_demand_runs_in_last() {
-        let source = include_str!("background_lifecycle.rs")
+        let source = include_str!("runtime.rs")
             .split("#[cfg(test)]")
             .next()
             .unwrap_or_default();
         let plugin_build = source
-            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .split("impl Plugin for RuntimePlugin")
             .nth(1)
             .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
             .unwrap_or_default();
@@ -1372,7 +1372,7 @@ mod tests {
 
     #[test]
     fn handle_lifecycle_events_uses_world_for_confirm_dialog() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let exclusive_marker = ["world", ": ", "&mut", " World"].concat();
         assert!(
             source.contains(&exclusive_marker),
@@ -1400,7 +1400,7 @@ mod tests {
                 continue;
             }
             walk_rs_files(&dir, &mut |path, source| {
-                if path.ends_with("background_lifecycle.rs") {
+                if path.ends_with("runtime.rs") {
                     return;
                 }
                 for (lineno, line) in source.lines().enumerate() {
@@ -1525,7 +1525,7 @@ mod tests {
 
     #[test]
     fn native_mouse_motion_publishes_latest_sample_before_waking() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let monitor = source
             .split("fn install_native_mouse_wake_monitor")
             .nth(1)
@@ -1547,7 +1547,7 @@ mod tests {
 
     #[test]
     fn native_mouse_wake_throttle_has_a_trailing_wake() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let throttle = source
             .split("fn native_throttle")
             .nth(1)
@@ -1564,7 +1564,7 @@ mod tests {
 
     #[test]
     fn native_mouse_monitor_tracks_left_button_state() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let monitor = source
             .split("fn install_native_mouse_wake_monitor")
             .nth(1)
@@ -1577,12 +1577,12 @@ mod tests {
 
     #[test]
     fn startup_activates_primary_window_on_macos() {
-        let source = include_str!("background_lifecycle.rs")
+        let source = include_str!("runtime.rs")
             .split("#[cfg(test)]")
             .next()
             .unwrap_or_default();
         let plugin_build = source
-            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .split("impl Plugin for RuntimePlugin")
             .nth(1)
             .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
             .unwrap_or_default();
@@ -1595,7 +1595,7 @@ mod tests {
 
     #[test]
     fn native_mouse_monitor_does_not_wait_for_window_creation() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let monitor = source
             .split("fn install_native_mouse_wake_monitor")
             .nth(1)
@@ -1609,7 +1609,7 @@ mod tests {
 
     #[test]
     fn startup_activation_waits_for_visible_window() {
-        let source = include_str!("background_lifecycle.rs")
+        let source = include_str!("runtime.rs")
             .split("fn activate_primary_window_on_startup")
             .nth(1)
             .and_then(|tail| tail.split("#[cfg(not(target_os = \"macos\"))]").next())
@@ -1620,9 +1620,9 @@ mod tests {
 
     #[test]
     fn app_activation_starts_during_boot() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let plugin_build = source
-            .split("impl Plugin for BackgroundLifecyclePlugin")
+            .split("impl Plugin for RuntimePlugin")
             .nth(1)
             .and_then(|tail| tail.split("#[cfg(target_os = \"macos\")]").next())
             .unwrap_or_default();
@@ -1639,7 +1639,7 @@ mod tests {
 
     #[test]
     fn native_mouse_down_requests_command_bar_dismiss() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
         let monitor = source
             .split("fn install_native_mouse_wake_monitor")
             .nth(1)
@@ -1699,7 +1699,7 @@ mod tests {
 
     #[test]
     fn hide_lifecycle_suspends_osr_webviews() {
-        let source = include_str!("background_lifecycle.rs");
+        let source = include_str!("runtime.rs");
 
         assert!(source.contains("hide_all_osr_webviews(world)"));
         assert!(source.contains("set_all_osr_hidden"));

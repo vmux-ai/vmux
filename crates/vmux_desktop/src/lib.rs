@@ -10,7 +10,6 @@
 )]
 
 mod appearance;
-mod background_lifecycle;
 mod bookmark_menu;
 mod bookmark_persistence;
 mod boot_status;
@@ -31,20 +30,20 @@ mod event_tap;
 mod focus_native;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
-mod lechat_bridge;
 mod log_forward;
-mod media_permission;
 #[cfg(target_os = "macos")]
 mod native_keyboard;
 #[cfg(feature = "native-notifications")]
 mod notify;
 mod os_menu;
 pub mod panic_hook;
+mod permission;
 mod persistence;
 pub mod plugins;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
+mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;
 mod tools;
@@ -115,7 +114,7 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        let winit_settings = background_lifecycle::foreground_winit_settings(false, false, false);
+        let winit_settings = runtime::foreground_winit_settings(false, false, false);
         app.insert_resource(winit_settings).add_plugins((
             VmuxCorePlugins,
             DefaultPlugins

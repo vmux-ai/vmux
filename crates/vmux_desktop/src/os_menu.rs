@@ -435,8 +435,8 @@ fn forward_menu_events(world: &mut World) {
 
 fn handle_quit_request(world: &mut World) {
     world
-        .resource_mut::<Messages<crate::background_lifecycle::LifecycleEvent>>()
-        .write(crate::background_lifecycle::LifecycleEvent::HideAllWindows);
+        .resource_mut::<Messages<crate::runtime::LifecycleEvent>>()
+        .write(crate::runtime::LifecycleEvent::HideAllWindows);
 }
 
 fn remember_stack_close_commands(

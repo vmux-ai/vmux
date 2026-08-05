@@ -9761,7 +9761,6 @@ dependencies = [
  "vmux_history",
  "vmux_knowledge",
  "vmux_layout",
- "vmux_mcp",
  "vmux_server",
  "vmux_service",
  "vmux_setting",
