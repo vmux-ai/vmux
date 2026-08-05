@@ -217,6 +217,26 @@ pub fn prepend_prompt_agents(
     results.splice(at..at, suggestions);
 }
 
+/// The launcher's resting state: every open agent session.
+///
+/// An empty query used to render nothing on the desktop launcher, so the sessions already open
+/// were the one thing it could not show you. Both hosts now open on this list.
+pub fn open_session_results(
+    tabs: &[CommandBarTab],
+    pages: &[CommandBarPage],
+) -> Vec<CommandBarResultItem> {
+    tabs.iter()
+        .map(|tab| CommandBarResultItem::Stack {
+            title: tab.title.clone(),
+            url: tab.url.clone(),
+            icon: stack_icon_for(pages, &tab.url),
+            pane_id: tab.pane_id,
+            tab_index: tab.tab_index as usize,
+            location: tab.location.clone(),
+        })
+        .collect()
+}
+
 pub fn start_page_results(
     pages: &[CommandBarPage],
     work_dirs: &[CommandBarWorkDir],
@@ -1228,5 +1248,37 @@ mod tests {
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::RecentFile { title, .. } if title == "main.rs"
         )));
+    }
+
+    #[test]
+    fn open_sessions_are_the_launcher_resting_state() {
+        let tabs = vec![
+            CommandBarTab {
+                title: "Fun terminal demo".into(),
+                url: "vmux://agent/claude/abc".into(),
+                pane_id: 7,
+                tab_index: 0,
+                is_active: true,
+                location: "space-1 / pane 1".into(),
+            },
+            CommandBarTab {
+                title: "Docs".into(),
+                url: "vmux://agent/codex/def".into(),
+                pane_id: 8,
+                tab_index: 1,
+                is_active: false,
+                location: "space-1 / pane 2".into(),
+            },
+        ];
+
+        let items = open_session_results(&tabs, &[]);
+
+        assert_eq!(items.len(), 2);
+        assert!(matches!(
+            &items[0],
+            CommandBarResultItem::Stack { title, pane_id, .. }
+                if title == "Fun terminal demo" && *pane_id == 7
+        ));
+        assert!(open_session_results(&[], &[]).is_empty());
     }
 }
