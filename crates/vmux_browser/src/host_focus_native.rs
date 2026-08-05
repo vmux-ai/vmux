@@ -1,7 +1,7 @@
+use crate::host_focus::HostFocusIntent;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use vmux_browser::HostFocusIntent;
 
 pub(crate) fn apply_winit_host_focus(
     _non_send: NonSendMarker,

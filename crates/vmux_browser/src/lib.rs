@@ -4,6 +4,8 @@
 
 mod extensions;
 mod host_focus;
+#[cfg(target_os = "macos")]
+mod host_focus_native;
 pub use host_focus::HostFocusIntent;
 
 use bevy::{
@@ -378,6 +380,9 @@ impl Plugin for BrowserPlugin {
                     .after(sync_windowed_frames)
                     .after(sync_windowed_command_bar),
             );
+
+        #[cfg(target_os = "macos")]
+        app.add_systems(Last, host_focus_native::apply_winit_host_focus);
     }
 }
 

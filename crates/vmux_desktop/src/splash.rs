@@ -257,14 +257,11 @@ mod tests {
     }
 
     #[test]
-    fn splash_plugin_registered_in_desktop_group() {
-        use bevy::app::PluginGroup;
+    fn splash_plugin_registered_by_native_window_plugin() {
+        let mut app = App::new();
+        app.add_plugins(crate::plugins::NativeWindowPlugin);
 
-        assert!(
-            crate::plugins::DesktopPlugins
-                .build()
-                .contains::<SplashPlugin>()
-        );
+        assert!(app.is_plugin_added::<SplashPlugin>());
     }
 
     #[test]

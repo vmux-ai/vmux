@@ -39,16 +39,12 @@ impl PluginGroup for DesktopPlugins {
     fn build(self) -> PluginGroupBuilder {
         #[allow(unused_mut)]
         let mut builder = PluginGroupBuilder::start::<Self>()
-            .add(WindowStatePlugin)
-            .add(DisplayPlugin)
+            .add(NativeWindowPlugin)
             .add(RuntimePlugin)
             .add(PermissionsPlugin)
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
-            .add(NativeFocusPlugin)
             .add(NotificationPlugin)
-            .add(BootStatusPlugin)
-            .add(AppearancePlugin)
             .add(BrowserAutomationPlugin)
             .add(ScreenshotPlugin)
             .add(RecordingPlugin)
@@ -59,37 +55,32 @@ impl PluginGroup for DesktopPlugins {
             builder = builder.add(crate::tray::TrayPlugin);
         }
 
-        #[cfg(all(target_os = "macos", feature = "native-glass"))]
-        {
-            builder = builder
-                .add(crate::glass::GlassPlugin)
-                .add(crate::splash::SplashPlugin);
-        }
-
         builder
     }
 }
 
-/// Tracks how far startup has progressed so the splash screen knows when to step aside.
-struct BootStatusPlugin;
+/// The app's native window from launch onward: the light/dark seed and launch splash, boot
+/// phase tracking, the glass backdrop, geometry restore and capture, and relocating the
+/// window when its monitor disappears.
+///
+/// These are one unit rather than several because they already interlock — the splash and the
+/// glass reveal both read `SplashStatus`, the glass reveal is what marks the window geometry
+/// restored, and `WindowStatePlugin` takes over fullscreen when the glass path is compiled out.
+pub(crate) struct NativeWindowPlugin;
 
-impl Plugin for BootStatusPlugin {
+impl Plugin for NativeWindowPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<crate::boot_status::SplashStatus>()
+        app.add_plugins((WindowStatePlugin, DisplayPlugin))
+            .init_resource::<crate::boot_status::SplashStatus>()
             .init_resource::<crate::boot_status::RestoreComplete>()
+            .add_systems(Startup, crate::appearance::seed_system_appearance)
             .add_systems(
                 Update,
                 crate::boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
             );
-    }
-}
 
-/// Seeds the system light/dark appearance before the first frame.
-struct AppearancePlugin;
-
-impl Plugin for AppearancePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, crate::appearance::seed_system_appearance);
+        #[cfg(all(target_os = "macos", feature = "native-glass"))]
+        app.add_plugins((crate::glass::GlassPlugin, crate::splash::SplashPlugin));
     }
 }
 
@@ -200,16 +191,6 @@ impl Plugin for NotificationPlugin {
     fn build(&self, _app: &mut App) {
         #[cfg(feature = "native-notifications")]
         _app.add_systems(Update, crate::notify::post_os_notifications);
-    }
-}
-
-/// Mirrors the layout's focused host into the native window on macOS.
-struct NativeFocusPlugin;
-
-impl Plugin for NativeFocusPlugin {
-    fn build(&self, _app: &mut App) {
-        #[cfg(target_os = "macos")]
-        _app.add_systems(Last, crate::focus_native::apply_winit_host_focus);
     }
 }
 

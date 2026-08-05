@@ -26,8 +26,6 @@ mod disabled_features;
 mod display;
 #[cfg(target_os = "macos")]
 mod event_tap;
-#[cfg(target_os = "macos")]
-mod focus_native;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod log_forward;
