@@ -37,6 +37,14 @@ const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
 #[cfg(target_os = "macos")]
 const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
+/// How often Bevy has to run while the layout webview is being scrolled.
+///
+/// The layout is composited as a native overlay: CEF paints into an `IOSurface` and the presenter
+/// hands it to the `CALayer` on the main dispatch queue, so no Bevy frame stands between a scrolled
+/// pixel and the screen. The app only has to tick often enough to keep the frame-rate governor from
+/// falling back to the idle rate, which it does after `LAYOUT_INPUT_BURST`.
+#[cfg(target_os = "macos")]
+const NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 struct RenderFrameDemand(bool);
@@ -706,17 +714,19 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
                 }
             }
         } else if scroll {
+            let forwarded = location.is_some_and(|(x, y)| {
+                let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
+                vmux_browser::forward_native_layout_scroll(Vec2::new(x, y), delta)
+            });
+            if forwarded {
+                local_wake(NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL);
+                return std::ptr::null_mut();
+            }
             if native_scroll_should_wake(
                 vmux_browser::native_layout_pointer_is_inside(),
                 sampled_over_windowed_page,
             ) {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
-            }
-            if let Some((x, y)) = location {
-                let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
-                if vmux_browser::forward_native_layout_scroll(Vec2::new(x, y), delta) {
-                    return std::ptr::null_mut();
-                }
             }
         } else {
             if let Some(result) = layout_pointer
