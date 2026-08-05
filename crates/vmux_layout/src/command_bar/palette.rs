@@ -10,8 +10,8 @@ use crate::command_bar::keyboard::{
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_results, agent_page_url, filter_results, prepend_prompt_agents,
-    space_switch_results, start_page_results,
+    agent_page_results, agent_page_url, filter_results, open_session_results,
+    prepend_prompt_agents, space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -412,7 +412,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
     } else if is_start && q.trim().is_empty() {
-        Vec::new()
+        open_session_results(&tabs, &pages)
     } else if start_prompt_mode {
         start_page_results(&pages, &work_dirs, &recent_files, &search_engines, &q)
     } else {
