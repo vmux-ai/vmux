@@ -180,6 +180,9 @@ pub fn Page() -> Element {
     // renders. `panel_open` is the entire lifecycle.
     let mut panel_state = use_signal(CommandBarOpenEvent::default);
     let mut panel_open = use_signal(|| false);
+    // Held above the panel so a closed bar does not forget where it was put. Survives reopen, not
+    // an app restart; that needs the host store.
+    let panel_placement = use_signal(|| None::<PanelPlacement>);
     let _panel_listener = use_bin_event_listener::<CommandBarOpenEvent, _>(
         LAYOUT_COMMAND_BAR_OPEN_EVENT,
         move |data| {
@@ -304,7 +307,7 @@ pub fn Page() -> Element {
             // Last child: stacking here is DOM order, so the panel floats above the header and
             // side sheet without a z-index.
             if panel_open() {
-                CommandBarPanel { state: panel_state, open: panel_open }
+                CommandBarPanel { state: panel_state, open: panel_open, placement: panel_placement }
             }
         }
     }
@@ -433,9 +436,13 @@ fn finish_panel_drag(mut drag: Signal<Option<PanelDrag>>, event: Event<PointerDa
 /// would put an IPC round trip and a Bevy frame between the pointer and the pixels. Only the
 /// settled rectangle is worth telling the host about.
 #[component]
-fn CommandBarPanel(state: Signal<CommandBarOpenEvent>, open: Signal<bool>) -> Element {
+fn CommandBarPanel(
+    state: Signal<CommandBarOpenEvent>,
+    open: Signal<bool>,
+    placement: Signal<Option<PanelPlacement>>,
+) -> Element {
     let mut open = open;
-    let mut placement = use_signal(|| None::<PanelPlacement>);
+    let mut placement = placement;
     let mut drag = use_signal(|| None::<PanelDrag>);
     use_drop(move || set_command_bar_panel_active(false));
 
