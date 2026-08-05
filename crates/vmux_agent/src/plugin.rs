@@ -1807,6 +1807,45 @@ pub(crate) fn on_tidy_action(
     }
 }
 
+/// Flatten the launcher's agent registry into the shape a remote client can consume.
+///
+/// ACP agents first, then CLI providers, matching the order the desktop launcher lists them.
+#[cfg(not(target_arch = "wasm32"))]
+fn remote_agents(
+    snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
+) -> Vec<vmux_remote::RemoteAgent> {
+    snapshot
+        .acp
+        .iter()
+        .map(|agent| vmux_remote::RemoteAgent {
+            id: agent.id.clone(),
+            name: agent.name.clone(),
+            url: agent.url.clone(),
+            icon: agent.icon.clone(),
+        })
+        .chain(
+            snapshot
+                .providers
+                .iter()
+                .map(|agent| vmux_remote::RemoteAgent {
+                    id: agent.id.clone(),
+                    name: format!("{} (CLI)", agent.name),
+                    url: agent.url.clone(),
+                    icon: agent.icon.clone(),
+                }),
+        )
+        .collect()
+}
+
+/// Focus and the agent registry, bundled because `handle_agent_commands` is at Bevy's
+/// system-parameter limit.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(bevy::ecs::system::SystemParam)]
+struct DesktopContext<'w> {
+    focus: Res<'w, FocusedStack>,
+    agents: Res<'w, vmux_command::snapshot::CommandBarAgentsSnapshot>,
+}
+
 fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
@@ -1822,7 +1861,7 @@ fn handle_agent_commands(
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
     mut terminal_stack_spawn_writer: MessageWriter<TerminalStackSpawnRequest>,
     mut process_stack_spawn_writer: MessageWriter<ProcessStackSpawnRequest>,
-    focus: Res<FocusedStack>,
+    desktop: DesktopContext,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     lookups: AgentLookups,
     mut sp: SettingsParams,
@@ -1907,7 +1946,7 @@ fn handle_agent_commands(
                 command,
                 args,
                 env,
-            } => match focus.pane.filter(|pane| panes.contains(*pane)) {
+            } => match desktop.focus.pane.filter(|pane| panes.contains(*pane)) {
                 None => AgentCommandResult::Error("no active pane".to_string()),
                 Some(pane) => match valid_cwd(cwd) {
                     Err(message) => AgentCommandResult::Error(message),
@@ -2075,7 +2114,7 @@ fn handle_agent_commands(
             ServiceAgentCommand::UpdateLayout { layout } => {
                 let mut layout = layout.clone();
                 if origin_is_agent(&request.origin) {
-                    preserve_current_focus_in_layout_snapshot(&mut layout, &focus);
+                    preserve_current_focus_in_layout_snapshot(&mut layout, &desktop.focus);
                 }
                 writers
                     .layout_apply
@@ -2159,11 +2198,18 @@ fn handle_agent_commands(
                     None => AgentCommandResult::Error("invalid bookmark command".to_string()),
                 }
             }
-            ServiceAgentCommand::NewAgentChat { prompt } => {
+            ServiceAgentCommand::NewAgentChat { prompt, agent_url } => {
                 stack_writers.2.write(vmux_layout::NewAgentChatRequest {
                     prompt: prompt.clone(),
+                    agent_url: agent_url.clone(),
                 });
                 AgentCommandResult::Ok
+            }
+            ServiceAgentCommand::ListAgents => {
+                match serde_json::to_string(&remote_agents(&desktop.agents)) {
+                    Ok(json) => AgentCommandResult::Text(json),
+                    Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
+                }
             }
             ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }

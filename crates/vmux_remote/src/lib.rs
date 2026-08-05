@@ -414,6 +414,19 @@ pub struct PromptRequest {
 pub struct NewChatRequest {
     pub client_op_id: ClientOpId,
     pub text: String,
+    /// Launch URL of the agent to start; omitted means the desktop default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_url: Option<String>,
+}
+
+/// An installed agent the phone can start a chat with.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RemoteAgent {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub icon: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -503,10 +516,12 @@ mod tests {
         let request = NewChatRequest {
             client_op_id: ClientOpId::new("op-1"),
             text: "start here".to_string(),
+            agent_url: Some("vmux://agent/claude".to_string()),
         };
         let json = serde_json::to_string(&request).unwrap();
         let back: NewChatRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.text, request.text);
+        assert_eq!(back.agent_url, request.agent_url);
     }
 
     #[test]

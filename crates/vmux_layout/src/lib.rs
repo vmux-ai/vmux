@@ -221,6 +221,8 @@ pub struct TabLayoutSpawnRequest {
 #[derive(Message, Clone, Debug)]
 pub struct NewAgentChatRequest {
     pub prompt: String,
+    /// Launch URL of the agent to start; `None` falls back to the first installed one.
+    pub agent_url: Option<String>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
