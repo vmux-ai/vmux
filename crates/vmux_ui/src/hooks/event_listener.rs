@@ -19,6 +19,9 @@ pub enum EventListenerError {
     SerializePayload,
     /// No [`crate::hooks::transport::PageHost`] installed on a target with no default.
     NoHost,
+    /// The installed host has no route for that event id. Unlike the other variants this is not a
+    /// fault: a host that can only serve part of a page says so rather than silently succeeding.
+    Unsupported,
 }
 
 impl fmt::Display for EventListenerError {
@@ -33,6 +36,7 @@ impl fmt::Display for EventListenerError {
             Self::EmitNotCallable => "`cef.binEmit` is not a function",
             Self::SerializePayload => "failed to serialize emit payload",
             Self::NoHost => "no page host installed",
+            Self::Unsupported => "the host has no route for this event",
         })
     }
 }

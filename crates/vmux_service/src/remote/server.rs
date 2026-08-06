@@ -123,6 +123,7 @@ pub fn spawn(
 fn router(state: RemoteState) -> Router {
     let api = Router::new()
         .route("/api/agents", get(list_agents))
+        .route("/api/team", get(list_team))
         .route("/api/sessions", get(list_sessions))
         .route("/api/sessions/{sid}/events", get(session_events))
         .route("/api/sessions/{sid}/media", get(list_media))
@@ -212,6 +213,23 @@ async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::
             crate::protocol::AgentRequestId::new(),
             None,
             crate::protocol::AgentCommand::ListAgents,
+        )
+        .await;
+    let Ok(crate::protocol::AgentCommandResult::Text(json)) = result else {
+        return Json(Vec::new());
+    };
+    Json(serde_json::from_str(&json).unwrap_or_default())
+}
+
+/// The active space's team roster, so a remote client can render the same team page the desktop
+/// does. Assembled from ECS state, hence the broker round-trip.
+async fn list_team(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::team::TeamMemberRow>> {
+    let result = state
+        .broker
+        .command(
+            crate::protocol::AgentRequestId::new(),
+            None,
+            crate::protocol::AgentCommand::ListTeam,
         )
         .await;
     let Ok(crate::protocol::AgentCommandResult::Text(json)) = result else {

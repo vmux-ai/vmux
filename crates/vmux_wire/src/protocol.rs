@@ -300,6 +300,10 @@ pub enum AgentCommand {
     /// Ask the GUI for the installed-agent list. Answered as JSON in
     /// [`AgentCommandResult::Text`], because only the GUI holds the registry.
     ListAgents,
+    /// Ask the GUI for the active space's team roster. Answered as JSON in
+    /// [`AgentCommandResult::Text`]; the roster is assembled from ECS state, and the daemon
+    /// serving the remote API runs in a different process from the ECS that holds it.
+    ListTeam,
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
