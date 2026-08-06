@@ -29,6 +29,8 @@ pub mod hooks;
 
 pub mod components;
 
+pub mod platform;
+
 pub mod util;
 
 pub mod dioxus_ext {

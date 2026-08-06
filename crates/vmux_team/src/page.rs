@@ -1,17 +1,14 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("team-title"));
-    }
     let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let members = team().members;
@@ -28,6 +25,7 @@ pub fn Page() -> Element {
     };
 
     rsx! {
+        document::Title { {translate("team-title")} }
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
             header { class: "flex items-center justify-between border-b border-border px-5 py-4",
