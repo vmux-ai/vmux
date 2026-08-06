@@ -11,12 +11,6 @@ pub(crate) enum SelectorMode<'a> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum MenuDirection {
-    Next,
-    Previous,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PromptHistoryDirection {
     Older,
     Newer,
@@ -134,35 +128,6 @@ pub(crate) fn resume_menu_state(
         ResumeMenuState::NoMatch
     } else {
         ResumeMenuState::Results
-    }
-}
-
-pub(crate) fn menu_direction(key: &str, ctrl: bool) -> Option<MenuDirection> {
-    match key {
-        "ArrowDown" if !ctrl => Some(MenuDirection::Next),
-        "ArrowUp" if !ctrl => Some(MenuDirection::Previous),
-        "n" | "N" if ctrl => Some(MenuDirection::Next),
-        "p" | "P" if ctrl => Some(MenuDirection::Previous),
-        _ => None,
-    }
-}
-
-pub(crate) fn choice_number_index(key: &str, len: usize) -> Option<usize> {
-    let number = key.parse::<usize>().ok()?;
-    if number == 0 || number > len {
-        None
-    } else {
-        Some(number - 1)
-    }
-}
-
-pub(crate) fn move_selection(current: usize, len: usize, direction: MenuDirection) -> usize {
-    if len == 0 {
-        return 0;
-    }
-    match direction {
-        MenuDirection::Next => (current + 1) % len,
-        MenuDirection::Previous => (current + len - 1) % len,
     }
 }
 
@@ -464,21 +429,6 @@ mod tests {
         assert!(!should_fetch_resume("/", &commands));
         assert!(!should_fetch_resume("/c", &commands));
         assert!(!should_fetch_resume("hello", &commands));
-    }
-
-    #[test]
-    fn menu_navigation_wraps_and_empty_stays_zero() {
-        assert_eq!(move_selection(0, 3, MenuDirection::Previous), 2);
-        assert_eq!(move_selection(2, 3, MenuDirection::Next), 0);
-        assert_eq!(move_selection(7, 0, MenuDirection::Next), 0);
-        assert_eq!(menu_direction("n", true), Some(MenuDirection::Next));
-        assert_eq!(menu_direction("p", true), Some(MenuDirection::Previous));
-        assert_eq!(menu_direction("n", false), None);
-        assert_eq!(menu_direction("ArrowDown", true), None);
-        assert_eq!(choice_number_index("1", 3), Some(0));
-        assert_eq!(choice_number_index("3", 3), Some(2));
-        assert_eq!(choice_number_index("0", 3), None);
-        assert_eq!(choice_number_index("4", 3), None);
     }
 
     #[test]

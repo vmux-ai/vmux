@@ -6,6 +6,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod cef_host;
 pub mod event_listener;
+pub mod list_nav;
 pub mod transport;
 mod use_theme;
 
@@ -18,5 +19,9 @@ pub use event_listener::{
 #[cfg(target_arch = "wasm32")]
 pub use event_listener::decode_bin_host_emit_js;
 
+pub use list_nav::{
+    ListKey, MenuDirection, choice_number_index, list_key, menu_direction, move_selection,
+    use_selection_visible,
+};
 pub use transport::{PageHost, install_host};
 pub use use_theme::use_theme;

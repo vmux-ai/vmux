@@ -2,10 +2,9 @@
 
 use crate::chat_page::composer::{
     PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, approval_decision_for_index,
-    chat_page_title, choice_number_index, edit_prompt, filter_models, filter_sessions,
-    is_handoff_boundary, menu_direction, move_prompt_history, move_selection,
-    prompt_history_direction, resume_menu_state, selector_mode, should_clear_draft_on_escape,
-    should_fetch_resume,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
+    move_prompt_history, prompt_history_direction, resume_menu_state, selector_mode,
+    should_clear_draft_on_escape, should_fetch_resume,
 };
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
@@ -45,7 +44,10 @@ use vmux_wire::prompt_media::{
 
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{
+    choice_number_index, menu_direction, move_selection, try_cef_bin_emit_rkyv,
+    use_bin_event_listener, use_selection_visible, use_theme,
+};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
@@ -168,26 +170,6 @@ fn prompt_caret() -> Option<(u32, u32)> {
 fn prompt_caret() -> Option<(u32, u32)> {
     Some((0, 0))
 }
-
-/// Keep the highlighted row of an open selector in view as the arrow keys move through it.
-///
-/// Reaching the row needs the DOM. Off CEF this does nothing: the affordance follows keyboard
-/// navigation, which a touch host does not have.
-#[cfg(target_arch = "wasm32")]
-fn scroll_selector_item_into_view(item_id: &str) {
-    let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(item_id))
-    else {
-        return;
-    };
-    let options = web_sys::ScrollIntoViewOptions::new();
-    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    element.scroll_into_view_with_scroll_into_view_options(&options);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn scroll_selector_item_into_view(_item_id: &str) {}
 
 fn hex_accent_rgb(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.strip_prefix('#')?;
@@ -1066,8 +1048,7 @@ pub fn Page(
         focus_prompt_end(PROMPT_INPUT_ID);
     };
 
-    use_effect(move || {
-        let selected = menu_sel();
+    use_selection_visible(menu_sel, move |selected| {
         let media_open = {
             let draft = draft.read();
             inline_media_query(&draft).is_some()
@@ -1075,15 +1056,13 @@ pub fn Page(
         let _ = sessions.read().len();
         let _ = models.read().len();
         let _ = media_entries.read().len();
-        let choice_open = !choice_options.read().is_empty();
-        let item_id = if choice_open {
+        if !choice_options.read().is_empty() {
             format!("agent-choice-item-{selected}")
         } else if media_open {
             format!("prompt-media-item-{selected}")
         } else {
             format!("agent-selector-item-{selected}")
-        };
-        scroll_selector_item_into_view(&item_id);
+        }
     });
 
     let context = composer_context();
