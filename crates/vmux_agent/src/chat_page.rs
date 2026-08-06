@@ -8,6 +8,8 @@ pub mod event;
 
 #[cfg(target_arch = "wasm32")]
 pub mod page;
+#[cfg(target_arch = "wasm32")]
+mod scroll;
 
 #[cfg(not(target_arch = "wasm32"))]
 use base64::Engine;
