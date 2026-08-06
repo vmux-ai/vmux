@@ -59,9 +59,11 @@ impl PageHost for MobileHost {
                             last = Some(members);
                         }
                     }
-                    // Pairing is gone; another poll will not fix it.
-                    Err(crate::ApiError::Unauthorized) => return,
-                    Err(_) => {}
+                    // Pairing is gone, or the route is not there — a relay too old to carry it
+                    // answers the same way. Neither is fixed by asking again every few seconds.
+                    Err(crate::ApiError::Unauthorized | crate::ApiError::NotFound) => return,
+                    // Anything else is likely the network, which does heal.
+                    Err(crate::ApiError::Message(_)) => {}
                 }
                 sleep_ms(POLL_INTERVAL_MS).await;
             }

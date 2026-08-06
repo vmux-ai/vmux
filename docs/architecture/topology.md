@@ -102,8 +102,17 @@ separate processes — so anything ECS-derived costs a request into Bevy and bac
 | --- | --- | --- |
 | page ↔ Bevy (desktop) | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope |
 | Bevy ↔ daemon | unix socket | rkyv-framed `ClientMessage` / `ServiceMessage` |
-| phone ↔ daemon | HTTP + SSE | JSON, re-encoded to rkyv by `MobileHost` before the page sees it |
+| phone ↔ desktop | HTTP + SSE | JSON, re-encoded to rkyv by `MobileHost` before the page sees it |
 | desktop ↔ relay | HTTPS long-poll | typed `DesktopCommandKind` / `DesktopResponse` |
+
+The phone never chooses between the relay and a direct connection. It appends paths to whatever
+`base_url` pairing gave it, and pairing sets that to `{relay}/r/{device_id}` when a relay is
+configured — which it is by default. Direct is the exception now: loopback for the Simulator, or a
+LAN address.
+
+That makes `DesktopCommandKind` the real API surface for a phone off the network. Every route the
+relay carries exists as a variant on both sides, so an endpoint added to the daemon is reachable
+directly but invisible through the relay until a matching variant lands with it.
 
 The asymmetry in the last two rows is the open question: rkyv everywhere would remove a re-encode,
 but the phone ships separately from the desktop and rkyv's archived layout is not

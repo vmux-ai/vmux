@@ -95,7 +95,20 @@ struct Api {
 
 enum ApiError {
     Unauthorized,
+    /// The endpoint is not there. A relay too old to carry this route answers the same way, and
+    /// neither case is fixed by asking again.
+    NotFound,
     Message(String),
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unauthorized => f.write_str("Pairing expired. Scan the QR on your Mac again."),
+            Self::NotFound => f.write_str("Your Mac does not offer this yet."),
+            Self::Message(message) => f.write_str(message),
+        }
+    }
 }
 
 impl Api {
@@ -125,6 +138,9 @@ impl Api {
             .map_err(|error| ApiError::Message(error.to_string()))?;
         if response.status() == StatusCode::UNAUTHORIZED {
             return Err(ApiError::Unauthorized);
+        }
+        if response.status() == StatusCode::NOT_FOUND {
+            return Err(ApiError::NotFound);
         }
         if !response.status().is_success() {
             return Err(ApiError::Message(format!(
@@ -177,6 +193,8 @@ impl Api {
             .map_err(|error| ApiError::Message(error.to_string()))?;
         if response.status() == StatusCode::UNAUTHORIZED {
             Err(ApiError::Unauthorized)
+        } else if response.status() == StatusCode::NOT_FOUND {
+            Err(ApiError::NotFound)
         } else if response.status().is_success() {
             Ok(response)
         } else {
@@ -389,7 +407,7 @@ fn start_new_chat(
             Err(ApiError::Unauthorized) => {
                 error.set("Pairing expired. Pair with the Mac again.".to_string());
             }
-            Err(ApiError::Message(message)) => error.set(message),
+            Err(other) => error.set(other.to_string()),
         }
         creating.set(false);
     });
@@ -543,8 +561,8 @@ fn App() -> Element {
                 error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                 auth.set(AuthState::Unpaired);
             }
-            Err(ApiError::Message(message)) => {
-                error.set(message);
+            Err(other) => {
+                error.set(other.to_string());
                 auth.set(AuthState::Unpaired);
             }
         }
@@ -610,8 +628,8 @@ fn App() -> Element {
                     error.set("Pairing token was rejected.".to_string());
                     auth.set(AuthState::Unpaired);
                 }
-                Err(ApiError::Message(message)) => {
-                    error.set(message);
+                Err(other) => {
+                    error.set(other.to_string());
                     auth.set(AuthState::Unpaired);
                 }
             }
@@ -638,7 +656,7 @@ fn App() -> Element {
                     error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                     auth.set(AuthState::Unpaired);
                 }
-                Err(ApiError::Message(_)) => {}
+                Err(_) => {}
             }
         }
     });
@@ -1466,7 +1484,8 @@ fn open_session(
             }
             let response = match api.events(&sid).await {
                 Ok(response) => response,
-                Err(ApiError::Unauthorized) => return,
+                // Pairing is gone, or the stream route is — reconnecting brings back neither.
+                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
                 Err(ApiError::Message(_)) => {
                     connected.set(false);
                     tokio::time::sleep(Duration::from_secs(2)).await;

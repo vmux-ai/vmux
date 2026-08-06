@@ -203,39 +203,41 @@ fn request_token(headers: &HeaderMap) -> Option<&str> {
         .map(str::trim)
 }
 
-/// The installed agents, so a remote client can offer the same launcher rows the desktop does.
+/// Ask the GUI for something only it holds, answered as JSON.
 ///
-/// Only the GUI holds the registry, so this is a broker round-trip rather than local state.
-async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::RemoteAgent>> {
-    let result = state
+/// The daemon and the ECS are separate processes, so anything derived from ECS state costs a
+/// round-trip rather than a read.
+async fn broker_json(
+    state: &RemoteState,
+    command: crate::protocol::AgentCommand,
+) -> Option<String> {
+    match state
         .broker
-        .command(
-            crate::protocol::AgentRequestId::new(),
-            None,
-            crate::protocol::AgentCommand::ListAgents,
-        )
-        .await;
-    let Ok(crate::protocol::AgentCommandResult::Text(json)) = result else {
-        return Json(Vec::new());
-    };
-    Json(serde_json::from_str(&json).unwrap_or_default())
+        .command(crate::protocol::AgentRequestId::new(), None, command)
+        .await
+    {
+        Ok(crate::protocol::AgentCommandResult::Text(json)) => Some(json),
+        _ => None,
+    }
+}
+
+/// The installed agents, so a remote client can offer the same launcher rows the desktop does.
+async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::RemoteAgent>> {
+    let json = broker_json(&state, crate::protocol::AgentCommand::ListAgents).await;
+    Json(
+        json.and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
+    )
 }
 
 /// The active space's team roster, so a remote client can render the same team page the desktop
-/// does. Assembled from ECS state, hence the broker round-trip.
+/// does.
 async fn list_team(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::team::TeamMemberRow>> {
-    let result = state
-        .broker
-        .command(
-            crate::protocol::AgentRequestId::new(),
-            None,
-            crate::protocol::AgentCommand::ListTeam,
-        )
-        .await;
-    let Ok(crate::protocol::AgentCommandResult::Text(json)) = result else {
-        return Json(Vec::new());
-    };
-    Json(serde_json::from_str(&json).unwrap_or_default())
+    let json = broker_json(&state, crate::protocol::AgentCommand::ListTeam).await;
+    Json(
+        json.and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default(),
+    )
 }
 
 async fn list_sessions(State(state): State<RemoteState>) -> Json<Vec<RemoteSession>> {
