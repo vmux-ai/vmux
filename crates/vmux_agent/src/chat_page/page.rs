@@ -43,7 +43,6 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::{JsCast, closure::Closure};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
 
@@ -299,151 +298,6 @@ fn select_media_entry(
     focus_prompt_end(PROMPT_INPUT_ID);
 }
 
-fn dispatch_input_event(textarea: &web_sys::HtmlTextAreaElement) {
-    let init = web_sys::EventInit::new();
-    init.set_bubbles(true);
-    if let Ok(event) = web_sys::Event::new_with_event_init_dict("input", &init) {
-        let _ = textarea.dispatch_event(&event);
-    }
-}
-
-fn dispatch_keyboard_event(
-    textarea: &web_sys::HtmlTextAreaElement,
-    source: &web_sys::KeyboardEvent,
-) {
-    let init = web_sys::KeyboardEventInit::new();
-    init.set_bubbles(true);
-    init.set_key(&source.key());
-    init.set_code(&source.code());
-    init.set_ctrl_key(source.ctrl_key());
-    init.set_shift_key(source.shift_key());
-    init.set_alt_key(source.alt_key());
-    init.set_meta_key(source.meta_key());
-    if let Ok(event) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
-        let _ = textarea.dispatch_event(&event);
-    }
-}
-
-fn install_global_prompt_input(
-    draft: Signal<String>,
-    slash_cmds: Signal<Vec<SlashCommandEntry>>,
-    choice_options: Signal<Vec<String>>,
-    mut approval: Signal<Option<(String, String, String)>>,
-    mut approval_sel: Signal<usize>,
-) {
-    let closure = Closure::wrap(Box::new(move |event: web_sys::KeyboardEvent| {
-        let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID) else {
-            return;
-        };
-        let prompt_focused = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.active_element())
-            .is_some_and(|element| element.id() == PROMPT_INPUT_ID);
-        if prompt_focused {
-            return;
-        }
-
-        let selector_open = {
-            let draft_value = draft.peek();
-            inline_media_query(&draft_value).is_some()
-                || match selector_mode(&draft_value) {
-                    SelectorMode::Resume(_) => true,
-                    SelectorMode::Models(_) => true,
-                    SelectorMode::Commands(query) => {
-                        let query = query.to_lowercase();
-                        slash_cmds
-                            .peek()
-                            .iter()
-                            .any(|command| command.name.starts_with(&query))
-                    }
-                    SelectorMode::None => false,
-                }
-        };
-        let key = event.key();
-        let active_approval = approval.peek().clone();
-        let approval_open = active_approval.is_some();
-        let choice_len = choice_options.peek().len();
-        let choice_open = choice_len > 0;
-        let direction = if event.meta_key() || event.alt_key() {
-            None
-        } else {
-            menu_direction(&key, event.ctrl_key())
-        };
-        let plain_invoke_or_close = !event.meta_key()
-            && !event.ctrl_key()
-            && !event.alt_key()
-            && matches!(key.as_str(), "Enter" | "Escape");
-        let selector_key = direction.is_some() || plain_invoke_or_close;
-        let choice_key = direction.is_some()
-            || (!event.meta_key()
-                && !event.ctrl_key()
-                && !event.alt_key()
-                && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
-        let approval_key = direction.is_some()
-            || (!event.meta_key()
-                && !event.ctrl_key()
-                && !event.alt_key()
-                && (key == "Enter" || choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some()));
-        if approval_open && approval_key {
-            event.prevent_default();
-            event.stop_propagation();
-            if let Some(direction) = direction {
-                approval_sel.set(move_selection(
-                    approval_sel(),
-                    APPROVAL_OPTION_COUNT,
-                    direction,
-                ));
-            } else if let Some((call_id, _, _)) = active_approval {
-                let index =
-                    choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
-                if let Some(decision) = approval_decision_for_index(index)
-                    && send_approval(call_id, decision)
-                {
-                    approval.set(None);
-                    approval_sel.set(0);
-                }
-            }
-            return;
-        }
-        if (choice_open && choice_key) || direction.is_some() || (selector_open && selector_key) {
-            event.prevent_default();
-            event.stop_propagation();
-            let _ = textarea.focus();
-            dispatch_keyboard_event(&textarea, &event);
-            return;
-        }
-
-        if event.meta_key() || event.ctrl_key() || event.alt_key() {
-            return;
-        }
-        let edit = match key.as_str() {
-            "Backspace" => PromptEdit::Backspace,
-            "Delete" => PromptEdit::Delete,
-            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
-            _ => return,
-        };
-        event.prevent_default();
-        event.stop_propagation();
-        let start = textarea
-            .selection_start()
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| textarea.value().encode_utf16().count() as u32);
-        let end = textarea.selection_end().ok().flatten().unwrap_or(start);
-        let (value, caret) = edit_prompt(&textarea.value(), start, end, edit);
-        let _ = textarea.focus();
-        textarea.set_value(&value);
-        let _ = textarea.set_selection_range(caret, caret);
-        dispatch_input_event(&textarea);
-    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-
-    if let Some(window) = web_sys::window() {
-        let _ =
-            window.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
-    }
-    closure.forget();
-}
-
 #[component]
 pub fn Page(
     #[props(default)] agent_override: Option<String>,
@@ -503,9 +357,6 @@ pub fn Page(
     let activity_counts = use_memo(move || composer_activity_counts(&items.read()));
     let latest_tool = use_memo(move || latest_tool_location(&items.read()));
 
-    use_effect(move || {
-        install_global_prompt_input(draft, slash_cmds, choice_options, approval, approval_sel)
-    });
     use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
 
     use_effect(move || {
@@ -835,6 +686,10 @@ pub fn Page(
     let prompt_action_enabled = !choice_pending
         && (prompt_streaming || !draft_val.trim().is_empty() || !attachments.read().is_empty());
     let prompt_keydown = move |e: KeyboardEvent| {
+        // The page root also listens, to catch typing aimed elsewhere. Stopping here is what
+        // tells it this keystroke already had a home — and it is why composition can never
+        // reach the root, since an IME only ever composes into a focused field.
+        e.stop_propagation();
         let active_approval = { approval.peek().clone() };
         if let Some((call_id, _, _)) = active_approval {
             let key = e.key().to_string();
@@ -1078,6 +933,74 @@ pub fn Page(
             e.prevent_default();
             let _ = try_cef_bin_emit_rkyv(&ChatCancel);
         }
+    };
+
+    // Keys that arrive with the prompt unfocused. The composer stops propagation while it has
+    // focus, so anything reaching the page root was aimed somewhere else — the transcript, a
+    // button — and the affordance is that typing still goes to the prompt.
+    let root_keydown = move |e: KeyboardEvent| {
+        let key = e.key().to_string();
+        let modifiers = e.modifiers();
+        let selector_open = {
+            let draft_value = draft.peek();
+            inline_media_query(&draft_value).is_some()
+                || match selector_mode(&draft_value) {
+                    SelectorMode::Resume(_) | SelectorMode::Models(_) => true,
+                    SelectorMode::Commands(query) => {
+                        let query = query.to_lowercase();
+                        slash_cmds
+                            .peek()
+                            .iter()
+                            .any(|command| command.name.starts_with(&query))
+                    }
+                    SelectorMode::None => false,
+                }
+        };
+        let approval_open = approval.peek().is_some();
+        let choice_len = choice_options.peek().len();
+        let unmodified = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
+        let direction = if modifiers.meta() || modifiers.alt() {
+            None
+        } else {
+            menu_direction(&key, modifiers.ctrl())
+        };
+        let choice_key = direction.is_some()
+            || (unmodified && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
+        let approval_key = direction.is_some()
+            || (unmodified
+                && (key == "Enter" || choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some()));
+        let selector_key =
+            direction.is_some() || (unmodified && matches!(key.as_str(), "Enter" | "Escape"));
+
+        // Navigation, approvals and choices mean exactly what they mean with the prompt focused,
+        // so hand the event to that handler rather than reproducing its rules.
+        if (approval_open && approval_key)
+            || (choice_len > 0 && choice_key)
+            || direction.is_some()
+            || (selector_open && selector_key)
+        {
+            let mut forward = prompt_keydown;
+            forward(e);
+            return;
+        }
+
+        if !unmodified {
+            return;
+        }
+        let edit = match key.as_str() {
+            "Backspace" => PromptEdit::Backspace,
+            "Delete" => PromptEdit::Delete,
+            _ if key.chars().count() == 1 => PromptEdit::Insert(&key),
+            _ => return,
+        };
+        e.prevent_default();
+        // The draft signal is the source of truth, so editing it is enough — the textarea is
+        // rendered from it. Appending at the end matches where focus_prompt_end puts the caret.
+        let current = draft.peek().clone();
+        let end = current.encode_utf16().count() as u32;
+        let (value, _caret) = edit_prompt(&current, end, end, edit);
+        draft.set(value);
+        focus_prompt_end(PROMPT_INPUT_ID);
     };
 
     use_effect(move || {
@@ -1399,8 +1322,13 @@ pub fn Page(
 
     rsx! {
         main {
-            class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground",
+            class: "agent-chat-page relative isolate flex h-screen flex-col overflow-hidden bg-background text-foreground outline-none",
             style: "--agent-accent:{theme_accent};",
+            // Focusable so a click on the transcript lands focus here rather than on the body,
+            // which would put keystrokes out of reach of the handler below. Deliberately not
+            // autofocused: `focus_prompt_end` already claims focus for the prompt on mount.
+            tabindex: "-1",
+            onkeydown: root_keydown,
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
                 div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
