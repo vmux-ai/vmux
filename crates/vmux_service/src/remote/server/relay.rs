@@ -87,8 +87,16 @@ impl DesktopRelayClient {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|error| error.to_string())?;
             for payload in parser.push(&chunk)? {
-                let command: DesktopCommand =
-                    serde_json::from_str(&payload).map_err(|error| error.to_string())?;
+                // Skip rather than fail: a relay newer than this desktop will send commands it has
+                // never heard of, and tearing down the whole stream for one of them would leave
+                // every other route reconnecting in a loop.
+                let command: DesktopCommand = match serde_json::from_str(&payload) {
+                    Ok(command) => command,
+                    Err(error) => {
+                        tracing::warn!(%error, "remote relay: ignoring unrecognised command");
+                        continue;
+                    }
+                };
                 let client = self.clone();
                 tokio::spawn(async move {
                     client.handle_command(command).await;
