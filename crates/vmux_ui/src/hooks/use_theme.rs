@@ -58,39 +58,14 @@ fn set_root_language(locale: &str, direction: &str) {
     let _ = el.set_attribute("dir", direction);
 }
 
-/// A locale tag safe to inline into a script literal: BCP-47 is alphanumerics and `-`, so a tag
-/// that matches cannot terminate a string or introduce syntax. `ThemeEvent` arrives over IPC, so
-/// this is validated rather than escaped — anything unexpected is dropped, not sanitised.
+/// Off CEF there is nothing to write to.
+///
+/// `ThemeEvent` is only ever sent by the CEF host (`vmux_browser`), so the radius never changes
+/// on another host and `theme.css` already carries its default. Locale still resolves — the
+/// returned signal and [`text_direction`] are the contract — but a native host applies it on its
+/// own root element rather than reaching for the document.
 #[cfg(not(target_arch = "wasm32"))]
-fn is_plain_locale_tag(locale: &str) -> bool {
-    !locale.is_empty()
-        && locale.len() <= 35
-        && locale
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
-}
+fn set_root_radius(_radius: f32) {}
 
 #[cfg(not(target_arch = "wasm32"))]
-fn set_root_radius(radius: f32) {
-    if !radius.is_finite() {
-        return;
-    }
-    // `document::eval` is Dioxus's WebView bridge, not JS `eval`. The only interpolated value is
-    // a finite f32, whose `Display` output is digits, `.`, `-`, and `e`.
-    document::eval(&format!(
-        "document.documentElement.style.setProperty('--radius', '{radius}px');"
-    ));
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn set_root_language(locale: &str, direction: &str) {
-    // `direction` is one of three compile-time literals from `apply_locale`; `locale` is checked
-    // against the BCP-47 character set above.
-    if !is_plain_locale_tag(locale) {
-        return;
-    }
-    document::eval(&format!(
-        "document.documentElement.setAttribute('lang', '{locale}');\
-         document.documentElement.setAttribute('dir', '{direction}');"
-    ));
-}
+fn set_root_language(_locale: &str, _direction: &str) {}
