@@ -8,9 +8,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("services-title"));
-    }
     let state = use_event::<ProcessesListEvent>(PROCESSES_LIST_EVENT, || ProcessesListEvent {
         connected: false,
         processes: Vec::new(),
@@ -37,6 +34,7 @@ pub fn Page() -> Element {
     let process_count = data.processes.len();
 
     rsx! {
+        document::Title { {translate("services-title")} }
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
             // Header
             div { class: "mb-3 flex items-center justify-between",

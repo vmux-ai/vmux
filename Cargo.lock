@@ -11309,7 +11309,6 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "dioxus",
- "js-sys",
  "moonshine-save",
  "rkyv",
  "ron 0.8.1",
@@ -11317,8 +11316,6 @@ dependencies = [
  "vmux_core",
  "vmux_ui",
  "vmux_wire",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -11514,8 +11511,6 @@ dependencies = [
  "vmux_ui",
  "vmux_wire",
  "vte",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -11575,8 +11570,7 @@ dependencies = [
  "vmux_layout",
  "vmux_setting",
  "vmux_ui",
- "wasm-bindgen",
- "web-sys",
+ "vmux_wire",
 ]
 
 [[package]]
@@ -11607,8 +11601,7 @@ dependencies = [
  "vmux_layout",
  "vmux_space",
  "vmux_ui",
- "wasm-bindgen",
- "web-sys",
+ "vmux_wire",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! Background daemon that hosts persistent terminal processes across app restarts, plus
 //! the processes-monitor webview page.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub use vmux_service_client::{
     read_message, read_message_blocking, write_message, write_message_blocking,
 };
@@ -9,60 +9,66 @@ pub use vmux_service_client::{
 pub mod chat;
 pub use vmux_wire::service as event;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
 pub mod page;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod acp;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod agent;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod agent_broker;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod agent_events;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod bundle;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod cleanup;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod cli;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod client;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod framing;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod http;
-#[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
+#[cfg(all(
+    target_os = "macos",
+    not(any(target_arch = "wasm32", target_os = "ios"))
+))]
 pub mod launchd;
 pub mod message;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 mod osc133;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod process;
 pub mod protocol;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod providers;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod registry;
 pub mod remote;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod run_marker;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod server;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod service;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 mod shell_integration;
-#[cfg(all(target_os = "macos", not(target_arch = "wasm32")))]
+#[cfg(all(
+    target_os = "macos",
+    not(any(target_arch = "wasm32", target_os = "ios"))
+))]
 pub mod sm_app_service;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod stream;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod supervisor;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "services",
     title: "Services",
@@ -71,7 +77,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 mod paths;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub use paths::*;

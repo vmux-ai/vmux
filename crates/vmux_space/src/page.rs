@@ -4,14 +4,10 @@ use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEve
 use dioxus::prelude::*;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::JsCast;
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("spaces-title"));
-    }
     let mut state = use_signal(SpacesListEvent::default);
     let mut selected = use_signal(|| 0usize);
     let mut new_name = use_signal(String::new);
@@ -19,16 +15,6 @@ pub fn Page() -> Element {
     let _listener = use_bin_event_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
         selected.set(0);
         state.set(data);
-    });
-
-    use_effect(move || {
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("spaces-root"))
-            && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
-        {
-            let _ = html.focus();
-        }
     });
 
     let spaces = state.read().spaces.clone();
@@ -48,10 +34,14 @@ pub fn Page() -> Element {
     let selected_space_deletable = count > 1 && spaces.get(sel).is_some();
 
     rsx! {
+        document::Title { {translate("spaces-title")} }
         div {
             id: "spaces-root",
             tabindex: "0",
             class: "flex h-full min-h-0 flex-col bg-background text-foreground outline-none",
+            onmounted: move |e| async move {
+                let _ = e.set_focus(true).await;
+            },
             onkeydown: move |e| {
                 let ctrl = e.modifiers().contains(Modifiers::CONTROL);
                 let down = (!ctrl && (e.code() == Code::KeyJ || e.key() == Key::ArrowDown))

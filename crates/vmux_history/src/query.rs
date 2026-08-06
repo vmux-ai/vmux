@@ -42,24 +42,24 @@ pub fn score(
     frecency(visit_count, last_visited_at, now) * m
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy::ecs::message::Messages;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy::prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::event::{
     HISTORY_CHANGED_EVENT, HISTORY_QUERY_RESPONSE_EVENT, HISTORY_SUGGESTIONS_RESPONSE_EVENT,
     HistoryChangedEvent, HistoryClearAllRequest, HistoryDeleteRequest, HistoryEntry,
     HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy_cef::prelude::{BinHostEmitEvent, BinReceive};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn on_history_query_request(
     trigger: On<BinReceive<HistoryQueryRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
@@ -95,7 +95,7 @@ pub fn on_history_query_request(
     ));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn build_entries(
     query: &Option<String>,
     urls: &[(Entity, PageMetadata, VisitCount, LastVisitedAt)],
@@ -151,7 +151,7 @@ pub fn build_entries(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn on_history_delete_request(
     trigger: On<BinReceive<HistoryDeleteRequest>>,
     mut commands: Commands,
@@ -168,7 +168,7 @@ pub fn on_history_delete_request(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn on_history_clear_all_request(
     _trigger: On<BinReceive<HistoryClearAllRequest>>,
     mut commands: Commands,
@@ -184,13 +184,13 @@ pub fn on_history_clear_all_request(
 }
 
 #[derive(Clone, Debug, Message)]
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub struct HistoryOpenIntent {
     pub url: String,
     pub in_new_stack: bool,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn on_history_open_request(
     trigger: On<BinReceive<HistoryOpenRequest>>,
     mut messages: ResMut<Messages<HistoryOpenIntent>>,
@@ -202,7 +202,7 @@ pub fn on_history_open_request(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
     webviews: Query<(Entity, &bevy_cef::prelude::WebviewSource)>,
@@ -230,7 +230,7 @@ pub fn broadcast_history_changed(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub fn on_history_suggestions_request(
     trigger: On<BinReceive<HistorySuggestionsRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,

@@ -3,5 +3,5 @@ pub use vmux_remote::{
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub mod server;
