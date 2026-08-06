@@ -1,6 +1,6 @@
 pub mod extension;
-pub mod space;
-pub mod team;
+pub use vmux_wire::space;
+pub use vmux_wire::team;
 
 use serde::{Deserialize, Serialize};
 pub use vmux_wire::{

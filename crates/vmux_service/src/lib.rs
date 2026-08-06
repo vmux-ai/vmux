@@ -7,7 +7,7 @@ pub use vmux_service_client::{
 };
 
 pub mod chat;
-pub mod event;
+pub use vmux_wire::service as event;
 
 #[cfg(target_arch = "wasm32")]
 pub mod page;

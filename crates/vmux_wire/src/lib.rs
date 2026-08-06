@@ -9,6 +9,9 @@ pub mod open_target;
 pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
+pub mod service;
+pub mod space;
+pub mod team;
 pub mod terminal;
 
 pub use icon::{BuiltinIcon, PageIcon};
