@@ -38,6 +38,8 @@ both humans and agents tile, persist, and reconcile in real time.
   that owns PTYs and agent sessions so work outlives the window.
 - **[Mobile Remote](architecture/mobile-remote.md)** — the native Dioxus Mobile app that
   securely reconnects to agent sessions running on the Mac.
+- **[Topology](architecture/topology.md)** — the process map across desktop and phone, which
+  transport carries what, and how one page runs unchanged on both.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.
 - **[The render stack](architecture/render-stack.md)** — many CEF surfaces in one window,
