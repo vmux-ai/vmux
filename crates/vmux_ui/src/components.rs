@@ -24,7 +24,6 @@ pub mod hover_card;
 pub mod icon;
 pub mod input;
 pub mod label;
-#[cfg(target_arch = "wasm32")]
 pub mod manager;
 pub mod menubar;
 #[cfg(target_arch = "wasm32")]

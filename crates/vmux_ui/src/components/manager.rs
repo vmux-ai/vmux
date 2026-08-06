@@ -53,6 +53,36 @@ impl ManagerButtonVariant {
     }
 }
 
+/// Keep the highlighted option visible. Only the CEF host can reach the DOM directly; elsewhere
+/// the native WebView scrolls it into view through the eval bridge.
+#[cfg(target_arch = "wasm32")]
+fn scroll_option_into_view(option_id: &str) {
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(option_id))
+    else {
+        return;
+    };
+    let options = web_sys::ScrollIntoViewOptions::new();
+    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+    element.scroll_into_view_with_scroll_into_view_options(&options);
+}
+
+/// Ids here are built from a caller-supplied uid=501(junichi.sugiura) gid=20(staff) groups=20(staff),12(everyone),61(localaccounts),79(_appserverusr),80(admin),81(_appserveradm),33(_appstore),98(_lpadmin),100(_lpoperator),204(_developer),250(_analyticsusers),395(com.apple.access_ftp),398(com.apple.access_screensharing),399(com.apple.access_ssh),400(com.apple.access_remote_ae),701(com.apple.sharepoint.group.1) plus an index, so they are interpolated into a
+/// query rather than a script body and cannot escape the selector.
+#[cfg(not(target_arch = "wasm32"))]
+fn scroll_option_into_view(option_id: &str) {
+    if !option_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return;
+    }
+    document::eval(&format!(
+        "document.getElementById('{option_id}')?.scrollIntoView({{ block: 'nearest' }});"
+    ));
+}
+
 #[component]
 pub fn ManagerPage(children: Element) -> Element {
     rsx! {
@@ -207,15 +237,7 @@ pub fn ManagerSelect(
         if !open() {
             return;
         }
-        let option_id = format!("{scroll_id}-option-{}", highlighted());
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&option_id))
-        {
-            let options = web_sys::ScrollIntoViewOptions::new();
-            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            element.scroll_into_view_with_scroll_into_view_options(&options);
-        }
+        scroll_option_into_view(&format!("{scroll_id}-option-{}", highlighted()));
     });
 
     let key_items = items.clone();
