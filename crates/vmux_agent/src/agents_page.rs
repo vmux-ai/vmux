@@ -7,33 +7,33 @@ pub mod event;
 #[cfg(target_arch = "wasm32")]
 pub mod page;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crossbeam_channel::{Receiver, Sender};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use std::collections::{HashMap, HashSet};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::acp_registry::Runtime;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::agents_page::event::{
     AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
     AgentsOpen, AgentsUninstall,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::agent::AgentKind;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::page::PrewarmPage;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub struct AgentsManagerPlugin;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl Plugin for AgentsManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
@@ -74,7 +74,7 @@ impl Plugin for AgentsManagerPlugin {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agents",
     title: "Agents",
@@ -83,17 +83,17 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource, Default)]
 struct AgentsPageWebviews(HashSet<Entity>);
 
 /// Session install status per agent id (`status`, `detail`), overlaid on the disk-derived state.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource, Default)]
 struct AgentsStatus(HashMap<String, (String, String)>);
 
 /// Background install progress/result for the manager page.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 enum AgentMsg {
     Progress {
         id: String,
@@ -109,14 +109,14 @@ enum AgentMsg {
     },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource)]
 struct AgentsInstallChannel {
     tx: Sender<AgentMsg>,
     rx: Receiver<AgentMsg>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl Default for AgentsInstallChannel {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -126,21 +126,21 @@ impl Default for AgentsInstallChannel {
 
 /// Published-version lists per agent id, fetched lazily in the background so the version selector
 /// can offer a dropdown. `requested` guards against re-fetching an agent every catalog push.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource, Default)]
 struct AgentVersions {
     fetched: HashMap<String, Vec<String>>,
     requested: HashSet<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource)]
 struct AgentVersionsChannel {
     tx: Sender<(String, Vec<String>)>,
     rx: Receiver<(String, Vec<String>)>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl Default for AgentVersionsChannel {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
@@ -148,7 +148,7 @@ impl Default for AgentVersionsChannel {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_open_request(
     trigger: On<BinReceive<AgentsOpen>>,
     mut commands: MessageWriter<vmux_command::AppCommand>,
@@ -160,7 +160,7 @@ fn on_open_request(
     ));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn catalog_snapshot(
     catalog: &AcpCatalog,
     status: &AgentsStatus,
@@ -214,7 +214,7 @@ fn catalog_snapshot(
     AgentsCatalog { agents }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<AgentEntry> {
     AgentKind::all()
         .into_iter()
@@ -244,7 +244,7 @@ fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<Age
 }
 
 /// Remember which webview asked for the catalog; the push system delivers it.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_catalog_request(
     trigger: On<BinReceive<AgentsCatalogRequest>>,
     mut webviews: ResMut<AgentsPageWebviews>,
@@ -254,7 +254,7 @@ fn on_catalog_request(
 
 /// Upsert the per-agent version pin into the settings ACP list: update a matching entry, or append
 /// a version-only entry (empty command) for a registry agent the user has not otherwise configured.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn upsert_acp_version(
     acp: &mut Vec<vmux_setting::AcpAgentConfig>,
     catalog_id: &str,
@@ -280,7 +280,7 @@ fn upsert_acp_version(
 }
 
 /// Kick a background install (or update) for the requested agent, persisting its version pin first.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_install_request(
     trigger: On<BinReceive<AgentsInstall>>,
     catalog: Res<AcpCatalog>,
@@ -335,7 +335,7 @@ fn on_install_request(
 }
 
 /// Remove an installed agent, then let its status re-derive from disk.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_uninstall_request(
     trigger: On<BinReceive<AgentsUninstall>>,
     mut status: ResMut<AgentsStatus>,
@@ -348,7 +348,7 @@ fn on_uninstall_request(
 }
 
 /// Fold background-install updates into the session status map.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_agent_installs(
     installs: Res<AgentsInstallChannel>,
     mut status: ResMut<AgentsStatus>,
@@ -376,7 +376,7 @@ fn drain_agent_installs(
 
 /// For each npx registry agent not yet queried, spawn a background `npm view` to populate its
 /// version list. Runs when the catalog (re)loads; `requested` guards one fetch per agent.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn kick_off_version_fetches(
     catalog: Res<AcpCatalog>,
     channel: Res<AgentVersionsChannel>,
@@ -403,7 +403,7 @@ fn kick_off_version_fetches(
 
 /// Fold completed version fetches into the cache; the resulting change re-pushes the catalog so
 /// the selector becomes a dropdown.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMut<AgentVersions>) {
     while let Ok((id, list)) = channel.rx.try_recv() {
         versions.fetched.insert(id, list);
@@ -412,7 +412,7 @@ fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMu
 
 /// Push the catalog (with per-agent status) whenever it (re)loads, status changes, or a page
 /// requests it.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn push_agents(
     catalog: Res<AcpCatalog>,
     status: Res<AgentsStatus>,
@@ -448,7 +448,7 @@ fn push_agents(
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(any(target_arch = "wasm32", target_os = "ios"))))]
 mod tests {
     use super::*;
 

@@ -2,25 +2,25 @@
 //! conversation + run-state (pushed from ECS) and sends prompt/approval intents back.
 //! This is the single agent front-end; it replaced the legacy CLI-install setup page.
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, any(target_arch = "wasm32", target_os = "ios")))]
 pub(crate) mod composer;
 pub mod event;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
 pub mod page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
 mod scroll;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use base64::Engine;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::chat_page::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_MAX_PAGE_SIZE,
     CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT, CHAT_MEDIA_ENTRIES_EVENT,
@@ -34,42 +34,42 @@ use crate::chat_page::event::{
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
     SlashCommandEntry, SlashCommands,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::client::acp::{AcpModelState, AcpSession};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::components::{
     AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
     provisional_conversation_title,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::events::{
     AgentApprovalReply, AgentChoiceSelected, AgentCommandRequest, ApprovalDecision, CommandOrigin,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::run_state::{AgentRunState, AgentTurnMeta};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::PageMetadata;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_core::team::Profile;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_service::chat::turns::{group_turns_before, group_turns_tail, grouped_item_count};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_service::client::ServiceClient;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_service::protocol::{
     AgentAttachment, AgentCommand as ServiceAgentCommand, AgentRequestId, ClientMessage,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub struct AgentChatPagePlugin;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
@@ -147,7 +147,7 @@ impl Plugin for AgentChatPagePlugin {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agent",
     title: "Agent",
@@ -156,14 +156,14 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: false,
 };
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ApprovalDetail {
     label: String,
     value: String,
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, any(target_arch = "wasm32", target_os = "ios")))]
 fn approval_details(args_json: &str) -> Vec<ApprovalDetail> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(args_json) else {
         return if args_json.trim().is_empty() {
@@ -180,7 +180,7 @@ fn approval_details(args_json: &str) -> Vec<ApprovalDetail> {
     details
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, any(target_arch = "wasm32", target_os = "ios")))]
 fn flatten_approval_details(
     path: &str,
     value: &serde_json::Value,
@@ -205,7 +205,7 @@ fn flatten_approval_details(
     details.push(ApprovalDetail { label, value });
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, any(target_arch = "wasm32", target_os = "ios")))]
 fn approval_detail_label(path: &str) -> String {
     let path = path.strip_prefix("arguments.").unwrap_or(path);
     let label = if path.is_empty() { "details" } else { path };
@@ -223,7 +223,7 @@ fn approval_detail_label(path: &str) -> String {
         .join(" · ")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Message)]
 struct AcpSetModelRequest {
     sid: String,
@@ -232,14 +232,14 @@ struct AcpSetModelRequest {
     model_id: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource, Default)]
 struct LastUsedAcpModels {
     by_agent: std::collections::BTreeMap<String, String>,
     dirty: bool,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl LastUsedAcpModels {
     fn remember(&mut self, agent_id: &str, model_id: &str) {
         if self
@@ -255,12 +255,12 @@ impl LastUsedAcpModels {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn last_used_acp_models_path() -> std::path::PathBuf {
     vmux_core::profile::profile_dir().join("agent-models.json")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
     let Ok(bytes) = std::fs::read(last_used_acp_models_path()) else {
         return;
@@ -273,7 +273,7 @@ fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
     models.dirty = false;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn save_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
     if !models.dirty {
         return;
@@ -294,11 +294,11 @@ fn save_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Resource, Default)]
 struct AcpModelRequestCounter(u64);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 impl AcpModelRequestCounter {
     fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(1);
@@ -309,7 +309,7 @@ impl AcpModelRequestCounter {
 /// Record per-turn wall-clock from `AgentRunState` edges (covers page + ACP mutation sites
 /// uniformly). Idempotent: the `turn_start` guard tolerates repeated same-state sets and does
 /// not reset across a mid-turn `AwaitingApproval`.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn track_turn_duration(
     time: Res<Time>,
     mut sessions: Query<(&AgentRunState, &mut AgentTurnMeta), Changed<AgentRunState>>,
@@ -333,24 +333,24 @@ fn track_turn_duration(
 }
 
 /// Marks a chat-page webview (ACP or Page agent) so the ready→resync path can find it cheaply.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 pub struct AgentChatView;
 
 /// Set once the current snapshot has been pushed to a ready chat webview; cleared when the page
 /// (re)signals ready (mount or Cmd+R reload) so the transcript is re-pushed instead of blanking.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 pub(crate) struct ChatSynced;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 struct ResumeListTask {
     webview: Entity,
     task: Task<ResumableSessions>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 struct ResumeHandoffTask {
     stack: Entity,
@@ -359,7 +359,7 @@ struct ResumeHandoffTask {
     task: Task<Result<StackSessionHandoff, String>>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 struct ChatAttachmentTask {
     webview: Entity,
@@ -367,28 +367,28 @@ struct ChatAttachmentTask {
     task: Task<ChatAttachments>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 struct ChatMediaListTask {
     webview: Entity,
     task: Task<ChatMediaEntries>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Component)]
 struct ChatMediaPreviewTask {
     webview: Entity,
     task: Task<ChatMediaEntries>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn attachment_mime(path: &std::path::Path) -> String {
     let path_str = path.to_string_lossy();
     if let Some(mime) = vmux_core::media::media_mime(&path_str) {
@@ -417,7 +417,7 @@ fn attachment_mime(path: &std::path::Path) -> String {
     .to_string()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
     let metadata = std::fs::metadata(&path).ok()?;
     if !metadata.is_file() {
@@ -434,7 +434,7 @@ fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String {
     if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
         return String::new();
@@ -465,7 +465,7 @@ fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String 
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
     let mut attachment = chat_attachment(path)?;
     if !attachment.mime_type.starts_with("image/") {
@@ -476,7 +476,7 @@ fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
     (!attachment.preview_data_url.is_empty()).then_some(attachment)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn spawn_chat_attachment_task(
     webview: Entity,
     event: &'static str,
@@ -506,7 +506,7 @@ fn spawn_chat_attachment_task(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn spawn_selected_attachment_tasks(
     webview: Entity,
     paths: Vec<std::path::PathBuf>,
@@ -521,7 +521,7 @@ fn spawn_selected_attachment_tasks(
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn decode_media_query_path(value: &str) -> std::path::PathBuf {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
@@ -544,7 +544,7 @@ fn decode_media_query_path(value: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return ChatMediaEntries {
@@ -667,7 +667,7 @@ fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
     for entry in &mut response.entries {
@@ -689,7 +689,7 @@ fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
     response
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_media_list_request(
     trigger: On<BinReceive<ChatMediaListRequest>>,
     mut commands: Commands,
@@ -703,7 +703,7 @@ fn on_chat_media_list_request(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: Commands) {
     let paths = trigger
         .event()
@@ -716,7 +716,7 @@ fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: 
     spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_attachment_preview_request(
     trigger: On<BinReceive<ChatAttachmentPreviewRequest>>,
     mut commands: Commands,
@@ -738,7 +738,7 @@ fn on_chat_attachment_preview_request(
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
@@ -746,7 +746,7 @@ fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut comm
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Commands) {
     let mut dialog = rfd::FileDialog::new();
     if let Some(home) = std::env::var_os("HOME") {
@@ -758,7 +758,7 @@ fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Comm
     spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).ok()?;
     let mut output = std::io::Cursor::new(Vec::new());
@@ -766,7 +766,7 @@ fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
     Some(output.into_inner())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn clipboard_image_path() -> Option<std::path::PathBuf> {
     if let Some(path) = vmux_terminal::clipboard::image_file_path() {
         return Some(std::path::PathBuf::from(path));
@@ -781,7 +781,7 @@ fn clipboard_image_path() -> Option<std::path::PathBuf> {
     Some(path)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Commands) {
     let Some(path) = clipboard_image_path() else {
         return;
@@ -789,7 +789,7 @@ fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Co
     spawn_selected_attachment_tasks(trigger.event().webview, vec![path], &mut commands);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_chat_attachment_tasks(
     mut tasks: Query<(Entity, &mut ChatAttachmentTask)>,
     mut commands: Commands,
@@ -823,7 +823,7 @@ fn drain_chat_attachment_tasks(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_chat_media_list_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
     mut commands: Commands,
@@ -852,7 +852,7 @@ fn drain_chat_media_list_tasks(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_chat_media_preview_tasks(
     mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
     mut commands: Commands,
@@ -875,7 +875,7 @@ fn drain_chat_media_preview_tasks(
 /// first snapshot always lands. Re-runs after a reload because [`reset_chat_synced_on_page_ready`]
 /// clears `ChatSynced` when the page re-signals ready — without this, Cmd+R blanked the chat
 /// (the `Changed`/`Added` pushes never re-fire for an unchanged, already-added session).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn sync_chat_to_ready_views(
     pending: Query<
         Entity,
@@ -955,7 +955,7 @@ fn sync_chat_to_ready_views(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
     let Some(state) = state else {
         return ModelState::default();
@@ -976,7 +976,7 @@ fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn emit_model_state(
     webview: Entity,
     model_state: Option<&AcpModelState>,
@@ -1007,7 +1007,7 @@ fn emit_model_state(
 }
 
 /// The persisted launch-time effort for `agent_key`, or `""` (agent default).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn effort_current_for<'a>(
     settings: Option<&'a Res<vmux_setting::AppSettings>>,
     agent_key: &str,
@@ -1017,7 +1017,7 @@ fn effort_current_for<'a>(
         .unwrap_or("")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ComposerContextInput {
     cwd: std::path::PathBuf,
@@ -1027,19 +1027,19 @@ struct ComposerContextInput {
     auto_allow_count: u32,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[derive(Default)]
 struct ComposerContextCache {
     entries: std::collections::HashMap<Entity, ComposerContextCacheEntry>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 struct ComposerContextCacheEntry {
     input: ComposerContextInput,
     context: ComposerContext,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn composer_context_input(
     stack: Entity,
     acp: Option<&AcpSession>,
@@ -1080,7 +1080,7 @@ fn composer_context_input(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn composer_context_from_input(
     input: &ComposerContextInput,
     info: Option<&vmux_git::worktree::RepoInfo>,
@@ -1121,7 +1121,7 @@ fn composer_context_from_input(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 #[allow(clippy::too_many_arguments)]
 fn push_composer_context_to_page(
     views: Query<(Entity, &ChildOf, Ref<vmux_core::page::PageReady>), With<AgentChatView>>,
@@ -1178,7 +1178,7 @@ fn push_composer_context_to_page(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn push_acp_model_state_to_page(
     sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
     children: Query<&Children>,
@@ -1211,7 +1211,7 @@ fn push_acp_model_state_to_page(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn push_removed_acp_model_state_to_page(
     mut removed: RemovedComponents<AcpModelState>,
     sessions: Query<&AcpSession>,
@@ -1250,7 +1250,7 @@ fn push_removed_acp_model_state_to_page(
 
 /// A chat webview re-signals `PageReady` on every (re)mount, including a Cmd+R reload. Clear its
 /// `ChatSynced` marker so [`sync_chat_to_ready_views`] re-pushes the full transcript.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn reset_chat_synced_on_page_ready(
     trigger: On<BinReceive<vmux_core::page::PageReady>>,
     chat_views: Query<(), With<AgentChatView>>,
@@ -1262,7 +1262,7 @@ fn reset_chat_synced_on_page_ready(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn snapshot_of(
     messages: &AgentMessages,
     state: &AgentRunState,
@@ -1361,17 +1361,17 @@ fn snapshot_of(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 const CHAT_STREAM_PUSH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn chat_snapshot_due(streaming: bool, urgent: bool, elapsed: Option<std::time::Duration>) -> bool {
     urgent || !streaming || elapsed.is_none_or(|elapsed| elapsed >= CHAT_STREAM_PUSH_INTERVAL)
 }
 
 /// Push each changed session's conversation + run-state to its pane webview (the child
 /// `Browser` of the session entity).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn push_chat_to_page(
     sessions: Query<
         (
@@ -1450,7 +1450,7 @@ fn push_chat_to_page(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_history_request(
     trigger: On<BinReceive<ChatHistoryRequest>>,
     child_of: Query<&ChildOf>,
@@ -1503,7 +1503,7 @@ fn on_chat_history_request(
     ));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_submit(
     trigger: On<BinReceive<ChatSubmit>>,
     child_of: Query<&ChildOf>,
@@ -1547,7 +1547,7 @@ fn on_chat_submit(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn enqueue_prompt(
     queue: &mut PromptQueue,
     state: &mut AgentRunState,
@@ -1560,7 +1560,7 @@ fn enqueue_prompt(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn cancel_session(
     service: Option<&ServiceClient>,
     acp: Option<&AcpSession>,
@@ -1578,7 +1578,7 @@ fn cancel_session(
     service.0.send(ClientMessage::AgentCancel { sid });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_cancel(
     trigger: On<BinReceive<ChatCancel>>,
     child_of: Query<&ChildOf>,
@@ -1597,7 +1597,7 @@ fn on_chat_cancel(
     cancel_session(service.as_deref(), acp, page);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_resume(
     trigger: On<BinReceive<ChatResume>>,
     child_of: Query<&ChildOf>,
@@ -1611,7 +1611,7 @@ fn on_chat_resume(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_clear_queue(
     trigger: On<BinReceive<ChatClearQueue>>,
     child_of: Query<&ChildOf>,
@@ -1625,7 +1625,7 @@ fn on_chat_clear_queue(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_cancel_queued_prompt(
     trigger: On<BinReceive<ChatCancelQueuedPrompt>>,
     child_of: Query<&ChildOf>,
@@ -1639,7 +1639,7 @@ fn on_chat_cancel_queued_prompt(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_escape(
     trigger: On<BinReceive<ChatEscape>>,
     child_of: Query<&ChildOf>,
@@ -1677,7 +1677,7 @@ fn on_chat_escape(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_approval(
     trigger: On<BinReceive<ChatApproval>>,
     child_of: Query<&ChildOf>,
@@ -1701,7 +1701,7 @@ fn on_chat_approval(
 }
 
 /// Age in seconds for a session's last-modified time.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
     std::time::SystemTime::now()
         .duration_since(mtime)
@@ -1710,7 +1710,7 @@ fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
 }
 
 /// The slash commands offered on an ACP pane.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommandEntry> {
     let mut v = vec![
         SlashCommandEntry {
@@ -1737,7 +1737,7 @@ fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommand
     v
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_select_model(
     trigger: On<BinReceive<SelectModel>>,
     child_of: Query<&ChildOf>,
@@ -1775,7 +1775,7 @@ fn on_select_model(
 /// Persist the launch-time effort level for an agent. Blank `level` clears the override; only
 /// levels valid for the agent (see [`vmux_core::agent::effort_levels`]) are stored. Takes effect
 /// when the agent next launches a session/process.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_set_agent_effort(
     trigger: On<BinReceive<SetAgentEffort>>,
     mut settings: ResMut<vmux_setting::AppSettings>,
@@ -1816,7 +1816,7 @@ fn on_set_agent_effort(
 }
 
 /// Open a vmux page URL in a new stack (the error card's "change version" action → `vmux://agents`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_open_page(
     trigger: On<BinReceive<ChatOpenPage>>,
     mut commands: MessageWriter<vmux_command::AppCommand>,
@@ -1832,7 +1832,7 @@ fn on_chat_open_page(
     ));
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn apply_last_used_acp_model(
     mut sessions: Query<(&AcpSession, &mut AcpModelState), Added<AcpModelState>>,
     last_used: Res<LastUsedAcpModels>,
@@ -1862,7 +1862,7 @@ fn apply_last_used_acp_model(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_select_workspace(
     trigger: On<BinReceive<ChatSelectWorkspace>>,
     child_of: Query<&ChildOf>,
@@ -1884,7 +1884,7 @@ fn on_chat_select_workspace(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_chat_create_worktree(
     trigger: On<BinReceive<ChatCreateWorktree>>,
     child_of: Query<&ChildOf>,
@@ -1906,7 +1906,7 @@ fn on_chat_create_worktree(
     });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn send_acp_model_requests(
     mut requests: MessageReader<AcpSetModelRequest>,
     service: Option<Res<ServiceClient>>,
@@ -1926,7 +1926,7 @@ fn send_acp_model_requests(
 
 /// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
 /// the handoff is unavailable (unknown agent, no session id yet, bad `to`).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn runtime_switch_target(
     agent_id: &str,
     resume: Option<&str>,
@@ -1951,7 +1951,7 @@ fn runtime_switch_target(
 }
 
 /// Page → native: `/resume` was opened — reply with the on-disk session list.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn resume_entries(
     sessions: Vec<crate::client::cli::strategy::ResumableSession>,
     active_kind: Option<AgentKind>,
@@ -1984,7 +1984,7 @@ fn resume_entries(
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn foreign_handoff_target(
     active_agent_id: &str,
     active_kind: Option<AgentKind>,
@@ -1999,7 +1999,7 @@ fn foreign_handoff_target(
     })
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn resume_agent_name(
     profile: Option<&Profile>,
     kind: Option<AgentKind>,
@@ -2014,7 +2014,7 @@ fn resume_agent_name(
         .unwrap_or_default()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_resume_list_request(
     trigger: On<BinReceive<ResumeListRequest>>,
     strategies: Option<Res<AgentStrategies>>,
@@ -2045,7 +2045,7 @@ fn on_resume_list_request(
     commands.spawn(ResumeListTask { webview, task });
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_resume_list_tasks(
     mut tasks: Query<(Entity, &mut ResumeListTask)>,
     mut commands: Commands,
@@ -2063,7 +2063,7 @@ fn drain_resume_list_tasks(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn drain_resume_handoff_tasks(
     mut tasks: Query<(Entity, &mut ResumeHandoffTask)>,
     mut states: Query<&mut AgentRunState>,
@@ -2094,7 +2094,7 @@ fn drain_resume_handoff_tasks(
 }
 
 /// Page → native: resume a picked session on this stack, in the current runtime.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_resume_session(
     trigger: On<BinReceive<ResumeSession>>,
     child_of: Query<&ChildOf>,
@@ -2156,7 +2156,7 @@ fn on_resume_session(
 }
 
 /// Page → native: hand the current ACP session off to the other runtime (the `/cli` fallback).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 fn on_runtime_switch_request(
     trigger: On<BinReceive<RuntimeSwitchRequest>>,
     child_of: Query<&ChildOf>,
@@ -2195,7 +2195,7 @@ fn on_runtime_switch_request(
     });
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(any(target_arch = "wasm32", target_os = "ios"))))]
 mod native_tests {
     use super::*;
     use std::path::Path;
