@@ -14,6 +14,9 @@ use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 use vmux_layout::stack::Stack;
 use vmux_layout::warm_page::{WarmPage, WarmPagePlugin};
+use vmux_service::agent_events::AgentCommandRequest;
+use vmux_service::client::ServiceClient;
+use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage};
 
 #[derive(Component)]
 struct Team;
@@ -50,6 +53,7 @@ impl Plugin for TeamPlugin {
         vmux_core::register_host_spawn(app, "team");
         app.add_systems(Startup, spawn_user_profile)
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
+            .add_systems(Update, answer_list_team)
             .add_plugins(WarmPagePlugin::<Team>::default())
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
                 "team", "layout",
@@ -213,6 +217,56 @@ fn build_team_members(
         }
     }
     members
+}
+
+/// Answer [`AgentCommand::ListTeam`] for the daemon's remote API.
+///
+/// `AgentCommandRequest` is a message, so reading it here rather than in `vmux_agent`'s central
+/// handler costs nothing and keeps the roster's seven queries out of a system that is already at
+/// Bevy's parameter limit.
+fn answer_list_team(
+    mut reader: MessageReader<AgentCommandRequest>,
+    service: Option<Res<ServiceClient>>,
+    active_space: Res<ActiveSpaceEntity>,
+    user_q: Query<(Entity, &Profile), With<User>>,
+    agent_q: Query<(
+        Entity,
+        &Profile,
+        &Agent,
+        Option<&AgentRunState>,
+        Option<&SessionId>,
+        Option<&vmux_core::notify::AgentDoneUnseen>,
+    )>,
+    child_of: Query<&ChildOf>,
+    space_marker: Query<(), With<Space>>,
+    meta_q: Query<&PageMetadata>,
+    children_q: Query<&Children>,
+) {
+    for request in reader.read() {
+        if !matches!(request.command, AgentCommand::ListTeam) {
+            continue;
+        }
+        let Some(service) = service.as_ref() else {
+            continue;
+        };
+        let members = build_team_members(
+            &active_space,
+            &user_q,
+            &agent_q,
+            &child_of,
+            &space_marker,
+            &meta_q,
+            &children_q,
+        );
+        let result = match serde_json::to_string(&members) {
+            Ok(json) => AgentCommandResult::Text(json),
+            Err(error) => AgentCommandResult::Error(format!("list_team: {error}")),
+        };
+        service.0.send(ClientMessage::AgentCommandResponse {
+            request_id: request.request_id,
+            result,
+        });
+    }
 }
 
 fn emit_team(

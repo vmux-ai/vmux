@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod native_transition;
+mod page_host;
 mod qr_scanner;
 
 use std::collections::HashMap;
@@ -116,9 +117,9 @@ impl Api {
             .bearer_auth(&self.credentials.token)
     }
 
-    async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
+    async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
         let response = self
-            .request(Method::GET, "/api/agents")
+            .request(Method::GET, path)
             .send()
             .await
             .map_err(|error| ApiError::Message(error.to_string()))?;
@@ -137,25 +138,16 @@ impl Api {
             .map_err(|error| ApiError::Message(error.to_string()))
     }
 
+    async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
+        self.get_json("/api/agents").await
+    }
+
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
-        let response = self
-            .request(Method::GET, "/api/sessions")
-            .send()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return Err(ApiError::Unauthorized);
-        }
-        if !response.status().is_success() {
-            return Err(ApiError::Message(format!(
-                "Mac returned HTTP {}.",
-                response.status()
-            )));
-        }
-        response
-            .json()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))
+        self.get_json("/api/sessions").await
+    }
+
+    async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
+        self.get_json("/api/team").await
     }
 
     async fn post_json<T: Serialize + ?Sized>(&self, path: &str, body: &T) -> Result<(), ApiError> {
@@ -451,6 +443,7 @@ fn App() -> Element {
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
     let mut pairing = use_signal(|| false);
+    let mut team_open = use_signal(|| false);
     let mut new_chat_draft = use_signal(String::new);
     let new_chat_error = use_signal(String::new);
     let creating_chat = use_signal(|| false);
@@ -508,6 +501,14 @@ fn App() -> Element {
             }
             media_loading.set(false);
         });
+    });
+
+    // Shared pages reach the desktop through the installed host, so it has to exist before one
+    // mounts. Keying off the signal covers every path that pairs, not just the resume-on-launch one.
+    use_effect(move || {
+        if let Some(client) = api() {
+            page_host::install(client);
+        }
     });
 
     use_future(move || async move {
@@ -651,6 +652,25 @@ fn App() -> Element {
         };
     }
 
+    if team_open() {
+        // vmux_team::page::Page is the desktop's team page, unmodified — it reads TEAM_EVENT off
+        // the installed host exactly as it does inside CEF. Only the way back is ours.
+        return rsx! {
+            AppHead {}
+            div { class: "flex h-dvh flex-col bg-background text-foreground",
+                div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
+                    button {
+                        class: "rounded-lg px-3 py-2 text-sm text-muted-foreground active:bg-accent",
+                        r#type: "button",
+                        onclick: move |_| team_open.set(false),
+                        "Back"
+                    }
+                }
+                div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
+            }
+        };
+    }
+
     if current().is_none() {
         return rsx! {
             AppHead {}
@@ -726,6 +746,7 @@ fn App() -> Element {
                     sessions.set(Vec::new());
                     auth.set(AuthState::Unpaired);
                 },
+                on_open_team: move |_| team_open.set(true),
             }
         };
     }
@@ -1067,6 +1088,7 @@ struct MobileStartPageProps {
     on_pair: EventHandler<()>,
     on_scan: EventHandler<()>,
     on_disconnect: EventHandler<()>,
+    on_open_team: EventHandler<()>,
 }
 
 #[component]
@@ -1091,6 +1113,12 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                 if props.paired {
                     button {
                         class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
+                        r#type: "button",
+                        onclick: move |_| props.on_open_team.call(()),
+                        "Team"
+                    }
+                    button {
+                        class: "rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_disconnect.call(()),
                         "Disconnect"

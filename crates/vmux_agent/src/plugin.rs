@@ -2211,7 +2211,9 @@ fn handle_agent_commands(
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }
             }
-            ServiceAgentCommand::OpenBeside { .. }
+            // Answered in vmux_team, which already holds the queries the roster is built from.
+            ServiceAgentCommand::ListTeam
+            | ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
             | ServiceAgentCommand::RunWithPlacementOverride { .. }
             | ServiceAgentCommand::CreateWorktree { .. }
