@@ -1,14 +1,9 @@
 use std::fmt;
 
-use crate::bin_ipc_envelope::encode_bin_ipc_envelope;
+use crate::hooks::transport::{decode_bin_payload, emit_bytes, listen_bytes};
 use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
-use js_sys::Function;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::JsValue;
-use wasm_bindgen::closure::Closure;
-use web_sys::window;
 
 const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
@@ -22,6 +17,8 @@ pub enum EventListenerError {
     NoEmitMethod,
     EmitNotCallable,
     SerializePayload,
+    /// No [`crate::hooks::transport::PageHost`] installed on a target with no default.
+    NoHost,
 }
 
 impl fmt::Display for EventListenerError {
@@ -35,54 +32,25 @@ impl fmt::Display for EventListenerError {
             Self::NoEmitMethod => "no `cef.binEmit`",
             Self::EmitNotCallable => "`cef.binEmit` is not a function",
             Self::SerializePayload => "failed to serialize emit payload",
+            Self::NoHost => "no page host installed",
         })
     }
 }
 
-fn window_cef() -> Result<JsValue, EventListenerError> {
-    let Some(win) = window() else {
-        return Err(EventListenerError::NoWindow);
-    };
-    let Ok(cef) = js_sys::Reflect::get(&win, &JsValue::from_str("cef")) else {
-        return Err(EventListenerError::NoCefGlobal);
-    };
-    if cef.is_null() || cef.is_undefined() {
-        return Err(EventListenerError::CefNotInjected);
-    }
-    Ok(cef)
-}
-
-pub fn decode_bin_host_emit_js<T>(e: &JsValue) -> Option<T>
+/// Decode a host payload out of a raw JS value.
+#[cfg(target_arch = "wasm32")]
+pub fn decode_bin_host_emit_js<T>(e: &wasm_bindgen::JsValue) -> Option<T>
 where
     T: rkyv::Archive,
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    use js_sys::{ArrayBuffer, Uint8Array};
-
-    let buffer: ArrayBuffer = if let Some(buf) = e.dyn_ref::<ArrayBuffer>() {
-        buf.clone()
-    } else if let Some(arr) = e.dyn_ref::<Uint8Array>() {
-        arr.buffer()
-    } else {
-        return None;
-    };
-
-    let view = Uint8Array::new(&buffer);
-    let mut bytes = vec![0u8; view.length() as usize];
-    view.copy_to(&mut bytes);
-
-    rkyv::from_bytes::<T, rkyv::rancor::Error>(&bytes).ok()
+    crate::hooks::cef_host::js_value_bytes(e).and_then(|bytes| decode_bin_payload::<T>(&bytes))
 }
 
-fn cef_bin_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
-    let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("binEmit")) else {
-        return Err(EventListenerError::NoEmitMethod);
-    };
-    emit.dyn_into::<Function>()
-        .map_err(|_| EventListenerError::EmitNotCallable)
-}
-
+/// Send a typed payload to the host.
+///
+/// The event id is the payload's type name, which is what the Bevy side matches on.
 pub fn try_cef_bin_emit_rkyv<T>(payload: &T) -> Result<(), EventListenerError>
 where
     T: for<'a> rkyv::Serialize<
@@ -93,30 +61,9 @@ where
             >,
         >,
 {
-    use js_sys::{ArrayBuffer, Uint8Array};
-
-    let cef = window_cef()?;
-    let emit_fn = cef_bin_emit_fn(&cef)?;
-
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
         .map_err(|_| EventListenerError::SerializePayload)?;
-
-    let envelope = encode_bin_ipc_envelope(std::any::type_name::<T>(), &bytes);
-    let buffer = ArrayBuffer::new(envelope.len() as u32);
-    let view = Uint8Array::new(&buffer);
-    view.copy_from(&envelope);
-
-    let _ = emit_fn.call1(&cef, &buffer.into());
-    Ok(())
-}
-
-fn cef_bin_listen_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
-    let Ok(listen) = js_sys::Reflect::get(cef, &JsValue::from_str("binListen")) else {
-        return Err(EventListenerError::NoListenMethod);
-    };
-    listen
-        .dyn_into::<Function>()
-        .map_err(|_| EventListenerError::ListenNotCallable)
+    emit_bytes(std::any::type_name::<T>(), &bytes)
 }
 
 pub fn try_cef_bin_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
@@ -126,46 +73,38 @@ where
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
     F: FnMut(T) + 'static,
 {
-    let cef = window_cef()?;
-    let listen_fn = cef_bin_listen_fn(&cef)?;
-
     let mut on_event = on_event;
-    let closure = Closure::wrap(Box::new(move |e: JsValue| {
-        if let Some(msg) = decode_bin_host_emit_js::<T>(&e) {
-            on_event(msg);
-        }
-    }) as Box<dyn FnMut(JsValue)>);
-
-    let cb = closure.as_ref().unchecked_ref();
-    let _ = listen_fn.call2(&cef, &JsValue::from_str(name), cb);
-    closure.forget();
-    Ok(())
+    listen_bytes(
+        name,
+        Box::new(move |bytes| {
+            if let Some(msg) = decode_bin_payload::<T>(bytes) {
+                on_event(msg);
+            }
+        }),
+    )
 }
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 struct PageReadyPayload {}
 
 pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
-    use js_sys::{ArrayBuffer, Uint8Array};
-
-    let cef = window_cef()?;
-    let emit_fn = cef_bin_emit_fn(&cef)?;
-
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayload {})
         .map_err(|_| EventListenerError::SerializePayload)?;
-    let envelope = encode_bin_ipc_envelope(PAGE_READY_BIN_EVENT_ID, &bytes);
-    let buffer = ArrayBuffer::new(envelope.len() as u32);
-    let view = Uint8Array::new(&buffer);
-    view.copy_from(&envelope);
-
-    let _ = emit_fn.call1(&cef, &buffer.into());
-    Ok(())
+    emit_bytes(PAGE_READY_BIN_EVENT_ID, &bytes)
 }
 
-const LISTENER_RETRY_MS: i32 = 16;
-
+/// Retry until the CEF bridge is injected.
+///
+/// Only wasm needs this: the bridge appears asynchronously after the page loads, whereas a native
+/// host installs its transport before the first page mounts.
+#[cfg(target_arch = "wasm32")]
 fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
-    let Some(win) = window() else {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    const LISTENER_RETRY_MS: i32 = 16;
+
+    let Some(win) = web_sys::window() else {
         return;
     };
     let closure = Closure::once(move || {
@@ -177,6 +116,9 @@ fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
     );
     closure.forget();
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn schedule_listener_retry(_retry_tick: Signal<u32>, _current: u32) {}
 
 pub struct BevyState {
     pub is_loading: Signal<bool>,
@@ -224,12 +166,12 @@ where
                 error.set(None);
                 match try_emit_page_ready() {
                     Ok(()) => {}
-                    Err(e) => error.set(Some(format!("cef.binEmit/emit failed: {e}"))),
+                    Err(e) => error.set(Some(format!("page ready emit failed: {e}"))),
                 }
             }
             Err(e) => {
                 is_loading.set(true);
-                error.set(Some(format!("cef.binListen failed: {e}")));
+                error.set(Some(format!("host listen failed: {e}")));
                 schedule_listener_retry(retry_tick, current_retry);
             }
         }
