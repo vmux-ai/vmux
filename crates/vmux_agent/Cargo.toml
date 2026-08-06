@@ -83,6 +83,9 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 mockito = "1"
+# The composer also compiles under `cfg(test)` on the host, where the page-side block above does
+# not apply, so its shared list-navigation helpers need a path in from here too.
+vmux_ui = { path = "../vmux_ui", default-features = false }
 serial_test = "3"
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }

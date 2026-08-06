@@ -1,3 +1,4 @@
+use crate::hooks::{MenuDirection, move_selection, use_selection_visible};
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -52,26 +53,6 @@ impl ManagerButtonVariant {
         }
     }
 }
-
-/// Keep the keyboard-highlighted option visible.
-#[cfg(target_arch = "wasm32")]
-fn scroll_option_into_view(option_id: &str) {
-    let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(option_id))
-    else {
-        return;
-    };
-    let options = web_sys::ScrollIntoViewOptions::new();
-    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    element.scroll_into_view_with_scroll_into_view_options(&options);
-}
-
-/// This follows arrow-key navigation, which a touch host does not have — there the list is
-/// scrolled by hand. Finding the element needs the DOM, so off CEF this does nothing; a host that
-/// wants it should reach for `MountedData::scroll_to`, which means the options carry `onmounted`.
-#[cfg(not(target_arch = "wasm32"))]
-fn scroll_option_into_view(_option_id: &str) {}
 
 #[component]
 pub fn ManagerPage(children: Element) -> Element {
@@ -223,11 +204,12 @@ pub fn ManagerSelect(
         .unwrap_or(&placeholder);
 
     let scroll_id = id.clone();
-    use_effect(move || {
-        if !open() {
-            return;
+    use_selection_visible(highlighted, move |index| {
+        if open() {
+            format!("{scroll_id}-option-{index}")
+        } else {
+            String::new()
         }
-        scroll_option_into_view(&format!("{scroll_id}-option-{}", highlighted()));
     });
 
     let key_items = items.clone();
@@ -243,13 +225,12 @@ pub fn ManagerSelect(
             event.stop_propagation();
             if open() {
                 let current = highlighted().min(key_items.len() - 1);
-                highlighted.set(if down {
-                    (current + 1) % key_items.len()
-                } else if current == 0 {
-                    key_items.len() - 1
+                let direction = if down {
+                    MenuDirection::Next
                 } else {
-                    current - 1
-                });
+                    MenuDirection::Previous
+                };
+                highlighted.set(move_selection(current, key_items.len(), direction));
             } else {
                 open.set(true);
                 highlighted.set(if down {
