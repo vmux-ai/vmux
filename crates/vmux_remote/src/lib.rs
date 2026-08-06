@@ -52,12 +52,32 @@ pub struct DesktopCommand {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DesktopCommandKind {
     ListSessions,
-    CreateChat { body: Value },
-    SendPrompt { sid: String, body: Value },
-    Cancel { sid: String },
-    Approve { sid: String, body: Value },
-    ListMedia { sid: String, query: String },
-    SubscribeSession { sid: String, stream_id: String },
+    /// `/r/{device}/api/agents` — the installed-agent list.
+    ListAgents,
+    /// `/r/{device}/api/team` — the active space's roster.
+    ListTeam,
+    CreateChat {
+        body: Value,
+    },
+    SendPrompt {
+        sid: String,
+        body: Value,
+    },
+    Cancel {
+        sid: String,
+    },
+    Approve {
+        sid: String,
+        body: Value,
+    },
+    ListMedia {
+        sid: String,
+        query: String,
+    },
+    SubscribeSession {
+        sid: String,
+        stream_id: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

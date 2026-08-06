@@ -1,5 +1,6 @@
 use std::{net::IpAddr, time::Duration};
 
+use crate::protocol::AgentCommand;
 use axum::http::StatusCode;
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -101,6 +102,12 @@ impl DesktopRelayClient {
         let DesktopCommand { id, kind } = command;
         let response = match kind {
             DesktopCommandKind::ListSessions => list_sessions_response(self.state.clone()).await,
+            DesktopCommandKind::ListAgents => {
+                broker_list_response(self.state.clone(), AgentCommand::ListAgents).await
+            }
+            DesktopCommandKind::ListTeam => {
+                broker_list_response(self.state.clone(), AgentCommand::ListTeam).await
+            }
             DesktopCommandKind::CreateChat { body } => {
                 create_chat_response(self.state.clone(), body).await
             }
@@ -248,6 +255,23 @@ async fn list_sessions_response(state: RemoteState) -> DesktopResponse {
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
     json_response(StatusCode::OK, sessions)
+}
+
+/// A GUI-held list, relayed as-is.
+///
+/// The body is forwarded without being parsed into its concrete type: the relay is a pipe, and
+/// re-deriving the shape here would be a second place to keep in step with the page.
+async fn broker_list_response(state: RemoteState, command: AgentCommand) -> DesktopResponse {
+    let Some(json) = broker_json(&state, command).await else {
+        return status_response(StatusCode::BAD_GATEWAY);
+    };
+    match serde_json::from_str::<Value>(&json) {
+        Ok(body) => DesktopResponse {
+            status: StatusCode::OK.as_u16(),
+            body,
+        },
+        Err(_) => status_response(StatusCode::BAD_GATEWAY),
+    }
 }
 
 async fn create_chat_response(state: RemoteState, body: Value) -> DesktopResponse {
