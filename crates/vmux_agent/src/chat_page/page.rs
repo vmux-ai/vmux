@@ -20,8 +20,8 @@ use crate::chat_page::event::{
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
     SlashCommandEntry, SlashCommands, latest_tool_location,
 };
+use crate::chat_page::scroll;
 use dioxus::prelude::*;
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use vmux_chat::activity::{
     ActivityIcon, activity_icon_paths, language_activity_icon, tool_activity_icon_for,
@@ -43,7 +43,7 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::{JsCast, JsValue, closure::Closure};
+use wasm_bindgen::{JsCast, closure::Closure};
 
 const APPROVAL_OPTION_COUNT: usize = 3;
 
@@ -161,16 +161,6 @@ fn accent_rgb(color: &str, fallback_rgb: &str) -> String {
         .unwrap_or_else(|| fallback_rgb.to_string())
 }
 
-fn chat_scroll_element() -> Option<web_sys::Element> {
-    web_sys::window()?
-        .document()?
-        .get_element_by_id("chat-scroll")
-}
-
-thread_local! {
-    static SCROLL_TO_BOTTOM_PENDING: Cell<bool> = const { Cell::new(false) };
-}
-
 fn request_chat_history(before: u32, mut loading: Signal<bool>) {
     if before == 0 || *loading.peek() {
         return;
@@ -183,43 +173,6 @@ fn request_chat_history(before: u32, mut loading: Signal<bool>) {
     {
         loading.set(true);
     }
-}
-
-fn schedule_scroll_to_bottom() {
-    if SCROLL_TO_BOTTOM_PENDING.replace(true) {
-        return;
-    }
-    let callback = Closure::once_into_js(move || {
-        SCROLL_TO_BOTTOM_PENDING.set(false);
-        if let Some(element) = chat_scroll_element() {
-            element.set_scroll_top(element.scroll_height());
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if let Some(window) = web_sys::window()
-        && window.request_animation_frame(&callback).is_ok()
-    {
-        return;
-    }
-    let _ = callback.call0(&JsValue::NULL);
-}
-
-fn schedule_scroll_restore(previous_height: i32, previous_top: i32) {
-    let callback = Closure::once_into_js(move || {
-        if let Some(element) = chat_scroll_element() {
-            let added_height = element.scroll_height().saturating_sub(previous_height);
-            element.set_scroll_top(previous_top.saturating_add(added_height));
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if let Some(window) = web_sys::window()
-        && window
-            .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, 0)
-            .is_ok()
-    {
-        return;
-    }
-    let _ = callback.call0(&JsValue::NULL);
 }
 
 fn merge_transcript_page(
@@ -563,7 +516,7 @@ pub fn Page(
         if !*at_bottom.peek() {
             return;
         }
-        schedule_scroll_to_bottom();
+        scroll::to_bottom();
     });
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
@@ -629,13 +582,12 @@ pub fn Page(
                 return;
             };
             request_attachment_previews(&older, attachment_previews, attachment_preview_requests);
-            let metrics = chat_scroll_element()
-                .map(|element| (element.scroll_height(), element.scroll_top()));
+            let metrics = scroll::metrics();
             drop(items.write().splice(0..0, older));
             loaded_start.set(page.start);
             messages_total.set(page.total);
             if let Some((height, top)) = metrics {
-                schedule_scroll_restore(height, top);
+                scroll::restore(height, top);
             }
         });
     let _attachments =
@@ -1471,23 +1423,21 @@ pub fn Page(
             div {
                 id: "chat-scroll",
                 class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 py-6 sm:px-4 md:px-6",
-                onscroll: move |_| {
-                    if let Some(el) = chat_scroll_element() {
-                        let top = el.scroll_top();
-                        let dist = el.scroll_height() - top - el.client_height();
-                        // Re-pin once the user reaches the bottom; unpin only when they scroll UP
-                        // (scroll_top decreases). Never unpin from our own programmatic
-                        // scroll-to-bottom, which only moves down and would otherwise poison
-                        // `at_bottom` with a stale, mid-stream scroll height.
-                        if dist <= 48 {
-                            at_bottom.set(true);
-                        } else if top < *last_top.peek() - 4 {
-                            at_bottom.set(false);
-                        }
-                        last_top.set(top);
-                        if top <= 160 {
-                            request_chat_history(loaded_start(), history_loading);
-                        }
+                onscroll: move |e: Event<ScrollData>| {
+                    let top = e.scroll_top() as i32;
+                    let dist = e.scroll_height() - top - e.client_height();
+                    // Re-pin once the user reaches the bottom; unpin only when they scroll UP
+                    // (scroll_top decreases). Never unpin from our own programmatic
+                    // scroll-to-bottom, which only moves down and would otherwise poison
+                    // `at_bottom` with a stale, mid-stream scroll height.
+                    if dist <= 48 {
+                        at_bottom.set(true);
+                    } else if top < *last_top.peek() - 4 {
+                        at_bottom.set(false);
+                    }
+                    last_top.set(top);
+                    if top <= 160 {
+                        request_chat_history(loaded_start(), history_loading);
                     }
                 },
                 div { class: "mx-auto flex min-h-full max-w-none flex-col gap-5 md:max-w-3xl",
