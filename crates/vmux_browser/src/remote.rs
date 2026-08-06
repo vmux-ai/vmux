@@ -241,18 +241,15 @@ fn pairing_info(base_url: &str, token: &str) -> Result<RemotePairingInfo, String
 }
 
 fn relay_pairing_base_url() -> Result<Option<String>, String> {
-    let Some(relay_url) = std::env::var("VMUX_REMOTE_RELAY_URL")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
+    // Removing the file matters: it is the daemon's only view of this setting, so a stale one
+    // would keep it dialling a relay the user just switched off.
+    let Some(relay_url) = vmux_service::relay_url_from_env() else {
         let _ = std::fs::remove_file(vmux_service::remote_relay_url_path());
         return Ok(None);
     };
     persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
     let device_id = ensure_relay_device_id().map_err(|error| error.to_string())?;
-    let base = relay_url.trim_end_matches('/');
-    Ok(Some(format!("{base}/r/{device_id}")))
+    Ok(Some(format!("{relay_url}/r/{device_id}")))
 }
 
 fn persist_relay_url(relay_url: &str) -> std::io::Result<()> {

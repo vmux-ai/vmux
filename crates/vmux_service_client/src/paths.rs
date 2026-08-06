@@ -65,9 +65,35 @@ pub fn remote_relay_device_path() -> PathBuf {
     profile_file("remote-device")
 }
 
-/// Path to the configured local-development relay URL for the active build and profile.
+/// Path to the resolved relay URL for the active build and profile.
+///
+/// The desktop app writes this so the daemon can read it: launchd starts the daemon, so it does
+/// not inherit the environment the app was launched with.
 pub fn remote_relay_url_path() -> PathBuf {
     profile_file("remote-relay-url")
+}
+
+/// The hosted relay, used when nothing overrides it.
+pub const DEFAULT_RELAY_URL: &str = "https://relay.vmux.ai";
+
+/// The relay `VMUX_REMOTE_RELAY_URL` asks for, or the hosted one when it is unset.
+pub fn relay_url_from_env() -> Option<String> {
+    resolve_relay_url(std::env::var("VMUX_REMOTE_RELAY_URL").ok().as_deref())
+}
+
+/// Decide the relay from what the environment said, if anything.
+///
+/// Setting the variable to an empty value is how the relay is turned off, leaving pairing on
+/// loopback — what the iOS Simulator needs and what a LAN-only setup wants. Absent and empty
+/// therefore mean opposite things, which is why this cannot collapse into a non-empty filter.
+pub fn resolve_relay_url(from_env: Option<&str>) -> Option<String> {
+    normalize_relay_url(from_env.unwrap_or(DEFAULT_RELAY_URL))
+}
+
+/// A relay URL trimmed to canonical form, or `None` when blank.
+pub fn normalize_relay_url(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 /// Stable loopback port for the active build and profile.
@@ -375,5 +401,30 @@ mod tests {
         let s = p.to_string_lossy();
         assert!(s.contains("Library/LaunchAgents"));
         assert!(s.ends_with("ai.vmux.service.dev.plist"));
+    }
+
+    /// An unset variable and an empty one mean opposite things — hosted relay versus no relay at
+    /// all. Collapsing them is the plausible refactor this guards against.
+    #[test]
+    fn an_absent_relay_setting_is_hosted_and_an_empty_one_is_off() {
+        for (from_env, expected) in [
+            (None, Some(DEFAULT_RELAY_URL)),
+            (Some(""), None),
+            (Some("   "), None),
+            (
+                Some("https://relay.example.com/"),
+                Some("https://relay.example.com"),
+            ),
+            (
+                Some("  https://localhost:8788  "),
+                Some("https://localhost:8788"),
+            ),
+        ] {
+            assert_eq!(
+                resolve_relay_url(from_env).as_deref(),
+                expected,
+                "from_env = {from_env:?}"
+            );
+        }
     }
 }

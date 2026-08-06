@@ -70,6 +70,20 @@ verifies them against the API, and persists them locally.
 The API rejects requests while Remote is off, rejects unauthenticated requests, caps prompt size,
 and listens only on loopback. Resetting the token restarts the daemon and invalidates paired phones.
 
-Loopback reaches the Mac from the iOS Simulator but not from a physical phone. Pairing a real
-device needs the endpoint reachable over the network; the desktop reads that endpoint from
-`VMUX_REMOTE_RELAY_URL` and pairs against it instead of loopback when it is set.
+## Reaching a Mac that is not on the network
+
+Loopback reaches the Mac from the iOS Simulator but not from a physical phone, so pairing a real
+device goes through a relay. The desktop long-polls it for commands and posts responses back;
+neither end listens, so a phone reaches a Mac behind NAT without either opening a port.
+
+`VMUX_REMOTE_RELAY_URL` selects the relay and defaults to `https://relay.vmux.ai`. Point it at your
+own to develop against one, or set it **empty** to switch the relay off and pair over loopback,
+which is what the Simulator wants. Absent and empty mean opposite things.
+
+Nothing is dialled until Remote is enabled — the daemon checks that first, so the default costs no
+traffic on a machine that never turns Remote on.
+
+The `.env` at the repository root feeds `make`, which exports it to the app. A packaged build
+started from Finder sees no `.env` and takes the default. The desktop writes the resolved URL into
+the profile's service directory, because launchd starts the daemon with no inherited environment
+and that file is the daemon's only view of the setting.

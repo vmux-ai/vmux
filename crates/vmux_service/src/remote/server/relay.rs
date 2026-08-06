@@ -415,12 +415,19 @@ fn json_response<T: Serialize>(status: StatusCode, body: T) -> DesktopResponse {
     }
 }
 
+/// Where this daemon should reach the relay.
+///
+/// The file is the normal source: the desktop app resolves the URL and writes it there, because
+/// launchd gives this process no inherited environment. An explicit variable still wins for a
+/// daemon started by hand, and the hosted default covers one that has never seen the app.
 fn configured_relay_url() -> Option<String> {
-    std::env::var("VMUX_REMOTE_RELAY_URL")
-        .ok()
-        .or_else(|| std::fs::read_to_string(crate::remote_relay_url_path()).ok())
-        .map(|value| value.trim().trim_end_matches('/').to_string())
-        .filter(|value| !value.is_empty())
+    if let Ok(from_env) = std::env::var("VMUX_REMOTE_RELAY_URL") {
+        return crate::normalize_relay_url(&from_env);
+    }
+    match std::fs::read_to_string(crate::remote_relay_url_path()) {
+        Ok(persisted) => crate::normalize_relay_url(&persisted),
+        Err(_) => crate::normalize_relay_url(crate::DEFAULT_RELAY_URL),
+    }
 }
 
 fn ensure_device_id() -> std::io::Result<String> {
