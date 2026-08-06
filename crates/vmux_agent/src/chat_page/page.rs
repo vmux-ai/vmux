@@ -26,17 +26,21 @@ use std::collections::{HashMap, HashSet};
 use vmux_chat::activity::{
     ActivityIcon, activity_icon_paths, language_activity_icon, tool_activity_icon_for,
 };
+use vmux_chat::clipboard::copy_to_clipboard;
 use vmux_chat::transcript::{ChatItemRow, MD_CSS};
-use vmux_command::prompt_media::{
-    inline_media_query, media_display_path, media_reference, merge_chat_attachments,
-    replace_inline_media_query,
-};
+#[cfg(target_arch = "wasm32")]
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::prompt_box::PromptPopup;
+#[cfg(target_arch = "wasm32")]
+use vmux_ui::components::prompt_composer::prompt_textarea;
 use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
-    focus_prompt_end, prompt_textarea,
+    focus_prompt_end,
+};
+use vmux_wire::prompt_media::{
+    inline_media_query, media_display_path, media_reference, merge_chat_attachments,
+    replace_inline_media_query,
 };
 
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
@@ -91,6 +95,7 @@ fn approval_detail_label(label: &str) -> String {
 }
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
+#[cfg(target_arch = "wasm32")]
 fn has_text_selection() -> bool {
     web_sys::window()
         .and_then(|w| w.get_selection().ok().flatten())
@@ -98,10 +103,11 @@ fn has_text_selection() -> bool {
         .unwrap_or(false)
 }
 
-fn copy_to_clipboard(text: &str) {
-    if let Some(window) = web_sys::window() {
-        let _ = window.navigator().clipboard().write_text(text);
-    }
+/// A touch host has neither a caret nor a Ctrl+C, so the question never arises and the answer
+/// that leaves the shortcut meaning "interrupt" is the right one.
+#[cfg(not(target_arch = "wasm32"))]
+fn has_text_selection() -> bool {
+    false
 }
 
 /// Whether a startup/run error looks like a package registry/version block (npm 403, security
@@ -127,12 +133,61 @@ fn is_version_error(message: &str) -> bool {
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
 /// across agents and only the id differs.
+#[cfg(target_arch = "wasm32")]
 fn current_agent() -> String {
     web_sys::window()
         .and_then(|w| w.location().pathname().ok())
         .and_then(|path| path.split('/').find(|s| !s.is_empty()).map(str::to_string))
         .unwrap_or_else(|| "agent".to_string())
 }
+
+/// A native host has no page URL to read the id out of, so it passes `agent_override` instead —
+/// which takes precedence over this anyway.
+#[cfg(not(target_arch = "wasm32"))]
+fn current_agent() -> String {
+    "agent".to_string()
+}
+
+/// Where the caret sits in the prompt, which decides whether Up moves within the text or recalls
+/// the previous prompt.
+#[cfg(target_arch = "wasm32")]
+fn prompt_caret() -> Option<(u32, u32)> {
+    let textarea = prompt_textarea(PROMPT_INPUT_ID)?;
+    let start = textarea
+        .selection_start()
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let end = textarea.selection_end().ok().flatten().unwrap_or(start);
+    Some((start, end))
+}
+
+/// Nothing to measure without an element handle. Reporting the start is what makes Up recall
+/// history rather than appear to do nothing.
+#[cfg(not(target_arch = "wasm32"))]
+fn prompt_caret() -> Option<(u32, u32)> {
+    Some((0, 0))
+}
+
+/// Keep the highlighted row of an open selector in view as the arrow keys move through it.
+///
+/// Reaching the row needs the DOM. Off CEF this does nothing: the affordance follows keyboard
+/// navigation, which a touch host does not have.
+#[cfg(target_arch = "wasm32")]
+fn scroll_selector_item_into_view(item_id: &str) {
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(item_id))
+    else {
+        return;
+    };
+    let options = web_sys::ScrollIntoViewOptions::new();
+    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+    element.scroll_into_view_with_scroll_into_view_options(&options);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scroll_selector_item_into_view(_item_id: &str) {}
 
 fn hex_accent_rgb(color: &str) -> Option<(u8, u8, u8)> {
     let hex = color.strip_prefix('#')?;
@@ -298,6 +353,24 @@ fn select_media_entry(
     focus_prompt_end(PROMPT_INPUT_ID);
 }
 
+/// The falling-glyphs backdrop shown while an agent installs.
+///
+/// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
+/// desktop act anyway, so a native host renders nothing rather than an approximation.
+#[cfg(target_arch = "wasm32")]
+fn install_backdrop(accent_rgb: String, title: String) -> Element {
+    rsx! {
+        div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
+            MatrixRain { accent_rgb, words: vec![title] }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn install_backdrop(_accent_rgb: String, _title: String) -> Element {
+    rsx! {}
+}
+
 #[component]
 pub fn Page(
     #[props(default)] agent_override: Option<String>,
@@ -335,6 +408,7 @@ pub fn Page(
     let mut history_scratch = use_signal(String::new);
     let mut at_bottom = use_signal(|| true);
     let mut last_top = use_signal(|| 0i32);
+    let mut scroll_container: scroll::Container = use_signal(|| None);
     let queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
     let paused = use_signal(|| false);
     let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
@@ -367,7 +441,7 @@ pub fn Page(
         if !*at_bottom.peek() {
             return;
         }
-        scroll::to_bottom();
+        scroll::to_bottom(scroll_container);
     });
 
     let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
@@ -433,12 +507,12 @@ pub fn Page(
                 return;
             };
             request_attachment_previews(&older, attachment_previews, attachment_preview_requests);
-            let metrics = scroll::metrics();
+            let metrics = scroll::metrics(scroll_container);
             drop(items.write().splice(0..0, older));
             loaded_start.set(page.start);
             messages_total.set(page.total);
             if let Some((height, top)) = metrics {
-                scroll::restore(height, top);
+                scroll::restore(scroll_container, height, top);
             }
         });
     let _attachments =
@@ -537,20 +611,15 @@ pub fn Page(
         let title = chat_page_title(&conversation_title(), &name);
         let status = status();
         let items = items.read();
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            if document.title() != title {
-                document.set_title(&title);
-            }
-            let fallback = agent_accent(&favicon_agent).rain_rgb;
-            let accent = normalized_accent(&accent(), fallback);
-            let href = current_activity_icon(&items, &status)
-                .map(|activity| activity_favicon(activity, &accent))
-                .or_else(|| {
-                    favicon_src_for_url(&agent_icon(), &format!("vmux://agent/{favicon_agent}"))
-                })
-                .unwrap_or_else(|| activity_favicon(ActivityIcon::Tool, &accent));
-            set_page_favicon(&href);
-        }
+        let fallback = agent_accent(&favicon_agent).rain_rgb;
+        let accent = normalized_accent(&accent(), fallback);
+        let href = current_activity_icon(&items, &status)
+            .map(|activity| activity_favicon(activity, &accent))
+            .or_else(|| {
+                favicon_src_for_url(&agent_icon(), &format!("vmux://agent/{favicon_agent}"))
+            })
+            .unwrap_or_else(|| activity_favicon(ActivityIcon::Tool, &accent));
+        set_tab_identity(&title, &href);
     });
 
     let header_name = {
@@ -872,16 +941,10 @@ pub fn Page(
         if !selector_open
             && !e.modifiers().meta()
             && !e.modifiers().alt()
-            && let Some(textarea) = prompt_textarea(PROMPT_INPUT_ID)
-        {
-            let start = textarea
-                .selection_start()
-                .ok()
-                .flatten()
-                .unwrap_or_default();
-            let end = textarea.selection_end().ok().flatten().unwrap_or(start);
-            if let Some(direction) =
+            && let Some((start, end)) = prompt_caret()
+            && let Some(direction) =
                 prompt_history_direction(&key, e.modifiers().ctrl(), &draft_now, start, end)
+        {
             {
                 let history = prompt_history(&items.peek(), &queued.peek());
                 let current_cursor = *history_cursor.peek();
@@ -1020,14 +1083,7 @@ pub fn Page(
         } else {
             format!("agent-selector-item-{selected}")
         };
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&item_id))
-        {
-            let options = web_sys::ScrollIntoViewOptions::new();
-            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            element.scroll_into_view_with_scroll_into_view_options(&options);
-        }
+        scroll_selector_item_into_view(&item_id);
     });
 
     let context = composer_context();
@@ -1331,12 +1387,7 @@ pub fn Page(
             onkeydown: root_keydown,
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
-                div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
-                    MatrixRain {
-                        accent_rgb: rain_accent,
-                        words: vec![header_name.to_uppercase()],
-                    }
-                }
+                {install_backdrop(rain_accent, header_name.to_uppercase())}
             }
             header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] sm:px-5",
                 {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
@@ -1350,6 +1401,7 @@ pub fn Page(
             }
             div {
                 id: "chat-scroll",
+                onmounted: move |e| scroll_container.set(Some(e.data())),
                 class: "vmux-agent-surface-enter vmux-agent-surface-enter-delayed relative z-10 flex-1 overflow-y-auto overscroll-contain px-3 py-6 sm:px-4 md:px-6",
                 onscroll: move |e: Event<ScrollData>| {
                     let top = e.scroll_top() as i32;
@@ -2001,6 +2053,24 @@ fn activity_favicon(kind: ActivityIcon, accent: &str) -> String {
     ))
 }
 
+/// Reflect the conversation in the tab that holds the page.
+///
+/// A pane is a browser tab, so its title and favicon are how the conversation identifies itself in
+/// the layout. A native host has no tab and shows this in its own chrome instead.
+#[cfg(target_arch = "wasm32")]
+fn set_tab_identity(title: &str, favicon_href: &str) {
+    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+        if document.title() != title {
+            document.set_title(title);
+        }
+        set_page_favicon(favicon_href);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn set_tab_identity(_title: &str, _favicon_href: &str) {}
+
+#[cfg(target_arch = "wasm32")]
 fn set_page_favicon(href: &str) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;

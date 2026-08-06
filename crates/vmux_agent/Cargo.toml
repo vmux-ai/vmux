@@ -15,11 +15,10 @@ rkyv = { workspace = true }
 similar = "2"
 unicode-segmentation = "1"
 vmux_chat = { path = "../vmux_chat" }
-vmux_command = { path = "../vmux_command" }
-vmux_terminal = { path = "../vmux_terminal" }
 vmux_wire = { path = "../vmux_wire" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+vmux_command = { path = "../vmux_command" }
 base64 = "0.22"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
@@ -48,13 +47,22 @@ vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+# MatrixRain is a canvas animation the CEF page renders, and the desktop half needs the crate
+# too; only a phone build can do without it.
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+vmux_terminal = { path = "../vmux_terminal" }
+
+# Shared by both page hosts. Everything web-bound stays in the wasm-only block below, so a phone
+# build pulls neither the browser bindings nor the crates that gate bevy on `not(wasm32)`.
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
 vmux_core = { path = "../vmux_core" }
-vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Clipboard",
