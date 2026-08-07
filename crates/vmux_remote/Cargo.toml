@@ -11,5 +11,21 @@ publish = false
 serde = { workspace = true }
 serde_json = { workspace = true }
 
+# The QUIC endpoint helpers. Still no vmux dependency: the relay links this and must stay unable
+# to decode a payload.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+quinn = { workspace = true }
+rcgen = { workspace = true }
+ring = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+
 [dev-dependencies]
 serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+quinn = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
