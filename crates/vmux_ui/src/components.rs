@@ -57,3 +57,110 @@ pub mod virtual_list;
 
 pub use crate::util::merge_class;
 pub use text::{UiText, UiTextSize, UiTextTone};
+
+#[cfg(test)]
+mod naming_policy {
+    use std::path::Path;
+
+    /// A `#[component]` is written as an element — `Foo {}` — so its name has to read like one.
+    /// Rust's own lints cannot say this: every page carries `#![allow(non_snake_case)]` to permit
+    /// the convention in the first place, which switches off the only check in the area and makes
+    /// a lower-case component compile silently. The convention is the oracle, so the scan is the
+    /// only way to hold it.
+    #[test]
+    fn every_component_is_named_like_an_element() {
+        let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir");
+        let mut offenders = Vec::new();
+        walk_rs_files(crates_dir, &mut |path, source| {
+            for (index, name) in component_names(source) {
+                if !name.starts_with(char::is_uppercase) {
+                    offenders.push(format!("{}:{}: {name}", path.display(), index + 1));
+                }
+            }
+        });
+        assert!(
+            offenders.is_empty(),
+            "components must be PascalCase so they read as elements in rsx:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    /// Names of `#[component]`-annotated functions, with the line the name sits on.
+    fn component_names(source: &str) -> Vec<(usize, String)> {
+        let lines: Vec<&str> = source.lines().collect();
+        let mut found = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            if line.trim() != "#[component]" {
+                continue;
+            }
+            // Attributes and doc comments both sit between the marker and the signature, and
+            // several components in this crate put the doc comment second.
+            let Some((offset, signature)) =
+                lines[index + 1..]
+                    .iter()
+                    .enumerate()
+                    .find(|(_, candidate)| {
+                        let candidate = candidate.trim_start();
+                        !candidate.starts_with('#') && !candidate.starts_with("//")
+                    })
+            else {
+                continue;
+            };
+            let Some(rest) = signature.split("fn ").nth(1) else {
+                continue;
+            };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                found.push((index + 1 + offset, name));
+            }
+        }
+        found
+    }
+
+    fn walk_rs_files(dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) == Some("target") {
+                    continue;
+                }
+                walk_rs_files(&path, visit);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+                && let Ok(source) = std::fs::read_to_string(&path)
+            {
+                visit(&path, &source);
+            }
+        }
+    }
+
+    /// The scan has to actually see a violation, or it passes for the wrong reason.
+    #[test]
+    fn the_scan_catches_a_lower_case_component() {
+        let source = "#[component]\nfn my_widget() -> Element { rsx! {} }\n";
+        let found = component_names(source);
+        assert_eq!(found.len(), 1, "expected one component, got {found:?}");
+        assert_eq!(found[0].1, "my_widget");
+        assert!(!found[0].1.starts_with(char::is_uppercase));
+    }
+
+    /// Attributes and doc comments both sit between the marker and the signature. Missing either
+    /// makes the scan skip the component entirely, so it would pass by seeing nothing.
+    #[test]
+    fn the_scan_looks_past_attributes_and_doc_comments() {
+        for between in ["#[allow(non_snake_case)]", "/// Doc.", "// Note."] {
+            let source =
+                format!("#[component]\n{between}\npub fn Widget() -> Element {{ rsx! {{}} }}\n");
+            let found = component_names(&source);
+            assert_eq!(found.len(), 1, "missed the component after {between:?}");
+            assert_eq!(found[0].1, "Widget");
+        }
+    }
+}

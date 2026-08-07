@@ -164,86 +164,60 @@ pub fn file_icon_kind(path: &str, is_dir: bool) -> FileIcon {
     }
 }
 
-pub use components::type_icon;
+pub use components::TypeIcon;
 
 mod components {
     use super::{FileIcon, file_icon_kind};
     use crate::components::icon::Icon;
     use dioxus::prelude::*;
 
-    pub fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
-        match file_icon_kind(path, is_dir) {
-            FileIcon::Folder => folder_glyph(class),
-            FileIcon::Image => image_glyph(class),
-            FileIcon::Logo(d) => logo_icon(d, class),
-            FileIcon::Config => config_glyph(class),
-            FileIcon::Text => text_glyph(class),
-            FileIcon::Code => code_glyph(class),
-            FileIcon::File => file_glyph(class),
-        }
-    }
-
-    fn folder_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-            }
-        }
-    }
-
-    fn file_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-            }
-        }
-    }
-
-    fn text_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                path { d: "M16 13H8" }
-                path { d: "M16 17H8" }
-                path { d: "M10 9H8" }
-            }
-        }
-    }
-
-    fn code_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "m16 18 6-6-6-6" }
-                path { d: "m8 6-6 6 6 6" }
-            }
-        }
-    }
-
-    fn config_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
-                path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
-            }
-        }
-    }
-
-    fn image_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
-                path { d: "m21 15-5-5L5 21" }
-            }
-        }
-    }
-
-    fn logo_icon(d: &str, class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}", fill: "currentColor", stroke: "none",
-                path { d: "{d}" }
-            }
+    /// The glyph for a path, chosen by extension.
+    #[component]
+    pub fn TypeIcon(path: String, is_dir: bool, class: String) -> Element {
+        match file_icon_kind(&path, is_dir) {
+            FileIcon::Folder => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                }
+            },
+            FileIcon::Image => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
+                    path { d: "m21 15-5-5L5 21" }
+                }
+            },
+            FileIcon::Logo(d) => rsx! {
+                Icon { class: "{class}", fill: "currentColor", stroke: "none",
+                    path { d: "{d}" }
+                }
+            },
+            FileIcon::Config => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
+                    path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
+                }
+            },
+            FileIcon::Text => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                    path { d: "M16 13H8" }
+                    path { d: "M16 17H8" }
+                    path { d: "M10 9H8" }
+                }
+            },
+            FileIcon::Code => rsx! {
+                Icon { class: "{class}",
+                    path { d: "m16 18 6-6-6-6" }
+                    path { d: "m8 6-6 6 6 6" }
+                }
+            },
+            FileIcon::File => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                }
+            },
         }
     }
 }

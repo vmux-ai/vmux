@@ -8,7 +8,7 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
-use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
+use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -144,7 +144,7 @@ fn render_package(
             show_icon,
             icon: rsx! {
                 if let Some(path) = icon_path.as_ref() {
-                    {type_icon(path, false, "h-6 w-6 text-foreground/80")}
+                    {rsx! { TypeIcon { path: path.to_string(), is_dir: false, class: "h-6 w-6 text-foreground/80" } }}
                 }
             },
             title: item.name.clone(),

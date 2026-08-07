@@ -35,10 +35,10 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
-use vmux_ui::file_icon::type_icon;
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{PageIconView, builtin_icon};
+use vmux_ui::icon::{BuiltinIconView, PageIconView};
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
@@ -1695,7 +1695,7 @@ fn KnowledgeCreateInput(
     };
     rsx! {
         div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-            {type_icon("untitled.md", kind == KnowledgeCreateKind::Folder, "h-4 w-4 shrink-0 text-muted-foreground")}
+            {rsx! { TypeIcon { path: "untitled.md", is_dir: kind == KnowledgeCreateKind::Folder, class: "h-4 w-4 shrink-0 text-muted-foreground" } }}
             BookmarkNameInput {
                 draft,
                 class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
@@ -1990,7 +1990,7 @@ fn KnowledgeEntryRow(
                         title: "{entry.path}",
                         class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                         onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                        {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
+                        {rsx! { TypeIcon { path: entry.path.to_string(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" } }}
                         span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
                         {knowledge_git_indicator(entry.git_status)}
                     }
@@ -2109,7 +2109,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
-                        {builtin_icon(vmux_core::BuiltinIcon::Hammer, "h-4 w-4")}
+                        {rsx! { BuiltinIconView { icon: vmux_core::BuiltinIcon::Hammer, class: "h-4 w-4" } }}
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "flex items-baseline gap-1.5",

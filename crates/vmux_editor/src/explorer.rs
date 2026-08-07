@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
-use vmux_ui::file_icon::type_icon;
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -458,7 +458,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                             },
                                             "\u{00D7}"
                                         }
-                                        {type_icon(&it.path, false, "h-4 w-4 shrink-0 opacity-80")}
+                                        {rsx! { TypeIcon { path: it.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                         span { class: "truncate", "{it.name}" }
                                         if dirty {
                                             span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" }
@@ -598,7 +598,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
-                                                {type_icon(&row.path, is_dir, "h-4 w-4 shrink-0 opacity-80")}
+                                                {rsx! { TypeIcon { path: row.path.to_string(), is_dir: is_dir, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                                 span { class: "truncate", "{row.name}" }
                                             }
                                         }
