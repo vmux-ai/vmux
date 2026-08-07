@@ -218,22 +218,43 @@ fn enable_remote() -> Result<RemotePairingInfo, String> {
             format!("http://127.0.0.1:{port}")
         }
     };
-    pairing_info(&base_url, &token)
+    // Absent until the QUIC listener has written its certificate, which leaves the phone on
+    // HTTP rather than blocking pairing.
+    let fingerprint = vmux_service::remote::quic::identity_fingerprint().unwrap_or_default();
+    pairing_info(&base_url, &token, &fingerprint)
 }
 
 fn disable_remote() -> Result<(), String> {
     Ok(())
 }
 
-fn pairing_info(base_url: &str, token: &str) -> Result<RemotePairingInfo, String> {
+/// Build the pairing URL and deep link.
+///
+/// `fingerprint` is passed in rather than read here so the result depends only on the arguments —
+/// reading the certificate from disk would make this answer differ between a machine that has
+/// started Remote and one that has not.
+fn pairing_info(
+    base_url: &str,
+    token: &str,
+    fingerprint: &str,
+) -> Result<RemotePairingInfo, String> {
     let mut pairing_url = url::Url::parse(base_url).map_err(|error| error.to_string())?;
-    pairing_url.set_fragment(Some(&format!("token={token}")));
+    pairing_url.set_fragment(Some(&if fingerprint.is_empty() {
+        format!("token={token}")
+    } else {
+        format!("token={token}&fp={fingerprint}")
+    }));
     let mut pairing_deep_link =
         url::Url::parse("vmuxremote://pair").map_err(|error| error.to_string())?;
     pairing_deep_link
         .query_pairs_mut()
         .append_pair("base", base_url)
         .append_pair("token", token);
+    if !fingerprint.is_empty() {
+        pairing_deep_link
+            .query_pairs_mut()
+            .append_pair("fp", fingerprint);
+    }
     Ok(RemotePairingInfo {
         pairing_url: pairing_url.to_string(),
         pairing_deep_link: pairing_deep_link.to_string(),
@@ -329,11 +350,28 @@ mod tests {
 
     #[test]
     fn builds_pairing_urls() {
-        let pairing = pairing_info("http://127.0.0.1:54821", "secret").unwrap();
+        let pairing = pairing_info("http://127.0.0.1:54821", "secret", "").unwrap();
         assert_eq!(pairing.pairing_url, "http://127.0.0.1:54821/#token=secret");
         assert_eq!(
             pairing.pairing_deep_link,
             "vmuxremote://pair?base=http%3A%2F%2F127.0.0.1%3A54821&token=secret"
+        );
+    }
+
+    /// The phone can only pin the desktop's certificate if the fingerprint survives into both
+    /// pairing shapes — the QR-encoded URL and the deep link. Dropping it from either would
+    /// downgrade that phone to an unpinned connection with nothing to show for it.
+    #[test]
+    fn a_fingerprint_reaches_both_pairing_shapes() {
+        let pairing = pairing_info("http://127.0.0.1:54821", "secret", "abc123").unwrap();
+
+        assert_eq!(
+            pairing.pairing_url,
+            "http://127.0.0.1:54821/#token=secret&fp=abc123"
+        );
+        assert_eq!(
+            pairing.pairing_deep_link,
+            "vmuxremote://pair?base=http%3A%2F%2F127.0.0.1%3A54821&token=secret&fp=abc123"
         );
     }
 }

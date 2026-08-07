@@ -86,6 +86,10 @@ struct MobileRoomProjection {
 struct Credentials {
     base_url: String,
     token: String,
+    /// SHA-256 of the desktop's QUIC certificate. Absent when paired against a desktop with no
+    /// QUIC listener, which keeps the HTTP path working while both transports coexist.
+    #[serde(default)]
+    fingerprint: String,
 }
 
 #[derive(Clone)]
@@ -1650,11 +1654,21 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         if !matches!(base.scheme(), "http" | "https") {
             return Err("Pairing URL must use HTTPS or HTTP.".to_string());
         }
+        // Absent when the desktop has no QUIC listener yet, which leaves the phone on HTTP
+        // rather than failing to pair.
+        let fingerprint = params
+            .get("fp")
+            .map(|value| value.to_string())
+            .unwrap_or_default();
         let base_url = normalized_pairing_base(base)?;
         if base_url.is_empty() {
             return Err("Pairing URL has no server address.".to_string());
         }
-        return Ok(Credentials { base_url, token });
+        return Ok(Credentials {
+            base_url,
+            token,
+            fingerprint,
+        });
     }
     let start = input
         .find("https://")
@@ -1674,11 +1688,23 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         })
         .filter(|token| !token.is_empty())
         .ok_or_else(|| "Pairing URL has no token.".to_string())?;
+    let fingerprint = parsed
+        .fragment()
+        .and_then(|fragment| {
+            url::form_urlencoded::parse(fragment.as_bytes())
+                .find(|(name, _)| name == "fp")
+                .map(|(_, value)| value.into_owned())
+        })
+        .unwrap_or_default();
     let base_url = normalized_pairing_base(parsed)?;
     if base_url.is_empty() {
         return Err("Pairing URL has no server address.".to_string());
     }
-    Ok(Credentials { base_url, token })
+    Ok(Credentials {
+        base_url,
+        token,
+        fingerprint,
+    })
 }
 
 fn normalized_pairing_base(mut url: Url) -> Result<String, String> {
@@ -1801,6 +1827,40 @@ fn status_dot(status: &RemoteStatus) -> &'static str {
 mod tests {
     use super::*;
 
+    /// The fingerprint is the whole basis for trusting the desktop's certificate. If it were
+    /// dropped while parsing, the phone would silently fall back to an unpinned connection —
+    /// a downgrade with no visible symptom, so both pairing shapes are covered.
+    #[test]
+    fn a_pairing_link_carries_the_certificate_fingerprint() {
+        let expected = "c620a502885ddf230420184cc3a1b190792c14c1049ab76a6a63596054a1025e";
+
+        let pasted = parse_pairing_url(&format!(
+            "https://mac.example.ts.net/#token=secret&fp={expected}"
+        ))
+        .unwrap();
+        let deep_link = parse_pairing_url(&format!(
+            "vmuxremote://pair?base=https%3A%2F%2Fmac.example.ts.net&token=secret&fp={expected}"
+        ))
+        .unwrap();
+
+        assert_eq!(pasted.fingerprint, expected);
+        assert_eq!(deep_link.fingerprint, expected);
+        assert_eq!(
+            pasted.token, "secret",
+            "the token must survive alongside it"
+        );
+    }
+
+    /// A desktop with no QUIC listener sends no fingerprint. That must still pair, on HTTP,
+    /// rather than refusing — the two transports coexist until the cutover.
+    #[test]
+    fn a_link_without_a_fingerprint_still_pairs() {
+        let credentials = parse_pairing_url("https://mac.example.ts.net/#token=secret").unwrap();
+
+        assert!(credentials.fingerprint.is_empty());
+        assert_eq!(credentials.token, "secret");
+    }
+
     #[test]
     fn parses_pairing_url() {
         assert_eq!(
@@ -1808,6 +1868,7 @@ mod tests {
             Credentials {
                 base_url: "https://mac.example.ts.net".to_string(),
                 token: "secret".to_string(),
+                fingerprint: String::new(),
             }
         );
     }
@@ -1822,6 +1883,7 @@ mod tests {
             Credentials {
                 base_url: "https://mac.example.ts.net:54821".to_string(),
                 token: "secret".to_string(),
+                fingerprint: String::new(),
             }
         );
     }
@@ -1833,6 +1895,7 @@ mod tests {
             Credentials {
                 base_url: "http://localhost:8787/r/device-1".to_string(),
                 token: "secret".to_string(),
+                fingerprint: String::new(),
             }
         );
     }

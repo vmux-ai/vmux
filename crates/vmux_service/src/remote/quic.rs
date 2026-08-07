@@ -62,6 +62,15 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     Ok(identity)
 }
 
+/// The fingerprint of the certificate this desktop presents, for the pairing link.
+///
+/// Reads the persisted identity rather than the live listener, so the GUI can build a pairing
+/// link without reaching into the daemon's process.
+pub fn identity_fingerprint() -> Option<String> {
+    let pem = std::fs::read_to_string(crate::remote_cert_path()).ok()?;
+    fingerprint_of(&pem).ok()
+}
+
 /// The names a phone might dial this desktop by. The certificate is pinned by fingerprint, so
 /// these are belt-and-braces rather than the trust decision.
 fn subject_alt_names() -> Vec<String> {
