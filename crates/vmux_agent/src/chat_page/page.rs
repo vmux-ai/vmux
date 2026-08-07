@@ -1650,6 +1650,7 @@ pub fn Page(
                                             key: "sc{i}",
                                             id: "agent-selector-item-{i}",
                                             class: if i == menu_sel() { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm bg-foreground/10" } else { "flex cursor-pointer items-baseline gap-3 px-3.5 py-2 text-sm" },
+                                            onmouseenter: move |_| menu_sel.set(i),
                                             onclick: move |_| run_slash_command(&command.name, draft, menu_sel),
                                             span { class: "font-medium text-foreground", "/{command.name}" }
                                             span { class: "text-xs text-muted-foreground", "{slash_command_description(&command)}" }
@@ -1676,6 +1677,7 @@ pub fn Page(
                                                 key: "rs{i}",
                                                 id: "agent-selector-item-{i}",
                                                 class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                                                onmouseenter: move |_| menu_sel.set(i),
                                                 onclick: move |_| select_resume_session(&session, draft),
                                                 div { class: "flex min-w-0 items-baseline gap-2",
                                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{session.title}" }
@@ -1705,6 +1707,7 @@ pub fn Page(
                                                 key: "model{i}",
                                                 id: "agent-selector-item-{i}",
                                                 class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                                                onmouseenter: move |_| menu_sel.set(i),
                                                 onclick: move |_| select_model(&model, draft),
                                                 div { class: "flex min-w-0 items-baseline gap-2",
                                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }
@@ -1730,6 +1733,7 @@ pub fn Page(
                                     button {
                                         key: "choice-{index}",
                                         id: "agent-choice-item-{index}",
+                                        onmouseenter: move |_| menu_sel.set(index),
                                         class: if index == menu_sel() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
                                         onclick: move |_| {
                                             if try_cef_bin_emit_rkyv(&ChatChoiceSelected { index: index as u32 }).is_ok() {
