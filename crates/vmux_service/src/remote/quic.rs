@@ -290,7 +290,20 @@ pub(crate) fn spawn(
     state: super::server::RemoteState,
     address: SocketAddr,
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
-    let identity = ensure_identity()?;
+    let liveness = spawn_liveness_watch();
+    spawn_with_identity(state, address, ensure_identity()?, liveness).map(|(handle, _)| handle)
+}
+
+/// Bind with a caller-supplied identity.
+///
+/// Split out so a test can use a throwaway certificate rather than writing one into the user's
+/// profile directory, which `ensure_identity` would otherwise do as a side effect.
+pub(crate) fn spawn_with_identity(
+    state: super::server::RemoteState,
+    address: SocketAddr,
+    identity: SelfSignedIdentity,
+    liveness: watch::Receiver<bool>,
+) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
     let endpoint = server_endpoint(
         address,
         &identity.certificate_pem,
@@ -304,8 +317,7 @@ pub(crate) fn spawn(
         "remote quic: listening"
     );
 
-    let liveness = spawn_liveness_watch();
-    Ok(tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
             let state = state.clone();
             let liveness = liveness.clone();
@@ -316,7 +328,8 @@ pub(crate) fn spawn(
                 }
             });
         }
-    }))
+    });
+    Ok((handle, bound))
 }
 
 #[cfg(test)]
@@ -392,5 +405,161 @@ mod tests {
         unique.dedup();
 
         assert_eq!(unique.len(), codes.len());
+    }
+}
+
+/// Drives the real listener over a real QUIC connection.
+///
+/// The tests above cover admission as a pure function and the dispatcher against a bare state.
+/// Neither would catch the failures that only appear once bytes move: a hello the server writes
+/// and a client cannot parse, a stream-kind byte that puts the frame off by one, or an rkyv buffer
+/// that arrives unaligned. This exercises handshake, hello, request and typed response.
+#[cfg(test)]
+mod live {
+    use super::*;
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use tokio::sync::{Mutex, broadcast};
+    use vmux_remote::DeviceId;
+    use vmux_remote::quic::endpoint::{client_endpoint, generate_self_signed};
+    use vmux_wire::protocol::SharedResponse;
+
+    struct Harness {
+        address: std::net::SocketAddr,
+        fingerprint: String,
+    }
+
+    fn start(token: &str) -> Harness {
+        let (agent_tx, _) = broadcast::channel(8);
+        let state = super::super::server::RemoteState {
+            token: Arc::from(token),
+            paired: Arc::new(AtomicBool::new(false)),
+            agents: Arc::new(Mutex::new(Default::default())),
+            acp: Arc::new(Mutex::new(Default::default())),
+            broker: crate::agent_broker::AgentBroker::new(
+                agent_tx,
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            ),
+            client_ops: Arc::new(Mutex::new(Default::default())),
+        };
+        // A throwaway certificate, so the test never writes into the user's profile directory.
+        let identity = generate_self_signed(vec!["localhost".into()]).expect("identity");
+        let fingerprint = identity.fingerprint.clone();
+        // Liveness is injected rather than read from disk: a test must not be able to flip the
+        // user's real Remote setting, and leaking that write would do exactly that.
+        let (_liveness_tx, liveness_rx) = tokio::sync::watch::channel(true);
+        std::mem::forget(_liveness_tx);
+        let (handle, address) = spawn_with_identity(
+            state,
+            (Ipv4Addr::LOCALHOST, 0).into(),
+            identity,
+            liveness_rx,
+        )
+        .expect("listener");
+        // Kept alive for the process; each test binds its own ephemeral port.
+        std::mem::forget(handle);
+        Harness {
+            address,
+            fingerprint,
+        }
+    }
+
+    async fn connect(
+        harness: &Harness,
+        token: &str,
+    ) -> Result<quinn::Connection, quinn::ConnectionError> {
+        let endpoint = client_endpoint(&harness.fingerprint).expect("client endpoint");
+        let connection = endpoint
+            .connect(harness.address, "localhost")
+            .expect("dial")
+            .await?;
+
+        let (mut send, mut recv) = connection.open_bi().await.expect("hello stream");
+        let hello = AuthenticatedHello {
+            hello: ClientHello {
+                protocol_version: ProtocolVersion::CURRENT,
+                device_id: DeviceId::new("test-device"),
+                capabilities: Vec::new(),
+                resume_from: None,
+            },
+            token: token.to_string(),
+        };
+        send.write_all(&encode_hello(&hello).expect("encode"))
+            .await
+            .expect("write hello");
+        send.finish().expect("finish hello");
+
+        match recv.read_to_end(64 * 1024).await {
+            Ok(bytes) => {
+                decode_hello::<vmux_remote::quic::ServerHello>(&bytes).expect("server hello");
+                Ok(connection)
+            }
+            Err(_) => Err(connection
+                .close_reason()
+                .unwrap_or(quinn::ConnectionError::LocallyClosed)),
+        }
+    }
+
+    async fn request(connection: &quinn::Connection, message: SharedMessage) -> SharedResponse {
+        let (mut send, mut recv) = connection.open_bi().await.expect("control stream");
+        let mut frame = vec![StreamKind::Control.as_byte()];
+        frame.extend_from_slice(&rkyv::to_bytes::<rkyv::rancor::Error>(&message).expect("encode"));
+        send.write_all(&frame).await.expect("write request");
+        send.finish().expect("finish request");
+
+        let bytes = recv.read_to_end(8 * 1024 * 1024).await.expect("response");
+        // Copied so rkyv sees an aligned buffer, for the same reason the production readers do.
+        let bytes = bytes.to_vec();
+        rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(&bytes).expect("decode")
+    }
+
+    #[tokio::test]
+    async fn a_paired_client_can_list_sessions() {
+        let harness = start("correct-token");
+
+        let connection = connect(&harness, "correct-token")
+            .await
+            .expect("handshake should succeed");
+        let response = request(&connection, SharedMessage::ListSessions).await;
+
+        // No sessions running, so the list is empty — but it is a *typed* empty list, which is
+        // the point: the frame round-tripped through rkyv in both directions.
+        assert!(
+            matches!(response, SharedResponse::Sessions(ref sessions) if sessions.is_empty()),
+            "expected a typed session list, got {response:?}"
+        );
+    }
+
+    /// The token is the whole access control, so a wrong one must not merely fail — it must close
+    /// with a code the client can act on.
+    #[tokio::test]
+    async fn a_wrong_token_is_closed_with_unauthorized() {
+        let harness = start("correct-token");
+
+        match connect(&harness, "wrong-token").await {
+            Err(quinn::ConnectionError::ApplicationClosed(closed)) => assert_eq!(
+                closed.error_code.into_inner(),
+                CloseCode::Unauthorized.as_u32() as u64,
+                "a bad token must close with Unauthorized, not a generic error"
+            ),
+            other => panic!("expected an Unauthorized close, got {other:?}"),
+        }
+    }
+
+    /// Requests are independent streams on one connection, so a second costs no handshake. Were
+    /// they ever serialised onto a single stream this would hang rather than merely slow down.
+    #[tokio::test]
+    async fn one_connection_serves_repeated_requests() {
+        let harness = start("correct-token");
+
+        let connection = connect(&harness, "correct-token").await.expect("handshake");
+
+        for _ in 0..3 {
+            let response = request(&connection, SharedMessage::ListSessions).await;
+            assert!(matches!(response, SharedResponse::Sessions(_)));
+        }
     }
 }

@@ -11534,6 +11534,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-quartz-core 0.3.2",
  "objc2-ui-kit 0.3.2",
+ "quinn",
  "reqwest",
  "rkyv",
  "serde",

@@ -3,6 +3,7 @@
 mod native_transition;
 mod page_host;
 mod qr_scanner;
+mod quic_api;
 
 use std::collections::HashMap;
 use std::net::IpAddr;
