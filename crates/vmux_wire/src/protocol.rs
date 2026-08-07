@@ -1,7 +1,9 @@
 pub mod layout;
+pub mod shared;
 pub use layout::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab, format_id, parse_id,
 };
+pub use shared::{SharedAgentCommand, SharedEvent, SharedMessage};
 
 use crate::{TermCursor, TermLine, TermSelectionRange};
 
@@ -290,20 +292,9 @@ pub enum AgentCommand {
         line: u32,
         limit: u32,
     },
-    /// Open a focused desktop tab with the default agent and submit its first prompt.
-    /// Appended to preserve existing positional enum discriminants.
-    NewAgentChat {
-        prompt: String,
-        /// Launch URL of the agent to start with; `None` uses the default.
-        agent_url: Option<String>,
-    },
-    /// Ask the GUI for the installed-agent list. Answered as JSON in
-    /// [`AgentCommandResult::Text`], because only the GUI holds the registry.
-    ListAgents,
-    /// Ask the GUI for the active space's team roster. Answered as JSON in
-    /// [`AgentCommandResult::Text`]; the roster is assembled from ECS state, and the daemon
-    /// serving the remote API runs in a different process from the ECS that holds it.
-    ListTeam,
+    /// The commands a remote peer may also issue. Appended last so the preceding positional
+    /// rkyv discriminants keep their existing values.
+    Shared(SharedAgentCommand),
 }
 
 pub const AGENT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -509,7 +500,9 @@ pub fn validate_agent_command(command: &AgentCommand) -> Result<(), &'static str
         {
             Err("read_knowledge requires a path and limit between 1 and 2000")
         }
-        AgentCommand::NewAgentChat { prompt, .. } if prompt.trim().is_empty() => {
+        AgentCommand::Shared(SharedAgentCommand::NewAgentChat { prompt, .. })
+            if prompt.trim().is_empty() =>
+        {
             Err("new_agent_chat.prompt is empty")
         }
         _ => Ok(()),
@@ -639,16 +632,8 @@ pub enum ClientMessage {
         auto_tools: Vec<String>,
         tools_json: String,
     },
-    AttachPageAgent {
-        sid: String,
-    },
     DetachPageAgent {
         sid: String,
-    },
-    AgentInput {
-        sid: String,
-        text: String,
-        context: Option<String>,
     },
     /// Select a model exposed by an ACP session's model configuration option.
     AcpSetModel {
@@ -656,15 +641,6 @@ pub enum ClientMessage {
         request_id: u64,
         config_id: String,
         model_id: String,
-    },
-    /// Interrupt the session's in-flight turn without tearing the session down.
-    AgentCancel {
-        sid: String,
-    },
-    AgentApprove {
-        sid: String,
-        call_id: String,
-        decision: ApprovalDecision,
     },
     ClosePageAgent {
         sid: String,
@@ -697,17 +673,14 @@ pub enum ClientMessage {
         effort: Option<String>,
     },
     Status,
-    AgentInputWithAttachments {
-        sid: String,
-        text: String,
-        context: Option<String>,
-        attachments: Vec<AgentAttachment>,
-    },
     /// Update the host-side working directory used by an existing ACP session.
     RebindAcpWorkspace {
         sid: String,
         cwd: String,
     },
+    /// The operations a remote peer may also perform. Appended last so the preceding positional
+    /// rkyv discriminants keep their existing values.
+    Shared(SharedMessage),
 }
 
 impl ClientMessage {
@@ -718,16 +691,7 @@ impl ClientMessage {
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
     ) -> Self {
-        if attachments.is_empty() {
-            Self::AgentInput { sid, text, context }
-        } else {
-            Self::AgentInputWithAttachments {
-                sid,
-                text,
-                context,
-                attachments,
-            }
-        }
+        SharedMessage::agent_input(sid, text, context, attachments).into()
     }
 }
 
@@ -962,33 +926,11 @@ pub enum ServiceMessage {
     Bell {
         process_id: ProcessId,
     },
-    AgentDelta {
-        sid: String,
-        text: String,
-    },
-    AgentRunStatusChanged {
-        sid: String,
-        status: AgentRunStatus,
-    },
-    AgentAwaitingApproval {
-        sid: String,
-        call_id: String,
-        name: String,
-        args_json: String,
-    },
-    AgentApprovalResolved {
-        sid: String,
-        call_id: String,
-    },
     AgentToolCall {
         request_id: AgentRequestId,
         sid: String,
         name: String,
         args_json: String,
-    },
-    AgentMessagesSnapshot {
-        sid: String,
-        messages_json: String,
     },
     /// An ACP agent created a terminal; the GUI spawns a visible pane bound to `process_id`.
     AcpTerminalCreated {
@@ -1017,25 +959,6 @@ pub enum ServiceMessage {
         sid: String,
         acp_session_id: String,
     },
-    /// Identity reported by an ACP agent during initialization.
-    AcpAgentInfo {
-        sid: String,
-        name: String,
-    },
-    AcpWorkspaceChanged {
-        sid: String,
-        name: String,
-        branch: String,
-        cwd: String,
-        workspace_cwd: String,
-    },
-    /// Current model and selectable models reported by an ACP session.
-    AcpModelInfo {
-        sid: String,
-        config_id: String,
-        current_model_id: String,
-        models: Vec<AcpModelOption>,
-    },
     /// Completion of a model selection request, correlated by `request_id`.
     AcpModelSelectionResult {
         sid: String,
@@ -1043,6 +966,9 @@ pub enum ServiceMessage {
         model_id: String,
         succeeded: bool,
     },
+    /// The events a remote peer may also receive. Appended last so the preceding positional
+    /// rkyv discriminants keep their existing values.
+    Shared(SharedEvent),
 }
 
 /// One model exposed by an ACP session configuration selector.
@@ -1099,6 +1025,158 @@ mod tests {
         assert!(has_private_context_envelope(&echoed));
     }
 
+    /// The remote surface is exactly this set. A variant reaches a paired phone only by being
+    /// moved into `SharedMessage`, so widening it must be a deliberate edit here and not a
+    /// side effect of adding a variant to `ClientMessage`.
+    #[test]
+    fn shared_message_variants_are_the_whole_remote_surface() {
+        fn name(message: &SharedMessage) -> &'static str {
+            match message {
+                SharedMessage::AttachPageAgent { .. } => "AttachPageAgent",
+                SharedMessage::AgentInput { .. } => "AgentInput",
+                SharedMessage::AgentCancel { .. } => "AgentCancel",
+                SharedMessage::AgentApprove { .. } => "AgentApprove",
+                SharedMessage::AgentInputWithAttachments { .. } => "AgentInputWithAttachments",
+            }
+        }
+
+        let sid = || "s".to_string();
+        let every_variant = [
+            SharedMessage::AttachPageAgent { sid: sid() },
+            SharedMessage::AgentInput {
+                sid: sid(),
+                text: String::new(),
+                context: None,
+            },
+            SharedMessage::AgentCancel { sid: sid() },
+            SharedMessage::AgentApprove {
+                sid: sid(),
+                call_id: "c".into(),
+                decision: ApprovalDecision::Allow,
+            },
+            SharedMessage::AgentInputWithAttachments {
+                sid: sid(),
+                text: String::new(),
+                context: None,
+                attachments: Vec::new(),
+            },
+        ];
+
+        assert_eq!(
+            every_variant.iter().map(name).collect::<Vec<_>>(),
+            [
+                "AttachPageAgent",
+                "AgentInput",
+                "AgentCancel",
+                "AgentApprove",
+                "AgentInputWithAttachments",
+            ]
+        );
+    }
+
+    /// Companion gate to [`shared_message_variants_are_the_whole_remote_surface`], for the
+    /// commands a remote peer may issue.
+    #[test]
+    fn shared_agent_command_variants_are_the_whole_remote_surface() {
+        fn name(command: &SharedAgentCommand) -> &'static str {
+            match command {
+                SharedAgentCommand::NewAgentChat { .. } => "NewAgentChat",
+                SharedAgentCommand::ListAgents => "ListAgents",
+                SharedAgentCommand::ListTeam => "ListTeam",
+            }
+        }
+
+        let every_variant = [
+            SharedAgentCommand::NewAgentChat {
+                prompt: String::new(),
+                agent_url: None,
+            },
+            SharedAgentCommand::ListAgents,
+            SharedAgentCommand::ListTeam,
+        ];
+
+        assert_eq!(
+            every_variant.iter().map(name).collect::<Vec<_>>(),
+            ["NewAgentChat", "ListAgents", "ListTeam"]
+        );
+    }
+
+    /// Companion gate to [`shared_message_variants_are_the_whole_remote_surface`], for the events
+    /// a remote peer may receive. Terminal output, proposed diffs and process lifecycle are
+    /// absent by design.
+    #[test]
+    fn shared_event_variants_are_the_whole_remote_surface() {
+        fn name(event: &SharedEvent) -> &'static str {
+            match event {
+                SharedEvent::AgentDelta { .. } => "AgentDelta",
+                SharedEvent::AgentRunStatusChanged { .. } => "AgentRunStatusChanged",
+                SharedEvent::AgentAwaitingApproval { .. } => "AgentAwaitingApproval",
+                SharedEvent::AgentApprovalResolved { .. } => "AgentApprovalResolved",
+                SharedEvent::AgentMessagesSnapshot { .. } => "AgentMessagesSnapshot",
+                SharedEvent::AcpAgentInfo { .. } => "AcpAgentInfo",
+                SharedEvent::AcpWorkspaceChanged { .. } => "AcpWorkspaceChanged",
+                SharedEvent::AcpModelInfo { .. } => "AcpModelInfo",
+            }
+        }
+
+        let sid = || "s".to_string();
+        let every_variant = [
+            SharedEvent::AgentDelta {
+                sid: sid(),
+                text: String::new(),
+            },
+            SharedEvent::AgentRunStatusChanged {
+                sid: sid(),
+                status: AgentRunStatus::Idle,
+            },
+            SharedEvent::AgentAwaitingApproval {
+                sid: sid(),
+                call_id: String::new(),
+                name: String::new(),
+                args_json: String::new(),
+            },
+            SharedEvent::AgentApprovalResolved {
+                sid: sid(),
+                call_id: String::new(),
+            },
+            SharedEvent::AgentMessagesSnapshot {
+                sid: sid(),
+                messages_json: String::new(),
+            },
+            SharedEvent::AcpAgentInfo {
+                sid: sid(),
+                name: String::new(),
+            },
+            SharedEvent::AcpWorkspaceChanged {
+                sid: sid(),
+                name: String::new(),
+                branch: String::new(),
+                cwd: String::new(),
+                workspace_cwd: String::new(),
+            },
+            SharedEvent::AcpModelInfo {
+                sid: sid(),
+                config_id: String::new(),
+                current_model_id: String::new(),
+                models: Vec::new(),
+            },
+        ];
+
+        assert_eq!(
+            every_variant.iter().map(name).collect::<Vec<_>>(),
+            [
+                "AgentDelta",
+                "AgentRunStatusChanged",
+                "AgentAwaitingApproval",
+                "AgentApprovalResolved",
+                "AgentMessagesSnapshot",
+                "AcpAgentInfo",
+                "AcpWorkspaceChanged",
+                "AcpModelInfo",
+            ]
+        );
+    }
+
     #[test]
     fn agent_request_id_roundtrips() {
         let request_id = AgentRequestId::new();
@@ -1110,10 +1188,12 @@ mod tests {
 
     #[test]
     fn agent_cancel_and_interrupted_roundtrip() {
-        let msg = ClientMessage::AgentCancel { sid: "s1".into() };
+        let msg = ClientMessage::Shared(SharedMessage::AgentCancel { sid: "s1".into() });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
         let back = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
-        assert!(matches!(back, ClientMessage::AgentCancel { sid } if sid == "s1"));
+        assert!(
+            matches!(back, ClientMessage::Shared(SharedMessage::AgentCancel { sid }) if sid == "s1")
+        );
 
         let st = AgentRunStatus::Interrupted;
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&st).unwrap();
@@ -1123,25 +1203,25 @@ mod tests {
 
     #[test]
     fn acp_workspace_changed_roundtrips() {
-        let message = ServiceMessage::AcpWorkspaceChanged {
+        let message = ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
             sid: "s1".into(),
             name: "quiet-amber-wolf".into(),
             branch: "vibe/quiet-amber-wolf".into(),
             cwd: "/worktrees/quiet-amber-wolf".into(),
             workspace_cwd: "/repo".into(),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&message).unwrap();
         let decoded = rkyv::from_bytes::<ServiceMessage, rkyv::rancor::Error>(&bytes).unwrap();
 
         assert!(matches!(
             decoded,
-            ServiceMessage::AcpWorkspaceChanged {
+            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
                 sid,
                 name,
                 branch,
                 cwd,
                 workspace_cwd,
-            } if sid == "s1"
+            }) if sid == "s1"
                 && name == "quiet-amber-wolf"
                 && branch == "vibe/quiet-amber-wolf"
                 && cwd == "/worktrees/quiet-amber-wolf"
@@ -1186,16 +1266,16 @@ mod tests {
     #[test]
     fn new_agent_chat_requires_prompt_and_roundtrips() {
         assert_eq!(
-            validate_agent_command(&AgentCommand::NewAgentChat {
+            validate_agent_command(&AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
                 prompt: "  ".to_string(),
                 agent_url: None,
-            }),
+            })),
             Err("new_agent_chat.prompt is empty")
         );
-        let command = AgentCommand::NewAgentChat {
+        let command = AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
             prompt: "continue from my phone".to_string(),
             agent_url: Some("vmux://agent/claude".to_string()),
-        };
+        });
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&command).unwrap();
         let back: AgentCommand =
             rkyv::from_bytes::<AgentCommand, rkyv::rancor::Error>(&bytes).unwrap();
@@ -1684,14 +1764,14 @@ mod tests {
                 auto_tools: vec!["list_spaces".into()],
                 tools_json: "[]".into(),
             },
-            ClientMessage::AttachPageAgent { sid: "s".into() },
+            ClientMessage::Shared(SharedMessage::AttachPageAgent { sid: "s".into() }),
             ClientMessage::DetachPageAgent { sid: "s".into() },
-            ClientMessage::AgentInput {
+            ClientMessage::Shared(SharedMessage::AgentInput {
                 sid: "s".into(),
                 text: "hi".into(),
                 context: Some("prior conversation".into()),
-            },
-            ClientMessage::AgentInputWithAttachments {
+            }),
+            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments {
                 sid: "s".into(),
                 text: "inspect".into(),
                 context: None,
@@ -1701,23 +1781,23 @@ mod tests {
                     mime_type: "image/png".into(),
                     size: 42,
                 }],
-            },
+            }),
             ClientMessage::AcpSetModel {
                 sid: "s".into(),
                 request_id: 7,
                 config_id: "model".into(),
                 model_id: "sonnet".into(),
             },
-            ClientMessage::AgentApprove {
+            ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid: "s".into(),
                 call_id: "c".into(),
                 decision: ApprovalDecision::Allow,
-            },
-            ClientMessage::AgentApprove {
+            }),
+            ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid: "s".into(),
                 call_id: "ca".into(),
                 decision: ApprovalDecision::AllowAlways,
-            },
+            }),
             ClientMessage::ClosePageAgent { sid: "s".into() },
             ClientMessage::AgentToolResult {
                 request_id: AgentRequestId::new(),
@@ -1732,20 +1812,20 @@ mod tests {
         for msg in messages {
             let expects_allow_always = matches!(
                 &msg,
-                ClientMessage::AgentApprove {
+                ClientMessage::Shared(SharedMessage::AgentApprove {
                     decision: ApprovalDecision::AllowAlways,
                     ..
-                }
+                })
             );
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
             let decoded = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
             if expects_allow_always {
                 assert!(matches!(
                     decoded,
-                    ClientMessage::AgentApprove {
+                    ClientMessage::Shared(SharedMessage::AgentApprove {
                         decision: ApprovalDecision::AllowAlways,
                         ..
-                    }
+                    })
                 ));
             }
         }
@@ -1755,7 +1835,7 @@ mod tests {
     fn agent_input_builder_preserves_legacy_variant_without_attachments() {
         assert!(matches!(
             ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
-            ClientMessage::AgentInput { sid, text, context }
+            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context })
                 if sid == "s" && text == "hi" && context.is_none()
         ));
         assert!(matches!(
@@ -1770,7 +1850,7 @@ mod tests {
                     size: 42,
                 }],
             ),
-            ClientMessage::AgentInputWithAttachments { attachments, .. }
+            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments { attachments, .. })
                 if attachments.len() == 1
         ));
     }
@@ -1843,11 +1923,11 @@ mod tests {
                 sid: "s".into(),
                 acp_session_id: "acp-1".into(),
             },
-            ServiceMessage::AcpAgentInfo {
+            ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
                 sid: "s".into(),
                 name: "Antigravity".into(),
-            },
-            ServiceMessage::AcpModelInfo {
+            }),
+            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 sid: "s".into(),
                 config_id: "model".into(),
                 current_model_id: "sonnet".into(),
@@ -1856,7 +1936,7 @@ mod tests {
                     name: "Claude Sonnet".into(),
                     description: Some("Balanced".into()),
                 }],
-            },
+            }),
             ServiceMessage::AcpModelSelectionResult {
                 sid: "s".into(),
                 request_id: 7,
@@ -1873,38 +1953,38 @@ mod tests {
     #[test]
     fn page_agent_service_messages_roundtrip() {
         let messages = [
-            ServiceMessage::AgentDelta {
+            ServiceMessage::Shared(SharedEvent::AgentDelta {
                 sid: "s".into(),
                 text: "hello".into(),
-            },
-            ServiceMessage::AgentRunStatusChanged {
+            }),
+            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
                 sid: "s".into(),
                 status: AgentRunStatus::Streaming,
-            },
-            ServiceMessage::AgentRunStatusChanged {
+            }),
+            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
                 sid: "s".into(),
                 status: AgentRunStatus::Errored("boom".into()),
-            },
-            ServiceMessage::AgentAwaitingApproval {
+            }),
+            ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
                 sid: "s".into(),
                 call_id: "c".into(),
                 name: "n".into(),
                 args_json: "{}".into(),
-            },
-            ServiceMessage::AgentApprovalResolved {
+            }),
+            ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
                 sid: "s".into(),
                 call_id: "c".into(),
-            },
+            }),
             ServiceMessage::AgentToolCall {
                 request_id: AgentRequestId::new(),
                 sid: "s".into(),
                 name: "n".into(),
                 args_json: "{}".into(),
             },
-            ServiceMessage::AgentMessagesSnapshot {
+            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: "s".into(),
                 messages_json: "[]".into(),
-            },
+            }),
         ];
         for msg in messages {
             let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();

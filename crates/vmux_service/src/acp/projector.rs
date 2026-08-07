@@ -14,9 +14,9 @@ use agent_client_protocol::schema::v1::{
 /// A side effect the driver performs after feeding a `SessionUpdate` to the projector.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Intent {
-    /// Incremental assistant text → `ServiceMessage::AgentDelta`.
+    /// Incremental assistant text → `ServiceMessage::Shared(SharedEvent::AgentDelta)`.
     Delta(String),
-    /// The transcript changed structurally → `ServiceMessage::AgentMessagesSnapshot`.
+    /// The transcript changed structurally → `ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot)`.
     Snapshot,
     /// A tool call carries a proposed edit → `ServiceMessage::AcpProposedDiff`.
     ProposedDiff {

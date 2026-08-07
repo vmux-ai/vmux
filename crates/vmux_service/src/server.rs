@@ -1,7 +1,7 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
 use crate::protocol::{
     AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
-    ServiceMessage, compose_agent_prompt, validate_agent_command,
+    ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
 use std::collections::HashMap;
@@ -830,7 +830,7 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AttachPageAgent { sid } => {
+            ClientMessage::Shared(SharedMessage::AttachPageAgent { sid }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
@@ -872,17 +872,17 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AgentInput { sid, text, context } => {
+            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context }) => {
                 route_agent_input(&acp_manager, &agent_manager, sid, text, context, Vec::new())
                     .await;
             }
 
-            ClientMessage::AgentInputWithAttachments {
+            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments {
                 sid,
                 text,
                 context,
                 attachments,
-            } => {
+            }) => {
                 route_agent_input(
                     &acp_manager,
                     &agent_manager,
@@ -922,7 +922,7 @@ async fn handle_client(
                 );
             }
 
-            ClientMessage::AgentCancel { sid } => {
+            ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
@@ -936,11 +936,11 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::AgentApprove {
+            ClientMessage::Shared(SharedMessage::AgentApprove {
                 sid,
                 call_id,
                 decision,
-            } => {
+            }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()

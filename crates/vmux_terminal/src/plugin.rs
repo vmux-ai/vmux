@@ -28,7 +28,7 @@ use vmux_layout::Browser;
 use vmux_layout::{CloseRequiresConfirmation, LayoutSpawnRequest};
 use vmux_service::{
     client::{ServiceHandle, ServiceWake},
-    protocol::{ClientMessage, ProcessId, ServiceMessage},
+    protocol::{ClientMessage, ProcessId, ServiceMessage, SharedEvent},
 };
 use vmux_setting::{AppSettings, SettingsSaveRequest};
 
@@ -1651,22 +1651,22 @@ fn poll_service_messages(
                         args_json,
                     });
             }
-            ServiceMessage::AgentDelta { sid, text } => {
+            ServiceMessage::Shared(SharedEvent::AgentDelta { sid, text }) => {
                 writers
                     .page_agent_delta
                     .write(vmux_service::agent_events::PageAgentDelta { sid, text });
             }
-            ServiceMessage::AgentRunStatusChanged { sid, status } => {
+            ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { sid, status }) => {
                 writers
                     .page_agent_run_status
                     .write(vmux_service::agent_events::PageAgentRunStatus { sid, status });
             }
-            ServiceMessage::AgentAwaitingApproval {
+            ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
                 sid,
                 call_id,
                 name,
                 args_json,
-            } => {
+            }) => {
                 writers.page_agent_awaiting.write(
                     vmux_service::agent_events::PageAgentAwaitingApproval {
                         sid,
@@ -1676,28 +1676,28 @@ fn poll_service_messages(
                     },
                 );
             }
-            ServiceMessage::AgentApprovalResolved { sid, call_id } => {
+            ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }) => {
                 writers
                     .page_agent_approval_resolved
                     .write(vmux_service::agent_events::PageAgentApprovalResolved { sid, call_id });
             }
-            ServiceMessage::AgentMessagesSnapshot { sid, messages_json } => {
+            ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { sid, messages_json }) => {
                 writers
                     .page_agent_snapshot
                     .write(vmux_service::agent_events::PageAgentSnapshot { sid, messages_json });
             }
-            ServiceMessage::AcpAgentInfo { sid, name } => {
+            ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name }) => {
                 writers
                     .page_agent_info
                     .write(vmux_service::agent_events::PageAgentInfo { sid, name });
             }
-            ServiceMessage::AcpWorkspaceChanged {
+            ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
                 sid,
                 name,
                 branch,
                 cwd,
                 workspace_cwd,
-            } => {
+            }) => {
                 writers.page_agent_workspace_changed.write(
                     vmux_service::agent_events::PageAgentWorkspaceChanged {
                         sid,
@@ -1708,12 +1708,12 @@ fn poll_service_messages(
                     },
                 );
             }
-            ServiceMessage::AcpModelInfo {
+            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 sid,
                 config_id,
                 current_model_id,
                 models,
-            } => {
+            }) => {
                 writers.page_agent_model_info.write(
                     vmux_service::agent_events::PageAgentModelInfo {
                         sid,
@@ -3928,7 +3928,7 @@ mod tests {
             .split("fn flush_pending_terminal_input")
             .next()
             .expect("service handler body");
-        assert!(handler.contains("ServiceMessage::AcpAgentInfo"));
+        assert!(handler.contains("ServiceMessage::Shared(SharedEvent::AcpAgentInfo"));
         assert!(handler.contains(".page_agent_info"));
     }
 

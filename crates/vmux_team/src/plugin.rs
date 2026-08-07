@@ -16,7 +16,7 @@ use vmux_layout::stack::Stack;
 use vmux_layout::warm_page::{WarmPage, WarmPagePlugin};
 use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage};
+use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
 
 #[derive(Component)]
 struct Team;
@@ -219,7 +219,7 @@ fn build_team_members(
     members
 }
 
-/// Answer [`AgentCommand::ListTeam`] for the daemon's remote API.
+/// Answer [`SharedAgentCommand::ListTeam`] for the daemon's remote API.
 ///
 /// `AgentCommandRequest` is a message, so reading it here rather than in `vmux_agent`'s central
 /// handler costs nothing and keeps the roster's seven queries out of a system that is already at
@@ -243,7 +243,10 @@ fn answer_list_team(
     children_q: Query<&Children>,
 ) {
     for request in reader.read() {
-        if !matches!(request.command, AgentCommand::ListTeam) {
+        if !matches!(
+            request.command,
+            AgentCommand::Shared(SharedAgentCommand::ListTeam)
+        ) {
             continue;
         }
         let Some(service) = service.as_ref() else {

@@ -7,7 +7,7 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use crate::agent_broker::AgentBroker;
 use crate::message::{AssistantBlock, Message};
 use crate::protocol::{
-    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage,
+    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
 };
 use crate::providers::{anthropic, mistral, openai};
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
@@ -133,12 +133,12 @@ impl AgentSessionManager {
                     .is_some_and(|pending| pending.call_id == *call_id)
                 {
                     *approval = None;
-                    let _ = handle
-                        .stream_tx
-                        .send(ServiceMessage::AgentApprovalResolved {
+                    let _ = handle.stream_tx.send(ServiceMessage::Shared(
+                        SharedEvent::AgentApprovalResolved {
                             sid: sid.to_string(),
                             call_id: call_id.clone(),
-                        });
+                        },
+                    ));
                 }
             }
             let _ = handle.input_tx.send(input);
@@ -205,10 +205,10 @@ fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
 async fn snapshot_message(sid: &str, messages: &Arc<Mutex<Vec<Message>>>) -> ServiceMessage {
     let msgs = messages.lock().await;
     let messages_json = serde_json::to_string(&*msgs).unwrap_or_else(|_| "[]".to_string());
-    ServiceMessage::AgentMessagesSnapshot {
+    ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
         sid: sid.to_string(),
         messages_json,
-    }
+    })
 }
 
 fn spawn_sse(
@@ -365,10 +365,10 @@ async fn run_session(
                         match event {
                             StreamEvent::TextDelta(text) => {
                                 append_text(&mut blocks, &text);
-                                let _ = stream_tx.send(ServiceMessage::AgentDelta {
+                                let _ = stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentDelta {
                                     sid: sid.clone(),
                                     text,
-                                });
+                                }));
                             }
                             StreamEvent::ToolUseStart { call_id, name } => {
                                 partial = Some((call_id, name, String::new()));
@@ -454,12 +454,13 @@ async fn run_session(
                     args_json: args_json.clone(),
                 };
                 *approval.lock().unwrap() = Some(next_approval.clone());
-                let _ = stream_tx.send(ServiceMessage::AgentAwaitingApproval {
-                    sid: sid.clone(),
-                    call_id: call_id.clone(),
-                    name: name.clone(),
-                    args_json: args_json.clone(),
-                });
+                let _ =
+                    stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+                        sid: sid.clone(),
+                        call_id: call_id.clone(),
+                        name: name.clone(),
+                        args_json: args_json.clone(),
+                    }));
                 match await_decision(&mut input_rx, &call_id).await {
                     Decision::Closed => return,
                     Decision::Cancelled => {
@@ -513,10 +514,10 @@ fn emit_status(
         *approval.lock().unwrap() = None;
     }
     *status.lock().unwrap() = next.clone();
-    let _ = stream_tx.send(ServiceMessage::AgentRunStatusChanged {
+    let _ = stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
         sid: sid.to_string(),
         status: next,
-    });
+    }));
 }
 
 #[cfg(test)]
@@ -555,7 +556,10 @@ mod tests {
         )
         .unwrap();
         match mgr.snapshot("s").await {
-            Some(ServiceMessage::AgentMessagesSnapshot { messages_json, .. }) => {
+            Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
+                messages_json,
+                ..
+            })) => {
                 assert_eq!(messages_json, "[]");
             }
             other => panic!("expected snapshot, got {other:?}"),
@@ -661,7 +665,7 @@ mod tests {
 
         assert!(matches!(
             receiver.try_recv(),
-            Ok(ServiceMessage::AgentApprovalResolved { sid, call_id })
+            Ok(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }))
                 if sid == "s" && call_id == "call-1"
         ));
         assert!(mgr.remote_session("s").unwrap().approval.is_none());

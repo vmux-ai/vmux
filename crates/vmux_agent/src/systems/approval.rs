@@ -8,7 +8,7 @@ use crate::components::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{ApprovalDecision as ProtoDecision, ClientMessage};
+use vmux_service::protocol::{ApprovalDecision as ProtoDecision, ClientMessage, SharedMessage};
 
 #[derive(Default, Deserialize, Serialize)]
 struct SavedApprovalGrants {
@@ -153,11 +153,13 @@ pub(crate) fn handle_approval_reply(
     }
     let decision = protocol_decision(reply.decision);
     if let Some(service) = service.as_ref() {
-        service.0.send(ClientMessage::AgentApprove {
-            sid,
-            call_id: reply.call_id.clone(),
-            decision,
-        });
+        service
+            .0
+            .send(ClientMessage::Shared(SharedMessage::AgentApprove {
+                sid,
+                call_id: reply.call_id.clone(),
+                decision,
+            }));
     }
     *state = AgentRunState::Streaming;
 }

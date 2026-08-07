@@ -22,7 +22,7 @@ use vmux_service::client::ServiceClient;
 use vmux_service::protocol::AgentAttachment;
 use vmux_service::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, AgentQuery, AgentQueryResult,
-    AgentRequestId, AgentShellMode, ClientMessage, ProcessId,
+    AgentRequestId, AgentShellMode, ClientMessage, ProcessId, SharedAgentCommand,
 };
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
@@ -2198,21 +2198,21 @@ fn handle_agent_commands(
                     None => AgentCommandResult::Error("invalid bookmark command".to_string()),
                 }
             }
-            ServiceAgentCommand::NewAgentChat { prompt, agent_url } => {
+            ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat { prompt, agent_url }) => {
                 stack_writers.2.write(vmux_layout::NewAgentChatRequest {
                     prompt: prompt.clone(),
                     agent_url: agent_url.clone(),
                 });
                 AgentCommandResult::Ok
             }
-            ServiceAgentCommand::ListAgents => {
+            ServiceAgentCommand::Shared(SharedAgentCommand::ListAgents) => {
                 match serde_json::to_string(&remote_agents(&desktop.agents)) {
                     Ok(json) => AgentCommandResult::Text(json),
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }
             }
             // Answered in vmux_team, which already holds the queries the roster is built from.
-            ServiceAgentCommand::ListTeam
+            ServiceAgentCommand::Shared(SharedAgentCommand::ListTeam)
             | ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
             | ServiceAgentCommand::RunWithPlacementOverride { .. }
@@ -5961,6 +5961,7 @@ fn handle_restart_agent_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_service::protocol::SharedMessage;
 
     fn init_worktree_test_repo() -> tempfile::TempDir {
         let repo = tempfile::tempdir().unwrap();
@@ -6129,7 +6130,7 @@ mod tests {
     fn chat_workspace_continuation_is_private_same_session_input() {
         assert!(matches!(
             chat_agent_continuation_message("sid-1", "continue original request"),
-            ClientMessage::AgentInput { sid, text, context }
+            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context })
                 if sid == "sid-1"
                     && text.is_empty()
                     && context.as_deref() == Some("continue original request")

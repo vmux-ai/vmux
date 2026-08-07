@@ -21,7 +21,7 @@ use crate::acp::{AcpInput, AcpSessionManager};
 use crate::agent::{AgentSessionManager, SessionInput};
 use crate::agent_broker::AgentBroker;
 use crate::message::Message;
-use crate::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage};
+use crate::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage, SharedEvent};
 use crate::remote::{
     ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent,
@@ -154,10 +154,11 @@ async fn create_chat(
     {
         return StatusCode::ACCEPTED;
     }
-    let command = crate::protocol::AgentCommand::NewAgentChat {
+    let command = crate::protocol::SharedAgentCommand::NewAgentChat {
         prompt: prompt.to_string(),
         agent_url: request.agent_url.clone(),
-    };
+    }
+    .into();
     match state
         .broker
         .command(crate::protocol::AgentRequestId::new(), None, command)
@@ -223,7 +224,11 @@ async fn broker_json(
 
 /// The installed agents, so a remote client can offer the same launcher rows the desktop does.
 async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::RemoteAgent>> {
-    let json = broker_json(&state, crate::protocol::AgentCommand::ListAgents).await;
+    let json = broker_json(
+        &state,
+        crate::protocol::SharedAgentCommand::ListAgents.into(),
+    )
+    .await;
     Json(
         json.and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default(),
@@ -233,7 +238,7 @@ async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::
 /// The active space's team roster, so a remote client can render the same team page the desktop
 /// does.
 async fn list_team(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::team::TeamMemberRow>> {
-    let json = broker_json(&state, crate::protocol::AgentCommand::ListTeam).await;
+    let json = broker_json(&state, crate::protocol::SharedAgentCommand::ListTeam.into()).await;
     Json(
         json.and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default(),
@@ -506,29 +511,31 @@ async fn service_event(
     message: ServiceMessage,
 ) -> Option<RemoteEvent> {
     match message {
-        ServiceMessage::AgentDelta { text, .. } => Some(RemoteEvent::Delta {
+        ServiceMessage::Shared(SharedEvent::AgentDelta { text, .. }) => Some(RemoteEvent::Delta {
             room_id: vmux_remote::room_id_for_session(sid),
             text,
         }),
-        ServiceMessage::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
-            status: RemoteStatus::from(&status),
-        }),
-        ServiceMessage::AgentAwaitingApproval {
+        ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { status, .. }) => {
+            Some(RemoteEvent::Status {
+                status: RemoteStatus::from(&status),
+            })
+        }
+        ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
             call_id,
             name,
             args_json,
             ..
-        } => Some(RemoteEvent::Approval {
+        }) => Some(RemoteEvent::Approval {
             approval: Some(RemoteApproval {
                 call_id,
                 name,
                 args_json,
             }),
         }),
-        ServiceMessage::AgentApprovalResolved { .. } => {
+        ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { .. }) => {
             Some(RemoteEvent::Approval { approval: None })
         }
-        ServiceMessage::AgentMessagesSnapshot { messages_json, .. } => {
+        ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) => {
             let messages = serde_json::from_str::<Vec<Message>>(&messages_json).ok()?;
             let session = current_session(state, sid).await?;
             let events =
@@ -543,11 +550,13 @@ async fn service_event(
                 events,
             })
         }
-        ServiceMessage::AcpAgentInfo { .. }
-        | ServiceMessage::AcpModelInfo { .. }
-        | ServiceMessage::AcpWorkspaceChanged { .. } => current_session(state, sid)
-            .await
-            .map(|session| RemoteEvent::Session { session }),
+        ServiceMessage::Shared(SharedEvent::AcpAgentInfo { .. })
+        | ServiceMessage::Shared(SharedEvent::AcpModelInfo { .. })
+        | ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged { .. }) => {
+            current_session(state, sid)
+                .await
+                .map(|session| RemoteEvent::Session { session })
+        }
         _ => None,
     }
 }

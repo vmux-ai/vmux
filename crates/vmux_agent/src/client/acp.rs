@@ -11,7 +11,7 @@ use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::pane::{PlacementCtx, resolve_spiral_pane};
 use vmux_layout::stack::stack_bundle;
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::ClientMessage;
+use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_setting::AppSettings;
 use vmux_terminal::reattach_terminal_bundle;
 
@@ -432,13 +432,13 @@ fn acp_auto_approval_message(
     policy: &AgentApprovalPolicy,
     request: &AgentApprovalRequest,
 ) -> Option<ClientMessage> {
-    policy
-        .allows(&request.name)
-        .then(|| ClientMessage::AgentApprove {
+    policy.allows(&request.name).then(|| {
+        ClientMessage::Shared(SharedMessage::AgentApprove {
             sid: session.sid.clone(),
             call_id: request.call_id.clone(),
             decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
         })
+    })
 }
 
 fn auto_allow_acp_approval(
@@ -1151,7 +1151,7 @@ mod tests {
 
         assert!(matches!(
             acp_auto_approval_message(&session, &policy, &request),
-            Some(ClientMessage::AgentApprove { sid, call_id, decision })
+            Some(ClientMessage::Shared(SharedMessage::AgentApprove { sid, call_id, decision }))
                 if sid == "s1"
                     && call_id == "call-1"
                     && decision == vmux_service::protocol::ApprovalDecision::AllowAlways

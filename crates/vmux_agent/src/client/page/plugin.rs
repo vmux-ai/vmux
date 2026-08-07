@@ -17,7 +17,7 @@ use vmux_service::agent_events::{
     PageAgentSnapshot,
 };
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{AgentRunStatus, ClientMessage};
+use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
 
 pub struct PageAgentPlugin;
 
@@ -110,9 +110,11 @@ fn spawn_page_session_on_add(
             auto_tools,
             tools_json,
         });
-        service.0.send(ClientMessage::AttachPageAgent {
-            sid: session.sid.clone(),
-        });
+        service
+            .0
+            .send(ClientMessage::Shared(SharedMessage::AttachPageAgent {
+                sid: session.sid.clone(),
+            }));
     }
 }
 
