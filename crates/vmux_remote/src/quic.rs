@@ -267,3 +267,29 @@ mod tests {
         assert_eq!(StreamKind::from_byte(200), None);
     }
 }
+
+/// Which end of a relayed pair a peer is.
+///
+/// The HTTP relay told these apart by URL path (`/desktop/…` against `/r/…`). A QUIC connection
+/// has no path, so the role is declared once at connect time.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeerRole {
+    /// Holds the sessions. Waits to be spliced into.
+    Desktop,
+    /// Wants to reach a desktop. Opens the streams.
+    Client,
+}
+
+/// First frame on a connection to the relay.
+///
+/// Deliberately the only thing the relay parses. Everything after it is opaque bytes copied
+/// between two peers — the relay routes on `device_id` and never learns what it moved.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RelayHello {
+    pub protocol_version: ProtocolVersion,
+    pub device_id: DeviceId,
+    pub role: PeerRole,
+    /// Proves both ends belong to the same pairing. The relay compares, it does not mint.
+    pub token: String,
+}
