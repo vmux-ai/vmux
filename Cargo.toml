@@ -93,6 +93,19 @@ portable-pty = "0.9"
 rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
+
+# ring, not the default aws-lc-rs: aws-lc-rs needs cmake and NASM and does not cross-compile to
+# aarch64-apple-ios, which is the one target that has no CI job to catch it.
+quinn = { version = "0.11", default-features = false, features = [
+    "runtime-tokio",
+    "rustls-ring",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+rcgen = "0.14"
+# Already in the tree via quinn/rcgen/rustls; a direct dep only so the fingerprint hash can
+# reach it without pulling in a second crypto library.
+ring = "0.17"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 # Dev builds of a Bevy + CEF app are unusably slow without optimizing dependencies.

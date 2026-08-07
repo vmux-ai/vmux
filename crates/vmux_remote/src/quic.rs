@@ -8,6 +8,10 @@
 //! Application frames after the hello are rkyv, length-prefixed by the same codec the local unix
 //! socket uses.
 
+/// Endpoint construction and certificate pinning. Absent on wasm, which has no UDP socket.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod endpoint;
+
 use serde::{Deserialize, Serialize};
 
 use crate::DeviceId;
