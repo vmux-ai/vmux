@@ -830,6 +830,18 @@ async fn handle_client(
                 }
             }
 
+            // Remote-only. The desktop reads the registries and the filesystem directly rather
+            // than asking the daemon, so these only ever arrive over a remote transport. Logged
+            // rather than ignored, because reaching here means a client is talking to the wrong
+            // endpoint and silence would make that impossible to see.
+            ClientMessage::Shared(
+                SharedMessage::ListSessions
+                | SharedMessage::ListMedia { .. }
+                | SharedMessage::AgentCommand(_),
+            ) => {
+                tracing::warn!("local socket: ignoring a remote-only request");
+            }
+
             ClientMessage::Shared(SharedMessage::AttachPageAgent { sid }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {

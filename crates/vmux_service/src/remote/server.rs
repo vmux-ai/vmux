@@ -29,11 +29,11 @@ use crate::remote::{
 
 mod relay;
 
-const MAX_PROMPT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
 const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_ATTACHMENT_TOTAL_BYTES: u64 = 256 * 1024 * 1024;
-const MAX_MEDIA_QUERY_BYTES: usize = 4 * 1024;
+pub(crate) const MAX_MEDIA_QUERY_BYTES: usize = 4 * 1024;
 const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
 const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
@@ -47,23 +47,23 @@ struct MediaQuery {
 }
 
 #[derive(Clone)]
-struct RemoteState {
-    token: Arc<str>,
-    paired: Arc<AtomicBool>,
-    agents: Arc<Mutex<AgentSessionManager>>,
-    acp: Arc<Mutex<AcpSessionManager>>,
-    broker: AgentBroker,
-    client_ops: Arc<Mutex<ClientOpDeduper>>,
+pub(crate) struct RemoteState {
+    pub(crate) token: Arc<str>,
+    pub(crate) paired: Arc<AtomicBool>,
+    pub(crate) agents: Arc<Mutex<AgentSessionManager>>,
+    pub(crate) acp: Arc<Mutex<AcpSessionManager>>,
+    pub(crate) broker: AgentBroker,
+    pub(crate) client_ops: Arc<Mutex<ClientOpDeduper>>,
 }
 
 #[derive(Default)]
-struct ClientOpDeduper {
+pub(crate) struct ClientOpDeduper {
     seen: HashSet<ClientOpId>,
     order: VecDeque<ClientOpId>,
 }
 
 impl ClientOpDeduper {
-    fn claim(&mut self, client_op_id: ClientOpId) -> bool {
+    pub(crate) fn claim(&mut self, client_op_id: ClientOpId) -> bool {
         if !self.seen.insert(client_op_id.clone()) {
             return false;
         }
@@ -76,7 +76,7 @@ impl ClientOpDeduper {
         true
     }
 
-    fn release(&mut self, client_op_id: &ClientOpId) {
+    pub(crate) fn release(&mut self, client_op_id: &ClientOpId) {
         self.seen.remove(client_op_id);
         self.order.retain(|queued| queued != client_op_id);
     }
@@ -104,6 +104,17 @@ pub fn spawn(
             client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
         };
         let relay_handle = relay::spawn(state.clone());
+        // Same port number, but UDP, so the two listeners never contend. A QUIC failure leaves
+        // HTTP serving rather than taking Remote down with it — the whole point of running them
+        // side by side until the cutover.
+        let quic_address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port()).into();
+        let quic_handle = match super::quic::spawn(state.clone(), quic_address) {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                tracing::warn!(%error, "remote quic: unavailable, serving HTTP only");
+                None
+            }
+        };
         let address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port());
         let listener = match tokio::net::TcpListener::bind(address).await {
             Ok(listener) => listener,
@@ -117,6 +128,9 @@ pub fn spawn(
             tracing::error!(%error, "remote: server failed");
         }
         relay_handle.abort();
+        if let Some(handle) = quic_handle {
+            handle.abort();
+        }
     })
 }
 
@@ -155,6 +169,7 @@ async fn create_chat(
         return StatusCode::ACCEPTED;
     }
     let command = crate::protocol::SharedAgentCommand::NewAgentChat {
+        client_op_id: request.client_op_id.clone(),
         prompt: prompt.to_string(),
         agent_url: request.agent_url.clone(),
     }
@@ -208,7 +223,7 @@ fn request_token(headers: &HeaderMap) -> Option<&str> {
 ///
 /// The daemon and the ECS are separate processes, so anything derived from ECS state costs a
 /// round-trip rather than a read.
-async fn broker_json(
+pub(crate) async fn broker_json(
     state: &RemoteState,
     command: crate::protocol::AgentCommand,
 ) -> Option<String> {
@@ -464,7 +479,7 @@ async fn session_stream(
     Some((session, events, agents.subscribe(sid)?))
 }
 
-async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
+pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
     {
         let acp = state.acp.lock().await;
         if let Some(messages) = acp.remote_messages(sid) {
@@ -582,7 +597,9 @@ fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
     !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
 }
 
-fn validate_remote_attachments(attachments: Vec<AgentAttachment>) -> Option<Vec<AgentAttachment>> {
+pub(crate) fn validate_remote_attachments(
+    attachments: Vec<AgentAttachment>,
+) -> Option<Vec<AgentAttachment>> {
     if attachments.len() > MAX_ATTACHMENTS {
         return None;
     }
@@ -698,7 +715,7 @@ fn decode_media_query_path(value: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
 }
 
-fn remote_media_entries(query: &str) -> Vec<RemoteMediaEntry> {
+pub(crate) fn remote_media_entries(query: &str) -> Vec<RemoteMediaEntry> {
     let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
         return Vec::new();
     };

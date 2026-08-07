@@ -3,7 +3,7 @@ pub mod shared;
 pub use layout::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab, format_id, parse_id,
 };
-pub use shared::{SharedAgentCommand, SharedEvent, SharedMessage};
+pub use shared::{SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 use crate::{TermCursor, TermLine, TermSelectionRange};
 
@@ -994,6 +994,7 @@ pub struct ProcessInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::room::ClientOpId;
 
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {
@@ -1037,6 +1038,9 @@ mod tests {
                 SharedMessage::AgentCancel { .. } => "AgentCancel",
                 SharedMessage::AgentApprove { .. } => "AgentApprove",
                 SharedMessage::AgentInputWithAttachments { .. } => "AgentInputWithAttachments",
+                SharedMessage::ListSessions => "ListSessions",
+                SharedMessage::ListMedia { .. } => "ListMedia",
+                SharedMessage::AgentCommand(_) => "AgentCommand",
             }
         }
 
@@ -1060,6 +1064,12 @@ mod tests {
                 context: None,
                 attachments: Vec::new(),
             },
+            SharedMessage::ListSessions,
+            SharedMessage::ListMedia {
+                sid: sid(),
+                query: String::new(),
+            },
+            SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
         ];
 
         assert_eq!(
@@ -1070,6 +1080,9 @@ mod tests {
                 "AgentCancel",
                 "AgentApprove",
                 "AgentInputWithAttachments",
+                "ListSessions",
+                "ListMedia",
+                "AgentCommand",
             ]
         );
     }
@@ -1088,6 +1101,7 @@ mod tests {
 
         let every_variant = [
             SharedAgentCommand::NewAgentChat {
+                client_op_id: ClientOpId::new("op"),
                 prompt: String::new(),
                 agent_url: None,
             },
@@ -1267,12 +1281,14 @@ mod tests {
     fn new_agent_chat_requires_prompt_and_roundtrips() {
         assert_eq!(
             validate_agent_command(&AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
+                client_op_id: ClientOpId::new("op"),
                 prompt: "  ".to_string(),
                 agent_url: None,
             })),
             Err("new_agent_chat.prompt is empty")
         );
         let command = AgentCommand::Shared(SharedAgentCommand::NewAgentChat {
+            client_op_id: ClientOpId::new("op"),
             prompt: "continue from my phone".to_string(),
             agent_url: Some("vmux://agent/claude".to_string()),
         });

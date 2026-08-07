@@ -12,6 +12,7 @@ use super::{
     AcpModelOption, AgentAttachment, AgentCommand, AgentRunStatus, ApprovalDecision, ClientMessage,
     ServiceMessage,
 };
+use crate::room::{ClientOpId, RemoteAgent, RemoteMediaEntry, RemoteSession};
 
 /// Operations a remote peer is permitted to perform.
 ///
@@ -39,6 +40,14 @@ pub enum SharedMessage {
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
     },
+    /// The running sessions a client can attach to. No local equivalent — the desktop reads the
+    /// registries directly rather than asking for them.
+    ListSessions,
+    /// Browse attachable files under `$HOME`. `query` is a path fragment, resolved and confined
+    /// by the daemon; a client cannot escape the home directory by crafting it.
+    ListMedia { sid: String, query: String },
+    /// Something only the GUI can answer, forwarded to it through the broker.
+    AgentCommand(SharedAgentCommand),
 }
 
 impl SharedMessage {
@@ -76,6 +85,9 @@ impl From<SharedMessage> for ClientMessage {
 pub enum SharedAgentCommand {
     /// Open a focused desktop tab with the default agent and submit its first prompt.
     NewAgentChat {
+        /// Idempotency key. A client that retries after a dropped connection reuses it, and the
+        /// daemon answers `AlreadyApplied` rather than opening a second chat.
+        client_op_id: ClientOpId,
         prompt: String,
         /// Launch URL of the agent to start with; `None` uses the default.
         agent_url: Option<String>,
@@ -150,4 +162,41 @@ impl From<SharedEvent> for ServiceMessage {
     fn from(event: SharedEvent) -> Self {
         Self::Shared(event)
     }
+}
+
+/// The answer to a [`SharedMessage`] sent on a control stream.
+///
+/// Typed rather than a status code plus loose JSON, which is what the HTTP path had: four of its
+/// nine routes answered with a bare `StatusCode` and no body, so a client could not tell an
+/// accepted prompt from a replayed one without inferring it.
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum SharedResponse {
+    /// Applied.
+    Ok,
+    /// Recognised as a replay of a `client_op_id` already seen, and deliberately not re-run.
+    AlreadyApplied,
+    Sessions(Vec<RemoteSession>),
+    Agents(Vec<RemoteAgent>),
+    Media(Vec<RemoteMediaEntry>),
+    /// A GUI-held list, forwarded verbatim. Still JSON because the shape belongs to the page that
+    /// renders it, and re-deriving it here would be a second place to keep in step.
+    BrokerJson(String),
+    /// Refused, with enough detail for a client to decide whether retrying could ever help.
+    Failed(SharedFailure),
+}
+
+/// Why a request was refused.
+///
+/// Distinguishes the cases the HTTP status codes blurred: a client needs to know that
+/// `NoDesktop` clears up when a window opens, whereas `NotFound` will not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum SharedFailure {
+    /// No session with that id in either registry.
+    NotFound,
+    /// Malformed, oversized, or otherwise rejected before execution.
+    Invalid,
+    /// The GUI holds the answer and no GUI is attached. Resolves on its own when one is.
+    NoDesktop,
+    /// The daemon failed while handling it.
+    Internal,
 }

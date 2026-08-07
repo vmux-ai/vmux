@@ -303,6 +303,7 @@ async fn create_chat_response(state: RemoteState, body: Value) -> DesktopRespons
         return status_response(StatusCode::ACCEPTED);
     }
     let command = crate::protocol::SharedAgentCommand::NewAgentChat {
+        client_op_id: request.client_op_id.clone(),
         prompt: prompt.to_string(),
         agent_url: request.agent_url.clone(),
     }

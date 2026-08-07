@@ -9,13 +9,15 @@
 //! - **Request limits.** `receive_window` bounds what a peer can buffer before the dispatcher's own
 //!   size check runs, which on HTTP was the body limit doing that job.
 
+pub mod dispatch;
+
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use tokio::sync::watch;
 use vmux_remote::quic::endpoint::{SelfSignedIdentity, generate_self_signed, server_endpoint};
+use vmux_wire::protocol::SharedMessage;
+
 use vmux_remote::quic::{
     ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
 };
@@ -188,10 +190,11 @@ pub async fn read_hello(stream: &mut quinn::RecvStream) -> Result<AuthenticatedH
 /// Serve one accepted connection: exchange hellos, then dispatch its streams.
 async fn serve(
     connection: quinn::Connection,
-    token: Arc<str>,
-    paired: Arc<AtomicBool>,
+    state: super::server::RemoteState,
     mut liveness: watch::Receiver<bool>,
 ) {
+    let token = state.token.clone();
+    let paired = state.paired.clone();
     let Ok((mut send, mut recv)) = connection.accept_bi().await else {
         return;
     };
@@ -234,7 +237,7 @@ async fn serve(
             accepted = connection.accept_bi() => {
                 match accepted {
                     Ok((send, recv)) => {
-                        tokio::spawn(dispatch_control(send, recv));
+                        tokio::spawn(dispatch_control(state.clone(), send, recv));
                     }
                     Err(_) => return,
                 }
@@ -243,16 +246,48 @@ async fn serve(
     }
 }
 
-/// One request, one response, then the stream closes. Operation wiring lands with the dispatcher.
-async fn dispatch_control(mut send: quinn::SendStream, _recv: quinn::RecvStream) {
-    let _ = send.write_all(&[StreamKind::Control.as_byte()]).await;
-    let _ = send.finish();
+/// Largest request frame accepted on a control stream.
+///
+/// Above the prompt cap so an oversized prompt is refused by the dispatcher with a reason, rather
+/// than looking to the client like a broken connection.
+const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+
+/// One request in, one response out, then the stream closes.
+///
+/// The stream kind leads so the peer can route without decoding, and so a client that opens the
+/// wrong kind is told rather than left waiting.
+async fn dispatch_control(
+    state: super::server::RemoteState,
+    mut send: quinn::SendStream,
+    mut recv: quinn::RecvStream,
+) {
+    let Ok(bytes) = recv.read_to_end(MAX_REQUEST_BYTES).await else {
+        return;
+    };
+    let Some((kind, body)) = bytes.split_first() else {
+        return;
+    };
+    if StreamKind::from_byte(*kind) != Some(StreamKind::Control) {
+        return;
+    }
+    // Copied so rkyv sees an aligned buffer; a slice at a one-byte offset is not.
+    let body = body.to_vec();
+    let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&body) else {
+        return;
+    };
+
+    let response = dispatch::dispatch(&state, request).await;
+    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+        return;
+    };
+    if send.write_all(&encoded).await.is_ok() {
+        let _ = send.finish();
+    }
 }
 
 /// Bind the listener and serve until the endpoint closes.
-pub fn spawn(
-    token: Arc<str>,
-    paired: Arc<AtomicBool>,
+pub(crate) fn spawn(
+    state: super::server::RemoteState,
     address: SocketAddr,
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
     let identity = ensure_identity()?;
@@ -272,12 +307,11 @@ pub fn spawn(
     let liveness = spawn_liveness_watch();
     Ok(tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
-            let token = token.clone();
-            let paired = paired.clone();
+            let state = state.clone();
             let liveness = liveness.clone();
             tokio::spawn(async move {
                 match incoming.await {
-                    Ok(connection) => serve(connection, token, paired, liveness).await,
+                    Ok(connection) => serve(connection, state, liveness).await,
                     Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
                 }
             });

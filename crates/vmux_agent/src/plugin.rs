@@ -2198,7 +2198,11 @@ fn handle_agent_commands(
                     None => AgentCommandResult::Error("invalid bookmark command".to_string()),
                 }
             }
-            ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat { prompt, agent_url }) => {
+            ServiceAgentCommand::Shared(SharedAgentCommand::NewAgentChat {
+                prompt,
+                agent_url,
+                ..
+            }) => {
                 stack_writers.2.write(vmux_layout::NewAgentChatRequest {
                     prompt: prompt.clone(),
                     agent_url: agent_url.clone(),

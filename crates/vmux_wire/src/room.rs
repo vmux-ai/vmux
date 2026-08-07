@@ -13,7 +13,20 @@ use crate::protocol::AgentRunStatus;
 pub const CONVERSATION_TITLE_MAX_GRAPHEMES: usize = 64;
 macro_rules! string_id {
     ($name:ident) => {
-        #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+        #[derive(
+            Clone,
+            Debug,
+            Deserialize,
+            Eq,
+            Hash,
+            Ord,
+            PartialEq,
+            PartialOrd,
+            Serialize,
+            rkyv::Archive,
+            rkyv::Serialize,
+            rkyv::Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(pub String);
 
@@ -45,7 +58,18 @@ string_id!(RoomId);
 string_id!(MemberId);
 string_id!(EventId);
 string_id!(ClientOpId);
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RoomRole {
     Owner,
@@ -53,7 +77,18 @@ pub enum RoomRole {
     Observer,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     Human,
@@ -61,7 +96,17 @@ pub enum MemberKind {
     System,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RoomMember {
     pub room_id: RoomId,
     pub member_id: MemberId,
@@ -70,7 +115,16 @@ pub struct RoomMember {
     pub kind: MemberKind,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum Message {
     User {
         text: String,
@@ -87,7 +141,16 @@ pub enum Message {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RoomEvent {
     pub event_id: EventId,
     pub room_id: RoomId,
@@ -168,7 +231,16 @@ impl Message {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum AssistantBlock {
     Text(String),
     /// The agent's streamed internal reasoning.
@@ -195,7 +267,16 @@ pub enum AssistantBlock {
 }
 
 /// A delegated agent operation surfaced by an ACP adapter.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct SubagentBlock {
     pub call_id: String,
     pub provider: String,
@@ -214,13 +295,31 @@ pub struct SubagentBlock {
 }
 
 /// One entry in an agent [`AssistantBlock::Plan`].
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct PlanStep {
     pub content: String,
     pub status: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RemoteStatus {
     Idle,
@@ -240,14 +339,32 @@ impl From<&AgentRunStatus> for RemoteStatus {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RemoteApproval {
     pub call_id: String,
     pub name: String,
     pub args_json: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RemoteMediaEntry {
     pub path: String,
     pub name: String,
@@ -258,7 +375,16 @@ pub struct RemoteMediaEntry {
     pub preview_data_url: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RemoteSession {
     pub sid: String,
     pub room_id: RoomId,
@@ -398,7 +524,16 @@ pub struct NewChatRequest {
 }
 
 /// An installed agent the phone can start a chat with.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct RemoteAgent {
     pub id: String,
     pub name: String,
