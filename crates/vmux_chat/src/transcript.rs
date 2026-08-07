@@ -11,8 +11,8 @@ use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use crate::activity::{
-    ActivityIcon, render_activity_icon, render_file_activity_icon, render_tool_activity_icon,
-    should_expand_thinking, tool_presentation,
+    ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, should_expand_thinking,
+    tool_presentation,
 };
 use crate::clipboard::copy_to_clipboard;
 use crate::platform::{random_index, sleep_ms};
@@ -91,20 +91,8 @@ pub fn ChatItemRow(
     attachment_previews: Signal<HashMap<String, ChatAttachment>>,
     latest_tool_block: Option<usize>,
 ) -> Element {
-    render_item(
-        absolute_index,
-        &item,
-        attachment_previews,
-        latest_tool_block,
-    )
-}
-
-pub fn render_item(
-    key: usize,
-    item: &ChatItem,
-    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
-    latest_tool_block: Option<usize>,
-) -> Element {
+    let key = absolute_index;
+    let item = &item;
     match item {
         ChatItem::User {
             text,
@@ -141,7 +129,7 @@ pub fn render_item(
                                     &[("count", TranslationValue::Number(context.len() as i64))],
                                 )}
                             }
-                            {render_disclosure_icon()}
+                            DisclosureIcon {}
                         }
                         pre { class: "user-context-content max-h-72 overflow-auto whitespace-pre-wrap rounded-lg px-3 py-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{context}" }
                     }
@@ -152,18 +140,29 @@ pub fn render_item(
                 if !attachments.is_empty() {
                     div { class: "flex flex-wrap justify-end gap-2",
                         for attachment in attachments {
-                            {render_user_attachment(attachment, attachment_previews)}
+                            UserAttachment {
+                                attachment: attachment.clone(),
+                                previews: attachment_previews,
+                            }
                         }
                     }
                 }
             }
         },
-        ChatItem::Turn(turn) => render_turn(key, turn, latest_tool_block),
+        ChatItem::Turn(turn) => rsx! {
+            TurnView {
+                turn_index: key,
+                turn: turn.clone(),
+                latest_tool_index: latest_tool_block,
+            }
+        },
     }
 }
 
-fn render_user_attachment(
-    attachment: &ChatSubmitAttachment,
+/// One file chip under a user message.
+#[component]
+fn UserAttachment(
+    attachment: ChatSubmitAttachment,
     previews: Signal<HashMap<String, ChatAttachment>>,
 ) -> Element {
     let preview_data_url = previews
@@ -197,7 +196,11 @@ fn render_user_attachment(
     }
 }
 
-pub fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>) -> Element {
+/// One assistant turn: its prose, activity blocks and run-state.
+#[component]
+pub fn TurnView(turn_index: usize, turn: ChatTurn, latest_tool_index: Option<usize>) -> Element {
+    let key = turn_index;
+    let turn = &turn;
     let reconnecting = matches!(turn.blocks.last(), Some(ChatBlock::Reconnect { .. }));
     let block_count = turn.blocks.len();
     let blocks = turn
@@ -288,7 +291,9 @@ pub fn render_turn(key: usize, turn: &ChatTurn, latest_tool_index: Option<usize>
     }
 }
 
-fn render_disclosure_icon() -> Element {
+/// The twisty on a collapsible activity row.
+#[component]
+fn DisclosureIcon() -> Element {
     rsx! {
         span {
             class: "disclosure-icon relative inline-block h-3 w-3 shrink-0 text-muted-foreground",
@@ -360,7 +365,10 @@ fn tool_arg_is_path(key: &str, value: &str) -> bool {
     ) || value.starts_with('/')
 }
 
-fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
+/// One argument of a tool call, recursing through nested objects and arrays.
+#[component]
+fn ToolArg(name: String, value: serde_json::Value) -> Element {
+    let key = name;
     let label = tool_arg_label(&key);
     let row_class = "relative flex min-w-0 items-center gap-3 py-1.5 pl-1 before:absolute before:-left-3 before:top-1/2 before:h-px before:w-2 before:bg-foreground/20";
     let label_class =
@@ -431,7 +439,7 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
                 }
                 div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
                     for (index , value) in values.into_iter().enumerate() {
-                        {render_tool_arg(format!("{}", index + 1), value)}
+                        ToolArg { name: format!("{}", index + 1), value }
                     }
                 }
             }
@@ -443,7 +451,7 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
                 }
                 div { class: "ml-1 flex flex-col border-l border-foreground/20 pl-3",
                     for (child_key , child_value) in values {
-                        {render_tool_arg(child_key, child_value)}
+                        ToolArg { name: child_key, value: child_value }
                     }
                 }
             }
@@ -459,7 +467,10 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
     }
 }
 
-fn render_tool_args(args: &str) -> Element {
+/// The argument list of a tool call, parsed out of its JSON.
+#[component]
+fn ToolArgs(args: String) -> Element {
+    let args = args.as_str();
     let Some(value) = normalized_tool_args(args) else {
         return rsx! {
             pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground", "{args}" }
@@ -470,12 +481,12 @@ fn render_tool_args(args: &str) -> Element {
         serde_json::Value::Object(map) => rsx! {
             div { class: "ml-1 mt-2 flex flex-col border-l border-foreground/20 pl-3", aria_label: "Tool arguments",
                 for (key , value) in map {
-                    {render_tool_arg(key, value)}
+                    ToolArg { name: key, value: value }
                 }
             }
         },
         value => rsx! {
-            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3", {render_tool_arg(String::new(), value)} }
+            div { class: "ml-1 mt-2 border-l border-foreground/20 pl-3", ToolArg { name: String::new(), value: value } }
         },
     }
 }
@@ -497,11 +508,11 @@ pub fn render_block(
         },
         ChatBlock::Thinking(text) => rsx! {
             div { key: "{key}", class: "agent-row-hover grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors",
-                {render_activity_icon(ActivityIcon::Thinking)}
+                ActivityIconView { kind: ActivityIcon::Thinking }
                 details { open: latest_thinking, class: "disclosure min-w-0 text-sm text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", {translate("agent-thinking")} }
-                        {render_disclosure_icon()}
+                        DisclosureIcon {}
                     }
                     div { class: "mt-2 whitespace-pre-wrap border-l border-foreground/15 pl-3 text-xs leading-relaxed", "{text}" }
                 }
@@ -511,22 +522,22 @@ pub fn render_block(
             let (icon, label) = tool_presentation(name, args);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
-                    {render_tool_activity_icon(name, args, icon)}
+                    ToolActivityIcon { name: name.clone(), args: args.clone(), fallback: icon }
                     div { class: "min-w-0",
                         details { open: latest_tool, class: "disclosure text-sm text-muted-foreground",
                             summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                                 span { class: "font-medium", "{label}" }
-                                {render_disclosure_icon()}
+                                DisclosureIcon {}
                             }
                             div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                             if !args.is_empty() && args != "{}" {
-                                {render_tool_args(args)}
+                                ToolArgs { args: args.to_string() }
                             }
                         }
                         if !children.is_empty() {
                             div { class: "agent-context-tree ml-0.5 mt-1.5 flex flex-col gap-1 border-l pl-3",
                                 for (child_key , child) in children {
-                                    {render_tool_child(*child_key, child)}
+                                    ToolChild { child_key: *child_key, block: (*child).clone() }
                                 }
                             }
                         }
@@ -546,13 +557,13 @@ pub fn render_block(
             let child_threads = subagent.child_thread_ids.join(", ");
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl bg-violet-500/[0.025] px-2 py-1.5 ring-1 ring-inset ring-violet-500/10 transition-colors hover:bg-violet-500/[0.05]",
-                    {render_activity_icon(ActivityIcon::Subagent)}
+                    ActivityIconView { kind: ActivityIcon::Subagent }
                     div { class: "min-w-0",
                         details { open: subagent.status == "in_progress", class: "disclosure text-sm text-muted-foreground",
                             summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                                 span { class: "font-medium text-foreground/85", "{title}" }
                                 span { class: "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                                {render_disclosure_icon()}
+                                DisclosureIcon {}
                             }
                             div { class: "mt-2 flex flex-wrap gap-1.5 text-[10px]",
                                 span { class: "rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -591,7 +602,7 @@ pub fn render_block(
                                 details { class: "disclosure mt-2 text-[11px] text-muted-foreground",
                                     summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                                         span { class: "font-medium", {translate("agent-raw-event")} }
-                                        {render_disclosure_icon()}
+                                        DisclosureIcon {}
                                     }
                                     pre { class: "agent-code-panel mt-1.5 max-h-56 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground", "{subagent.raw_input}" }
                                 }
@@ -600,7 +611,7 @@ pub fn render_block(
                         if !children.is_empty() {
                             div { class: "agent-context-tree ml-0.5 mt-2 flex flex-col gap-1 border-l border-violet-500/25 pl-3",
                                 for (child_key , child) in children {
-                                    {render_tool_child(*child_key, child)}
+                                    ToolChild { child_key: *child_key, block: (*child).clone() }
                                 }
                             }
                         }
@@ -612,7 +623,7 @@ pub fn render_block(
             let n = steps.len();
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-indigo-500/[0.035]",
-                    {render_activity_icon(ActivityIcon::Plan)}
+                    ActivityIconView { kind: ActivityIcon::Plan }
                     details { open: true, class: "disclosure min-w-0 text-sm",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium text-foreground/80", {translate("agent-plan")} }
@@ -623,7 +634,7 @@ pub fn render_block(
                                     &[("count", TranslationValue::Number(n as i64))],
                                 )}
                             }
-                            {render_disclosure_icon()}
+                            DisclosureIcon {}
                         }
                         ul { class: "mt-2 flex flex-col gap-1.5 border-l border-indigo-500/20 pl-3",
                             for (i , step) in steps.iter().enumerate() {
@@ -662,12 +673,12 @@ pub fn render_block(
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
-                    {render_file_activity_icon(path, true)}
+                    FileActivityIcon { path: path.clone(), write: true }
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                             span { class: "font-medium", {format!("{} ", translate("agent-edited"))} }
                             code { class: "truncate font-mono text-xs text-foreground/70", "{fname}" }
-                            {render_disclosure_icon()}
+                            DisclosureIcon {}
                         }
                         div { class: "mt-2 overflow-hidden rounded-lg ring-1 ring-inset ring-foreground/10",
                             div { class: "overflow-x-auto bg-foreground/[0.02] py-1 font-mono text-[11px] leading-relaxed",
@@ -682,10 +693,12 @@ pub fn render_block(
         }
         ChatBlock::ToolResult {
             content, is_error, ..
-        } => render_standalone_tool_result(key, content, *is_error),
+        } => rsx! {
+            StandaloneToolResult { result_key: key, content: content.clone(), is_error: *is_error }
+        },
         ChatBlock::Reconnect { attempt, total } => rsx! {
             div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-2.5 rounded-xl px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-amber-500/[0.035]",
-                {render_activity_icon(ActivityIcon::Reconnect)}
+                ActivityIconView { kind: ActivityIcon::Reconnect }
                 span {
                     class: "font-medium tabular-nums",
                     {translate_with(
@@ -701,7 +714,11 @@ pub fn render_block(
     }
 }
 
-fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
+/// A block nested under a tool call, which may itself hold more.
+#[component]
+fn ToolChild(child_key: usize, block: ChatBlock) -> Element {
+    let key = child_key;
+    let block = &block;
     match block {
         ChatBlock::ToolUse { name, args, .. } => {
             let (_, label) = tool_presentation(name, args);
@@ -709,11 +726,11 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                 details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "{label}" }
-                        {render_disclosure_icon()}
+                        DisclosureIcon {}
                     }
                     div { class: "mt-1 text-[11px] font-medium text-foreground/45", "{name}" }
                     if !args.is_empty() && args != "{}" {
-                        {render_tool_args(args)}
+                        ToolArgs { args: args.to_string() }
                     }
                 }
             }
@@ -726,7 +743,7 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
                     summary { class: "flex cursor-pointer select-none flex-wrap items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                         span { class: "font-medium", "{subagent.title}" }
                         span { class: "rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {status_class}", "{status_label}" }
-                        {render_disclosure_icon()}
+                        DisclosureIcon {}
                     }
                     div { class: "mt-1 flex flex-wrap gap-1 text-[10px]",
                         span { class: "rounded-full bg-violet-500/10 px-1.5 py-0.5 text-violet-700 dark:text-violet-300", "{subagent.provider}" }
@@ -742,7 +759,9 @@ fn render_tool_child(key: usize, block: &ChatBlock) -> Element {
         }
         ChatBlock::ToolResult {
             content, is_error, ..
-        } => render_nested_tool_result(key, content, *is_error),
+        } => rsx! {
+            NestedToolResult { result_key: key, content: content.clone(), is_error: *is_error }
+        },
         _ => rsx! {},
     }
 }
@@ -765,7 +784,11 @@ fn subagent_status_class(status: &str) -> &'static str {
     }
 }
 
-fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Element {
+/// A tool result folded under the call that produced it.
+#[component]
+fn NestedToolResult(result_key: usize, content: String, is_error: bool) -> Element {
+    let key = result_key;
+    let content = content.as_str();
     let tone = if is_error {
         "text-red-600 dark:text-red-300"
     } else {
@@ -785,14 +808,18 @@ fn render_nested_tool_result(key: usize, content: &str, is_error: bool) -> Eleme
         details { key: "{key}", class: "disclosure text-xs {tone}",
             summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",
                 span { class: "font-medium", "{label}" }
-                {render_disclosure_icon()}
+                DisclosureIcon {}
             }
             pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
         }
     }
 }
 
-fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> Element {
+/// A tool result with no matching call in view.
+#[component]
+fn StandaloneToolResult(result_key: usize, content: String, is_error: bool) -> Element {
+    let key = result_key;
+    let content = content.as_str();
     let tone = if is_error {
         "text-red-600 dark:text-red-300"
     } else {
@@ -820,11 +847,11 @@ fn render_standalone_tool_result(key: usize, content: &str, is_error: bool) -> E
     };
     rsx! {
         div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors {row}",
-            {render_activity_icon(icon)}
+            ActivityIconView { kind: icon }
             details { class: "disclosure min-w-0 text-sm {tone}",
                 summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
                     span { class: "font-medium", "{label}" }
-                    {render_disclosure_icon()}
+                    DisclosureIcon {}
                 }
                 pre { class: "mt-1.5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg p-2 font-mono text-[11px] text-muted-foreground ring-1 ring-inset {panel}", "{content}" }
             }

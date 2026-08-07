@@ -241,7 +241,9 @@ pub fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
     }
 }
 
-pub fn render_activity_icon(kind: ActivityIcon) -> Element {
+/// The glyph standing in for a kind of agent activity.
+#[component]
+pub fn ActivityIconView(kind: ActivityIcon) -> Element {
     if kind == ActivityIcon::Thinking {
         return rsx! {
             span { class: "flex h-6 w-6 shrink-0 items-center justify-center text-[17px] leading-none", aria_hidden: "true", "🧠" }
@@ -400,7 +402,9 @@ pub fn tool_file_path(args: &str) -> Option<String> {
         .or_else(|| file_path_from_text(args))
 }
 
-pub fn render_file_activity_icon(path: &str, write: bool) -> Element {
+/// A file's own icon, tinted by whether the agent read it or wrote it.
+#[component]
+pub fn FileActivityIcon(path: String, write: bool) -> Element {
     let tone = if write {
         "bg-green-500/10 text-green-600 ring-green-500/20 dark:text-green-300"
     } else {
@@ -408,24 +412,27 @@ pub fn render_file_activity_icon(path: &str, write: bool) -> Element {
     };
     rsx! {
         span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset {tone}", aria_hidden: "true",
-            {rsx! { TypeIcon { path: path.to_string(), is_dir: false, class: "h-4 w-4" } }}
+            TypeIcon { path, is_dir: false, class: "h-4 w-4" }
         }
     }
 }
 
-pub fn render_tool_activity_icon(name: &str, args: &str, fallback: ActivityIcon) -> Element {
-    let activity = tool_activity(name);
+/// A tool call's icon: the file it touches when it names one, else the activity glyph.
+#[component]
+pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> Element {
+    let activity = tool_activity(&name);
     if matches!(
         activity,
         ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
-    ) && let Some(path) = tool_file_path(args)
+    ) && let Some(path) = tool_file_path(&args)
     {
-        return render_file_activity_icon(&path, activity == ToolActivity::WriteFile);
+        let write = activity == ToolActivity::WriteFile;
+        return rsx! { FileActivityIcon { path, write } };
     }
-    if matches!(file_icon_kind(name, false), FileIcon::Logo(_)) {
-        return render_file_activity_icon(name, false);
+    if matches!(file_icon_kind(&name, false), FileIcon::Logo(_)) {
+        return rsx! { FileActivityIcon { path: name, write: false } };
     }
-    render_activity_icon(fallback)
+    rsx! { ActivityIconView { kind: fallback } }
 }
 
 pub fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
