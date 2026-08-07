@@ -1,6 +1,6 @@
 use std::{net::IpAddr, time::Duration};
 
-use crate::protocol::AgentCommand;
+use crate::protocol::{AgentCommand, SharedAgentCommand};
 use axum::http::StatusCode;
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -111,10 +111,11 @@ impl DesktopRelayClient {
         let response = match kind {
             DesktopCommandKind::ListSessions => list_sessions_response(self.state.clone()).await,
             DesktopCommandKind::ListAgents => {
-                broker_list_response(self.state.clone(), AgentCommand::ListAgents).await
+                broker_list_response(self.state.clone(), SharedAgentCommand::ListAgents.into())
+                    .await
             }
             DesktopCommandKind::ListTeam => {
-                broker_list_response(self.state.clone(), AgentCommand::ListTeam).await
+                broker_list_response(self.state.clone(), SharedAgentCommand::ListTeam.into()).await
             }
             DesktopCommandKind::CreateChat { body } => {
                 create_chat_response(self.state.clone(), body).await
@@ -301,10 +302,11 @@ async fn create_chat_response(state: RemoteState, body: Value) -> DesktopRespons
     {
         return status_response(StatusCode::ACCEPTED);
     }
-    let command = crate::protocol::AgentCommand::NewAgentChat {
+    let command = crate::protocol::SharedAgentCommand::NewAgentChat {
         prompt: prompt.to_string(),
         agent_url: request.agent_url.clone(),
-    };
+    }
+    .into();
     match state
         .broker
         .command(crate::protocol::AgentRequestId::new(), None, command)

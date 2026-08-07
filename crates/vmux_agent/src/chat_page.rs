@@ -64,6 +64,7 @@ use vmux_service::client::ServiceClient;
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 use vmux_service::protocol::{
     AgentAttachment, AgentCommand as ServiceAgentCommand, AgentRequestId, ClientMessage,
+    SharedMessage,
 };
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
@@ -1575,7 +1576,9 @@ fn cancel_session(
     else {
         return;
     };
-    service.0.send(ClientMessage::AgentCancel { sid });
+    service
+        .0
+        .send(ClientMessage::Shared(SharedMessage::AgentCancel { sid }));
 }
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]

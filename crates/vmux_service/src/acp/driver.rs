@@ -34,7 +34,7 @@ use super::projector::{AcpProjector, Intent, is_conversation_title_tool};
 use crate::process::{ProcessManager, PtyInputWriter};
 use crate::protocol::{
     AgentAttachment, AgentCommand, AgentRequestId, AgentRunStatus, ApprovalDecision,
-    ServiceMessage, compose_agent_prompt,
+    ServiceMessage, SharedEvent, compose_agent_prompt,
 };
 use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
 
@@ -204,10 +204,10 @@ impl AcpShared {
         let projector = self.projector.lock().unwrap();
         let messages_json =
             serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
-        ServiceMessage::AgentMessagesSnapshot {
+        ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
             messages_json,
-        }
+        })
     }
 
     fn cwd(&self) -> PathBuf {
@@ -235,24 +235,22 @@ impl AcpShared {
             return;
         };
         *self.cwd.lock().unwrap() = validated.cwd.clone();
-        self.emit(ServiceMessage::AcpWorkspaceChanged {
+        self.emit(ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged {
             sid: self.sid.clone(),
             name: name.to_string(),
             branch: branch.to_string(),
             cwd: validated.cwd.to_string_lossy().into_owned(),
             workspace_cwd: validated.workspace_cwd.to_string_lossy().into_owned(),
-        });
+        }));
     }
 
     pub fn agent_info_message(&self) -> Option<ServiceMessage> {
-        self.agent_name
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|name| ServiceMessage::AcpAgentInfo {
+        self.agent_name.lock().unwrap().as_ref().map(|name| {
+            ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
                 sid: self.sid.clone(),
                 name: name.clone(),
             })
+        })
     }
 
     pub fn model_info_message(&self) -> Option<ServiceMessage> {
@@ -304,19 +302,19 @@ impl AcpShared {
             return false;
         }
         *approval = None;
-        self.emit(ServiceMessage::AgentApprovalResolved {
+        self.emit(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved {
             sid: self.sid.clone(),
             call_id: call_id.to_string(),
-        });
+        }));
         true
     }
 
     fn publish_agent_info(&self, name: String) {
         *self.agent_name.lock().unwrap() = Some(name.clone());
-        self.emit(ServiceMessage::AcpAgentInfo {
+        self.emit(ServiceMessage::Shared(SharedEvent::AcpAgentInfo {
             sid: self.sid.clone(),
             name,
-        });
+        }));
     }
 
     fn publish_model_info(&self, config_options: &[SessionConfigOption]) {
@@ -331,12 +329,12 @@ impl AcpShared {
         if let Some(state) = next {
             self.emit(state.message(&self.sid));
         } else if removed {
-            self.emit(ServiceMessage::AcpModelInfo {
+            self.emit(ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 sid: self.sid.clone(),
                 config_id: String::new(),
                 current_model_id: String::new(),
                 models: Vec::new(),
-            });
+            }));
         }
     }
 
@@ -378,10 +376,10 @@ impl AcpShared {
             serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
         self.history_replay_updates.store(0, Ordering::SeqCst);
         self.history_replay.store(false, Ordering::SeqCst);
-        self.emit(ServiceMessage::AgentMessagesSnapshot {
+        self.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
             sid: self.sid.clone(),
             messages_json,
-        });
+        }));
     }
 
     fn emit(&self, msg: ServiceMessage) {
@@ -393,10 +391,10 @@ impl AcpShared {
             *self.approval.lock().unwrap() = None;
         }
         *self.status.lock().unwrap() = status.clone();
-        self.emit(ServiceMessage::AgentRunStatusChanged {
+        self.emit(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
             sid: self.sid.clone(),
             status,
-        });
+        }));
     }
 
     fn push_stderr(&self, line: String) {
@@ -454,20 +452,20 @@ fn project_session_update(shared: &AcpShared, update: SessionUpdate) {
         if update_count == 1 || update_count.is_multiple_of(HISTORY_REPLAY_SNAPSHOT_INTERVAL) {
             let messages_json =
                 serde_json::to_string(projector.messages()).unwrap_or_else(|_| "[]".to_string());
-            shared.emit(ServiceMessage::AgentMessagesSnapshot {
+            shared.emit(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
                 sid: shared.sid.clone(),
                 messages_json,
-            });
+            }));
         }
         return;
     }
     drop(projector);
     for intent in intents {
         match intent {
-            Intent::Delta(text) => shared.emit(ServiceMessage::AgentDelta {
+            Intent::Delta(text) => shared.emit(ServiceMessage::Shared(SharedEvent::AgentDelta {
                 sid: shared.sid.clone(),
                 text,
-            }),
+            })),
             Intent::Snapshot => shared.emit(shared.snapshot_message()),
             Intent::ProposedDiff {
                 call_id,
@@ -514,12 +512,12 @@ struct AcpModelInfoState {
 
 impl AcpModelInfoState {
     fn message(&self, sid: &str) -> ServiceMessage {
-        ServiceMessage::AcpModelInfo {
+        ServiceMessage::Shared(SharedEvent::AcpModelInfo {
             sid: sid.to_string(),
             config_id: self.config_id.clone(),
             current_model_id: self.current_model_id.clone(),
             models: self.models.clone(),
-        }
+        })
     }
 }
 
@@ -819,12 +817,12 @@ pub async fn run(
                     name: name.clone(),
                     args_json: args_json.clone(),
                 });
-                perm_shared.emit(ServiceMessage::AgentAwaitingApproval {
+                perm_shared.emit(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
                     sid: perm_shared.sid.clone(),
                     call_id: call_id.clone(),
                     name,
                     args_json,
-                });
+                }));
                 let decision = rx.await.unwrap_or(ApprovalDecision::Deny);
                 *perm_shared.approval.lock().unwrap() = None;
                 let outcome = match pick_permission_option(&req.options, decision) {
@@ -2026,7 +2024,7 @@ mod tests {
         shared.publish_agent_info("Antigravity".into());
 
         match shared.agent_info_message() {
-            Some(ServiceMessage::AcpAgentInfo { sid, name }) => {
+            Some(ServiceMessage::Shared(SharedEvent::AcpAgentInfo { sid, name })) => {
                 assert_eq!(sid, "s1");
                 assert_eq!(name, "Antigravity");
             }
@@ -2099,12 +2097,12 @@ mod tests {
         shared.publish_model_info(&[config]);
 
         match shared.model_info_message() {
-            Some(ServiceMessage::AcpModelInfo {
+            Some(ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 sid,
                 current_model_id,
                 models,
                 ..
-            }) => {
+            })) => {
                 assert_eq!(sid, "s1");
                 assert_eq!(current_model_id, "sonnet");
                 assert_eq!(models[0].name, "Claude Sonnet");
@@ -2169,9 +2167,9 @@ mod tests {
         shared.publish_selected_model("model", "default", &[stale]);
 
         match stream_rx.try_recv().expect("selected model update") {
-            ServiceMessage::AcpModelInfo {
+            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 current_model_id, ..
-            } => assert_eq!(current_model_id, "default"),
+            }) => assert_eq!(current_model_id, "default"),
             other => panic!("expected ACP model info, got {other:?}"),
         }
     }
@@ -2203,11 +2201,11 @@ mod tests {
         shared.publish_selected_model("model", "default", &[]);
 
         match stream_rx.try_recv().expect("selected model update") {
-            ServiceMessage::AcpModelInfo {
+            ServiceMessage::Shared(SharedEvent::AcpModelInfo {
                 current_model_id,
                 models,
                 ..
-            } => {
+            }) => {
                 assert_eq!(current_model_id, "default");
                 assert_eq!(models.len(), 2);
             }
@@ -2234,7 +2232,7 @@ mod tests {
                 TextContent::new("hello"),
             ))),
         );
-        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
             stream_rx.try_recv().expect("first progressive snapshot")
         else {
             panic!("expected snapshot");
@@ -2256,7 +2254,7 @@ mod tests {
         assert!(snapshots.len() < 64);
         shared.finish_history_replay(true);
 
-        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
             stream_rx.try_recv().expect("final snapshot")
         else {
             panic!("expected snapshot");
@@ -2293,7 +2291,7 @@ mod tests {
             ))),
         );
 
-        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
             stream_rx.try_recv().expect("progressive snapshot")
         else {
             panic!("expected snapshot");
@@ -2304,7 +2302,7 @@ mod tests {
         shared.finish_history_replay(false);
 
         assert!(shared.projector.lock().unwrap().messages().is_empty());
-        let ServiceMessage::AgentMessagesSnapshot { messages_json, .. } =
+        let ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) =
             stream_rx.try_recv().expect("clearing snapshot")
         else {
             panic!("expected snapshot");
@@ -2798,7 +2796,7 @@ mod tests {
         assert!(shared.resolve_approval("call-1"));
         assert!(matches!(
             receiver.try_recv(),
-            Ok(ServiceMessage::AgentApprovalResolved { sid, call_id })
+            Ok(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }))
                 if sid == "s1" && call_id == "call-1"
         ));
         assert!(shared.approval.lock().unwrap().is_none());
