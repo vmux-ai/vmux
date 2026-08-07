@@ -188,7 +188,7 @@ async fn authorize(State(state): State<RemoteState>, request: Request, next: Nex
     }
 }
 
-fn remote_enabled() -> bool {
+pub(crate) fn remote_enabled() -> bool {
     remote_enabled_at(&crate::remote_state_path())
 }
 
@@ -565,7 +565,7 @@ fn remote_sse(event: RemoteEvent) -> Result<Event, Infallible> {
     Ok(Event::default().data(serde_json::to_string(&event).unwrap()))
 }
 
-fn secure_eq(left: &str, right: &str) -> bool {
+pub(crate) fn secure_eq(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
     }
@@ -816,7 +816,7 @@ fn remote_media_entries(query: &str) -> Vec<RemoteMediaEntry> {
     entries
 }
 
-fn mark_paired(paired: &AtomicBool) {
+pub(crate) fn mark_paired(paired: &AtomicBool) {
     if paired.swap(true, Ordering::AcqRel) {
         return;
     }
