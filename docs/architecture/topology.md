@@ -1,133 +1,163 @@
-# Topology: desktop, phone, and what sits between them
+# Topology: one service, many clients
 
-Where each process runs, what talks to what, and which of those links carry the same payloads.
+Vmux is not a desktop app that later grew a phone companion. It is **one service** that owns the
+work, and **clients** that render it. Which operating system a client runs on, and whether it shares
+a machine with the service, changes the transport and nothing else.
 
-The relay is drawn as a boundary only. Its internals live in the `vmux-cloud` repository; what
-matters here is the shape of the two endpoints each side uses.
+Naming the roles rather than the devices is deliberate. Every diagram here holds whether the client
+is a laptop, a phone, a tablet, or a watch.
 
-## The three deployment units
+## Three roles
+
+- **Service** — `vmux_service`. One per host machine. Owns the PTYs, the agent sessions, the ACP
+  sessions. It outlives every client, so closing a window does not kill a running agent.
+- **Client** — anything that renders the workspace and sends intent back. A **local** client shares
+  the machine with the service; a **remote** client does not.
+- **Relay** — a rendezvous point, and optional. It exists only so a remote client can reach a
+  service that is not routable from where it is standing. Its internals live in the `vmux-cloud`
+  repository; what matters here is the shape of the two endpoints each side uses.
 
 ```mermaid
 flowchart LR
-    subgraph mac["Mac"]
-        direction TB
-        desktop["vmux_desktop<br/>Bevy ECS · window · GPU compositing"]
-        daemon["vmux_service<br/>launchd daemon · PTYs · agent sessions"]
-        desktop <-->|"unix socket<br/>ServiceClient"| daemon
+    subgraph host["host machine"]
+        service["vmux_service<br/>PTYs · agent + ACP sessions"]
+        local["local client<br/>window · GPU compositing · ECS"]
+        local <-->|"unix socket · rkyv"| service
     end
 
-    subgraph phone["iPhone"]
-        mobile["vmux_mobile<br/>native Dioxus · WKWebView renders"]
+    subgraph device["remote device"]
+        remote["remote client<br/>thin: no PTYs, no ECS"]
     end
 
-    relay(["relay<br/>lives in vmux-cloud"])
+    relay(["relay<br/>vmux-cloud"])
 
-    daemon -->|"long-poll /desktop/…/commands<br/>POST /desktop/…/responses"| relay
-    mobile -->|"/r/…/api/…"| relay
-    mobile -.->|"direct: /api/… on loopback or LAN"| daemon
+    service <-->|"SSE down · POST up"| relay
+    remote -->|"HTTP · /r/{device}/api/…"| relay
+    remote -.->|"direct HTTP · /api/… when routable"| service
 
     style relay stroke-dasharray: 4 4
 ```
 
-Neither end listens for the other. The desktop polls out and the phone calls in, so a phone reaches
-a Mac behind NAT without either opening a port. The dotted path is the direct one — loopback from
-the Simulator, or a LAN address — and needs no relay at all.
+Neither end of the relay listens for the other. The service dials out and holds a stream open; the
+remote client calls in. So a client reaches a host behind NAT without either opening a port. The
+dotted path is the same API without the rendezvous — loopback for a simulator, or a LAN address —
+and is the exception, because pairing points a client at `{relay}/r/{device_id}` by default.
 
-The relay is **not** a generic proxy. It carries a typed `DesktopCommandKind`, so every endpoint the
-phone can reach exists as an explicit variant on both sides.
+The relay is **not** a generic proxy. It carries a typed `DesktopCommandKind`, so every route a
+remote client can reach exists as an explicit variant on both sides. Add an endpoint to the service
+and it is reachable directly but invisible through the relay until a matching variant lands with it.
 
-## Inside the Mac
+Nothing is dialled until Remote is switched on. The service checks that before connecting and
+rechecks it mid-stream, so a host that never enables Remote costs no traffic.
 
-Two processes, deliberately. The daemon outlives the window, so closing the app does not kill a
-running agent or a PTY.
+## Local and remote are the same client, differently plumbed
 
-```mermaid
-flowchart TB
-    subgraph proc1["vmux_desktop — Bevy ECS"]
-        ecs["ECS world<br/>Space → Tab → Pane → Stack"]
-        plugins["plugins: layout, agent, team,<br/>space, history, terminal, editor"]
-        cef["embedded CEF<br/>one browser per pane"]
-        ecs --- plugins
-        plugins --- cef
-    end
-
-    subgraph browsers["inside every CEF browser"]
-        wasm["vmux_server.wasm — one bundle<br/>routes on window.location"]
-        pages["18 pages<br/>vmux://… · file: · https:"]
-        wasm --- pages
-    end
-
-    subgraph proc2["vmux_service — daemon"]
-        registries["AgentSessionManager<br/>AcpSessionManager<br/>ProcessManager"]
-        api["axum API on loopback"]
-        registries --- api
-    end
-
-    cef <-->|"rkyv over window.cef<br/>binEmit / binListen"| wasm
-    ecs <-->|"unix socket"| registries
-```
-
-One wasm bundle serves every page; there is no per-page build. `vmux_server::App` reads
-`window.location` and picks from a manifest table, so `vmux://team` and `file:` land in the same
-binary. Each pane being its own browser means that bundle is parsed per pane, not once.
-
-## One page, two hosts
-
-The point of the shared-page work: a page never names a backend. It emits typed payloads under an
-event id and subscribes to ids, and `PageHost` decides what that physically means.
+This is where the layers collapse. A page never names a backend. It emits typed payloads under an
+event id and subscribes to ids, and a `PageHost` decides what that physically means.
 
 ```mermaid
 flowchart TB
-    page["a page — e.g. vmux_team::page::Page<br/>identical code on both hosts"]
-    hooks["vmux_ui::hooks<br/>use_bin_event_listener · try_cef_bin_emit_rkyv"]
+    page["a page — identical code on every client"]
+    hooks["vmux_ui::hooks<br/>use_bin_event_listener · emit"]
     trait["PageHost::emit / listen"]
 
     page --> hooks --> trait
 
-    trait --> cefhost["CefHost<br/>window.cef.binEmit/binListen"]
-    trait --> mobilehost["MobileHost<br/>poll HTTP, re-encode as rkyv"]
+    trait --> cefhost["CefHost — wasm in a webview<br/>window.cef binEmit/binListen"]
+    trait --> remotehost["MobileHost — native beside a webview<br/>HTTP, JSON re-encoded to rkyv"]
 
-    cefhost -->|"crosses a process boundary"| bevy["Bevy ECS"]
-    mobilehost -->|"HTTP + SSE"| daemon2["daemon API"]
-    daemon2 -->|"broker round-trip"| bevy
+    cefhost -->|"crosses a process boundary"| ecs["local client ECS"]
+    remotehost -->|"HTTP + SSE"| service["service API"]
+    service -->|"broker round-trip"| ecs
 ```
 
-The broker hop is not incidental. The daemon answers HTTP but the ECS holds the state, and they are
-separate processes — so anything ECS-derived costs a request into Bevy and back, which is why
-`/api/agents` and `/api/team` are broker commands rather than reads of local state.
+The asymmetry is not where you would guess. On a local client the page is wasm inside an embedded
+browser and every message crosses a real process boundary. On a remote client the page is native
+Rust in the same process as its webview and crosses nothing at all — the distance is to the *host*,
+not to the renderer.
+
+Two consequences fall out of that, and both are current limits rather than design:
+
+- **`emit` is one-way on remote clients.** A page can read; it cannot push a typed payload back the
+  way it does locally. Ids with no route are refused rather than silently accepted, so a half-served
+  page reports as much instead of rendering empty.
+- **Subscriptions degrade to polling.** The local host pushes on change. HTTP cannot, so
+  `MobileHost` re-reads on an interval and only re-emits when the value actually moved.
+
+The **broker round-trip** in the diagram is the other thing worth knowing. The service answers HTTP,
+but the workspace shape — installed agents, the active roster — lives in the local client's ECS, in
+a different process. So `/api/agents` and `/api/team` are not reads of service state; they are
+commands brokered into the local client and relayed back as-is. A remote client can drive sessions
+with no window open, but those two routes answer `502` until a local client is there to ask.
 
 ## What each link carries
 
 | Link | Transport | Payload |
 | --- | --- | --- |
-| page ↔ Bevy (desktop) | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope |
-| Bevy ↔ daemon | unix socket | rkyv-framed `ClientMessage` / `ServiceMessage` |
-| phone ↔ desktop | HTTP + SSE | JSON, re-encoded to rkyv by `MobileHost` before the page sees it |
-| desktop ↔ relay | HTTPS long-poll | typed `DesktopCommandKind` / `DesktopResponse` |
+| page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope, host→page bare |
+| local client ↔ service | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
+| remote client ↔ service | HTTP/1.1 + SSE | JSON, re-encoded to rkyv on-device before the page sees it |
+| service ↔ relay | HTTPS: held-open SSE down, POST up | JSON `DesktopCommandKind` / `DesktopResponse` |
 
-The phone never chooses between the relay and a direct connection. It appends paths to whatever
-`base_url` pairing gave it, and pairing sets that to `{relay}/r/{device_id}` when a relay is
-configured — which it is by default. Direct is the exception now: loopback for the Simulator, or a
-LAN address.
+The gap between the last two rows and the first two is the open question. rkyv everywhere would
+remove a re-encode, but a remote client ships on its own schedule and rkyv's archived layout is not
+forward-compatible, whereas JSON tolerates a field the other side has not heard of. The relay
+already leans on that: an unrecognised command is skipped, not fatal, so one unknown variant does
+not tear down every other route.
 
-That makes `DesktopCommandKind` the real API surface for a phone off the network. Every route the
-relay carries exists as a variant on both sides, so an endpoint added to the daemon is reachable
-directly but invisible through the relay until a matching variant lands with it.
+## HTTP/1.1 today — no h2, no HTTP/3, no QUIC
 
-The asymmetry in the last two rows is the open question: rkyv everywhere would remove a re-encode,
-but the phone ships separately from the desktop and rkyv's archived layout is not
-forward-compatible, whereas JSON tolerates a field the other side has not heard of.
+Worth stating plainly, because "SSE" invites the question.
+
+Both streaming links are **real** `text/event-stream` over **HTTP/1.1**, not long-polling: the
+session stream (`GET /api/sessions/{sid}/events`, 15-second keep-alive) and the relay command
+stream, each held open until it breaks, with a flat 2-second reconnect.
+
+Nothing negotiates h2. The service runs axum on hyper with HTTP/2 off, cleartext, bound to loopback
+— TLS is the relay's job, not the host's. Clients use `reqwest` with `rustls` but without the
+`http2` feature, so ALPN offers `http/1.1` and only that. No `quinn`, `h3`, or `s2n-quic` is
+compiled anywhere in the workspace.
+
+That is a fine floor for what runs over it: one long stream and small JSON requests, where h2's
+multiplexing buys little. It stops being fine when a client is on a mobile network and wants many
+concurrent session streams, or wants one stream to survive walking between networks — head-of-line
+blocking and connection migration are exactly what QUIC fixes.
+
+When that lands it is the relay link that changes, not the shape above. The client side is a
+`reqwest` feature away, though HTTP/3 there is still gated behind `--cfg reqwest_unstable`, and the
+relay would have to terminate it. The direct link stays on h1: it is loopback or LAN, where none of
+this is worth paying for.
+
+## Which platforms exist today
+
+The shape above is OS-agnostic; the builds are not yet. Being honest about the difference:
+
+| Platform | Role | Status |
+| --- | --- | --- |
+| macOS | host — service + local client | Primary. Packaged, launchd-managed, shipped. |
+| Linux | host | Builds and tests in CI. Not packaged. |
+| Windows | host | Not started — no platform code exists. |
+| iOS | remote client | Real and buildable via `dx`; no CI job. |
+| Android | remote client | Configured in `Dioxus.toml` and the `Makefile`; no platform code yet. |
+| iPadOS · watchOS · others | remote client | Nothing platform-specific stands in the way. |
+
+A remote client is strictly a client: the service's server half is compiled out for iOS and wasm
+entirely. Adding one is a rendering and input problem, not a protocol problem — the API, the pairing
+flow, and `PageHost` are already the whole contract.
+
+Discovery is manual by design: there is no mDNS or zeroconf. A client is paired by scanning a QR
+code or pasting the URL it encodes, which carries the endpoint and a bearer token.
 
 ## Shared crates
 
-What both hosts compile, and what only one does.
+What every client compiles, and what only one does.
 
-- **Both** — `vmux_wire` (plain serde/rkyv models, no Bevy), `vmux_ui` (components, hooks,
+- **Everywhere** — `vmux_wire` (plain serde/rkyv models, no Bevy), `vmux_ui` (components, hooks,
   transport), `vmux_chat`, `vmux_start`, and the pages lifted onto the transport so far:
   `vmux_history`, `vmux_service`, `vmux_team`, `vmux_space`.
-- **Desktop only** — anything that pulls Bevy: the plugins, the compositor, `vmux_browser`.
-- **Not shared by choice** — `vmux_editor`, `vmux_terminal` and `vmux_layout`, which are built on
-  DOM measurement or on tiling that a phone has no use for.
+- **Local client only** — anything that pulls Bevy: the plugins, the compositor, `vmux_browser`.
+- **Not shared, by choice** — `vmux_editor`, `vmux_terminal`, `vmux_layout`. They are built on DOM
+  measurement or on tiling, which a small screen has no use for.
 
 The recurring trap when adding to the first list: crates gate their desktop half on
 `not(target_arch = "wasm32")`, which is **true on iOS**. The gate has to read
