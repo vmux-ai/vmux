@@ -130,15 +130,17 @@ pub fn Page() -> Element {
                     }
                 }
                 for extension in visible.iter() {
-                    {render_extension(extension)}
+                    ExtensionRow { extension: extension.clone() }
                 }
             }
         }
     }
 }
 
-fn render_extension(extension: &ExtRow) -> Element {
-    let item = extension.clone();
+/// One installed extension, with its enable and remove controls.
+#[component]
+fn ExtensionRow(extension: ExtRow) -> Element {
+    let item = extension;
     let toggle_id = item.id.clone();
     let toggle_enabled = item.enabled;
     let needs_approval = item.needs_approval;

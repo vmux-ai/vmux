@@ -87,6 +87,83 @@ mod naming_policy {
         );
     }
 
+    /// A function returning `Element` renders UI, so it is a component and must say so.
+    ///
+    /// The naming check above cannot see these: a helper never claimed to be a component, so
+    /// there is nothing to check the name of. That is exactly how 47 of them accumulated. The
+    /// cost is not cosmetic — a helper is inlined into its caller's scope, so it re-runs whenever
+    /// the caller does and can never skip on unchanged inputs.
+    #[test]
+    fn nothing_returns_an_element_without_being_a_component() {
+        let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir");
+        let mut offenders = Vec::new();
+        walk_rs_files(crates_dir, &mut |path, source| {
+            // This file quotes offending code in its own fixtures.
+            if path.ends_with("components.rs") {
+                return;
+            }
+            for (index, name) in element_fns_without_component(source) {
+                offenders.push(format!("{}:{}: {name}", path.display(), index + 1));
+            }
+        });
+        assert!(
+            offenders.is_empty(),
+            "these return Element, so they are components — add #[component], name them \
+             PascalCase, take owned props, and render them as `Foo {{ .. }}`:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    /// Functions whose signature returns `Element` and that carry no `#[component]` above them.
+    fn element_fns_without_component(source: &str) -> Vec<(usize, String)> {
+        let lines: Vec<&str> = source.lines().collect();
+        let mut found = Vec::new();
+        for (index, line) in lines.iter().enumerate() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            let Some(rest) = trimmed.strip_prefix("fn ").or_else(|| {
+                trimmed
+                    .strip_prefix("pub fn ")
+                    .or_else(|| trimmed.strip_prefix("pub(crate) fn "))
+            }) else {
+                continue;
+            };
+            // The return type may sit on this line or after a wrapped parameter list.
+            let signature: String = lines[index..lines.len().min(index + 14)].join("\n");
+            let Some(head) = signature.split_once('{').map(|(head, _)| head) else {
+                continue;
+            };
+            if !head.contains("-> Element") {
+                continue;
+            }
+            let annotated = lines[..index].iter().rev().try_fold(false, |_, previous| {
+                let previous = previous.trim();
+                if previous == "#[component]" {
+                    return Err(true);
+                }
+                if previous.starts_with('#') || previous.starts_with("//") {
+                    return Ok(false);
+                }
+                Err(false)
+            });
+            if annotated == Err(true) {
+                continue;
+            }
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                found.push((index, name));
+            }
+        }
+        found
+    }
+
     /// Names of `#[component]`-annotated functions, with the line the name sits on.
     fn component_names(source: &str) -> Vec<(usize, String)> {
         let lines: Vec<&str> = source.lines().collect();

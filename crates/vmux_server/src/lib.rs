@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
 #[allow(non_snake_case)]
+#[component]
 pub fn App() -> Element {
     let host = current_host();
     WEB_PAGE_MANIFESTS

@@ -603,7 +603,12 @@ fn TerminalRow(
                 }
             }
             for (span_idx, span) in line.spans.iter().enumerate() {
-                {render_span(span, span_idx, state.cursor.as_ref(), "block")}
+                TermSpanView {
+                    span: span.clone(),
+                    span_idx,
+                    cursor: state.cursor.clone(),
+                    cursor_style: "block",
+                }
             }
             if let Some((sel_start, sel_end)) = selected_cols {
                 div {
@@ -956,12 +961,17 @@ fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, movi
 // Span rendering
 // ---------------------------------------------------------------------------
 
-fn render_span(
-    span: &TermSpan,
+/// One run of same-styled cells in a terminal row, splitting around the cursor.
+#[component]
+fn TermSpanView(
+    span: TermSpan,
     span_idx: usize,
-    cursor: Option<&TermCursor>,
-    cursor_style: &str,
+    cursor: Option<TermCursor>,
+    cursor_style: String,
 ) -> Element {
+    let span = &span;
+    let cursor = cursor.as_ref();
+    let cursor_style = cursor_style.as_str();
     let classes = span_classes(span);
     let style = span_inline_style(span);
 

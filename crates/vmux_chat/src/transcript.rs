@@ -269,13 +269,16 @@ pub fn TurnView(turn_index: usize, turn: ChatTurn, latest_tool_index: Option<usi
                         MessageCopyButton { text: copy_text.clone() }
                     }
                     for (j , block , children) in blocks {
-                        {render_block(
-                            j,
-                            block,
-                            &children,
-                            should_expand_thinking(j, block_count),
-                            latest_tool_index == Some(j),
-                        )}
+                        TurnBlock {
+                            block_index: j,
+                            block: block.clone(),
+                            nested: children
+                                .iter()
+                                .map(|(index, child)| (*index, (*child).clone()))
+                                .collect::<Vec<_>>(),
+                            latest_thinking: should_expand_thinking(j, block_count),
+                            latest_tool: latest_tool_index == Some(j),
+                        }
                     }
                 }
             }
@@ -491,13 +494,22 @@ fn ToolArgs(args: String) -> Element {
     }
 }
 
-pub fn render_block(
-    key: usize,
-    block: &ChatBlock,
-    children: &[(usize, &ChatBlock)],
+/// One block of an assistant turn: prose, thinking, a tool call and what it produced.
+#[component]
+pub fn TurnBlock(
+    block_index: usize,
+    block: ChatBlock,
+    nested: Vec<(usize, ChatBlock)>,
     latest_thinking: bool,
     latest_tool: bool,
 ) -> Element {
+    let key = block_index;
+    let block = &block;
+    let children: Vec<(usize, &ChatBlock)> = nested
+        .iter()
+        .map(|(index, child)| (*index, child))
+        .collect();
+    let children = children.as_slice();
     match block {
         ChatBlock::Text(text) => rsx! {
             div {

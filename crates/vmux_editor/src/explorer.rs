@@ -277,7 +277,9 @@ fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) 
     prompt.set(None);
 }
 
-fn chevron(expanded: bool, loading: bool) -> Element {
+/// The twisty on a tree row, replaced by a spinner while its children load.
+#[component]
+fn Chevron(expanded: bool, loading: bool) -> Element {
     if loading {
         return rsx! {
             span { class: "inline-block h-3 w-3 shrink-0 animate-spin rounded-full border border-foreground/25 border-t-foreground/70" }
@@ -293,12 +295,14 @@ fn chevron(expanded: bool, loading: bool) -> Element {
     }
 }
 
-fn section_header(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
+/// A collapsible section title in the explorer sidebar.
+#[component]
+fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "flex items-center gap-1 px-2 py-1 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
             onclick: move |_| on_toggle.call(()),
-            {chevron(open(), false)}
+            Chevron { expanded: open(), loading: false }
             span { class: "truncate", "{title}" }
         }
     }
@@ -431,7 +435,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 {translate("editor-explorer")}
             }
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
-                {section_header(translate("editor-open-editors"), show_open, EventHandler::new(move |_| show_open.set(!show_open())))}
+                SectionHeader { title: translate("editor-open-editors"), open: show_open, on_toggle: EventHandler::new(move |_| show_open.set(!show_open())) }
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
@@ -471,7 +475,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 }
 
                 if let Some(results) = search() {
-                    {section_header("Search".to_string(), show_search, EventHandler::new(move |_| show_search.set(!show_search())))}
+                    SectionHeader { title: "Search".to_string(), open: show_search, on_toggle: EventHandler::new(move |_| show_search.set(!show_search())) }
                     div { class: "{search_body}",
                         div { class: "min-h-0 overflow-hidden pb-1",
                             div { class: "mx-2 mb-1 flex h-7 items-center gap-2 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10",
@@ -529,7 +533,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                             y,
                         }));
                     },
-                    {section_header(root_name(), show_files, EventHandler::new(move |_| show_files.set(!show_files())))}
+                    SectionHeader { title: root_name(), open: show_files, on_toggle: EventHandler::new(move |_| show_files.set(!show_files())) }
                 }
                 div { class: "{files_body}",
                     div { class: "min-h-0 overflow-hidden",
@@ -594,7 +598,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                     }
                                                 },
                                                 if is_dir {
-                                                    {chevron(row.expanded, row.loading)}
+                                                    Chevron { expanded: row.expanded, loading: row.loading }
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
@@ -609,7 +613,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     }
                 }
 
-                {section_header(translate("editor-outline"), show_outline, EventHandler::new(move |_| show_outline.set(!show_outline())))}
+                SectionHeader { title: translate("editor-outline"), open: show_outline, on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())) }
                 div { class: "{outline_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for s in outline() {
@@ -622,7 +626,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                         class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 transition-colors duration-100 hover:bg-foreground/[0.08]",
                                         style: "padding-left:{pad}px;",
                                         onclick: move |_| goto_line(line),
-                                        {outline_glyph(s.kind)}
+                                        OutlineGlyph { kind: s.kind }
                                         span { class: "truncate", "{s.name}" }
                                     }
                                 }
@@ -787,7 +791,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     }
 }
 
-fn outline_glyph(kind: u8) -> Element {
+/// The symbol glyph for an outline entry's kind.
+#[component]
+fn OutlineGlyph(kind: u8) -> Element {
     let label = match kind {
         15 => "abc",
         12 => "fn",
