@@ -340,7 +340,8 @@ fn select_media_entry(
 /// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
 /// desktop act anyway, so a native host renders nothing rather than an approximation.
 #[cfg(target_arch = "wasm32")]
-fn install_backdrop(accent_rgb: String, title: String) -> Element {
+#[component]
+fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     rsx! {
         div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
             MatrixRain { accent_rgb, words: vec![title] }
@@ -349,7 +350,10 @@ fn install_backdrop(accent_rgb: String, title: String) -> Element {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn install_backdrop(_accent_rgb: String, _title: String) -> Element {
+#[component]
+fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
+    // The prop names have to match the CEF impl, since callers name them.
+    let _ = (accent_rgb, title);
     rsx! {}
 }
 
@@ -1366,10 +1370,16 @@ pub fn Page(
             onkeydown: root_keydown,
             style { dangerous_inner_html: MD_CSS }
             if installing_splash {
-                {install_backdrop(rain_accent, header_name.to_uppercase())}
+                InstallBackdrop { accent_rgb: rain_accent, title: header_name.to_uppercase() }
             }
             header { class: "agent-chat-header vmux-agent-surface-enter relative z-10 flex min-w-0 items-center gap-2.5 border-b bg-background/95 px-3 py-3 shadow-[0_1px_0_rgba(255,255,255,0.02)] sm:px-5",
-                {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-6 w-6 text-[11px]")}
+                AgentAvatar {
+                    icon: agent_icon(),
+                    accent: accent(),
+                    agent: agent.clone(),
+                    name: header_name.clone(),
+                    size_class: "h-6 w-6 text-[11px]",
+                }
                 span { class: "h-2.5 w-2.5 rounded-full {status_dot_class(&status())}" }
                 div { class: "min-w-0 flex-1",
                     div { class: "truncate bg-gradient-to-b from-foreground to-foreground/60 bg-clip-text text-sm font-semibold text-transparent", title: "{conversation_title}",
@@ -1411,7 +1421,13 @@ pub fn Page(
                     }
                     if installing_splash {
                         div { class: "my-auto flex flex-col items-center gap-3 py-16 text-center",
-                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
+                            AgentAvatar {
+                    icon: agent_icon(),
+                    accent: accent(),
+                    agent: agent.clone(),
+                    name: header_name.clone(),
+                    size_class: "h-14 w-14 text-xl",
+                }
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"
                             }
@@ -1422,7 +1438,13 @@ pub fn Page(
                         }
                     } else if items.read().is_empty() && status() == "idle" {
                         div { class: "vmux-agent-ready-enter flex flex-col items-center gap-3 py-24 text-center",
-                            {avatar_node(&agent_icon(), &accent(), &agent, &header_name, "h-14 w-14 text-xl")}
+                            AgentAvatar {
+                    icon: agent_icon(),
+                    accent: accent(),
+                    agent: agent.clone(),
+                    name: header_name.clone(),
+                    size_class: "h-14 w-14 text-xl",
+                }
                             h2 { class: "bg-gradient-to-b from-foreground to-foreground/50 bg-clip-text text-3xl font-semibold capitalize tracking-tight text-transparent",
                                 "{header_name}"
                             }
@@ -2089,7 +2111,22 @@ fn status_dot_class(status: &str) -> &'static str {
 }
 
 /// The agent avatar: its favicon if resolvable, else an accent-filled circle with the initial.
-fn avatar_node(icon: &str, accent: &str, agent: &str, name: &str, size_class: &str) -> Element {
+/// The agent's face: its favicon when it has one, else an initial on its accent.
+#[component]
+fn AgentAvatar(
+    icon: String,
+    accent: String,
+    agent: String,
+    name: String,
+    size_class: String,
+) -> Element {
+    let (icon, accent, agent, name, size_class) = (
+        icon.as_str(),
+        accent.as_str(),
+        agent.as_str(),
+        name.as_str(),
+        size_class.as_str(),
+    );
     let url = format!("vmux://agent/{agent}");
     let src = favicon_src_for_url(icon, &url);
     let initial: String = name

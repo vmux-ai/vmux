@@ -24,6 +24,7 @@ pub struct AgentsCatalog {
     Clone,
     Debug,
     Default,
+    PartialEq,
     serde::Serialize,
     serde::Deserialize,
     rkyv::Archive,
