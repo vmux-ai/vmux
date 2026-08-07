@@ -16,12 +16,6 @@ use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, WorkingIndicator};
-use vmux_remote::{
-    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
-    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
-    RemoteStatus, RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
-    replace_inline_media_query,
-};
 use vmux_start::results::CommandBarResultItem;
 use vmux_start::row::ResultRow;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
@@ -35,6 +29,12 @@ use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
 };
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
+use vmux_wire::room::{
+    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
+    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
+    RemoteStatus, RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
+    replace_inline_media_query,
+};
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
 const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
@@ -1845,7 +1845,7 @@ mod tests {
         assert_eq!(
             parse_sse_event(&frame),
             Some(RemoteEvent::Delta {
-                room_id: vmux_remote::room_id_for_session("s"),
+                room_id: vmux_wire::room::room_id_for_session("s"),
                 text: "hi".to_string()
             })
         );
@@ -1853,7 +1853,7 @@ mod tests {
     }
 
     fn sample_events() -> Vec<RoomEvent> {
-        vmux_remote::room_events_from_messages(
+        vmux_wire::room::room_events_from_messages(
             "s",
             0,
             &[

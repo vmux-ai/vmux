@@ -1,1 +1,1 @@
-pub use vmux_remote::{AssistantBlock, Message, PlanStep, SubagentBlock};
+pub use vmux_wire::room::{AssistantBlock, Message, PlanStep, SubagentBlock};

@@ -12,6 +12,7 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+unicode-segmentation = "1"
 url = { workspace = true }
 uuid = { workspace = true }
 

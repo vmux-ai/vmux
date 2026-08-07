@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
-use vmux_remote::{
+use vmux_wire::room::{
     ClientOpId, EventId, MemberId, MemberKind, Message, RoomId, RoomRole, agent_member_id,
     local_member_id, room_events_from_messages, room_id_for_session,
 };
@@ -107,10 +107,10 @@ pub enum RoomIntent {
 }
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpReceived(pub vmux_remote::RoomEvent);
+pub struct RoomOpReceived(pub vmux_wire::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, PartialEq)]
-pub struct RoomOpCommitted(pub vmux_remote::RoomEvent);
+pub struct RoomOpCommitted(pub vmux_wire::room::RoomEvent);
 
 #[derive(Message, Clone, Debug, Eq, PartialEq)]
 pub struct CrdtChangeReceived {
@@ -447,7 +447,7 @@ mod tests {
             .unwrap()
             .0
             .push(Message::Assistant {
-                blocks: vec![vmux_remote::AssistantBlock::Text("hi".to_string())],
+                blocks: vec![vmux_wire::room::AssistantBlock::Text("hi".to_string())],
             });
         app.world_mut()
             .get_mut::<AgentConversationTitle>(session)

@@ -223,7 +223,7 @@ async fn broker_json(
 }
 
 /// The installed agents, so a remote client can offer the same launcher rows the desktop does.
-async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_remote::RemoteAgent>> {
+async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::room::RemoteAgent>> {
     let json = broker_json(
         &state,
         crate::protocol::SharedAgentCommand::ListAgents.into(),
@@ -250,7 +250,7 @@ async fn list_sessions(State(state): State<RemoteState>) -> Json<Vec<RemoteSessi
     sessions.extend(state.acp.lock().await.remote_sessions());
     for session in &mut sessions {
         if let Some(messages) = session_messages(&state, &session.sid).await {
-            session.title = vmux_remote::conversation_title(&messages, &session.name);
+            session.title = vmux_wire::room::conversation_title(&messages, &session.name);
         }
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
@@ -450,17 +450,17 @@ async fn session_stream(
         let acp = state.acp.lock().await;
         if let Some(mut session) = acp.remote_session(sid) {
             let messages = acp.remote_messages(sid)?;
-            session.title = vmux_remote::conversation_title(&messages, &session.name);
+            session.title = vmux_wire::room::conversation_title(&messages, &session.name);
             let events =
-                vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+                vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
             return Some((session, events, acp.subscribe(sid)?));
         }
     }
     let agents = state.agents.lock().await;
     let mut session = agents.remote_session(sid)?;
     let messages = agents.remote_messages(sid).await?;
-    session.title = vmux_remote::conversation_title(&messages, &session.name);
-    let events = vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+    session.title = vmux_wire::room::conversation_title(&messages, &session.name);
+    let events = vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
     Some((session, events, agents.subscribe(sid)?))
 }
 
@@ -485,7 +485,7 @@ async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession
         state.agents.lock().await.remote_session(sid)?
     };
     if let Some(messages) = session_messages(state, sid).await {
-        session.title = vmux_remote::conversation_title(&messages, &session.name);
+        session.title = vmux_wire::room::conversation_title(&messages, &session.name);
     }
     Some(session)
 }
@@ -493,7 +493,7 @@ async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession
 async fn session_snapshot(state: &RemoteState, sid: &str) -> Option<RemoteEvent> {
     let session = current_session(state, sid).await?;
     let messages = session_messages(state, sid).await?;
-    let events = vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+    let events = vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
     let through_seq = events
         .last()
         .map(|event| event.server_seq)
@@ -512,7 +512,7 @@ async fn service_event(
 ) -> Option<RemoteEvent> {
     match message {
         ServiceMessage::Shared(SharedEvent::AgentDelta { text, .. }) => Some(RemoteEvent::Delta {
-            room_id: vmux_remote::room_id_for_session(sid),
+            room_id: vmux_wire::room::room_id_for_session(sid),
             text,
         }),
         ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { status, .. }) => {
@@ -539,7 +539,7 @@ async fn service_event(
             let messages = serde_json::from_str::<Vec<Message>>(&messages_json).ok()?;
             let session = current_session(state, sid).await?;
             let events =
-                vmux_remote::room_events_from_messages(sid, session.created_at_ms, &messages);
+                vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
             let through_seq = events
                 .last()
                 .map(|event| event.server_seq)

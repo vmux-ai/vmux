@@ -1813,11 +1813,11 @@ pub(crate) fn on_tidy_action(
 #[cfg(not(target_arch = "wasm32"))]
 fn remote_agents(
     snapshot: &vmux_command::snapshot::CommandBarAgentsSnapshot,
-) -> Vec<vmux_remote::RemoteAgent> {
+) -> Vec<vmux_wire::room::RemoteAgent> {
     snapshot
         .acp
         .iter()
-        .map(|agent| vmux_remote::RemoteAgent {
+        .map(|agent| vmux_wire::room::RemoteAgent {
             id: agent.id.clone(),
             name: agent.name.clone(),
             url: agent.url.clone(),
@@ -1827,7 +1827,7 @@ fn remote_agents(
             snapshot
                 .providers
                 .iter()
-                .map(|agent| vmux_remote::RemoteAgent {
+                .map(|agent| vmux_wire::room::RemoteAgent {
                     id: agent.id.clone(),
                     name: format!("{} (CLI)", agent.name),
                     url: agent.url.clone(),
