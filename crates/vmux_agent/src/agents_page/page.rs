@@ -107,14 +107,17 @@ pub fn Page() -> Element {
                     }
                 }
                 for agent in filtered.iter() {
-                    {render_agent(agent, agents)}
+                    AgentRow { agent: agent.clone(), agents }
                 }
             }
         }
     }
 }
 
-fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+/// One installed agent, with its version and install controls.
+#[component]
+fn AgentRow(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let agent = &agent;
     let icon_url = agent.icon.clone();
     let launch_url = agent.launch_url.clone();
     let description = if agent.source == "cli" {
@@ -140,7 +143,7 @@ fn render_agent(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element 
                     ManagerBadge { tone: runtime_tone(&agent.runtime), "{agent.runtime}" }
                 }
             },
-            actions: render_action(agent, agents),
+            actions: rsx! { AgentActions { agent: agent.clone(), agents } },
         }
     }
 }
@@ -156,7 +159,10 @@ fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &s
 /// A version-pin control, shown only for npx/uvx agents (native binaries can't be pinned). Renders
 /// a dropdown of published versions when they've been fetched, else a free-text fallback (so it
 /// still works before the fetch lands or when the registry can't be queried).
-fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+/// The pinned-version field, for runtimes that support pinning.
+#[component]
+fn AgentVersionInput(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let agent = &agent;
     let id = agent.id.clone();
     if agent.available_versions.is_empty() {
         return rsx! {
@@ -204,17 +210,23 @@ fn render_version_input(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> 
     }
 }
 
-fn render_action(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+/// The controls on the right of an agent row.
+#[component]
+fn AgentActions(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let agent = &agent;
     let pinnable = agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     rsx! {
         if pinnable {
-            {render_version_input(agent, agents)}
+            AgentVersionInput { agent: agent.clone(), agents }
         }
-        {render_status_buttons(agent, agents)}
+        AgentStatusButtons { agent: agent.clone(), agents }
     }
 }
 
-fn render_status_buttons(agent: &AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+/// Install, apply and uninstall, according to what the agent needs.
+#[component]
+fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+    let agent = &agent;
     let id = agent.id.clone();
     let install_id = agent.id.clone();
     let uninstall_id = agent.id.clone();
