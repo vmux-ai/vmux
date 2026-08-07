@@ -60,6 +60,19 @@ pub fn remote_paired_path() -> PathBuf {
     profile_file("remote-paired")
 }
 
+/// Path to the self-signed certificate the QUIC listener presents.
+///
+/// Persisted rather than minted per launch: the pairing link records its fingerprint, so a fresh
+/// certificate on every start would silently unpair every phone.
+pub fn remote_cert_path() -> PathBuf {
+    profile_file("remote-cert")
+}
+
+/// Path to the private key for [`remote_cert_path`]. Written at mode `0600`.
+pub fn remote_key_path() -> PathBuf {
+    profile_file("remote-key")
+}
+
 /// Path to the stable relay device id for the active build and profile.
 pub fn remote_relay_device_path() -> PathBuf {
     profile_file("remote-device")

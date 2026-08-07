@@ -33,6 +33,8 @@ tokio = { workspace = true, features = ["process", "io-util"] }
 alacritty_terminal = { workspace = true }
 vte = "0.15"
 portable-pty = { workspace = true }
+quinn = { workspace = true }
+rustls-pemfile = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
