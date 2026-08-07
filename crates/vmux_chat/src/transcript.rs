@@ -5,7 +5,7 @@
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use vmux_ui::file_icon::type_icon;
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
@@ -368,7 +368,7 @@ fn render_tool_arg(key: String, value: serde_json::Value) -> Element {
     match value {
         serde_json::Value::String(text) if tool_arg_is_path(&key, &text) => rsx! {
             div { class: "{row_class}",
-                {type_icon(&text, false, "h-4 w-4 shrink-0 opacity-85")}
+                {rsx! { TypeIcon { path: text.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-85" } }}
                 if !key.is_empty() {
                     span { class: "{label_class}", "{label}" }
                 }

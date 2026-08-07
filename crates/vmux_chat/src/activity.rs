@@ -5,7 +5,7 @@
 //! other. This is the single implementation.
 
 use dioxus::prelude::*;
-use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
+use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::i18n::translate;
 use vmux_wire::chat::is_guardian_tool;
 
@@ -408,7 +408,7 @@ pub fn render_file_activity_icon(path: &str, write: bool) -> Element {
     };
     rsx! {
         span { class: "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset {tone}", aria_hidden: "true",
-            {type_icon(path, false, "h-4 w-4")}
+            {rsx! { TypeIcon { path: path.to_string(), is_dir: false, class: "h-4 w-4" } }}
         }
     }
 }

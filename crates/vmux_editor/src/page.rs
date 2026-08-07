@@ -21,7 +21,7 @@ use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::file_icon::type_icon;
+use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
@@ -866,7 +866,7 @@ pub fn Page() -> Element {
                     request_id: explorer_request_id,
                     mode,
                 }
-                {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
+                {rsx! { TypeIcon { path: header_path.to_string(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
@@ -3601,7 +3601,7 @@ fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
             img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
         };
     }
-    type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
+    rsx! { TypeIcon { path: entry.path.to_string(), is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" } }
 }
 
 fn render_preview(preview: &Preview) -> Element {
