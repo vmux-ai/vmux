@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
-use crate::note::{render_block, render_block_with_hidden_list_line};
+use crate::note::MdBlockView;
 use crate::page_model::{
     NoteCaretVisibilityQueue, NoteCaretVisibilityRequest, NoteCursorActivation, NoteInlineKind,
     NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started,
@@ -627,7 +627,9 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
     }
 }
 
-fn render_note_caret(width_class: &'static str) -> Element {
+/// The blinking caret overlaid on the rendered note.
+#[component]
+fn NoteCaret(width_class: String) -> Element {
     rsx! {
         span {
             id: NOTE_CARET_ID,
@@ -647,9 +649,9 @@ fn RenderedNoteBlock(
     rsx! {
         div { class: if invisible { "invisible" } else { "" },
             if let Some(line) = hidden_list_line {
-                {render_block_with_hidden_list_line(&block, index, line)}
+                MdBlockView { block: block.clone(), block_key: index, hidden_list_line: Some(line) }
             } else {
-                {render_block(&block, index)}
+                MdBlockView { block: block.clone(), block_key: index }
             }
         }
     }
@@ -881,15 +883,15 @@ fn NoteBlockView(
                             span {
                                 "data-note-line-text": "true",
                                 class: "inline",
-                                {render_note_inline_nodes(
-                                    &live_source,
-                                    &live_nodes,
-                                    live_caret,
-                                    &live_selections,
-                                    caret_width_class,
-                                )}
+                                NoteInlineNodes {
+                                    source: live_source.clone(),
+                                    nodes: live_nodes.clone(),
+                                    caret: live_caret,
+                                    selections: live_selections.clone(),
+                                    caret_width_class: caret_width_class.to_string(),
+                                }
                                 if live_caret == live_source.len() as u32 {
-                                    {render_note_caret(caret_width_class)}
+                                    NoteCaret { width_class: caret_width_class.to_string() }
                                 }
                             }
                         }
@@ -1006,19 +1008,24 @@ fn NoteBlockView(
     }
 }
 
-fn render_note_source_range(
-    source: &[char],
+/// A span of raw note source, split around the caret and any selection.
+#[component]
+fn NoteSourceRange(
+    source: Vec<char>,
     start: u32,
     end: u32,
     caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
+    selections: Vec<(u32, u32)>,
+    caret_width_class: String,
 ) -> Element {
+    let source = source.as_slice();
+    let selections = selections.as_slice();
+    let caret_width_class = caret_width_class.as_str();
     let chunks = note_source_chunks(source, start, end, caret, selections);
     rsx! {
         for (index, chunk) in chunks.iter().enumerate() {
             if chunk.caret_before {
-                {render_note_caret(caret_width_class)}
+                NoteCaret { width_class: caret_width_class.to_string() }
             }
             if !chunk.text.is_empty() {
                 span {
@@ -1031,45 +1038,75 @@ fn render_note_source_range(
     }
 }
 
-fn render_note_inline_nodes(
-    source: &[char],
-    nodes: &[NoteInlineNode],
+/// Inline note nodes, recursing so a wrapped node keeps its own source range visible.
+#[component]
+fn NoteInlineNodes(
+    source: Vec<char>,
+    nodes: Vec<NoteInlineNode>,
     caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
+    selections: Vec<(u32, u32)>,
+    caret_width_class: String,
 ) -> Element {
+    let nodes = nodes.as_slice();
     rsx! {
-        for (index, node) in nodes.iter().enumerate() {
-            match node {
-                NoteInlineNode::Text { start, end } => rsx! {
-                    span { key: "text-{index}",
-                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
-                    }
-                },
-                NoteInlineNode::Syntax {
-                    kind,
-                    start,
-                    prefix_end,
-                    suffix_start,
-                    end,
-                    children,
-                } => {
-                    let reveal = *start <= caret && caret <= *end;
-                    rsx! {
-                        span { key: "syntax-{index}", class: note_inline_class(*kind),
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
-                            }
-                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
+            for (index, node) in nodes.iter().enumerate() {
+                match node {
+                    NoteInlineNode::Text { start, end } => rsx! {
+                        span { key: "text-{index}",
+                            NoteSourceRange {
+        source: source.to_vec(),
+        start: *start,
+        end: *end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                        }
+                    },
+                    NoteInlineNode::Syntax {
+                        kind,
+                        start,
+                        prefix_end,
+                        suffix_start,
+                        end,
+                        children,
+                    } => {
+                        let reveal = *start <= caret && caret <= *end;
+                        rsx! {
+                            span { key: "syntax-{index}", class: note_inline_class(*kind),
+                                span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                    NoteSourceRange {
+        source: source.to_vec(),
+        start: *start,
+        end: *prefix_end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                }
+                                NoteInlineNodes {
+        source: source.to_vec(),
+        nodes: children.to_vec(),
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                    NoteSourceRange {
+        source: source.to_vec(),
+        start: *suffix_start,
+        end: *end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 }
 
 fn note_selection_ranges(
@@ -1572,7 +1609,11 @@ fn apply_dir(
     dir_entries.set(entries);
 }
 
-fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
+/// A directory entry's thumbnail, or its type icon when there is none.
+#[component]
+fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
+    let entry = &entry;
+    let thumb = thumb.as_ref();
     if let Some(url) = thumb {
         return rsx! {
             img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
@@ -1581,7 +1622,10 @@ fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
     rsx! { TypeIcon { path: entry.path.to_string(), is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" } }
 }
 
-fn render_preview(preview: &Preview) -> Element {
+/// The right-hand preview pane for the selected entry.
+#[component]
+fn PreviewPane(preview: Preview) -> Element {
+    let preview = &preview;
     match preview {
         Preview::None => rsx! {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
@@ -1627,7 +1671,7 @@ fn render_preview(preview: &Preview) -> Element {
             div { class: "h-full w-full overflow-auto",
                 for e in entries.iter() {
                     div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
-                        {entry_visual(e, None)}
+                        EntryVisual { entry: e.clone(), thumb: None }
                         span { class: "truncate text-xs", "{e.name}" }
                     }
                 }
@@ -3025,7 +3069,7 @@ pub fn Page() -> Element {
                                 div {
                                     key: "{e.path}",
                                     class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-foreground/[0.04]" },
-                                    {entry_visual(&e, None)}
+                                    EntryVisual { entry: e.clone(), thumb: None }
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
                             }
@@ -3054,7 +3098,7 @@ pub fn Page() -> Element {
                                                 }
                                                 open_path(p_open.clone());
                                             },
-                                            {entry_visual(&e, thumb.as_ref())}
+                                            EntryVisual { entry: e.clone(), thumb: thumb.clone() }
                                             span { class: "truncate text-xs", "{e.name}" }
                                         }
                                     }
@@ -3063,7 +3107,7 @@ pub fn Page() -> Element {
                         }
 
                         div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
-                            {render_preview(&preview())}
+                            PreviewPane { preview: preview() }
                         }
                     }
                 },

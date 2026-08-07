@@ -110,15 +110,17 @@ pub fn Page() -> Element {
                     }
                 }
                 for package in visible.iter() {
-                    {render_package(package, progress)}
+                    PackageRow { package: package.clone(), progress }
                 }
             }
         }
     }
 }
 
-fn render_package(
-    package: &LspPackage,
+/// One language package row.
+#[component]
+fn PackageRow(
+    package: LspPackage,
     progress: Signal<HashMap<String, LspInstallProgress>>,
 ) -> Element {
     let item = package.clone();
@@ -159,7 +161,7 @@ fn render_package(
             },
             actions: rsx! {
                 span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{status_label}" }
-                {render_action(action, &action_name, item.requires.as_deref())}
+                PackageAction { action, name: action_name.clone(), requires: item.requires.clone() }
             },
         }
     }
@@ -218,7 +220,11 @@ fn localized_status(status: LspPkgStatus) -> String {
     translate(id)
 }
 
-fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Element {
+/// The install or remove control for a language package.
+#[component]
+fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> Element {
+    let name = name.as_str();
+    let requires = requires.as_deref();
     let install_name = name.to_string();
     let update_name = name.to_string();
     let uninstall_name = name.to_string();

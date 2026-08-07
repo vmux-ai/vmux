@@ -1934,7 +1934,7 @@ fn KnowledgeEntryRow(
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                             }
                             span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
-                            {knowledge_git_indicator(entry.git_status)}
+                            KnowledgeGitIndicator { status: entry.git_status }
                         }
                     }
                     KnowledgeCreateMenu {
@@ -1992,7 +1992,7 @@ fn KnowledgeEntryRow(
                         onclick: move |_| open_knowledge_path(pane_id, path.clone()),
                         {rsx! { TypeIcon { path: entry.path.to_string(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" } }}
                         span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
-                        {knowledge_git_indicator(entry.git_status)}
+                        KnowledgeGitIndicator { status: entry.git_status }
                     }
                 }
                 KnowledgeCreateMenu {
@@ -2009,7 +2009,9 @@ fn KnowledgeEntryRow(
     }
 }
 
-fn knowledge_git_indicator(status: KnowledgeGitStatus) -> Element {
+/// The coloured dot marking a knowledge file's git state.
+#[component]
+fn KnowledgeGitIndicator(status: KnowledgeGitStatus) -> Element {
     let (class, title) = match status {
         KnowledgeGitStatus::Clean => return rsx! {},
         KnowledgeGitStatus::Added => ("bg-ansi-2", translate("git-status-untracked")),
