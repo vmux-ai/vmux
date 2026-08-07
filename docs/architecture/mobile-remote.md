@@ -73,8 +73,9 @@ and listens only on loopback. Resetting the token restarts the daemon and invali
 ## Reaching a Mac that is not on the network
 
 Loopback reaches the Mac from the iOS Simulator but not from a physical phone, so pairing a real
-device goes through a relay. The desktop long-polls it for commands and posts responses back;
-neither end listens, so a phone reaches a Mac behind NAT without either opening a port.
+device goes through a relay. The desktop holds a server-sent-events stream open to it for commands
+and posts responses back; neither end listens, so a phone reaches a Mac behind NAT without either
+opening a port.
 
 `VMUX_REMOTE_RELAY_URL` selects the relay and defaults to `https://relay.vmux.ai`. Point it at your
 own to develop against one, or set it **empty** to switch the relay off and pair over loopback,
