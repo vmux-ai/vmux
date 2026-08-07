@@ -9,6 +9,7 @@ pub mod open_target;
 pub mod process_id;
 pub mod prompt_media;
 pub mod protocol;
+pub mod room;
 pub mod service;
 pub mod space;
 pub mod team;

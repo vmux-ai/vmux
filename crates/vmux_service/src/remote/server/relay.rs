@@ -259,7 +259,7 @@ async fn list_sessions_response(state: RemoteState) -> DesktopResponse {
     sessions.extend(state.acp.lock().await.remote_sessions());
     for session in &mut sessions {
         if let Some(messages) = session_messages(&state, &session.sid).await {
-            session.title = vmux_remote::conversation_title(&messages, &session.name);
+            session.title = vmux_wire::room::conversation_title(&messages, &session.name);
         }
     }
     sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));

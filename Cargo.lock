@@ -11448,8 +11448,6 @@ version = "0.0.30"
 dependencies = [
  "serde",
  "serde_json",
- "unicode-segmentation",
- "vmux_wire",
 ]
 
 [[package]]
@@ -11673,6 +11671,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "unicode-segmentation",
  "url",
  "uuid",
 ]
