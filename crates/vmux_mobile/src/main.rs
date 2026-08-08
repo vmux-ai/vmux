@@ -12,7 +12,6 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
-use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -30,6 +29,7 @@ use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
 };
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
+use vmux_wire::protocol::{SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
     PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
@@ -38,7 +38,6 @@ use vmux_wire::room::{
 };
 
 const STORAGE_KEY: &str = "vmux.remote.credentials";
-const MAX_SSE_BUFFER: usize = 2 * 1024 * 1024;
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
@@ -52,20 +51,37 @@ fn next_client_op_id() -> ClientOpId {
     ClientOpId::new(format!("mobile:{timestamp}:{sequence}"))
 }
 
+/// Set when the app comes back to the foreground.
+///
+/// iOS tears down the UDP socket while suspended without closing the QUIC connection, so a
+/// connection that still looks alive after a resume usually is not. Reconnecting on the next call
+/// is cheaper than discovering it through a stalled request.
+static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn main() {
     let config = dioxus::mobile::Config::new().with_custom_event_handler(|event, _| {
-        if let dioxus::mobile::tao::event::Event::Opened { urls } = event {
-            let mut opened = OPENED_URLS
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            opened.extend(
-                urls.iter()
-                    .filter(|url| url.scheme() == "vmuxremote")
-                    .map(ToString::to_string),
-            );
+        use dioxus::mobile::tao::event::Event;
+        match event {
+            Event::Opened { urls } => {
+                let mut opened = OPENED_URLS
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                opened.extend(
+                    urls.iter()
+                        .filter(|url| url.scheme() == "vmuxremote")
+                        .map(ToString::to_string),
+                );
+            }
+            Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
+            _ => {}
         }
     });
     dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
+}
+
+/// Whether the app has resumed since this was last asked.
+fn take_resumed() -> bool {
+    RESUMED.swap(false, std::sync::atomic::Ordering::AcqRel)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -96,6 +112,9 @@ struct Credentials {
 struct Api {
     client: Client,
     credentials: Credentials,
+    /// Present when the pairing carried a certificate fingerprint. Absent means the desktop had
+    /// no QUIC listener when it was paired, and this stays on HTTP.
+    quic: Option<crate::quic_api::QuicApi>,
 }
 
 enum ApiError {
@@ -119,9 +138,18 @@ impl std::fmt::Display for ApiError {
 impl Api {
     fn new(credentials: Credentials) -> Self {
         let client = api_client(&credentials.base_url);
+        let quic = quic_endpoint(&credentials).map(crate::quic_api::QuicApi::new);
         Self {
             client,
             credentials,
+            quic,
+        }
+    }
+
+    /// Drop any live QUIC connection so the next call redials.
+    async fn reset_transport(&self) {
+        if let Some(quic) = &self.quic {
+            quic.reset().await;
         }
     }
 
@@ -160,15 +188,114 @@ impl Api {
     }
 
     async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
+        if let Some(quic) = &self.quic {
+            return broker_list(quic, SharedAgentCommand::ListAgents).await;
+        }
         self.get_json("/api/agents").await
     }
 
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
+        if let Some(quic) = &self.quic {
+            return match quic.request(SharedMessage::ListSessions).await {
+                Ok(SharedResponse::Sessions(sessions)) => Ok(sessions),
+                Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+                Err(error) => Err(error.into()),
+            };
+        }
         self.get_json("/api/sessions").await
     }
 
     async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
+        if let Some(quic) = &self.quic {
+            return broker_list(quic, SharedAgentCommand::ListTeam).await;
+        }
         self.get_json("/api/team").await
+    }
+
+    /// Subscribe to a session's events.
+    ///
+    /// QUIC only. The SSE equivalent is gone from the caller, so a pairing with no fingerprint
+    /// can still list and send but will not stream — which is the state a desktop too old to
+    /// offer QUIC leaves it in, and is preferable to pretending otherwise.
+    async fn subscribe(&self, sid: &str) -> Result<crate::quic_api::Subscription, ApiError> {
+        let Some(quic) = &self.quic else {
+            return Err(ApiError::NotFound);
+        };
+        quic.subscribe(sid).await.map_err(Into::into)
+    }
+
+    /// Submit a prompt to a running session.
+    async fn send_prompt(&self, sid: &str, request: &PromptRequest) -> Result<(), ApiError> {
+        if let Some(quic) = &self.quic {
+            let message = SharedMessage::agent_input(
+                sid.to_string(),
+                request.text.clone(),
+                None,
+                request.attachments.clone(),
+            );
+            return self.applied(quic.request(message).await);
+        }
+        self.post_json(&format!("/api/sessions/{sid}/messages"), request)
+            .await
+    }
+
+    /// Open a new chat on the desktop.
+    async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
+        if let Some(quic) = &self.quic {
+            let command = SharedAgentCommand::NewAgentChat {
+                client_op_id: request.client_op_id.clone(),
+                prompt: request.text.clone(),
+                agent_url: request.agent_url.clone(),
+            };
+            return self.applied(quic.request(SharedMessage::AgentCommand(command)).await);
+        }
+        self.post_json("/api/chats", request).await
+    }
+
+    /// Interrupt the session's in-flight turn.
+    async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
+        if let Some(quic) = &self.quic {
+            let message = SharedMessage::AgentCancel {
+                sid: sid.to_string(),
+            };
+            return self.applied(quic.request(message).await);
+        }
+        self.post_json(
+            &format!("/api/sessions/{sid}/cancel"),
+            &serde_json::json!({}),
+        )
+        .await
+    }
+
+    /// Answer a pending tool approval.
+    async fn approve(&self, sid: &str, request: &ApprovalRequest) -> Result<(), ApiError> {
+        if let Some(quic) = &self.quic {
+            let message = SharedMessage::AgentApprove {
+                sid: sid.to_string(),
+                call_id: request.call_id.clone(),
+                decision: if request.allow {
+                    vmux_wire::protocol::ApprovalDecision::Allow
+                } else {
+                    vmux_wire::protocol::ApprovalDecision::Deny
+                },
+            };
+            return self.applied(quic.request(message).await);
+        }
+        self.post_json(&format!("/api/sessions/{sid}/approval"), request)
+            .await
+    }
+
+    /// A replay is success, not failure: the desktop recognised the op and declined to run it
+    /// twice, which is exactly what the idempotency key is for.
+    fn applied(
+        &self,
+        outcome: Result<SharedResponse, crate::quic_api::QuicError>,
+    ) -> Result<(), ApiError> {
+        match outcome {
+            Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Ok(()),
+            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn post_json<T: Serialize + ?Sized>(&self, path: &str, body: &T) -> Result<(), ApiError> {
@@ -190,27 +317,18 @@ impl Api {
         }
     }
 
-    async fn events(&self, sid: &str) -> Result<reqwest::Response, ApiError> {
-        let response = self
-            .request(Method::GET, &format!("/api/sessions/{sid}/events"))
-            .send()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            Err(ApiError::Unauthorized)
-        } else if response.status() == StatusCode::NOT_FOUND {
-            Err(ApiError::NotFound)
-        } else if response.status().is_success() {
-            Ok(response)
-        } else {
-            Err(ApiError::Message(format!(
-                "Mac returned HTTP {}.",
-                response.status()
-            )))
-        }
-    }
-
     async fn media(&self, sid: &str, query: &str) -> Result<Vec<RemoteMediaEntry>, ApiError> {
+        if let Some(quic) = &self.quic {
+            let request = SharedMessage::ListMedia {
+                sid: sid.to_string(),
+                query: query.to_string(),
+            };
+            return match quic.request(request).await {
+                Ok(SharedResponse::Media(entries)) => Ok(entries),
+                Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+                Err(error) => Err(error.into()),
+            };
+        }
         let mut endpoint = Url::parse(&self.endpoint(&format!("/api/sessions/{sid}/media")))
             .map_err(|error| ApiError::Message(error.to_string()))?;
         endpoint.query_pairs_mut().append_pair("query", query);
@@ -234,6 +352,105 @@ impl Api {
             .json()
             .await
             .map_err(|error| ApiError::Message(error.to_string()))
+    }
+}
+
+/// Build the QUIC endpoint from a pairing, when it carried a fingerprint.
+///
+/// The device id is derived from the pairing address rather than stored separately: for a relay
+/// pairing it is already the last path segment, and for a direct one the relay never sees it.
+/// Project a shared event onto the shape the pages already render.
+///
+/// The desktop used to do this before serialising to SSE. Doing it here instead keeps the wire
+/// typed while the pages stay as they are; both this function and `RemoteEvent` go away with the
+/// HTTP path.
+fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<RemoteEvent> {
+    use vmux_wire::protocol::SharedEvent as Shared;
+    match event {
+        Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
+            room_id: vmux_wire::room::room_id_for_session(&sid),
+            text,
+        }),
+        Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
+            status: RemoteStatus::from(&status),
+        }),
+        Shared::AgentAwaitingApproval {
+            call_id,
+            name,
+            args_json,
+            ..
+        } => Some(RemoteEvent::Approval {
+            approval: Some(RemoteApproval {
+                call_id,
+                name,
+                args_json,
+            }),
+        }),
+        Shared::AgentApprovalResolved { .. } => Some(RemoteEvent::Approval { approval: None }),
+        Shared::AgentMessagesSnapshot { sid, messages_json } => {
+            let messages: Vec<vmux_wire::room::Message> =
+                serde_json::from_str(&messages_json).ok()?;
+            let room_id = vmux_wire::room::room_id_for_session(&sid);
+            let events = vmux_wire::room::room_events_from_messages(&sid, 0, &messages);
+            Some(RemoteEvent::Snapshot {
+                room_id,
+                through_seq: events.len() as u64,
+                events,
+            })
+        }
+        // Identity and workspace changes have no rendered equivalent yet; dropped rather than
+        // guessed at.
+        Shared::AcpAgentInfo { .. }
+        | Shared::AcpWorkspaceChanged { .. }
+        | Shared::AcpModelInfo { .. } => None,
+    }
+}
+
+fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint> {
+    if credentials.fingerprint.is_empty() {
+        return None;
+    }
+    let parsed = Url::parse(&credentials.base_url).ok()?;
+    let host = parsed.host_str()?;
+    let port = parsed.port().unwrap_or(443);
+    let device_id = parsed
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .filter(|segment| !segment.is_empty())
+        .unwrap_or("direct")
+        .to_string();
+    Some(crate::quic_api::Endpoint {
+        address: format!("{host}:{port}"),
+        token: credentials.token.clone(),
+        fingerprint: credentials.fingerprint.clone(),
+        device_id: vmux_remote::DeviceId::new(device_id),
+    })
+}
+
+/// A GUI-held list comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
+/// than re-typed on the wire — the shape belongs to the page that renders it.
+async fn broker_list<T: serde::de::DeserializeOwned>(
+    quic: &crate::quic_api::QuicApi,
+    command: SharedAgentCommand,
+) -> Result<T, ApiError> {
+    match quic.request(SharedMessage::AgentCommand(command)).await {
+        Ok(SharedResponse::BrokerJson(json)) => {
+            serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
+        }
+        Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+        Err(error) => Err(error.into()),
+    }
+}
+
+impl From<crate::quic_api::QuicError> for ApiError {
+    fn from(error: crate::quic_api::QuicError) -> Self {
+        use crate::quic_api::QuicError;
+        use vmux_wire::protocol::SharedFailure;
+        match error {
+            QuicError::Unauthorized => Self::Unauthorized,
+            QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,
+            other => Self::Message(other.to_string()),
+        }
     }
 }
 
@@ -292,8 +509,8 @@ fn submit_remote_prompt(
     status.set(RemoteStatus::Streaming);
     spawn(async move {
         if let Err(ApiError::Message(message)) = client
-            .post_json(
-                &format!("/api/sessions/{sid}/messages"),
+            .send_prompt(
+                &sid,
                 &PromptRequest {
                     client_op_id: next_client_op_id(),
                     text,
@@ -370,14 +587,11 @@ fn start_new_chat(
     error.set(String::new());
     spawn(async move {
         match client
-            .post_json(
-                "/api/chats",
-                &NewChatRequest {
-                    client_op_id: next_client_op_id(),
-                    text,
-                    agent_url,
-                },
-            )
+            .create_chat(&NewChatRequest {
+                client_op_id: next_client_op_id(),
+                text,
+                agent_url,
+            })
             .await
         {
             Ok(()) => {
@@ -916,10 +1130,9 @@ fn App() -> Element {
                                         let call_id = call_id.clone();
                                         let sid = sid.clone();
                                         spawn(async move {
-                                            let _ = client.post_json(
-                                                &format!("/api/sessions/{sid}/approval"),
-                                                &ApprovalRequest { call_id, allow: true },
-                                            ).await;
+                                            let _ = client
+                                                .approve(&sid, &ApprovalRequest { call_id, allow: true })
+                                                .await;
                                         });
                                     }
                                 },
@@ -936,10 +1149,9 @@ fn App() -> Element {
                                         let call_id = call_id.clone();
                                         let sid = sid.clone();
                                         spawn(async move {
-                                            let _ = client.post_json(
-                                                &format!("/api/sessions/{sid}/approval"),
-                                                &ApprovalRequest { call_id, allow: false },
-                                            ).await;
+                                            let _ = client
+                                                .approve(&sid, &ApprovalRequest { call_id, allow: false })
+                                                .await;
                                         });
                                     }
                                 },
@@ -1071,7 +1283,7 @@ fn App() -> Element {
                                     let Some(client) = api() else { return };
                                     let sid = stop_sid.clone();
                                     spawn(async move {
-                                        let _ = client.post_json(&format!("/api/sessions/{sid}/cancel"), &serde_json::json!({})).await;
+                                        let _ = client.cancel(&sid).await;
                                     });
                                 } else {
                                     submit_remote_prompt(
@@ -1487,40 +1699,33 @@ fn open_session(
             if generation() != next_generation {
                 return;
             }
-            let response = match api.events(&sid).await {
-                Ok(response) => response,
-                // Pairing is gone, or the stream route is — reconnecting brings back neither.
-                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
-                Err(ApiError::Message(_)) => {
-                    connected.set(false);
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                    continue;
-                }
-            };
-            connected.set(true);
-            let mut chunks = response.bytes_stream();
-            let mut buffer = Vec::new();
-            while let Some(chunk) = chunks.next().await {
-                if generation() != next_generation {
-                    return;
-                }
-                let Ok(chunk) = chunk else {
-                    break;
-                };
-                buffer.extend_from_slice(&chunk);
-                if buffer.len() > MAX_SSE_BUFFER {
-                    break;
-                }
-                while let Some(frame) = take_sse_frame(&mut buffer) {
-                    let Some(event) = parse_sse_event(&frame) else {
-                        continue;
-                    };
-                    let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
-                    apply_remote_event(event, current, room, live_delta, status, approval);
-                    if refresh_now {
-                        tokio::task::yield_now().await;
+            // A connection that survived a suspend is a connection whose socket the OS already
+            // closed. Drop it before dialling rather than waiting for a request to stall.
+            if take_resumed() {
+                api.reset_transport().await;
+            }
+            match api.subscribe(&sid).await {
+                Ok(mut subscription) => {
+                    connected.set(true);
+                    while let Some(event) = subscription.next().await {
+                        if generation() != next_generation {
+                            return;
+                        }
+                        // Projected to the shape the page already renders. The projection goes
+                        // away with the HTTP path, not before.
+                        let Some(event) = remote_event_from_shared(event) else {
+                            continue;
+                        };
+                        let refresh_now = matches!(&event, RemoteEvent::Approval { .. });
+                        apply_remote_event(event, current, room, live_delta, status, approval);
+                        if refresh_now {
+                            tokio::task::yield_now().await;
+                        }
                     }
                 }
+                // Pairing is gone, or the stream route is — reconnecting brings back neither.
+                Err(ApiError::Unauthorized | ApiError::NotFound) => return,
+                Err(ApiError::Message(_)) => {}
             }
             connected.set(false);
             tokio::time::sleep(Duration::from_secs(2)).await;
@@ -1593,40 +1798,6 @@ fn apply_remote_event(
             status.set(next);
         }
         RemoteEvent::Approval { approval: next } => approval.set(next),
-    }
-}
-
-fn take_sse_frame(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
-    let crlf = buffer
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| (index, 4));
-    let lf = buffer
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|index| (index, 2));
-    let delimiter = match (crlf, lf) {
-        (Some(crlf), Some(lf)) => Some(if crlf.0 < lf.0 { crlf } else { lf }),
-        (Some(delimiter), None) | (None, Some(delimiter)) => Some(delimiter),
-        (None, None) => None,
-    }?;
-    let frame = buffer[..delimiter.0].to_vec();
-    buffer.drain(..delimiter.0 + delimiter.1);
-    Some(frame)
-}
-
-fn parse_sse_event(frame: &[u8]) -> Option<RemoteEvent> {
-    let text = std::str::from_utf8(frame).ok()?;
-    let data = text
-        .lines()
-        .filter_map(|line| line.trim_end_matches('\r').strip_prefix("data:"))
-        .map(str::trim_start)
-        .collect::<Vec<_>>()
-        .join("\n");
-    if data.is_empty() {
-        None
-    } else {
-        serde_json::from_str(&data).ok()
     }
 }
 
@@ -1898,22 +2069,6 @@ mod tests {
                 fingerprint: String::new(),
             }
         );
-    }
-
-    #[test]
-    fn parses_sse_frames() {
-        let mut buffer =
-            b"data: {\"type\":\"delta\",\"room_id\":\"session:s\",\"text\":\"hi\"}\r\n\r\n"
-                .to_vec();
-        let frame = take_sse_frame(&mut buffer).unwrap();
-        assert_eq!(
-            parse_sse_event(&frame),
-            Some(RemoteEvent::Delta {
-                room_id: vmux_wire::room::room_id_for_session("s"),
-                text: "hi".to_string()
-            })
-        );
-        assert!(buffer.is_empty());
     }
 
     fn sample_events() -> Vec<RoomEvent> {

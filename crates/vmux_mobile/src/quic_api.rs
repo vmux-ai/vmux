@@ -20,7 +20,7 @@ use vmux_remote::quic::{
     Capability, ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello,
     encode_hello,
 };
-use vmux_wire::protocol::{SharedFailure, SharedMessage, SharedResponse};
+use vmux_wire::protocol::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 /// Matches the daemon's cap on a control response.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -150,6 +150,35 @@ impl QuicApi {
         Ok(connection)
     }
 
+    /// Subscribe to a session's events.
+    ///
+    /// The client opens this stream and writes once; everything after flows back. That direction
+    /// is not cosmetic — the relay only routes streams the client opens, so a desktop-initiated
+    /// stream would work on a direct connection and disappear through the relay.
+    pub async fn subscribe(&self, sid: &str) -> Result<Subscription, QuicError> {
+        let connection = self.connected().await?;
+        let (mut send, recv) = connection
+            .open_bi()
+            .await
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+
+        let request = SharedMessage::AttachPageAgent {
+            sid: sid.to_string(),
+        };
+        let mut frame = vec![StreamKind::SessionEvents.as_byte()];
+        frame.extend_from_slice(
+            &rkyv::to_bytes::<rkyv::rancor::Error>(&request)
+                .map_err(|error| QuicError::Transport(error.to_string()))?,
+        );
+        send.write_all(&frame)
+            .await
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        send.finish()
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+
+        Ok(Subscription { recv })
+    }
+
     /// One request, one response, on its own stream.
     pub async fn request(&self, message: SharedMessage) -> Result<SharedResponse, QuicError> {
         let connection = self.connected().await?;
@@ -181,6 +210,29 @@ impl QuicApi {
             SharedResponse::Failed(failure) => Err(QuicError::Refused(failure)),
             other => Ok(other),
         }
+    }
+}
+
+/// A live session subscription. Yields events until the desktop closes the stream.
+pub struct Subscription {
+    recv: quinn::RecvStream,
+}
+
+impl Subscription {
+    /// The next event, or `None` once the desktop is done sending.
+    ///
+    /// Events are length-prefixed because many share one stream; a control response is not,
+    /// because it is the only thing on its own.
+    pub async fn next(&mut self) -> Option<SharedEvent> {
+        let mut length = [0u8; 4];
+        self.recv.read_exact(&mut length).await.ok()?;
+        let length = u32::from_le_bytes(length) as usize;
+        if length > MAX_RESPONSE_BYTES {
+            return None;
+        }
+        let mut body = vec![0u8; length];
+        self.recv.read_exact(&mut body).await.ok()?;
+        rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(&body).ok()
     }
 }
 
