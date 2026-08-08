@@ -18,9 +18,27 @@ use vmux_macro::string_id;
 #[string_id]
 pub struct RoomId(pub String);
 
+impl RoomId {
+    pub fn for_session(sid: &str) -> Self {
+        Self::new(format!("session:{sid}"))
+    }
+}
+
 /// Identifies one participant in a room — the user, or an agent.
 #[string_id]
 pub struct MemberId(pub String);
+
+impl MemberId {
+    /// The human on this desktop.
+    pub fn local(room_id: &RoomId) -> Self {
+        Self::new(format!("{}:member:local", room_id.as_str()))
+    }
+
+    /// The agent answering in this room.
+    pub fn agent(room_id: &RoomId) -> Self {
+        Self::new(format!("{}:member:agent", room_id.as_str()))
+    }
+}
 
 /// Identifies one event in a room's append-only log.
 #[string_id]
@@ -133,35 +151,23 @@ pub struct RoomEvent {
     pub message: Message,
 }
 
-pub fn room_id_for_session(sid: &str) -> RoomId {
-    RoomId::new(format!("session:{sid}"))
-}
-
-pub fn local_member_id(room_id: &RoomId) -> MemberId {
-    MemberId::new(format!("{}:member:local", room_id.as_str()))
-}
-
-pub fn agent_member_id(room_id: &RoomId) -> MemberId {
-    MemberId::new(format!("{}:member:agent", room_id.as_str()))
-}
-
-pub fn room_events_from_messages(
-    sid: &str,
-    created_at_ms: u64,
-    messages: &[Message],
-) -> Vec<RoomEvent> {
-    let room_id = room_id_for_session(sid);
-    let local_member = local_member_id(&room_id);
-    let agent_member = agent_member_id(&room_id);
-    let mut reply_to = None;
-    messages
-        .iter()
-        .enumerate()
-        .map(|(index, message)| {
+impl RoomEvent {
+    /// Project a transcript into the append-only log a client replays.
+    ///
+    /// Sequence numbers and event ids come from the position in `messages`, so the same transcript
+    /// always projects to the same log — a client that reconnects sees the ids it already has.
+    /// Each assistant event points back at the user message it answers.
+    pub fn from_messages(sid: &str, created_at_ms: u64, messages: &[Message]) -> Vec<Self> {
+        let room_id = RoomId::for_session(sid);
+        let local_member = MemberId::local(&room_id);
+        let agent_member = MemberId::agent(&room_id);
+        let mut events = Vec::with_capacity(messages.len());
+        let mut reply_to = None;
+        for (index, message) in messages.iter().enumerate() {
             let server_seq = index as u64 + 1;
             let event_id = EventId::new(format!("{}:event:{server_seq}", room_id.as_str()));
             let is_user = matches!(message, Message::User { .. });
-            let event = RoomEvent {
+            events.push(RoomEvent {
                 event_id: event_id.clone(),
                 room_id: room_id.clone(),
                 actor_id: if is_user {
@@ -174,13 +180,13 @@ pub fn room_events_from_messages(
                 created_at_ms: created_at_ms.saturating_add(index as u64),
                 reply_to: if is_user { None } else { reply_to.clone() },
                 message: message.clone(),
-            };
+            });
             if is_user {
                 reply_to = Some(event_id);
             }
-            event
-        })
-        .collect()
+        }
+        events
+    }
 }
 
 impl Message {
@@ -200,6 +206,88 @@ impl Message {
             attachments,
         }
     }
+
+    /// Name a conversation after its first user prompt, or `fallback` when it has none.
+    pub fn conversation_title(messages: &[Self], fallback: &str) -> String {
+        for message in messages {
+            let Self::User { text, .. } = message else {
+                continue;
+            };
+            let title = normalize_conversation_title(text);
+            if !title.is_empty() {
+                return title;
+            }
+        }
+        normalize_conversation_title(fallback)
+    }
+}
+
+/// Trim a prompt to a title: collapse whitespace, drop anything invisible, cap the length.
+///
+/// The character filter is a spoofing defence, not tidiness. Titles are rendered next to names the
+/// user trusts, and a bidi override smuggled into a prompt would let a title reorder what it sits
+/// beside.
+fn normalize_conversation_title(value: &str) -> String {
+    let mut title = String::new();
+    let mut graphemes_written = 0;
+    let mut pending_space = false;
+    let mut truncated = false;
+
+    for grapheme in value.graphemes(true) {
+        if grapheme.chars().all(char::is_whitespace) {
+            pending_space = !title.is_empty();
+            continue;
+        }
+        let grapheme = grapheme
+            .chars()
+            .filter(|character| !is_disallowed_title_char(*character))
+            .collect::<String>();
+        if grapheme.is_empty() {
+            continue;
+        }
+        if pending_space {
+            if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
+                truncated = true;
+                break;
+            }
+            title.push(' ');
+            graphemes_written += 1;
+            pending_space = false;
+        }
+        if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
+            truncated = true;
+            break;
+        }
+        title.push_str(&grapheme);
+        graphemes_written += 1;
+    }
+
+    if truncated {
+        if let Some((start, _)) = title.grapheme_indices(true).next_back() {
+            title.truncate(start);
+        }
+        title.push('…');
+    }
+    title
+}
+
+fn is_disallowed_title_char(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{180E}'
+                | '\u{200B}'
+                | '\u{200E}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{206F}'
+                | '\u{FEFF}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+        )
 }
 
 #[derive(
@@ -346,6 +434,33 @@ pub struct RemoteMediaEntry {
     pub preview_data_url: String,
 }
 
+impl RemoteMediaEntry {
+    /// How this entry is written into a prompt after an `@`.
+    ///
+    /// Percent-encoded, because a space would otherwise end the token the composer is matching.
+    pub fn reference(&self) -> String {
+        let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+        if self.parent == "~" {
+            format!("~/{name}", name = encode(&self.name))
+        } else {
+            format!(
+                "{parent}/{name}",
+                parent = encode(&self.parent),
+                name = encode(&self.name)
+            )
+        }
+    }
+
+    /// How this entry is shown to a reader — the same path, unencoded.
+    pub fn display_path(&self) -> String {
+        if self.parent == "~" {
+            format!("~/{}", self.name)
+        } else {
+            format!("{}/{}", self.parent.trim_end_matches('/'), self.name)
+        }
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -368,90 +483,6 @@ pub struct RemoteSession {
     pub status: RemoteStatus,
     pub approval: Option<RemoteApproval>,
     pub created_at_ms: u64,
-}
-
-pub fn conversation_title(messages: &[Message], fallback: &str) -> String {
-    conversation_title_from_prompts(
-        messages.iter().filter_map(|message| match message {
-            Message::User { text, .. } => Some(text.as_str()),
-            Message::Assistant { .. } | Message::ToolResult { .. } => None,
-        }),
-        fallback,
-    )
-}
-
-pub fn conversation_title_from_prompts<'a>(
-    prompts: impl IntoIterator<Item = &'a str>,
-    fallback: &str,
-) -> String {
-    prompts
-        .into_iter()
-        .map(normalize_conversation_title)
-        .find(|title| !title.is_empty())
-        .unwrap_or_else(|| normalize_conversation_title(fallback))
-}
-
-fn normalize_conversation_title(value: &str) -> String {
-    let mut title = String::new();
-    let mut graphemes_written = 0;
-    let mut pending_space = false;
-    let mut truncated = false;
-
-    for grapheme in value.graphemes(true) {
-        if grapheme.chars().all(char::is_whitespace) {
-            pending_space = !title.is_empty();
-            continue;
-        }
-        let grapheme = grapheme
-            .chars()
-            .filter(|character| !is_disallowed_title_char(*character))
-            .collect::<String>();
-        if grapheme.is_empty() {
-            continue;
-        }
-        if pending_space {
-            if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
-                truncated = true;
-                break;
-            }
-            title.push(' ');
-            graphemes_written += 1;
-            pending_space = false;
-        }
-        if graphemes_written >= CONVERSATION_TITLE_MAX_GRAPHEMES {
-            truncated = true;
-            break;
-        }
-        title.push_str(&grapheme);
-        graphemes_written += 1;
-    }
-
-    if truncated {
-        if let Some((start, _)) = title.grapheme_indices(true).next_back() {
-            title.truncate(start);
-        }
-        title.push('…');
-    }
-    title
-}
-
-fn is_disallowed_title_char(character: char) -> bool {
-    character.is_control()
-        || matches!(
-            character,
-            '\u{00AD}'
-                | '\u{034F}'
-                | '\u{061C}'
-                | '\u{180E}'
-                | '\u{200B}'
-                | '\u{200E}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{2064}'
-                | '\u{2066}'..='\u{206F}'
-                | '\u{FEFF}'
-                | '\u{FFF9}'..='\u{FFFB}'
-                | '\u{1BCA0}'..='\u{1BCA3}'
-        )
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -517,27 +548,6 @@ pub struct RemoteAgent {
 pub struct ApprovalRequest {
     pub call_id: String,
     pub allow: bool,
-}
-
-pub fn media_reference(entry: &RemoteMediaEntry) -> String {
-    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
-    if entry.parent == "~" {
-        format!("~/{name}", name = encode(&entry.name))
-    } else {
-        format!(
-            "{parent}/{name}",
-            parent = encode(&entry.parent),
-            name = encode(&entry.name)
-        )
-    }
-}
-
-pub fn media_display_path(entry: &RemoteMediaEntry) -> String {
-    if entry.parent == "~" {
-        format!("~/{}", entry.name)
-    } else {
-        format!("{}/{}", entry.parent.trim_end_matches('/'), entry.name)
-    }
 }
 
 #[cfg(test)]
@@ -614,7 +624,7 @@ mod tests {
 
     #[test]
     fn message_projection_has_stable_order_and_reply_links() {
-        let events = room_events_from_messages(
+        let events = RoomEvent::from_messages(
             "session-1",
             100,
             &[
@@ -655,16 +665,16 @@ mod tests {
             Message::user("later"),
         ];
         assert_eq!(
-            conversation_title(&messages, "Codex"),
+            Message::conversation_title(&messages, "Codex"),
             "Show me something fun. in terminal"
         );
     }
 
     #[test]
     fn conversation_title_falls_back_and_sanitizes() {
-        assert_eq!(conversation_title(&[], "Codex"), "Codex");
+        assert_eq!(Message::conversation_title(&[], "Codex"), "Codex");
         assert_eq!(
-            conversation_title(&[Message::user("Fix \u{202e}\x1b title")], "Codex"),
+            Message::conversation_title(&[Message::user("Fix \u{202e}\x1b title")], "Codex"),
             "Fix title"
         );
     }

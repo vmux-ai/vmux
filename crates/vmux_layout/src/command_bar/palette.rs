@@ -29,8 +29,8 @@ use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query, media_display_path,
-    media_reference, merge_chat_attachments, replace_inline_media_query,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query,
+    merge_chat_attachments, replace_inline_media_query,
 };
 use vmux_start::row::ResultRow;
 use vmux_ui::agent_accent::agent_accent;
@@ -386,7 +386,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .map(|entry| PromptMediaOption {
             key: format!("media-{}", entry.path),
             name: entry.name.clone(),
-            display_path: media_display_path(entry),
+            display_path: entry.display_path(),
             preview_data_url: entry.preview_data_url.clone(),
             label: file_extension_label(&entry.name),
             is_dir: entry.is_dir,
@@ -1389,7 +1389,7 @@ fn select_start_media_entry(
     let Some(media_query) = inline_media_query(&value) else {
         return;
     };
-    let reference = media_reference(entry);
+    let reference = entry.reference();
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {

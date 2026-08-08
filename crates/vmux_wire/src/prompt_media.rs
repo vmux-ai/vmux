@@ -76,6 +76,33 @@ pub struct ChatMediaEntry {
     pub preview_data_url: String,
 }
 
+impl ChatMediaEntry {
+    /// How this entry is written into a prompt after an `@`.
+    ///
+    /// Percent-encoded, because a space would otherwise end the token the composer is matching.
+    pub fn reference(&self) -> String {
+        let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
+        if self.parent == "~" {
+            format!("~/{name}", name = encode(&self.name))
+        } else {
+            format!(
+                "{parent}/{name}",
+                parent = encode(&self.parent),
+                name = encode(&self.name)
+            )
+        }
+    }
+
+    /// How this entry is shown to a reader — the same path, unencoded.
+    pub fn display_path(&self) -> String {
+        if self.parent == "~" {
+            format!("~/{}", self.name)
+        } else {
+            format!("{}/{}", self.parent.trim_end_matches('/'), self.name)
+        }
+    }
+}
+
 #[derive(
     Clone,
     Debug,
@@ -189,27 +216,6 @@ pub fn replace_inline_media_query(
     value
 }
 
-pub fn media_reference(entry: &ChatMediaEntry) -> String {
-    let encode = |value: &str| value.replace('%', "%25").replace(' ', "%20");
-    if entry.parent == "~" {
-        format!("~/{name}", name = encode(&entry.name))
-    } else {
-        format!(
-            "{parent}/{name}",
-            parent = encode(&entry.parent),
-            name = encode(&entry.name)
-        )
-    }
-}
-
-pub fn media_display_path(entry: &ChatMediaEntry) -> String {
-    if entry.parent == "~" {
-        format!("~/{}", entry.name)
-    } else {
-        format!("{}/{}", entry.parent.trim_end_matches('/'), entry.name)
-    }
-}
-
 pub fn merge_chat_attachments(
     current: &[ChatAttachment],
     incoming: &[ChatAttachment],
@@ -274,14 +280,14 @@ mod tests {
             parent: "~/Library".into(),
             ..Default::default()
         };
-        assert_eq!(media_display_path(&entry), "~/Library/Accessibility");
+        assert_eq!(entry.display_path(), "~/Library/Accessibility");
 
         let root_entry = ChatMediaEntry {
             name: "Pictures".into(),
             parent: "~".into(),
             ..Default::default()
         };
-        assert_eq!(media_display_path(&root_entry), "~/Pictures");
+        assert_eq!(root_entry.display_path(), "~/Pictures");
     }
 
     #[test]

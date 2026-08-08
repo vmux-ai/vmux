@@ -34,8 +34,7 @@ use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, Shared
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
     PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
-    RemoteStatus, RoomEvent, RoomId, inline_media_query, media_display_path, media_reference,
-    replace_inline_media_query,
+    RemoteStatus, RoomEvent, RoomId, inline_media_query, replace_inline_media_query,
 };
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
@@ -260,7 +259,7 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
     use vmux_wire::protocol::SharedEvent as Shared;
     match event {
         Shared::AgentDelta { sid, text } => Some(RemoteEvent::Delta {
-            room_id: vmux_wire::room::room_id_for_session(&sid),
+            room_id: vmux_wire::room::RoomId::for_session(&sid),
             text,
         }),
         Shared::AgentRunStatusChanged { status, .. } => Some(RemoteEvent::Status {
@@ -282,8 +281,8 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
         Shared::AgentMessagesSnapshot { sid, messages_json } => {
             let messages: Vec<vmux_wire::room::Message> =
                 serde_json::from_str(&messages_json).ok()?;
-            let room_id = vmux_wire::room::room_id_for_session(&sid);
-            let events = vmux_wire::room::room_events_from_messages(&sid, 0, &messages);
+            let room_id = vmux_wire::room::RoomId::for_session(&sid);
+            let events = vmux_wire::room::RoomEvent::from_messages(&sid, 0, &messages);
             Some(RemoteEvent::Snapshot {
                 room_id,
                 through_seq: events.len() as u64,
@@ -410,7 +409,7 @@ fn select_remote_media_entry(
         return;
     };
     let replacement = if entry.is_dir {
-        format!("@{}/", media_reference(entry))
+        format!("@{}/", entry.reference())
     } else {
         let mut next = attachments.peek().clone();
         if !next.iter().any(|attached| attached.path == entry.path) {
@@ -943,7 +942,7 @@ fn App() -> Element {
         .map(|entry| PromptMediaOption {
             key: format!("remote-media-{}", entry.path),
             name: entry.name.clone(),
-            display_path: media_display_path(entry),
+            display_path: entry.display_path(),
             preview_data_url: entry.preview_data_url.clone(),
             label: file_extension_label(&entry.name),
             is_dir: entry.is_dir,
@@ -1982,7 +1981,7 @@ mod tests {
     }
 
     fn sample_events() -> Vec<RoomEvent> {
-        vmux_wire::room::room_events_from_messages(
+        vmux_wire::room::RoomEvent::from_messages(
             "s",
             0,
             &[

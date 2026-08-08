@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use bevy::prelude::*;
 use vmux_wire::room::{
-    ClientOpId, EventId, MemberId, MemberKind, Message, RoomId, RoomRole, agent_member_id,
-    local_member_id, room_events_from_messages, room_id_for_session,
+    ClientOpId, EventId, MemberId, MemberKind, Message, RoomEvent, RoomId, RoomRole,
 };
 
 use crate::client::acp::AcpSession;
@@ -173,8 +172,8 @@ fn ensure_implicit_rooms(
         let Some((sid, agent_name)) = session_identity(page, acp) else {
             continue;
         };
-        let room_id = room_id_for_session(sid);
-        let agent_id = agent_member_id(&room_id);
+        let room_id = RoomId::for_session(sid);
+        let agent_id = MemberId::agent(&room_id);
         let room_entity = rooms.0.get(&room_id).copied().unwrap_or_else(|| {
             let title = title
                 .map(|title| title.0.clone())
@@ -195,7 +194,7 @@ fn ensure_implicit_rooms(
             commands.spawn((
                 RoomMember {
                     room_id: room_id.clone(),
-                    member_id: local_member_id(&room_id),
+                    member_id: MemberId::local(&room_id),
                     display_name: "You".to_string(),
                     role: RoomRole::Owner,
                     kind: MemberKind::Human,
@@ -257,7 +256,7 @@ fn materialize_events(
     messages: &[Message],
     event_index: &mut RoomEventIndex,
 ) {
-    for event in room_events_from_messages(sid, 0, messages) {
+    for event in RoomEvent::from_messages(sid, 0, messages) {
         let event_entity = commands
             .spawn((
                 MaterializedRoomEvent,
@@ -301,7 +300,7 @@ fn sync_room_messages(
         let Some(&room_entity) = rooms.0.get(&binding.room_id) else {
             continue;
         };
-        let events = room_events_from_messages(sid, 0, &messages.0);
+        let events = RoomEvent::from_messages(sid, 0, &messages.0);
         let mut stale = existing
             .iter()
             .filter(|(_, _, child_of)| child_of.parent() == room_entity)
@@ -425,7 +424,7 @@ mod tests {
         app.update();
 
         let binding = app.world().get::<RoomAgentBinding>(session).unwrap();
-        assert_eq!(binding.room_id, room_id_for_session("session-1"));
+        assert_eq!(binding.room_id, RoomId::for_session("session-1"));
         let room_entity = app.world().resource::<RoomIndex>().0[&binding.room_id];
         let first_event_id = EventId::new("session:session-1:event:1");
         let first_event_entity = app.world().resource::<RoomEventIndex>().0[&first_event_id];

@@ -36,8 +36,7 @@ use vmux_ui::components::prompt_composer::{
     focus_prompt_end,
 };
 use vmux_wire::prompt_media::{
-    inline_media_query, media_display_path, media_reference, merge_chat_attachments,
-    replace_inline_media_query,
+    inline_media_query, merge_chat_attachments, replace_inline_media_query,
 };
 
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
@@ -315,7 +314,7 @@ fn select_media_entry(
     let Some(query) = inline_media_query(&value) else {
         return;
     };
-    let reference = media_reference(entry);
+    let reference = entry.reference();
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
@@ -676,7 +675,7 @@ pub fn Page(
         .map(|entry| PromptMediaOption {
             key: format!("media-{}", entry.path),
             name: entry.name.clone(),
-            display_path: media_display_path(entry),
+            display_path: entry.display_path(),
             preview_data_url: entry.preview_data_url.clone(),
             label: file_extension_label(&entry.name),
             is_dir: entry.is_dir,

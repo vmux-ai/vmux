@@ -1188,7 +1188,7 @@ mod tests {
             SharedEvent::Session {
                 session: crate::room::RemoteSession {
                     sid: sid(),
-                    room_id: crate::room::room_id_for_session("s"),
+                    room_id: crate::room::RoomId::for_session("s"),
                     title: String::new(),
                     name: String::new(),
                     runtime: String::new(),
