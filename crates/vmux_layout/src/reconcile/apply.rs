@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet as ApplyHashSet;
 
 use super::*;
-use crate::protocol::{Focus, LayoutNode, LayoutSnapshot, NodeKind, parse_id};
+use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind, parse_id};
 
 use crate::pane::{
     Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps,
