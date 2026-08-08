@@ -222,6 +222,19 @@ pub struct TabLayoutSpawnRequest {
     pub focus: bool,
 }
 
+/// A command-bar row contributed through `CommandBarContributions` was chosen.
+///
+/// The command bar does not know what the row means — whoever published the id answers this.
+/// `stack` is the empty stack the bar was opened on; when there is none, `pane` is the focused
+/// pane to spawn into. Exactly one of the two is set.
+#[cfg(not(web))]
+#[derive(Message, Clone, Debug)]
+pub struct ContributedCommandChosen {
+    pub id: String,
+    pub stack: Option<Entity>,
+    pub pane: Option<Entity>,
+}
+
 /// Open `url` in a new focused tab in the active space.
 ///
 /// Layout picks the space, the tab name and the working directory; the sender only says what to

@@ -14,6 +14,8 @@ pub mod acp_registry;
 #[cfg(native)]
 pub mod client;
 #[cfg(native)]
+pub mod command_bar;
+#[cfg(native)]
 pub mod components;
 #[cfg(native)]
 pub mod echo;

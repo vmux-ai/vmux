@@ -3,9 +3,9 @@ use bevy::prelude::*;
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
 use crate::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot, CommandBarWorkSnapshot, WriteCommandBarSnapshots,
-    update_pages_snapshot,
+    CommandBarAgentsSnapshot, CommandBarContributions, CommandBarPagesSnapshot,
+    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, CommandBarWorkSnapshot,
+    WriteCommandBarSnapshots, update_pages_snapshot,
 };
 use vmux_core::team::{Profile, User};
 
@@ -18,6 +18,7 @@ impl Plugin for CommandPlugin {
         app.add_message::<AppCommand>()
             .add_message::<CommandIssued>()
             .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()

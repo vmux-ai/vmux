@@ -103,6 +103,7 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<AgentCommandRequest>()
             .add_message::<vmux_layout::bookmark::BookmarkOp>()
             .add_message::<vmux_layout::NewTabRequest>()
+            .add_message::<vmux_layout::ContributedCommandChosen>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
@@ -244,6 +245,7 @@ impl Plugin for AgentSessionPlugin {
                     respond_page_agent_spawn_stack,
                     respond_page_agent_spawn_default,
                     respond_page_agent_attach_default,
+                    crate::command_bar::claim_chosen_command,
                 ),
             )
             .add_systems(
@@ -252,7 +254,9 @@ impl Plugin for AgentSessionPlugin {
                     crate::snapshot_updater::update_agents_snapshot,
                     crate::snapshot_updater::update_recent_agents,
                     crate::snapshot_updater::update_agent_sessions_snapshot,
+                    crate::command_bar::publish_contributions,
                 )
+                    .chain()
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             )
             .add_systems(
@@ -1844,6 +1848,7 @@ fn remote_agents(
 struct DesktopContext<'w> {
     focus: Res<'w, FocusedStack>,
     agents: Res<'w, vmux_command::snapshot::CommandBarAgentsSnapshot>,
+    contributions: Res<'w, vmux_command::snapshot::CommandBarContributions>,
 }
 
 fn handle_agent_commands(
@@ -2202,7 +2207,7 @@ fn handle_agent_commands(
                 prompt,
                 agent_url,
                 ..
-            }) => match desktop.agents.prompt_url(agent_url.as_deref()) {
+            }) => match desktop.contributions.prompt_url(agent_url.as_deref()) {
                 Some(url) => {
                     stack_writers.2.write(vmux_layout::NewTabRequest {
                         url,

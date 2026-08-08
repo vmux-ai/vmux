@@ -32,14 +32,13 @@ use vmux_command::event::{
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
     CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{Terminal, TerminalSpawnRequest};
@@ -58,9 +57,8 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
+            .add_message::<crate::ContributedCommandChosen>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<PageAgentAttachRequest>()
-            .add_message::<PageAgentSpawnStackRequest>()
             .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
             .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .add_message::<SettingsPageSpawnRequest>()
@@ -177,30 +175,13 @@ pub struct CommandBarEntry {
     pub shortcut: String,
 }
 
-pub struct AppAgentEntry {
-    pub id: String,
-    pub name: String,
-}
-
-pub fn app_agent_id(provider: &str, model: &str) -> String {
-    format!("app_{provider}_{model}_new")
-}
-
-pub fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
-    let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
-    let parts: Vec<&str> = body.splitn(2, '_').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-    Some((parts[0].to_string(), parts[1].to_string()))
-}
-
 /// Command ids surfaced through a page entry instead of a command row: the
 /// Services page (vmux://services/) replaces "Open Service Monitor", and the
 /// History page shows the History shortcut. Their menu items + shortcuts stay.
 const COMMAND_BAR_SKIP_IDS: &[&str] = &["service_open", "browser_open_history"];
 
-pub fn command_list(locale: &str, app_agent_entries: Vec<AppAgentEntry>) -> Vec<CommandBarEntry> {
+/// Built-in command rows plus whatever other crates contributed, already named.
+pub fn command_list(locale: &str, contributed: Vec<CommandBarEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
         .filter(|(id, _, _)| !COMMAND_BAR_SKIP_IDS.contains(id))
@@ -210,11 +191,7 @@ pub fn command_list(locale: &str, app_agent_entries: Vec<AppAgentEntry>) -> Vec<
             shortcut: shortcut.to_string(),
         })
         .collect();
-    entries.extend(app_agent_entries.into_iter().map(|entry| CommandBarEntry {
-        id: entry.id,
-        name: entry.name,
-        shortcut: String::new(),
-    }));
+    entries.extend(contributed);
     entries
 }
 
@@ -688,7 +665,7 @@ fn handle_open_command_bar(
         ),
     >,
     mut snapshot_params: ParamSet<(
-        Res<CommandBarAgentsSnapshot>,
+        Res<CommandBarContributions>,
         Res<CommandBarSpacesSnapshot>,
         ResMut<NewStackContext>,
         Option<Res<crate::settings::EffectiveStartupUrl>>,
@@ -705,7 +682,7 @@ fn handle_open_command_bar(
     let active_stack_count = stack_q.iter().count();
     let spaces_snapshot = snapshot_params.p1().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
-    let agents_snap = snapshot_params.p0().clone();
+    let contributions = snapshot_params.p0().clone();
     let startup_url = snapshot_params.p3().map(|url| url.0.clone());
     let pages_snap = snapshot_params.p5().clone();
     let work_snap = snapshot_params.p6().clone();
@@ -912,7 +889,7 @@ fn handle_open_command_bar(
         space_name,
         current_url,
         &spaces_snapshot,
-        &agents_snap,
+        &contributions,
         &pages_snap,
         &work_snap,
         &locale,
@@ -1081,7 +1058,7 @@ pub(crate) fn build_command_bar_open_payload(
     space_name: String,
     url: String,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    agents_snapshot: &CommandBarAgentsSnapshot,
+    contributions: &CommandBarContributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
     locale: &str,
@@ -1089,35 +1066,33 @@ pub(crate) fn build_command_bar_open_payload(
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
 ) -> CommandBarOpenEvent {
-    let app_agent_entries: Vec<AppAgentEntry> = agents_snapshot
-        .strategies
-        .iter()
-        .map(|s| AppAgentEntry {
-            id: app_agent_id(&s.provider, &s.model),
-            name: translate_for_with(
-                locale,
-                "command-new-app-chat",
-                &[
-                    ("provider", TranslationValue::String(&s.provider)),
-                    ("model", TranslationValue::String(&s.model)),
-                ],
-            ),
-        })
-        .collect();
+    let mut contributed = Vec::with_capacity(contributions.commands.len());
+    for command in &contributions.commands {
+        let args: Vec<(&str, TranslationValue<'_>)> = command
+            .args
+            .iter()
+            .map(|(name, value)| (name.as_str(), TranslationValue::String(value)))
+            .collect();
+        contributed.push(CommandBarEntry {
+            id: command.id.clone(),
+            name: translate_for_with(locale, &command.message_id, &args),
+            shortcut: String::new(),
+        });
+    }
     let mut pages = pages_snapshot.pages.clone();
     for page in &mut pages {
         if let Some(message_id) = page_title_message_id(&page.host) {
             page.title = translate_for(locale, message_id);
         }
     }
-    pages.extend(agents_snapshot.launcher_pages());
+    pages.extend(contributions.pages.iter().map(|entry| entry.page.clone()));
     let history_shortcut = command_shortcut("browser_open_history");
     if !history_shortcut.is_empty()
         && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
     {
         page.shortcut = history_shortcut;
     }
-    let commands: Vec<CommandBarCommandEntry> = command_list(locale, app_agent_entries)
+    let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id,
@@ -1280,7 +1255,7 @@ fn on_command_bar_action(
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
-        Res<CommandBarAgentsSnapshot>,
+        Res<CommandBarContributions>,
         Option<Res<ResolvedLocale>>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
@@ -1288,9 +1263,8 @@ fn on_command_bar_action(
         MessageWriter<AppCommand>,
         MessageWriter<PageOpenRequest>,
         MessageWriter<TerminalSpawnRequest>,
-        Option<MessageWriter<PageAgentAttachRequest>>,
-        Option<MessageWriter<PageAgentSpawnStackRequest>>,
     )>,
+    mut chosen_writer: MessageWriter<crate::ContributedCommandChosen>,
     mut page_default_spawn_writer: MessageWriter<vmux_core::agent::PageAgentSpawnDefaultRequest>,
     mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
@@ -1547,52 +1521,43 @@ fn on_command_bar_action(
             } // end reattach else
         }
         "command" => {
-            if let Some((provider, model)) = parse_app_agent_id(&evt.value) {
-                let sid = uuid::Uuid::new_v4().to_string();
-                if let Some(stack_e) = empty_stack {
-                    if let Some(mut w) = writer_params.p3() {
-                        w.write(PageAgentAttachRequest {
-                            stack: stack_e,
-                            provider,
-                            model,
-                            sid,
-                        });
+            let is_contributed = resource_params
+                .p2()
+                .commands
+                .iter()
+                .any(|command| command.id == evt.value);
+            if is_contributed {
+                let pane = match empty_stack {
+                    Some(_) => None,
+                    None => {
+                        let (_, active_pane_opt, _) = focused_stack(
+                            queries.active_tab_param.get(),
+                            &queries.all_children,
+                            &queries.leaf_panes,
+                            &queries.pane_ts,
+                            &queries.pane_children,
+                            &queries.stack_ts,
+                        );
+                        active_pane_opt
                     }
+                };
+                if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(LastActivatedAt::now());
                     if let Ok(parent) = queries.child_of_q.get(stack_e) {
                         commands.entity(parent.0).insert(LastActivatedAt::now());
                     }
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
-                    custom_keyboard_restore = true;
-                } else {
-                    let (_, active_pane_opt, _) = focused_stack(
-                        queries.active_tab_param.get(),
-                        &queries.all_children,
-                        &queries.leaf_panes,
-                        &queries.pane_ts,
-                        &queries.pane_children,
-                        &queries.stack_ts,
-                    );
-                    if let Some(pane_e) = active_pane_opt {
-                        if let Some(mut w) = writer_params.p4() {
-                            w.write(PageAgentSpawnStackRequest {
-                                pane: pane_e,
-                                provider,
-                                model,
-                                sid,
-                            });
-                        }
-                        custom_keyboard_restore = true;
-                    }
                 }
-            } else if let Some(url) = resource_params
-                .p2()
-                .providers
-                .iter()
-                .find(|p| p.id == evt.value)
-                .map(|p| p.url.clone())
-            {
+                if empty_stack.is_some() || pane.is_some() {
+                    chosen_writer.write(crate::ContributedCommandChosen {
+                        id: evt.value.clone(),
+                        stack: empty_stack,
+                        pane,
+                    });
+                    custom_keyboard_restore = true;
+                }
+            } else if let Some(url) = resource_params.p2().page_url(&evt.value) {
                 if let Some(stack_e) = empty_stack {
                     writer_params.p1().write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack_e),
@@ -2096,7 +2061,7 @@ mod tests {
     fn build_payload_includes_commands_and_target() {
         let pages = CommandBarPagesSnapshot::default();
         let spaces = CommandBarSpacesSnapshot::default();
-        let agents = CommandBarAgentsSnapshot::default();
+        let agents = CommandBarContributions::default();
         let work = vmux_command::snapshot::CommandBarWorkSnapshot::default();
         let payload = build_command_bar_open_payload(
             7,
@@ -2638,7 +2603,7 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AppCommand>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()

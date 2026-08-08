@@ -8,7 +8,7 @@ use bevy_cef::prelude::{
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
     CommandBarWorkSnapshot,
 };
 use vmux_core::{
@@ -301,7 +301,7 @@ fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -338,7 +338,7 @@ fn sync_live_start_pages(
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
-        agents_snapshot.is_changed(),
+        contributions.is_changed(),
         pages_snapshot.is_changed(),
         work_snapshot.is_changed(),
         focus_changed,
@@ -376,7 +376,7 @@ fn sync_live_start_pages(
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
-        &agents_snapshot,
+        &contributions,
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
@@ -405,12 +405,12 @@ fn sync_live_start_pages(
 
 fn should_refresh_start_payload(
     spaces_changed: bool,
-    agents_changed: bool,
+    contributions_changed: bool,
     pages_changed: bool,
     work_changed: bool,
     focus_changed: bool,
 ) -> bool {
-    spaces_changed || agents_changed || pages_changed || work_changed || focus_changed
+    spaces_changed || contributions_changed || pages_changed || work_changed || focus_changed
 }
 
 fn should_focus_start_sync(
@@ -508,7 +508,7 @@ fn on_start_spare_revealed(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -522,7 +522,7 @@ fn on_start_spare_revealed(
         let payload = build_start_payload(
             &tab_gather,
             &spaces_snapshot,
-            &agents_snapshot,
+            &contributions,
             &pages_snapshot,
             &work_snapshot,
             &prompt_context,
@@ -552,7 +552,7 @@ fn on_start_data_request(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -566,7 +566,7 @@ fn on_start_data_request(
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
-        &agents_snapshot,
+        &contributions,
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
@@ -595,7 +595,7 @@ fn on_start_data_request(
 fn build_start_payload(
     tab_gather: &TabGatherParams,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    agents_snapshot: &CommandBarAgentsSnapshot,
+    contributions: &CommandBarContributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &CommandBarWorkSnapshot,
     prompt_context: &StartPromptContextParams,
@@ -624,7 +624,7 @@ fn build_start_payload(
         space_name,
         String::new(),
         spaces_snapshot,
-        agents_snapshot,
+        contributions,
         pages_snapshot,
         work_snapshot,
         locale,
@@ -662,7 +662,7 @@ mod tests {
     fn start_ready_app() -> App {
         let mut app = App::new();
         app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
             .init_resource::<EmittedIds>()

@@ -19,30 +19,36 @@ pub struct CommandBarAgentsSnapshot {
 
 impl CommandBarAgentsSnapshot {
     /// Launcher entries for installed ACP and CLI agents, most recently used first.
-    pub fn launcher_pages(&self) -> Vec<CommandBarPage> {
+    pub fn launcher_pages(&self) -> Vec<ContributedPage> {
         let mut pages = Vec::with_capacity(self.acp.len() + self.providers.len());
         for agent in &self.acp {
-            pages.push(CommandBarPage {
-                host: "agent".to_string(),
-                url: agent.url.clone(),
-                title: agent.name.clone(),
-                keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
-                icon: if agent.icon.is_empty() {
-                    vmux_core::PageIcon::None
-                } else {
-                    vmux_core::PageIcon::Favicon(agent.icon.clone())
+            pages.push(ContributedPage {
+                id: agent.id.clone(),
+                page: CommandBarPage {
+                    host: "agent".to_string(),
+                    url: agent.url.clone(),
+                    title: agent.name.clone(),
+                    keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
+                    icon: if agent.icon.is_empty() {
+                        vmux_core::PageIcon::None
+                    } else {
+                        vmux_core::PageIcon::Favicon(agent.icon.clone())
+                    },
+                    shortcut: String::new(),
                 },
-                shortcut: String::new(),
             });
         }
         for agent in &self.providers {
-            pages.push(CommandBarPage {
-                host: "agent".to_string(),
-                url: agent.url.clone(),
-                title: format!("{} (CLI)", agent.name),
-                keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
-                icon: vmux_core::PageIcon::None,
-                shortcut: String::new(),
+            pages.push(ContributedPage {
+                id: agent.id.clone(),
+                page: CommandBarPage {
+                    host: "agent".to_string(),
+                    url: agent.url.clone(),
+                    title: format!("{} (CLI)", agent.name),
+                    keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
+                    icon: vmux_core::PageIcon::None,
+                    shortcut: String::new(),
+                },
             });
         }
         let mut recent_rank: HashMap<String, usize> = HashMap::new();
@@ -51,28 +57,70 @@ impl CommandBarAgentsSnapshot {
         }
         pages.sort_by(|a, b| {
             recent_rank
-                .get(&a.url)
+                .get(&a.page.url)
                 .copied()
                 .unwrap_or(usize::MAX)
-                .cmp(&recent_rank.get(&b.url).copied().unwrap_or(usize::MAX))
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                .cmp(&recent_rank.get(&b.page.url).copied().unwrap_or(usize::MAX))
+                .then_with(|| {
+                    a.page
+                        .title
+                        .to_lowercase()
+                        .cmp(&b.page.title.to_lowercase())
+                })
         });
         pages
     }
+}
 
-    /// Where a prompt should go: `requested` when that agent is installed, else the most recent.
+/// What other crates add to the command bar.
+///
+/// The command bar lists pages and commands; it does not know what any of them are for. Whoever
+/// owns a capability describes it here and handles it when it is chosen, so the command bar stays
+/// a launcher rather than growing a branch per feature.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct CommandBarContributions {
+    /// Pages to list, and the targets a prompt can be sent to, most preferred first.
+    pub pages: Vec<ContributedPage>,
+    pub commands: Vec<ContributedCommand>,
+}
+
+/// One contributed page: something the command bar can list, open, and send a prompt to.
+#[derive(Clone, Debug)]
+pub struct ContributedPage {
+    /// Echoed back when this page is chosen by id rather than by url. Opaque to the command bar.
+    pub id: String,
+    pub page: CommandBarPage,
+}
+
+/// One contributed command-bar row.
+#[derive(Clone, Debug)]
+pub struct ContributedCommand {
+    /// Echoed back by the command bar when this row is chosen. Opaque to it.
+    pub id: String,
+    /// Fluent message naming the row, with its arguments. Not a rendered string: the contributor
+    /// has no locale, and the command bar does.
+    pub message_id: String,
+    pub args: Vec<(String, String)>,
+}
+
+impl CommandBarContributions {
+    /// Where a prompt should go: `requested` when that page is listed, else the most preferred.
     ///
-    /// `None` means no agent is installed at all, which is the one case a caller has to refuse
-    /// rather than substitute for — silently launching a different agent than the one asked for
-    /// would be worse than doing nothing.
+    /// `None` means nothing accepts a prompt, which a caller has to refuse rather than substitute
+    /// for — opening something other than what was asked for would be worse than doing nothing.
     pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
-        let pages = self.launcher_pages();
         if let Some(requested) = requested
-            && let Some(page) = pages.iter().find(|page| page.url == requested)
+            && let Some(entry) = self.pages.iter().find(|entry| entry.page.url == requested)
         {
-            return Some(page.url.clone());
+            return Some(entry.page.url.clone());
         }
-        pages.first().map(|page| page.url.clone())
+        self.pages.first().map(|entry| entry.page.url.clone())
+    }
+
+    /// The page a contributed id names.
+    pub fn page_url(&self, id: &str) -> Option<String> {
+        let entry = self.pages.iter().find(|entry| entry.id == id)?;
+        Some(entry.page.url.clone())
     }
 }
 
@@ -177,6 +225,14 @@ mod tests {
     use super::*;
     use vmux_core::agent::AgentKind;
 
+    /// What the contributing crate publishes, so the prompt tests run the real path.
+    fn contributions(agents: &CommandBarAgentsSnapshot) -> CommandBarContributions {
+        CommandBarContributions {
+            pages: agents.launcher_pages(),
+            commands: Vec::new(),
+        }
+    }
+
     #[test]
     fn agents_snapshot_default_is_empty() {
         let s = CommandBarAgentsSnapshot::default();
@@ -206,7 +262,7 @@ mod tests {
         };
 
         assert_eq!(
-            snapshot.prompt_url(None).as_deref(),
+            contributions(&snapshot).prompt_url(None).as_deref(),
             Some("vmux://agent/codex/cli")
         );
     }
@@ -224,10 +280,13 @@ mod tests {
         };
 
         assert_eq!(
-            snapshot.prompt_url(None).as_deref(),
+            contributions(&snapshot).prompt_url(None).as_deref(),
             Some("vmux://agent/claude")
         );
-        assert_eq!(CommandBarAgentsSnapshot::default().prompt_url(None), None);
+        assert_eq!(
+            contributions(&CommandBarAgentsSnapshot::default()).prompt_url(None),
+            None
+        );
     }
 
     #[test]
@@ -250,11 +309,13 @@ mod tests {
         };
 
         assert_eq!(
-            snapshot.prompt_url(Some("vmux://agent/claude")).as_deref(),
+            contributions(&snapshot)
+                .prompt_url(Some("vmux://agent/claude"))
+                .as_deref(),
             Some("vmux://agent/claude")
         );
         assert_eq!(
-            snapshot
+            contributions(&snapshot)
                 .prompt_url(Some("vmux://agent/uninstalled"))
                 .as_deref(),
             Some("vmux://agent/codex/cli")
@@ -286,12 +347,13 @@ mod tests {
         };
         let pages = snapshot.launcher_pages();
         assert_eq!(pages.len(), 2);
-        assert_eq!(pages[0].url, "vmux://agent/codex/cli");
-        assert_eq!(pages[0].title, "Codex (CLI)");
-        assert_eq!(pages[0].host, "agent");
-        assert_eq!(pages[1].title, "Claude Agent");
+        assert_eq!(pages[0].id, "codex");
+        assert_eq!(pages[0].page.url, "vmux://agent/codex/cli");
+        assert_eq!(pages[0].page.title, "Codex (CLI)");
+        assert_eq!(pages[0].page.host, "agent");
+        assert_eq!(pages[1].page.title, "Claude Agent");
         assert!(matches!(
-            pages[1].icon,
+            pages[1].page.icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
         ));
     }
