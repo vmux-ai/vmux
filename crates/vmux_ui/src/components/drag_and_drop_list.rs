@@ -56,17 +56,6 @@ pub fn DragAndDropList(props: DragAndDropListProps) -> Element {
 }
 
 #[component]
-pub fn DragAndDropListItem(props: DragAndDropListItemProps) -> Element {
-    rsx! {
-        drag_and_drop_list::DragAndDropListItem {
-            index: props.index,
-            attributes: props.attributes,
-            {props.children}
-        }
-    }
-}
-
-#[component]
 fn DragIcon() -> Element {
     rsx! {
         div { class: "mr-4 flex w-6 shrink-0 items-center text-muted-foreground", aria_hidden: "true",
@@ -102,6 +91,17 @@ pub fn RemoveButton(
                 path { d: "M18 6 6 18" }
                 path { d: "m6 6 12 12" }
             }
+        }
+    }
+}
+
+#[component]
+pub fn DragAndDropListItem(props: DragAndDropListItemProps) -> Element {
+    rsx! {
+        drag_and_drop_list::DragAndDropListItem {
+            index: props.index,
+            attributes: props.attributes,
+            {props.children}
         }
     }
 }

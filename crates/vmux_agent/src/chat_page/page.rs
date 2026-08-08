@@ -2060,6 +2060,21 @@ fn send_approval(call_id: String, decision: u8) -> bool {
 }
 
 #[component]
+fn ChatItemRow(
+    absolute_index: usize,
+    item: ChatItem,
+    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
+    latest_tool_block: Option<usize>,
+) -> Element {
+    render_item(
+        absolute_index,
+        &item,
+        attachment_previews,
+        latest_tool_block,
+    )
+}
+
+#[component]
 fn MessageCopyButton(text: String) -> Element {
     let label = translate("agent-copy");
     rsx! {
@@ -2084,21 +2099,6 @@ fn MessageCopyButton(text: String) -> Element {
             }
         }
     }
-}
-
-#[component]
-fn ChatItemRow(
-    absolute_index: usize,
-    item: ChatItem,
-    attachment_previews: Signal<HashMap<String, ChatAttachment>>,
-    latest_tool_block: Option<usize>,
-) -> Element {
-    render_item(
-        absolute_index,
-        &item,
-        attachment_previews,
-        latest_tool_block,
-    )
 }
 
 fn render_item(

@@ -340,25 +340,26 @@ fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -
 }
 
 #[component]
-fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
-    let current = status();
-    let (button_label, hint, disabled) = update_check_presentation(&current);
-
+fn ObjectBody(value: Value, parent_path: String, depth: usize, schema: SettingsSchema) -> Element {
+    let obj = match value.as_object() {
+        Some(o) => o.clone(),
+        None => return rsx! {},
+    };
+    let order = schema
+        .field(&parent_path)
+        .map(|f| f.order.clone())
+        .unwrap_or_default();
+    let keys = order_keys(&obj, &order);
     rsx! {
-        Row {
-            label: translate("settings-software-update"),
-            hint: Some(hint),
-            control: rsx! {
-                Button {
-                    variant: ButtonVariant::Outline,
-                    disabled,
-                    onclick: move |_| {
-                        status.set(UpdateCheckStatus::Checking);
-                        let _ = try_cef_bin_emit_rkyv(&CheckForUpdatesEvent);
-                    },
-                    "{button_label}"
-                }
-            },
+        for key in keys {
+            FieldView {
+                key: "{key}",
+                name: key.clone(),
+                value: obj[&key].clone(),
+                parent_path: parent_path.clone(),
+                depth,
+                schema: schema.clone(),
+            }
         }
     }
 }
@@ -418,26 +419,25 @@ fn update_check_presentation(status: &UpdateCheckStatus) -> (String, String, boo
 }
 
 #[component]
-fn ObjectBody(value: Value, parent_path: String, depth: usize, schema: SettingsSchema) -> Element {
-    let obj = match value.as_object() {
-        Some(o) => o.clone(),
-        None => return rsx! {},
-    };
-    let order = schema
-        .field(&parent_path)
-        .map(|f| f.order.clone())
-        .unwrap_or_default();
-    let keys = order_keys(&obj, &order);
+fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
+    let current = status();
+    let (button_label, hint, disabled) = update_check_presentation(&current);
+
     rsx! {
-        for key in keys {
-            FieldView {
-                key: "{key}",
-                name: key.clone(),
-                value: obj[&key].clone(),
-                parent_path: parent_path.clone(),
-                depth,
-                schema: schema.clone(),
-            }
+        Row {
+            label: translate("settings-software-update"),
+            hint: Some(hint),
+            control: rsx! {
+                Button {
+                    variant: ButtonVariant::Outline,
+                    disabled,
+                    onclick: move |_| {
+                        status.set(UpdateCheckStatus::Checking);
+                        let _ = try_cef_bin_emit_rkyv(&CheckForUpdatesEvent);
+                    },
+                    "{button_label}"
+                }
+            },
         }
     }
 }
@@ -536,79 +536,16 @@ fn FieldView(
 }
 
 #[component]
-fn ArrayBody(
-    items: Vec<Value>,
-    parent_path: String,
-    depth: usize,
-    schema: SettingsSchema,
-) -> Element {
-    if items.is_empty() {
-        return rsx! {
-            div { class: "rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground",
-                {translate("settings-empty")}
-            }
-        };
-    }
-    let all_objects = items.iter().all(Value::is_object);
-    if !all_objects {
-        return rsx! {
-            div { class: "flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2",
-                for (i, item) in items.iter().enumerate() {
-                    div { key: "{i}", class: "rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground",
-                        "{item}"
-                    }
-                }
-            }
-        };
-    }
+fn Row(label: String, hint: Option<String>, control: Element) -> Element {
     rsx! {
-        div { class: "flex flex-col gap-3",
-            for (i, item) in items.iter().cloned().enumerate() {
-                ArrayItemCard {
-                    key: "{i}",
-                    index: i,
-                    item: item,
-                    parent_path: parent_path.clone(),
-                    depth,
-                    schema: schema.clone(),
+        div { class: "flex items-center justify-between gap-6 py-3 first:pt-0 last:pb-0",
+            div { class: "min-w-0 flex-1",
+                div { class: "text-sm font-medium text-foreground", "{label}" }
+                if let Some(h) = hint {
+                    p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{h}" }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn ArrayItemCard(
-    index: usize,
-    item: Value,
-    parent_path: String,
-    depth: usize,
-    schema: SettingsSchema,
-) -> Element {
-    let title = item
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            translate_with(
-                "settings-item-number",
-                &[("number", TranslationValue::Number((index + 1) as i64))],
-            )
-        });
-    let item_path = format!("{parent_path}[{index}]");
-    rsx! {
-        div { class: "rounded-xl border border-border bg-muted/30 p-4",
-            div { class: "mb-3 flex items-center justify-between gap-2",
-                div { class: "min-w-0",
-                    div { class: "truncate text-sm font-semibold text-foreground", "{title}" }
-                }
-                span { class: "rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
-                    {translate("settings-item")}
-                }
-            }
-            div { class: "flex flex-col divide-y divide-border/60",
-                ObjectBody { value: item, parent_path: item_path, depth, schema }
-            }
+            div { class: "shrink-0", {control} }
         }
     }
 }
@@ -697,64 +634,27 @@ fn WidgetView(
 }
 
 #[component]
-fn SubgroupHeading(label: String) -> Element {
-    rsx! {
-        div { class: "px-1 py-1.5",
-            div { class: "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
-                "{label}"
-            }
-        }
-    }
-}
-
-#[component]
-fn Row(label: String, hint: Option<String>, control: Element) -> Element {
-    rsx! {
-        div { class: "flex items-center justify-between gap-6 py-3 first:pt-0 last:pb-0",
-            div { class: "min-w-0 flex-1",
-                div { class: "text-sm font-medium text-foreground", "{label}" }
-                if let Some(h) = hint {
-                    p { class: "mt-0.5 text-xs leading-snug text-muted-foreground", "{h}" }
-                }
-            }
-            div { class: "shrink-0", {control} }
-        }
-    }
-}
-
-#[component]
-fn StackedRow(label: String, hint: Option<String>, control: Element) -> Element {
-    rsx! {
-        div { class: "flex flex-col gap-2 py-3 first:pt-0 last:pb-0",
-            div { class: "flex flex-col gap-0.5",
-                div { class: "text-sm font-medium text-foreground", "{label}" }
-                if let Some(h) = hint {
-                    p { class: "text-xs leading-snug text-muted-foreground", "{h}" }
-                }
-            }
-            {control}
-        }
-    }
-}
-
-#[component]
-fn NumberInput(path: String, value: f64, step: f64) -> Element {
+fn Toggle(path: String, value: bool) -> Element {
     let path_for_input = path.clone();
+    let track_class = if value {
+        "relative h-6 w-10 cursor-pointer rounded-full bg-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    } else {
+        "relative h-6 w-10 cursor-pointer rounded-full bg-muted shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+    };
+    let thumb_class = if value {
+        "absolute top-0.5 left-[1.125rem] h-5 w-5 rounded-full bg-background shadow-sm transition-transform"
+    } else {
+        "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-foreground/80 shadow-sm transition-transform"
+    };
     rsx! {
-        Input {
-            attributes: attributes!(input {
-                r#type: "number",
-                step: "{step}",
-                value: "{value}",
-                class: "w-24 text-right tabular-nums text-sm",
-            }),
-            oninput: move |e: FormEvent| {
-                if let Ok(parsed) = e.value().parse::<f64>() {
-                    emit_update(&path_for_input, serde_json::json!(parsed));
-                }
+        button {
+            r#type: "button",
+            class: "{track_class}",
+            "aria-pressed": if value { "true" } else { "false" },
+            onclick: move |_| {
+                emit_update(&path_for_input, serde_json::json!(!value));
             },
-            placeholder: None::<String>,
-            children: rsx! {},
+            span { class: "{thumb_class}" }
         }
     }
 }
@@ -782,6 +682,43 @@ fn IntInput(path: String, value: u64) -> Element {
 }
 
 #[component]
+fn NumberInput(path: String, value: f64, step: f64) -> Element {
+    let path_for_input = path.clone();
+    rsx! {
+        Input {
+            attributes: attributes!(input {
+                r#type: "number",
+                step: "{step}",
+                value: "{value}",
+                class: "w-24 text-right tabular-nums text-sm",
+            }),
+            oninput: move |e: FormEvent| {
+                if let Ok(parsed) = e.value().parse::<f64>() {
+                    emit_update(&path_for_input, serde_json::json!(parsed));
+                }
+            },
+            placeholder: None::<String>,
+            children: rsx! {},
+        }
+    }
+}
+
+#[component]
+fn StackedRow(label: String, hint: Option<String>, control: Element) -> Element {
+    rsx! {
+        div { class: "flex flex-col gap-2 py-3 first:pt-0 last:pb-0",
+            div { class: "flex flex-col gap-0.5",
+                div { class: "text-sm font-medium text-foreground", "{label}" }
+                if let Some(h) = hint {
+                    p { class: "text-xs leading-snug text-muted-foreground", "{h}" }
+                }
+            }
+            {control}
+        }
+    }
+}
+
+#[component]
 fn TextInput(path: String, value: String, placeholder: Option<String>) -> Element {
     let path_for_input = path.clone();
     let placeholder_attr = placeholder.unwrap_or_default();
@@ -803,67 +740,53 @@ fn TextInput(path: String, value: String, placeholder: Option<String>) -> Elemen
 }
 
 #[component]
-fn Toggle(path: String, value: bool) -> Element {
-    let path_for_input = path.clone();
-    let track_class = if value {
-        "relative h-6 w-10 cursor-pointer rounded-full bg-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    } else {
-        "relative h-6 w-10 cursor-pointer rounded-full bg-muted shadow-[inset_0_0_0_1px_var(--border)] transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-    };
-    let thumb_class = if value {
-        "absolute top-0.5 left-[1.125rem] h-5 w-5 rounded-full bg-background shadow-sm transition-transform"
-    } else {
-        "absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-foreground/80 shadow-sm transition-transform"
-    };
+fn SubgroupHeading(label: String) -> Element {
     rsx! {
-        button {
-            r#type: "button",
-            class: "{track_class}",
-            "aria-pressed": if value { "true" } else { "false" },
-            onclick: move |_| {
-                emit_update(&path_for_input, serde_json::json!(!value));
-            },
-            span { class: "{thumb_class}" }
+        div { class: "px-1 py-1.5",
+            div { class: "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+                "{label}"
+            }
         }
     }
 }
 
 #[component]
-fn Kbd(text: String) -> Element {
-    rsx! {
-        span { class: "inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground",
-            "{text}"
-        }
+fn ArrayBody(
+    items: Vec<Value>,
+    parent_path: String,
+    depth: usize,
+    schema: SettingsSchema,
+) -> Element {
+    if items.is_empty() {
+        return rsx! {
+            div { class: "rounded-md border border-dashed border-border/60 px-3 py-4 text-center text-xs text-muted-foreground",
+                {translate("settings-empty")}
+            }
+        };
     }
-}
-
-#[component]
-fn BindingRow(index: usize, binding: Value) -> Element {
-    let command = binding
-        .get("command")
-        .and_then(Value::as_str)
-        .unwrap_or("(unknown)")
-        .to_string();
-    let chord = binding
-        .get("binding")
-        .map(format_binding)
-        .unwrap_or_else(|| "(none)".to_string());
-    let edit_path = binding.get("binding").and_then(|b| {
-        if b.get("Direct").is_some() {
-            Some(format!("shortcuts.bindings[{index}].binding.Direct"))
-        } else if b.get("Leader").is_some() {
-            Some(format!("shortcuts.bindings[{index}].binding.Leader"))
-        } else {
-            None
-        }
-    });
+    let all_objects = items.iter().all(Value::is_object);
+    if !all_objects {
+        return rsx! {
+            div { class: "flex flex-col gap-1 rounded-md border border-border/60 bg-muted/30 p-2",
+                for (i, item) in items.iter().enumerate() {
+                    div { key: "{i}", class: "rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-foreground",
+                        "{item}"
+                    }
+                }
+            }
+        };
+    }
     rsx! {
-        div { class: "flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/30 px-3 py-2",
-            span { class: "truncate font-mono text-xs text-foreground", "{command}" }
-            if let Some(path) = edit_path {
-                ChordEditor { path, text: chord }
-            } else {
-                Kbd { text: chord }
+        div { class: "flex flex-col gap-3",
+            for (i, item) in items.iter().cloned().enumerate() {
+                ArrayItemCard {
+                    key: "{i}",
+                    index: i,
+                    item: item,
+                    parent_path: parent_path.clone(),
+                    depth,
+                    schema: schema.clone(),
+                }
             }
         }
     }
@@ -943,6 +866,83 @@ fn ChordEditor(path: String, text: String) -> Element {
                 },
                 "{text}"
             }
+        }
+    }
+}
+
+#[component]
+fn BindingRow(index: usize, binding: Value) -> Element {
+    let command = binding
+        .get("command")
+        .and_then(Value::as_str)
+        .unwrap_or("(unknown)")
+        .to_string();
+    let chord = binding
+        .get("binding")
+        .map(format_binding)
+        .unwrap_or_else(|| "(none)".to_string());
+    let edit_path = binding.get("binding").and_then(|b| {
+        if b.get("Direct").is_some() {
+            Some(format!("shortcuts.bindings[{index}].binding.Direct"))
+        } else if b.get("Leader").is_some() {
+            Some(format!("shortcuts.bindings[{index}].binding.Leader"))
+        } else {
+            None
+        }
+    });
+    rsx! {
+        div { class: "flex items-center justify-between gap-4 rounded-md border border-border/60 bg-muted/30 px-3 py-2",
+            span { class: "truncate font-mono text-xs text-foreground", "{command}" }
+            if let Some(path) = edit_path {
+                ChordEditor { path, text: chord }
+            } else {
+                Kbd { text: chord }
+            }
+        }
+    }
+}
+
+#[component]
+fn ArrayItemCard(
+    index: usize,
+    item: Value,
+    parent_path: String,
+    depth: usize,
+    schema: SettingsSchema,
+) -> Element {
+    let title = item
+        .get("name")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            translate_with(
+                "settings-item-number",
+                &[("number", TranslationValue::Number((index + 1) as i64))],
+            )
+        });
+    let item_path = format!("{parent_path}[{index}]");
+    rsx! {
+        div { class: "rounded-xl border border-border bg-muted/30 p-4",
+            div { class: "mb-3 flex items-center justify-between gap-2",
+                div { class: "min-w-0",
+                    div { class: "truncate text-sm font-semibold text-foreground", "{title}" }
+                }
+                span { class: "rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground",
+                    {translate("settings-item")}
+                }
+            }
+            div { class: "flex flex-col divide-y divide-border/60",
+                ObjectBody { value: item, parent_path: item_path, depth, schema }
+            }
+        }
+    }
+}
+
+#[component]
+fn Kbd(text: String) -> Element {
+    rsx! {
+        span { class: "inline-flex items-center rounded-md border border-border bg-muted px-2 py-1 font-mono text-[11px] text-foreground",
+            "{text}"
         }
     }
 }

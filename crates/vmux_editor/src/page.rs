@@ -2716,18 +2716,309 @@ fn render_note_caret(width_class: &'static str) -> Element {
 }
 
 #[component]
-fn RenderedNoteBlock(
-    block: MdBlock,
-    index: usize,
-    hidden_list_line: Option<u32>,
-    invisible: bool,
+fn ExplorerSidebar(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    mut resizing: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> Element {
+    let open = visible();
+    let panel_width = width();
+    let wrapper_style = if open {
+        format!("width:{panel_width}px;contain:layout style;")
+    } else {
+        "width:0px;contain:layout style;".to_string()
+    };
+    let panel_style = format!("width:{panel_width}px;");
+    let panel_class = if open {
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    } else {
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    };
+    rsx! {
+        div {
+            class: "relative z-[2] h-full shrink-0",
+            style: "{wrapper_style}",
+            onkeydown: move |event| {
+                handle_explorer_shortcut(
+                    &event,
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                );
+            },
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
+        }
+        div {
+            class: if open {
+                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+            } else {
+                "pointer-events-none h-full w-0 shrink-0 opacity-0"
+            },
+            onmousedown: move |e: Event<MouseData>| {
+                e.prevent_default();
+                resizing.set(true);
+            },
+        }
+    }
+}
+
+#[component]
+fn ExplorerToggleButton(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
 ) -> Element {
     rsx! {
-        div { class: if invisible { "invisible" } else { "" },
-            if let Some(line) = hidden_list_line {
-                {render_block_with_hidden_list_line(&block, index, line)}
+        button {
+            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            title: translate("editor-toggle-explorer"),
+            onclick: move |_| {
+                toggle_explorer(
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                )
+            },
+            svg {
+                class: "h-4 w-4",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
+fn render_note_source_range(
+    source: &[char],
+    start: u32,
+    end: u32,
+    caret: u32,
+    selections: &[(u32, u32)],
+    caret_width_class: &'static str,
+) -> Element {
+    let chunks = note_source_chunks(source, start, end, caret, selections);
+    rsx! {
+        for (index, chunk) in chunks.iter().enumerate() {
+            if chunk.caret_before {
+                {render_note_caret(caret_width_class)}
+            }
+            if !chunk.text.is_empty() {
+                span {
+                    key: "source-{start}-{index}",
+                    class: if chunk.selected { "bg-current/20" } else { "" },
+                    "{chunk.text}"
+                }
+            }
+        }
+    }
+}
+
+fn render_note_inline_nodes(
+    source: &[char],
+    nodes: &[NoteInlineNode],
+    caret: u32,
+    selections: &[(u32, u32)],
+    caret_width_class: &'static str,
+) -> Element {
+    rsx! {
+        for (index, node) in nodes.iter().enumerate() {
+            match node {
+                NoteInlineNode::Text { start, end } => rsx! {
+                    span { key: "text-{index}",
+                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
+                    }
+                },
+                NoteInlineNode::Syntax {
+                    kind,
+                    start,
+                    prefix_end,
+                    suffix_start,
+                    end,
+                    children,
+                } => {
+                    let reveal = *start <= caret && caret <= *end;
+                    rsx! {
+                        span { key: "syntax-{index}", class: note_inline_class(*kind),
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
+                            }
+                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn note_selection_ranges(
+    source: &str,
+    start_line: u32,
+    selections: &[vmux_core::editor::SelSpan],
+) -> Vec<(u32, u32)> {
+    selections
+        .iter()
+        .map(|selection| {
+            let start = note_source_offset(source, start_line, selection.line, selection.start);
+            let end_col = if selection.end == u32::MAX {
+                source
+                    .split('\n')
+                    .nth(selection.line.saturating_sub(start_line) as usize)
+                    .map_or(0, |line| line.chars().count() as u32)
             } else {
-                {render_block(&block, index)}
+                selection.end
+            };
+            let end = note_source_offset(source, start_line, selection.line, end_col);
+            (start.min(end), start.max(end))
+        })
+        .filter(|(start, end)| start < end)
+        .collect()
+}
+
+fn emit_property_edit(
+    original_key: String,
+    key: String,
+    kind: KnowledgePropertyKind,
+    values: Vec<String>,
+    remove: bool,
+) {
+    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
+        original_key,
+        key,
+        kind,
+        values,
+        remove,
+    });
+}
+
+fn property_kind_label(kind: KnowledgePropertyKind) -> String {
+    match kind {
+        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
+        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
+        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
+        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
+        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
+        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
+        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
+    }
+}
+
+fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
+    match kind {
+        KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
+        KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
+        KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
+        KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
+        KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
+        KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
+        KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
+    }
+}
+
+#[component]
+fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
+    let mut open = use_signal(|| !properties.is_empty());
+    let has_tags = properties
+        .iter()
+        .any(|property| property.kind == KnowledgePropertyKind::Tags);
+    let add_key = {
+        let mut suffix = 1;
+        loop {
+            let candidate = if suffix == 1 {
+                "property".to_string()
+            } else {
+                format!("property-{suffix}")
+            };
+            if !properties
+                .iter()
+                .any(|property| property.key.eq_ignore_ascii_case(&candidate))
+            {
+                break candidate;
+            }
+            suffix += 1;
+        }
+    };
+    rsx! {
+        div { class: "mb-5 rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
+            div { class: "flex h-9 items-center gap-2 px-3",
+                button {
+                    r#type: "button",
+                    class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
+                    onclick: move |_| open.toggle(),
+                    Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
+                    span { {translate("editor-properties")} }
+                    if !properties.is_empty() {
+                        span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    title: translate("editor-add-tags"),
+                    disabled: has_tags,
+                    class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
+                    onclick: move |_| {
+                        open.set(true);
+                        emit_property_edit(
+                            String::new(),
+                            "tags".to_string(),
+                            KnowledgePropertyKind::Tags,
+                            Vec::new(),
+                            false,
+                        );
+                    },
+                    "#"
+                }
+                button {
+                    r#type: "button",
+                    title: translate("editor-add-property"),
+                    class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+                    onclick: move |_| {
+                        open.set(true);
+                        emit_property_edit(
+                            String::new(),
+                            add_key.clone(),
+                            KnowledgePropertyKind::Text,
+                            vec![String::new()],
+                            false,
+                        );
+                    },
+                    Icon { class: "h-3.5 w-3.5", path { d: "M12 5v14" } path { d: "M5 12h14" } }
+                }
+            }
+            if open() {
+                div { class: "border-t border-foreground/[0.06] px-1 py-1",
+                    if properties.is_empty() {
+                        div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
+                    }
+                    for property in properties {
+                        NotePropertyRow {
+                            key: "{property.key}:{property.kind:?}:{property.values:?}",
+                            property,
+                        }
+                    }
+                }
             }
         }
     }
@@ -3076,352 +3367,6 @@ fn NoteBlockView(
                                     span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
                                 }
                             }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn render_note_source_range(
-    source: &[char],
-    start: u32,
-    end: u32,
-    caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
-) -> Element {
-    let chunks = note_source_chunks(source, start, end, caret, selections);
-    rsx! {
-        for (index, chunk) in chunks.iter().enumerate() {
-            if chunk.caret_before {
-                {render_note_caret(caret_width_class)}
-            }
-            if !chunk.text.is_empty() {
-                span {
-                    key: "source-{start}-{index}",
-                    class: if chunk.selected { "bg-current/20" } else { "" },
-                    "{chunk.text}"
-                }
-            }
-        }
-    }
-}
-
-fn render_note_inline_nodes(
-    source: &[char],
-    nodes: &[NoteInlineNode],
-    caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
-) -> Element {
-    rsx! {
-        for (index, node) in nodes.iter().enumerate() {
-            match node {
-                NoteInlineNode::Text { start, end } => rsx! {
-                    span { key: "text-{index}",
-                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
-                    }
-                },
-                NoteInlineNode::Syntax {
-                    kind,
-                    start,
-                    prefix_end,
-                    suffix_start,
-                    end,
-                    children,
-                } => {
-                    let reveal = *start <= caret && caret <= *end;
-                    rsx! {
-                        span { key: "syntax-{index}", class: note_inline_class(*kind),
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
-                            }
-                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn note_selection_ranges(
-    source: &str,
-    start_line: u32,
-    selections: &[vmux_core::editor::SelSpan],
-) -> Vec<(u32, u32)> {
-    selections
-        .iter()
-        .map(|selection| {
-            let start = note_source_offset(source, start_line, selection.line, selection.start);
-            let end_col = if selection.end == u32::MAX {
-                source
-                    .split('\n')
-                    .nth(selection.line.saturating_sub(start_line) as usize)
-                    .map_or(0, |line| line.chars().count() as u32)
-            } else {
-                selection.end
-            };
-            let end = note_source_offset(source, start_line, selection.line, end_col);
-            (start.min(end), start.max(end))
-        })
-        .filter(|(start, end)| start < end)
-        .collect()
-}
-
-fn emit_property_edit(
-    original_key: String,
-    key: String,
-    kind: KnowledgePropertyKind,
-    values: Vec<String>,
-    remove: bool,
-) {
-    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
-        original_key,
-        key,
-        kind,
-        values,
-        remove,
-    });
-}
-
-fn property_kind_label(kind: KnowledgePropertyKind) -> String {
-    match kind {
-        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
-        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
-        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
-        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
-        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
-        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
-        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
-    }
-}
-
-fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
-    match kind {
-        KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
-        KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
-        KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
-        KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
-        KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
-        KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
-        KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
-    }
-}
-
-#[component]
-fn NotePropertyRow(property: KnowledgeProperty) -> Element {
-    let original_key = property.key.clone();
-    let kind = property.kind;
-    let mut key = use_signal(|| property.key.clone());
-    let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
-    let mut item = use_signal(String::new);
-    let values = property.values.clone();
-    let key_for_kind = original_key.clone();
-    let key_for_delete = original_key.clone();
-    rsx! {
-        div { class: "group flex min-h-9 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/[0.035]",
-            input {
-                value: "{key}",
-                class: "w-28 shrink-0 bg-transparent text-xs font-medium text-foreground/65 outline-none focus:text-foreground",
-                oninput: move |event| key.set(event.value()),
-                onblur: {
-                    let original_key = original_key.clone();
-                    let values = values.clone();
-                    move |_| emit_property_edit(original_key.clone(), key(), kind, values.clone(), false)
-                },
-            }
-            button {
-                r#type: "button",
-                title: translate("editor-change-property-type"),
-                class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                onclick: {
-                    let values = values.clone();
-                    move |_| {
-                        let next = next_property_kind(kind);
-                        emit_property_edit(key_for_kind.clone(), key(), next, values.clone(), false);
-                    }
-                },
-                {property_kind_label(kind)}
-            }
-            div { class: "min-w-0 flex-1",
-                if kind == KnowledgePropertyKind::Checkbox {
-                    button {
-                        r#type: "button",
-                        class: if scalar().eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
-                        onclick: {
-                            let original_key = original_key.clone();
-                            move |_| {
-                                let next = (!scalar().eq_ignore_ascii_case("true")).to_string();
-                                scalar.set(next.clone());
-                                emit_property_edit(original_key.clone(), key(), kind, vec![next], false);
-                            }
-                        },
-                        span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
-                    }
-                } else if matches!(kind, KnowledgePropertyKind::List | KnowledgePropertyKind::Tags) {
-                    div { class: "flex flex-wrap items-center gap-1",
-                        for (index, value) in values.iter().enumerate() {
-                            {
-                                let remove_key = original_key.clone();
-                                let remove_values = values.clone();
-                                rsx! {
-                                    button {
-                                        key: "{index}:{value}",
-                                        r#type: "button",
-                                        title: translate("common-remove"),
-                                        class: if kind == KnowledgePropertyKind::Tags { "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary hover:bg-destructive/10 hover:text-destructive" } else { "rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/75 hover:bg-destructive/10 hover:text-destructive" },
-                                        onclick: move |_| {
-                                            let mut next = remove_values.clone();
-                                            next.remove(index);
-                                            emit_property_edit(remove_key.clone(), key(), kind, next, false);
-                                        },
-                                        if kind == KnowledgePropertyKind::Tags { "#" }
-                                        "{value}"
-                                    }
-                                }
-                            }
-                        }
-                        input {
-                            value: "{item}",
-                            placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
-                            class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                            oninput: move |event| item.set(event.value()),
-                            onkeydown: {
-                                let add_key = original_key.clone();
-                                let add_values = values.clone();
-                                move |event: Event<KeyboardData>| {
-                                    if event.key() != Key::Enter {
-                                        return;
-                                    }
-                                    event.prevent_default();
-                                    let value = item().trim().trim_start_matches('#').to_string();
-                                    if value.is_empty() {
-                                        return;
-                                    }
-                                    let mut next = add_values.clone();
-                                    if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
-                                        next.push(value);
-                                    }
-                                    item.set(String::new());
-                                    emit_property_edit(add_key.clone(), key(), kind, next, false);
-                                }
-                            },
-                        }
-                    }
-                } else {
-                    input {
-                        r#type: match kind {
-                            KnowledgePropertyKind::Number => "number",
-                            KnowledgePropertyKind::Date => "date",
-                            _ => "text",
-                        },
-                        value: "{scalar}",
-                        placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
-                        class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                        oninput: move |event| scalar.set(event.value()),
-                        onblur: {
-                            let original_key = original_key.clone();
-                            move |_| emit_property_edit(original_key.clone(), key(), kind, vec![scalar()], false)
-                        },
-                    }
-                }
-            }
-            button {
-                r#type: "button",
-                title: translate("editor-delete-property"),
-                class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
-                onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
-                Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
-            }
-        }
-    }
-}
-
-#[component]
-fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
-    let mut open = use_signal(|| !properties.is_empty());
-    let has_tags = properties
-        .iter()
-        .any(|property| property.kind == KnowledgePropertyKind::Tags);
-    let add_key = {
-        let mut suffix = 1;
-        loop {
-            let candidate = if suffix == 1 {
-                "property".to_string()
-            } else {
-                format!("property-{suffix}")
-            };
-            if !properties
-                .iter()
-                .any(|property| property.key.eq_ignore_ascii_case(&candidate))
-            {
-                break candidate;
-            }
-            suffix += 1;
-        }
-    };
-    rsx! {
-        div { class: "mb-5 rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
-            div { class: "flex h-9 items-center gap-2 px-3",
-                button {
-                    r#type: "button",
-                    class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
-                    onclick: move |_| open.toggle(),
-                    Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
-                    span { {translate("editor-properties")} }
-                    if !properties.is_empty() {
-                        span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
-                    }
-                }
-                button {
-                    r#type: "button",
-                    title: translate("editor-add-tags"),
-                    disabled: has_tags,
-                    class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
-                    onclick: move |_| {
-                        open.set(true);
-                        emit_property_edit(
-                            String::new(),
-                            "tags".to_string(),
-                            KnowledgePropertyKind::Tags,
-                            Vec::new(),
-                            false,
-                        );
-                    },
-                    "#"
-                }
-                button {
-                    r#type: "button",
-                    title: translate("editor-add-property"),
-                    class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-                    onclick: move |_| {
-                        open.set(true);
-                        emit_property_edit(
-                            String::new(),
-                            add_key.clone(),
-                            KnowledgePropertyKind::Text,
-                            vec![String::new()],
-                            false,
-                        );
-                    },
-                    Icon { class: "h-3.5 w-3.5", path { d: "M12 5v14" } path { d: "M5 12h14" } }
-                }
-            }
-            if open() {
-                div { class: "border-t border-foreground/[0.06] px-1 py-1",
-                    if properties.is_empty() {
-                        div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
-                    }
-                    for property in properties {
-                        NotePropertyRow {
-                            key: "{property.key}:{property.kind:?}:{property.values:?}",
-                            property,
                         }
                     }
                 }
@@ -3950,92 +3895,147 @@ fn handle_explorer_shortcut(
 }
 
 #[component]
-fn ExplorerSidebar(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    mut resizing: Signal<bool>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> Element {
-    let open = visible();
-    let panel_width = width();
-    let wrapper_style = if open {
-        format!("width:{panel_width}px;contain:layout style;")
-    } else {
-        "width:0px;contain:layout style;".to_string()
-    };
-    let panel_style = format!("width:{panel_width}px;");
-    let panel_class = if open {
-        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
-    } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
-    };
+fn NotePropertyRow(property: KnowledgeProperty) -> Element {
+    let original_key = property.key.clone();
+    let kind = property.kind;
+    let mut key = use_signal(|| property.key.clone());
+    let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
+    let mut item = use_signal(String::new);
+    let values = property.values.clone();
+    let key_for_kind = original_key.clone();
+    let key_for_delete = original_key.clone();
     rsx! {
-        div {
-            class: "relative z-[2] h-full shrink-0",
-            style: "{wrapper_style}",
-            onkeydown: move |event| {
-                handle_explorer_shortcut(
-                    &event,
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                );
-            },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
-        }
-        div {
-            class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
-            } else {
-                "pointer-events-none h-full w-0 shrink-0 opacity-0"
-            },
-            onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                resizing.set(true);
-            },
+        div { class: "group flex min-h-9 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/[0.035]",
+            input {
+                value: "{key}",
+                class: "w-28 shrink-0 bg-transparent text-xs font-medium text-foreground/65 outline-none focus:text-foreground",
+                oninput: move |event| key.set(event.value()),
+                onblur: {
+                    let original_key = original_key.clone();
+                    let values = values.clone();
+                    move |_| emit_property_edit(original_key.clone(), key(), kind, values.clone(), false)
+                },
+            }
+            button {
+                r#type: "button",
+                title: translate("editor-change-property-type"),
+                class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                onclick: {
+                    let values = values.clone();
+                    move |_| {
+                        let next = next_property_kind(kind);
+                        emit_property_edit(key_for_kind.clone(), key(), next, values.clone(), false);
+                    }
+                },
+                {property_kind_label(kind)}
+            }
+            div { class: "min-w-0 flex-1",
+                if kind == KnowledgePropertyKind::Checkbox {
+                    button {
+                        r#type: "button",
+                        class: if scalar().eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
+                        onclick: {
+                            let original_key = original_key.clone();
+                            move |_| {
+                                let next = (!scalar().eq_ignore_ascii_case("true")).to_string();
+                                scalar.set(next.clone());
+                                emit_property_edit(original_key.clone(), key(), kind, vec![next], false);
+                            }
+                        },
+                        span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
+                    }
+                } else if matches!(kind, KnowledgePropertyKind::List | KnowledgePropertyKind::Tags) {
+                    div { class: "flex flex-wrap items-center gap-1",
+                        for (index, value) in values.iter().enumerate() {
+                            {
+                                let remove_key = original_key.clone();
+                                let remove_values = values.clone();
+                                rsx! {
+                                    button {
+                                        key: "{index}:{value}",
+                                        r#type: "button",
+                                        title: translate("common-remove"),
+                                        class: if kind == KnowledgePropertyKind::Tags { "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary hover:bg-destructive/10 hover:text-destructive" } else { "rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/75 hover:bg-destructive/10 hover:text-destructive" },
+                                        onclick: move |_| {
+                                            let mut next = remove_values.clone();
+                                            next.remove(index);
+                                            emit_property_edit(remove_key.clone(), key(), kind, next, false);
+                                        },
+                                        if kind == KnowledgePropertyKind::Tags { "#" }
+                                        "{value}"
+                                    }
+                                }
+                            }
+                        }
+                        input {
+                            value: "{item}",
+                            placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
+                            class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+                            oninput: move |event| item.set(event.value()),
+                            onkeydown: {
+                                let add_key = original_key.clone();
+                                let add_values = values.clone();
+                                move |event: Event<KeyboardData>| {
+                                    if event.key() != Key::Enter {
+                                        return;
+                                    }
+                                    event.prevent_default();
+                                    let value = item().trim().trim_start_matches('#').to_string();
+                                    if value.is_empty() {
+                                        return;
+                                    }
+                                    let mut next = add_values.clone();
+                                    if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
+                                        next.push(value);
+                                    }
+                                    item.set(String::new());
+                                    emit_property_edit(add_key.clone(), key(), kind, next, false);
+                                }
+                            },
+                        }
+                    }
+                } else {
+                    input {
+                        r#type: match kind {
+                            KnowledgePropertyKind::Number => "number",
+                            KnowledgePropertyKind::Date => "date",
+                            _ => "text",
+                        },
+                        value: "{scalar}",
+                        placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
+                        class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+                        oninput: move |event| scalar.set(event.value()),
+                        onblur: {
+                            let original_key = original_key.clone();
+                            move |_| emit_property_edit(original_key.clone(), key(), kind, vec![scalar()], false)
+                        },
+                    }
+                }
+            }
+            button {
+                r#type: "button",
+                title: translate("editor-delete-property"),
+                class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
+                onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
+                Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
+            }
         }
     }
 }
 
 #[component]
-fn ExplorerToggleButton(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
+fn RenderedNoteBlock(
+    block: MdBlock,
+    index: usize,
+    hidden_list_line: Option<u32>,
+    invisible: bool,
 ) -> Element {
     rsx! {
-        button {
-            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
-            title: translate("editor-toggle-explorer"),
-            onclick: move |_| {
-                toggle_explorer(
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                )
-            },
-            svg {
-                class: "h-4 w-4",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "2",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+        div { class: if invisible { "invisible" } else { "" },
+            if let Some(line) = hidden_list_line {
+                {render_block_with_hidden_list_line(&block, index, line)}
+            } else {
+                {render_block(&block, index)}
             }
         }
     }
