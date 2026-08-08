@@ -27,1942 +27,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-const CONTAINER_ID: &str = "file-container";
-const PAGE_ID: &str = "file-page";
-const MEASURE_ID: &str = "file-measure";
-const NOTE_CARET_ID: &str = "note-caret";
-const VIDEO_HOST_ID: &str = "vmux-video-host";
-const INPUT_ID: &str = "file-input";
-const SCROLL_ID: &str = "file-scroll";
-const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
-const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
-const LSP_NOTICE_DONE_MS: i32 = 2_500;
-const LSP_NOTICE_FAILED_MS: i32 = 6_000;
-
-std::thread_local! {
-    static NOTE_CARET_VISIBILITY_QUEUE: RefCell<NoteCaretVisibilityQueue> = RefCell::new(NoteCaretVisibilityQueue::default());
-}
-
-fn is_markdown_file(path: &str) -> bool {
-    path.rsplit_once('.')
-        .map(|(_, extension)| {
-            extension.eq_ignore_ascii_case("md")
-                || extension.eq_ignore_ascii_case("markdown")
-                || extension.eq_ignore_ascii_case("mdx")
-        })
-        .unwrap_or(false)
-}
-
-fn file_mode_class(active: bool) -> &'static str {
-    if active {
-        "rounded bg-primary/15 px-1.5 py-0.5 text-primary transition-[background-color,color,box-shadow] duration-200 ease-out"
-    } else {
-        "rounded px-1.5 py-0.5 text-foreground/45 transition-[background-color,color,box-shadow] duration-200 ease-out hover:bg-foreground/[0.06] hover:text-foreground"
-    }
-}
-
-fn editor_pointer_position(
-    event: &web_sys::MouseEvent,
-    target: &web_sys::Element,
-    gutter: f64,
-    char_width: f64,
-    char_height: f64,
-    wrap_columns: u16,
-    round: bool,
-) -> (f64, u32) {
-    let rect = target.get_bounding_client_rect();
-    let x = event.client_x() as f64 - rect.left() - gutter;
-    if char_width <= 0.0 {
-        return (x, 0);
-    }
-    let local = if round {
-        (x.max(0.0) / char_width).round()
-    } else {
-        (x.max(0.0) / char_width).floor()
-    } as u32;
-    if wrap_columns == 0 || char_height <= 0.0 {
-        return (x, local);
-    }
-    let wrapped_row =
-        ((event.client_y() as f64 - rect.top()).max(0.0) / char_height).floor() as u32;
-    (
-        x,
-        wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
-    )
-}
-
-fn set_pointer_capture(event: &Event<PointerData>, element_id: &str, capture: bool) {
-    let data = event.data();
-    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-        return;
-    };
-    let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(element_id))
-    else {
-        return;
-    };
-    if capture {
-        let _ = element.set_pointer_capture(pointer.pointer_id());
-    } else {
-        let _ = element.release_pointer_capture(pointer.pointer_id());
-    }
-}
-
-fn editor_pointer_file_position(
-    pointer: &web_sys::PointerEvent,
-    gutter: f64,
-    char_width: f64,
-    char_height: f64,
-    layouts: &[FileLineLayout],
-    wrap_columns: u16,
-    round: bool,
-) -> Option<(u32, u32)> {
-    if char_width <= 0.0 || char_height <= 0.0 {
-        return None;
-    }
-    let scroll = scroll_el()?;
-    let rect = scroll.get_bounding_client_rect();
-    let content_y = pointer.client_y() as f64 - rect.top() + scroll.scroll_top() as f64;
-    let row = (content_y.max(0.0) / char_height).floor() as u32;
-    let layout = layouts
-        .iter()
-        .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
-    let x = pointer.client_x() as f64 - rect.left() + scroll.scroll_left() as f64 - gutter;
-    let local = if round {
-        (x.max(0.0) / char_width).round()
-    } else {
-        (x.max(0.0) / char_width).floor()
-    } as u32;
-    let col = if wrap_columns == 0 {
-        local
-    } else {
-        (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
-    };
-    Some((layout.line_no, col))
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct NoteEditRect {
-    top: f64,
-    left: f64,
-    width: f64,
-    height: f64,
-}
-
-fn note_list_item_line(event: &Event<MouseData>) -> Option<u32> {
-    let data = event.data();
-    let raw = data.downcast::<web_sys::MouseEvent>()?;
-    raw.target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?
-        .closest("[data-note-list-line]")
-        .ok()
-        .flatten()?
-        .get_attribute("data-note-list-line")?
-        .parse()
-        .ok()
-}
-
-fn note_list_edit_rect(event: &Event<MouseData>, block_index: usize) -> Option<NoteEditRect> {
-    let data = event.data();
-    let raw = data.downcast::<web_sys::MouseEvent>()?;
-    let target = raw
-        .target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
-    let item = target.closest("[data-note-list-line]").ok().flatten()?;
-    let line = item.get_attribute("data-note-list-line")?.parse().ok()?;
-    note_list_edit_rect_for_line(block_index, line)
-}
-
-fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEditRect> {
-    let document = web_sys::window()?.document()?;
-    let block = document.get_element_by_id(&format!("note-block-{block_index}"))?;
-    let item = block
-        .query_selector(&format!("[data-note-list-line=\"{line}\"]"))
-        .ok()
-        .flatten()?;
-    let content = item
-        .query_selector(":scope > p")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| item.clone());
-    let block_rect = block.get_bounding_client_rect();
-    let item_rect = content.get_bounding_client_rect();
-    Some(NoteEditRect {
-        top: item_rect.top() - block_rect.top(),
-        left: item_rect.left() - block_rect.left(),
-        width: item_rect.width(),
-        height: item_rect.height(),
-    })
-}
-
-fn activate_note_cursor(
-    block_index: usize,
-    line: u32,
-    note_active: Signal<Option<u32>>,
-    note_editing: Signal<bool>,
-    note_edit_line: Signal<Option<u32>>,
-    note_edit_rect: Signal<Option<NoteEditRect>>,
-) {
-    set_note_cursor_active(
-        block_index,
-        line,
-        note_active,
-        note_editing,
-        note_edit_line,
-        note_edit_rect,
-        false,
-    );
-}
-
-fn activate_note_cursor_centered(
-    block_index: usize,
-    line: u32,
-    note_active: Signal<Option<u32>>,
-    note_editing: Signal<bool>,
-    note_edit_line: Signal<Option<u32>>,
-    note_edit_rect: Signal<Option<NoteEditRect>>,
-) {
-    set_note_cursor_active(
-        block_index,
-        line,
-        note_active,
-        note_editing,
-        note_edit_line,
-        note_edit_rect,
-        true,
-    );
-}
-
-fn set_note_cursor_active(
-    block_index: usize,
-    line: u32,
-    mut note_active: Signal<Option<u32>>,
-    mut note_editing: Signal<bool>,
-    mut note_edit_line: Signal<Option<u32>>,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
-    center: bool,
-) {
-    note_active.set(Some(block_index as u32));
-    note_editing.set(true);
-    note_edit_line.set(Some(line));
-    note_edit_rect.set(None);
-    schedule_note_cursor_activation(block_index, line, note_edit_rect, center, true);
-}
-
-fn schedule_note_cursor_activation(
-    block_index: usize,
-    line: u32,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
-    center: bool,
-    retry: bool,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        note_edit_rect.set(note_list_edit_rect_for_line(block_index, line));
-        focus_file_input();
-        if center {
-            center_note_caret(block_index, line);
-        }
-        if retry {
-            schedule_note_cursor_activation(block_index, line, note_edit_rect, center, false);
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn browser_has_text_selection() -> bool {
-    web_sys::window()
-        .and_then(|window| window.get_selection().ok().flatten())
-        .is_some_and(|selection| !selection.is_collapsed())
-}
-
-fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32, block: &MdBlock) -> u32 {
-    if matches!(block, MdBlock::List { .. })
-        && let Some(line) = note_list_item_line(event)
-    {
-        return line;
-    }
-    let count = end.saturating_sub(start).max(1);
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
-        return start;
-    };
-    let Some(target) = raw
-        .current_target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    else {
-        return start;
-    };
-    let rect = target.get_bounding_client_rect();
-    if rect.height() <= 0.0 {
-        return start;
-    }
-    let ratio = ((raw.client_y() as f64 - rect.top()) / rect.height()).clamp(0.0, 1.0);
-    start + ((ratio * count as f64).floor() as u32).min(count - 1)
-}
-
-fn note_edit_block_class(block: &MdBlock) -> &'static str {
-    match block {
-        MdBlock::Heading { level, .. } => heading_class(*level),
-        MdBlock::Paragraph { .. } => "my-3",
-        MdBlock::List { .. } => "my-3 pl-6",
-        MdBlock::CodeBlock { .. } => {
-            "my-4 rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border"
-        }
-        MdBlock::BlockQuote { .. } => {
-            "my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70"
-        }
-        MdBlock::Table { .. } => {
-            "my-4 rounded-xl p-3 font-mono text-xs ring-1 ring-inset ring-border"
-        }
-        MdBlock::ThematicBreak => "my-6",
-        MdBlock::Html { .. } => "my-3 whitespace-pre-wrap text-foreground/60",
-    }
-}
-
-fn note_edit_line_class(block: &MdBlock) -> &'static str {
-    if matches!(block, MdBlock::List { .. }) {
-        "my-1 min-h-[1lh] w-full whitespace-pre-wrap break-words"
-    } else {
-        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
-    }
-}
-
-fn note_edit_overlay_class() -> &'static str {
-    "visible absolute inset-0 z-10 cursor-text overflow-visible"
-}
-
-fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
-    blocks
-        .iter()
-        .position(|block| block.start_line <= line && line < block.end_line)
-        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
-        .or_else(|| (!blocks.is_empty()).then_some(0))
-}
-
-fn note_pointer_col_from_pointer(event: &Event<PointerData>, text: &str) -> u32 {
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::PointerEvent>() else {
-        return 0;
-    };
-    let Some(target) = raw
-        .current_target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    else {
-        return 0;
-    };
-    note_col_at_point(&target, raw.client_x() as f64, raw.client_y() as f64, text)
-}
-
-fn note_pointer_position_at(
-    client_x: f64,
-    client_y: f64,
-    blocks: &[NoteBlock],
-) -> Option<(u32, u32)> {
-    let document = web_sys::window()?.document()?;
-    let target = document.element_from_point(client_x as f32, client_y as f32)?;
-    if let Some(block_element) = target.closest("[data-note-edit-block]").ok().flatten() {
-        let index = block_element
-            .get_attribute("data-note-edit-block")?
-            .parse::<usize>()
-            .ok()?;
-        let block = blocks.get(index)?;
-        let offset = note_col_at_point(&block_element, client_x, client_y, &block.source);
-        return Some(note_source_position(
-            &block.source,
-            block.start_line,
-            offset,
-        ));
-    }
-    let line_element = target
-        .closest("[data-note-edit-line], [data-note-list-line]")
-        .ok()
-        .flatten()?;
-    let line = line_element
-        .get_attribute("data-note-edit-line")
-        .or_else(|| line_element.get_attribute("data-note-list-line"))?
-        .parse::<u32>()
-        .ok()?;
-    let block = blocks
-        .iter()
-        .find(|block| block.start_line <= line && line < block.end_line)?;
-    let raw = block
-        .source
-        .lines()
-        .nth(line.saturating_sub(block.start_line) as usize)
-        .unwrap_or_default();
-    let prefix = if matches!(block.block, MdBlock::List { .. }) {
-        note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
-    } else {
-        0
-    };
-    let displayed = raw.chars().skip(prefix as usize).collect::<String>();
-    let col = prefix + note_col_at_point(&line_element, client_x, client_y, &displayed);
-    Some((line, col))
-}
-
-fn note_col_at_point(target: &web_sys::Element, client_x: f64, client_y: f64, text: &str) -> u32 {
-    let text_target = target
-        .query_selector("[data-note-line-text]")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| target.clone());
-    let char_count = text.chars().count() as u32;
-    if let Some(document) = web_sys::window().and_then(|window| window.document())
-        && let Some(caret) = document.caret_position_from_point(client_x as f32, client_y as f32)
-        && let Some(offset_node) = caret.offset_node()
-    {
-        let text_node: &web_sys::Node = text_target.as_ref();
-        if text_node.contains(Some(&offset_node))
-            && let Ok(range) = document.create_range()
-            && range.select_node_contents(text_node).is_ok()
-            && range.set_end(&offset_node, caret.offset()).is_ok()
-            && let Ok(fragment) = range.clone_contents()
-        {
-            return fragment
-                .text_content()
-                .unwrap_or_default()
-                .chars()
-                .count()
-                .min(char_count as usize) as u32;
-        }
-    }
-    let rect = text_target.get_bounding_client_rect();
-    if rect.width() <= 0.0 {
-        return 0;
-    }
-    let x = client_x - rect.left();
-    if x <= 0.0 {
-        return 0;
-    }
-    if x >= rect.width() {
-        return char_count;
-    }
-    let ratio = x / rect.width();
-    (ratio * char_count as f64).round() as u32
-}
-
-fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let Some(target) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&format!("note-line-{line}")))
-        else {
-            return;
-        };
-        let rect = target.get_bounding_client_rect();
-        let col =
-            prefix + note_col_at_point(&target, client_x, rect.top() + rect.height() / 2.0, &text);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-            line,
-            col,
-            extend: false,
-        });
-        focus_file_input();
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn place_note_block_caret(
-    index: usize,
-    start_line: u32,
-    source: String,
-    client_x: f64,
-    client_y: f64,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let Some(target) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&format!("note-live-block-{index}")))
-        else {
-            return;
-        };
-        let offset = note_col_at_point(&target, client_x, client_y, &source);
-        let (line, col) = note_source_position(&source, start_line, offset);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-            line,
-            col,
-            extend: false,
-        });
-        focus_file_input();
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct NoteLineChunk {
-    text: String,
-    selected: bool,
-    caret_before: bool,
-}
-
-fn note_line_chunks(
-    text: &str,
-    caret: Option<u32>,
-    selection: Option<vmux_core::editor::SelSpan>,
-) -> Vec<NoteLineChunk> {
-    let chars = text.chars().collect::<Vec<_>>();
-    let len = chars.len() as u32;
-    let caret = caret.map(|column| column.min(len));
-    let selection = selection.map(|span| {
-        let start = span.start.min(len);
-        let end = if span.end == u32::MAX {
-            len
-        } else {
-            span.end.min(len)
-        };
-        (start.min(end), start.max(end))
-    });
-    let mut boundaries = vec![0, len];
-    if let Some(caret) = caret {
-        boundaries.push(caret);
-    }
-    if let Some((start, end)) = selection {
-        boundaries.push(start);
-        boundaries.push(end);
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    let mut chunks = boundaries
-        .windows(2)
-        .map(|range| {
-            let start = range[0];
-            let end = range[1];
-            NoteLineChunk {
-                text: chars[start as usize..end as usize].iter().collect(),
-                selected: selection.is_some_and(|(selection_start, selection_end)| {
-                    start < selection_end && end > selection_start
-                }),
-                caret_before: caret == Some(start),
-            }
-        })
-        .collect::<Vec<_>>();
-    if chunks.is_empty() || caret == Some(len) {
-        chunks.push(NoteLineChunk {
-            text: String::new(),
-            selected: false,
-            caret_before: caret == Some(len),
-        });
-    }
-    chunks
-}
-
-#[derive(Clone, PartialEq)]
-struct NoteSourceChunk {
-    text: String,
-    selected: bool,
-    caret_before: bool,
-}
-
-fn note_source_chunks(
-    source: &[char],
-    start: u32,
-    end: u32,
-    caret: u32,
-    selections: &[(u32, u32)],
-) -> Vec<NoteSourceChunk> {
-    let mut boundaries = vec![start, end];
-    if start <= caret && caret < end {
-        boundaries.push(caret);
-    }
-    for (selection_start, selection_end) in selections {
-        let clipped_start = (*selection_start).clamp(start, end);
-        let clipped_end = (*selection_end).clamp(start, end);
-        if clipped_start < clipped_end {
-            boundaries.push(clipped_start);
-            boundaries.push(clipped_end);
-        }
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    boundaries
-        .windows(2)
-        .map(|range| {
-            let chunk_start = range[0];
-            let chunk_end = range[1];
-            NoteSourceChunk {
-                text: source[chunk_start as usize..chunk_end as usize]
-                    .iter()
-                    .map(|character| if *character == '\n' { ' ' } else { *character })
-                    .collect(),
-                selected: selections.iter().any(|(selection_start, selection_end)| {
-                    chunk_start < *selection_end && chunk_end > *selection_start
-                }),
-                caret_before: caret == chunk_start,
-            }
-        })
-        .collect()
-}
-
-fn note_inline_class(kind: NoteInlineKind) -> &'static str {
-    match kind {
-        NoteInlineKind::BlockMarker | NoteInlineKind::Escape => "",
-        NoteInlineKind::Code => {
-            "rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em] text-primary"
-        }
-        NoteInlineKind::Strong => "font-semibold text-foreground",
-        NoteInlineKind::Emph => "italic",
-        NoteInlineKind::Strike => "line-through opacity-70",
-        NoteInlineKind::Link | NoteInlineKind::WikiLink => {
-            "text-primary underline decoration-primary/40 underline-offset-2"
-        }
-    }
-}
-
-fn render_note_caret(width_class: &'static str) -> Element {
-    rsx! {
-        span {
-            id: NOTE_CARET_ID,
-            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-            span { class: "pointer-events-none absolute inset-y-0 left-0 {width_class} bg-current" }
-        }
-    }
-}
-
-#[component]
-fn RenderedNoteBlock(
-    block: MdBlock,
-    index: usize,
-    hidden_list_line: Option<u32>,
-    invisible: bool,
-) -> Element {
-    rsx! {
-        div { class: if invisible { "invisible" } else { "" },
-            if let Some(line) = hidden_list_line {
-                {render_block_with_hidden_list_line(&block, index, line)}
-            } else {
-                {render_block(&block, index)}
-            }
-        }
-    }
-}
-
-#[component]
-fn NoteBlockView(
-    note_blocks: Signal<Vec<NoteBlock>>,
-    diff_markers: Signal<HashMap<u32, EditorDiffMarker>>,
-    index: usize,
-    editing: bool,
-    source_cursor: Signal<vmux_core::editor::CursorPos>,
-    source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
-    note_diff_marker: Option<EditorDiffMarker>,
-    keymap: vmux_core::KeymapKind,
-    mut note_active: Signal<Option<u32>>,
-    mut note_editing: Signal<bool>,
-    mut note_edit_line: Signal<Option<u32>>,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
-    mut note_dragging: Signal<bool>,
-    comp_open: bool,
-    comp_filtered: Vec<CompletionItem>,
-    comp_sel_clamped: usize,
-) -> Element {
-    let Some(note_block) = note_blocks.read().get(index).cloned() else {
-        return rsx! {};
-    };
-    let current = if editing {
-        *source_cursor.read()
-    } else {
-        vmux_core::editor::CursorPos::default()
-    };
-    let selections = if editing {
-        source_selections.read().clone()
-    } else {
-        Vec::new()
-    };
-    let active_edit_line = if editing {
-        note_edit_line.read().unwrap_or(current.line)
-    } else {
-        0
-    };
-    let edit_rect = if editing {
-        *note_edit_rect.read()
-    } else {
-        None
-    };
-    let is_list = matches!(note_block.block, MdBlock::List { .. });
-    let is_live_inline = matches!(
-        note_block.block,
-        MdBlock::Paragraph { .. } | MdBlock::Heading { .. }
-    );
-    let start = note_block.start_line;
-    let end = note_block.end_line;
-    let note_diff_marker = note_block_diff_marker(&diff_markers.read(), start, end);
-    let source = note_block.source.clone();
-    let pointer_source = source.clone();
-    let live_pointer_source = source.clone();
-    let live_down_source = if editing {
-        source.clone()
-    } else {
-        String::new()
-    };
-    let pointer_block = note_block.block.clone();
-    let edit_lines = if !editing {
-        Vec::new()
-    } else if is_list {
-        let raw = source
-            .lines()
-            .nth(active_edit_line.saturating_sub(start) as usize)
-            .unwrap_or_default();
-        let prefix = note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix);
-        vec![(
-            active_edit_line,
-            raw.chars().skip(prefix).collect::<String>(),
-            prefix as u32,
-        )]
-    } else if source.is_empty() {
-        vec![(start, String::new(), 0)]
-    } else {
-        source
-            .lines()
-            .enumerate()
-            .map(|(offset, raw)| (start + offset as u32, raw.to_string(), 0))
-            .collect::<Vec<_>>()
-    };
-    let edit_class = note_edit_block_class(&note_block.block);
-    let heading_level = match &note_block.block {
-        MdBlock::Heading { level, .. } => Some(*level),
-        _ => None,
-    };
-    let (live_nodes, live_source, live_caret, live_selections) = if editing && is_live_inline {
-        (
-            note_inline_nodes(&source, heading_level),
-            source.chars().collect::<Vec<_>>(),
-            note_source_offset(&source, start, current.line, current.col),
-            note_selection_ranges(&source, start, &selections),
-        )
-    } else {
-        (Vec::new(), Vec::new(), 0, Vec::new())
-    };
-    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
-        "w-px"
-    } else {
-        "w-[2px]"
-    };
-    let edit_overlay_class = if is_list {
-        "visible absolute z-10 cursor-text overflow-auto"
-    } else {
-        note_edit_overlay_class()
-    };
-    let edit_overlay_style = if is_list {
-        edit_rect.map_or_else(String::new, |rect| {
-            format!(
-                "top:{}px;left:{}px;width:{}px;height:{}px;",
-                rect.top, rect.left, rect.width, rect.height,
-            )
-        })
-    } else {
-        String::new()
-    };
-
-    rsx! {
-        div {
-            id: "note-block-{index}",
-            "data-note-block": "{index}",
-            class: "relative flow-root w-full cursor-text",
-            onclick: move |event| {
-                if editing && !is_list {
-                    return;
-                }
-                event.stop_propagation();
-                if browser_has_text_selection() {
-                    return;
-                }
-                let event_data = event.data();
-                let raw = event_data.downcast::<web_sys::MouseEvent>();
-                let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
-                let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
-                if is_live_inline {
-                    note_active.set(Some(index as u32));
-                    note_editing.set(true);
-                    note_edit_line.set(None);
-                    note_edit_rect.set(None);
-                    place_note_block_caret(
-                        index,
-                        start,
-                        live_pointer_source.clone(),
-                        client_x,
-                        client_y,
-                    );
-                    return;
-                }
-                let line = note_pointer_line(&event, start, end, &pointer_block);
-                let text = pointer_source
-                    .lines()
-                    .nth(line.saturating_sub(start) as usize)
-                    .unwrap_or_default()
-                    .to_string();
-                let prefix = if is_list {
-                    note_list_marker_prefix_len(&text).map_or(0, |(_, prefix)| prefix as u32)
-                } else {
-                    0
-                };
-                note_active.set(Some(index as u32));
-                note_editing.set(true);
-                note_edit_line.set(Some(line));
-                note_edit_rect.set(
-                    is_list
-                        .then(|| note_list_edit_rect(&event, index))
-                        .flatten(),
-                );
-                let displayed = text.chars().skip(prefix as usize).collect();
-                place_note_caret(line, displayed, client_x, prefix);
-            },
-            if let Some(marker) = note_diff_marker {
-                span {
-                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
-                }
-            }
-            RenderedNoteBlock {
-                block: note_block.block.clone(),
-                index,
-                hidden_list_line: (editing && is_list).then_some(active_edit_line),
-                invisible: editing && !is_list,
-            }
-            if editing {
-                div {
-                    class: edit_overlay_class,
-                    style: edit_overlay_style,
-                    if is_live_inline {
-                        div {
-                            id: "note-live-block-{index}",
-                            "data-note-edit-block": "{index}",
-                            class: edit_class,
-                            onclick: move |event: Event<MouseData>| {
-                                event.stop_propagation();
-                                event.prevent_default();
-                            },
-                            onpointerdown: move |event: Event<PointerData>| {
-                                event.stop_propagation();
-                                event.prevent_default();
-                                let extend = event
-                                    .data()
-                                    .downcast::<web_sys::PointerEvent>()
-                                    .is_some_and(|raw| raw.shift_key());
-                                let offset = note_pointer_col_from_pointer(
-                                    &event,
-                                    &live_down_source,
-                                );
-                                let (line, col) = note_source_position(
-                                    &live_down_source,
-                                    start,
-                                    offset,
-                                );
-                                note_dragging.set(true);
-                                set_pointer_capture(&event, "file-scroll", true);
-                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                    line,
-                                    col,
-                                    extend,
-                                });
-                                focus_file_input();
-                            },
-                            onmousedown: move |event: Event<MouseData>| {
-                                event.stop_propagation();
-                                event.prevent_default();
-                            },
-                            span {
-                                "data-note-line-text": "true",
-                                class: "inline",
-                                {render_note_inline_nodes(
-                                    &live_source,
-                                    &live_nodes,
-                                    live_caret,
-                                    &live_selections,
-                                    caret_width_class,
-                                )}
-                                if live_caret == live_source.len() as u32 {
-                                    {render_note_caret(caret_width_class)}
-                                }
-                            }
-                        }
-                    } else {
-                        div {
-                            class: if is_list { "" } else { edit_class },
-                            for (line, raw, prefix) in edit_lines.iter() {
-                                {
-                                    let line = *line;
-                                    let prefix = *prefix;
-                                    let pointer_raw_down = raw.clone();
-                                    let line_selection = selections
-                                        .iter()
-                                        .find(|selection| selection.line == line)
-                                        .map(|selection| vmux_core::editor::SelSpan {
-                                            line: selection.line,
-                                            row: selection.row,
-                                            start: selection.start.saturating_sub(prefix),
-                                            end: if selection.end == u32::MAX {
-                                                u32::MAX
-                                            } else {
-                                                selection.end.saturating_sub(prefix)
-                                            },
-                                        });
-                                    let chunks = note_line_chunks(
-                                        raw,
-                                        (line == current.line)
-                                            .then_some(current.col.saturating_sub(prefix)),
-                                        line_selection,
-                                    );
-                                    let line_class = if is_list {
-                                        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
-                                    } else {
-                                        note_edit_line_class(&note_block.block)
-                                    };
-                                    rsx! {
-                                        div {
-                                            key: "{line}",
-                                            id: "note-line-{line}",
-                                            "data-note-edit-line": "{line}",
-                                            class: line_class,
-                                            onclick: move |event: Event<MouseData>| {
-                                                event.stop_propagation();
-                                                event.prevent_default();
-                                            },
-                                            onpointerdown: move |event: Event<PointerData>| {
-                                                event.stop_propagation();
-                                                event.prevent_default();
-                                                let extend = event
-                                                    .data()
-                                                    .downcast::<web_sys::PointerEvent>()
-                                                    .is_some_and(|raw| raw.shift_key());
-                                                let col = prefix
-                                                    + note_pointer_col_from_pointer(
-                                                        &event,
-                                                        &pointer_raw_down,
-                                                    );
-                                                note_dragging.set(true);
-                                                set_pointer_capture(&event, "file-scroll", true);
-                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
-                                                    line,
-                                                    col,
-                                                    extend,
-                                                });
-                                                focus_file_input();
-                                            },
-                                            onmousedown: move |event: Event<MouseData>| {
-                                                event.stop_propagation();
-                                                event.prevent_default();
-                                            },
-                                            span {
-                                                "data-note-line-text": "true",
-                                                class: "inline-block min-w-[1ch]",
-                                                for (chunk_index, chunk) in chunks.iter().enumerate() {
-                                                    if chunk.caret_before {
-                                                        span {
-                                                            key: "caret-{chunk_index}",
-                                                            id: NOTE_CARET_ID,
-                                                            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
-                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
-                                                        }
-                                                    }
-                                                    if !chunk.text.is_empty() {
-                                                        span {
-                                                            key: "text-{chunk_index}",
-                                                            class: if chunk.selected { "bg-cyan-400/20" } else { "" },
-                                                            "{chunk.text}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if comp_open && !comp_filtered.is_empty() {
-                        div {
-                            class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
-                            for (item_index, item) in comp_filtered.iter().enumerate() {
-                                div {
-                                    key: "note-completion-{item_index}",
-                                    class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-cyan-400/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
-                                    span { class: "truncate", "{item.label}" }
-                                    span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn render_note_source_range(
-    source: &[char],
-    start: u32,
-    end: u32,
-    caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
-) -> Element {
-    let chunks = note_source_chunks(source, start, end, caret, selections);
-    rsx! {
-        for (index, chunk) in chunks.iter().enumerate() {
-            if chunk.caret_before {
-                {render_note_caret(caret_width_class)}
-            }
-            if !chunk.text.is_empty() {
-                span {
-                    key: "source-{start}-{index}",
-                    class: if chunk.selected { "bg-current/20" } else { "" },
-                    "{chunk.text}"
-                }
-            }
-        }
-    }
-}
-
-fn render_note_inline_nodes(
-    source: &[char],
-    nodes: &[NoteInlineNode],
-    caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
-) -> Element {
-    rsx! {
-        for (index, node) in nodes.iter().enumerate() {
-            match node {
-                NoteInlineNode::Text { start, end } => rsx! {
-                    span { key: "text-{index}",
-                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
-                    }
-                },
-                NoteInlineNode::Syntax {
-                    kind,
-                    start,
-                    prefix_end,
-                    suffix_start,
-                    end,
-                    children,
-                } => {
-                    let reveal = *start <= caret && caret <= *end;
-                    rsx! {
-                        span { key: "syntax-{index}", class: note_inline_class(*kind),
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
-                            }
-                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn note_selection_ranges(
-    source: &str,
-    start_line: u32,
-    selections: &[vmux_core::editor::SelSpan],
-) -> Vec<(u32, u32)> {
-    selections
-        .iter()
-        .map(|selection| {
-            let start = note_source_offset(source, start_line, selection.line, selection.start);
-            let end_col = if selection.end == u32::MAX {
-                source
-                    .split('\n')
-                    .nth(selection.line.saturating_sub(start_line) as usize)
-                    .map_or(0, |line| line.chars().count() as u32)
-            } else {
-                selection.end
-            };
-            let end = note_source_offset(source, start_line, selection.line, end_col);
-            (start.min(end), start.max(end))
-        })
-        .filter(|(start, end)| start < end)
-        .collect()
-}
-
-fn emit_property_edit(
-    original_key: String,
-    key: String,
-    kind: KnowledgePropertyKind,
-    values: Vec<String>,
-    remove: bool,
-) {
-    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
-        original_key,
-        key,
-        kind,
-        values,
-        remove,
-    });
-}
-
-fn property_kind_label(kind: KnowledgePropertyKind) -> String {
-    match kind {
-        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
-        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
-        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
-        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
-        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
-        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
-        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
-    }
-}
-
-fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
-    match kind {
-        KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
-        KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
-        KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
-        KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
-        KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
-        KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
-        KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
-    }
-}
-
-#[component]
-fn NotePropertyRow(property: KnowledgeProperty) -> Element {
-    let original_key = property.key.clone();
-    let kind = property.kind;
-    let mut key = use_signal(|| property.key.clone());
-    let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
-    let mut item = use_signal(String::new);
-    let values = property.values.clone();
-    let key_for_kind = original_key.clone();
-    let key_for_delete = original_key.clone();
-    rsx! {
-        div { class: "group flex min-h-9 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/[0.035]",
-            input {
-                value: "{key}",
-                class: "w-28 shrink-0 bg-transparent text-xs font-medium text-foreground/65 outline-none focus:text-foreground",
-                oninput: move |event| key.set(event.value()),
-                onblur: {
-                    let original_key = original_key.clone();
-                    let values = values.clone();
-                    move |_| emit_property_edit(original_key.clone(), key(), kind, values.clone(), false)
-                },
-            }
-            button {
-                r#type: "button",
-                title: translate("editor-change-property-type"),
-                class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                onclick: {
-                    let values = values.clone();
-                    move |_| {
-                        let next = next_property_kind(kind);
-                        emit_property_edit(key_for_kind.clone(), key(), next, values.clone(), false);
-                    }
-                },
-                {property_kind_label(kind)}
-            }
-            div { class: "min-w-0 flex-1",
-                if kind == KnowledgePropertyKind::Checkbox {
-                    button {
-                        r#type: "button",
-                        class: if scalar().eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
-                        onclick: {
-                            let original_key = original_key.clone();
-                            move |_| {
-                                let next = (!scalar().eq_ignore_ascii_case("true")).to_string();
-                                scalar.set(next.clone());
-                                emit_property_edit(original_key.clone(), key(), kind, vec![next], false);
-                            }
-                        },
-                        span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
-                    }
-                } else if matches!(kind, KnowledgePropertyKind::List | KnowledgePropertyKind::Tags) {
-                    div { class: "flex flex-wrap items-center gap-1",
-                        for (index, value) in values.iter().enumerate() {
-                            {
-                                let remove_key = original_key.clone();
-                                let remove_values = values.clone();
-                                rsx! {
-                                    button {
-                                        key: "{index}:{value}",
-                                        r#type: "button",
-                                        title: translate("common-remove"),
-                                        class: if kind == KnowledgePropertyKind::Tags { "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary hover:bg-destructive/10 hover:text-destructive" } else { "rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/75 hover:bg-destructive/10 hover:text-destructive" },
-                                        onclick: move |_| {
-                                            let mut next = remove_values.clone();
-                                            next.remove(index);
-                                            emit_property_edit(remove_key.clone(), key(), kind, next, false);
-                                        },
-                                        if kind == KnowledgePropertyKind::Tags { "#" }
-                                        "{value}"
-                                    }
-                                }
-                            }
-                        }
-                        input {
-                            value: "{item}",
-                            placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
-                            class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                            oninput: move |event| item.set(event.value()),
-                            onkeydown: {
-                                let add_key = original_key.clone();
-                                let add_values = values.clone();
-                                move |event: Event<KeyboardData>| {
-                                    if event.key() != Key::Enter {
-                                        return;
-                                    }
-                                    event.prevent_default();
-                                    let value = item().trim().trim_start_matches('#').to_string();
-                                    if value.is_empty() {
-                                        return;
-                                    }
-                                    let mut next = add_values.clone();
-                                    if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
-                                        next.push(value);
-                                    }
-                                    item.set(String::new());
-                                    emit_property_edit(add_key.clone(), key(), kind, next, false);
-                                }
-                            },
-                        }
-                    }
-                } else {
-                    input {
-                        r#type: match kind {
-                            KnowledgePropertyKind::Number => "number",
-                            KnowledgePropertyKind::Date => "date",
-                            _ => "text",
-                        },
-                        value: "{scalar}",
-                        placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
-                        class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
-                        oninput: move |event| scalar.set(event.value()),
-                        onblur: {
-                            let original_key = original_key.clone();
-                            move |_| emit_property_edit(original_key.clone(), key(), kind, vec![scalar()], false)
-                        },
-                    }
-                }
-            }
-            button {
-                r#type: "button",
-                title: translate("editor-delete-property"),
-                class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
-                onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
-                Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
-            }
-        }
-    }
-}
-
-#[component]
-fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
-    let mut open = use_signal(|| !properties.is_empty());
-    let has_tags = properties
-        .iter()
-        .any(|property| property.kind == KnowledgePropertyKind::Tags);
-    let add_key = {
-        let mut suffix = 1;
-        loop {
-            let candidate = if suffix == 1 {
-                "property".to_string()
-            } else {
-                format!("property-{suffix}")
-            };
-            if !properties
-                .iter()
-                .any(|property| property.key.eq_ignore_ascii_case(&candidate))
-            {
-                break candidate;
-            }
-            suffix += 1;
-        }
-    };
-    rsx! {
-        div { class: "mb-5 rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
-            div { class: "flex h-9 items-center gap-2 px-3",
-                button {
-                    r#type: "button",
-                    class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
-                    onclick: move |_| open.toggle(),
-                    Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
-                    span { {translate("editor-properties")} }
-                    if !properties.is_empty() {
-                        span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
-                    }
-                }
-                button {
-                    r#type: "button",
-                    title: translate("editor-add-tags"),
-                    disabled: has_tags,
-                    class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
-                    onclick: move |_| {
-                        open.set(true);
-                        emit_property_edit(
-                            String::new(),
-                            "tags".to_string(),
-                            KnowledgePropertyKind::Tags,
-                            Vec::new(),
-                            false,
-                        );
-                    },
-                    "#"
-                }
-                button {
-                    r#type: "button",
-                    title: translate("editor-add-property"),
-                    class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
-                    onclick: move |_| {
-                        open.set(true);
-                        emit_property_edit(
-                            String::new(),
-                            add_key.clone(),
-                            KnowledgePropertyKind::Text,
-                            vec![String::new()],
-                            false,
-                        );
-                    },
-                    Icon { class: "h-3.5 w-3.5", path { d: "M12 5v14" } path { d: "M5 12h14" } }
-                }
-            }
-            if open() {
-                div { class: "border-t border-foreground/[0.06] px-1 py-1",
-                    if properties.is_empty() {
-                        div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
-                    }
-                    for property in properties {
-                        NotePropertyRow {
-                            key: "{property.key}:{property.kind:?}:{property.values:?}",
-                            property,
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    Dir,
-    Text,
-    Media(MediaKind),
-}
-
-#[derive(Clone, PartialEq)]
-enum Preview {
-    None,
-    Dir(Vec<FileDirEntry>),
-    Text(Vec<FileLine>),
-    Image(String),
-    Video {
-        url: String,
-        path: String,
-        native: bool,
-    },
-    Info {
-        size: u64,
-        modified: String,
-        kind: String,
-    },
-    Error(String),
-}
-
-fn blob_url(bytes: &[u8]) -> Option<String> {
-    let arr = js_sys::Uint8Array::from(bytes);
-    let parts = js_sys::Array::new();
-    parts.push(&arr.buffer());
-    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).ok()?;
-    web_sys::Url::create_object_url_with_blob(&blob).ok()
-}
-
-fn revoke(url: &str) {
-    let _ = web_sys::Url::revoke_object_url(url);
-}
-
-fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
-    if let Preview::Image(old) = &*preview.read() {
-        revoke(old);
-    }
-    preview.set(Preview::None);
-    for url in thumbs.read().values() {
-        revoke(url);
-    }
-    thumbs.set(HashMap::new());
-}
-
-fn request_preview(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
-}
-
-fn request_thumb(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: true });
-}
-
-fn open_path(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
-}
-
-fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
-    let next = generation().wrapping_add(1);
-    generation.set(next);
-    let Some(window) = web_sys::window() else {
-        nonce.set(nonce().wrapping_add(1));
-        return;
-    };
-    let closure = Closure::once(move || {
-        if generation() == next {
-            nonce.set(nonce().wrapping_add(1));
-        }
-    });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        closure.as_ref().unchecked_ref(),
-        GIT_REFRESH_DEBOUNCE_MS,
-    );
-    closure.forget();
-}
-
-fn parent_of(path: &str) -> String {
-    match path.trim_end_matches('/').rsplit_once('/') {
-        Some(("", _)) => "/".to_string(),
-        Some((prefix, _)) => prefix.to_string(),
-        None => path.to_string(),
-    }
-}
-
-fn format_size(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    const GB: f64 = MB * 1024.0;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.1} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KB", b / KB)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
-
-fn row_class(selected: bool) -> String {
-    let base =
-        "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
-    if selected {
-        format!(
-            "{base} bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
-        )
-    } else {
-        format!("{base} text-foreground/75 hover:bg-foreground/[0.05]")
-    }
-}
-
-fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "+",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "~",
-        EditorDiffMarker::Deleted => "-",
-    }
-}
-
-fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "text-ansi-2",
-        EditorDiffMarker::Modified => "text-ansi-3",
-        EditorDiffMarker::Deleted => "text-ansi-1",
-        EditorDiffMarker::Staged => "text-ansi-3/80",
-    }
-}
-
-fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
-        EditorDiffMarker::Modified => "bg-ansi-3/[0.06] hover:bg-ansi-3/[0.10]",
-        EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
-        EditorDiffMarker::Staged => "bg-ansi-3/[0.035] hover:bg-ansi-3/[0.07]",
-    }
-}
-
-fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
-    match marker {
-        EditorDiffMarker::Added => "bg-ansi-2",
-        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "bg-ansi-3",
-        EditorDiffMarker::Deleted => "bg-ansi-1",
-    }
-}
-
-fn note_block_diff_marker(
-    markers: &HashMap<u32, EditorDiffMarker>,
-    start_line: u32,
-    end_line: u32,
-) -> Option<EditorDiffMarker> {
-    let priority = |marker| match marker {
-        EditorDiffMarker::Staged => 0,
-        EditorDiffMarker::Deleted => 1,
-        EditorDiffMarker::Added => 2,
-        EditorDiffMarker::Modified => 3,
-    };
-    (start_line..=end_line)
-        .filter_map(|line| markers.get(&(line + 1)).copied())
-        .max_by_key(|marker| priority(*marker))
-}
-
-fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
-    if show_hidden {
-        all.to_vec()
-    } else {
-        all.iter()
-            .filter(|e| !e.name.starts_with('.'))
-            .cloned()
-            .collect()
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn apply_dir(
-    mut dir_entries: Signal<Vec<FileDirEntry>>,
-    mut parent_entries: Signal<Vec<FileDirEntry>>,
-    mut path: Signal<String>,
-    mut selected: Signal<usize>,
-    mut preview: Signal<Preview>,
-    mut thumbs: Signal<HashMap<String, String>>,
-    show_hidden: bool,
-    entries: Vec<FileDirEntry>,
-    parent: Vec<FileDirEntry>,
-    new_path: String,
-    select_path: Option<String>,
-) {
-    for url in thumbs.read().values() {
-        revoke(url);
-    }
-    thumbs.set(HashMap::new());
-    if let Preview::Image(old) = &*preview.read() {
-        revoke(old);
-    }
-    preview.set(Preview::None);
-    parent_entries.set(parent);
-    path.set(new_path);
-    let vis = visible_entries(&entries, show_hidden);
-    let sel_idx = select_path
-        .as_deref()
-        .map(|p| dir_select_index(&vis, p))
-        .unwrap_or(0);
-    selected.set(sel_idx);
-    if let Some(sel) = vis.get(sel_idx) {
-        request_preview(sel.path.clone());
-    }
-    for e in &vis {
-        if !e.is_dir && image_mime(&e.path).is_some() {
-            request_thumb(e.path.clone());
-        }
-    }
-    dir_entries.set(entries);
-}
-
-fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
-    if let Some(url) = thumb {
-        return rsx! {
-            img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
-        };
-    }
-    type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
-}
-
-fn render_preview(preview: &Preview) -> Element {
-    match preview {
-        Preview::None => rsx! {
-            div { class: "text-xs text-muted-foreground opacity-60", "" }
-        },
-        Preview::Image(url) => rsx! {
-            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
-        },
-        Preview::Video { url, path, native } => {
-            if *native {
-                let path = path.clone();
-                rsx! {
-                    div {
-                        key: "{path}",
-                        id: VIDEO_HOST_ID,
-                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
-                        onmounted: move |_| report_video_rect(path.clone()),
-                    }
-                }
-            } else {
-                rsx! {
-                    video {
-                        id: "preview-video",
-                        src: "{url}",
-                        controls: true,
-                        autoplay: false,
-                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
-                    }
-                }
-            }
-        }
-        Preview::Text(lines) => rsx! {
-            div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
-                for line in lines.iter() {
-                    div { key: "{line.line_no}", class: "whitespace-pre",
-                        for (i, s) in line.spans.iter().enumerate() {
-                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
-                        }
-                    }
-                }
-            }
-        },
-        Preview::Dir(entries) => rsx! {
-            div { class: "h-full w-full overflow-auto",
-                for e in entries.iter() {
-                    div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
-                        {entry_visual(e, None)}
-                        span { class: "truncate text-xs", "{e.name}" }
-                    }
-                }
-            }
-        },
-        Preview::Info {
-            size,
-            modified,
-            kind,
-        } => rsx! {
-            div { class: "space-y-1 text-center text-xs text-muted-foreground",
-                div {
-                    class: "uppercase tracking-wide text-foreground/80",
-                    {match kind.as_str() {
-                        "image (too large to preview)" => translate("editor-preview-large-image"),
-                        "binary" => translate("editor-preview-binary"),
-                        "file" => translate("editor-preview-file"),
-                        _ => kind.clone(),
-                    }}
-                }
-                div { "{format_size(*size)}" }
-                if !modified.is_empty() {
-                    div { class: "opacity-70", "{modified}" }
-                }
-            }
-        },
-        Preview::Error(m) => rsx! {
-            div { class: "text-xs text-ansi-1", "{m}" }
-        },
-    }
-}
-
-fn explorer_client_id() -> u64 {
-    ((js_sys::Date::now() as u64) << 12) ^ (js_sys::Math::random() * 4096.0) as u64
-}
-
-fn set_explorer_visible(
-    next: bool,
-    mut visible: Signal<bool>,
-    mut preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    mut request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    let next_request_id = request_id().wrapping_add(1);
-    request_id.set(next_request_id);
-    preferred_visible.set(next);
-    visible.set(next && explorer_has_room(width()));
-    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
-        visible: next,
-        client_id: client_id(),
-        request_id: next_request_id,
-    });
-    if !next {
-        match mode() {
-            Mode::Text => focus_file_input(),
-            Mode::Dir | Mode::Media(_) => focus_container(),
-        }
-    }
-}
-
-fn explorer_page_width() -> Option<u32> {
-    web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(PAGE_ID))
-        .map(|element| element.client_width().max(0) as u32)
-}
-
-fn explorer_has_room(explorer_width: u32) -> bool {
-    explorer_page_width().is_some_and(|page_width| {
-        NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
-    })
-}
-
-fn sync_explorer_visibility(
-    mut visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-) {
-    let next = preferred_visible() && explorer_has_room(width());
-    if visible() != next {
-        visible.set(next);
-    }
-}
-
-fn schedule_explorer_visibility_sync(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        sync_explorer_visibility(visible, preferred_visible, width);
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn show_explorer_if_room(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        if visible() {
-            return;
-        }
-        if explorer_has_room(width()) {
-            set_explorer_visible(
-                true,
-                visible,
-                preferred_visible,
-                width,
-                client_id,
-                request_id,
-                mode,
-            );
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn schedule_lsp_notice_clear(
-    mut notice: Signal<Option<LspInstallProgress>>,
-    mut request: Signal<Option<(String, String)>>,
-    mut generation: Signal<u32>,
-    delay: i32,
-) {
-    let id = generation().wrapping_add(1);
-    generation.set(id);
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let clear = Closure::once(move || {
-        if generation() == id {
-            notice.set(None);
-            request.set(None);
-        }
-    });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        clear.as_ref().unchecked_ref(),
-        delay,
-    );
-    clear.forget();
-}
-
-fn toggle_explorer(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    set_explorer_visible(
-        !preferred_visible(),
-        visible,
-        preferred_visible,
-        width,
-        client_id,
-        request_id,
-        mode,
-    );
-}
-
-fn reveal_current_in_explorer(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    if visible() {
-        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
-    } else {
-        set_explorer_visible(
-            true,
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-    }
-}
-
-fn handle_explorer_shortcut(
-    event: &Event<KeyboardData>,
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> bool {
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-        return false;
-    };
-    let key = raw.key();
-    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
-        event.prevent_default();
-        reveal_current_in_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
-        event.prevent_default();
-        toggle_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    false
-}
-
-#[component]
-fn ExplorerSidebar(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    mut resizing: Signal<bool>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> Element {
-    let open = visible();
-    let panel_width = width();
-    let wrapper_style = if open {
-        format!("width:{panel_width}px;contain:layout style;")
-    } else {
-        "width:0px;contain:layout style;".to_string()
-    };
-    let panel_style = format!("width:{panel_width}px;");
-    let panel_class = if open {
-        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
-    } else {
-        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
-    };
-    rsx! {
-        div {
-            class: "relative z-[2] h-full shrink-0",
-            style: "{wrapper_style}",
-            onkeydown: move |event| {
-                handle_explorer_shortcut(
-                    &event,
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                );
-            },
-            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
-        }
-        div {
-            class: if open {
-                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
-            } else {
-                "pointer-events-none h-full w-0 shrink-0 opacity-0"
-            },
-            onmousedown: move |e: Event<MouseData>| {
-                e.prevent_default();
-                resizing.set(true);
-            },
-        }
-    }
-}
-
-#[component]
-fn ExplorerToggleButton(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> Element {
-    rsx! {
-        button {
-            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
-            title: translate("editor-toggle-explorer"),
-            onclick: move |_| {
-                toggle_explorer(
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                )
-            },
-            svg {
-                class: "h-4 w-4",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "2",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
-                line { x1: "9", y1: "3", x2: "9", y2: "21" }
-            }
-        }
-    }
-}
-
 #[component]
 pub fn Page() -> Element {
     use_theme();
@@ -4037,6 +2101,1942 @@ pub fn Page() -> Element {
                 }
             }
         }
+        }
+    }
+}
+
+const CONTAINER_ID: &str = "file-container";
+const PAGE_ID: &str = "file-page";
+const MEASURE_ID: &str = "file-measure";
+const NOTE_CARET_ID: &str = "note-caret";
+const VIDEO_HOST_ID: &str = "vmux-video-host";
+const INPUT_ID: &str = "file-input";
+const SCROLL_ID: &str = "file-scroll";
+const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
+const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
+const LSP_NOTICE_DONE_MS: i32 = 2_500;
+const LSP_NOTICE_FAILED_MS: i32 = 6_000;
+
+std::thread_local! {
+    static NOTE_CARET_VISIBILITY_QUEUE: RefCell<NoteCaretVisibilityQueue> = RefCell::new(NoteCaretVisibilityQueue::default());
+}
+
+fn is_markdown_file(path: &str) -> bool {
+    path.rsplit_once('.')
+        .map(|(_, extension)| {
+            extension.eq_ignore_ascii_case("md")
+                || extension.eq_ignore_ascii_case("markdown")
+                || extension.eq_ignore_ascii_case("mdx")
+        })
+        .unwrap_or(false)
+}
+
+fn file_mode_class(active: bool) -> &'static str {
+    if active {
+        "rounded bg-primary/15 px-1.5 py-0.5 text-primary transition-[background-color,color,box-shadow] duration-200 ease-out"
+    } else {
+        "rounded px-1.5 py-0.5 text-foreground/45 transition-[background-color,color,box-shadow] duration-200 ease-out hover:bg-foreground/[0.06] hover:text-foreground"
+    }
+}
+
+fn editor_pointer_position(
+    event: &web_sys::MouseEvent,
+    target: &web_sys::Element,
+    gutter: f64,
+    char_width: f64,
+    char_height: f64,
+    wrap_columns: u16,
+    round: bool,
+) -> (f64, u32) {
+    let rect = target.get_bounding_client_rect();
+    let x = event.client_x() as f64 - rect.left() - gutter;
+    if char_width <= 0.0 {
+        return (x, 0);
+    }
+    let local = if round {
+        (x.max(0.0) / char_width).round()
+    } else {
+        (x.max(0.0) / char_width).floor()
+    } as u32;
+    if wrap_columns == 0 || char_height <= 0.0 {
+        return (x, local);
+    }
+    let wrapped_row =
+        ((event.client_y() as f64 - rect.top()).max(0.0) / char_height).floor() as u32;
+    (
+        x,
+        wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
+    )
+}
+
+fn set_pointer_capture(event: &Event<PointerData>, element_id: &str, capture: bool) {
+    let data = event.data();
+    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+        return;
+    };
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(element_id))
+    else {
+        return;
+    };
+    if capture {
+        let _ = element.set_pointer_capture(pointer.pointer_id());
+    } else {
+        let _ = element.release_pointer_capture(pointer.pointer_id());
+    }
+}
+
+fn editor_pointer_file_position(
+    pointer: &web_sys::PointerEvent,
+    gutter: f64,
+    char_width: f64,
+    char_height: f64,
+    layouts: &[FileLineLayout],
+    wrap_columns: u16,
+    round: bool,
+) -> Option<(u32, u32)> {
+    if char_width <= 0.0 || char_height <= 0.0 {
+        return None;
+    }
+    let scroll = scroll_el()?;
+    let rect = scroll.get_bounding_client_rect();
+    let content_y = pointer.client_y() as f64 - rect.top() + scroll.scroll_top() as f64;
+    let row = (content_y.max(0.0) / char_height).floor() as u32;
+    let layout = layouts
+        .iter()
+        .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
+    let x = pointer.client_x() as f64 - rect.left() + scroll.scroll_left() as f64 - gutter;
+    let local = if round {
+        (x.max(0.0) / char_width).round()
+    } else {
+        (x.max(0.0) / char_width).floor()
+    } as u32;
+    let col = if wrap_columns == 0 {
+        local
+    } else {
+        (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
+    };
+    Some((layout.line_no, col))
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct NoteEditRect {
+    top: f64,
+    left: f64,
+    width: f64,
+    height: f64,
+}
+
+fn note_list_item_line(event: &Event<MouseData>) -> Option<u32> {
+    let data = event.data();
+    let raw = data.downcast::<web_sys::MouseEvent>()?;
+    raw.target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?
+        .closest("[data-note-list-line]")
+        .ok()
+        .flatten()?
+        .get_attribute("data-note-list-line")?
+        .parse()
+        .ok()
+}
+
+fn note_list_edit_rect(event: &Event<MouseData>, block_index: usize) -> Option<NoteEditRect> {
+    let data = event.data();
+    let raw = data.downcast::<web_sys::MouseEvent>()?;
+    let target = raw
+        .target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
+    let item = target.closest("[data-note-list-line]").ok().flatten()?;
+    let line = item.get_attribute("data-note-list-line")?.parse().ok()?;
+    note_list_edit_rect_for_line(block_index, line)
+}
+
+fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEditRect> {
+    let document = web_sys::window()?.document()?;
+    let block = document.get_element_by_id(&format!("note-block-{block_index}"))?;
+    let item = block
+        .query_selector(&format!("[data-note-list-line=\"{line}\"]"))
+        .ok()
+        .flatten()?;
+    let content = item
+        .query_selector(":scope > p")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| item.clone());
+    let block_rect = block.get_bounding_client_rect();
+    let item_rect = content.get_bounding_client_rect();
+    Some(NoteEditRect {
+        top: item_rect.top() - block_rect.top(),
+        left: item_rect.left() - block_rect.left(),
+        width: item_rect.width(),
+        height: item_rect.height(),
+    })
+}
+
+fn activate_note_cursor(
+    block_index: usize,
+    line: u32,
+    note_active: Signal<Option<u32>>,
+    note_editing: Signal<bool>,
+    note_edit_line: Signal<Option<u32>>,
+    note_edit_rect: Signal<Option<NoteEditRect>>,
+) {
+    set_note_cursor_active(
+        block_index,
+        line,
+        note_active,
+        note_editing,
+        note_edit_line,
+        note_edit_rect,
+        false,
+    );
+}
+
+fn activate_note_cursor_centered(
+    block_index: usize,
+    line: u32,
+    note_active: Signal<Option<u32>>,
+    note_editing: Signal<bool>,
+    note_edit_line: Signal<Option<u32>>,
+    note_edit_rect: Signal<Option<NoteEditRect>>,
+) {
+    set_note_cursor_active(
+        block_index,
+        line,
+        note_active,
+        note_editing,
+        note_edit_line,
+        note_edit_rect,
+        true,
+    );
+}
+
+fn set_note_cursor_active(
+    block_index: usize,
+    line: u32,
+    mut note_active: Signal<Option<u32>>,
+    mut note_editing: Signal<bool>,
+    mut note_edit_line: Signal<Option<u32>>,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    center: bool,
+) {
+    note_active.set(Some(block_index as u32));
+    note_editing.set(true);
+    note_edit_line.set(Some(line));
+    note_edit_rect.set(None);
+    schedule_note_cursor_activation(block_index, line, note_edit_rect, center, true);
+}
+
+fn schedule_note_cursor_activation(
+    block_index: usize,
+    line: u32,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    center: bool,
+    retry: bool,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        note_edit_rect.set(note_list_edit_rect_for_line(block_index, line));
+        focus_file_input();
+        if center {
+            center_note_caret(block_index, line);
+        }
+        if retry {
+            schedule_note_cursor_activation(block_index, line, note_edit_rect, center, false);
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn browser_has_text_selection() -> bool {
+    web_sys::window()
+        .and_then(|window| window.get_selection().ok().flatten())
+        .is_some_and(|selection| !selection.is_collapsed())
+}
+
+fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32, block: &MdBlock) -> u32 {
+    if matches!(block, MdBlock::List { .. })
+        && let Some(line) = note_list_item_line(event)
+    {
+        return line;
+    }
+    let count = end.saturating_sub(start).max(1);
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
+        return start;
+    };
+    let Some(target) = raw
+        .current_target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    else {
+        return start;
+    };
+    let rect = target.get_bounding_client_rect();
+    if rect.height() <= 0.0 {
+        return start;
+    }
+    let ratio = ((raw.client_y() as f64 - rect.top()) / rect.height()).clamp(0.0, 1.0);
+    start + ((ratio * count as f64).floor() as u32).min(count - 1)
+}
+
+fn note_edit_block_class(block: &MdBlock) -> &'static str {
+    match block {
+        MdBlock::Heading { level, .. } => heading_class(*level),
+        MdBlock::Paragraph { .. } => "my-3",
+        MdBlock::List { .. } => "my-3 pl-6",
+        MdBlock::CodeBlock { .. } => {
+            "my-4 rounded-xl bg-foreground/[0.05] p-4 font-mono text-xs ring-1 ring-inset ring-border"
+        }
+        MdBlock::BlockQuote { .. } => {
+            "my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70"
+        }
+        MdBlock::Table { .. } => {
+            "my-4 rounded-xl p-3 font-mono text-xs ring-1 ring-inset ring-border"
+        }
+        MdBlock::ThematicBreak => "my-6",
+        MdBlock::Html { .. } => "my-3 whitespace-pre-wrap text-foreground/60",
+    }
+}
+
+fn note_edit_line_class(block: &MdBlock) -> &'static str {
+    if matches!(block, MdBlock::List { .. }) {
+        "my-1 min-h-[1lh] w-full whitespace-pre-wrap break-words"
+    } else {
+        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
+    }
+}
+
+fn note_edit_overlay_class() -> &'static str {
+    "visible absolute inset-0 z-10 cursor-text overflow-visible"
+}
+
+fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
+    blocks
+        .iter()
+        .position(|block| block.start_line <= line && line < block.end_line)
+        .or_else(|| blocks.iter().rposition(|block| block.start_line <= line))
+        .or_else(|| (!blocks.is_empty()).then_some(0))
+}
+
+fn note_pointer_col_from_pointer(event: &Event<PointerData>, text: &str) -> u32 {
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::PointerEvent>() else {
+        return 0;
+    };
+    let Some(target) = raw
+        .current_target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    else {
+        return 0;
+    };
+    note_col_at_point(&target, raw.client_x() as f64, raw.client_y() as f64, text)
+}
+
+fn note_pointer_position_at(
+    client_x: f64,
+    client_y: f64,
+    blocks: &[NoteBlock],
+) -> Option<(u32, u32)> {
+    let document = web_sys::window()?.document()?;
+    let target = document.element_from_point(client_x as f32, client_y as f32)?;
+    if let Some(block_element) = target.closest("[data-note-edit-block]").ok().flatten() {
+        let index = block_element
+            .get_attribute("data-note-edit-block")?
+            .parse::<usize>()
+            .ok()?;
+        let block = blocks.get(index)?;
+        let offset = note_col_at_point(&block_element, client_x, client_y, &block.source);
+        return Some(note_source_position(
+            &block.source,
+            block.start_line,
+            offset,
+        ));
+    }
+    let line_element = target
+        .closest("[data-note-edit-line], [data-note-list-line]")
+        .ok()
+        .flatten()?;
+    let line = line_element
+        .get_attribute("data-note-edit-line")
+        .or_else(|| line_element.get_attribute("data-note-list-line"))?
+        .parse::<u32>()
+        .ok()?;
+    let block = blocks
+        .iter()
+        .find(|block| block.start_line <= line && line < block.end_line)?;
+    let raw = block
+        .source
+        .lines()
+        .nth(line.saturating_sub(block.start_line) as usize)
+        .unwrap_or_default();
+    let prefix = if matches!(block.block, MdBlock::List { .. }) {
+        note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
+    } else {
+        0
+    };
+    let displayed = raw.chars().skip(prefix as usize).collect::<String>();
+    let col = prefix + note_col_at_point(&line_element, client_x, client_y, &displayed);
+    Some((line, col))
+}
+
+fn note_col_at_point(target: &web_sys::Element, client_x: f64, client_y: f64, text: &str) -> u32 {
+    let text_target = target
+        .query_selector("[data-note-line-text]")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| target.clone());
+    let char_count = text.chars().count() as u32;
+    if let Some(document) = web_sys::window().and_then(|window| window.document())
+        && let Some(caret) = document.caret_position_from_point(client_x as f32, client_y as f32)
+        && let Some(offset_node) = caret.offset_node()
+    {
+        let text_node: &web_sys::Node = text_target.as_ref();
+        if text_node.contains(Some(&offset_node))
+            && let Ok(range) = document.create_range()
+            && range.select_node_contents(text_node).is_ok()
+            && range.set_end(&offset_node, caret.offset()).is_ok()
+            && let Ok(fragment) = range.clone_contents()
+        {
+            return fragment
+                .text_content()
+                .unwrap_or_default()
+                .chars()
+                .count()
+                .min(char_count as usize) as u32;
+        }
+    }
+    let rect = text_target.get_bounding_client_rect();
+    if rect.width() <= 0.0 {
+        return 0;
+    }
+    let x = client_x - rect.left();
+    if x <= 0.0 {
+        return 0;
+    }
+    if x >= rect.width() {
+        return char_count;
+    }
+    let ratio = x / rect.width();
+    (ratio * char_count as f64).round() as u32
+}
+
+fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        let Some(target) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&format!("note-line-{line}")))
+        else {
+            return;
+        };
+        let rect = target.get_bounding_client_rect();
+        let col =
+            prefix + note_col_at_point(&target, client_x, rect.top() + rect.height() / 2.0, &text);
+        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+            line,
+            col,
+            extend: false,
+        });
+        focus_file_input();
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn place_note_block_caret(
+    index: usize,
+    start_line: u32,
+    source: String,
+    client_x: f64,
+    client_y: f64,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        let Some(target) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&format!("note-live-block-{index}")))
+        else {
+            return;
+        };
+        let offset = note_col_at_point(&target, client_x, client_y, &source);
+        let (line, col) = note_source_position(&source, start_line, offset);
+        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+            line,
+            col,
+            extend: false,
+        });
+        focus_file_input();
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct NoteLineChunk {
+    text: String,
+    selected: bool,
+    caret_before: bool,
+}
+
+fn note_line_chunks(
+    text: &str,
+    caret: Option<u32>,
+    selection: Option<vmux_core::editor::SelSpan>,
+) -> Vec<NoteLineChunk> {
+    let chars = text.chars().collect::<Vec<_>>();
+    let len = chars.len() as u32;
+    let caret = caret.map(|column| column.min(len));
+    let selection = selection.map(|span| {
+        let start = span.start.min(len);
+        let end = if span.end == u32::MAX {
+            len
+        } else {
+            span.end.min(len)
+        };
+        (start.min(end), start.max(end))
+    });
+    let mut boundaries = vec![0, len];
+    if let Some(caret) = caret {
+        boundaries.push(caret);
+    }
+    if let Some((start, end)) = selection {
+        boundaries.push(start);
+        boundaries.push(end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    let mut chunks = boundaries
+        .windows(2)
+        .map(|range| {
+            let start = range[0];
+            let end = range[1];
+            NoteLineChunk {
+                text: chars[start as usize..end as usize].iter().collect(),
+                selected: selection.is_some_and(|(selection_start, selection_end)| {
+                    start < selection_end && end > selection_start
+                }),
+                caret_before: caret == Some(start),
+            }
+        })
+        .collect::<Vec<_>>();
+    if chunks.is_empty() || caret == Some(len) {
+        chunks.push(NoteLineChunk {
+            text: String::new(),
+            selected: false,
+            caret_before: caret == Some(len),
+        });
+    }
+    chunks
+}
+
+#[derive(Clone, PartialEq)]
+struct NoteSourceChunk {
+    text: String,
+    selected: bool,
+    caret_before: bool,
+}
+
+fn note_source_chunks(
+    source: &[char],
+    start: u32,
+    end: u32,
+    caret: u32,
+    selections: &[(u32, u32)],
+) -> Vec<NoteSourceChunk> {
+    let mut boundaries = vec![start, end];
+    if start <= caret && caret < end {
+        boundaries.push(caret);
+    }
+    for (selection_start, selection_end) in selections {
+        let clipped_start = (*selection_start).clamp(start, end);
+        let clipped_end = (*selection_end).clamp(start, end);
+        if clipped_start < clipped_end {
+            boundaries.push(clipped_start);
+            boundaries.push(clipped_end);
+        }
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+    boundaries
+        .windows(2)
+        .map(|range| {
+            let chunk_start = range[0];
+            let chunk_end = range[1];
+            NoteSourceChunk {
+                text: source[chunk_start as usize..chunk_end as usize]
+                    .iter()
+                    .map(|character| if *character == '\n' { ' ' } else { *character })
+                    .collect(),
+                selected: selections.iter().any(|(selection_start, selection_end)| {
+                    chunk_start < *selection_end && chunk_end > *selection_start
+                }),
+                caret_before: caret == chunk_start,
+            }
+        })
+        .collect()
+}
+
+fn note_inline_class(kind: NoteInlineKind) -> &'static str {
+    match kind {
+        NoteInlineKind::BlockMarker | NoteInlineKind::Escape => "",
+        NoteInlineKind::Code => {
+            "rounded bg-foreground/10 px-1 py-0.5 font-mono text-[0.85em] text-primary"
+        }
+        NoteInlineKind::Strong => "font-semibold text-foreground",
+        NoteInlineKind::Emph => "italic",
+        NoteInlineKind::Strike => "line-through opacity-70",
+        NoteInlineKind::Link | NoteInlineKind::WikiLink => {
+            "text-primary underline decoration-primary/40 underline-offset-2"
+        }
+    }
+}
+
+fn render_note_caret(width_class: &'static str) -> Element {
+    rsx! {
+        span {
+            id: NOTE_CARET_ID,
+            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
+            span { class: "pointer-events-none absolute inset-y-0 left-0 {width_class} bg-current" }
+        }
+    }
+}
+
+#[component]
+fn ExplorerSidebar(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    mut resizing: Signal<bool>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> Element {
+    let open = visible();
+    let panel_width = width();
+    let wrapper_style = if open {
+        format!("width:{panel_width}px;contain:layout style;")
+    } else {
+        "width:0px;contain:layout style;".to_string()
+    };
+    let panel_style = format!("width:{panel_width}px;");
+    let panel_class = if open {
+        "absolute inset-y-0 left-0 h-full translate-x-0 opacity-100 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    } else {
+        "pointer-events-none absolute inset-y-0 left-0 h-full -translate-x-full opacity-0 transition-[translate,opacity] duration-200 ease-out will-change-[translate]"
+    };
+    rsx! {
+        div {
+            class: "relative z-[2] h-full shrink-0",
+            style: "{wrapper_style}",
+            onkeydown: move |event| {
+                handle_explorer_shortcut(
+                    &event,
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                );
+            },
+            div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
+        }
+        div {
+            class: if open {
+                "relative z-[2] h-full w-1 shrink-0 cursor-col-resize bg-foreground/[0.06] opacity-100 transition-opacity duration-150 hover:bg-cyan-400/40"
+            } else {
+                "pointer-events-none h-full w-0 shrink-0 opacity-0"
+            },
+            onmousedown: move |e: Event<MouseData>| {
+                e.prevent_default();
+                resizing.set(true);
+            },
+        }
+    }
+}
+
+#[component]
+fn ExplorerToggleButton(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> Element {
+    rsx! {
+        button {
+            class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
+            title: translate("editor-toggle-explorer"),
+            onclick: move |_| {
+                toggle_explorer(
+                    visible,
+                    preferred_visible,
+                    width,
+                    client_id,
+                    request_id,
+                    mode,
+                )
+            },
+            svg {
+                class: "h-4 w-4",
+                view_box: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                stroke_width: "2",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+                rect { x: "3", y: "3", width: "18", height: "18", rx: "2" }
+                line { x1: "9", y1: "3", x2: "9", y2: "21" }
+            }
+        }
+    }
+}
+
+fn render_note_source_range(
+    source: &[char],
+    start: u32,
+    end: u32,
+    caret: u32,
+    selections: &[(u32, u32)],
+    caret_width_class: &'static str,
+) -> Element {
+    let chunks = note_source_chunks(source, start, end, caret, selections);
+    rsx! {
+        for (index, chunk) in chunks.iter().enumerate() {
+            if chunk.caret_before {
+                {render_note_caret(caret_width_class)}
+            }
+            if !chunk.text.is_empty() {
+                span {
+                    key: "source-{start}-{index}",
+                    class: if chunk.selected { "bg-current/20" } else { "" },
+                    "{chunk.text}"
+                }
+            }
+        }
+    }
+}
+
+fn render_note_inline_nodes(
+    source: &[char],
+    nodes: &[NoteInlineNode],
+    caret: u32,
+    selections: &[(u32, u32)],
+    caret_width_class: &'static str,
+) -> Element {
+    rsx! {
+        for (index, node) in nodes.iter().enumerate() {
+            match node {
+                NoteInlineNode::Text { start, end } => rsx! {
+                    span { key: "text-{index}",
+                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
+                    }
+                },
+                NoteInlineNode::Syntax {
+                    kind,
+                    start,
+                    prefix_end,
+                    suffix_start,
+                    end,
+                    children,
+                } => {
+                    let reveal = *start <= caret && caret <= *end;
+                    rsx! {
+                        span { key: "syntax-{index}", class: note_inline_class(*kind),
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
+                            }
+                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
+                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn note_selection_ranges(
+    source: &str,
+    start_line: u32,
+    selections: &[vmux_core::editor::SelSpan],
+) -> Vec<(u32, u32)> {
+    selections
+        .iter()
+        .map(|selection| {
+            let start = note_source_offset(source, start_line, selection.line, selection.start);
+            let end_col = if selection.end == u32::MAX {
+                source
+                    .split('\n')
+                    .nth(selection.line.saturating_sub(start_line) as usize)
+                    .map_or(0, |line| line.chars().count() as u32)
+            } else {
+                selection.end
+            };
+            let end = note_source_offset(source, start_line, selection.line, end_col);
+            (start.min(end), start.max(end))
+        })
+        .filter(|(start, end)| start < end)
+        .collect()
+}
+
+fn emit_property_edit(
+    original_key: String,
+    key: String,
+    kind: KnowledgePropertyKind,
+    values: Vec<String>,
+    remove: bool,
+) {
+    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
+        original_key,
+        key,
+        kind,
+        values,
+        remove,
+    });
+}
+
+fn property_kind_label(kind: KnowledgePropertyKind) -> String {
+    match kind {
+        KnowledgePropertyKind::Text => translate("editor-property-kind-text"),
+        KnowledgePropertyKind::Number => translate("editor-property-kind-number"),
+        KnowledgePropertyKind::Checkbox => translate("editor-property-kind-checkbox"),
+        KnowledgePropertyKind::Date => translate("editor-property-kind-date"),
+        KnowledgePropertyKind::List => translate("editor-property-kind-list"),
+        KnowledgePropertyKind::Link => translate("editor-property-kind-link"),
+        KnowledgePropertyKind::Tags => translate("editor-property-kind-tags"),
+    }
+}
+
+fn next_property_kind(kind: KnowledgePropertyKind) -> KnowledgePropertyKind {
+    match kind {
+        KnowledgePropertyKind::Text => KnowledgePropertyKind::Number,
+        KnowledgePropertyKind::Number => KnowledgePropertyKind::Checkbox,
+        KnowledgePropertyKind::Checkbox => KnowledgePropertyKind::Date,
+        KnowledgePropertyKind::Date => KnowledgePropertyKind::List,
+        KnowledgePropertyKind::List => KnowledgePropertyKind::Link,
+        KnowledgePropertyKind::Link => KnowledgePropertyKind::Tags,
+        KnowledgePropertyKind::Tags => KnowledgePropertyKind::Text,
+    }
+}
+
+#[component]
+fn NoteProperties(properties: Vec<KnowledgeProperty>) -> Element {
+    let mut open = use_signal(|| !properties.is_empty());
+    let has_tags = properties
+        .iter()
+        .any(|property| property.kind == KnowledgePropertyKind::Tags);
+    let add_key = {
+        let mut suffix = 1;
+        loop {
+            let candidate = if suffix == 1 {
+                "property".to_string()
+            } else {
+                format!("property-{suffix}")
+            };
+            if !properties
+                .iter()
+                .any(|property| property.key.eq_ignore_ascii_case(&candidate))
+            {
+                break candidate;
+            }
+            suffix += 1;
+        }
+    };
+    rsx! {
+        div { class: "mb-5 rounded-xl bg-foreground/[0.025] ring-1 ring-inset ring-foreground/[0.07]",
+            div { class: "flex h-9 items-center gap-2 px-3",
+                button {
+                    r#type: "button",
+                    class: "flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-medium text-foreground/65 hover:text-foreground",
+                    onclick: move |_| open.toggle(),
+                    Icon { class: if open() { "h-3.5 w-3.5 rotate-90 transition-transform" } else { "h-3.5 w-3.5 transition-transform" }, path { d: "m9 18 6-6-6-6" } }
+                    span { {translate("editor-properties")} }
+                    if !properties.is_empty() {
+                        span { class: "text-[10px] text-muted-foreground", "{properties.len()}" }
+                    }
+                }
+                button {
+                    r#type: "button",
+                    title: translate("editor-add-tags"),
+                    disabled: has_tags,
+                    class: if has_tags { "rounded-md px-1 text-xs text-muted-foreground/30" } else { "rounded-md px-1 text-xs text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground" },
+                    onclick: move |_| {
+                        open.set(true);
+                        emit_property_edit(
+                            String::new(),
+                            "tags".to_string(),
+                            KnowledgePropertyKind::Tags,
+                            Vec::new(),
+                            false,
+                        );
+                    },
+                    "#"
+                }
+                button {
+                    r#type: "button",
+                    title: translate("editor-add-property"),
+                    class: "rounded-md p-1 text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+                    onclick: move |_| {
+                        open.set(true);
+                        emit_property_edit(
+                            String::new(),
+                            add_key.clone(),
+                            KnowledgePropertyKind::Text,
+                            vec![String::new()],
+                            false,
+                        );
+                    },
+                    Icon { class: "h-3.5 w-3.5", path { d: "M12 5v14" } path { d: "M5 12h14" } }
+                }
+            }
+            if open() {
+                div { class: "border-t border-foreground/[0.06] px-1 py-1",
+                    if properties.is_empty() {
+                        div { class: "px-3 py-2 text-xs text-muted-foreground", {translate("editor-no-properties")} }
+                    }
+                    for property in properties {
+                        NotePropertyRow {
+                            key: "{property.key}:{property.kind:?}:{property.values:?}",
+                            property,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn NoteBlockView(
+    note_blocks: Signal<Vec<NoteBlock>>,
+    diff_markers: Signal<HashMap<u32, EditorDiffMarker>>,
+    index: usize,
+    editing: bool,
+    source_cursor: Signal<vmux_core::editor::CursorPos>,
+    source_selections: Signal<Vec<vmux_core::editor::SelSpan>>,
+    note_diff_marker: Option<EditorDiffMarker>,
+    keymap: vmux_core::KeymapKind,
+    mut note_active: Signal<Option<u32>>,
+    mut note_editing: Signal<bool>,
+    mut note_edit_line: Signal<Option<u32>>,
+    mut note_edit_rect: Signal<Option<NoteEditRect>>,
+    mut note_dragging: Signal<bool>,
+    comp_open: bool,
+    comp_filtered: Vec<CompletionItem>,
+    comp_sel_clamped: usize,
+) -> Element {
+    let Some(note_block) = note_blocks.read().get(index).cloned() else {
+        return rsx! {};
+    };
+    let current = if editing {
+        *source_cursor.read()
+    } else {
+        vmux_core::editor::CursorPos::default()
+    };
+    let selections = if editing {
+        source_selections.read().clone()
+    } else {
+        Vec::new()
+    };
+    let active_edit_line = if editing {
+        note_edit_line.read().unwrap_or(current.line)
+    } else {
+        0
+    };
+    let edit_rect = if editing {
+        *note_edit_rect.read()
+    } else {
+        None
+    };
+    let is_list = matches!(note_block.block, MdBlock::List { .. });
+    let is_live_inline = matches!(
+        note_block.block,
+        MdBlock::Paragraph { .. } | MdBlock::Heading { .. }
+    );
+    let start = note_block.start_line;
+    let end = note_block.end_line;
+    let note_diff_marker = note_block_diff_marker(&diff_markers.read(), start, end);
+    let source = note_block.source.clone();
+    let pointer_source = source.clone();
+    let live_pointer_source = source.clone();
+    let live_down_source = if editing {
+        source.clone()
+    } else {
+        String::new()
+    };
+    let pointer_block = note_block.block.clone();
+    let edit_lines = if !editing {
+        Vec::new()
+    } else if is_list {
+        let raw = source
+            .lines()
+            .nth(active_edit_line.saturating_sub(start) as usize)
+            .unwrap_or_default();
+        let prefix = note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix);
+        vec![(
+            active_edit_line,
+            raw.chars().skip(prefix).collect::<String>(),
+            prefix as u32,
+        )]
+    } else if source.is_empty() {
+        vec![(start, String::new(), 0)]
+    } else {
+        source
+            .lines()
+            .enumerate()
+            .map(|(offset, raw)| (start + offset as u32, raw.to_string(), 0))
+            .collect::<Vec<_>>()
+    };
+    let edit_class = note_edit_block_class(&note_block.block);
+    let heading_level = match &note_block.block {
+        MdBlock::Heading { level, .. } => Some(*level),
+        _ => None,
+    };
+    let (live_nodes, live_source, live_caret, live_selections) = if editing && is_live_inline {
+        (
+            note_inline_nodes(&source, heading_level),
+            source.chars().collect::<Vec<_>>(),
+            note_source_offset(&source, start, current.line, current.col),
+            note_selection_ranges(&source, start, &selections),
+        )
+    } else {
+        (Vec::new(), Vec::new(), 0, Vec::new())
+    };
+    let caret_width_class = if keymap == vmux_core::KeymapKind::Vscode {
+        "w-px"
+    } else {
+        "w-[2px]"
+    };
+    let edit_overlay_class = if is_list {
+        "visible absolute z-10 cursor-text overflow-auto"
+    } else {
+        note_edit_overlay_class()
+    };
+    let edit_overlay_style = if is_list {
+        edit_rect.map_or_else(String::new, |rect| {
+            format!(
+                "top:{}px;left:{}px;width:{}px;height:{}px;",
+                rect.top, rect.left, rect.width, rect.height,
+            )
+        })
+    } else {
+        String::new()
+    };
+
+    rsx! {
+        div {
+            id: "note-block-{index}",
+            "data-note-block": "{index}",
+            class: "relative flow-root w-full cursor-text",
+            onclick: move |event| {
+                if editing && !is_list {
+                    return;
+                }
+                event.stop_propagation();
+                if browser_has_text_selection() {
+                    return;
+                }
+                let event_data = event.data();
+                let raw = event_data.downcast::<web_sys::MouseEvent>();
+                let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
+                let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
+                if is_live_inline {
+                    note_active.set(Some(index as u32));
+                    note_editing.set(true);
+                    note_edit_line.set(None);
+                    note_edit_rect.set(None);
+                    place_note_block_caret(
+                        index,
+                        start,
+                        live_pointer_source.clone(),
+                        client_x,
+                        client_y,
+                    );
+                    return;
+                }
+                let line = note_pointer_line(&event, start, end, &pointer_block);
+                let text = pointer_source
+                    .lines()
+                    .nth(line.saturating_sub(start) as usize)
+                    .unwrap_or_default()
+                    .to_string();
+                let prefix = if is_list {
+                    note_list_marker_prefix_len(&text).map_or(0, |(_, prefix)| prefix as u32)
+                } else {
+                    0
+                };
+                note_active.set(Some(index as u32));
+                note_editing.set(true);
+                note_edit_line.set(Some(line));
+                note_edit_rect.set(
+                    is_list
+                        .then(|| note_list_edit_rect(&event, index))
+                        .flatten(),
+                );
+                let displayed = text.chars().skip(prefix as usize).collect();
+                place_note_caret(line, displayed, client_x, prefix);
+            },
+            if let Some(marker) = note_diff_marker {
+                span {
+                    class: "pointer-events-none absolute -left-4 bottom-1 top-1 w-[3px] rounded-full opacity-80 {note_diff_marker_class(marker)}"
+                }
+            }
+            RenderedNoteBlock {
+                block: note_block.block.clone(),
+                index,
+                hidden_list_line: (editing && is_list).then_some(active_edit_line),
+                invisible: editing && !is_list,
+            }
+            if editing {
+                div {
+                    class: edit_overlay_class,
+                    style: edit_overlay_style,
+                    if is_live_inline {
+                        div {
+                            id: "note-live-block-{index}",
+                            "data-note-edit-block": "{index}",
+                            class: edit_class,
+                            onclick: move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                            },
+                            onpointerdown: move |event: Event<PointerData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                                let extend = event
+                                    .data()
+                                    .downcast::<web_sys::PointerEvent>()
+                                    .is_some_and(|raw| raw.shift_key());
+                                let offset = note_pointer_col_from_pointer(
+                                    &event,
+                                    &live_down_source,
+                                );
+                                let (line, col) = note_source_position(
+                                    &live_down_source,
+                                    start,
+                                    offset,
+                                );
+                                note_dragging.set(true);
+                                set_pointer_capture(&event, "file-scroll", true);
+                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                    line,
+                                    col,
+                                    extend,
+                                });
+                                focus_file_input();
+                            },
+                            onmousedown: move |event: Event<MouseData>| {
+                                event.stop_propagation();
+                                event.prevent_default();
+                            },
+                            span {
+                                "data-note-line-text": "true",
+                                class: "inline",
+                                {render_note_inline_nodes(
+                                    &live_source,
+                                    &live_nodes,
+                                    live_caret,
+                                    &live_selections,
+                                    caret_width_class,
+                                )}
+                                if live_caret == live_source.len() as u32 {
+                                    {render_note_caret(caret_width_class)}
+                                }
+                            }
+                        }
+                    } else {
+                        div {
+                            class: if is_list { "" } else { edit_class },
+                            for (line, raw, prefix) in edit_lines.iter() {
+                                {
+                                    let line = *line;
+                                    let prefix = *prefix;
+                                    let pointer_raw_down = raw.clone();
+                                    let line_selection = selections
+                                        .iter()
+                                        .find(|selection| selection.line == line)
+                                        .map(|selection| vmux_core::editor::SelSpan {
+                                            line: selection.line,
+                                            row: selection.row,
+                                            start: selection.start.saturating_sub(prefix),
+                                            end: if selection.end == u32::MAX {
+                                                u32::MAX
+                                            } else {
+                                                selection.end.saturating_sub(prefix)
+                                            },
+                                        });
+                                    let chunks = note_line_chunks(
+                                        raw,
+                                        (line == current.line)
+                                            .then_some(current.col.saturating_sub(prefix)),
+                                        line_selection,
+                                    );
+                                    let line_class = if is_list {
+                                        "min-h-[1lh] w-full whitespace-pre-wrap break-words"
+                                    } else {
+                                        note_edit_line_class(&note_block.block)
+                                    };
+                                    rsx! {
+                                        div {
+                                            key: "{line}",
+                                            id: "note-line-{line}",
+                                            "data-note-edit-line": "{line}",
+                                            class: line_class,
+                                            onclick: move |event: Event<MouseData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                            },
+                                            onpointerdown: move |event: Event<PointerData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                                let extend = event
+                                                    .data()
+                                                    .downcast::<web_sys::PointerEvent>()
+                                                    .is_some_and(|raw| raw.shift_key());
+                                                let col = prefix
+                                                    + note_pointer_col_from_pointer(
+                                                        &event,
+                                                        &pointer_raw_down,
+                                                    );
+                                                note_dragging.set(true);
+                                                set_pointer_capture(&event, "file-scroll", true);
+                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                    line,
+                                                    col,
+                                                    extend,
+                                                });
+                                                focus_file_input();
+                                            },
+                                            onmousedown: move |event: Event<MouseData>| {
+                                                event.stop_propagation();
+                                                event.prevent_default();
+                                            },
+                                            span {
+                                                "data-note-line-text": "true",
+                                                class: "inline-block min-w-[1ch]",
+                                                for (chunk_index, chunk) in chunks.iter().enumerate() {
+                                                    if chunk.caret_before {
+                                                        span {
+                                                            key: "caret-{chunk_index}",
+                                                            id: NOTE_CARET_ID,
+                                                            class: "relative inline-block h-[1.15em] w-0 scroll-mb-8 scroll-mt-8 align-text-bottom",
+                                                            span { class: "pointer-events-none absolute inset-y-0 left-0 {caret_width_class} bg-current" }
+                                                        }
+                                                    }
+                                                    if !chunk.text.is_empty() {
+                                                        span {
+                                                            key: "text-{chunk_index}",
+                                                            class: if chunk.selected { "bg-cyan-400/20" } else { "" },
+                                                            "{chunk.text}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if comp_open && !comp_filtered.is_empty() {
+                        div {
+                            class: "absolute left-0 top-full z-40 mt-1 max-h-56 min-w-56 overflow-auto rounded-lg bg-background/95 py-1 text-xs text-foreground/90 ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg",
+                            for (item_index, item) in comp_filtered.iter().enumerate() {
+                                div {
+                                    key: "note-completion-{item_index}",
+                                    class: if item_index == comp_sel_clamped { "flex items-center gap-2 bg-cyan-400/15 px-3 py-1" } else { "flex items-center gap-2 px-3 py-1" },
+                                    span { class: "truncate", "{item.label}" }
+                                    span { class: "ml-auto truncate text-[10px] text-foreground/40", "{item.detail}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Dir,
+    Text,
+    Media(MediaKind),
+}
+
+#[derive(Clone, PartialEq)]
+enum Preview {
+    None,
+    Dir(Vec<FileDirEntry>),
+    Text(Vec<FileLine>),
+    Image(String),
+    Video {
+        url: String,
+        path: String,
+        native: bool,
+    },
+    Info {
+        size: u64,
+        modified: String,
+        kind: String,
+    },
+    Error(String),
+}
+
+fn blob_url(bytes: &[u8]) -> Option<String> {
+    let arr = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&arr.buffer());
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).ok()?;
+    web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
+fn revoke(url: &str) {
+    let _ = web_sys::Url::revoke_object_url(url);
+}
+
+fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
+    if let Preview::Image(old) = &*preview.read() {
+        revoke(old);
+    }
+    preview.set(Preview::None);
+    for url in thumbs.read().values() {
+        revoke(url);
+    }
+    thumbs.set(HashMap::new());
+}
+
+fn request_preview(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
+}
+
+fn request_thumb(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: true });
+}
+
+fn open_path(path: String) {
+    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+}
+
+fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
+    let next = generation().wrapping_add(1);
+    generation.set(next);
+    let Some(window) = web_sys::window() else {
+        nonce.set(nonce().wrapping_add(1));
+        return;
+    };
+    let closure = Closure::once(move || {
+        if generation() == next {
+            nonce.set(nonce().wrapping_add(1));
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        closure.as_ref().unchecked_ref(),
+        GIT_REFRESH_DEBOUNCE_MS,
+    );
+    closure.forget();
+}
+
+fn parent_of(path: &str) -> String {
+    match path.trim_end_matches('/').rsplit_once('/') {
+        Some(("", _)) => "/".to_string(),
+        Some((prefix, _)) => prefix.to_string(),
+        None => path.to_string(),
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    let b = bytes as f64;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{bytes} B")
+    }
+}
+
+const PANE_CLASS: &str = "min-h-0 overflow-y-auto rounded-2xl bg-foreground/[0.025] p-2 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]";
+
+fn row_class(selected: bool) -> String {
+    let base =
+        "flex items-center gap-2 rounded-md px-2 py-1 cursor-default transition-all duration-100";
+    if selected {
+        format!(
+            "{base} bg-cyan-400/12 text-foreground shadow-[inset_2px_0_0_0_rgb(34,211,238),0_0_18px_-4px_rgba(34,211,238,0.45)]"
+        )
+    } else {
+        format!("{base} text-foreground/75 hover:bg-foreground/[0.05]")
+    }
+}
+
+fn diff_marker_sign(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "+",
+        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "~",
+        EditorDiffMarker::Deleted => "-",
+    }
+}
+
+fn diff_marker_text_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "text-ansi-2",
+        EditorDiffMarker::Modified => "text-ansi-3",
+        EditorDiffMarker::Deleted => "text-ansi-1",
+        EditorDiffMarker::Staged => "text-ansi-3/80",
+    }
+}
+
+fn diff_marker_row_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "bg-ansi-2/[0.06] hover:bg-ansi-2/[0.10]",
+        EditorDiffMarker::Modified => "bg-ansi-3/[0.06] hover:bg-ansi-3/[0.10]",
+        EditorDiffMarker::Deleted => "bg-ansi-1/[0.06] hover:bg-ansi-1/[0.10]",
+        EditorDiffMarker::Staged => "bg-ansi-3/[0.035] hover:bg-ansi-3/[0.07]",
+    }
+}
+
+fn note_diff_marker_class(marker: EditorDiffMarker) -> &'static str {
+    match marker {
+        EditorDiffMarker::Added => "bg-ansi-2",
+        EditorDiffMarker::Modified | EditorDiffMarker::Staged => "bg-ansi-3",
+        EditorDiffMarker::Deleted => "bg-ansi-1",
+    }
+}
+
+fn note_block_diff_marker(
+    markers: &HashMap<u32, EditorDiffMarker>,
+    start_line: u32,
+    end_line: u32,
+) -> Option<EditorDiffMarker> {
+    let priority = |marker| match marker {
+        EditorDiffMarker::Staged => 0,
+        EditorDiffMarker::Deleted => 1,
+        EditorDiffMarker::Added => 2,
+        EditorDiffMarker::Modified => 3,
+    };
+    (start_line..=end_line)
+        .filter_map(|line| markers.get(&(line + 1)).copied())
+        .max_by_key(|marker| priority(*marker))
+}
+
+fn visible_entries(all: &[FileDirEntry], show_hidden: bool) -> Vec<FileDirEntry> {
+    if show_hidden {
+        all.to_vec()
+    } else {
+        all.iter()
+            .filter(|e| !e.name.starts_with('.'))
+            .cloned()
+            .collect()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_dir(
+    mut dir_entries: Signal<Vec<FileDirEntry>>,
+    mut parent_entries: Signal<Vec<FileDirEntry>>,
+    mut path: Signal<String>,
+    mut selected: Signal<usize>,
+    mut preview: Signal<Preview>,
+    mut thumbs: Signal<HashMap<String, String>>,
+    show_hidden: bool,
+    entries: Vec<FileDirEntry>,
+    parent: Vec<FileDirEntry>,
+    new_path: String,
+    select_path: Option<String>,
+) {
+    for url in thumbs.read().values() {
+        revoke(url);
+    }
+    thumbs.set(HashMap::new());
+    if let Preview::Image(old) = &*preview.read() {
+        revoke(old);
+    }
+    preview.set(Preview::None);
+    parent_entries.set(parent);
+    path.set(new_path);
+    let vis = visible_entries(&entries, show_hidden);
+    let sel_idx = select_path
+        .as_deref()
+        .map(|p| dir_select_index(&vis, p))
+        .unwrap_or(0);
+    selected.set(sel_idx);
+    if let Some(sel) = vis.get(sel_idx) {
+        request_preview(sel.path.clone());
+    }
+    for e in &vis {
+        if !e.is_dir && image_mime(&e.path).is_some() {
+            request_thumb(e.path.clone());
+        }
+    }
+    dir_entries.set(entries);
+}
+
+fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
+    if let Some(url) = thumb {
+        return rsx! {
+            img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
+        };
+    }
+    type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
+}
+
+fn render_preview(preview: &Preview) -> Element {
+    match preview {
+        Preview::None => rsx! {
+            div { class: "text-xs text-muted-foreground opacity-60", "" }
+        },
+        Preview::Image(url) => rsx! {
+            img { src: "{url}", class: "max-h-full max-w-full rounded-xl object-contain shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20" }
+        },
+        Preview::Video { url, path, native } => {
+            if *native {
+                let path = path.clone();
+                rsx! {
+                    div {
+                        key: "{path}",
+                        id: VIDEO_HOST_ID,
+                        class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+                        onmounted: move |_| report_video_rect(path.clone()),
+                    }
+                }
+            } else {
+                rsx! {
+                    video {
+                        id: "preview-video",
+                        src: "{url}",
+                        controls: true,
+                        autoplay: false,
+                        class: "max-h-full max-w-full rounded-xl shadow-[0_0_30px_-8px_rgba(34,211,238,0.4)] ring-1 ring-cyan-400/20",
+                    }
+                }
+            }
+        }
+        Preview::Text(lines) => rsx! {
+            div { class: "h-full w-full overflow-auto font-mono text-xs leading-snug",
+                for line in lines.iter() {
+                    div { key: "{line.line_no}", class: "whitespace-pre",
+                        for (i, s) in line.spans.iter().enumerate() {
+                            span { key: "{i}", style: "{span_style(s)}", "{s.text}" }
+                        }
+                    }
+                }
+            }
+        },
+        Preview::Dir(entries) => rsx! {
+            div { class: "h-full w-full overflow-auto",
+                for e in entries.iter() {
+                    div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
+                        {entry_visual(e, None)}
+                        span { class: "truncate text-xs", "{e.name}" }
+                    }
+                }
+            }
+        },
+        Preview::Info {
+            size,
+            modified,
+            kind,
+        } => rsx! {
+            div { class: "space-y-1 text-center text-xs text-muted-foreground",
+                div {
+                    class: "uppercase tracking-wide text-foreground/80",
+                    {match kind.as_str() {
+                        "image (too large to preview)" => translate("editor-preview-large-image"),
+                        "binary" => translate("editor-preview-binary"),
+                        "file" => translate("editor-preview-file"),
+                        _ => kind.clone(),
+                    }}
+                }
+                div { "{format_size(*size)}" }
+                if !modified.is_empty() {
+                    div { class: "opacity-70", "{modified}" }
+                }
+            }
+        },
+        Preview::Error(m) => rsx! {
+            div { class: "text-xs text-ansi-1", "{m}" }
+        },
+    }
+}
+
+fn explorer_client_id() -> u64 {
+    ((js_sys::Date::now() as u64) << 12) ^ (js_sys::Math::random() * 4096.0) as u64
+}
+
+fn set_explorer_visible(
+    next: bool,
+    mut visible: Signal<bool>,
+    mut preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    mut request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    let next_request_id = request_id().wrapping_add(1);
+    request_id.set(next_request_id);
+    preferred_visible.set(next);
+    visible.set(next && explorer_has_room(width()));
+    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
+        visible: next,
+        client_id: client_id(),
+        request_id: next_request_id,
+    });
+    if !next {
+        match mode() {
+            Mode::Text => focus_file_input(),
+            Mode::Dir | Mode::Media(_) => focus_container(),
+        }
+    }
+}
+
+fn explorer_page_width() -> Option<u32> {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(PAGE_ID))
+        .map(|element| element.client_width().max(0) as u32)
+}
+
+fn explorer_has_room(explorer_width: u32) -> bool {
+    explorer_page_width().is_some_and(|page_width| {
+        NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
+    })
+}
+
+fn sync_explorer_visibility(
+    mut visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+) {
+    let next = preferred_visible() && explorer_has_room(width());
+    if visible() != next {
+        visible.set(next);
+    }
+}
+
+fn schedule_explorer_visibility_sync(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        sync_explorer_visibility(visible, preferred_visible, width);
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn show_explorer_if_room(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let callback = Closure::once_into_js(move || {
+        if visible() {
+            return;
+        }
+        if explorer_has_room(width()) {
+            set_explorer_visible(
+                true,
+                visible,
+                preferred_visible,
+                width,
+                client_id,
+                request_id,
+                mode,
+            );
+        }
+    })
+    .unchecked_into::<js_sys::Function>();
+    if window.request_animation_frame(&callback).is_err() {
+        let _ = callback.call0(&JsValue::NULL);
+    }
+}
+
+fn schedule_lsp_notice_clear(
+    mut notice: Signal<Option<LspInstallProgress>>,
+    mut request: Signal<Option<(String, String)>>,
+    mut generation: Signal<u32>,
+    delay: i32,
+) {
+    let id = generation().wrapping_add(1);
+    generation.set(id);
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let clear = Closure::once(move || {
+        if generation() == id {
+            notice.set(None);
+            request.set(None);
+        }
+    });
+    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+        clear.as_ref().unchecked_ref(),
+        delay,
+    );
+    clear.forget();
+}
+
+fn toggle_explorer(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    set_explorer_visible(
+        !preferred_visible(),
+        visible,
+        preferred_visible,
+        width,
+        client_id,
+        request_id,
+        mode,
+    );
+}
+
+fn reveal_current_in_explorer(
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) {
+    if visible() {
+        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
+    } else {
+        set_explorer_visible(
+            true,
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
+    }
+}
+
+fn handle_explorer_shortcut(
+    event: &Event<KeyboardData>,
+    visible: Signal<bool>,
+    preferred_visible: Signal<bool>,
+    width: Signal<u32>,
+    client_id: Signal<u64>,
+    request_id: Signal<u64>,
+    mode: Signal<Mode>,
+) -> bool {
+    let data = event.data();
+    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
+        return false;
+    };
+    let key = raw.key();
+    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
+        event.prevent_default();
+        reveal_current_in_explorer(
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
+        return true;
+    }
+    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
+        event.prevent_default();
+        toggle_explorer(
+            visible,
+            preferred_visible,
+            width,
+            client_id,
+            request_id,
+            mode,
+        );
+        return true;
+    }
+    false
+}
+
+#[component]
+fn NotePropertyRow(property: KnowledgeProperty) -> Element {
+    let original_key = property.key.clone();
+    let kind = property.kind;
+    let mut key = use_signal(|| property.key.clone());
+    let mut scalar = use_signal(|| property.values.first().cloned().unwrap_or_default());
+    let mut item = use_signal(String::new);
+    let values = property.values.clone();
+    let key_for_kind = original_key.clone();
+    let key_for_delete = original_key.clone();
+    rsx! {
+        div { class: "group flex min-h-9 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-foreground/[0.035]",
+            input {
+                value: "{key}",
+                class: "w-28 shrink-0 bg-transparent text-xs font-medium text-foreground/65 outline-none focus:text-foreground",
+                oninput: move |event| key.set(event.value()),
+                onblur: {
+                    let original_key = original_key.clone();
+                    let values = values.clone();
+                    move |_| emit_property_edit(original_key.clone(), key(), kind, values.clone(), false)
+                },
+            }
+            button {
+                r#type: "button",
+                title: translate("editor-change-property-type"),
+                class: "shrink-0 rounded-md bg-foreground/[0.05] px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                onclick: {
+                    let values = values.clone();
+                    move |_| {
+                        let next = next_property_kind(kind);
+                        emit_property_edit(key_for_kind.clone(), key(), next, values.clone(), false);
+                    }
+                },
+                {property_kind_label(kind)}
+            }
+            div { class: "min-w-0 flex-1",
+                if kind == KnowledgePropertyKind::Checkbox {
+                    button {
+                        r#type: "button",
+                        class: if scalar().eq_ignore_ascii_case("true") { "flex h-5 w-9 items-center justify-end rounded-full bg-primary px-0.5" } else { "flex h-5 w-9 items-center justify-start rounded-full bg-foreground/15 px-0.5" },
+                        onclick: {
+                            let original_key = original_key.clone();
+                            move |_| {
+                                let next = (!scalar().eq_ignore_ascii_case("true")).to_string();
+                                scalar.set(next.clone());
+                                emit_property_edit(original_key.clone(), key(), kind, vec![next], false);
+                            }
+                        },
+                        span { class: "h-4 w-4 rounded-full bg-background shadow-sm" }
+                    }
+                } else if matches!(kind, KnowledgePropertyKind::List | KnowledgePropertyKind::Tags) {
+                    div { class: "flex flex-wrap items-center gap-1",
+                        for (index, value) in values.iter().enumerate() {
+                            {
+                                let remove_key = original_key.clone();
+                                let remove_values = values.clone();
+                                rsx! {
+                                    button {
+                                        key: "{index}:{value}",
+                                        r#type: "button",
+                                        title: translate("common-remove"),
+                                        class: if kind == KnowledgePropertyKind::Tags { "rounded-full bg-primary/10 px-2 py-0.5 text-[11px] text-primary hover:bg-destructive/10 hover:text-destructive" } else { "rounded-md bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-foreground/75 hover:bg-destructive/10 hover:text-destructive" },
+                                        onclick: move |_| {
+                                            let mut next = remove_values.clone();
+                                            next.remove(index);
+                                            emit_property_edit(remove_key.clone(), key(), kind, next, false);
+                                        },
+                                        if kind == KnowledgePropertyKind::Tags { "#" }
+                                        "{value}"
+                                    }
+                                }
+                            }
+                        }
+                        input {
+                            value: "{item}",
+                            placeholder: if kind == KnowledgePropertyKind::Tags { translate("editor-add-tag") } else { translate("editor-add-item") },
+                            class: "min-w-20 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+                            oninput: move |event| item.set(event.value()),
+                            onkeydown: {
+                                let add_key = original_key.clone();
+                                let add_values = values.clone();
+                                move |event: Event<KeyboardData>| {
+                                    if event.key() != Key::Enter {
+                                        return;
+                                    }
+                                    event.prevent_default();
+                                    let value = item().trim().trim_start_matches('#').to_string();
+                                    if value.is_empty() {
+                                        return;
+                                    }
+                                    let mut next = add_values.clone();
+                                    if !next.iter().any(|existing| existing.eq_ignore_ascii_case(&value)) {
+                                        next.push(value);
+                                    }
+                                    item.set(String::new());
+                                    emit_property_edit(add_key.clone(), key(), kind, next, false);
+                                }
+                            },
+                        }
+                    }
+                } else {
+                    input {
+                        r#type: match kind {
+                            KnowledgePropertyKind::Number => "number",
+                            KnowledgePropertyKind::Date => "date",
+                            _ => "text",
+                        },
+                        value: "{scalar}",
+                        placeholder: if kind == KnowledgePropertyKind::Link { translate("editor-linked-note") } else { translate("editor-property-value") },
+                        class: "w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/60",
+                        oninput: move |event| scalar.set(event.value()),
+                        onblur: {
+                            let original_key = original_key.clone();
+                            move |_| emit_property_edit(original_key.clone(), key(), kind, vec![scalar()], false)
+                        },
+                    }
+                }
+            }
+            button {
+                r#type: "button",
+                title: translate("editor-delete-property"),
+                class: "invisible shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:visible",
+                onclick: move |_| emit_property_edit(key_for_delete.clone(), String::new(), kind, Vec::new(), true),
+                Icon { class: "h-3.5 w-3.5", path { d: "M18 6 6 18" } path { d: "m6 6 12 12" } }
+            }
+        }
+    }
+}
+
+#[component]
+fn RenderedNoteBlock(
+    block: MdBlock,
+    index: usize,
+    hidden_list_line: Option<u32>,
+    invisible: bool,
+) -> Element {
+    rsx! {
+        div { class: if invisible { "invisible" } else { "" },
+            if let Some(line) = hidden_list_line {
+                {render_block_with_hidden_list_line(&block, index, line)}
+            } else {
+                {render_block(&block, index)}
+            }
         }
     }
 }

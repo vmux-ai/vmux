@@ -13,8 +13,6 @@ use bevy::{
 };
 use vmux_history::LastActivatedAt;
 
-const FOCUS_RING_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
-
 pub struct FocusRingPlugin;
 
 impl Plugin for FocusRingPlugin {
@@ -32,6 +30,8 @@ impl Plugin for FocusRingPlugin {
         load_internal_asset!(app, FOCUS_RING_SHADER, "focus_ring.wgsl", Shader::from_wgsl);
     }
 }
+
+const FOCUS_RING_SHADER: Handle<Shader> = uuid_handle!("c4a8e901-2b7d-4c1e-9f63-7a2d8e5b1044");
 
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 struct FocusRingMaterial {

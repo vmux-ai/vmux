@@ -53,114 +53,6 @@ use vmux_core::browser::{
 
 pub use vmux_space::cwd::valid_cwd;
 
-const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
-    &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
-const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
-const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
-const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
-const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
-
-/// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
-/// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
-/// without depending on which CLIs are installed on the host.
-#[derive(Resource, Clone, Default)]
-pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
-
-#[derive(Resource, Default)]
-pub struct AgentTerminalRegions {
-    pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
-    pub run_panes: std::collections::HashMap<ProcessId, Entity>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RunTerminalCandidate {
-    terminal: Entity,
-    pid: ProcessId,
-    stack: Entity,
-    pane: Entity,
-    pane_spawn_seq: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RunTerminalBucketPaneCandidate {
-    pane: Entity,
-    pane_spawn_seq: u64,
-}
-
-fn choose_reusable_run_terminal(
-    anchor: ProcessId,
-    agent_pane: Entity,
-    regions: &AgentTerminalRegions,
-    candidates: &[RunTerminalCandidate],
-) -> Option<RunTerminalCandidate> {
-    if let Some(pid) = regions.run_terminals.get(&anchor)
-        && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
-    {
-        return Some(*candidate);
-    }
-    if let Some(pane) = regions.run_panes.get(&anchor)
-        && let Some(candidate) = candidates
-            .iter()
-            .filter(|c| c.pane == *pane)
-            .max_by_key(|c| c.pane_spawn_seq)
-    {
-        return Some(*candidate);
-    }
-    candidates
-        .iter()
-        .filter(|c| c.pane != agent_pane)
-        .max_by_key(|c| c.pane_spawn_seq)
-        .copied()
-}
-
-fn choose_run_terminal_bucket_pane(
-    anchor: ProcessId,
-    agent_pane: Entity,
-    regions: &AgentTerminalRegions,
-    candidates: &[RunTerminalCandidate],
-) -> Option<Entity> {
-    choose_reusable_run_terminal(anchor, agent_pane, regions, candidates)
-        .map(|c| c.pane)
-        .or_else(|| {
-            regions
-                .run_panes
-                .get(&anchor)
-                .copied()
-                .filter(|pane| *pane != agent_pane)
-        })
-}
-
-fn resolve_agent_executable(
-    kind: AgentKind,
-    override_: Option<&AgentExecutableOverride>,
-) -> Option<PathBuf> {
-    if let Some(forced) = override_.and_then(|o| o.0.get(&kind).copied()) {
-        return forced.then(|| PathBuf::from(kind.executable()));
-    }
-    crate::exec::find_executable(kind.executable())
-}
-
-fn spawn_builtin_agent_providers(mut commands: Commands) {
-    for kind in BUILTIN_AGENT_PROVIDERS {
-        commands.spawn((
-            AgentProviderTargetKind(*kind),
-            Name::new(kind.display_name()),
-        ));
-    }
-}
-
-fn detect_agent_provider_availability(
-    mut commands: Commands,
-    q: Query<(Entity, &AgentProviderTargetKind), Without<Ready>>,
-) {
-    for (entity, kind) in &q {
-        if crate::exec::find_executable(kind.0.executable()).is_some() {
-            commands.entity(entity).insert(Ready);
-        }
-    }
-}
-
 /// Root plugin for the agent domain, aggregating session lifecycle, the agent pages, and
 /// the agent clients (ACP and in-page providers).
 pub struct AgentPlugin;
@@ -369,6 +261,114 @@ impl Plugin for AgentSessionPlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
+    &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
+const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const USER_CHOICE_REQUESTED: &str = "User choice requested. Stop this turn and wait. vmux will resume this same conversation with the selected option.";
+const WORKSPACE_SELECTION_PENDING: &str = "Project selection is already pending. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
+const INITIALIZE_GIT_QUESTION: &str = "Initialize Git repository?";
+const INITIALIZE_GIT_OPTIONS: [&str; 2] = ["Initialize Git", "Not now"];
+
+/// Per-[`AgentKind`] override for CLI executable resolution: `true` forces present, `false` forces
+/// missing, absent falls back to a real `PATH` lookup. Lets tests drive the spawn/setup-page flow
+/// without depending on which CLIs are installed on the host.
+#[derive(Resource, Clone, Default)]
+pub struct AgentExecutableOverride(pub std::collections::HashMap<AgentKind, bool>);
+
+#[derive(Resource, Default)]
+pub struct AgentTerminalRegions {
+    pub run_terminals: std::collections::HashMap<ProcessId, ProcessId>,
+    pub run_panes: std::collections::HashMap<ProcessId, Entity>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RunTerminalCandidate {
+    terminal: Entity,
+    pid: ProcessId,
+    stack: Entity,
+    pane: Entity,
+    pane_spawn_seq: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RunTerminalBucketPaneCandidate {
+    pane: Entity,
+    pane_spawn_seq: u64,
+}
+
+fn choose_reusable_run_terminal(
+    anchor: ProcessId,
+    agent_pane: Entity,
+    regions: &AgentTerminalRegions,
+    candidates: &[RunTerminalCandidate],
+) -> Option<RunTerminalCandidate> {
+    if let Some(pid) = regions.run_terminals.get(&anchor)
+        && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
+    {
+        return Some(*candidate);
+    }
+    if let Some(pane) = regions.run_panes.get(&anchor)
+        && let Some(candidate) = candidates
+            .iter()
+            .filter(|c| c.pane == *pane)
+            .max_by_key(|c| c.pane_spawn_seq)
+    {
+        return Some(*candidate);
+    }
+    candidates
+        .iter()
+        .filter(|c| c.pane != agent_pane)
+        .max_by_key(|c| c.pane_spawn_seq)
+        .copied()
+}
+
+fn choose_run_terminal_bucket_pane(
+    anchor: ProcessId,
+    agent_pane: Entity,
+    regions: &AgentTerminalRegions,
+    candidates: &[RunTerminalCandidate],
+) -> Option<Entity> {
+    choose_reusable_run_terminal(anchor, agent_pane, regions, candidates)
+        .map(|c| c.pane)
+        .or_else(|| {
+            regions
+                .run_panes
+                .get(&anchor)
+                .copied()
+                .filter(|pane| *pane != agent_pane)
+        })
+}
+
+fn resolve_agent_executable(
+    kind: AgentKind,
+    override_: Option<&AgentExecutableOverride>,
+) -> Option<PathBuf> {
+    if let Some(forced) = override_.and_then(|o| o.0.get(&kind).copied()) {
+        return forced.then(|| PathBuf::from(kind.executable()));
+    }
+    crate::exec::find_executable(kind.executable())
+}
+
+fn spawn_builtin_agent_providers(mut commands: Commands) {
+    for kind in BUILTIN_AGENT_PROVIDERS {
+        commands.spawn((
+            AgentProviderTargetKind(*kind),
+            Name::new(kind.display_name()),
+        ));
+    }
+}
+
+fn detect_agent_provider_availability(
+    mut commands: Commands,
+    q: Query<(Entity, &AgentProviderTargetKind), Without<Ready>>,
+) {
+    for (entity, kind) in &q {
+        if crate::exec::find_executable(kind.0.executable()).is_some() {
+            commands.entity(entity).insert(Ready);
+        }
     }
 }
 

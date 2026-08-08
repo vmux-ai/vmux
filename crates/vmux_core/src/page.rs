@@ -10,6 +10,17 @@ use bevy_cef_core::prelude::{CefEmbeddedHost, webview_debug_log};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// Embeds each page manifest's static webview bundle into Bevy's asset registry so pages
+/// can be served over `vmux://` URLs.
+pub struct ServerPlugin;
+
+impl Plugin for ServerPlugin {
+    fn build(&self, app: &mut App) {
+        app.configure_sets(Startup, ServerEmbedSet)
+            .add_systems(Startup, embed_page_static_assets.in_set(ServerEmbedSet));
+    }
+}
+
 pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,17 +75,6 @@ pub struct ServerEmbedSet;
     rkyv::Deserialize,
 )]
 pub struct PageReady {}
-
-/// Embeds each page manifest's static webview bundle into Bevy's asset registry so pages
-/// can be served over `vmux://` URLs.
-pub struct ServerPlugin;
-
-impl Plugin for ServerPlugin {
-    fn build(&self, app: &mut App) {
-        app.configure_sets(Startup, ServerEmbedSet)
-            .add_systems(Startup, embed_page_static_assets.in_set(ServerEmbedSet));
-    }
-}
 
 pub fn mark_webview_page_ready(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
     webview_debug_log(format!("PageReady entity={:?}", trigger.event().webview));

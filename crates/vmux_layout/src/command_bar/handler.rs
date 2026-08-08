@@ -54,60 +54,6 @@ use crate::settings::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
-pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u32> {
-    let suffix = url.strip_prefix(terminal_page_url)?;
-    if suffix.is_empty() {
-        return None;
-    }
-    suffix.parse::<u32>().ok()
-}
-
-#[derive(Component)]
-struct CommandBarReady;
-
-#[derive(Component)]
-struct CommandBarRenderedOpen(u64);
-
-#[derive(Component)]
-struct CommandBarPaintedOpen(u64);
-
-#[derive(Component)]
-struct CommandBarOpenedOnce;
-
-#[derive(Component)]
-struct CommandBarRecreating;
-
-#[derive(Component, Clone, Copy, Debug, Default)]
-pub struct CommandBarNativeSize {
-    pub width: f32,
-    pub height: f32,
-    pub shell_left: f32,
-    pub shell_top: f32,
-    pub shell_width: f32,
-    pub shell_height: f32,
-}
-
-#[derive(Component)]
-pub struct PendingCommandBarReveal {
-    frames: u8,
-    open_id: u64,
-    payload: Option<Vec<u8>>,
-    started_at: Option<Instant>,
-}
-
-impl PendingCommandBarReveal {
-    /// True once a real open is in flight (open_id != 0). The prewarm placeholder
-    /// (open_id == 0) is idle and must not keep the event loop awake.
-    pub fn is_active(&self) -> bool {
-        self.open_id != 0
-    }
-}
-
-const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
-const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
-const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
-const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
-
 pub(crate) struct CommandBarInputPlugin;
 
 impl Plugin for CommandBarInputPlugin {
@@ -171,6 +117,60 @@ impl Plugin for CommandBarInputPlugin {
             );
     }
 }
+
+pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u32> {
+    let suffix = url.strip_prefix(terminal_page_url)?;
+    if suffix.is_empty() {
+        return None;
+    }
+    suffix.parse::<u32>().ok()
+}
+
+#[derive(Component)]
+struct CommandBarReady;
+
+#[derive(Component)]
+struct CommandBarRenderedOpen(u64);
+
+#[derive(Component)]
+struct CommandBarPaintedOpen(u64);
+
+#[derive(Component)]
+struct CommandBarOpenedOnce;
+
+#[derive(Component)]
+struct CommandBarRecreating;
+
+#[derive(Component, Clone, Copy, Debug, Default)]
+pub struct CommandBarNativeSize {
+    pub width: f32,
+    pub height: f32,
+    pub shell_left: f32,
+    pub shell_top: f32,
+    pub shell_width: f32,
+    pub shell_height: f32,
+}
+
+#[derive(Component)]
+pub struct PendingCommandBarReveal {
+    frames: u8,
+    open_id: u64,
+    payload: Option<Vec<u8>>,
+    started_at: Option<Instant>,
+}
+
+impl PendingCommandBarReveal {
+    /// True once a real open is in flight (open_id != 0). The prewarm placeholder
+    /// (open_id == 0) is idle and must not keep the event loop awake.
+    pub fn is_active(&self) -> bool {
+        self.open_id != 0
+    }
+}
+
+const COMMAND_BAR_REVEAL_FRAMES: u8 = 2;
+const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
+const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
+const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 pub struct CommandBarEntry {
     pub id: String,

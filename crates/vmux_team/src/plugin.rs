@@ -15,6 +15,25 @@ use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 use vmux_layout::stack::Stack;
 use vmux_layout::warm_page::{WarmPage, WarmPagePlugin};
 
+/// Wires the team domain: spawns the user profile, emits the team-member list (user and
+/// agents) to ready views, and handles team commands.
+pub struct TeamPlugin;
+
+impl Plugin for TeamPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "team");
+        app.add_systems(Startup, spawn_user_profile)
+            .add_systems(Update, (sync_user_profile_name, emit_team).chain())
+            .add_plugins(WarmPagePlugin::<Team>::default())
+            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
+                "team", "layout",
+            ]))
+            .add_observer(on_team_command)
+            .add_observer(reset_team_sent_on_page_ready);
+    }
+}
+
 #[derive(Component)]
 struct Team;
 
@@ -39,25 +58,6 @@ impl WarmPage for Team {
 
 #[derive(Component)]
 struct TeamListSent;
-
-/// Wires the team domain: spawns the user profile, emits the team-member list (user and
-/// agents) to ready views, and handles team commands.
-pub struct TeamPlugin;
-
-impl Plugin for TeamPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "team");
-        app.add_systems(Startup, spawn_user_profile)
-            .add_systems(Update, (sync_user_profile_name, emit_team).chain())
-            .add_plugins(WarmPagePlugin::<Team>::default())
-            .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
-                "team", "layout",
-            ]))
-            .add_observer(on_team_command)
-            .add_observer(reset_team_sent_on_page_ready);
-    }
-}
 
 fn spawn_user_profile(mut commands: Commands) {
     let mut identity = commands.spawn((Profile::user(), User, Name::new("Profile: User")));

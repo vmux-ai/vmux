@@ -14,6 +14,79 @@ use crate::event::{
 };
 use crate::job::{Emit, JobKind, emit_event_name, run_job};
 
+/// Wires the git bridge: runs each git request on a background thread and drains completed
+/// results back to the originating webview.
+pub struct GitPlugin;
+
+impl Plugin for GitPlugin {
+    fn build(&self, app: &mut App) {
+        let (tx, rx) = mpsc::channel();
+        let proxy = app
+            .world()
+            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
+            .map(|wrapper| (**wrapper).clone());
+        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+            if !should_forward_git_watch_result(&result) {
+                return;
+            }
+            let _ = tx.send(result);
+            if let Some(proxy) = proxy.as_ref() {
+                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
+            }
+        }) {
+            Ok(watcher) => {
+                app.insert_non_send(GitWatch {
+                    watcher,
+                    rx,
+                    watched: HashSet::new(),
+                    subscriptions: HashMap::new(),
+                    repo_info_subscriptions: HashMap::new(),
+                });
+            }
+            Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
+        }
+        let repo_info_wake = app
+            .world()
+            .get_resource::<EventLoopProxyWrapper>()
+            .map(|wrapper| (**wrapper).clone());
+        app.init_resource::<GitOutbox>()
+            .init_resource::<GitStatusJobs>()
+            .insert_resource(RepoInfoCache {
+                entries: HashMap::new(),
+                wake: repo_info_wake,
+            })
+            .add_plugins(BinEventEmitterPlugin::<(
+                GitStatusRequest,
+                GitDiffRequest,
+                GitStageRequest,
+                GitUnstageRequest,
+                GitDiscardRequest,
+                GitCommitRequest,
+                GitPushRequest,
+                GitHunkRequest,
+            )>::default())
+            .add_observer(on_status_request)
+            .add_observer(on_diff_request)
+            .add_observer(on_stage_request)
+            .add_observer(on_unstage_request)
+            .add_observer(on_discard_request)
+            .add_observer(on_commit_request)
+            .add_observer(on_push_request)
+            .add_observer(on_hunk_request)
+            .add_systems(
+                Update,
+                (
+                    drain_git_watch,
+                    poll_repo_info_cache,
+                    sync_repo_info_watches,
+                    drain_git_outbox,
+                    dispatch_status_jobs,
+                )
+                    .chain(),
+            );
+    }
+}
+
 pub enum GitOutboxItem {
     Events {
         webview: Entity,
@@ -402,78 +475,6 @@ impl GitWatch {
     }
 }
 
-/// Wires the git bridge: runs each git request on a background thread and drains completed
-/// results back to the originating webview.
-pub struct GitPlugin;
-
-impl Plugin for GitPlugin {
-    fn build(&self, app: &mut App) {
-        let (tx, rx) = mpsc::channel();
-        let proxy = app
-            .world()
-            .get_resource::<bevy::winit::EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        match notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-            if !should_forward_git_watch_result(&result) {
-                return;
-            }
-            let _ = tx.send(result);
-            if let Some(proxy) = proxy.as_ref() {
-                let _ = proxy.send_event(bevy::winit::WinitUserEvent::WakeUp);
-            }
-        }) {
-            Ok(watcher) => {
-                app.insert_non_send(GitWatch {
-                    watcher,
-                    rx,
-                    watched: HashSet::new(),
-                    subscriptions: HashMap::new(),
-                    repo_info_subscriptions: HashMap::new(),
-                });
-            }
-            Err(error) => bevy::log::warn!("git watcher init failed: {error}"),
-        }
-        let repo_info_wake = app
-            .world()
-            .get_resource::<EventLoopProxyWrapper>()
-            .map(|wrapper| (**wrapper).clone());
-        app.init_resource::<GitOutbox>()
-            .init_resource::<GitStatusJobs>()
-            .insert_resource(RepoInfoCache {
-                entries: HashMap::new(),
-                wake: repo_info_wake,
-            })
-            .add_plugins(BinEventEmitterPlugin::<(
-                GitStatusRequest,
-                GitDiffRequest,
-                GitStageRequest,
-                GitUnstageRequest,
-                GitDiscardRequest,
-                GitCommitRequest,
-                GitPushRequest,
-                GitHunkRequest,
-            )>::default())
-            .add_observer(on_status_request)
-            .add_observer(on_diff_request)
-            .add_observer(on_stage_request)
-            .add_observer(on_unstage_request)
-            .add_observer(on_discard_request)
-            .add_observer(on_commit_request)
-            .add_observer(on_push_request)
-            .add_observer(on_hunk_request)
-            .add_systems(
-                Update,
-                (
-                    drain_git_watch,
-                    poll_repo_info_cache,
-                    sync_repo_info_watches,
-                    drain_git_outbox,
-                    dispatch_status_jobs,
-                )
-                    .chain(),
-            );
-    }
-}
 
 fn spawn_job(outbox: &GitOutbox, webview: Entity, job: JobKind) {
     let sink = outbox.0.clone();

@@ -5,6 +5,29 @@ use std::path::PathBuf;
 use vmux_core::{Bookmark, BookmarkOrder, Collapsed, Folder, Order, PageMetadata, Pin, Uuid};
 use vmux_layout::LayoutStartupSet;
 
+pub(crate) struct BookmarkPersistencePlugin;
+
+impl Plugin for BookmarkPersistencePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<BookmarkAutoSave>()
+            .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
+            .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
+            .add_systems(
+                Startup,
+                load_bookmarks_on_startup.after(LayoutStartupSet::Persistence),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    migrate_legacy_bookmark_order,
+                    mark_bookmarks_dirty,
+                    autosave_bookmarks,
+                )
+                    .chain(),
+            );
+    }
+}
+
 type BookmarkFilter = Or<(With<Pin>, With<Bookmark>, With<Folder>)>;
 
 pub(crate) fn bookmarks_path() -> PathBuf {
@@ -110,29 +133,6 @@ fn autosave_bookmarks(mut auto: ResMut<BookmarkAutoSave>, mut commands: Commands
     }
     save_bookmarks_to_path(&mut commands, bookmarks_path());
     auto.dirty = false;
-}
-
-pub(crate) struct BookmarkPersistencePlugin;
-
-impl Plugin for BookmarkPersistencePlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<BookmarkAutoSave>()
-            .add_observer(save_on::<SaveWorld<BookmarkFilter>>)
-            .add_observer(load_on::<LoadWorld<BookmarkFilter>>)
-            .add_systems(
-                Startup,
-                load_bookmarks_on_startup.after(LayoutStartupSet::Persistence),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    migrate_legacy_bookmark_order,
-                    mark_bookmarks_dirty,
-                    autosave_bookmarks,
-                )
-                    .chain(),
-            );
-    }
 }
 
 #[cfg(test)]

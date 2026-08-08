@@ -21,6 +21,39 @@ use vmux_command::{
 use vmux_layout::scene::InteractionMode;
 use vmux_ui::i18n::{requested_locale, translate_for};
 
+/// Wires the native application menu bar, including the bookmark context menu.
+pub struct OsMenuPlugin;
+
+impl Plugin for OsMenuPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
+            .init_resource::<LastMenuCommandAt>()
+            .init_resource::<LastStackCloseAt>()
+            .init_resource::<LastNativePageOpenAt>()
+            .init_resource::<CloseMenuItemEnabled>()
+            .add_systems(
+                Startup,
+                setup.after(vmux_setting::plugin::runtime::SettingsLoadSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    forward_menu_events.in_set(WriteAppCommands),
+                    sync_menu_locale,
+                    sync_interactive_mode_menu_items.after(ReadAppCommands),
+                    remember_stack_close_commands.after(WriteAppCommands),
+                    remember_native_page_open_commands.after(WriteAppCommands),
+                    hide_window_on_close_request
+                        .after(remember_stack_close_commands)
+                        .after(remember_native_page_open_commands),
+                    sync_close_menu_item.after(hide_window_on_close_request),
+                ),
+            );
+        #[cfg(target_os = "macos")]
+        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
+    }
+}
+
 /// When a menu key-equivalent last fired. ⌘W triggers the `stack_close` menu item *and* Chromium's
 /// built-in ⌘W (`performClose:` → `WindowCloseRequested`). The red traffic-light button is the only
 /// legitimate window close and never fires a menu event first, so we suppress a `CloseRequested`
@@ -75,39 +108,6 @@ impl InteractiveModeMenuItems {
         self.player.set_enabled(*mode != InteractionMode::Player);
         #[cfg(not(feature = "player-mode"))]
         self.player.set_enabled(false);
-    }
-}
-
-/// Wires the native application menu bar, including the bookmark context menu.
-pub struct OsMenuPlugin;
-
-impl Plugin for OsMenuPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(crate::bookmark_menu::BookmarkMenuPlugin)
-            .init_resource::<LastMenuCommandAt>()
-            .init_resource::<LastStackCloseAt>()
-            .init_resource::<LastNativePageOpenAt>()
-            .init_resource::<CloseMenuItemEnabled>()
-            .add_systems(
-                Startup,
-                setup.after(vmux_setting::plugin::runtime::SettingsLoadSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    forward_menu_events.in_set(WriteAppCommands),
-                    sync_menu_locale,
-                    sync_interactive_mode_menu_items.after(ReadAppCommands),
-                    remember_stack_close_commands.after(WriteAppCommands),
-                    remember_native_page_open_commands.after(WriteAppCommands),
-                    hide_window_on_close_request
-                        .after(remember_stack_close_commands)
-                        .after(remember_native_page_open_commands),
-                    sync_close_menu_item.after(hide_window_on_close_request),
-                ),
-            );
-        #[cfg(target_os = "macos")]
-        app.add_systems(Update, sync_edit_menu_items.after(ReadAppCommands));
     }
 }
 

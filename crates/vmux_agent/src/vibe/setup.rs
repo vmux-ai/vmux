@@ -17,20 +17,6 @@ use crate::vibe::setup::event::{
 use vmux_core::agent::AgentKind;
 
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Component)]
-struct AgentInstallPane {
-    setup_stack: Entity,
-    setup_webview: Entity,
-    agent: AgentKind,
-    process_id: vmux_service::protocol::ProcessId,
-    armed: bool,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Component)]
-pub(crate) struct AgentSetupNavigated;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub struct AgentSetupPlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -46,6 +32,20 @@ impl Plugin for AgentSetupPlugin {
             .add_systems(Update, detect_agent_install_outcome);
     }
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+struct AgentInstallPane {
+    setup_stack: Entity,
+    setup_webview: Entity,
+    agent: AgentKind,
+    process_id: vmux_service::protocol::ProcessId,
+    armed: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Component)]
+pub(crate) struct AgentSetupNavigated;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {

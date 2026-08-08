@@ -18,6 +18,35 @@ use vmux_command::{
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
+pub struct StackPlugin;
+
+impl Plugin for StackPlugin {
+    fn build(&self, app: &mut App) {
+        app.register_type::<Stack>()
+            .init_resource::<FocusedStack>()
+            .add_message::<CloseStackRequest>()
+            .add_systems(
+                Update,
+                (
+                    handle_stack_commands
+                        .in_set(ReadAppCommands)
+                        .in_set(StackCommandSet),
+                    handle_close_stack_requests.in_set(ReadAppCommands),
+                ),
+            )
+            .add_systems(
+                Update,
+                compute_focused_stack
+                    .in_set(ComputeFocusSet)
+                    .after(ReadAppCommands)
+                    .after(crate::active::ensure_active_tab)
+                    .after(crate::active::ensure_active_stack)
+                    .after(crate::active::ensure_active_branch),
+            )
+            .add_systems(PostUpdate, sync_stack_picking);
+    }
+}
+
 /// Cached result of `focused_stack()`, computed once per frame in `Update`
 /// after all command handlers. Read by push/sync systems to avoid redundant
 /// tree walks.
@@ -51,35 +80,6 @@ pub struct CloseStackRequest {
 /// System set for `handle_stack_commands`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StackCommandSet;
-
-pub struct StackPlugin;
-
-impl Plugin for StackPlugin {
-    fn build(&self, app: &mut App) {
-        app.register_type::<Stack>()
-            .init_resource::<FocusedStack>()
-            .add_message::<CloseStackRequest>()
-            .add_systems(
-                Update,
-                (
-                    handle_stack_commands
-                        .in_set(ReadAppCommands)
-                        .in_set(StackCommandSet),
-                    handle_close_stack_requests.in_set(ReadAppCommands),
-                ),
-            )
-            .add_systems(
-                Update,
-                compute_focused_stack
-                    .in_set(ComputeFocusSet)
-                    .after(ReadAppCommands)
-                    .after(crate::active::ensure_active_tab)
-                    .after(crate::active::ensure_active_stack)
-                    .after(crate::active::ensure_active_branch),
-            )
-            .add_systems(PostUpdate, sync_stack_picking);
-    }
-}
 
 fn handle_close_stack_requests(
     mut reader: MessageReader<CloseStackRequest>,

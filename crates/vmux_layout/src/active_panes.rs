@@ -3,6 +3,25 @@ use crate::stack::{ComputeFocusSet, FocusedStack};
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+pub struct ActivePanesPlugin;
+
+impl Plugin for ActivePanesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ActivePanes>()
+            .add_message::<ActivatePane>()
+            .add_systems(
+                Update,
+                (
+                    mirror_local_active_pane,
+                    apply_active_panes,
+                    prune_active_panes,
+                )
+                    .chain()
+                    .after(ComputeFocusSet),
+            );
+    }
+}
+
 /// Identity of a participant whose focus the layout tracks. The local human
 /// drives OS keyboard focus; agents each get their own active pane and focus
 /// ring. Remote participants are a future variant feeding the same flow.
@@ -49,25 +68,6 @@ impl ActivePanes {
 pub struct ActivatePane {
     pub profile: ProfileId,
     pub active: ActiveStack,
-}
-
-pub struct ActivePanesPlugin;
-
-impl Plugin for ActivePanesPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<ActivePanes>()
-            .add_message::<ActivatePane>()
-            .add_systems(
-                Update,
-                (
-                    mirror_local_active_pane,
-                    apply_active_panes,
-                    prune_active_panes,
-                )
-                    .chain()
-                    .after(ComputeFocusSet),
-            );
-    }
 }
 
 fn mirror_local_active_pane(focus: Res<FocusedStack>, mut active: ResMut<ActivePanes>) {

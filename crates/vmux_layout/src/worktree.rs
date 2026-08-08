@@ -15,6 +15,29 @@ use sha2::{Digest, Sha256};
 use crate::tab::{Tab, TabWorkspace, TabWorktree, TabWorktreeUnavailable};
 use vmux_git::worktree::{self, CheckoutInfo};
 
+impl Plugin for WorktreePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ManagedWorktreeRoot>()
+            .init_resource::<WorktreeReconcileQueue>()
+            .add_message::<TabDirectoryObserved>()
+            .add_systems(
+                Update,
+                (
+                    ensure_tab_workspaces,
+                    queue_added_tab_worktrees,
+                    reconcile_next_tab_worktree,
+                )
+                    .chain(),
+            )
+            .add_systems(
+                Update,
+                rebind_tab_directories
+                    .in_set(TabDirectoryRebindSet)
+                    .after(reconcile_next_tab_worktree),
+            );
+    }
+}
+
 pub struct WorktreePlugin;
 
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
@@ -64,29 +87,6 @@ pub struct TabDirectoryObserved {
     pub tab: Entity,
     pub path: PathBuf,
     pub kind: TabDirectoryObservationKind,
-}
-
-impl Plugin for WorktreePlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<ManagedWorktreeRoot>()
-            .init_resource::<WorktreeReconcileQueue>()
-            .add_message::<TabDirectoryObserved>()
-            .add_systems(
-                Update,
-                (
-                    ensure_tab_workspaces,
-                    queue_added_tab_worktrees,
-                    reconcile_next_tab_worktree,
-                )
-                    .chain(),
-            )
-            .add_systems(
-                Update,
-                rebind_tab_directories
-                    .in_set(TabDirectoryRebindSet)
-                    .after(reconcile_next_tab_worktree),
-            );
-    }
 }
 
 /// Sanitize a tab name into a filesystem/branch-safe slug (lowercase alnum, `-` separators).

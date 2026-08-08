@@ -9,10 +9,6 @@ use bevy_cef_core::prelude::WebviewDirtyRect;
 use vmux_layout::cef::LayoutCef;
 use vmux_layout::scene::InteractionMode;
 
-/// How long to keep re-asserting activation after reveal before giving up, so a degenerate case
-/// (activation never confirms) cannot wake the loop forever.
-const ACTIVATION_RETRY_BUDGET: Duration = Duration::from_secs(3);
-
 pub(crate) struct GlassPlugin;
 
 impl Plugin for GlassPlugin {
@@ -48,6 +44,10 @@ impl Plugin for GlassPlugin {
         );
     }
 }
+
+/// How long to keep re-asserting activation after reveal before giving up, so a degenerate case
+/// (activation never confirms) cannot wake the loop forever.
+const ACTIVATION_RETRY_BUDGET: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
 struct GlassState {

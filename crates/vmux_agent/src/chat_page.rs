@@ -68,6 +68,87 @@ use vmux_service::protocol::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
+pub struct AgentChatPagePlugin;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Plugin for AgentChatPagePlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(PAGE_MANIFEST);
+        app.init_resource::<AcpModelRequestCounter>()
+            .init_resource::<LastUsedAcpModels>()
+            .add_message::<AcpSetModelRequest>()
+            .add_systems(Startup, load_last_used_acp_models)
+            .add_plugins(BinEventEmitterPlugin::<(
+                ChatSubmit,
+                ChatApproval,
+                ChatCancel,
+                ChatResume,
+                ChatClearQueue,
+                ChatCancelQueuedPrompt,
+                ChatEscape,
+                ResumeListRequest,
+                ResumeSession,
+                RuntimeSwitchRequest,
+                SelectModel,
+                SetAgentEffort,
+            )>::for_hosts(&["agent", "start"]))
+            .add_plugins(BinEventEmitterPlugin::<(
+                ChatPickFiles,
+                ChatPasteMedia,
+                ChatMediaListRequest,
+                ChatAttachPaths,
+                ChatAttachmentPreviewRequest,
+                ChatChoiceSelected,
+                ChatHistoryRequest,
+                ChatSelectWorkspace,
+                ChatCreateWorktree,
+                ChatOpenPage,
+            )>::for_hosts(&["agent", "start"]))
+            .add_observer(on_chat_submit)
+            .add_observer(on_chat_approval)
+            .add_observer(on_chat_cancel)
+            .add_observer(on_chat_resume)
+            .add_observer(on_chat_clear_queue)
+            .add_observer(on_chat_cancel_queued_prompt)
+            .add_observer(on_chat_escape)
+            .add_observer(on_chat_choice_selected)
+            .add_observer(on_chat_history_request)
+            .add_observer(on_chat_pick_files)
+            .add_observer(on_chat_paste_media)
+            .add_observer(on_chat_media_list_request)
+            .add_observer(on_chat_attach_paths)
+            .add_observer(on_chat_attachment_preview_request)
+            .add_observer(on_resume_list_request)
+            .add_observer(on_resume_session)
+            .add_observer(on_runtime_switch_request)
+            .add_observer(on_select_model)
+            .add_observer(on_set_agent_effort)
+            .add_observer(on_chat_open_page)
+            .add_observer(on_chat_select_workspace)
+            .add_observer(on_chat_create_worktree)
+            .add_observer(reset_chat_synced_on_page_ready)
+            .add_systems(
+                Update,
+                (
+                    (track_turn_duration, push_chat_to_page).chain(),
+                    sync_chat_to_ready_views,
+                    push_acp_model_state_to_page,
+                    push_removed_acp_model_state_to_page,
+                    push_composer_context_to_page,
+                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
+                    send_acp_model_requests,
+                    save_last_used_acp_models.after(apply_last_used_acp_model),
+                    drain_chat_attachment_tasks,
+                    drain_chat_media_list_tasks,
+                    drain_chat_media_preview_tasks,
+                    drain_resume_list_tasks,
+                    drain_resume_handoff_tasks,
+                ),
+            );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agent",
     title: "Agent",
@@ -142,9 +223,6 @@ fn approval_detail_label(path: &str) -> String {
         .collect::<Vec<_>>()
         .join(" · ")
 }
-
-#[cfg(not(target_arch = "wasm32"))]
-pub struct AgentChatPagePlugin;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Message)]
@@ -226,84 +304,6 @@ impl AcpModelRequestCounter {
     fn next(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(1);
         self.0
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Plugin for AgentChatPagePlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(PAGE_MANIFEST);
-        app.init_resource::<AcpModelRequestCounter>()
-            .init_resource::<LastUsedAcpModels>()
-            .add_message::<AcpSetModelRequest>()
-            .add_systems(Startup, load_last_used_acp_models)
-            .add_plugins(BinEventEmitterPlugin::<(
-                ChatSubmit,
-                ChatApproval,
-                ChatCancel,
-                ChatResume,
-                ChatClearQueue,
-                ChatCancelQueuedPrompt,
-                ChatEscape,
-                ResumeListRequest,
-                ResumeSession,
-                RuntimeSwitchRequest,
-                SelectModel,
-                SetAgentEffort,
-            )>::for_hosts(&["agent", "start"]))
-            .add_plugins(BinEventEmitterPlugin::<(
-                ChatPickFiles,
-                ChatPasteMedia,
-                ChatMediaListRequest,
-                ChatAttachPaths,
-                ChatAttachmentPreviewRequest,
-                ChatChoiceSelected,
-                ChatHistoryRequest,
-                ChatSelectWorkspace,
-                ChatCreateWorktree,
-                ChatOpenPage,
-            )>::for_hosts(&["agent", "start"]))
-            .add_observer(on_chat_submit)
-            .add_observer(on_chat_approval)
-            .add_observer(on_chat_cancel)
-            .add_observer(on_chat_resume)
-            .add_observer(on_chat_clear_queue)
-            .add_observer(on_chat_cancel_queued_prompt)
-            .add_observer(on_chat_escape)
-            .add_observer(on_chat_choice_selected)
-            .add_observer(on_chat_history_request)
-            .add_observer(on_chat_pick_files)
-            .add_observer(on_chat_paste_media)
-            .add_observer(on_chat_media_list_request)
-            .add_observer(on_chat_attach_paths)
-            .add_observer(on_chat_attachment_preview_request)
-            .add_observer(on_resume_list_request)
-            .add_observer(on_resume_session)
-            .add_observer(on_runtime_switch_request)
-            .add_observer(on_select_model)
-            .add_observer(on_set_agent_effort)
-            .add_observer(on_chat_open_page)
-            .add_observer(on_chat_select_workspace)
-            .add_observer(on_chat_create_worktree)
-            .add_observer(reset_chat_synced_on_page_ready)
-            .add_systems(
-                Update,
-                (
-                    (track_turn_duration, push_chat_to_page).chain(),
-                    sync_chat_to_ready_views,
-                    push_acp_model_state_to_page,
-                    push_removed_acp_model_state_to_page,
-                    push_composer_context_to_page,
-                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
-                    send_acp_model_requests,
-                    save_last_used_acp_models.after(apply_last_used_acp_model),
-                    drain_chat_attachment_tasks,
-                    drain_chat_media_list_tasks,
-                    drain_chat_media_preview_tasks,
-                    drain_resume_list_tasks,
-                    drain_resume_handoff_tasks,
-                ),
-            );
     }
 }
 

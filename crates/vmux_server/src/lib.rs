@@ -14,6 +14,17 @@ pub use vmux_core::page::{
 use dioxus::prelude::*;
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[allow(non_snake_case)]
+pub fn App() -> Element {
+    let host = current_host();
+    WEB_PAGE_MANIFESTS
+        .iter()
+        .find(|manifest| manifest.host == host)
+        .map(|manifest| (manifest.render)())
+        .unwrap_or_else(|| rsx! { UnknownPage { host } })
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
 struct WebPageManifest {
     host: &'static str,
     render: fn() -> Element,
@@ -57,26 +68,20 @@ fn inline_agent_id(agent_url: &str) -> String {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
-#[allow(non_snake_case)]
 #[component]
-fn StartAgentPage() -> Element {
-    let mut transition = use_signal(inline_agent_transition);
-    if let Some(active) = transition() {
-        return rsx! {
-            vmux_agent::chat_page::page::Page {
-                agent_override: Some(inline_agent_id(&active.agent_url)),
-                transition_prompt: Some(active.prompt),
-                transition_attachments: Some(active.attachments),
-            }
-        };
-    }
+fn UnknownPage(host: String) -> Element {
+    use vmux_ui::i18n::{TranslationValue, translate_with};
+
+    vmux_ui::hooks::use_theme();
     rsx! {
-        vmux_layout::start::page::Page {
-            on_agent_transition: move |next: vmux_layout::command_bar::palette::StartAgentTransition| {
-                vmux_layout::start::page::begin_agent_transition();
-                set_inline_agent_url(&next.agent_url);
-                transition.set(Some(next));
-            },
+        div { class: "flex h-screen items-center justify-center bg-background text-foreground",
+            div {
+                class: "text-sm text-muted-foreground",
+                {translate_with(
+                    "error-unknown-host",
+                    &[("host", TranslationValue::String(&host))],
+                )}
+            }
         }
     }
 }
@@ -125,17 +130,6 @@ web_pages! {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
-#[allow(non_snake_case)]
-pub fn App() -> Element {
-    let host = current_host();
-    WEB_PAGE_MANIFESTS
-        .iter()
-        .find(|manifest| manifest.host == host)
-        .map(|manifest| (manifest.render)())
-        .unwrap_or_else(|| rsx! { UnknownPage { host } })
-}
-
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
 fn current_host() -> String {
     let loc = web_sys::window().map(|window| window.location());
     let protocol = loc
@@ -171,20 +165,26 @@ mod host_tests {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[allow(non_snake_case)]
 #[component]
-fn UnknownPage(host: String) -> Element {
-    use vmux_ui::i18n::{TranslationValue, translate_with};
-
-    vmux_ui::hooks::use_theme();
-    rsx! {
-        div { class: "flex h-screen items-center justify-center bg-background text-foreground",
-            div {
-                class: "text-sm text-muted-foreground",
-                {translate_with(
-                    "error-unknown-host",
-                    &[("host", TranslationValue::String(&host))],
-                )}
+fn StartAgentPage() -> Element {
+    let mut transition = use_signal(inline_agent_transition);
+    if let Some(active) = transition() {
+        return rsx! {
+            vmux_agent::chat_page::page::Page {
+                agent_override: Some(inline_agent_id(&active.agent_url)),
+                transition_prompt: Some(active.prompt),
+                transition_attachments: Some(active.attachments),
             }
+        };
+    }
+    rsx! {
+        vmux_layout::start::page::Page {
+            on_agent_transition: move |next: vmux_layout::command_bar::palette::StartAgentTransition| {
+                vmux_layout::start::page::begin_agent_transition();
+                set_inline_agent_url(&next.agent_url);
+                transition.set(Some(next));
+            },
         }
     }
 }

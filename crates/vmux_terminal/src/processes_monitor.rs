@@ -18,6 +18,42 @@ use vmux_layout::{
     warm_page::{WarmPage, WarmPagePlugin, WarmPageSpare},
 };
 
+pub struct ProcessesMonitorPlugin;
+
+impl Plugin for ProcessesMonitorPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ServiceProcessList>()
+            .init_resource::<ProcessUsage>()
+            .init_resource::<SysinfoState>()
+            .insert_resource(ProcessesPollTimer(Timer::from_seconds(
+                1.0,
+                TimerMode::Repeating,
+            )))
+            .insert_resource(SysinfoPollTimer(Timer::from_seconds(
+                1.0,
+                TimerMode::Repeating,
+            )))
+            .add_plugins(BinEventEmitterPlugin::<(
+                ProcessNavigateEvent,
+                ProcessKillEvent,
+                ProcessKillAllEvent,
+            )>::for_hosts(&["services"]))
+            .add_systems(
+                Update,
+                (
+                    request_process_list,
+                    sample_process_usage,
+                    broadcast_to_monitors,
+                )
+                    .chain(),
+            )
+            .add_observer(on_process_navigate)
+            .add_observer(on_process_kill)
+            .add_observer(on_process_kill_all)
+            .add_plugins(WarmPagePlugin::<ProcessesMonitor>::default());
+    }
+}
+
 #[derive(Component)]
 pub struct ProcessesMonitor;
 
@@ -136,42 +172,6 @@ struct SysinfoState(sysinfo::System);
 impl Default for SysinfoState {
     fn default() -> Self {
         Self(sysinfo::System::new())
-    }
-}
-
-pub struct ProcessesMonitorPlugin;
-
-impl Plugin for ProcessesMonitorPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<ServiceProcessList>()
-            .init_resource::<ProcessUsage>()
-            .init_resource::<SysinfoState>()
-            .insert_resource(ProcessesPollTimer(Timer::from_seconds(
-                1.0,
-                TimerMode::Repeating,
-            )))
-            .insert_resource(SysinfoPollTimer(Timer::from_seconds(
-                1.0,
-                TimerMode::Repeating,
-            )))
-            .add_plugins(BinEventEmitterPlugin::<(
-                ProcessNavigateEvent,
-                ProcessKillEvent,
-                ProcessKillAllEvent,
-            )>::for_hosts(&["services"]))
-            .add_systems(
-                Update,
-                (
-                    request_process_list,
-                    sample_process_usage,
-                    broadcast_to_monitors,
-                )
-                    .chain(),
-            )
-            .add_observer(on_process_navigate)
-            .add_observer(on_process_kill)
-            .add_observer(on_process_kill_all)
-            .add_plugins(WarmPagePlugin::<ProcessesMonitor>::default());
     }
 }
 

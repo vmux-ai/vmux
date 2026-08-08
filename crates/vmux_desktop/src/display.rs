@@ -1,13 +1,13 @@
 use bevy::prelude::*;
 use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, Window, WindowPosition};
 
-pub(crate) struct DisplayPlugin;
-
 impl Plugin for DisplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, relocate_window_to_live_display);
     }
 }
+
+pub(crate) struct DisplayPlugin;
 
 fn monitor_rect(monitor: &Monitor) -> IRect {
     let min = monitor.physical_position;

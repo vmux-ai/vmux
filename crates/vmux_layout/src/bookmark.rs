@@ -9,6 +9,31 @@ use vmux_core::{
     Bookmark, BookmarkOrder, Collapsed, Folder, LastActivatedAt, PageMetadata, Pin, Uuid,
 };
 
+pub struct BookmarkPlugin;
+
+impl Plugin for BookmarkPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<BookmarkOp>()
+            .add_message::<ShowBookmarkMenuRequest>()
+            .add_plugins(BinEventEmitterPlugin::<(
+                BookmarksCommandEvent,
+                BookmarkTextInputEvent,
+                BookmarkContextMenuEvent,
+            )>::for_hosts(&["layout"]))
+            .add_observer(on_bookmarks_command_emit)
+            .add_observer(on_bookmark_text_input_emit)
+            .add_observer(on_bookmark_context_menu_emit)
+            .add_systems(
+                Update,
+                (
+                    handle_bookmark_app_commands.in_set(ReadAppCommands),
+                    apply_bookmark_ops,
+                )
+                    .chain(),
+            );
+    }
+}
+
 #[derive(Message, Clone, Debug, PartialEq, Eq)]
 pub enum BookmarkOp {
     ToggleForUrl {
@@ -73,31 +98,6 @@ pub struct BookmarkTextInputActive;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BookmarkContextMenuActive;
-
-pub struct BookmarkPlugin;
-
-impl Plugin for BookmarkPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<BookmarkOp>()
-            .add_message::<ShowBookmarkMenuRequest>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                BookmarksCommandEvent,
-                BookmarkTextInputEvent,
-                BookmarkContextMenuEvent,
-            )>::for_hosts(&["layout"]))
-            .add_observer(on_bookmarks_command_emit)
-            .add_observer(on_bookmark_text_input_emit)
-            .add_observer(on_bookmark_context_menu_emit)
-            .add_systems(
-                Update,
-                (
-                    handle_bookmark_app_commands.in_set(ReadAppCommands),
-                    apply_bookmark_ops,
-                )
-                    .chain(),
-            );
-    }
-}
 
 fn on_bookmark_context_menu_emit(
     trigger: On<BinReceive<BookmarkContextMenuEvent>>,

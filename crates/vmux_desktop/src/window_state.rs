@@ -5,25 +5,6 @@ use vmux_layout::window::WindowGeometry;
 #[cfg(not(all(target_os = "macos", feature = "native-glass")))]
 use bevy::window::{MonitorSelection, WindowMode};
 
-/// Captures below this logical size are treated as transient and ignored.
-const MIN_WINDOW_SIZE: f32 = 100.0;
-
-/// Live fullscreen signal. macOS writes it from `glass.rs` (NSWindow styleMask);
-/// other platforms derive it from `window.mode`.
-#[derive(Resource, Default, Debug)]
-pub struct WindowFullscreen(pub bool);
-
-/// Loaded fullscreen intent awaiting application. Inserted by
-/// `apply_geometry_on_load`, consumed by the platform fullscreen-restore system
-/// (post-reveal on macOS), which then sets [`WindowRestoreComplete`].
-#[derive(Resource, Debug)]
-pub struct PendingFullscreenRestore(pub bool);
-
-/// Set once startup geometry restore is finished. Capture is gated on this so
-/// the transient windowed startup state can't overwrite a saved `fullscreen`.
-#[derive(Resource, Default, Debug)]
-pub struct WindowRestoreComplete;
-
 pub(crate) struct WindowStatePlugin;
 
 impl Plugin for WindowStatePlugin {
@@ -47,6 +28,25 @@ impl Plugin for WindowStatePlugin {
         );
     }
 }
+
+/// Captures below this logical size are treated as transient and ignored.
+const MIN_WINDOW_SIZE: f32 = 100.0;
+
+/// Live fullscreen signal. macOS writes it from `glass.rs` (NSWindow styleMask);
+/// other platforms derive it from `window.mode`.
+#[derive(Resource, Default, Debug)]
+pub struct WindowFullscreen(pub bool);
+
+/// Loaded fullscreen intent awaiting application. Inserted by
+/// `apply_geometry_on_load`, consumed by the platform fullscreen-restore system
+/// (post-reveal on macOS), which then sets [`WindowRestoreComplete`].
+#[derive(Resource, Debug)]
+pub struct PendingFullscreenRestore(pub bool);
+
+/// Set once startup geometry restore is finished. Capture is gated on this so
+/// the transient windowed startup state can't overwrite a saved `fullscreen`.
+#[derive(Resource, Default, Debug)]
+pub struct WindowRestoreComplete;
 
 /// Spawn the persisted geometry singleton if none was loaded from `store.ron`
 /// (first run, or an older store predating this feature). Gated on restore

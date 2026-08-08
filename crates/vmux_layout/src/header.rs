@@ -2,11 +2,6 @@ use super::Open;
 use crate::event::CEF_RESERVED_HEIGHT_PX;
 use bevy::prelude::*;
 
-#[derive(Component)]
-pub struct Header;
-
-pub(crate) struct HeaderLayoutPlugin;
-
 impl Plugin for HeaderLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
@@ -15,6 +10,11 @@ impl Plugin for HeaderLayoutPlugin {
         );
     }
 }
+
+pub(crate) struct HeaderLayoutPlugin;
+
+#[derive(Component)]
+pub struct Header;
 
 fn sync_header_visibility(
     mut header_q: Query<(&mut Visibility, &mut Node), With<Header>>,

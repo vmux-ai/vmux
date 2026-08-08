@@ -5,13 +5,13 @@ pub use vmux_core::profile::{
     active_profile_name, cef_cache_path, profile_dir, session_path, shared_data_dir,
 };
 
-pub struct ProfilePlugin;
-
 impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Profile>();
     }
 }
+
+pub struct ProfilePlugin;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]

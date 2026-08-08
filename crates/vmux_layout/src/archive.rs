@@ -28,9 +28,6 @@ use crate::tab::{
 use crate::window::spawn_tab_scaffold_in_space;
 use crate::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
-const MAX_ARCHIVE_ENTRIES: usize = 25;
-const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
-
 pub struct ArchivePlugin;
 
 impl Plugin for ArchivePlugin {
@@ -47,6 +44,9 @@ impl Plugin for ArchivePlugin {
             );
     }
 }
+
+const MAX_ARCHIVE_ENTRIES: usize = 25;
+const ARCHIVE_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 
 #[allow(clippy::too_many_arguments)]
 fn archive_on_stack_close(

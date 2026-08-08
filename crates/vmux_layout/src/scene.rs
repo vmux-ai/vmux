@@ -16,6 +16,47 @@ use bevy::{
 use bevy_cef::prelude::CefKeyboardTarget;
 use vmux_command::{AppCommand, ReadAppCommands, SceneCommand, SceneInteractiveModeCommand};
 
+#[derive(Default)]
+pub struct ScenePlugin;
+
+impl Plugin for ScenePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(FreeCameraPlugin)
+            .init_resource::<InteractionMode>()
+            .insert_resource(ClearColor(Color::BLACK))
+            .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
+            .add_systems(
+                Startup,
+                fit_main_camera
+                    .after(fit_window_to_screen)
+                    .in_set(LayoutStartupSet::Post),
+            )
+            .add_systems(
+                Update,
+                (
+                    on_interactive_mode_command.in_set(ReadAppCommands),
+                    suppress_free_camera_when_pane_active,
+                    tick_mode_transition,
+                    fade_bloom_and_light,
+                    setup_exit_camera_animation,
+                    start_pending_animation,
+                    complete_mode_transition.in_set(SceneSystems::CompleteModeTransition),
+                )
+                    .chain(),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    fit_main_camera.after(fit_window_to_screen),
+                    update_camera_home.after(fit_window_to_screen),
+                ),
+            );
+
+        #[cfg(target_os = "macos")]
+        app.insert_resource(ClearColor(Color::NONE));
+    }
+}
+
 pub const FOV_Y: f32 = std::f32::consts::FRAC_PI_4;
 
 const TRANSITION_DURATION: f32 = 0.3;
@@ -74,47 +115,6 @@ struct PendingAnimationStart(AnimationNodeIndex);
 
 #[derive(Component)]
 struct SceneSunlight;
-
-#[derive(Default)]
-pub struct ScenePlugin;
-
-impl Plugin for ScenePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_plugins(FreeCameraPlugin)
-            .init_resource::<InteractionMode>()
-            .insert_resource(ClearColor(Color::BLACK))
-            .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
-            .add_systems(
-                Startup,
-                fit_main_camera
-                    .after(fit_window_to_screen)
-                    .in_set(LayoutStartupSet::Post),
-            )
-            .add_systems(
-                Update,
-                (
-                    on_interactive_mode_command.in_set(ReadAppCommands),
-                    suppress_free_camera_when_pane_active,
-                    tick_mode_transition,
-                    fade_bloom_and_light,
-                    setup_exit_camera_animation,
-                    start_pending_animation,
-                    complete_mode_transition.in_set(SceneSystems::CompleteModeTransition),
-                )
-                    .chain(),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    fit_main_camera.after(fit_window_to_screen),
-                    update_camera_home.after(fit_window_to_screen),
-                ),
-            );
-
-        #[cfg(target_os = "macos")]
-        app.insert_resource(ClearColor(Color::NONE));
-    }
-}
 
 pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>>) {
     let mut state = FreeCameraState::default();

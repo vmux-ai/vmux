@@ -4,6 +4,17 @@ use bevy_cef::prelude::*;
 
 use crate::event::LAYOUT_PAGE_URL;
 
+pub struct LayoutCefPlugin;
+
+impl Plugin for LayoutCefPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::COMMAND_BAR_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::DEBUG_PAGE_MANIFEST);
+        app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
+    }
+}
+
 const LAYOUT_OSR_MAX_FRAME_RATE: i32 = 30;
 
 #[derive(Component)]
@@ -20,17 +31,6 @@ pub struct Loading;
 pub struct NavigationState {
     pub can_go_back: bool,
     pub can_go_forward: bool,
-}
-
-pub struct LayoutCefPlugin;
-
-impl Plugin for LayoutCefPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
-        app.world_mut().spawn(crate::COMMAND_BAR_PAGE_MANIFEST);
-        app.world_mut().spawn(crate::DEBUG_PAGE_MANIFEST);
-        app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
-    }
 }
 
 pub fn mirror_metadata_to_url(

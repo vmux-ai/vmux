@@ -8,9 +8,6 @@ use crate::client::page::strategy_components::{
 use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::{AgentKind, AgentVariant};
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct AnthropicProvider;
-
 pub struct AnthropicPlugin;
 
 impl Plugin for AnthropicPlugin {
@@ -18,6 +15,9 @@ impl Plugin for AnthropicPlugin {
         app.add_systems(Startup, register_anthropic_strategy.after(SettingsLoadSet));
     }
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AnthropicProvider;
 
 fn register_anthropic_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
     if std::env::var(super::anthropic::ENV_VAR).is_err() {
