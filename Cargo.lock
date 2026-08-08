@@ -11231,9 +11231,23 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "vmux_client",
  "vmux_mcp",
  "vmux_profile",
- "vmux_service_client",
+]
+
+[[package]]
+name = "vmux_client"
+version = "0.0.30"
+dependencies = [
+ "chrono",
+ "libc",
+ "rkyv",
+ "tokio",
+ "tracing",
+ "url",
+ "vmux_profile",
+ "vmux_wire",
 ]
 
 [[package]]
@@ -11508,10 +11522,10 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "vmux_client",
  "vmux_command_mcp",
  "vmux_macro",
  "vmux_profile",
- "vmux_service_client",
 ]
 
 [[package]]
@@ -11630,27 +11644,13 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "vmux_client",
  "vmux_core",
  "vmux_layout",
  "vmux_remote",
- "vmux_service_client",
  "vmux_ui",
  "vmux_wire",
  "vte",
-]
-
-[[package]]
-name = "vmux_service_client"
-version = "0.0.30"
-dependencies = [
- "chrono",
- "libc",
- "rkyv",
- "tokio",
- "tracing",
- "url",
- "vmux_profile",
- "vmux_wire",
 ]
 
 [[package]]

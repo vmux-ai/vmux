@@ -17,4 +17,4 @@ tokio = { workspace = true }
 vmux_command_mcp = { path = "../vmux_command_mcp" }
 vmux_macro = { path = "../vmux_macro" }
 vmux_profile = { path = "../vmux_profile" }
-vmux_service = { package = "vmux_service_client", path = "../vmux_service_client" }
+vmux_client = { path = "../vmux_client" }

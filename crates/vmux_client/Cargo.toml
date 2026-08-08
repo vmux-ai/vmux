@@ -1,5 +1,5 @@
 [package]
-name = "vmux_service_client"
+name = "vmux_client"
 description = "Lightweight client and CLI for vmux_service"
 version.workspace = true
 edition.workspace = true

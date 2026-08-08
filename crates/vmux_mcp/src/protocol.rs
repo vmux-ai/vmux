@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 use std::time::{Duration, Instant};
-use vmux_service::protocol::{
+use vmux_client::protocol::{
     AgentCommand, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage, FileTouchKind,
     ServiceMessage,
 };
@@ -22,7 +22,7 @@ pub fn read_json_line(reader: &mut impl BufRead) -> io::Result<Option<Value>> {
 }
 
 pub async fn run_stdio(
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
     run_block_timeout: Duration,
@@ -52,7 +52,7 @@ pub async fn run_stdio(
 
 async fn handle_message(
     message: Value,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
     run_block_timeout: Duration,
@@ -121,7 +121,7 @@ fn initialize_result(params: &Value) -> Value {
 
 async fn tool_call_result(
     params: &Value,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
     acp_session: bool,
     acp_terminals: bool,
     run_block_timeout: Duration,
@@ -203,7 +203,7 @@ fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
 
 async fn read_file_result(
     arguments: &Value,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<Value, String> {
     let path = arguments
         .get("path")
@@ -241,7 +241,7 @@ const GREP_MAX_LINES: usize = 200;
 
 async fn grep_result(
     arguments: &Value,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<Value, String> {
     let query = arguments
         .get("query")
@@ -376,7 +376,7 @@ async fn grep_result(
                     .entry(path.clone())
                     .or_insert_with(|| std::fs::canonicalize(&path).ok())
                     .clone()?;
-                Some(vmux_service::protocol::FileSearchMatch {
+                Some(vmux_client::protocol::FileSearchMatch {
                     path: canonical.to_string_lossy().into_owned(),
                     line,
                     col,
@@ -530,7 +530,7 @@ fn run_result(
 fn run_completion_exit(
     result: AgentQueryResult,
     token: &str,
-    process_id: vmux_service::protocol::ProcessId,
+    process_id: vmux_client::protocol::ProcessId,
     allow_missing_process: bool,
 ) -> Result<Option<i32>, String> {
     match result {
@@ -555,7 +555,7 @@ fn run_completion_exit(
 /// completion escape for this run's token is seen, returning the output + exit
 /// code in one response.
 async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<Value, String> {
-    let connection = vmux_service::client::ServiceConnection::connect()
+    let connection = vmux_client::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
 
@@ -584,7 +584,7 @@ async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<
                 request_id: received,
                 result,
             } if received == request_id => {
-                use vmux_service::protocol::AgentCommandResult;
+                use vmux_client::protocol::AgentCommandResult;
                 match result {
                     AgentCommandResult::Text(pid) => break pid,
                     AgentCommandResult::Error(message) => return Err(message),
@@ -597,7 +597,7 @@ async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<
     };
 
     let process_id = pid
-        .parse::<vmux_service::protocol::ProcessId>()
+        .parse::<vmux_client::protocol::ProcessId>()
         .map_err(|_| format!("run: service returned an invalid terminal id: {pid}"))?;
 
     let start = Instant::now();
@@ -632,7 +632,7 @@ async fn run_blocking(run: AgentCommand, run_block_timeout: Duration) -> Result<
 }
 
 async fn agent_query(
-    connection: &vmux_service::client::ServiceConnection,
+    connection: &vmux_client::client::ServiceConnection,
     query: AgentQuery,
 ) -> Result<AgentQueryResult, String> {
     let request_id = AgentRequestId::new();
@@ -660,8 +660,8 @@ async fn agent_query(
 }
 
 async fn read_full_text(
-    connection: &vmux_service::client::ServiceConnection,
-    process_id: vmux_service::protocol::ProcessId,
+    connection: &vmux_client::client::ServiceConnection,
+    process_id: vmux_client::protocol::ProcessId,
 ) -> String {
     match agent_query(connection, AgentQuery::ReadTerminalFull { process_id }).await {
         Ok(AgentQueryResult::Text(text)) => text,
@@ -671,10 +671,10 @@ async fn read_full_text(
 
 async fn run_agent_command(
     command: AgentCommand,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<Value, String> {
-    let request_id = vmux_service::protocol::AgentRequestId::new();
-    let connection = vmux_service::client::ServiceConnection::connect()
+    let request_id = vmux_client::protocol::AgentRequestId::new();
+    let connection = vmux_client::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
@@ -708,9 +708,9 @@ async fn run_agent_command(
 }
 
 pub fn command_result_to_mcp_response(
-    result: vmux_service::protocol::AgentCommandResult,
+    result: vmux_client::protocol::AgentCommandResult,
 ) -> Result<Value, String> {
-    use vmux_service::protocol::AgentCommandResult;
+    use vmux_client::protocol::AgentCommandResult;
     match result {
         AgentCommandResult::Ok => Ok(json!({
             "content": [{"type": "text", "text": "ok"}]
@@ -728,9 +728,9 @@ pub fn command_result_to_mcp_response(
     }
 }
 
-async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Value, String> {
-    let request_id = vmux_service::protocol::AgentRequestId::new();
-    let connection = vmux_service::client::ServiceConnection::connect()
+async fn run_agent_query(query: vmux_client::protocol::AgentQuery) -> Result<Value, String> {
+    let request_id = vmux_client::protocol::AgentRequestId::new();
+    let connection = vmux_client::client::ServiceConnection::connect()
         .await
         .map_err(|error| format!("cannot connect to vmux_service: {error}"))?;
     connection
@@ -759,8 +759,8 @@ async fn run_agent_query(query: vmux_service::protocol::AgentQuery) -> Result<Va
     }
 }
 
-pub fn query_result_to_mcp_response(result: vmux_service::protocol::AgentQueryResult) -> Value {
-    use vmux_service::protocol::AgentQueryResult;
+pub fn query_result_to_mcp_response(result: vmux_client::protocol::AgentQueryResult) -> Value {
+    use vmux_client::protocol::AgentQueryResult;
     match result {
         AgentQueryResult::Layout(snapshot) => {
             let text = serde_json::to_string(&snapshot).unwrap_or_default();
@@ -957,7 +957,7 @@ mod tests {
 
     #[test]
     fn image_query_result_maps_to_text_and_image_blocks() {
-        use vmux_service::protocol::AgentQueryResult;
+        use vmux_client::protocol::AgentQueryResult;
         let resp = query_result_to_mcp_response(AgentQueryResult::Image {
             path: "/tmp/shot.png".into(),
             png: vec![137, 80, 78, 71],
@@ -981,7 +981,7 @@ mod tests {
 
     #[test]
     fn recording_maps_to_text_block() {
-        use vmux_service::protocol::AgentQueryResult;
+        use vmux_client::protocol::AgentQueryResult;
         let v = query_result_to_mcp_response(AgentQueryResult::Recording {
             mp4_path: "/tmp/x.mp4".into(),
             gif_path: Some("/tmp/x.gif".into()),
@@ -1063,14 +1063,14 @@ mod tests {
     #[test]
     fn blocking_run_sets_done_marker_token() {
         let request_id = AgentRequestId([7; 16]);
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let run = AgentCommand::Run {
             anchor,
             command: "git status".into(),
-            direction: vmux_service::protocol::AgentPaneDirection::Right,
+            direction: vmux_client::protocol::AgentPaneDirection::Right,
             focus: false,
             beside: None,
-            mode: vmux_service::protocol::PlacementMode::Auto,
+            mode: vmux_client::protocol::PlacementMode::Auto,
             terminal: None,
             done_marker: None,
         };
@@ -1089,12 +1089,12 @@ mod tests {
     fn blocking_placement_override_run_sets_done_marker_token() {
         let request_id = AgentRequestId([9; 16]);
         let run = AgentCommand::RunWithPlacementOverride {
-            anchor: vmux_service::protocol::ProcessId::new(),
+            anchor: vmux_client::protocol::ProcessId::new(),
             command: "git status".into(),
-            direction: vmux_service::protocol::AgentPaneDirection::Bottom,
+            direction: vmux_client::protocol::AgentPaneDirection::Bottom,
             focus: false,
             beside: None,
-            mode: vmux_service::protocol::PlacementMode::Split,
+            mode: vmux_client::protocol::PlacementMode::Split,
             terminal: None,
             done_marker: None,
         };
@@ -1111,7 +1111,7 @@ mod tests {
 
     #[test]
     fn blocking_run_waits_for_new_terminal_process_to_materialize() {
-        let process_id = vmux_service::protocol::ProcessId::new();
+        let process_id = vmux_client::protocol::ProcessId::new();
         let result = AgentQueryResult::Error(format!("process not found: {process_id}"));
 
         assert_eq!(
@@ -1122,7 +1122,7 @@ mod tests {
 
     #[test]
     fn blocking_run_surfaces_process_missing_after_startup_grace() {
-        let process_id = vmux_service::protocol::ProcessId::new();
+        let process_id = vmux_client::protocol::ProcessId::new();
         let message = format!("process not found: {process_id}");
         let result = AgentQueryResult::Error(message.clone());
 

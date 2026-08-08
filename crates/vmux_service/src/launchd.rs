@@ -1,1 +1,1 @@
-pub use vmux_service_client::launchd::*;
+pub use vmux_client::launchd::*;

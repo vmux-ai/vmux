@@ -4,7 +4,7 @@ use bevy::ecs::resource::Resource;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub use vmux_service_client::client::ServiceConnection;
+pub use vmux_client::client::ServiceConnection;
 
 #[derive(Resource)]
 pub struct ServiceClient(pub ServiceHandle);

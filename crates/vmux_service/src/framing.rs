@@ -1,1 +1,1 @@
-pub use vmux_service_client::framing::*;
+pub use vmux_client::framing::*;

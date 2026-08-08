@@ -2,7 +2,7 @@
 //! the processes-monitor webview page.
 
 #[cfg(native)]
-pub use vmux_service_client::{
+pub use vmux_client::{
     pairing, read_message, read_message_blocking, write_message, write_message_blocking,
 };
 

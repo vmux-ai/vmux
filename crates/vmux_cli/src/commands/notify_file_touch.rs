@@ -1,7 +1,7 @@
 use std::io::{self, Read};
 
-use vmux_service::client::ServiceConnection;
-use vmux_service::protocol::{
+use vmux_client::client::ServiceConnection;
+use vmux_client::protocol::{
     AGENT_COMMAND_TIMEOUT, AgentCommand, AgentRequestId, ClientMessage, FileTouchKind, ProcessId,
     ServiceMessage,
 };

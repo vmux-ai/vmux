@@ -30,11 +30,11 @@ pub enum ServiceAction {
 
 pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
     match args.action {
-        ServiceAction::Status => vmux_service::cli::cmd_status(),
+        ServiceAction::Status => vmux_client::cli::cmd_status(),
         ServiceAction::Start => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_start(&current_service_binary()?)
+                vmux_client::cli::cmd_start(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -44,7 +44,7 @@ pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
         ServiceAction::Stop => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_stop()
+                vmux_client::cli::cmd_stop()
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -54,18 +54,18 @@ pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
         ServiceAction::Restart => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_restart(&current_service_binary()?)
+                vmux_client::cli::cmd_restart(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
                 not_supported()
             }
         }
-        ServiceAction::Logs { follow } => vmux_service::cli::cmd_logs(follow),
+        ServiceAction::Logs { follow } => vmux_client::cli::cmd_logs(follow),
         ServiceAction::Install => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_install(&current_service_binary()?)
+                vmux_client::cli::cmd_install(&current_service_binary()?)
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -75,7 +75,7 @@ pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
         ServiceAction::Uninstall => {
             #[cfg(target_os = "macos")]
             {
-                vmux_service::cli::cmd_uninstall()
+                vmux_client::cli::cmd_uninstall()
             }
             #[cfg(not(target_os = "macos"))]
             {
@@ -93,5 +93,5 @@ fn not_supported() -> std::io::Result<i32> {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn current_service_binary() -> std::io::Result<std::path::PathBuf> {
-    vmux_service::daemon_binary_path()
+    vmux_client::daemon_binary_path()
 }
