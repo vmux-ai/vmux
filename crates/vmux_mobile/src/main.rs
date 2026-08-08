@@ -674,6 +674,9 @@ fn App() -> Element {
     let mut media_selected = use_signal(|| 0_usize);
     let mut attachment_sid = use_signal(String::new);
     let connected = use_signal(|| false);
+    // Whether the Mac is answering, as opposed to whether this device is paired.
+    // Conflating the two let the header claim Connected while every request timed out.
+    let mut reachable = use_signal(|| false);
     let mut stream_generation = use_signal(|| 0_u64);
     let mut pending_pair_url = use_signal(|| None::<String>);
     let mut deep_link_received = use_signal(|| false);
@@ -775,6 +778,7 @@ fn App() -> Element {
             Ok(next) => {
                 sessions.set(next);
                 agents.set(client.agents().await.unwrap_or_default());
+                reachable.set(true);
             }
             Err(ApiError::Unauthorized) => {
                 clear_credentials();
@@ -866,14 +870,20 @@ fn App() -> Element {
             match client.sessions().await {
                 Ok(next) => {
                     sessions.set(next);
+                    reachable.set(true);
+                    error.set(String::new());
                 }
                 Err(ApiError::Unauthorized) => {
+                    reachable.set(false);
                     clear_credentials();
                     api.set(None);
                     error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                     auth.set(AuthState::Unpaired);
                 }
-                Err(_) => {}
+                Err(other) => {
+                    reachable.set(false);
+                    error.set(other.to_string());
+                }
             }
         }
     });
@@ -911,6 +921,7 @@ fn App() -> Element {
             AppHead {}
             MobileStartPage {
                 paired: auth() == AuthState::Paired,
+                reachable: reachable(),
                 sessions: sessions(),
                 agents: agents(),
                 draft: new_chat_draft(),
@@ -1334,6 +1345,7 @@ fn App() -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct MobileStartPageProps {
     paired: bool,
+    reachable: bool,
     sessions: Vec<RemoteSession>,
     agents: Vec<RemoteAgent>,
     draft: String,
@@ -1370,7 +1382,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                 span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
                 span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.08] px-2.5 py-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
                     span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-emerald-500" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
-                    if props.paired { "Connected" } else { "Not connected" }
+                    if props.reachable { "Connected" } else if props.paired { "Reaching your Mac…" } else { "Not connected" }
                 }
                 if props.paired {
                     button {
@@ -1401,6 +1413,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                                 accent_gradient: "from-violet-500 to-violet-700".to_string(),
                                 autofocus: true,
                                 show_attach: false,
+                                disabled: props.creating,
                                 action: PromptComposerAction::Send,
                                 action_title: if props.creating { "Starting…".to_string() } else { "Start chat".to_string() },
                                 action_enabled: can_submit,
