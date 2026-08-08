@@ -10,19 +10,14 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use vmux_remote::quic::endpoint::{
-    SelfSignedIdentity, client_endpoint, generate_self_signed, server_endpoint,
-};
+use vmux_remote::quic::endpoint::{SelfSignedIdentity, Trust};
 
 fn desktop() -> (SelfSignedIdentity, SocketAddr, quinn::Endpoint) {
-    let identity = generate_self_signed(vec!["localhost".into(), "127.0.0.1".into()])
+    let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
         .expect("generate identity");
-    let endpoint = server_endpoint(
-        (Ipv4Addr::LOCALHOST, 0).into(),
-        &identity.certificate_pem,
-        &identity.private_key_pem,
-    )
-    .expect("bind server");
+    let endpoint = identity
+        .listen((Ipv4Addr::LOCALHOST, 0).into())
+        .expect("bind server");
     let address = endpoint.local_addr().expect("local addr");
     (identity, address, endpoint)
 }
@@ -40,7 +35,11 @@ async fn the_paired_fingerprint_connects() {
     let (identity, address, server) = desktop();
     let accepting = tokio::spawn(accept_once(server));
 
-    let client = client_endpoint(&identity.fingerprint, address).expect("bind client");
+    let client = Trust::Desktop {
+        fingerprint: identity.fingerprint.clone(),
+    }
+    .endpoint(address)
+    .expect("bind client");
     let connecting = client.connect(address, "localhost").expect("dial");
     let connection = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
@@ -58,8 +57,12 @@ async fn a_different_certificate_is_refused() {
     let (_identity, address, server) = desktop();
     let accepting = tokio::spawn(accept_once(server));
 
-    let impostor = generate_self_signed(vec!["localhost".into()]).expect("second identity");
-    let client = client_endpoint(&impostor.fingerprint, address).expect("bind client");
+    let impostor = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("second identity");
+    let client = Trust::Desktop {
+        fingerprint: impostor.fingerprint.clone(),
+    }
+    .endpoint(address)
+    .expect("bind client");
     let connecting = client.connect(address, "localhost").expect("dial");
     let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await

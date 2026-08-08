@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use vmux_remote::DeviceId;
-use vmux_remote::quic::endpoint::client_endpoint;
+use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::{
     Capability, ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello,
     encode_hello,
@@ -149,8 +149,11 @@ impl QuicApi {
             .map(|(host, _)| host)
             .unwrap_or(&self.endpoint.address)
             .to_string();
-        let endpoint =
-            client_endpoint(&self.endpoint.fingerprint, address).map_err(QuicError::Transport)?;
+        let endpoint = Trust::Desktop {
+            fingerprint: self.endpoint.fingerprint.clone(),
+        }
+        .endpoint(address)
+        .map_err(QuicError::Transport)?;
         let connection = endpoint
             .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?

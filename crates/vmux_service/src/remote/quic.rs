@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 
-use vmux_remote::quic::endpoint::{SelfSignedIdentity, generate_self_signed};
+use vmux_remote::quic::endpoint::SelfSignedIdentity;
 
 use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
@@ -46,18 +46,14 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     ) && !certificate_pem.trim().is_empty()
         && !private_key_pem.trim().is_empty()
     {
-        let fingerprint = fingerprint_of(&certificate_pem)
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-        persist_fingerprint(&fingerprint)?;
-        return Ok(SelfSignedIdentity {
-            certificate_pem,
-            private_key_pem,
-            fingerprint,
-        });
+        let identity = SelfSignedIdentity::from_pem(certificate_pem, private_key_pem)
+            .map_err(std::io::Error::other)?;
+        persist_fingerprint(&identity.fingerprint)?;
+        return Ok(identity);
     }
 
-    let identity = generate_self_signed(subject_alt_names())
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let identity =
+        SelfSignedIdentity::generate(subject_alt_names()).map_err(std::io::Error::other)?;
     if let Some(parent) = cert_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -85,23 +81,13 @@ fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
 /// link without reaching into the daemon's process.
 pub fn identity_fingerprint() -> Option<String> {
     let pem = std::fs::read_to_string(crate::remote_cert_path()).ok()?;
-    fingerprint_of(&pem).ok()
+    SelfSignedIdentity::fingerprint_of_pem(&pem).ok()
 }
 
 /// The names a phone might dial this desktop by. The certificate is pinned by fingerprint, so
 /// these are belt-and-braces rather than the trust decision.
 fn subject_alt_names() -> Vec<String> {
     vec!["localhost".to_string(), "127.0.0.1".to_string()]
-}
-
-fn fingerprint_of(certificate_pem: &str) -> Result<String, String> {
-    let certificate = rustls_pemfile::certs(&mut certificate_pem.as_bytes())
-        .next()
-        .ok_or_else(|| "certificate file held no certificate".to_string())?
-        .map_err(|error| format!("certificate parse failed: {error}"))?;
-    Ok(vmux_remote::quic::endpoint::certificate_fingerprint(
-        &certificate,
-    ))
 }
 
 /// Why a connection was turned away, so the peer is told rather than merely dropped.
@@ -439,10 +425,7 @@ pub(crate) fn inner_endpoint(
     socket: std::sync::Arc<vmux_remote::quic::tunnel::TunnelSocket>,
     identity: &SelfSignedIdentity,
 ) -> Result<quinn::Endpoint, String> {
-    let config = vmux_remote::quic::endpoint::server_config(
-        &identity.certificate_pem,
-        &identity.private_key_pem,
-    )?;
+    let config = identity.server_config()?;
     quinn::Endpoint::new_with_abstract_socket(
         quinn::EndpointConfig::default(),
         Some(config),
@@ -489,12 +472,7 @@ pub(crate) fn spawn_with_identity(
     identity: SelfSignedIdentity,
     liveness: watch::Receiver<bool>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, std::net::SocketAddr)> {
-    let endpoint = vmux_remote::quic::endpoint::server_endpoint(
-        address,
-        &identity.certificate_pem,
-        &identity.private_key_pem,
-    )
-    .map_err(std::io::Error::other)?;
+    let endpoint = identity.listen(address).map_err(std::io::Error::other)?;
     let bound = endpoint.local_addr()?;
     tracing::info!(
         port = bound.port(),
@@ -607,7 +585,7 @@ mod live {
     use std::sync::atomic::AtomicBool;
     use tokio::sync::{Mutex, broadcast};
     use vmux_remote::DeviceId;
-    use vmux_remote::quic::endpoint::{client_endpoint, generate_self_signed};
+    use vmux_remote::quic::endpoint::{SelfSignedIdentity, Trust};
     use vmux_wire::protocol::SharedResponse;
 
     struct Harness {
@@ -631,7 +609,7 @@ mod live {
             client_ops: Arc::new(Mutex::new(Default::default())),
         };
         // A throwaway certificate, so the test never writes into the user's profile directory.
-        let identity = generate_self_signed(vec!["localhost".into()]).expect("identity");
+        let identity = SelfSignedIdentity::generate(vec!["localhost".into()]).expect("identity");
         let fingerprint = identity.fingerprint.clone();
         // Liveness is injected rather than read from disk: a test must not be able to flip the
         // user's real Remote setting, and leaking that write would do exactly that.
@@ -656,8 +634,11 @@ mod live {
         harness: &Harness,
         token: &str,
     ) -> Result<quinn::Connection, quinn::ConnectionError> {
-        let endpoint =
-            client_endpoint(&harness.fingerprint, harness.address).expect("client endpoint");
+        let endpoint = Trust::Desktop {
+            fingerprint: harness.fingerprint.clone(),
+        }
+        .endpoint(harness.address)
+        .expect("client endpoint");
         let connection = endpoint
             .connect(harness.address, "localhost")
             .expect("dial")

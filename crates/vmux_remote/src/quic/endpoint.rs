@@ -2,11 +2,16 @@
 //!
 //! QUIC has no cleartext mode, so the loopback and LAN paths that used to be plain HTTP now need
 //! a certificate. There is no CA that will sign for `192.168.1.4`, so the desktop mints its own
-//! and the pairing QR carries its fingerprint. The phone then trusts exactly that certificate
-//! and nothing else — narrower than the public CA set, and far narrower than the
-//! `danger_accept_invalid_certs(true)` this replaces, which accepted *any* certificate on a
-//! private address.
+//! ([`SelfSignedIdentity`]) and the pairing QR carries its fingerprint. The phone then trusts
+//! exactly that certificate and nothing else — narrower than the public CA set, and far narrower
+//! than the `danger_accept_invalid_certs(true)` this replaces, which accepted *any* certificate on
+//! a private address.
+//!
+//! The two sides are shaped differently on purpose. A listener is defined by the identity it
+//! presents, so it hangs off [`SelfSignedIdentity`]. A dialler is defined by whose certificate it
+//! will accept, so it hangs off [`Trust`].
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
@@ -37,6 +42,7 @@ pub const RECEIVE_WINDOW: u32 = 8 * 1024 * 1024;
 pub const MAX_CONCURRENT_BIDI_STREAMS: u32 = 64;
 
 /// A self-signed identity for a desktop that no CA will vouch for.
+#[derive(Clone, Debug)]
 pub struct SelfSignedIdentity {
     pub certificate_pem: String,
     pub private_key_pem: String,
@@ -45,15 +51,157 @@ pub struct SelfSignedIdentity {
     pub fingerprint: String,
 }
 
-/// Mint a certificate covering the addresses a phone might reach this desktop on.
-pub fn generate_self_signed(subject_alt_names: Vec<String>) -> Result<SelfSignedIdentity, String> {
-    let certified = rcgen::generate_simple_self_signed(subject_alt_names)
-        .map_err(|error| format!("certificate generation failed: {error}"))?;
-    Ok(SelfSignedIdentity {
-        certificate_pem: certified.cert.pem(),
-        private_key_pem: certified.signing_key.serialize_pem(),
-        fingerprint: certificate_fingerprint(certified.cert.der()),
-    })
+impl SelfSignedIdentity {
+    /// Mint a certificate covering the addresses a phone might reach this desktop on.
+    pub fn generate(subject_alt_names: Vec<String>) -> Result<Self, String> {
+        let certified = rcgen::generate_simple_self_signed(subject_alt_names)
+            .map_err(|error| format!("certificate generation failed: {error}"))?;
+        Ok(Self {
+            certificate_pem: certified.cert.pem(),
+            private_key_pem: certified.signing_key.serialize_pem(),
+            fingerprint: certificate_fingerprint(certified.cert.der()),
+        })
+    }
+
+    /// Adopt an identity already on disk, deriving its fingerprint.
+    pub fn from_pem(certificate_pem: String, private_key_pem: String) -> Result<Self, String> {
+        let fingerprint = Self::fingerprint_of_pem(&certificate_pem)?;
+        Ok(Self {
+            certificate_pem,
+            private_key_pem,
+            fingerprint,
+        })
+    }
+
+    /// The fingerprint a PEM would be pinned by, without building an identity around it.
+    pub fn fingerprint_of_pem(certificate_pem: &str) -> Result<String, String> {
+        let certificate = rustls_pemfile::certs(&mut certificate_pem.as_bytes())
+            .next()
+            .ok_or_else(|| "certificate file held no certificate".to_string())?
+            .map_err(|error| format!("certificate parse failed: {error}"))?;
+        Ok(certificate_fingerprint(&certificate))
+    }
+
+    /// Bind a listener presenting this identity. Port 0 asks the OS to choose, which is what
+    /// tests want.
+    pub fn listen(&self, address: SocketAddr) -> Result<Endpoint, String> {
+        let config = self.server_config()?;
+        Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
+    }
+
+    /// The server half of the TLS configuration, for callers driving their own endpoint.
+    pub fn server_config(&self) -> Result<ServerConfig, String> {
+        let certificates: Vec<CertificateDer<'static>> =
+            rustls_pemfile::certs(&mut self.certificate_pem.as_bytes())
+                .collect::<Result<_, _>>()
+                .map_err(|error| format!("certificate parse failed: {error}"))?;
+        let key: PrivateKeyDer<'static> =
+            rustls_pemfile::private_key(&mut self.private_key_pem.as_bytes())
+                .map_err(|error| format!("private key parse failed: {error}"))?
+                .ok_or_else(|| "private key file held no key".to_string())?;
+
+        let mut crypto = rustls::ServerConfig::builder_with_provider(provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(|error| format!("TLS config failed: {error}"))?
+            .with_no_client_auth()
+            .with_single_cert(certificates, key)
+            .map_err(|error| format!("TLS config failed: {error}"))?;
+        crypto.alpn_protocols = vec![ALPN.to_vec()];
+
+        let quic = QuicServerConfig::try_from(crypto)
+            .map_err(|error| format!("QUIC server config failed: {error}"))?;
+        let mut config = ServerConfig::with_crypto(Arc::new(quic));
+        config.transport_config(transport_config());
+        Ok(config)
+    }
+}
+
+/// Whose certificate a dialler is willing to accept.
+#[derive(Clone, Debug)]
+pub enum Trust {
+    /// Exactly one certificate, by fingerprint — a desktop no CA will vouch for.
+    ///
+    /// The hostname is not checked: the certificate is pinned outright, so the name adds nothing,
+    /// and a phone reaches the same desktop as `127.0.0.1`, a LAN address, or whatever the pairing
+    /// link recorded.
+    Desktop { fingerprint: String },
+    /// A relay, verified by name against the public roots.
+    ///
+    /// Not pinned, because there is nothing stable to pin: the relay's certificate is renewed on
+    /// its own schedule, so a fingerprint captured at pairing time would start rejecting it
+    /// without warning. A relay on loopback or a private address is a development stack whose
+    /// certificate no public root signs, so nothing is verified there — the same allowance the
+    /// HTTP client made, and not reachable from anywhere an attacker could sit.
+    Relay { host: String },
+}
+
+impl Trust {
+    /// Bind a client endpoint on an ephemeral local port, configured for this decision.
+    ///
+    /// `remote` decides which family the local socket binds. An IPv4 socket cannot dial an IPv6
+    /// peer, and `localhost` resolves to `::1` first on macOS, so binding a fixed family turns a
+    /// perfectly reachable peer into `invalid remote address`.
+    pub fn endpoint(&self, remote: SocketAddr) -> Result<Endpoint, String> {
+        let local: SocketAddr = if remote.is_ipv4() {
+            (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+        } else {
+            (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+        };
+        let mut endpoint =
+            Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
+        endpoint.set_default_client_config(self.client_config()?);
+        Ok(endpoint)
+    }
+
+    fn client_config(&self) -> Result<ClientConfig, String> {
+        let builder = rustls::ClientConfig::builder_with_provider(provider())
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(|error| format!("TLS config failed: {error}"))?;
+
+        let mut crypto = match self {
+            Self::Desktop { fingerprint } => builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(PinnedCertificate {
+                    expected: fingerprint.to_ascii_lowercase(),
+                }))
+                .with_no_client_auth(),
+            Self::Relay { host } if is_local_development_host(host) => builder
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(AnyCertificate))
+                .with_no_client_auth(),
+            Self::Relay { .. } => {
+                let roots = rustls::RootCertStore {
+                    roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+                };
+                builder.with_root_certificates(roots).with_no_client_auth()
+            }
+        };
+        crypto.alpn_protocols = vec![ALPN.to_vec()];
+
+        let quic = QuicClientConfig::try_from(crypto)
+            .map_err(|error| format!("QUIC client config failed: {error}"))?;
+        let mut config = ClientConfig::new(Arc::new(quic));
+        config.transport_config(transport_config());
+        Ok(config)
+    }
+}
+
+/// Resolve `host:port`, preferring IPv4.
+///
+/// `localhost` resolves to `::1` before `127.0.0.1` on macOS, and a UDP port published by Docker
+/// answers on IPv4 only however it advertises itself — so taking the first result silently sends
+/// every packet somewhere that never replies. IPv6 is still used when it is all the host has.
+pub async fn resolve_preferring_ipv4(host: &str, port: u16) -> Result<SocketAddr, String> {
+    let resolved: Vec<SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| format!("resolve {host}: {error}"))?
+        .collect();
+    resolved
+        .iter()
+        .find(|address| address.is_ipv4())
+        .or_else(|| resolved.first())
+        .copied()
+        .ok_or_else(|| format!("{host} resolved to nothing"))
 }
 
 /// SHA-256 over the whole certificate DER, lowercase hex.
@@ -61,9 +209,13 @@ pub fn generate_self_signed(subject_alt_names: Vec<String>) -> Result<SelfSigned
 /// The certificate rather than its SubjectPublicKeyInfo, because the verifier only ever sees the
 /// peer's DER and extracting SPKI from it would mean parsing ASN.1 here. The cost is that
 /// re-issuing invalidates every paired client — acceptable while re-pairing is a QR scan, and the
-/// reason `ensure_identity` reuses a stored certificate instead of minting one per launch.
+/// reason a stored certificate is reused instead of minting one per launch.
 pub fn certificate_fingerprint(certificate: &CertificateDer<'_>) -> String {
     hex_lower(ring::digest::digest(&ring::digest::SHA256, certificate.as_ref()).as_ref())
+}
+
+fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+    Arc::new(rustls::crypto::ring::default_provider())
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
@@ -89,154 +241,6 @@ fn transport_config() -> Arc<TransportConfig> {
     Arc::new(transport)
 }
 
-/// Server config for a desktop presenting `identity`.
-pub fn server_config(certificate_pem: &str, private_key_pem: &str) -> Result<ServerConfig, String> {
-    let certificates: Vec<CertificateDer<'static>> =
-        rustls_pemfile::certs(&mut certificate_pem.as_bytes())
-            .collect::<Result<_, _>>()
-            .map_err(|error| format!("certificate parse failed: {error}"))?;
-    let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut private_key_pem.as_bytes())
-        .map_err(|error| format!("private key parse failed: {error}"))?
-        .ok_or_else(|| "private key file held no key".to_string())?;
-
-    let mut crypto = rustls::ServerConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_protocol_versions(&[&rustls::version::TLS13])
-    .map_err(|error| format!("TLS config failed: {error}"))?
-    .with_no_client_auth()
-    .with_single_cert(certificates, key)
-    .map_err(|error| format!("TLS config failed: {error}"))?;
-    crypto.alpn_protocols = vec![ALPN.to_vec()];
-
-    let quic = QuicServerConfig::try_from(crypto)
-        .map_err(|error| format!("QUIC server config failed: {error}"))?;
-    let mut config = ServerConfig::with_crypto(Arc::new(quic));
-    config.transport_config(transport_config());
-    Ok(config)
-}
-
-/// Client config that trusts exactly one certificate.
-pub fn client_config_pinned(fingerprint: &str) -> Result<ClientConfig, String> {
-    let verifier = Arc::new(PinnedCertificate {
-        expected: fingerprint.to_ascii_lowercase(),
-    });
-    let mut crypto = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_protocol_versions(&[&rustls::version::TLS13])
-    .map_err(|error| format!("TLS config failed: {error}"))?
-    .dangerous()
-    .with_custom_certificate_verifier(verifier)
-    .with_no_client_auth();
-    crypto.alpn_protocols = vec![ALPN.to_vec()];
-
-    let quic = QuicClientConfig::try_from(crypto)
-        .map_err(|error| format!("QUIC client config failed: {error}"))?;
-    let mut config = ClientConfig::new(Arc::new(quic));
-    config.transport_config(transport_config());
-    Ok(config)
-}
-
-/// Bind a server endpoint. Port 0 asks the OS to choose, which is what tests want.
-pub fn server_endpoint(
-    address: std::net::SocketAddr,
-    certificate_pem: &str,
-    private_key_pem: &str,
-) -> Result<Endpoint, String> {
-    let config = server_config(certificate_pem, private_key_pem)?;
-    Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
-}
-
-/// Bind a client endpoint on an ephemeral local port, in the peer's address family.
-///
-/// The family has to match: an IPv4 socket cannot dial an IPv6 peer, and `localhost` resolves to
-/// `::1` before `127.0.0.1` on macOS.
-pub fn client_endpoint(
-    fingerprint: &str,
-    remote: std::net::SocketAddr,
-) -> Result<Endpoint, String> {
-    let local: std::net::SocketAddr = if remote.is_ipv4() {
-        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
-    } else {
-        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
-    };
-    let mut endpoint =
-        Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
-    endpoint.set_default_client_config(client_config_pinned(fingerprint)?);
-    Ok(endpoint)
-}
-
-/// A client endpoint for dialling the relay, which presents a publicly-signed certificate.
-///
-/// Unlike the pinned path this verifies the name, because there is nothing else to verify
-/// against: the relay's certificate is renewed on its own schedule, so a fingerprint captured at
-/// pairing time would start rejecting it without warning.
-///
-/// A relay on loopback or a private address is a development stack whose certificate no public
-/// root signs, so it verifies nothing there — the same allowance the HTTP client already made,
-/// and not reachable from anywhere an attacker could sit.
-///
-/// `remote` decides which family the local socket binds. An IPv4 socket cannot dial an IPv6 peer,
-/// and `localhost` resolves to `::1` first on macOS, so binding a fixed family turns a perfectly
-/// reachable relay into `invalid remote address`.
-pub fn client_endpoint_relay(host: &str, remote: std::net::SocketAddr) -> Result<Endpoint, String> {
-    let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
-        rustls::crypto::ring::default_provider(),
-    ))
-    .with_protocol_versions(&[&rustls::version::TLS13])
-    .map_err(|error| format!("TLS config failed: {error}"))?;
-
-    let mut crypto = if is_local_development_host(host) {
-        builder
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(AnyCertificate))
-            .with_no_client_auth()
-    } else {
-        let roots = rustls::RootCertStore {
-            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
-        };
-        builder.with_root_certificates(roots).with_no_client_auth()
-    };
-    crypto.alpn_protocols = vec![ALPN.to_vec()];
-
-    let quic = QuicClientConfig::try_from(crypto)
-        .map_err(|error| format!("QUIC client config failed: {error}"))?;
-    let mut config = ClientConfig::new(Arc::new(quic));
-    config.transport_config(transport_config());
-
-    let local: std::net::SocketAddr = if remote.is_ipv4() {
-        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
-    } else {
-        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
-    };
-    let mut endpoint =
-        Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
-    endpoint.set_default_client_config(config);
-    Ok(endpoint)
-}
-
-/// Resolve `host:port`, preferring IPv4.
-///
-/// `localhost` resolves to `::1` before `127.0.0.1` on macOS, and a UDP port published by Docker
-/// answers on IPv4 only however it advertises itself — so taking the first result silently sends
-/// every packet somewhere that never replies. IPv6 is still used when it is all the host has.
-pub async fn resolve_preferring_ipv4(
-    host: &str,
-    port: u16,
-) -> Result<std::net::SocketAddr, String> {
-    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|error| format!("resolve {host}: {error}"))?
-        .collect();
-    resolved
-        .iter()
-        .find(|address| address.is_ipv4())
-        .or_else(|| resolved.first())
-        .copied()
-        .ok_or_else(|| format!("{host} resolved to nothing"))
-}
-
 /// Whether this host can only be a development relay.
 fn is_local_development_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
@@ -253,24 +257,24 @@ fn is_local_development_host(host: &str) -> bool {
 #[derive(Debug)]
 struct AnyCertificate;
 
-impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
+impl ServerCertVerifier for AnyCertificate {
     fn verify_server_cert(
         &self,
         _end_entity: &CertificateDer<'_>,
         _intermediates: &[CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
+        _server_name: &ServerName<'_>,
         _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        Ok(ServerCertVerified::assertion())
     }
 
     fn verify_tls12_signature(
         &self,
         _message: &[u8],
         _cert: &CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        _dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
         Err(rustls::Error::PeerIncompatible(
             rustls::PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig,
         ))
@@ -280,28 +284,24 @@ impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
         &self,
         message: &[u8],
         cert: &CertificateDer<'_>,
-        dss: &rustls::DigitallySignedStruct,
-    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, rustls::Error> {
         rustls::crypto::verify_tls13_signature(
             message,
             cert,
             dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+            &provider().signature_verification_algorithms,
         )
     }
 
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        rustls::crypto::ring::default_provider()
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        provider()
             .signature_verification_algorithms
             .supported_schemes()
     }
 }
 
 /// Accepts one specific certificate and refuses everything else.
-///
-/// Name verification is deliberately skipped: the certificate is pinned outright, so the hostname
-/// adds nothing, and a phone reaches the same desktop as `127.0.0.1`, a LAN address, or whatever
-/// the pairing link recorded.
 #[derive(Debug)]
 struct PinnedCertificate {
     expected: String,
@@ -346,12 +346,12 @@ impl ServerCertVerifier for PinnedCertificate {
             message,
             cert,
             dss,
-            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+            &provider().signature_verification_algorithms,
         )
     }
 
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        rustls::crypto::ring::default_provider()
+        provider()
             .signature_verification_algorithms
             .supported_schemes()
     }
@@ -378,8 +378,8 @@ mod tests {
 
     #[test]
     fn a_fingerprint_is_stable_and_key_specific() {
-        let first = generate_self_signed(vec!["localhost".into()]).unwrap();
-        let second = generate_self_signed(vec!["localhost".into()]).unwrap();
+        let first = SelfSignedIdentity::generate(vec!["localhost".into()]).unwrap();
+        let second = SelfSignedIdentity::generate(vec!["localhost".into()]).unwrap();
 
         assert_eq!(first.fingerprint.len(), 64);
         assert!(
@@ -394,12 +394,56 @@ mod tests {
         );
     }
 
+    /// Reloading from disk has to produce the same fingerprint the pairing link recorded, or every
+    /// paired phone silently stops trusting the desktop after a restart.
     #[test]
-    fn configs_build_from_a_generated_identity() {
-        let identity = generate_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+    fn an_identity_reloaded_from_pem_keeps_its_fingerprint() {
+        let minted = SelfSignedIdentity::generate(vec!["localhost".into()]).unwrap();
 
-        server_config(&identity.certificate_pem, &identity.private_key_pem).unwrap();
-        client_config_pinned(&identity.fingerprint).unwrap();
+        let reloaded = SelfSignedIdentity::from_pem(
+            minted.certificate_pem.clone(),
+            minted.private_key_pem.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(reloaded.fingerprint, minted.fingerprint);
+        assert_eq!(
+            SelfSignedIdentity::fingerprint_of_pem(&minted.certificate_pem).unwrap(),
+            minted.fingerprint
+        );
+    }
+
+    #[test]
+    fn configs_build_for_both_ends() {
+        let identity =
+            SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+
+        identity.server_config().unwrap();
+        Trust::Desktop {
+            fingerprint: identity.fingerprint.clone(),
+        }
+        .client_config()
+        .unwrap();
+        Trust::Relay {
+            host: "relay.vmux.ai".into(),
+        }
+        .client_config()
+        .unwrap();
+        Trust::Relay {
+            host: "localhost".into(),
+        }
+        .client_config()
+        .unwrap();
+    }
+
+    /// A public relay must not fall into the verify-nothing branch meant for a dev stack.
+    #[test]
+    fn only_private_relay_hosts_skip_verification() {
+        assert!(is_local_development_host("localhost"));
+        assert!(is_local_development_host("127.0.0.1"));
+        assert!(is_local_development_host("192.168.1.4"));
+        assert!(!is_local_development_host("relay.vmux.ai"));
+        assert!(!is_local_development_host("8.8.8.8"));
     }
 
     #[test]
