@@ -11,6 +11,9 @@
 /// Endpoint construction and certificate pinning. Absent on wasm, which has no UDP socket.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod endpoint;
+
+/// The relay tunnel a desktop's inner endpoint runs over. Absent on wasm for the same reason.
+#[cfg(not(target_arch = "wasm32"))]
 pub mod tunnel;
 
 use serde::{Deserialize, Serialize};
