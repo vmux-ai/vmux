@@ -4,6 +4,7 @@ use crate::components::sheet::{
     Sheet, SheetContent, SheetDescription, SheetHeader, SheetSide, SheetTitle,
 };
 use crate::components::tooltip::{Tooltip, TooltipContent, TooltipTrigger};
+use crate::hooks::use_mobile;
 use dioxus::prelude::*;
 use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::icon;
@@ -16,7 +17,6 @@ const SIDEBAR_WIDTH: &str = "16rem";
 const SIDEBAR_WIDTH_MOBILE: &str = "18rem";
 const SIDEBAR_WIDTH_ICON: &str = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT: &str = "b";
-const MOBILE_BREAKPOINT: u32 = 768;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum SidebarState {
@@ -122,43 +122,12 @@ impl SidebarCtx {
     }
 }
 
+/// Reads the context [`SidebarProvider`] installs.
+///
+/// Lives here rather than in `hooks` because it is the accessor for that one type; moving it
+/// would point `hooks` back at `components`.
 pub fn use_sidebar() -> SidebarCtx {
     use_context::<SidebarCtx>()
-}
-
-pub fn use_is_mobile() -> Signal<bool> {
-    let mut is_mobile = use_signal(|| false);
-
-    use_effect(move || {
-        let check = || -> bool {
-            web_sys::window()
-                .and_then(|w| w.inner_width().ok())
-                .and_then(|v| v.as_f64())
-                .map(|w| (w as u32) < MOBILE_BREAKPOINT)
-                .unwrap_or(false)
-        };
-
-        is_mobile.set(check());
-
-        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(move |_: web_sys::Event| {
-            is_mobile.set(
-                web_sys::window()
-                    .and_then(|w| w.inner_width().ok())
-                    .and_then(|v| v.as_f64())
-                    .map(|w| (w as u32) < MOBILE_BREAKPOINT)
-                    .unwrap_or(false),
-            );
-        })
-            as Box<dyn FnMut(web_sys::Event)>);
-
-        if let Some(win) = web_sys::window() {
-            let _ =
-                win.add_event_listener_with_callback("resize", closure.as_ref().unchecked_ref());
-        }
-        closure.forget();
-    });
-
-    is_mobile
 }
 
 #[component]
@@ -169,7 +138,7 @@ pub fn SidebarProvider(
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
     children: Element,
 ) -> Element {
-    let is_mobile = use_is_mobile();
+    let is_mobile = use_mobile();
     let side = use_signal(|| SidebarSide::Left);
     let open_mobile = use_signal(|| false);
 

@@ -13,7 +13,7 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::translate;
 
 fn request_catalog() {
@@ -55,21 +55,19 @@ pub fn Page() -> Element {
     let mut query = use_signal(String::new);
     let mut loaded = use_signal(|| false);
 
-    let _catalog =
-        use_bin_event_listener::<AgentsCatalog, _>(AGENTS_CATALOG_EVENT, move |catalog| {
-            agents.set(catalog.agents);
-            loaded.set(true);
-        });
-    let _setup =
-        use_bin_event_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |result| {
-            let id = format!("cli:{}", result.agent);
-            if result.ok {
-                set_status(agents, &id, "installed", "");
-                request_catalog();
-            } else {
-                set_status(agents, &id, "error", &translate("agents-install-failed"));
-            }
-        });
+    let _catalog = use_listener::<AgentsCatalog, _>(AGENTS_CATALOG_EVENT, move |catalog| {
+        agents.set(catalog.agents);
+        loaded.set(true);
+    });
+    let _setup = use_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |result| {
+        let id = format!("cli:{}", result.agent);
+        if result.ok {
+            set_status(agents, &id, "installed", "");
+            request_catalog();
+        } else {
+            set_status(agents, &id, "error", &translate("agents-install-failed"));
+        }
+    });
 
     use_effect(move || {
         locale();

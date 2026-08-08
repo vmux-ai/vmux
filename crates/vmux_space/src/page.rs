@@ -2,7 +2,7 @@
 
 use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -12,7 +12,7 @@ pub fn Page() -> Element {
     let mut selected = use_signal(|| 0usize);
     let mut new_name = use_signal(String::new);
 
-    let _listener = use_bin_event_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
+    let _listener = use_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
         selected.set(0);
         state.set(data);
     });

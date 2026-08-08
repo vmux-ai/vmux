@@ -11,7 +11,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -87,39 +87,37 @@ pub fn Page() -> Element {
     let mut cloud_root = use_signal(String::new);
     let private = use_signal(|| true);
 
-    let _snapshot_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
-            if pending() == Some(VaultAction::ConnectGithub)
-                && (event.vault.repositories_loaded || !event.vault.error.is_empty())
-            {
-                pending.set(None);
-            }
-            let needs_repositories = !event.vault.github_owner.is_empty()
-                && (!event.vault.initialized || event.vault.remote.is_empty())
-                && !event.vault.repositories_loaded;
-            if needs_repositories && !repositories_requested() {
-                repositories_requested.set(true);
-                request_snapshot(true);
-            } else if !needs_repositories {
-                repositories_requested.set(false);
-            }
-            if !event.vault.github_owner.is_empty()
-                && selected_owner()
-                    .as_ref()
-                    .is_none_or(|owner| !event.vault.github_owners.contains(owner))
-            {
-                selected_owner.set(Some(event.vault.github_owner.clone()));
-            }
-            if event.vault.repositories_loaded && repository() == "vmux-vault" {
-                let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
-                repository.set(suggested_repository_name(&owner, &event.vault.repositories));
-            }
-            snapshot.set(event);
-            loaded.set(true);
-        });
-    let _action_listener = use_bin_event_listener::<VaultActionResult, _>(
-        VAULT_ACTION_RESULT_EVENT,
-        move |mut result| {
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+        if pending() == Some(VaultAction::ConnectGithub)
+            && (event.vault.repositories_loaded || !event.vault.error.is_empty())
+        {
+            pending.set(None);
+        }
+        let needs_repositories = !event.vault.github_owner.is_empty()
+            && (!event.vault.initialized || event.vault.remote.is_empty())
+            && !event.vault.repositories_loaded;
+        if needs_repositories && !repositories_requested() {
+            repositories_requested.set(true);
+            request_snapshot(true);
+        } else if !needs_repositories {
+            repositories_requested.set(false);
+        }
+        if !event.vault.github_owner.is_empty()
+            && selected_owner()
+                .as_ref()
+                .is_none_or(|owner| !event.vault.github_owners.contains(owner))
+        {
+            selected_owner.set(Some(event.vault.github_owner.clone()));
+        }
+        if event.vault.repositories_loaded && repository() == "vmux-vault" {
+            let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
+            repository.set(suggested_repository_name(&owner, &event.vault.repositories));
+        }
+        snapshot.set(event);
+        loaded.set(true);
+    });
+    let _action_listener =
+        use_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |mut result| {
             if result.action == VaultAction::ConnectGithub {
                 github_device_code.set(String::new());
                 github_device_code_copied.set(false);
@@ -193,15 +191,12 @@ pub fn Page() -> Element {
                 pending.set(None);
                 notice.set(Some(result));
             }
-        },
-    );
-    let _auth_progress_listener = use_bin_event_listener::<VaultAuthProgress, _>(
-        VAULT_AUTH_PROGRESS_EVENT,
-        move |progress| {
+        });
+    let _auth_progress_listener =
+        use_listener::<VaultAuthProgress, _>(VAULT_AUTH_PROGRESS_EVENT, move |progress| {
             github_device_code_copied.set(false);
             github_device_code.set(progress.code);
-        },
-    );
+        });
 
     use_effect(move || {
         locale();

@@ -12,7 +12,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -24,13 +24,12 @@ pub fn Page() -> Element {
     let mut pending = use_signal(BTreeSet::<String>::new);
     let mut notice = use_signal(|| None::<ToolActionResult>);
 
-    let _snapshot_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
-            snapshot.set(event);
-            loaded.set(true);
-        });
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+        snapshot.set(event);
+        loaded.set(true);
+    });
     let _action_listener =
-        use_bin_event_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
+        use_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
             pending
                 .write()
                 .remove(&action_key(result.provider, result.action, &result.id));

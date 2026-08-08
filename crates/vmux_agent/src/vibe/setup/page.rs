@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn current_agent_segment() -> String {
@@ -47,17 +47,15 @@ pub fn Page() -> Element {
     let mut needs_homebrew = use_signal(|| false);
     let mut failed = use_signal(|| false);
 
-    let _prereq =
-        use_bin_event_listener::<AgentSetupPrereqStatus, _>(AGENT_SETUP_PREREQ_EVENT, move |s| {
-            needs_homebrew.set(s.needs_homebrew);
-        });
-    let _result =
-        use_bin_event_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |r| {
-            if !r.ok {
-                installing.set(false);
-                failed.set(true);
-            }
-        });
+    let _prereq = use_listener::<AgentSetupPrereqStatus, _>(AGENT_SETUP_PREREQ_EVENT, move |s| {
+        needs_homebrew.set(s.needs_homebrew);
+    });
+    let _result = use_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |r| {
+        if !r.ok {
+            installing.set(false);
+            failed.set(true);
+        }
+    });
 
     {
         let seg = segment.clone();

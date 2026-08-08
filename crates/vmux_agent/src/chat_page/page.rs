@@ -45,8 +45,8 @@ use vmux_wire::prompt_media::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{
-    choice_number_index, menu_direction, move_selection, try_cef_bin_emit_rkyv,
-    use_bin_event_listener, use_selection_visible, use_theme,
+    choice_number_index, menu_direction, move_selection, try_cef_bin_emit_rkyv, use_listener,
+    use_selector, use_theme,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -430,7 +430,7 @@ pub fn Page(
         scroll::to_bottom(scroll_container);
     });
 
-    let _listener = use_bin_event_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
+    let _listener = use_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snap| {
         let messages_changed = recent_messages_start() != snap.messages_start
             || *recent_messages_json.peek() != snap.messages_json;
         if messages_changed
@@ -483,42 +483,39 @@ pub fn Page(
             set_if_changed(approval_sel, 0);
         }
     });
-    let _history =
-        use_bin_event_listener::<ChatHistoryPage, _>(CHAT_HISTORY_PAGE_EVENT, move |page| {
-            history_loading.set(false);
-            if page.end != loaded_start() {
-                return;
-            }
-            let Ok(older) = serde_json::from_str::<Vec<ChatItem>>(&page.items_json) else {
-                return;
-            };
-            request_attachment_previews(&older, attachment_previews, attachment_preview_requests);
-            let metrics = scroll::metrics(scroll_container);
-            drop(items.write().splice(0..0, older));
-            loaded_start.set(page.start);
-            messages_total.set(page.total);
-            if let Some((height, top)) = metrics {
-                scroll::restore(scroll_container, height, top);
-            }
-        });
+    let _history = use_listener::<ChatHistoryPage, _>(CHAT_HISTORY_PAGE_EVENT, move |page| {
+        history_loading.set(false);
+        if page.end != loaded_start() {
+            return;
+        }
+        let Ok(older) = serde_json::from_str::<Vec<ChatItem>>(&page.items_json) else {
+            return;
+        };
+        request_attachment_previews(&older, attachment_previews, attachment_preview_requests);
+        let metrics = scroll::metrics(scroll_container);
+        drop(items.write().splice(0..0, older));
+        loaded_start.set(page.start);
+        messages_total.set(page.total);
+        if let Some((height, top)) = metrics {
+            scroll::restore(scroll_container, height, top);
+        }
+    });
     let _attachments =
-        use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
             let current = attachments.peek().clone();
             attachments.set(merge_chat_attachments(&current, &selected.attachments));
             focus_prompt_end(PROMPT_INPUT_ID);
         });
-    let _attachment_previews = use_bin_event_listener::<ChatAttachments, _>(
-        CHAT_ATTACHMENT_PREVIEWS_EVENT,
-        move |loaded| {
+    let _attachment_previews =
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
             let mut previews = attachment_previews.peek().clone();
             for attachment in &loaded.attachments {
                 previews.insert(attachment.path.clone(), attachment.clone());
             }
             attachment_previews.set(previews);
-        },
-    );
+        });
     let _media_entries =
-        use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+        use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
             if response.request_id != media_request_id() {
                 return;
             }
@@ -527,10 +524,10 @@ pub fn Page(
             menu_sel.set(0);
         });
 
-    let _cmds = use_bin_event_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
+    let _cmds = use_listener::<SlashCommands, _>(SLASH_COMMANDS_EVENT, move |s| {
         slash_cmds.set(s.commands.clone());
     });
-    let _models = use_bin_event_listener::<ModelState, _>(MODEL_STATE_EVENT, move |state| {
+    let _models = use_listener::<ModelState, _>(MODEL_STATE_EVENT, move |state| {
         models.set(state.models.clone());
         current_model_id.set(state.current_model_id.clone());
         current_model.set(state.current_model_name.clone());
@@ -540,15 +537,14 @@ pub fn Page(
         menu_sel.set(0);
     });
     let _composer_context =
-        use_bin_event_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
+        use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
             composer_context.set(context.clone())
         });
-    let _sess =
-        use_bin_event_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
-            sessions.set(s.sessions.clone());
-            menu_sel.set(0);
-            resume_loading.set(false);
-        });
+    let _sess = use_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |s| {
+        sessions.set(s.sessions.clone());
+        menu_sel.set(0);
+        resume_loading.set(false);
+    });
 
     use_effect(move || {
         let should_fetch = should_fetch_resume(&draft(), &slash_cmds.read());
@@ -1052,7 +1048,7 @@ pub fn Page(
         focus_prompt_end(PROMPT_INPUT_ID);
     };
 
-    use_selection_visible(menu_sel, move |selected| {
+    use_selector(menu_sel, move |selected| {
         let media_open = {
             let draft = draft.read();
             inline_media_query(&draft).is_some()

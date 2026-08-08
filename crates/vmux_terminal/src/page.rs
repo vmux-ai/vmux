@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
@@ -66,124 +66,122 @@ pub fn Page() -> Element {
     let mut prompt_draft = use_signal(|| (String::new(), false));
     let client_h = use_signal(|| 0.0f64);
 
-    let _err_listener = use_bin_event_listener::<ServiceUnavailableEvent, _>(
-        SERVICE_UNAVAILABLE_EVENT,
-        move |evt| service_error.set(evt.message),
-    );
+    let _err_listener =
+        use_listener::<ServiceUnavailableEvent, _>(SERVICE_UNAVAILABLE_EVENT, move |evt| {
+            service_error.set(evt.message)
+        });
 
-    let _listener =
-        use_bin_event_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
-            let first = patch.first_row;
-            if *first_row.peek() != first {
-                first_row.set(first);
-            }
-            if *total_rows.peek() != patch.total_rows {
-                total_rows.set(patch.total_rows);
-            }
-            if *alt.peek() != patch.alt {
-                alt.set(patch.alt);
-            }
-            if *mouse.peek() != patch.mouse {
-                mouse.set(patch.mouse);
-            }
-            if *cols.peek() != patch.cols {
-                cols.set(patch.cols);
+    let _listener = use_listener::<TermViewportPatch, _>(TERM_VIEWPORT_EVENT, move |patch| {
+        let first = patch.first_row;
+        if *first_row.peek() != first {
+            first_row.set(first);
+        }
+        if *total_rows.peek() != patch.total_rows {
+            total_rows.set(patch.total_rows);
+        }
+        if *alt.peek() != patch.alt {
+            alt.set(patch.alt);
+        }
+        if *mouse.peek() != patch.mouse {
+            mouse.set(patch.mouse);
+        }
+        if *cols.peek() != patch.cols {
+            cols.set(patch.cols);
+        }
+
+        let overscan = vmux_core::scroll::overscan_for(
+            patch.rows,
+            vmux_core::scroll::TERMINAL_OVERSCAN_K,
+            vmux_core::scroll::OVERSCAN_FLOOR,
+            vmux_core::scroll::OVERSCAN_CAP,
+        );
+        let keep_hi = first + patch.rows as u32 + overscan * 2 + 2;
+        let previous_cursor = cursor.peek().clone();
+        let next_cursor = patch.cursor.clone();
+        let cursor_for_row = |doc_row| (next_cursor.row == doc_row).then_some(next_cursor.clone());
+        if patch.full {
+            let next = patch
+                .changed_lines
+                .iter()
+                .filter(|(doc_row, _)| *doc_row >= first && *doc_row <= keep_hi)
+                .map(|(doc_row, line)| {
+                    (
+                        *doc_row,
+                        Signal::new(TerminalRowState {
+                            line: line.clone(),
+                            cursor: cursor_for_row(*doc_row),
+                        }),
+                    )
+                })
+                .collect();
+            rows.set(next);
+        } else {
+            let mut missing = Vec::new();
+            for (doc_row, line) in &patch.changed_lines {
+                let state = TerminalRowState {
+                    line: line.clone(),
+                    cursor: cursor_for_row(*doc_row),
+                };
+                if let Some(mut existing) = rows.peek().get(doc_row).copied() {
+                    if *existing.peek() != state {
+                        existing.set(state);
+                    }
+                } else {
+                    missing.push((*doc_row, state));
+                }
             }
 
-            let overscan = vmux_core::scroll::overscan_for(
-                patch.rows,
-                vmux_core::scroll::TERMINAL_OVERSCAN_K,
-                vmux_core::scroll::OVERSCAN_FLOOR,
-                vmux_core::scroll::OVERSCAN_CAP,
-            );
-            let keep_hi = first + patch.rows as u32 + overscan * 2 + 2;
-            let previous_cursor = cursor.peek().clone();
-            let next_cursor = patch.cursor.clone();
-            let cursor_for_row =
-                |doc_row| (next_cursor.row == doc_row).then_some(next_cursor.clone());
-            if patch.full {
-                let next = patch
+            let line_changed = |doc_row| {
+                patch
                     .changed_lines
                     .iter()
-                    .filter(|(doc_row, _)| *doc_row >= first && *doc_row <= keep_hi)
-                    .map(|(doc_row, line)| {
-                        (
-                            *doc_row,
-                            Signal::new(TerminalRowState {
-                                line: line.clone(),
-                                cursor: cursor_for_row(*doc_row),
-                            }),
-                        )
-                    })
-                    .collect();
-                rows.set(next);
-            } else {
-                let mut missing = Vec::new();
-                for (doc_row, line) in &patch.changed_lines {
-                    let state = TerminalRowState {
-                        line: line.clone(),
-                        cursor: cursor_for_row(*doc_row),
-                    };
-                    if let Some(mut existing) = rows.peek().get(doc_row).copied() {
-                        if *existing.peek() != state {
-                            existing.set(state);
-                        }
-                    } else {
-                        missing.push((*doc_row, state));
-                    }
-                }
-
-                let line_changed = |doc_row| {
-                    patch
-                        .changed_lines
-                        .iter()
-                        .any(|(changed_row, _)| *changed_row == doc_row)
-                };
-                if previous_cursor.as_ref().map(|cursor| cursor.row) != Some(next_cursor.row)
-                    && let Some(old_row) = previous_cursor.as_ref().map(|cursor| cursor.row)
-                    && !line_changed(old_row)
-                    && let Some(mut state) = rows.peek().get(&old_row).copied()
-                    && state.peek().cursor.is_some()
-                {
-                    let line = state.peek().line.clone();
-                    state.set(TerminalRowState { line, cursor: None });
-                }
-                if !line_changed(next_cursor.row)
-                    && let Some(mut state) = rows.peek().get(&next_cursor.row).copied()
-                {
-                    let current = state.peek().clone();
-                    if current.cursor.as_ref() != Some(&next_cursor) {
-                        state.set(TerminalRowState {
-                            line: current.line,
-                            cursor: Some(next_cursor.clone()),
-                        });
-                    }
-                }
-
-                let prune = rows
-                    .peek()
-                    .keys()
-                    .any(|doc_row| *doc_row < first || *doc_row > keep_hi);
-                if !missing.is_empty() || prune {
-                    rows.with_mut(|map| {
-                        for (doc_row, state) in missing {
-                            map.insert(doc_row, Signal::new(state));
-                        }
-                        map.retain(|doc_row, _| *doc_row >= first && *doc_row <= keep_hi);
+                    .any(|(changed_row, _)| *changed_row == doc_row)
+            };
+            if previous_cursor.as_ref().map(|cursor| cursor.row) != Some(next_cursor.row)
+                && let Some(old_row) = previous_cursor.as_ref().map(|cursor| cursor.row)
+                && !line_changed(old_row)
+                && let Some(mut state) = rows.peek().get(&old_row).copied()
+                && state.peek().cursor.is_some()
+            {
+                let line = state.peek().line.clone();
+                state.set(TerminalRowState { line, cursor: None });
+            }
+            if !line_changed(next_cursor.row)
+                && let Some(mut state) = rows.peek().get(&next_cursor.row).copied()
+            {
+                let current = state.peek().clone();
+                if current.cursor.as_ref() != Some(&next_cursor) {
+                    state.set(TerminalRowState {
+                        line: current.line,
+                        cursor: Some(next_cursor.clone()),
                     });
                 }
             }
 
-            if *selection.peek() != patch.selection {
-                selection.set(patch.selection);
+            let prune = rows
+                .peek()
+                .keys()
+                .any(|doc_row| *doc_row < first || *doc_row > keep_hi);
+            if !missing.is_empty() || prune {
+                rows.with_mut(|map| {
+                    for (doc_row, state) in missing {
+                        map.insert(doc_row, Signal::new(state));
+                    }
+                    map.retain(|doc_row, _| *doc_row >= first && *doc_row <= keep_hi);
+                });
             }
-            if *copy_mode.peek() != patch.copy_mode {
-                copy_mode.set(patch.copy_mode);
-            }
-            if cursor.peek().as_ref() != Some(&patch.cursor) {
-                cursor.set(Some(patch.cursor.clone()));
-            }
-        });
+        }
+
+        if *selection.peek() != patch.selection {
+            selection.set(patch.selection);
+        }
+        if *copy_mode.peek() != patch.copy_mode {
+            copy_mode.set(patch.copy_mode);
+        }
+        if cursor.peek().as_ref() != Some(&patch.cursor) {
+            cursor.set(Some(patch.cursor.clone()));
+        }
+    });
 
     use_effect(move || {
         let _ = total_rows();
@@ -193,15 +191,13 @@ pub fn Page() -> Element {
         }
     });
 
-    let _theme_listener =
-        use_bin_event_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
-            theme.set(Some(data));
-        });
+    let _theme_listener = use_listener::<TermThemeEvent, _>(TERM_THEME_EVENT, move |data| {
+        theme.set(Some(data));
+    });
 
-    let _title_listener =
-        use_bin_event_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
-            raw_title.set(evt.title);
-        });
+    let _title_listener = use_listener::<TermTitleEvent, _>(TERM_TITLE_EVENT, move |evt| {
+        raw_title.set(evt.title);
+    });
 
     use_effect(move || {
         locale();
@@ -213,18 +209,17 @@ pub fn Page() -> Element {
         }
     });
 
-    let _loading_listener =
-        use_bin_event_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
-            loading.set(if evt.loading {
-                Some((evt.label, evt.segment))
-            } else {
-                prompt_draft.set((String::new(), false));
-                None
-            });
+    let _loading_listener = use_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
+        loading.set(if evt.loading {
+            Some((evt.label, evt.segment))
+        } else {
+            prompt_draft.set((String::new(), false));
+            None
         });
+    });
 
     let _prompt_draft_listener =
-        use_bin_event_listener::<AgentPromptDraftEvent, _>(AGENT_PROMPT_DRAFT_EVENT, move |evt| {
+        use_listener::<AgentPromptDraftEvent, _>(AGENT_PROMPT_DRAFT_EVENT, move |evt| {
             prompt_draft.set((evt.draft, evt.skipped));
         });
 

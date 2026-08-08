@@ -10,7 +10,7 @@ use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, command_bar_open_should_ack, command_bar_open_should_reset_input,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -33,7 +33,7 @@ pub fn Page() -> Element {
     let mut outside_pointer_listener_installed = use_signal(|| false);
 
     let open_listener =
-        use_bin_event_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
+        use_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             let open_id = data.open_id;
             let should_reset_input =
                 command_bar_open_should_reset_input(current_open_id(), open_id);

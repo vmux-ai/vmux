@@ -1,4 +1,4 @@
-use crate::hooks::{MenuDirection, move_selection, use_selection_visible};
+use crate::hooks::{MenuDirection, move_selection, use_selector};
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -204,7 +204,7 @@ pub fn ManagerSelect(
         .unwrap_or(&placeholder);
 
     let scroll_id = id.clone();
-    use_selection_visible(highlighted, move |index| {
+    use_selector(highlighted, move |index| {
         if open() {
             format!("{scroll_id}-option-{index}")
         } else {

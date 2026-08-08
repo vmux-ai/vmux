@@ -8,7 +8,7 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn approval_message(extension: &ExtRow) -> String {
@@ -37,19 +37,19 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut search = use_signal(String::new);
 
-    let _list = use_bin_event_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |event| {
+    let _list = use_listener::<ExtensionsEvent, _>(EXTENSIONS_LIST_EVENT, move |event| {
         state.set(event);
         loaded.set(true);
     });
     let _progress =
-        use_bin_event_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |item| {
+        use_listener::<ExtInstallProgress, _>(EXT_INSTALL_PROGRESS_EVENT, move |item| {
             if matches!(item.phase, ExtInstallPhase::Done | ExtInstallPhase::Failed) {
                 progress.write().remove(&item.key);
             } else {
                 progress.write().insert(item.key.clone(), item);
             }
         });
-    let _status = use_bin_event_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_| {});
+    let _status = use_listener::<ExtStatusEvent, _>(EXT_STATUS_EVENT, move |_| {});
 
     use_effect(move || {
         locale();

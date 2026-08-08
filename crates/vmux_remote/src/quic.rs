@@ -242,9 +242,9 @@ mod tests {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PeerRole {
-    /// Holds the sessions. Waits to be spliced into.
+    /// Holds the sessions. Registers once, then answers whatever the relay forwards to it.
     Desktop,
-    /// Wants to reach a desktop. Opens the streams.
+    /// Wants to reach a desktop. Dials the port the relay allocated that desktop.
     Client,
 }
 

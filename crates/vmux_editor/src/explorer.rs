@@ -9,7 +9,7 @@ use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -359,7 +359,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         }
     });
 
-    let _tree = use_bin_event_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
+    let _tree = use_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
@@ -369,7 +369,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             schedule_tree_focus(e.focus_path, focus_generation);
         }
     });
-    let _focus = use_bin_event_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
+    let _focus = use_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
         if current_path() != e.path {
             current_path.set(e.path.clone());
         }
@@ -377,36 +377,33 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             schedule_tree_focus(e.path, focus_generation);
         }
     });
-    let _open =
-        use_bin_event_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
-            open_editors.set(e.items);
-        });
-    let _outline = use_bin_event_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+    let _open = use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
+        open_editors.set(e.items);
+    });
+    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
         outline.set(e.items);
     });
-    let _search =
-        use_bin_event_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |e| {
-            search.set(Some(e));
-            show_search.set(true);
-        });
-    let _fs_result =
-        use_bin_event_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
-            if e.ok && !e.open_path.is_empty() {
-                open_file(e.open_path);
-            }
-            show_notice(
-                notice,
-                notice_generation,
-                ExplorerNotice {
-                    ok: e.ok,
-                    message: if e.ok {
-                        localize_notice(&e.message)
-                    } else {
-                        e.message
-                    },
+    let _search = use_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |e| {
+        search.set(Some(e));
+        show_search.set(true);
+    });
+    let _fs_result = use_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
+        if e.ok && !e.open_path.is_empty() {
+            open_file(e.open_path);
+        }
+        show_notice(
+            notice,
+            notice_generation,
+            ExplorerNotice {
+                ok: e.ok,
+                message: if e.ok {
+                    localize_notice(&e.message)
+                } else {
+                    e.message
                 },
-            );
-        });
+            },
+        );
+    });
 
     let open_body = if show_open() {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"

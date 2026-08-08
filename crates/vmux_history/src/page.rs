@@ -7,7 +7,7 @@ use crate::event::{
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::now_millis;
 
@@ -35,7 +35,7 @@ pub fn Page() -> Element {
     let mut request_id: Signal<u64> = use_signal(|| 0);
     let mut last_reset_id: Signal<u64> = use_signal(|| 0);
 
-    let _listener = use_bin_event_listener::<HistoryQueryResponse, _>(
+    let _listener = use_listener::<HistoryQueryResponse, _>(
         HISTORY_QUERY_RESPONSE_EVENT,
         move |resp: HistoryQueryResponse| {
             if resp.request_id < *last_reset_id.read() {
@@ -56,7 +56,7 @@ pub fn Page() -> Element {
         emit_query("", 0, 1);
     });
 
-    let _changed_listener = use_bin_event_listener::<HistoryChangedEvent, _>(
+    let _changed_listener = use_listener::<HistoryChangedEvent, _>(
         HISTORY_CHANGED_EVENT,
         move |_: HistoryChangedEvent| {
             let new_id = *request_id.peek() + 1;

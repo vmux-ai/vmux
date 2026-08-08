@@ -1,4 +1,4 @@
-use super::use_bin_event_listener;
+use super::use_listener;
 use crate::i18n::{preferred_locale, register_catalog, set_current_locale, text_direction};
 use crate::theme::{THEME_EVENT, ThemeEvent};
 use dioxus::prelude::*;
@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 pub fn use_theme() -> Signal<String> {
     let mut locale = use_signal(preferred_locale);
     apply_locale(&locale());
-    let _listener = use_bin_event_listener::<ThemeEvent, _>(THEME_EVENT, move |data| {
+    let _listener = use_listener::<ThemeEvent, _>(THEME_EVENT, move |data| {
         set_root_radius(data.radius);
         if let Some(catalog) = data.catalog.as_deref() {
             let _ = register_catalog(&data.locale, catalog);

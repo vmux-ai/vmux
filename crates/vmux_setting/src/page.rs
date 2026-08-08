@@ -15,7 +15,7 @@ use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
 };
 use vmux_ui::dioxus_ext::attributes;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 
@@ -33,18 +33,16 @@ pub fn Page() -> Element {
         }
     });
 
-    let _values =
-        use_bin_event_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
-            let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
-            snapshot.set(parsed);
-        });
+    let _values = use_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
+        let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
+        snapshot.set(parsed);
+    });
 
-    let _schema =
-        use_bin_event_listener::<SettingsSchemaEvent, _>(SETTINGS_SCHEMA_EVENT, move |data| {
-            if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
-                schema.set(parsed);
-            }
-        });
+    let _schema = use_listener::<SettingsSchemaEvent, _>(SETTINGS_SCHEMA_EVENT, move |data| {
+        if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
+            schema.set(parsed);
+        }
+    });
 
     let s = snapshot.read().clone();
     if s.is_null() {
@@ -316,16 +314,14 @@ fn SectionView(
 fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -> Element {
     let mut status = use_signal(UpdateCheckStatus::default);
     let mut updater_unavailable = use_signal(|| false);
-    let _status_listener = use_bin_event_listener::<UpdateCheckStatusEvent, _>(
-        UPDATE_CHECK_STATUS_EVENT,
-        move |event| {
+    let _status_listener =
+        use_listener::<UpdateCheckStatusEvent, _>(UPDATE_CHECK_STATUS_EVENT, move |event| {
             let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
             if updater_unavailable() != unavailable {
                 updater_unavailable.set(unavailable);
             }
             status.set(event.status);
-        },
-    );
+        });
     let mut visible_value = value;
     if updater_unavailable()
         && let Some(object) = visible_value.as_object_mut()

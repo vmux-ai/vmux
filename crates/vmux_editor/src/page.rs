@@ -22,7 +22,7 @@ use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -111,32 +111,30 @@ pub fn Page() -> Element {
     let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
 
-    let _chrome =
-        use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
-            if should_apply_explorer_chrome(
-                explorer_client_id(),
-                explorer_request_id(),
-                c.client_id,
-                c.request_id,
-            ) {
-                explorer_preferred_visible.set(c.visible);
-            }
-            if explorer_width() != c.width {
-                explorer_width.set(c.width);
-            }
-            schedule_explorer_visibility_sync(
-                explorer_visible,
-                explorer_preferred_visible,
-                explorer_width,
-            );
-        });
+    let _chrome = use_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
+        if should_apply_explorer_chrome(
+            explorer_client_id(),
+            explorer_request_id(),
+            c.client_id,
+            c.request_id,
+        ) {
+            explorer_preferred_visible.set(c.visible);
+        }
+        if explorer_width() != c.width {
+            explorer_width.set(c.width);
+        }
+        schedule_explorer_visibility_sync(
+            explorer_visible,
+            explorer_preferred_visible,
+            explorer_width,
+        );
+    });
 
-    let _tidy =
-        use_bin_event_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
-            tidy_prompt.set(Some(e.count));
-        });
+    let _tidy = use_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
+        tidy_prompt.set(Some(e.count));
+    });
 
-    let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+    let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
@@ -181,7 +179,7 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
-    let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
+    let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
@@ -191,7 +189,7 @@ pub fn Page() -> Element {
         lsp_hover.set(None);
     });
 
-    let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
+    let _cur = use_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
         let moved = cursor.peek().ne(&c.primary);
         if *ed_mode.peek() != c.mode {
             ed_mode.set(c.mode);
@@ -262,56 +260,54 @@ pub fn Page() -> Element {
         }
     });
 
-    let _scroll_by =
-        use_bin_event_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
-            let line_height = if file_view_mode() == FileViewMode::Note {
-                28.0
-            } else {
-                cell_dims().1
-            };
-            if line_height <= 0.0 {
-                return;
-            }
-            scroll_viewport_by(event.lines, line_height);
-        });
+    let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
+        let line_height = if file_view_mode() == FileViewMode::Note {
+            28.0
+        } else {
+            cell_dims().1
+        };
+        if line_height <= 0.0 {
+            return;
+        }
+        scroll_viewport_by(event.lines, line_height);
+    });
 
-    let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
+    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
         schedule_git_refresh(git_refresh_generation, git_nonce);
     });
 
-    let _git_changed = use_bin_event_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
+    let _git_changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
         schedule_git_refresh(git_refresh_generation, git_nonce);
     });
 
-    let _view_mode =
-        use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
-            if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
-                note_editing.set(false);
-            }
-            file_view_mode.set(event.mode);
-            match event.mode {
-                FileViewMode::Note if is_markdown_file(&git_path()) => {
-                    let line = source_cursor().line;
-                    if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                        activate_note_cursor_centered(
-                            index,
-                            line,
-                            note_active,
-                            note_editing,
-                            note_edit_line,
-                            note_edit_rect,
-                        );
-                    }
+    let _view_mode = use_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
+        if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
+            note_editing.set(false);
+        }
+        file_view_mode.set(event.mode);
+        match event.mode {
+            FileViewMode::Note if is_markdown_file(&git_path()) => {
+                let line = source_cursor().line;
+                if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                    activate_note_cursor_centered(
+                        index,
+                        line,
+                        note_active,
+                        note_editing,
+                        note_edit_line,
+                        note_edit_rect,
+                    );
                 }
-                FileViewMode::Editor => {
-                    schedule_line_center(cursor().row, cell_dims().1, true);
-                }
-                _ => {}
             }
-        });
+            FileViewMode::Editor => {
+                schedule_line_center(cursor().row, cell_dims().1, true);
+            }
+            _ => {}
+        }
+    });
 
-    let _keymap = use_bin_event_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
+    let _keymap = use_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
         keymap.set(event.keymap);
         if event.keymap == vmux_core::KeymapKind::Vim
             && file_view_mode() == FileViewMode::Note
@@ -331,7 +327,7 @@ pub fn Page() -> Element {
         }
     });
 
-    let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
+    let _note = use_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
         let FileNoteEvent {
             title,
             properties,
@@ -386,59 +382,56 @@ pub fn Page() -> Element {
         }
     });
 
-    let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
+    let _hov = use_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
         lsp_hover.set(Some(h));
     });
 
-    let _refs = use_bin_event_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
+    let _refs = use_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
         refs.set(e.items);
         refs_sel.set(0);
         refs_open.set(true);
         focus_by_id("refs-panel");
     });
 
-    let _comp = use_bin_event_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
+    let _comp = use_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
         comp_open.set(!e.items.is_empty());
         comps.set(e.items);
         comp_sel.set(0);
         comp_anchor.set((e.line, e.replace_from_col));
     });
 
-    let _diag =
-        use_bin_event_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
-            if d.path != git_path() {
-                return;
-            }
-            diagnostics.set(d.diagnostics);
-        });
+    let _diag = use_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
+        if d.path != git_path() {
+            return;
+        }
+        diagnostics.set(d.diagnostics);
+    });
 
-    let _lsp_status =
-        use_bin_event_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
-            if s.path != git_path() {
-                return;
+    let _lsp_status = use_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
+        if s.path != git_path() {
+            return;
+        }
+        if s.state == LspServerState::Missing
+            && let Some(package) = s.package.clone()
+        {
+            let request = (s.path.clone(), package.clone());
+            if lsp_install_request() != Some(request.clone()) {
+                lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+                lsp_install_request.set(Some(request));
+                lsp_install_notice.set(Some(LspInstallProgress {
+                    name: package.clone(),
+                    phase: InstallPhase::Resolving,
+                    pct: None,
+                    message: translate("lsp-status-installing"),
+                }));
+                let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: package });
             }
-            if s.state == LspServerState::Missing
-                && let Some(package) = s.package.clone()
-            {
-                let request = (s.path.clone(), package.clone());
-                if lsp_install_request() != Some(request.clone()) {
-                    lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-                    lsp_install_request.set(Some(request));
-                    lsp_install_notice.set(Some(LspInstallProgress {
-                        name: package.clone(),
-                        phase: InstallPhase::Resolving,
-                        pct: None,
-                        message: translate("lsp-status-installing"),
-                    }));
-                    let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: package });
-                }
-            }
-            lsp_status.set(Some(s));
-        });
+        }
+        lsp_status.set(Some(s));
+    });
 
-    let _lsp_install_progress = use_bin_event_listener::<LspInstallProgress, _>(
-        LSP_INSTALL_PROGRESS_EVENT,
-        move |progress| {
+    let _lsp_install_progress =
+        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |progress| {
             let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
             if !active {
                 return;
@@ -457,11 +450,10 @@ pub fn Page() -> Element {
                     delay,
                 );
             }
-        },
-    );
+        });
 
     let _lsp_package_status =
-        use_bin_event_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+        use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
             if status.status != LspPkgStatus::Installed
                 || lsp_install_request().is_none_or(|(_, package)| package != status.name)
             {
@@ -481,11 +473,11 @@ pub fn Page() -> Element {
             );
         });
 
-    let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+    let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
     });
 
-    let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+    let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
@@ -526,7 +518,7 @@ pub fn Page() -> Element {
         );
     });
 
-    let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
+    let _media = use_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         let kind = e.kind;
@@ -537,7 +529,7 @@ pub fn Page() -> Element {
         lsp_status.set(None);
     });
 
-    let _prev = use_bin_event_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
+    let _prev = use_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
         if ev.thumb {
             if let PreviewKind::Image { bytes, .. } = ev.kind
                 && let Some(url) = blob_url(&bytes)
@@ -579,7 +571,7 @@ pub fn Page() -> Element {
         preview.set(next);
     });
 
-    let _theme = use_bin_event_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
+    let _theme = use_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
         let mut s = String::new();
         if !t.font_family.is_empty() {
             s.push_str(&format!(

@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_listener, use_theme};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -30,10 +30,9 @@ pub fn Page(
     );
     let mut mounted = use_signal(|| false);
 
-    let _focus_listener =
-        use_bin_event_listener::<StartFocusInput, _>(START_FOCUS_INPUT_EVENT, move |_| {
-            focus_start_input();
-        });
+    let _focus_listener = use_listener::<StartFocusInput, _>(START_FOCUS_INPUT_EVENT, move |_| {
+        focus_start_input();
+    });
 
     use_effect(move || {
         locale();

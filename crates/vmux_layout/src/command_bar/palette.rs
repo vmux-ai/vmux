@@ -40,7 +40,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -178,7 +178,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let _path_listener =
-        use_bin_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
+        use_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
             path_completions.set(data.completions);
         });
 
@@ -199,7 +199,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         });
     });
 
-    let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
+    let _history_listener = use_listener::<HistorySuggestionsResponse, _>(
         HISTORY_SUGGESTIONS_RESPONSE_EVENT,
         move |resp| {
             if resp.request_id != *suggestions_request_id.read() {
@@ -210,7 +210,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     );
 
     let _attachments_listener =
-        use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
             if !is_start {
                 return;
             }
@@ -219,9 +219,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             focus_prompt_end(PROMPT_INPUT_ID);
         });
 
-    let _attachment_previews_listener = use_bin_event_listener::<ChatAttachments, _>(
-        CHAT_ATTACHMENT_PREVIEWS_EVENT,
-        move |loaded| {
+    let _attachment_previews_listener =
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
             if !is_start {
                 return;
             }
@@ -240,11 +239,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             attachments.set(current);
-        },
-    );
+        });
 
     let _media_entries_listener =
-        use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+        use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
             if !is_start || response.request_id != media_request_id() {
                 return;
             }

@@ -1276,7 +1276,7 @@ fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Co
         .insert(crate::start::StartAgentTransitionView);
 }
 
-fn use_legacy_default_agent_open(url: &str, inline_transition: bool) -> bool {
+fn is_legacy_default_agent_open(url: &str, inline_transition: bool) -> bool {
     matches!(url, "vmux://agent/" | "vmux://agent") && !inline_transition
 }
 
@@ -1492,7 +1492,7 @@ fn on_command_bar_action(
                 } else {
                     false
                 };
-                if use_legacy_default_agent_open(&url, inline_transition) {
+                if is_legacy_default_agent_open(&url, inline_transition) {
                     if let Some(stack_e) = empty_stack {
                         page_default_attach_writer.write(
                             vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
@@ -3299,10 +3299,10 @@ mod tests {
 
     #[test]
     fn inline_default_agent_open_uses_standard_page_flow() {
-        assert!(use_legacy_default_agent_open("vmux://agent/", false));
-        assert!(use_legacy_default_agent_open("vmux://agent", false));
-        assert!(!use_legacy_default_agent_open("vmux://agent/", true));
-        assert!(!use_legacy_default_agent_open("vmux://agent/codex", false));
+        assert!(is_legacy_default_agent_open("vmux://agent/", false));
+        assert!(is_legacy_default_agent_open("vmux://agent", false));
+        assert!(!is_legacy_default_agent_open("vmux://agent/", true));
+        assert!(!is_legacy_default_agent_open("vmux://agent/codex", false));
     }
 
     #[test]

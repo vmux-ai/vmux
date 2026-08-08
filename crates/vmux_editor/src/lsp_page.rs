@@ -9,7 +9,7 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
@@ -32,12 +32,12 @@ pub fn Page() -> Element {
     let mut progress = use_signal(HashMap::<String, LspInstallProgress>::new);
     let mut loading = use_signal(|| true);
 
-    let _catalog = use_bin_event_listener::<LspCatalogEvent, _>(LSP_CATALOG_EVENT, move |event| {
+    let _catalog = use_listener::<LspCatalogEvent, _>(LSP_CATALOG_EVENT, move |event| {
         packages.set(event.packages);
         loading.set(false);
     });
     let _progress =
-        use_bin_event_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |item| {
+        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |item| {
             let name = item.name.clone();
             let phase = item.phase;
             progress.write().insert(name.clone(), item);
@@ -53,19 +53,18 @@ pub fn Page() -> Element {
                 };
             }
         });
-    let _status =
-        use_bin_event_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
-            let name = status.name.clone();
-            if let Some(package) = packages
-                .write()
-                .iter_mut()
-                .find(|package| package.name == name)
-            {
-                package.status = status.status;
-                package.version = status.version;
-            }
-            progress.write().remove(&name);
-        });
+    let _status = use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+        let name = status.name.clone();
+        if let Some(package) = packages
+            .write()
+            .iter_mut()
+            .find(|package| package.name == name)
+        {
+            package.status = status.status;
+            package.version = status.version;
+        }
+        progress.write().remove(&name);
+    });
 
     use_effect(move || {
         locale();

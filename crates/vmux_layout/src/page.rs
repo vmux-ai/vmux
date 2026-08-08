@@ -36,7 +36,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
+use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, PageIconView};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -47,48 +47,45 @@ pub fn Page() -> Element {
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
     let mut layout_state_received = use_signal(|| false);
-    let layout_listener =
-        use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
-            layout_state_received.set(true);
-            layout_state.set(data);
-        });
+    let layout_listener = use_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+        layout_state_received.set(true);
+        layout_state.set(data);
+    });
 
     let mut stacks_state = use_signal(StacksHostEvent::default);
     let mut stacks_state_received = use_signal(|| false);
-    let stacks_listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
+    let stacks_listener = use_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
         stacks_state_received.set(true);
         stacks_state.set(data);
     });
 
     let mut tabs_state = use_signal(TabsHostEvent::default);
     let mut tabs_state_received = use_signal(|| false);
-    let tabs_listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+    let tabs_listener = use_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
         tabs_state_received.set(true);
         tabs_state.set(data);
     });
 
     let mut bookmarks_state = use_signal(BookmarksHostEvent::default);
-    let _bookmarks_listener =
-        use_bin_event_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
-            bookmarks_state.set(data);
-        });
+    let _bookmarks_listener = use_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
+        bookmarks_state.set(data);
+    });
 
     let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
+    let _reload_listener = use_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
         reload_key.set(reload_key() + 1);
     });
 
     let mut pane_tree_state = use_signal(PaneTreeEvent::default);
     let mut pane_tree_state_received = use_signal(|| false);
-    let pane_tree_listener =
-        use_bin_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
-            pane_tree_state_received.set(true);
-            pane_tree_state.set(data);
-        });
+    let pane_tree_listener = use_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
+        pane_tree_state_received.set(true);
+        pane_tree_state.set(data);
+    });
 
     let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
     let mut spaces_state_received = use_signal(|| false);
-    let spaces_listener = use_bin_event_listener::<vmux_core::event::space::SpacesListEvent, _>(
+    let spaces_listener = use_listener::<vmux_core::event::space::SpacesListEvent, _>(
         vmux_core::event::space::SPACES_LIST_EVENT,
         move |data| {
             spaces_state_received.set(true);
@@ -104,23 +101,22 @@ pub fn Page() -> Element {
     let mut knowledge_state = use_signal(KnowledgeTreeEvent::default);
     let mut knowledge_state_received = use_signal(|| false);
     let _knowledge_listener =
-        use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
+        use_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
             knowledge_state_received.set(true);
             knowledge_state.set(data);
         });
     let mut knowledge_search = use_signal(KnowledgeSearchEvent::default);
     let _knowledge_search_listener =
-        use_bin_event_listener::<KnowledgeSearchEvent, _>(KNOWLEDGE_SEARCH_EVENT, move |data| {
+        use_listener::<KnowledgeSearchEvent, _>(KNOWLEDGE_SEARCH_EVENT, move |data| {
             knowledge_search.set(data)
         });
 
     let mut tools_state = use_signal(ToolsSnapshot::default);
     let mut tools_state_received = use_signal(|| false);
-    let _tools_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
-            tools_state_received.set(true);
-            tools_state.set(data);
-        });
+    let _tools_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
+        tools_state_received.set(true);
+        tools_state.set(data);
+    });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
     let remote_state = use_event::<RemoteStateEvent>(REMOTE_STATE_EVENT, RemoteStateEvent::default);
@@ -132,7 +128,7 @@ pub fn Page() -> Element {
     });
 
     let mut update_phase = use_signal(|| None::<UpdatePhase>);
-    let _update_progress_listener = use_bin_event_listener::<crate::event::UpdateProgressEvent, _>(
+    let _update_progress_listener = use_listener::<crate::event::UpdateProgressEvent, _>(
         crate::event::UPDATE_PROGRESS_EVENT,
         move |evt| {
             update_phase.set(Some(if evt.installing {
@@ -148,7 +144,7 @@ pub fn Page() -> Element {
             }));
         },
     );
-    let _update_ready_listener = use_bin_event_listener::<crate::event::UpdateReadyEvent, _>(
+    let _update_ready_listener = use_listener::<crate::event::UpdateReadyEvent, _>(
         crate::event::UPDATE_READY_EVENT,
         move |evt| {
             update_phase.set(Some(UpdatePhase::Ready {
@@ -156,7 +152,7 @@ pub fn Page() -> Element {
             }))
         },
     );
-    let _update_cleared_listener = use_bin_event_listener::<crate::event::UpdateClearedEvent, _>(
+    let _update_cleared_listener = use_listener::<crate::event::UpdateClearedEvent, _>(
         crate::event::UPDATE_CLEARED_EVENT,
         move |_| update_phase.set(None),
     );
@@ -187,18 +183,16 @@ pub fn Page() -> Element {
     // Held above the panel so a closed bar does not forget where it was put. Survives reopen, not
     // an app restart; that needs the host store.
     let panel_placement = use_signal(|| None::<PanelPlacement>);
-    let _panel_listener = use_bin_event_listener::<CommandBarOpenEvent, _>(
-        LAYOUT_COMMAND_BAR_OPEN_EVENT,
-        move |data| {
+    let _panel_listener =
+        use_listener::<CommandBarOpenEvent, _>(LAYOUT_COMMAND_BAR_OPEN_EVENT, move |data| {
             panel_state.set(data);
             panel_open.set(true);
             set_command_bar_panel_active(true);
-        },
-    );
-    let _panel_close_listener = use_bin_event_listener::<CommandBarPanelCloseEvent, _>(
-        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
-        move |_| panel_open.set(false),
-    );
+        });
+    let _panel_close_listener =
+        use_listener::<CommandBarPanelCloseEvent, _>(LAYOUT_COMMAND_BAR_CLOSE_EVENT, move |_| {
+            panel_open.set(false)
+        });
 
     let radius_px = state.radius;
     let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
@@ -1388,9 +1382,8 @@ fn KnowledgeCard(
     let create_prompt = use_signal(|| None::<KnowledgeCreatePrompt>);
     let create_draft = use_signal(String::new);
     let mut create_error = use_signal(String::new);
-    let _create_listener = use_bin_event_listener::<KnowledgeCreateResult, _>(
-        KNOWLEDGE_CREATE_RESULT_EVENT,
-        move |result| {
+    let _create_listener =
+        use_listener::<KnowledgeCreateResult, _>(KNOWLEDGE_CREATE_RESULT_EVENT, move |result| {
             if result.ok {
                 create_error.set(String::new());
                 if !result.is_directory {
@@ -1399,8 +1392,7 @@ fn KnowledgeCard(
             } else {
                 create_error.set(result.error);
             }
-        },
-    );
+        });
     let root = knowledge.root.clone();
     let landing_path = knowledge
         .entries
