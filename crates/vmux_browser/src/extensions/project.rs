@@ -10,7 +10,7 @@ use vmux_layout::space::Space;
 use vmux_layout::stack::{FocusedStack, Stack};
 use vmux_layout::tab::Tab;
 
-use super::{
+use super::model::{
     ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, ChromeWindow, extension_visible_url,
 };
 use crate::extensions::bridge_page::ExtensionBridgeWebview;

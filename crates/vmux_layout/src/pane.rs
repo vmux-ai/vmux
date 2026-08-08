@@ -1838,7 +1838,7 @@ fn handle_open_in_pane(
             continue;
         };
 
-        let resolved = vmux_command::open::handler::resolve_url(
+        let resolved = vmux_command::open::resolve_url(
             url.as_deref(),
             effective_startup_url.as_ref().map(|s| s.0.as_str()),
         );

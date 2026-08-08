@@ -7,7 +7,7 @@ use bevy_cef::prelude::{
     WebviewCommittedNavigationEvent,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
-use vmux_core::event::extension::{
+use vmux_core::event::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
     ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
     ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,

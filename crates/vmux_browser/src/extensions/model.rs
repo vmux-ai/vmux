@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-mod project;
-pub(crate) use project::rebuild_chrome_model;
-
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChromeWindow {
@@ -60,7 +57,7 @@ impl Default for ChromeStableIds {
 }
 
 impl ChromeStableIds {
-    fn window(&mut self, entity: Entity) -> i32 {
+    pub(crate) fn window(&mut self, entity: Entity) -> i32 {
         if let Some(id) = self.windows.get(&entity) {
             return *id;
         }
@@ -70,7 +67,7 @@ impl ChromeStableIds {
         id
     }
 
-    fn tab(&mut self, entity: Entity) -> i32 {
+    pub(crate) fn tab(&mut self, entity: Entity) -> i32 {
         if let Some(id) = self.tabs.get(&entity) {
             return *id;
         }
@@ -153,7 +150,7 @@ mod tests {
             .init_resource::<ChromeStableIds>()
             .insert_resource(FocusedStack::default())
             .add_message::<ChromeModelEvent>()
-            .add_systems(Update, project::rebuild_chrome_model);
+            .add_systems(Update, crate::extensions::project::rebuild_chrome_model);
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),

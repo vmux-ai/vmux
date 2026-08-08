@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use base64::Engine;
-use vmux_core::event::extension::ExtInstallPhase;
+use vmux_core::event::ExtInstallPhase;
 use vmux_core::extension::{crx, manifest, store, webstore};
 
 pub const DEFAULT_PRODVERSION: &str = "120.0.0.0";

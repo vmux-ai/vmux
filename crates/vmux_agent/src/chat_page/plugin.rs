@@ -36,7 +36,7 @@ use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runti
 use vmux_core::PageMetadata;
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
-use vmux_service::chat::turns::{group_turns_before, group_turns_tail, grouped_item_count};
+use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{
     AgentAttachment, AgentCommand as ServiceAgentCommand, AgentRequestId, ClientMessage,

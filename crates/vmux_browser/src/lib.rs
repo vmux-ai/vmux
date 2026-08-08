@@ -171,7 +171,7 @@ impl Plugin for BrowserPlugin {
             .add_systems(
                 Update,
                 crate::extensions::windows::sync_extension_windows
-                    .after(crate::extensions::model::rebuild_chrome_model),
+                    .after(crate::extensions::project::rebuild_chrome_model),
             )
             .add_systems(
                 Update,
@@ -183,14 +183,14 @@ impl Plugin for BrowserPlugin {
             )
             .add_systems(
                 Update,
-                crate::extensions::model::rebuild_chrome_model
+                crate::extensions::project::rebuild_chrome_model
                     .after(vmux_layout::apply_cef_state_from_webview)
                     .after(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 Update,
                 crate::extensions::broker::forward_chrome_model_events
-                    .after(crate::extensions::model::rebuild_chrome_model),
+                    .after(crate::extensions::project::rebuild_chrome_model),
             )
             .add_systems(
                 Update,
@@ -4526,7 +4526,7 @@ fn handle_browser_commands(
             #[allow(clippy::single_match)]
             BrowserCommand::Open(open_cmd) => match open_cmd {
                 OpenCommand::InPlace { url } => {
-                    let resolved = vmux_command::open::handler::resolve_url(
+                    let resolved = vmux_command::open::resolve_url(
                         url.as_deref(),
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );

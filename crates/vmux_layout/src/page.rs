@@ -18,11 +18,11 @@ use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use vmux_command::event::CommandBarOpenEvent;
-use vmux_core::event::extension::{
+use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::event::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
 };
-use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{
     KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeEntry, KnowledgeGitStatus,
