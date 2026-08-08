@@ -16,36 +16,6 @@ use vmux_core::event::extension::{
 use vmux_core::extension::store;
 use vmux_core::page::PrewarmPage;
 
-const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "extensions",
-    title: "Extensions",
-    keywords: &["extension", "extensions", "chrome", "addon", "install"],
-    icon: Some(vmux_core::BuiltinIcon::Puzzle),
-    command_bar: true,
-};
-
-enum OutMsg {
-    Progress(ExtInstallProgress),
-    Status(ExtStatusEvent),
-    List(ExtensionsEvent),
-    WebStoreInstallResult { id: String, success: bool },
-}
-
-#[derive(Resource, Clone, Default)]
-struct ExtOutbox(Arc<Mutex<Vec<(Entity, OutMsg)>>>);
-
-#[derive(Resource, Default)]
-struct ExtSubscribers(HashSet<Entity>);
-
-#[derive(Clone)]
-struct WebStoreInjector {
-    nonce: String,
-    extension_id: String,
-}
-
-#[derive(Resource, Default)]
-struct WebStoreInjectors(HashMap<Entity, WebStoreInjector>);
-
 pub struct ExtensionsPlugin;
 
 impl Plugin for ExtensionsPlugin {
@@ -92,6 +62,36 @@ impl Plugin for ExtensionsPlugin {
             );
     }
 }
+
+const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "extensions",
+    title: "Extensions",
+    keywords: &["extension", "extensions", "chrome", "addon", "install"],
+    icon: Some(vmux_core::BuiltinIcon::Puzzle),
+    command_bar: true,
+};
+
+enum OutMsg {
+    Progress(ExtInstallProgress),
+    Status(ExtStatusEvent),
+    List(ExtensionsEvent),
+    WebStoreInstallResult { id: String, success: bool },
+}
+
+#[derive(Resource, Clone, Default)]
+struct ExtOutbox(Arc<Mutex<Vec<(Entity, OutMsg)>>>);
+
+#[derive(Resource, Default)]
+struct ExtSubscribers(HashSet<Entity>);
+
+#[derive(Clone)]
+struct WebStoreInjector {
+    nonce: String,
+    extension_id: String,
+}
+
+#[derive(Resource, Default)]
+struct WebStoreInjectors(HashMap<Entity, WebStoreInjector>);
 
 fn push(outbox: &ExtOutbox, entity: Entity, msg: OutMsg) {
     outbox

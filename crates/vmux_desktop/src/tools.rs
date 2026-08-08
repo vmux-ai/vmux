@@ -25,115 +25,7 @@ use vmux_core::vault::{
 };
 use vmux_layout::LayoutCef;
 
-const PAGE_MANIFEST: PageManifest = PageManifest {
-    host: "tools",
-    title: "Tools",
-    keywords: &[
-        "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
-    ],
-    icon: Some(vmux_core::BuiltinIcon::Hammer),
-    command_bar: true,
-};
-
-const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
-    host: "vault",
-    title: "Vault",
-    keywords: &["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
-    icon: Some(vmux_core::BuiltinIcon::Vault),
-    command_bar: true,
-};
-
-const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
-const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
-
 pub struct ToolsPlugin;
-
-#[derive(Resource)]
-struct ToolsState {
-    dirty: bool,
-    full_scan: bool,
-    refresh_catalogs: bool,
-    load_vault_repositories: bool,
-    generation: u64,
-    revision: u64,
-    loaded: bool,
-    snapshot: ToolsSnapshot,
-    subscribers: HashMap<Entity, u64>,
-}
-
-impl Default for ToolsState {
-    fn default() -> Self {
-        Self {
-            dirty: true,
-            full_scan: true,
-            refresh_catalogs: false,
-            load_vault_repositories: false,
-            generation: 1,
-            revision: 0,
-            loaded: false,
-            snapshot: ToolsSnapshot::default(),
-            subscribers: HashMap::new(),
-        }
-    }
-}
-
-#[derive(Component)]
-struct ToolsScanTask {
-    generation: u64,
-    task: Task<ToolsSnapshot>,
-}
-
-#[derive(Component)]
-struct ToolActionTask {
-    target: Entity,
-    request: ToolActionRequest,
-    task: Task<Result<String, String>>,
-}
-
-#[derive(Resource, Default)]
-struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
-
-#[derive(Component)]
-struct VaultActionTask {
-    target: Entity,
-    request: VaultActionRequest,
-    task: Task<Result<VaultActionOutput, String>>,
-    progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
-    canceled: Arc<AtomicBool>,
-}
-
-struct VaultActionOutput {
-    message: String,
-    pending_upload: bool,
-}
-
-struct VaultWatch {
-    _watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
-    debounce_tx: mpsc::Sender<()>,
-    ready_rx: mpsc::Receiver<()>,
-    remote_rx: mpsc::Receiver<()>,
-}
-
-#[derive(Resource, Default)]
-struct VaultAutoSync {
-    requested: bool,
-    initial_scan_complete: bool,
-    remote_check: bool,
-}
-
-#[derive(Resource, Default)]
-struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
-
-#[derive(Clone, Debug)]
-struct InventoryItem {
-    id: String,
-    name: String,
-    version: Option<String>,
-    detail: String,
-    status: ToolStatus,
-    removable: bool,
-}
 
 impl Plugin for ToolsPlugin {
     fn build(&self, app: &mut App) {
@@ -276,6 +168,114 @@ impl Plugin for ToolsPlugin {
                     .chain(),
             );
     }
+}
+
+const PAGE_MANIFEST: PageManifest = PageManifest {
+    host: "tools",
+    title: "Tools",
+    keywords: &[
+        "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
+    ],
+    icon: Some(vmux_core::BuiltinIcon::Hammer),
+    command_bar: true,
+};
+
+const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
+    host: "vault",
+    title: "Vault",
+    keywords: &["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
+    icon: Some(vmux_core::BuiltinIcon::Vault),
+    command_bar: true,
+};
+
+const VAULT_AUTO_SYNC_DELAY: Duration = Duration::from_secs(2);
+const VAULT_REMOTE_SYNC_INTERVAL: Duration = Duration::from_secs(30);
+
+#[derive(Resource)]
+struct ToolsState {
+    dirty: bool,
+    full_scan: bool,
+    refresh_catalogs: bool,
+    load_vault_repositories: bool,
+    generation: u64,
+    revision: u64,
+    loaded: bool,
+    snapshot: ToolsSnapshot,
+    subscribers: HashMap<Entity, u64>,
+}
+
+impl Default for ToolsState {
+    fn default() -> Self {
+        Self {
+            dirty: true,
+            full_scan: true,
+            refresh_catalogs: false,
+            load_vault_repositories: false,
+            generation: 1,
+            revision: 0,
+            loaded: false,
+            snapshot: ToolsSnapshot::default(),
+            subscribers: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Component)]
+struct ToolsScanTask {
+    generation: u64,
+    task: Task<ToolsSnapshot>,
+}
+
+#[derive(Component)]
+struct ToolActionTask {
+    target: Entity,
+    request: ToolActionRequest,
+    task: Task<Result<String, String>>,
+}
+
+#[derive(Resource, Default)]
+struct ToolActionQueue(VecDeque<(Entity, ToolActionRequest)>);
+
+#[derive(Component)]
+struct VaultActionTask {
+    target: Entity,
+    request: VaultActionRequest,
+    task: Task<Result<VaultActionOutput, String>>,
+    progress: Mutex<mpsc::Receiver<VaultAuthProgress>>,
+    canceled: Arc<AtomicBool>,
+}
+
+struct VaultActionOutput {
+    message: String,
+    pending_upload: bool,
+}
+
+struct VaultWatch {
+    _watcher: RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    debounce_tx: mpsc::Sender<()>,
+    ready_rx: mpsc::Receiver<()>,
+    remote_rx: mpsc::Receiver<()>,
+}
+
+#[derive(Resource, Default)]
+struct VaultAutoSync {
+    requested: bool,
+    initial_scan_complete: bool,
+    remote_check: bool,
+}
+
+#[derive(Resource, Default)]
+struct VaultActionQueue(VecDeque<(Entity, VaultActionRequest)>);
+
+#[derive(Clone, Debug)]
+struct InventoryItem {
+    id: String,
+    name: String,
+    version: Option<String>,
+    detail: String,
+    status: ToolStatus,
+    removable: bool,
 }
 
 fn on_open_request(

@@ -18,6 +18,17 @@ pub mod registry;
 pub mod store;
 pub mod target;
 
+impl Plugin for LspPlugin {
+    fn build(&self, app: &mut App) {
+        let outbox = LspOutbox::default();
+        app.insert_resource(outbox.clone());
+        manager::build(app, outbox);
+        app.add_plugins(manager_page::ManagerPlugin);
+    }
+}
+
+pub struct LspPlugin;
+
 pub type PathDiagnostics = (PathBuf, Vec<lsp_types::Diagnostic>);
 
 #[derive(Resource, Clone, Default)]
@@ -36,14 +47,3 @@ pub struct OpenDoc {
 }
 
 pub type PendingMap = Arc<Mutex<HashMap<i64, std::sync::mpsc::Sender<serde_json::Value>>>>;
-
-pub struct LspPlugin;
-
-impl Plugin for LspPlugin {
-    fn build(&self, app: &mut App) {
-        let outbox = LspOutbox::default();
-        app.insert_resource(outbox.clone());
-        manager::build(app, outbox);
-        app.add_plugins(manager_page::ManagerPlugin);
-    }
-}

@@ -27,6 +27,65 @@ use vmux_terminal as terminal;
 #[cfg(feature = "tray")]
 use vmux_terminal::{PtyExited, Terminal};
 
+pub struct RuntimePlugin;
+
+impl Plugin for RuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<LifecycleEvent>()
+            .init_resource::<RenderFrameDemand>()
+            .add_systems(Update, handle_lifecycle_events)
+            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
+            .add_systems(Update, activate_app_during_boot)
+            .add_systems(Update, keep_awake_while_revealing)
+            .add_systems(
+                Update,
+                keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
+            )
+            .add_systems(Update, grab_key_window_on_pane_hover)
+            .add_systems(Last, sync_render_frame_demand)
+            .add_systems(Last, keep_awake_while_player_active)
+            .add_systems(
+                Startup,
+                (
+                    install_native_mouse_wake_monitor,
+                    install_live_resize_monitor,
+                    activate_primary_window_on_startup,
+                ),
+            );
+    }
+
+    fn finish(&self, app: &mut App) {
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        let Some(mut extract) = render_app.take_extract() else {
+            return;
+        };
+        render_app
+            .init_resource::<RenderFrameDemand>()
+            .add_schedule(Schedule::new(DemandedRender))
+            .add_systems(DemandedRender, run_demanded_render);
+        {
+            let mut order = render_app.world_mut().resource_mut::<RenderScheduleOrder>();
+            for label in &mut order.labels {
+                if (**label).eq(&Render) {
+                    *label = DemandedRender.intern();
+                }
+            }
+        }
+        render_app.set_extract(move |main_world, render_world| {
+            let demand = main_world
+                .get_resource::<RenderFrameDemand>()
+                .copied()
+                .unwrap_or_default();
+            render_world.insert_resource(demand);
+            if demand.0 {
+                extract(main_world, render_world);
+            }
+        });
+    }
+}
+
 const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
@@ -190,65 +249,6 @@ pub enum LifecycleEvent {
     ShowAllWindows,
     #[cfg(feature = "tray")]
     QuitVmux,
-}
-
-pub struct RuntimePlugin;
-
-impl Plugin for RuntimePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<LifecycleEvent>()
-            .init_resource::<RenderFrameDemand>()
-            .add_systems(Update, handle_lifecycle_events)
-            .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
-            .add_systems(Update, activate_app_during_boot)
-            .add_systems(Update, keep_awake_while_revealing)
-            .add_systems(
-                Update,
-                keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
-            )
-            .add_systems(Update, grab_key_window_on_pane_hover)
-            .add_systems(Last, sync_render_frame_demand)
-            .add_systems(Last, keep_awake_while_player_active)
-            .add_systems(
-                Startup,
-                (
-                    install_native_mouse_wake_monitor,
-                    install_live_resize_monitor,
-                    activate_primary_window_on_startup,
-                ),
-            );
-    }
-
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        let Some(mut extract) = render_app.take_extract() else {
-            return;
-        };
-        render_app
-            .init_resource::<RenderFrameDemand>()
-            .add_schedule(Schedule::new(DemandedRender))
-            .add_systems(DemandedRender, run_demanded_render);
-        {
-            let mut order = render_app.world_mut().resource_mut::<RenderScheduleOrder>();
-            for label in &mut order.labels {
-                if (**label).eq(&Render) {
-                    *label = DemandedRender.intern();
-                }
-            }
-        }
-        render_app.set_extract(move |main_world, render_world| {
-            let demand = main_world
-                .get_resource::<RenderFrameDemand>()
-                .copied()
-                .unwrap_or_default();
-            render_world.insert_resource(demand);
-            if demand.0 {
-                extract(main_world, render_world);
-            }
-        });
-    }
 }
 
 #[cfg(target_os = "macos")]

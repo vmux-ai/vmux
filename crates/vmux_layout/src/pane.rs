@@ -29,26 +29,7 @@ use vmux_command::{
 use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_history::LastActivatedAt;
 
-/// Marker: pane is waiting for close confirmation dialog.
-#[derive(Component)]
-pub struct PendingPaneClose;
-
-/// Marker: close this pane immediately, without a confirmation dialog. Used when
-/// the pane's process has already exited (e.g. an agent CLI quit), so there is
-/// nothing to confirm and the pane should be removed + the split collapsed.
-#[derive(Component)]
-pub struct ForcePaneClose;
-
 pub struct PanePlugin;
-
-#[cfg_attr(target_os = "macos", allow(dead_code))]
-const HOVER_COOLDOWN_MS: u64 = 300;
-
-#[derive(Resource, Default)]
-pub struct PaneHoverIntent {
-    pub target: Option<Entity>,
-    pub last_activation: Option<Instant>,
-}
 
 impl Plugin for PanePlugin {
     fn build(&self, app: &mut App) {
@@ -112,6 +93,25 @@ impl Plugin for PanePlugin {
         );
         register_zoom_hooks(app);
     }
+}
+
+/// Marker: pane is waiting for close confirmation dialog.
+#[derive(Component)]
+pub struct PendingPaneClose;
+
+/// Marker: close this pane immediately, without a confirmation dialog. Used when
+/// the pane's process has already exited (e.g. an agent CLI quit), so there is
+/// nothing to confirm and the pane should be removed + the split collapsed.
+#[derive(Component)]
+pub struct ForcePaneClose;
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+const HOVER_COOLDOWN_MS: u64 = 300;
+
+#[derive(Resource, Default)]
+pub struct PaneHoverIntent {
+    pub target: Option<Entity>,
+    pub last_activation: Option<Instant>,
 }
 
 fn register_zoom_hooks(app: &mut App) {

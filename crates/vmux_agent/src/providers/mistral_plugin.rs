@@ -8,9 +8,6 @@ use crate::client::page::strategy_components::{
 use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::{AgentKind, AgentVariant};
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct MistralProvider;
-
 pub struct MistralPlugin;
 
 impl Plugin for MistralPlugin {
@@ -18,6 +15,9 @@ impl Plugin for MistralPlugin {
         app.add_systems(Startup, register_mistral_strategy.after(SettingsLoadSet));
     }
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct MistralProvider;
 
 fn register_mistral_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
     if std::env::var(super::mistral::ENV_VAR).is_err() {

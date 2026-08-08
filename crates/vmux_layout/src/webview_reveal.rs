@@ -11,14 +11,14 @@ use bevy_cef_core::prelude::webview_debug_log;
 
 use crate::window::VmuxWindow;
 
-pub struct WebviewRevealPlugin;
-
 impl Plugin for WebviewRevealPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_webview_added)
             .add_systems(PostUpdate, reveal_webviews.after(UiSystems::Layout));
     }
 }
+
+pub struct WebviewRevealPlugin;
 
 /// Frame counter for a hidden webview waiting to be revealed.
 #[derive(Component)]

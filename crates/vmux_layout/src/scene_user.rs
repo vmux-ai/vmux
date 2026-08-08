@@ -8,6 +8,21 @@ use bevy::{
     window::PrimaryWindow,
 };
 
+#[derive(Default)]
+pub struct ScenePlugin;
+
+impl Plugin for ScenePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<InteractionMode>()
+            .insert_resource(ClearColor(Color::BLACK))
+            .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
+            .add_systems(PostUpdate, fit_main_camera.after(fit_window_to_screen));
+
+        #[cfg(target_os = "macos")]
+        app.insert_resource(ClearColor(Color::NONE));
+    }
+}
+
 const TRANSITION_DURATION: f32 = 0.3;
 
 #[derive(Component)]
@@ -50,21 +65,6 @@ impl ModeTransition {
 
     pub fn progress(&self) -> f32 {
         self.timer.fraction()
-    }
-}
-
-#[derive(Default)]
-pub struct ScenePlugin;
-
-impl Plugin for ScenePlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<InteractionMode>()
-            .insert_resource(ClearColor(Color::BLACK))
-            .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
-            .add_systems(PostUpdate, fit_main_camera.after(fit_window_to_screen));
-
-        #[cfg(target_os = "macos")]
-        app.insert_resource(ClearColor(Color::NONE));
     }
 }
 

@@ -15,40 +15,6 @@ use vmux_layout::LayoutCef;
 
 use crate::store::{build_tree, create_entry, ensure_vault, ensure_vault_repository, vault_dir};
 
-pub struct KnowledgePlugin;
-
-#[derive(Resource)]
-struct KnowledgeState {
-    dirty: bool,
-    generation: u64,
-    revision: u64,
-    loaded: bool,
-    tree: KnowledgeTreeEvent,
-}
-
-impl Default for KnowledgeState {
-    fn default() -> Self {
-        Self {
-            dirty: true,
-            generation: 1,
-            revision: 0,
-            loaded: false,
-            tree: KnowledgeTreeEvent::default(),
-        }
-    }
-}
-
-struct KnowledgeWatch {
-    _watcher: RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Result<notify::Event>>,
-}
-
-#[derive(Component)]
-struct KnowledgeTreeTask {
-    generation: u64,
-    task: Task<Result<(KnowledgeTreeEvent, KnowledgeIndex), String>>,
-}
-
 impl Plugin for KnowledgePlugin {
     fn build(&self, app: &mut App) {
         let vault = vault_dir();
@@ -101,6 +67,40 @@ impl Plugin for KnowledgePlugin {
             .add_observer(on_knowledge_search)
             .add_observer(on_knowledge_create);
     }
+}
+
+pub struct KnowledgePlugin;
+
+#[derive(Resource)]
+struct KnowledgeState {
+    dirty: bool,
+    generation: u64,
+    revision: u64,
+    loaded: bool,
+    tree: KnowledgeTreeEvent,
+}
+
+impl Default for KnowledgeState {
+    fn default() -> Self {
+        Self {
+            dirty: true,
+            generation: 1,
+            revision: 0,
+            loaded: false,
+            tree: KnowledgeTreeEvent::default(),
+        }
+    }
+}
+
+struct KnowledgeWatch {
+    _watcher: RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Result<notify::Event>>,
+}
+
+#[derive(Component)]
+struct KnowledgeTreeTask {
+    generation: u64,
+    task: Task<Result<(KnowledgeTreeEvent, KnowledgeIndex), String>>,
 }
 
 fn drain_knowledge_watch(

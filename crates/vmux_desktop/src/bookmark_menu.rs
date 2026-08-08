@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-pub(crate) struct BookmarkMenuPlugin;
-
 impl Plugin for BookmarkMenuPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<vmux_layout::bookmark::ShowBookmarkMenuRequest>();
@@ -9,6 +7,8 @@ impl Plugin for BookmarkMenuPlugin {
         app.add_systems(Update, macos::show_bookmark_menu);
     }
 }
+
+pub(crate) struct BookmarkMenuPlugin;
 
 #[cfg(target_os = "macos")]
 mod macos {

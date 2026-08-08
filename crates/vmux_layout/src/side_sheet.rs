@@ -4,8 +4,6 @@ use crate::settings::LayoutSettings;
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
 
-pub(crate) struct SideSheetLayoutPlugin;
-
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<SideSheetSectionsExpanded>()
@@ -21,6 +19,8 @@ impl Plugin for SideSheetLayoutPlugin {
             );
     }
 }
+
+pub(crate) struct SideSheetLayoutPlugin;
 
 #[derive(Component)]
 pub struct SideSheet;

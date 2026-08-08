@@ -67,32 +67,6 @@ use {vmux_browser::BrowserPlugin, vmux_layout::LayoutPlugin};
 /// layout, features, browser, and desktop — that make up the app.
 pub struct VmuxPlugin;
 
-/// First-launch window size (logical px) when no geometry is persisted in
-/// `store.ron`. Restored geometry overrides this after load.
-const DEFAULT_WINDOW_WIDTH: u32 = 1280;
-const DEFAULT_WINDOW_HEIGHT: u32 = 800;
-
-fn primary_window_config(title: String) -> NativeWindow {
-    NativeWindow {
-        title,
-        transparent: true,
-        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
-        decorations: true,
-        titlebar_shown: true,
-        titlebar_transparent: true,
-        titlebar_show_title: false,
-        titlebar_show_buttons: false,
-        movable_by_window_background: false,
-        fullsize_content_view: true,
-        resizable: true,
-        ime_enabled: true,
-        visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
-        position: WindowPosition::Centered(MonitorSelection::Primary),
-        resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
-        ..default()
-    }
-}
-
 impl Plugin for VmuxPlugin {
     fn build(&self, app: &mut App) {
         let title = match env!("VMUX_BUILD_PROFILE") {
@@ -128,6 +102,32 @@ impl Plugin for VmuxPlugin {
             BrowserPlugin,
             DesktopPlugins,
         ));
+    }
+}
+
+/// First-launch window size (logical px) when no geometry is persisted in
+/// `store.ron`. Restored geometry overrides this after load.
+const DEFAULT_WINDOW_WIDTH: u32 = 1280;
+const DEFAULT_WINDOW_HEIGHT: u32 = 800;
+
+fn primary_window_config(title: String) -> NativeWindow {
+    NativeWindow {
+        title,
+        transparent: true,
+        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
+        decorations: true,
+        titlebar_shown: true,
+        titlebar_transparent: true,
+        titlebar_show_title: false,
+        titlebar_show_buttons: false,
+        movable_by_window_background: false,
+        fullsize_content_view: true,
+        resizable: true,
+        ime_enabled: true,
+        visible: !cfg!(all(target_os = "macos", feature = "native-glass")),
+        position: WindowPosition::Centered(MonitorSelection::Primary),
+        resolution: WindowResolution::new(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT),
+        ..default()
     }
 }
 

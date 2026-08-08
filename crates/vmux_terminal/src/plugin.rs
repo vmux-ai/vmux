@@ -36,6 +36,143 @@ use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
 
+/// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
+/// process-monitor requests, keyboard and mouse forwarding, and snapshot updates.
+pub struct TerminalPlugin;
+
+impl Plugin for TerminalPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::PAGE_MANIFEST);
+        vmux_core::register_host_spawn(app, "terminal");
+        vmux_core::register_host_spawn(app, "services");
+        app.register_type::<crate::launch::TerminalLaunch>()
+            .register_type::<crate::launch::TerminalKind>()
+            .add_message::<TerminalSendRequest>()
+            .add_message::<RunShellRequest>()
+            .add_message::<TerminalStackSpawnRequest>()
+            .add_message::<TerminalSpawnRequest>()
+            .add_message::<ProcessesMonitorSpawnRequest>()
+            .add_message::<TerminalFontSizeCommand>()
+            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
+            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
+            .init_resource::<pid::PidToEntity>()
+            .add_systems(
+                Update,
+                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
+            );
+        let service_wake = service_wake_callback(app);
+        ensure_service_started();
+        app.insert_resource(ServiceConnectRetry::new());
+        app.insert_resource(ServiceWakeCallback(service_wake))
+            .init_resource::<MouseSelectionState>()
+            .init_resource::<TerminalModeMap>()
+            .init_resource::<LocalCopyModeState>()
+            .init_resource::<TerminalWebShortcutState>()
+            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
+            .add_plugins(BinEventEmitterPlugin::<(
+                TermResizeEvent,
+                TermMouseEvent,
+                TermScrollEvent,
+                TermKeyEvent,
+                TermLinkOpenRequest,
+            )>::for_hosts(&["terminal"]))
+            .add_systems(
+                PreUpdate,
+                handle_terminal_keyboard
+                    .run_if(on_message::<KeyboardInput>)
+                    .after(InputSystems),
+            );
+        app.add_plugins(TerminalUpdatePlugin)
+            .add_systems(
+                Update,
+                (
+                    handle_terminal_send_requests,
+                    handle_run_shell_requests,
+                    respond_terminal_stack_spawn,
+                )
+                    .after(ServiceMessageSet),
+            )
+            .add_systems(
+                Update,
+                (respond_terminal_spawn, respond_processes_monitor_spawn)
+                    .in_set(vmux_command::ReadAppCommands),
+            )
+            .add_systems(
+                Update,
+                handle_terminal_font_size.after(vmux_command::ReadAppCommands),
+            )
+            .add_observer(on_term_ready)
+            .add_observer(on_term_resize)
+            .add_observer(on_term_mouse)
+            .add_observer(on_term_scroll)
+            .add_observer(on_term_key)
+            .add_observer(on_term_link_open)
+            .add_observer(on_restart_pty)
+            .add_observer(on_terminal_removed)
+            .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
+            .add_systems(
+                Update,
+                crate::snapshot_updater::update_terminals_snapshot
+                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+            )
+            .add_systems(
+                Update,
+                (
+                    arm_agent_loading,
+                    arm_agent_loading_on_restart,
+                    clear_agent_loading.after(poll_service_messages),
+                    flush_buffered_agent_prompt.after(poll_service_messages),
+                    reset_terminal_title_on_agent_removed,
+                    set_terminal_shell_icon,
+                ),
+            );
+    }
+}
+
+/// Drives a terminal's per-frame work: the service connection, PTY input and output, OSC
+/// title updates, and the page/layout spawn requests that create new terminals.
+struct TerminalUpdatePlugin;
+
+impl Plugin for TerminalUpdatePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<ProcessExitedEvent>()
+            .add_message::<CommandLifecycleEvent>()
+            .add_message::<TerminalReinputRequest>()
+            .add_message::<OscTitleChanged>()
+            .add_message::<vmux_core::notify::BellReceived>()
+            .add_systems(
+                Update,
+                handle_terminal_reinput_requests
+                    .after(poll_service_messages)
+                    .before(flush_pending_terminal_input),
+            )
+            .add_systems(Update, apply_osc_title.after(poll_service_messages))
+            .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
+            .add_systems(Update, sync_agent_focus.after(poll_service_messages))
+            .add_systems(
+                Update,
+                handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
+            .add_systems(
+                Update,
+                spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
+            )
+            .add_systems(
+                Update,
+                (
+                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
+                    poll_service_messages
+                        .in_set(WriteAppCommands)
+                        .in_set(ServiceMessageSet),
+                    flush_pending_terminal_input,
+                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
+                )
+                    .chain(),
+            )
+            .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
+    }
+}
+
 const MULTI_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(300);
 const MULTI_CLICK_CELL_TOLERANCE: i32 = 1;
 /// `Ctrl+V` control byte. Sent on ⌘V when the clipboard holds an image, so the
@@ -288,10 +425,6 @@ pub struct TerminalStackSpawnRequest {
     pub activate: bool,
 }
 
-/// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
-/// process-monitor requests, keyboard and mouse forwarding, and snapshot updates.
-pub struct TerminalPlugin;
-
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ServiceMessageSet;
 
@@ -313,95 +446,6 @@ pub fn format_terminal_url(
         if meta.url != next {
             meta.url = next;
         }
-    }
-}
-
-impl Plugin for TerminalPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "terminal");
-        vmux_core::register_host_spawn(app, "services");
-        app.register_type::<crate::launch::TerminalLaunch>()
-            .register_type::<crate::launch::TerminalKind>()
-            .add_message::<TerminalSendRequest>()
-            .add_message::<RunShellRequest>()
-            .add_message::<TerminalStackSpawnRequest>()
-            .add_message::<TerminalSpawnRequest>()
-            .add_message::<ProcessesMonitorSpawnRequest>()
-            .add_message::<TerminalFontSizeCommand>()
-            .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
-            .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-            .init_resource::<pid::PidToEntity>()
-            .add_systems(
-                Update,
-                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
-            );
-        let service_wake = service_wake_callback(app);
-        ensure_service_started();
-        app.insert_resource(ServiceConnectRetry::new());
-        app.insert_resource(ServiceWakeCallback(service_wake))
-            .init_resource::<MouseSelectionState>()
-            .init_resource::<TerminalModeMap>()
-            .init_resource::<LocalCopyModeState>()
-            .init_resource::<TerminalWebShortcutState>()
-            .add_systems(Update, format_terminal_url.after(pid::track_pid_inserts))
-            .add_plugins(BinEventEmitterPlugin::<(
-                TermResizeEvent,
-                TermMouseEvent,
-                TermScrollEvent,
-                TermKeyEvent,
-                TermLinkOpenRequest,
-            )>::for_hosts(&["terminal"]))
-            .add_systems(
-                PreUpdate,
-                handle_terminal_keyboard
-                    .run_if(on_message::<KeyboardInput>)
-                    .after(InputSystems),
-            );
-        app.add_plugins(TerminalUpdatePlugin)
-            .add_systems(
-                Update,
-                (
-                    handle_terminal_send_requests,
-                    handle_run_shell_requests,
-                    respond_terminal_stack_spawn,
-                )
-                    .after(ServiceMessageSet),
-            )
-            .add_systems(
-                Update,
-                (respond_terminal_spawn, respond_processes_monitor_spawn)
-                    .in_set(vmux_command::ReadAppCommands),
-            )
-            .add_systems(
-                Update,
-                handle_terminal_font_size.after(vmux_command::ReadAppCommands),
-            )
-            .add_observer(on_term_ready)
-            .add_observer(on_term_resize)
-            .add_observer(on_term_mouse)
-            .add_observer(on_term_scroll)
-            .add_observer(on_term_key)
-            .add_observer(on_term_link_open)
-            .add_observer(on_restart_pty)
-            .add_observer(on_terminal_removed)
-            .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
-            .add_systems(
-                Update,
-                crate::snapshot_updater::update_terminals_snapshot
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Update,
-                (
-                    arm_agent_loading,
-                    arm_agent_loading_on_restart,
-                    clear_agent_loading.after(poll_service_messages),
-                    flush_buffered_agent_prompt.after(poll_service_messages),
-                    reset_terminal_title_on_agent_removed,
-                    set_terminal_shell_icon,
-                ),
-            );
     }
 }
 
@@ -437,50 +481,6 @@ fn on_terminal_removed(
     service.0.send(ClientMessage::KillProcess {
         process_id: *process_id,
     });
-}
-
-/// Drives a terminal's per-frame work: the service connection, PTY input and output, OSC
-/// title updates, and the page/layout spawn requests that create new terminals.
-struct TerminalUpdatePlugin;
-
-impl Plugin for TerminalUpdatePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<ProcessExitedEvent>()
-            .add_message::<CommandLifecycleEvent>()
-            .add_message::<TerminalReinputRequest>()
-            .add_message::<OscTitleChanged>()
-            .add_message::<vmux_core::notify::BellReceived>()
-            .add_systems(
-                Update,
-                handle_terminal_reinput_requests
-                    .after(poll_service_messages)
-                    .before(flush_pending_terminal_input),
-            )
-            .add_systems(Update, apply_osc_title.after(poll_service_messages))
-            .add_systems(Update, clear_osc_title_on_exit.after(poll_service_messages))
-            .add_systems(Update, sync_agent_focus.after(poll_service_messages))
-            .add_systems(
-                Update,
-                handle_terminal_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
-                spawn_layout_requested_content.after(vmux_layout::stack::StackCommandSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    try_connect_service.run_if(resource_exists::<ServiceConnectRetry>),
-                    poll_service_messages
-                        .in_set(WriteAppCommands)
-                        .in_set(ServiceMessageSet),
-                    flush_pending_terminal_input,
-                    handle_terminal_copy_mode_command.in_set(vmux_command::ReadAppCommands),
-                )
-                    .chain(),
-            )
-            .add_systems(Update, sync_terminal_theme.after(handle_terminal_font_size));
-    }
 }
 
 fn spawn_layout_requested_content(

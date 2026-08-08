@@ -17,16 +17,6 @@ use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, T
 use vmux_core::Order;
 use vmux_history::LastActivatedAt;
 
-pub struct TabPlugin;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TabCommandSet;
-
-#[derive(Message, Clone, Copy)]
-pub struct CloseTabRequest {
-    pub tab: Entity,
-}
-
 impl Plugin for TabPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Tab>()
@@ -57,6 +47,16 @@ impl Plugin for TabPlugin {
             .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
             .add_systems(PostUpdate, sync_tab_order);
     }
+}
+
+pub struct TabPlugin;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TabCommandSet;
+
+#[derive(Message, Clone, Copy)]
+pub struct CloseTabRequest {
+    pub tab: Entity,
 }
 
 #[derive(Component, Reflect, Default)]

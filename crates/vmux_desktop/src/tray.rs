@@ -10,10 +10,20 @@ use crate::runtime::LifecycleEvent;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::{register_catalog, requested_locale, translate_for};
 
+pub(crate) struct TrayPlugin;
+
+impl Plugin for TrayPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
+            .add_systems(
+                Update,
+                (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
+            );
+    }
+}
+
 pub(crate) static PENDING_TRAY_EVENTS: LazyLock<Mutex<Vec<String>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
-
-pub(crate) struct TrayPlugin;
 
 struct TrayHandle {
     _tray: TrayIcon,
@@ -37,16 +47,6 @@ struct TrayHandle {
     last_locale: String,
     #[cfg(feature = "recording")]
     last_status: Option<RecordingStatus>,
-}
-
-impl Plugin for TrayPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_tray.after(vmux_setting::SettingsLoadSet))
-            .add_systems(
-                Update,
-                (drain_tray_events, sync_tray_menu_state, sync_tray_recording),
-            );
-    }
 }
 
 fn setup_tray(world: &mut World) {

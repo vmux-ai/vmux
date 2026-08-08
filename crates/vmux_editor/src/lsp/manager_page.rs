@@ -14,26 +14,6 @@ use vmux_core::page::PrewarmPage;
 use crate::lsp::catalog::{self, Package};
 use crate::lsp::{install, purl, store, target};
 
-const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "lsp",
-    title: "Language Servers",
-    keywords: &["lsp", "language", "server", "install", "mason"],
-    icon: Some(vmux_core::BuiltinIcon::Server),
-    command_bar: true,
-};
-
-pub enum ManagerMsg {
-    Catalog(LspCatalogEvent),
-    Progress(LspInstallProgress),
-    Status(LspPkgStatusEvent),
-}
-
-#[derive(Resource, Clone, Default)]
-pub struct ManagerOutbox(pub Arc<Mutex<Vec<(Entity, ManagerMsg)>>>);
-
-#[derive(Resource, Clone, Default)]
-struct ActiveInstalls(Arc<Mutex<HashSet<String>>>);
-
 pub struct ManagerPlugin;
 
 impl Plugin for ManagerPlugin {
@@ -63,6 +43,26 @@ impl Plugin for ManagerPlugin {
             .add_systems(Update, drain_manager_outbox);
     }
 }
+
+const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "lsp",
+    title: "Language Servers",
+    keywords: &["lsp", "language", "server", "install", "mason"],
+    icon: Some(vmux_core::BuiltinIcon::Server),
+    command_bar: true,
+};
+
+pub enum ManagerMsg {
+    Catalog(LspCatalogEvent),
+    Progress(LspInstallProgress),
+    Status(LspPkgStatusEvent),
+}
+
+#[derive(Resource, Clone, Default)]
+pub struct ManagerOutbox(pub Arc<Mutex<Vec<(Entity, ManagerMsg)>>>);
+
+#[derive(Resource, Clone, Default)]
+struct ActiveInstalls(Arc<Mutex<HashSet<String>>>);
 
 pub fn to_lsp_package(root: &Path, p: &Package) -> LspPackage {
     let kind = purl::parse(&p.source_id)

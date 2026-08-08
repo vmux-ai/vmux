@@ -6,10 +6,6 @@ use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
 
-/// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
-#[derive(Resource, Default, Debug)]
-pub struct LayoutHidden(pub bool);
-
 pub struct TogglePlugin;
 
 impl Plugin for TogglePlugin {
@@ -22,6 +18,10 @@ impl Plugin for TogglePlugin {
             );
     }
 }
+
+/// Tracks whether the layout CEF shell (header + side sheet) is currently hidden.
+#[derive(Resource, Default, Debug)]
+pub struct LayoutHidden(pub bool);
 
 /// When the CEF shell is hidden, the pane fills the full window. Apply
 /// WINDOW_PAD_PX on all four sides to keep the pane off the system window

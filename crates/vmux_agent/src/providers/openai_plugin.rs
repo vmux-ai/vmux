@@ -8,9 +8,6 @@ use crate::client::page::strategy_components::{
 use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::{AgentKind, AgentVariant};
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct OpenAiProvider;
-
 pub struct OpenAiPlugin;
 
 impl Plugin for OpenAiPlugin {
@@ -18,6 +15,9 @@ impl Plugin for OpenAiPlugin {
         app.add_systems(Startup, register_openai_strategy.after(SettingsLoadSet));
     }
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct OpenAiProvider;
 
 fn register_openai_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
     if std::env::var(super::openai::ENV_VAR).is_err() {

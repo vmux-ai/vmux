@@ -31,6 +31,50 @@ use vmux_core::agent::AgentKind;
 use vmux_core::page::PrewarmPage;
 
 #[cfg(not(target_arch = "wasm32"))]
+pub struct AgentsManagerPlugin;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Plugin for AgentsManagerPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            PrewarmPage {
+                host: "agents",
+                url: "vmux://agents/",
+                title: "Agents",
+                pool_size: 1,
+            },
+        ));
+        vmux_core::register_host_spawn(app, "agents");
+        app.init_resource::<AgentsPageWebviews>()
+            .init_resource::<AgentsStatus>()
+            .init_resource::<AgentsInstallChannel>()
+            .init_resource::<AgentVersions>()
+            .init_resource::<AgentVersionsChannel>()
+            .init_resource::<AcpInstallGeneration>()
+            .add_plugins(BinEventEmitterPlugin::<(
+                AgentsCatalogRequest,
+                AgentsInstall,
+                AgentsUninstall,
+                AgentsOpen,
+            )>::for_hosts(&["agents"]))
+            .add_observer(on_catalog_request)
+            .add_observer(on_install_request)
+            .add_observer(on_uninstall_request)
+            .add_observer(on_open_request)
+            .add_systems(
+                Update,
+                (
+                    kick_off_version_fetches,
+                    drain_version_fetches,
+                    push_agents,
+                    drain_agent_installs,
+                ),
+            );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agents",
     title: "Agents",
@@ -101,50 +145,6 @@ impl Default for AgentVersionsChannel {
     fn default() -> Self {
         let (tx, rx) = crossbeam_channel::unbounded();
         Self { tx, rx }
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub struct AgentsManagerPlugin;
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Plugin for AgentsManagerPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn((
-            PAGE_MANIFEST,
-            PrewarmPage {
-                host: "agents",
-                url: "vmux://agents/",
-                title: "Agents",
-                pool_size: 1,
-            },
-        ));
-        vmux_core::register_host_spawn(app, "agents");
-        app.init_resource::<AgentsPageWebviews>()
-            .init_resource::<AgentsStatus>()
-            .init_resource::<AgentsInstallChannel>()
-            .init_resource::<AgentVersions>()
-            .init_resource::<AgentVersionsChannel>()
-            .init_resource::<AcpInstallGeneration>()
-            .add_plugins(BinEventEmitterPlugin::<(
-                AgentsCatalogRequest,
-                AgentsInstall,
-                AgentsUninstall,
-                AgentsOpen,
-            )>::for_hosts(&["agents"]))
-            .add_observer(on_catalog_request)
-            .add_observer(on_install_request)
-            .add_observer(on_uninstall_request)
-            .add_observer(on_open_request)
-            .add_systems(
-                Update,
-                (
-                    kick_off_version_fetches,
-                    drain_version_fetches,
-                    push_agents,
-                    drain_agent_installs,
-                ),
-            );
     }
 }
 

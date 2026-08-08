@@ -13,20 +13,6 @@ use crate::event::{
 };
 use crate::spaces::{ActiveSpace, Spaces};
 
-#[derive(Message, Clone)]
-pub struct SaveSpaceRequest {
-    pub path: PathBuf,
-}
-
-/// A space CRUD request from a non-web source (e.g. the agent/MCP). Relayed into
-/// the same `SpaceCommandEvent` flow the web spaces page uses.
-#[derive(Message, Clone)]
-pub struct SpaceCommandRequest {
-    pub command: String,
-    pub space_id: Option<String>,
-    pub name: Option<String>,
-}
-
 /// Wires the spaces domain: space commands, active-space syncing, configured startup
 /// resolution, and the spaces list webview.
 pub struct SpacePlugin;
@@ -86,6 +72,20 @@ impl Plugin for SpacePlugin {
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
             );
     }
+}
+
+#[derive(Message, Clone)]
+pub struct SaveSpaceRequest {
+    pub path: PathBuf,
+}
+
+/// A space CRUD request from a non-web source (e.g. the agent/MCP). Relayed into
+/// the same `SpaceCommandEvent` flow the web spaces page uses.
+#[derive(Message, Clone)]
+pub struct SpaceCommandRequest {
+    pub command: String,
+    pub space_id: Option<String>,
+    pub name: Option<String>,
 }
 
 fn update_effective_startup_url(

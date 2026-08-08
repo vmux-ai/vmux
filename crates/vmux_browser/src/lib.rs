@@ -81,35 +81,9 @@ use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
-#[derive(Clone, Copy, Debug, Message)]
-pub(crate) struct WebviewLoadCompleted {
-    webview: Entity,
-}
-
 /// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
 /// the CEF backend, and forwards pointer and cursor input between the layout and pages.
 pub struct BrowserPlugin;
-
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-enum BrowserSystems {
-    SyncCefBackend,
-}
-
-fn configure_cef_backend_sync(app: &mut App) -> &mut App {
-    app.configure_sets(
-        Update,
-        BrowserSystems::SyncCefBackend
-            .after(vmux_layout::scene::SceneSystems::CompleteModeTransition)
-            .before(CefSystems::CreateAndResize),
-    )
-    .add_systems(
-        Update,
-        sync_cef_backend_for_interaction_mode
-            .in_set(BrowserSystems::SyncCefBackend)
-            .after(PageOpenSet::Fallback)
-            .after(spawn_popup_stacks),
-    )
-}
 
 impl Plugin for BrowserPlugin {
     fn build(&self, app: &mut App) {
@@ -399,6 +373,32 @@ impl Plugin for BrowserPlugin {
         #[cfg(target_os = "macos")]
         app.add_systems(Last, host_focus_native::apply_winit_host_focus);
     }
+}
+
+#[derive(Clone, Copy, Debug, Message)]
+pub(crate) struct WebviewLoadCompleted {
+    webview: Entity,
+}
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum BrowserSystems {
+    SyncCefBackend,
+}
+
+fn configure_cef_backend_sync(app: &mut App) -> &mut App {
+    app.configure_sets(
+        Update,
+        BrowserSystems::SyncCefBackend
+            .after(vmux_layout::scene::SceneSystems::CompleteModeTransition)
+            .before(CefSystems::CreateAndResize),
+    )
+    .add_systems(
+        Update,
+        sync_cef_backend_for_interaction_mode
+            .in_set(BrowserSystems::SyncCefBackend)
+            .after(PageOpenSet::Fallback)
+            .after(spawn_popup_stacks),
+    )
 }
 
 fn log_command_bar_keyboard_input(

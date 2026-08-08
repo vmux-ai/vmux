@@ -35,6 +35,77 @@ use vmux_core::page::ServerEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
+pub struct WindowLayoutPlugin;
+
+impl Plugin for WindowLayoutPlugin {
+    fn build(&self, app: &mut App) {
+        #[cfg(feature = "player-mode")]
+        load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
+
+        app.register_type::<WindowGeometry>()
+            .register_type::<Option<IVec2>>()
+            .register_type::<Option<Vec2>>()
+            .add_systems(
+                Startup,
+                setup
+                    .in_set(LayoutStartupSet::Window)
+                    .after(crate::scene::setup)
+                    .after(ServerEmbedSet),
+            )
+            .add_systems(
+                Startup,
+                (
+                    request_default_layout,
+                    spawn_requested_tab_layouts,
+                    discard_startup_tab_layout_requests,
+                )
+                    .chain()
+                    .in_set(LayoutStartupSet::DefaultTab),
+            )
+            .add_systems(
+                Startup,
+                (
+                    crate::stack::open_startup_url_if_no_stacks,
+                    fit_window_to_screen,
+                )
+                    .chain()
+                    .in_set(LayoutStartupSet::Post),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    fit_window_to_screen,
+                    sync_window_layout_to_settings,
+                    sync_main_column_gap_to_pane_count,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
+                    spawn_requested_tab_layouts
+                        .after(ReadAppCommands)
+                        .before(PageOpenSet::ResolveTarget),
+                ),
+            )
+            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
+
+        #[cfg(feature = "player-mode")]
+        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
+            .add_systems(
+                PostUpdate,
+                (
+                    sync_window_surface_clip,
+                    sync_window_surface_alpha,
+                    apply_webview_material_defaults,
+                ),
+            );
+
+        #[cfg(not(feature = "player-mode"))]
+        app.init_resource::<Assets<WindowMaterial>>();
+    }
+}
+
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
 pub const WEBVIEW_Z_MAIN: f32 = 0.018;
@@ -55,8 +126,6 @@ const _: () = {
     assert!(WEBVIEW_Z_MODAL <= 0.08);
     assert!(WEBVIEW_MESH_DEPTH_BIAS >= 0.0);
 };
-
-pub struct WindowLayoutPlugin;
 
 #[cfg(feature = "player-mode")]
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone, PartialEq)]
@@ -137,75 +206,6 @@ fn window_background_material(
             clip: Vec4::new(radius, size_m.x, size_m.y, PIXELS_PER_METER),
             ..default()
         },
-    }
-}
-
-impl Plugin for WindowLayoutPlugin {
-    fn build(&self, app: &mut App) {
-        #[cfg(feature = "player-mode")]
-        load_internal_asset!(app, WINDOW_SHADER_HANDLE, "window.wgsl", Shader::from_wgsl);
-
-        app.register_type::<WindowGeometry>()
-            .register_type::<Option<IVec2>>()
-            .register_type::<Option<Vec2>>()
-            .add_systems(
-                Startup,
-                setup
-                    .in_set(LayoutStartupSet::Window)
-                    .after(crate::scene::setup)
-                    .after(ServerEmbedSet),
-            )
-            .add_systems(
-                Startup,
-                (
-                    request_default_layout,
-                    spawn_requested_tab_layouts,
-                    discard_startup_tab_layout_requests,
-                )
-                    .chain()
-                    .in_set(LayoutStartupSet::DefaultTab),
-            )
-            .add_systems(
-                Startup,
-                (
-                    crate::stack::open_startup_url_if_no_stacks,
-                    fit_window_to_screen,
-                )
-                    .chain()
-                    .in_set(LayoutStartupSet::Post),
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    fit_window_to_screen,
-                    sync_window_layout_to_settings,
-                    sync_main_column_gap_to_pane_count,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::stack::open_startup_url_if_no_stacks.before(PageOpenSet::ResolveTarget),
-                    spawn_requested_tab_layouts
-                        .after(ReadAppCommands)
-                        .before(PageOpenSet::ResolveTarget),
-                ),
-            )
-            .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
-
-        #[cfg(feature = "player-mode")]
-        app.add_plugins(MaterialPlugin::<WindowMaterial>::default())
-            .add_systems(
-                PostUpdate,
-                (
-                    sync_window_surface_clip,
-                    sync_window_surface_alpha,
-                    apply_webview_material_defaults,
-                ),
-            );
-
-        #[cfg(not(feature = "player-mode"))]
-        app.init_resource::<Assets<WindowMaterial>>();
     }
 }
 

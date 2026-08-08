@@ -9,6 +9,20 @@ use vmux_setting::{
     event::{CheckForUpdatesRequest, CurrentUpdateCheckStatus, UpdateCheckStatus},
 };
 
+impl Plugin for UpdatePlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(UpdateConfig {
+            endpoint: self.updater.endpoint.clone(),
+            pubkey: self.updater.pubkey.clone(),
+            initial_delay: self.updater.initial_delay,
+            poll_interval: self.updater.poll_interval,
+        })
+        .add_systems(Startup, init_update_checker)
+        .add_systems(Update, poll_update_result)
+        .add_observer(on_debug_simulate_download);
+    }
+}
+
 const DEFAULT_ENDPOINT: &str = "https://vmux.ai/updates.json";
 
 fn default_pubkey() -> String {
@@ -109,20 +123,6 @@ impl VmuxUpdaterBuilder {
 
 pub struct UpdatePlugin {
     updater: VmuxUpdater,
-}
-
-impl Plugin for UpdatePlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(UpdateConfig {
-            endpoint: self.updater.endpoint.clone(),
-            pubkey: self.updater.pubkey.clone(),
-            initial_delay: self.updater.initial_delay,
-            poll_interval: self.updater.poll_interval,
-        })
-        .add_systems(Startup, init_update_checker)
-        .add_systems(Update, poll_update_result)
-        .add_observer(on_debug_simulate_download);
-    }
 }
 
 #[derive(Resource)]

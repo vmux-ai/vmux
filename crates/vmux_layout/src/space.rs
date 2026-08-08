@@ -2,8 +2,6 @@ use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::ReadAppCommands;
 
-pub struct SpaceLayoutPlugin;
-
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<Space>()
@@ -35,6 +33,8 @@ impl Plugin for SpaceLayoutPlugin {
             );
     }
 }
+
+pub struct SpaceLayoutPlugin;
 
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]

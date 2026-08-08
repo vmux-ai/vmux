@@ -9,9 +9,6 @@ use crate::client::page::strategy_index::PageStrategyIndex;
 use crate::echo;
 use crate::{AgentKind, AgentVariant};
 
-#[derive(Component, Debug, Clone, Copy)]
-pub struct EchoProvider;
-
 pub struct EchoPlugin;
 
 impl Plugin for EchoPlugin {
@@ -19,6 +16,9 @@ impl Plugin for EchoPlugin {
         app.add_systems(Startup, register_echo_strategy.after(SettingsLoadSet));
     }
 }
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EchoProvider;
 
 fn register_echo_strategy(mut commands: Commands, idx: Option<Res<PageStrategyIndex>>) {
     let key = StrategyKey {

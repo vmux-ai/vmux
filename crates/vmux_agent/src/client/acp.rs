@@ -20,6 +20,39 @@ use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
 
+pub struct AcpAgentPlugin;
+
+impl Plugin for AcpAgentPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<AcpInstallChannel>()
+            .init_resource::<AcpCatalog>()
+            .init_resource::<AcpInstallGeneration>()
+            .add_message::<vmux_service::agent_events::PageAgentInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
+            .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
+            .add_message::<vmux_service::agent_events::PageAgentModelSelectionResult>()
+            .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
+            .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
+            .add_systems(Startup, start_catalog_fetch)
+            .add_systems(
+                Update,
+                (
+                    install_acp_session_when_focused,
+                    send_acp_input,
+                    drain_acp_installs,
+                    receive_catalog,
+                    apply_acp_agent_info,
+                    apply_acp_workspace_changed,
+                    (apply_acp_model_info, apply_acp_model_selection_result).chain(),
+                    apply_acp_session_created,
+                    apply_acp_terminal_created,
+                ),
+            )
+            .add_observer(close_acp_session_on_remove)
+            .add_observer(auto_allow_acp_approval);
+    }
+}
+
 const CONVERSATION_TITLE_STEER_PROMPT: &str = "On the first user message, always call mcp__vmux__set_conversation_title as the first tool of the turn. The host immediately shows the raw first prompt as a provisional title; replace it with a concise 3 to 7 word summary with corrected spelling and grammar. On later user messages, call the tool only when the conversation topic materially changes; keep the current title for same-topic follow-ups. When needed, call it before reading skills, calling any other tool, or answering. Never copy the user's prompt verbatim. This tool never needs user permission.";
 
 const UNBOUND_WORKSPACE_CONTEXT: &str = "VMUX HOST POLICY (mandatory): This tab has no selected project. Read-only inspection may use the current directory or a known path immediately. Never call select_project or create_worktree for requests that only read, show, search, or explain existing files. Before the first edit, write, test, build, or other mutation in an existing project, call select_project with its known path or without a path to open the project picker rooted at ~/.vmux/workspace. For a new project, do not ask the user to invent a folder location. First call request_user_choice with two concrete options: create the project at a suggested path under ~/.vmux/workspace, or choose an existing project. Use ~/.vmux/workspace/<remote-host>/<organization>/<repository> when a remote is known and ~/.vmux/workspace/local/<project> otherwise. If the user chooses creation, use run only to create the empty directory, then call select_project with that path. vmux will offer Git initialization and use the new project root directly; never call create_worktree for that new project. Do not search the user's home directory. General questions and self-contained terminal demonstrations may run in the temporary current directory.";
@@ -222,39 +255,6 @@ fn receive_catalog(channel: Option<Res<AcpCatalogChannel>>, mut catalog: ResMut<
     };
     if let Ok(agents) = channel.rx.try_recv() {
         catalog.agents = agents;
-    }
-}
-
-pub struct AcpAgentPlugin;
-
-impl Plugin for AcpAgentPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<AcpInstallChannel>()
-            .init_resource::<AcpCatalog>()
-            .init_resource::<AcpInstallGeneration>()
-            .add_message::<vmux_service::agent_events::PageAgentInfo>()
-            .add_message::<vmux_service::agent_events::PageAgentWorkspaceChanged>()
-            .add_message::<vmux_service::agent_events::PageAgentModelInfo>()
-            .add_message::<vmux_service::agent_events::PageAgentModelSelectionResult>()
-            .add_message::<vmux_service::agent_events::PageAgentSessionCreated>()
-            .add_message::<vmux_service::agent_events::PageAgentAcpTerminalCreated>()
-            .add_systems(Startup, start_catalog_fetch)
-            .add_systems(
-                Update,
-                (
-                    install_acp_session_when_focused,
-                    send_acp_input,
-                    drain_acp_installs,
-                    receive_catalog,
-                    apply_acp_agent_info,
-                    apply_acp_workspace_changed,
-                    (apply_acp_model_info, apply_acp_model_selection_result).chain(),
-                    apply_acp_session_created,
-                    apply_acp_terminal_created,
-                ),
-            )
-            .add_observer(close_acp_session_on_remove)
-            .add_observer(auto_allow_acp_approval);
     }
 }
 

@@ -9,6 +9,33 @@ use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageO
 use crate::cef::LayoutCef;
 use crate::window::VmuxWindow;
 
+/// Prewarms plain registered pages that use the standard browser bundle.
+pub struct PrewarmPagesPlugin;
+
+impl Plugin for PrewarmPagesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WarmPageSpawnBudget>()
+            .configure_sets(
+                Update,
+                (WarmPageSet::Reset, WarmPageSet::Fill)
+                    .chain()
+                    .before(CefSystems::CreateAndResize),
+            )
+            .add_systems(
+                Update,
+                reset_warm_page_spawn_budget.in_set(WarmPageSet::Reset),
+            )
+            .add_systems(
+                Update,
+                handle_registered_page_open.in_set(PageOpenSet::HandleKnownPages),
+            )
+            .add_systems(
+                Update,
+                maintain_registered_page_pools.in_set(WarmPageSet::Fill),
+            );
+    }
+}
+
 /// A `vmux://` page that can keep hidden, fully-mounted webviews ready for reuse.
 pub trait WarmPage: Component {
     const HOST: &'static str;
@@ -82,33 +109,6 @@ impl WarmPageSpawnBudget {
         }
         self.0 -= 1;
         true
-    }
-}
-
-/// Prewarms plain registered pages that use the standard browser bundle.
-pub struct PrewarmPagesPlugin;
-
-impl Plugin for PrewarmPagesPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<WarmPageSpawnBudget>()
-            .configure_sets(
-                Update,
-                (WarmPageSet::Reset, WarmPageSet::Fill)
-                    .chain()
-                    .before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                reset_warm_page_spawn_budget.in_set(WarmPageSet::Reset),
-            )
-            .add_systems(
-                Update,
-                handle_registered_page_open.in_set(PageOpenSet::HandleKnownPages),
-            )
-            .add_systems(
-                Update,
-                maintain_registered_page_pools.in_set(WarmPageSet::Fill),
-            );
     }
 }
 

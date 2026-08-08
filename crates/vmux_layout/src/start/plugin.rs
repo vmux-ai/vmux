@@ -28,6 +28,33 @@ use crate::start::event::{
 use crate::tab::{Tab, TabWorkspace, TabWorktree};
 use crate::window::VmuxWindow;
 
+/// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
+/// and answers [`StartDataRequest`] with the shared command-bar payload.
+pub struct StartPlugin;
+
+impl Plugin for StartPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn(crate::start::PAGE_MANIFEST);
+        app.add_plugins(BinEventEmitterPlugin::<(
+            StartDataRequest,
+            StartSelectWorkspace,
+        )>::for_hosts(&["start"]))
+            .add_message::<StartSpareRevealed>()
+            .add_observer(on_start_data_request)
+            .add_observer(on_start_select_workspace)
+            .add_systems(
+                Update,
+                (
+                    handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
+                    maintain_warm_start_pool,
+                    on_start_spare_revealed.after(PageOpenSet::HandleKnownPages),
+                    sync_live_start_pages,
+                    drain_start_workspace_pickers,
+                ),
+            );
+    }
+}
+
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 /// How many prewarmed `vmux://start/` webviews to keep ready.
@@ -144,33 +171,6 @@ impl StartPromptContextParams<'_, '_> {
             uncommitted: info.map(|info| info.uncommitted).unwrap_or(0),
             ahead: info.map(|info| info.ahead).unwrap_or(0),
         }
-    }
-}
-
-/// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
-/// and answers [`StartDataRequest`] with the shared command-bar payload.
-pub struct StartPlugin;
-
-impl Plugin for StartPlugin {
-    fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::start::PAGE_MANIFEST);
-        app.add_plugins(BinEventEmitterPlugin::<(
-            StartDataRequest,
-            StartSelectWorkspace,
-        )>::for_hosts(&["start"]))
-            .add_message::<StartSpareRevealed>()
-            .add_observer(on_start_data_request)
-            .add_observer(on_start_select_workspace)
-            .add_systems(
-                Update,
-                (
-                    handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    maintain_warm_start_pool,
-                    on_start_spare_revealed.after(PageOpenSet::HandleKnownPages),
-                    sync_live_start_pages,
-                    drain_start_workspace_pickers,
-                ),
-            );
     }
 }
 

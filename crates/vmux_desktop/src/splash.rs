@@ -5,6 +5,16 @@ use bevy::prelude::*;
 use objc2::rc::Retained;
 use objc2_app_kit::NSPanel;
 
+pub(crate) struct SplashPlugin;
+
+impl Plugin for SplashPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_non_send::<SplashState>()
+            .add_systems(Startup, show_splash)
+            .add_systems(Last, (update_splash_text, dismiss_splash).chain());
+    }
+}
+
 const SPLASH_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,16 +45,6 @@ struct SplashState {
     dismissed: bool,
     created_at: Option<Instant>,
     fade_started: Option<Instant>,
-}
-
-pub(crate) struct SplashPlugin;
-
-impl Plugin for SplashPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_non_send::<SplashState>()
-            .add_systems(Startup, show_splash)
-            .add_systems(Last, (update_splash_text, dismiss_splash).chain());
-    }
 }
 
 fn show_splash(mut state: NonSendMut<SplashState>) {

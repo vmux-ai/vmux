@@ -18,8 +18,6 @@ use vmux_service::agent_events::{
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage};
 
-pub struct PageAgentPlugin;
-
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(approval::AgentApprovalStore::load())
@@ -68,6 +66,8 @@ impl Plugin for PageAgentPlugin {
             .add_plugins(crate::echo_plugin::EchoPlugin);
     }
 }
+
+pub struct PageAgentPlugin;
 
 fn attach_last_run_state_kind(
     mut commands: Commands,

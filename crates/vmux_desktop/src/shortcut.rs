@@ -8,8 +8,6 @@ use vmux_command::{
 };
 use vmux_setting::{AppSettings, load_settings};
 
-pub struct ShortcutPlugin;
-
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, init_shortcuts.after(load_settings))
@@ -30,6 +28,8 @@ impl Plugin for ShortcutPlugin {
         );
     }
 }
+
+pub struct ShortcutPlugin;
 
 #[derive(Resource, Debug, Clone)]
 pub struct ShortcutMap {
