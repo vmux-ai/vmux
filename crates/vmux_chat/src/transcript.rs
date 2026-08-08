@@ -11,8 +11,8 @@ use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use crate::activity::{
-    ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, should_expand_thinking,
-    tool_presentation,
+    ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
+    should_expand_thinking,
 };
 use crate::clipboard::copy_to_clipboard;
 use crate::platform::{random_index, sleep_ms};
@@ -531,7 +531,7 @@ pub fn TurnBlock(
             }
         },
         ChatBlock::ToolUse { name, args, .. } => {
-            let (icon, label) = tool_presentation(name, args);
+            let ToolPresentation { icon, label } = ToolPresentation::of(name, args);
             rsx! {
                 div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-foreground/[0.025]",
                     ToolActivityIcon { name: name.clone(), args: args.clone(), fallback: icon }
@@ -733,7 +733,7 @@ fn ToolChild(child_key: usize, block: ChatBlock) -> Element {
     let block = &block;
     match block {
         ChatBlock::ToolUse { name, args, .. } => {
-            let (_, label) = tool_presentation(name, args);
+            let label = ToolPresentation::of(name, args).label;
             rsx! {
                 details { key: "{key}", class: "disclosure text-xs text-muted-foreground",
                     summary { class: "flex cursor-pointer select-none items-center gap-2 py-0.5 list-none [&::-webkit-details-marker]:hidden",

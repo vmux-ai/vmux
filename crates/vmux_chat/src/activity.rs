@@ -9,9 +9,6 @@ use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::i18n::translate;
 use vmux_wire::chat::is_guardian_tool;
 
-// Components first: this file exists to render an activity, and everything below is what
-// these three need in order to choose a glyph.
-
 /// The glyph standing in for a kind of agent activity.
 #[component]
 pub fn ActivityIconView(kind: ActivityIcon) -> Element {
@@ -38,7 +35,7 @@ pub fn ActivityIconView(kind: ActivityIcon) -> Element {
             }
         };
     }
-    let paths = activity_icon_paths(kind);
+    let paths = kind.paths();
     let tone = match kind {
         ActivityIcon::Thinking
         | ActivityIcon::Writing
@@ -124,7 +121,7 @@ pub fn FileActivityIcon(path: String, write: bool) -> Element {
 /// A tool call's icon: the file it touches when it names one, else the activity glyph.
 #[component]
 pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> Element {
-    let activity = tool_activity(&name);
+    let activity = ToolActivity::of(&name);
     if matches!(
         activity,
         ToolActivity::ReadFile | ToolActivity::WriteFile | ToolActivity::Other
@@ -139,6 +136,38 @@ pub fn ToolActivityIcon(name: String, args: String, fallback: ActivityIcon) -> E
     rsx! { ActivityIconView { kind: fallback } }
 }
 
+/// How a tool call announces itself in the transcript.
+pub struct ToolPresentation {
+    pub icon: ActivityIcon,
+    pub label: String,
+}
+
+impl ToolPresentation {
+    pub fn of(name: &str, args: &str) -> Self {
+        let icon = ActivityIcon::for_tool(name, args);
+        let label = match ToolActivity::of(name) {
+            ToolActivity::Guardian => translate("agent-tool-guardian-review"),
+            ToolActivity::ReadFile if tool_args_read_skill(args) => "Read skill".into(),
+            ToolActivity::ReadFile => translate("agent-tool-read-files"),
+            ToolActivity::WriteFile => translate("agent-edited"),
+            ToolActivity::Layout => translate("schema-layout"),
+            ToolActivity::Worktree if name.ends_with("select_project") => "Select project".into(),
+            ToolActivity::Worktree => translate("layout-worktree"),
+            ToolActivity::Image | ToolActivity::Screenshot => translate("agent-tool-viewed-image"),
+            ToolActivity::OpenPage | ToolActivity::Browser => translate("agent-tool-used-browser"),
+            ToolActivity::Search => translate("agent-tool-searched-files"),
+            ToolActivity::Command => translate("agent-tool-ran-commands"),
+            ToolActivity::Other => name
+                .rsplit(['.', ':'])
+                .next()
+                .unwrap_or(name)
+                .replace('_', " "),
+        };
+        Self { icon, label }
+    }
+}
+
+/// What kind of work a tool call represents, before any glyph is chosen for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolActivity {
     Guardian,
@@ -155,62 +184,84 @@ pub enum ToolActivity {
     Other,
 }
 
-pub fn tool_activity(name: &str) -> ToolActivity {
-    let lower = name.to_ascii_lowercase();
-    if is_guardian_tool(name) {
-        ToolActivity::Guardian
-    } else if lower.contains("read_file")
-        || lower.contains("read file")
-        || lower.contains("open_file")
-        || lower.contains("open file")
-    {
-        ToolActivity::ReadFile
-    } else if matches!(lower.as_str(), "edit" | "write")
-        || lower.contains("editing file")
-        || lower.contains("edited file")
-        || lower.contains("write file")
-        || lower.contains("apply_patch")
-        || lower.contains("edit_file")
-        || lower.contains("write_file")
-        || lower.contains("multi_edit")
-    {
-        ToolActivity::WriteFile
-    } else if lower.contains("worktree")
-        || lower.contains("workspace")
-        || lower == "select_project"
-        || lower.contains("repository")
-    {
-        ToolActivity::Worktree
-    } else if lower.contains("layout")
-        || lower.contains("list_spaces")
-        || lower.contains("create_space")
-        || lower.contains("rename_space")
-        || lower.contains("delete_space")
-    {
-        ToolActivity::Layout
-    } else if lower.contains("screenshot") {
-        ToolActivity::Screenshot
-    } else if lower.contains("open_page") || lower.contains("open page") {
-        ToolActivity::OpenPage
-    } else if lower.contains("view_image") || lower.contains("view image") {
-        ToolActivity::Image
-    } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_") {
-        ToolActivity::Browser
-    } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
-        ToolActivity::Search
-    } else if lower.contains("run")
-        || lower.contains("exec")
-        || lower.contains("command")
-        || lower.contains("shell")
-        || lower.contains("terminal")
-    {
-        ToolActivity::Command
-    } else {
-        ToolActivity::Other
+impl ToolActivity {
+    /// Classify by name, since that is all every agent reliably gives us.
+    pub fn of(name: &str) -> Self {
+        let lower = name.to_ascii_lowercase();
+        if is_guardian_tool(name) {
+            ToolActivity::Guardian
+        } else if lower.contains("read_file")
+            || lower.contains("read file")
+            || lower.contains("open_file")
+            || lower.contains("open file")
+        {
+            ToolActivity::ReadFile
+        } else if matches!(lower.as_str(), "edit" | "write")
+            || lower.contains("editing file")
+            || lower.contains("edited file")
+            || lower.contains("write file")
+            || lower.contains("apply_patch")
+            || lower.contains("edit_file")
+            || lower.contains("write_file")
+            || lower.contains("multi_edit")
+        {
+            ToolActivity::WriteFile
+        } else if lower.contains("worktree")
+            || lower.contains("workspace")
+            || lower == "select_project"
+            || lower.contains("repository")
+        {
+            ToolActivity::Worktree
+        } else if lower.contains("layout")
+            || lower.contains("list_spaces")
+            || lower.contains("create_space")
+            || lower.contains("rename_space")
+            || lower.contains("delete_space")
+        {
+            ToolActivity::Layout
+        } else if lower.contains("screenshot") {
+            ToolActivity::Screenshot
+        } else if lower.contains("open_page") || lower.contains("open page") {
+            ToolActivity::OpenPage
+        } else if lower.contains("view_image") || lower.contains("view image") {
+            ToolActivity::Image
+        } else if lower.contains("browser") || lower.contains("navigate") || lower.contains("web_")
+        {
+            ToolActivity::Browser
+        } else if lower.contains("grep") || lower.contains("search") || lower.contains("find") {
+            ToolActivity::Search
+        } else if lower.contains("run")
+            || lower.contains("exec")
+            || lower.contains("command")
+            || lower.contains("shell")
+            || lower.contains("terminal")
+        {
+            ToolActivity::Command
+        } else {
+            ToolActivity::Other
+        }
+    }
+
+    /// The glyph for this activity, ignoring anything the arguments might say.
+    pub fn icon(self) -> ActivityIcon {
+        match self {
+            Self::Guardian => ActivityIcon::Guardian,
+            Self::ReadFile => ActivityIcon::ReadFile,
+            Self::WriteFile => ActivityIcon::WriteFile,
+            Self::Layout => ActivityIcon::Layout,
+            Self::Worktree => ActivityIcon::Worktree,
+            Self::Image => ActivityIcon::Image,
+            Self::Screenshot => ActivityIcon::Screenshot,
+            Self::OpenPage => ActivityIcon::OpenPage,
+            Self::Browser => ActivityIcon::Browser,
+            Self::Search => ActivityIcon::Search,
+            Self::Command => ActivityIcon::Command,
+            Self::Other => ActivityIcon::Tool,
+        }
     }
 }
 
-pub fn tool_args_read_skill(args: &str) -> bool {
+fn tool_args_read_skill(args: &str) -> bool {
     fn skill_path(value: &serde_json::Value) -> bool {
         match value {
             serde_json::Value::Object(map) => map.iter().any(|(key, value)| {
@@ -248,6 +299,7 @@ pub fn should_expand_thinking(block_index: usize, block_count: usize) -> bool {
     block_index + 1 == block_count
 }
 
+/// The glyph standing in for a kind of agent activity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActivityIcon {
     Thinking,
@@ -275,126 +327,137 @@ pub enum ActivityIcon {
     Reconnect,
 }
 
-pub fn activity_icon_paths(kind: ActivityIcon) -> &'static [&'static str] {
-    match kind {
-        ActivityIcon::Thinking => &[
-            "M9.5 4.5a3.2 3.2 0 0 1 5.35 1.05 3.35 3.35 0 0 1 2.8 3.35 3.5 3.5 0 0 1 .55 6.45A3.4 3.4 0 0 1 15 18.5H9a4 4 0 0 1-3.75-5.4 3.5 3.5 0 0 1 1.2-6.3A3.2 3.2 0 0 1 9.5 4.5Z",
-            "M14.5 18.5c0 1.4.9 2.5 2.5 2.5v-4.4",
-            "M9.4 4.7c-.9 1.2-.8 2.8.3 3.8",
-            "M6.2 9.4c1.3-.7 2.8-.4 3.8.6",
-            "M13.9 5.8c-.7 1-.6 2.2.2 3.1",
-            "M14.1 9c1.4-.2 2.6.6 3.1 1.7",
-            "M8.5 13.2c1-.7 2.4-.5 3.2.4",
-            "M12.6 11.9c-.1 1.9.8 3.6 2.4 4.4",
-        ],
-        ActivityIcon::Writing => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
-        ActivityIcon::Installing => &[
-            "m7.5 4.27 9 5.15",
-            "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
-            "M3.3 7 12 12l8.7-5",
-            "M12 22V12",
-        ],
-        ActivityIcon::Awaiting => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
-        ActivityIcon::Python => &[],
-        ActivityIcon::ReadFile => &[
-            "M12 7v14",
-            "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
-            "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
-        ],
-        ActivityIcon::WriteFile => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
-        ActivityIcon::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
-        ActivityIcon::Worktree => &[
-            "M6 3v12",
-            "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
-            "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
-            "M6 15c0 3 2 5 5 5h4",
-        ],
-        ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
-        ActivityIcon::Image => &[
-            "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
-            "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
-            "m21 15-5-5L5 21",
-        ],
-        ActivityIcon::Screenshot => &[
-            "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
-            "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
-        ],
-        ActivityIcon::OpenPage => &[
-            "M14 3h7v7",
-            "m21 3-9 9",
-            "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
-        ],
-        ActivityIcon::Command => &["m4 17 6-6-6-6", "M12 19h8"],
-        ActivityIcon::Browser => &[
-            "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
-            "M2 12h20",
-            "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
-        ],
-        ActivityIcon::Guardian => &[
-            "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
-            "m9 12 2 2 4-4",
-        ],
-        ActivityIcon::Subagent => &[
-            "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
-            "M5 21v-2a7 7 0 0 1 14 0v2",
-            "M5.5 11a2.5 2.5 0 1 0 0-5",
-            "M18.5 11a2.5 2.5 0 1 1 0-5",
-        ],
-        ActivityIcon::Tool => &[
-            "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
-        ],
-        ActivityIcon::Output => &[
-            "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z",
-            "M14 2v6h6",
-            "m10 17 3-3-3-3",
-            "M13 14H7",
-        ],
-        ActivityIcon::Error => &[
-            "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
-            "M12 8v4",
-            "M12 16h.01",
-        ],
-        ActivityIcon::Plan => &[
-            "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
-            "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
-        ],
-        ActivityIcon::Diff => &[
-            "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
-            "M14 2v4a2 2 0 0 0 2 2h4",
-        ],
-        ActivityIcon::Reconnect => &[
-            "M5 12.55a11 11 0 0 1 14.08 0",
-            "M1.42 9a16 16 0 0 1 21.16 0",
-            "M8.53 16.11a6 6 0 0 1 6.95 0",
-            "M12 20h.01",
-        ],
+impl ActivityIcon {
+    /// The glyph for a tool call, preferring what the arguments say over what the name does.
+    ///
+    /// A `run` that executes Python is a Python call first and a command second.
+    pub fn for_tool(name: &str, args: &str) -> Self {
+        if let Some(icon) = Self::for_language(args) {
+            return icon;
+        }
+        if let Some(icon) = Self::for_language(name) {
+            return icon;
+        }
+        ToolActivity::of(name).icon()
+    }
+
+    /// The glyph for a language named anywhere in `value`, if it is one we draw.
+    pub fn for_language(value: &str) -> Option<Self> {
+        let lower = value.to_ascii_lowercase();
+        (lower.contains(".py") || lower == "py" || lower.contains("python")).then_some(Self::Python)
+    }
+
+    /// The SVG path data drawn inside the glyph's box.
+    pub fn paths(self) -> &'static [&'static str] {
+        match self {
+            ActivityIcon::Thinking => &[
+                "M9.5 4.5a3.2 3.2 0 0 1 5.35 1.05 3.35 3.35 0 0 1 2.8 3.35 3.5 3.5 0 0 1 .55 6.45A3.4 3.4 0 0 1 15 18.5H9a4 4 0 0 1-3.75-5.4 3.5 3.5 0 0 1 1.2-6.3A3.2 3.2 0 0 1 9.5 4.5Z",
+                "M14.5 18.5c0 1.4.9 2.5 2.5 2.5v-4.4",
+                "M9.4 4.7c-.9 1.2-.8 2.8.3 3.8",
+                "M6.2 9.4c1.3-.7 2.8-.4 3.8.6",
+                "M13.9 5.8c-.7 1-.6 2.2.2 3.1",
+                "M14.1 9c1.4-.2 2.6.6 3.1 1.7",
+                "M8.5 13.2c1-.7 2.4-.5 3.2.4",
+                "M12.6 11.9c-.1 1.9.8 3.6 2.4 4.4",
+            ],
+            ActivityIcon::Writing => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+            ActivityIcon::Installing => &[
+                "m7.5 4.27 9 5.15",
+                "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
+                "M3.3 7 12 12l8.7-5",
+                "M12 22V12",
+            ],
+            ActivityIcon::Awaiting => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
+            ActivityIcon::Python => &[],
+            ActivityIcon::ReadFile => &[
+                "M12 7v14",
+                "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
+                "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
+            ],
+            ActivityIcon::WriteFile => {
+                &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"]
+            }
+            ActivityIcon::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            ActivityIcon::Worktree => &[
+                "M6 3v12",
+                "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 15c0 3 2 5 5 5h4",
+            ],
+            ActivityIcon::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
+            ActivityIcon::Image => &[
+                "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
+                "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
+                "m21 15-5-5L5 21",
+            ],
+            ActivityIcon::Screenshot => &[
+                "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
+                "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+            ],
+            ActivityIcon::OpenPage => &[
+                "M14 3h7v7",
+                "m21 3-9 9",
+                "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+            ],
+            ActivityIcon::Command => &["m4 17 6-6-6-6", "M12 19h8"],
+            ActivityIcon::Browser => &[
+                "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
+                "M2 12h20",
+                "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
+            ],
+            ActivityIcon::Guardian => &[
+                "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
+                "m9 12 2 2 4-4",
+            ],
+            ActivityIcon::Subagent => &[
+                "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M5 21v-2a7 7 0 0 1 14 0v2",
+                "M5.5 11a2.5 2.5 0 1 0 0-5",
+                "M18.5 11a2.5 2.5 0 1 1 0-5",
+            ],
+            ActivityIcon::Tool => &[
+                "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
+            ],
+            ActivityIcon::Output => &[
+                "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z",
+                "M14 2v6h6",
+                "m10 17 3-3-3-3",
+                "M13 14H7",
+            ],
+            ActivityIcon::Error => &[
+                "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+                "M12 8v4",
+                "M12 16h.01",
+            ],
+            ActivityIcon::Plan => &[
+                "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
+                "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
+            ],
+            ActivityIcon::Diff => &[
+                "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+                "M14 2v4a2 2 0 0 0 2 2h4",
+            ],
+            ActivityIcon::Reconnect => &[
+                "M5 12.55a11 11 0 0 1 14.08 0",
+                "M1.42 9a16 16 0 0 1 21.16 0",
+                "M8.53 16.11a6 6 0 0 1 6.95 0",
+                "M12 20h.01",
+            ],
+        }
     }
 }
 
-pub fn tool_activity_icon(activity: ToolActivity) -> ActivityIcon {
-    match activity {
-        ToolActivity::Guardian => ActivityIcon::Guardian,
-        ToolActivity::ReadFile => ActivityIcon::ReadFile,
-        ToolActivity::WriteFile => ActivityIcon::WriteFile,
-        ToolActivity::Layout => ActivityIcon::Layout,
-        ToolActivity::Worktree => ActivityIcon::Worktree,
-        ToolActivity::Image => ActivityIcon::Image,
-        ToolActivity::Screenshot => ActivityIcon::Screenshot,
-        ToolActivity::OpenPage => ActivityIcon::OpenPage,
-        ToolActivity::Browser => ActivityIcon::Browser,
-        ToolActivity::Search => ActivityIcon::Search,
-        ToolActivity::Command => ActivityIcon::Command,
-        ToolActivity::Other => ActivityIcon::Tool,
+/// The file a tool call names, from its arguments as JSON or as raw text.
+fn tool_file_path(args: &str) -> Option<String> {
+    if let Ok(value) = serde_json::from_str(args)
+        && let Some(path) = file_path_from_value(&value)
+    {
+        return Some(path);
     }
+    file_path_from_text(args)
 }
 
-pub fn language_activity_icon(value: &str) -> Option<ActivityIcon> {
-    let lower = value.to_ascii_lowercase();
-    (lower.contains(".py") || lower == "py" || lower.contains("python"))
-        .then_some(ActivityIcon::Python)
-}
-
-pub fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
+fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Object(map) => {
             for key in ["path", "file_path", "filename", "file"] {
@@ -412,7 +475,7 @@ pub fn file_path_from_value(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-pub fn file_path_from_text(text: &str) -> Option<String> {
+fn file_path_from_text(text: &str) -> Option<String> {
     for marker in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
         if let Some(path) = text.lines().find_map(|line| line.strip_prefix(marker)) {
             return Some(path.trim().to_string());
@@ -431,48 +494,6 @@ pub fn file_path_from_text(text: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-pub fn tool_file_path(args: &str) -> Option<String> {
-    serde_json::from_str(args)
-        .ok()
-        .and_then(|value| file_path_from_value(&value))
-        .or_else(|| file_path_from_text(args))
-}
-
-pub fn tool_activity_icon_for(name: &str, args: &str) -> ActivityIcon {
-    language_activity_icon(args)
-        .or_else(|| language_activity_icon(name))
-        .unwrap_or_else(|| tool_activity_icon(tool_activity(name)))
-}
-
-pub fn tool_presentation(name: &str, args: &str) -> (ActivityIcon, String) {
-    let activity = tool_activity(name);
-    let icon = tool_activity_icon_for(name, args);
-    match activity {
-        ToolActivity::Guardian => (icon, translate("agent-tool-guardian-review")),
-        ToolActivity::ReadFile if tool_args_read_skill(args) => (icon, "Read skill".into()),
-        ToolActivity::ReadFile => (icon, translate("agent-tool-read-files")),
-        ToolActivity::WriteFile => (icon, translate("agent-edited")),
-        ToolActivity::Layout => (icon, translate("schema-layout")),
-        ToolActivity::Worktree if name.ends_with("select_project") => {
-            (icon, "Select project".into())
-        }
-        ToolActivity::Worktree => (icon, translate("layout-worktree")),
-        ToolActivity::Image => (icon, translate("agent-tool-viewed-image")),
-        ToolActivity::Screenshot => (icon, translate("agent-tool-viewed-image")),
-        ToolActivity::OpenPage => (icon, translate("agent-tool-used-browser")),
-        ToolActivity::Browser => (icon, translate("agent-tool-used-browser")),
-        ToolActivity::Search => (icon, translate("agent-tool-searched-files")),
-        ToolActivity::Command => (icon, translate("agent-tool-ran-commands")),
-        ToolActivity::Other => (
-            icon,
-            name.rsplit(['.', ':'])
-                .next()
-                .unwrap_or(name)
-                .replace('_', " "),
-        ),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -485,20 +506,36 @@ mod tests {
 
     #[test]
     fn tool_activity_classifies_timeline_icons() {
-        assert_eq!(tool_activity("guardian_review"), ToolActivity::Guardian);
-        assert_eq!(tool_activity("read_file"), ToolActivity::ReadFile);
-        assert_eq!(tool_activity("apply_patch"), ToolActivity::WriteFile);
-        assert_eq!(tool_activity("read_layout"), ToolActivity::Layout);
-        assert_eq!(tool_activity("create_worktree"), ToolActivity::Worktree);
-        assert_eq!(tool_activity("select_project"), ToolActivity::Worktree);
-        assert_eq!(tool_activity("view_image"), ToolActivity::Image);
-        assert_eq!(tool_activity("vmux_screenshot"), ToolActivity::Screenshot);
-        assert_eq!(tool_activity("vmux_open_page"), ToolActivity::OpenPage);
-        assert_eq!(tool_activity("vmux_open_file"), ToolActivity::ReadFile);
-        assert_eq!(tool_activity("browser_navigate"), ToolActivity::Browser);
-        assert_eq!(tool_activity("search_files"), ToolActivity::Search);
-        assert_eq!(tool_activity("exec_command"), ToolActivity::Command);
-        assert_eq!(tool_activity("custom_tool"), ToolActivity::Other);
+        assert_eq!(ToolActivity::of("guardian_review"), ToolActivity::Guardian);
+        assert_eq!(ToolActivity::of("read_file"), ToolActivity::ReadFile);
+        assert_eq!(ToolActivity::of("apply_patch"), ToolActivity::WriteFile);
+        assert_eq!(ToolActivity::of("read_layout"), ToolActivity::Layout);
+        assert_eq!(ToolActivity::of("create_worktree"), ToolActivity::Worktree);
+        assert_eq!(ToolActivity::of("select_project"), ToolActivity::Worktree);
+        assert_eq!(ToolActivity::of("view_image"), ToolActivity::Image);
+        assert_eq!(
+            ToolActivity::of("vmux_screenshot"),
+            ToolActivity::Screenshot
+        );
+        assert_eq!(ToolActivity::of("vmux_open_page"), ToolActivity::OpenPage);
+        assert_eq!(ToolActivity::of("vmux_open_file"), ToolActivity::ReadFile);
+        assert_eq!(ToolActivity::of("browser_navigate"), ToolActivity::Browser);
+        assert_eq!(ToolActivity::of("search_files"), ToolActivity::Search);
+        assert_eq!(ToolActivity::of("exec_command"), ToolActivity::Command);
+        assert_eq!(ToolActivity::of("custom_tool"), ToolActivity::Other);
+    }
+
+    /// The arguments outrank the name: a `run` that executes Python is a Python call.
+    #[test]
+    fn a_tool_icon_prefers_the_language_in_its_arguments() {
+        assert_eq!(
+            ActivityIcon::for_tool("run", r#"{"cmd":"python main.py"}"#),
+            ActivityIcon::Python
+        );
+        assert_eq!(
+            ActivityIcon::for_tool("run", r#"{"cmd":"ls"}"#),
+            ActivityIcon::Command
+        );
     }
 
     #[test]

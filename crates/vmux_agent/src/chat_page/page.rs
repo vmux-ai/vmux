@@ -22,9 +22,7 @@ use crate::chat_page::event::{
 use crate::chat_page::scroll;
 use dioxus::prelude::*;
 use std::collections::{HashMap, HashSet};
-use vmux_chat::activity::{
-    ActivityIcon, activity_icon_paths, language_activity_icon, tool_activity_icon_for,
-};
+use vmux_chat::activity::ActivityIcon;
 use vmux_chat::clipboard::copy_to_clipboard;
 use vmux_chat::transcript::{ChatItemRow, MD_CSS};
 #[cfg(web)]
@@ -2006,10 +2004,10 @@ fn current_activity_icon(items: &[ChatItem], status: &str) -> Option<ActivityIco
             Some(match block {
                 Some(ChatBlock::Text(_)) => ActivityIcon::Writing,
                 Some(ChatBlock::Thinking(_)) | None => ActivityIcon::Thinking,
-                Some(ChatBlock::ToolUse { name, args, .. }) => tool_activity_icon_for(name, args),
+                Some(ChatBlock::ToolUse { name, args, .. }) => ActivityIcon::for_tool(name, args),
                 Some(ChatBlock::Subagent(_)) => ActivityIcon::Subagent,
                 Some(ChatBlock::Diff { path, .. }) => {
-                    language_activity_icon(path).unwrap_or(ActivityIcon::Diff)
+                    ActivityIcon::for_language(path).unwrap_or(ActivityIcon::Diff)
                 }
                 Some(ChatBlock::Plan { .. }) => ActivityIcon::Plan,
                 Some(ChatBlock::ToolResult { is_error: true, .. }) => ActivityIcon::Error,
@@ -2044,7 +2042,7 @@ fn activity_favicon(kind: ActivityIcon, accent: &str) -> String {
         );
     }
     let mut paths = String::new();
-    for path in activity_icon_paths(kind) {
+    for path in kind.paths() {
         paths.push_str("<path d='");
         paths.push_str(path);
         paths.push_str("'/>");
