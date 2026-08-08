@@ -3,10 +3,27 @@
 
 mod expand;
 mod named_fields;
+mod string_id;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
 use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
+
+/// Turn a `String` newtype into an id type: the shared derives, `new`, `as_str`, `From` and
+/// `Display`.
+///
+/// ```ignore
+/// #[string_id]
+/// pub struct RoomId(pub String);
+/// ```
+#[proc_macro_attribute]
+pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match string_id::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
 
 #[proc_macro_derive(CommandBar, attributes(menu))]
 pub fn derive_command_bar(input: TokenStream) -> TokenStream {

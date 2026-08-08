@@ -11,53 +11,24 @@ pub use crate::protocol::AgentAttachment;
 use crate::protocol::AgentRunStatus;
 
 pub const CONVERSATION_TITLE_MAX_GRAPHEMES: usize = 64;
-macro_rules! string_id {
-    ($name:ident) => {
-        #[derive(
-            Clone,
-            Debug,
-            Deserialize,
-            Eq,
-            Hash,
-            Ord,
-            PartialEq,
-            PartialOrd,
-            Serialize,
-            rkyv::Archive,
-            rkyv::Serialize,
-            rkyv::Deserialize,
-        )]
-        #[serde(transparent)]
-        pub struct $name(pub String);
+use vmux_macro::string_id;
 
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
+/// Identifies one conversation. Derived from a session id, so a client can address a room
+/// without having seen it before.
+#[string_id]
+pub struct RoomId(pub String);
 
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
+/// Identifies one participant in a room — the user, or an agent.
+#[string_id]
+pub struct MemberId(pub String);
 
-        impl From<String> for $name {
-            fn from(value: String) -> Self {
-                Self(value)
-            }
-        }
+/// Identifies one event in a room's append-only log.
+#[string_id]
+pub struct EventId(pub String);
 
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
-                Self(value.to_string())
-            }
-        }
-    };
-}
-
-string_id!(RoomId);
-string_id!(MemberId);
-string_id!(EventId);
-string_id!(ClientOpId);
+/// Idempotency key for an operation a client may retry after a dropped connection.
+#[string_id]
+pub struct ClientOpId(pub String);
 #[derive(
     Clone,
     Copy,

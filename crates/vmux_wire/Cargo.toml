@@ -13,6 +13,7 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 rkyv = { workspace = true }
 serde = { workspace = true }
 unicode-segmentation = "1"
+vmux_macro = { path = "../vmux_macro" }
 url = { workspace = true }
 uuid = { workspace = true }
 
