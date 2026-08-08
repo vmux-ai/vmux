@@ -128,13 +128,18 @@ impl QuicApi {
         // The pairing link names the relay by host, so this has to resolve rather than parse: a
         // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
         // pairing address is not valid".
-        let address = tokio::net::lookup_host(&self.endpoint.address)
+        let (host, port) = self
+            .endpoint
+            .address
+            .rsplit_once(':')
+            .ok_or_else(|| QuicError::Transport("That pairing address is not valid.".into()))?;
+        let port: u16 = port
+            .parse()
+            .map_err(|_| QuicError::Transport("That pairing address has no port.".into()))?;
+        let address = vmux_remote::quic::endpoint::resolve_preferring_ipv4(host, port)
             .await
-            .map_err(|_| QuicError::Transport("That pairing address did not resolve.".into()))?
-            .next()
-            .ok_or_else(|| {
-                QuicError::Transport("That pairing address resolved to nothing.".into())
-            })?;
+            .map_err(QuicError::Transport)?;
+
         // The certificate is pinned by fingerprint and the verifier ignores the name, but the
         // relay may still route on SNI, so send the real host rather than a placeholder.
         let server_name = self

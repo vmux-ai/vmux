@@ -150,11 +150,7 @@ async fn resolve(relay_url: &str) -> Result<std::net::SocketAddr, String> {
     let parsed = url::Url::parse(relay_url).map_err(|error| format!("relay url: {error}"))?;
     let host = parsed.host_str().ok_or("relay url has no host")?;
     let port = parsed.port().unwrap_or(443);
-    tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|error| format!("resolve {host}: {error}"))?
-        .next()
-        .ok_or_else(|| format!("{host} resolved to nothing"))
+    vmux_remote::quic::endpoint::resolve_preferring_ipv4(host, port).await
 }
 
 fn host_of(relay_url: &str) -> Result<String, String> {

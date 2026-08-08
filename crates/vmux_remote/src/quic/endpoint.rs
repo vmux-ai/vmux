@@ -216,6 +216,27 @@ pub fn client_endpoint_relay(host: &str, remote: std::net::SocketAddr) -> Result
     Ok(endpoint)
 }
 
+/// Resolve `host:port`, preferring IPv4.
+///
+/// `localhost` resolves to `::1` before `127.0.0.1` on macOS, and a UDP port published by Docker
+/// answers on IPv4 only however it advertises itself — so taking the first result silently sends
+/// every packet somewhere that never replies. IPv6 is still used when it is all the host has.
+pub async fn resolve_preferring_ipv4(
+    host: &str,
+    port: u16,
+) -> Result<std::net::SocketAddr, String> {
+    let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|error| format!("resolve {host}: {error}"))?
+        .collect();
+    resolved
+        .iter()
+        .find(|address| address.is_ipv4())
+        .or_else(|| resolved.first())
+        .copied()
+        .ok_or_else(|| format!("{host} resolved to nothing"))
+}
+
 /// Whether this host can only be a development relay.
 fn is_local_development_host(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
