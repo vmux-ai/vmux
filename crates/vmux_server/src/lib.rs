@@ -14,6 +14,17 @@ pub use vmux_core::page::{
 use dioxus::prelude::*;
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[allow(non_snake_case)]
+pub fn App() -> Element {
+    let host = current_host();
+    WEB_PAGE_MANIFESTS
+        .iter()
+        .find(|manifest| manifest.host == host)
+        .map(|manifest| (manifest.render)())
+        .unwrap_or_else(|| rsx! { UnknownPage { host } })
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "web"))]
 struct WebPageManifest {
     host: &'static str,
     render: fn() -> Element,
@@ -122,17 +133,6 @@ web_pages! {
     render_vault: "vault" => vmux_layout::vault_page::Page,
     render_extensions: "extensions" => vmux_layout::extensions_page::Page,
     render_start: "start" => StartAgentPage,
-}
-
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
-#[allow(non_snake_case)]
-pub fn App() -> Element {
-    let host = current_host();
-    WEB_PAGE_MANIFESTS
-        .iter()
-        .find(|manifest| manifest.host == host)
-        .map(|manifest| (manifest.render)())
-        .unwrap_or_else(|| rsx! { UnknownPage { host } })
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
