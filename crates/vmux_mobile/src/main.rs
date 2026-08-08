@@ -28,7 +28,7 @@ use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
 };
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
-use vmux_wire::protocol::{SharedAgentCommand, SharedMessage, SharedResponse};
+use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
     PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
@@ -176,11 +176,13 @@ impl Api {
 
     /// Submit a prompt to a running session.
     async fn send_prompt(&self, sid: &str, request: &PromptRequest) -> Result<(), ApiError> {
-        let message = SharedMessage::agent_input(
-            sid.to_string(),
-            request.text.clone(),
-            None,
-            request.attachments.clone(),
+        let message = SharedMessage::agent(
+            sid,
+            AgentAction::Input {
+                text: request.text.clone(),
+                context: None,
+                attachments: request.attachments.clone(),
+            },
         );
         self.applied(self.quic.request(message).await)
     }
@@ -201,23 +203,23 @@ impl Api {
 
     /// Interrupt the session's in-flight turn.
     async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        let message = SharedMessage::AgentCancel {
-            sid: sid.to_string(),
-        };
+        let message = SharedMessage::agent(sid, AgentAction::Cancel);
         self.applied(self.quic.request(message).await)
     }
 
     /// Answer a pending tool approval.
     async fn approve(&self, sid: &str, request: &ApprovalRequest) -> Result<(), ApiError> {
-        let message = SharedMessage::AgentApprove {
-            sid: sid.to_string(),
-            call_id: request.call_id.clone(),
-            decision: if request.allow {
-                vmux_wire::protocol::ApprovalDecision::Allow
-            } else {
-                vmux_wire::protocol::ApprovalDecision::Deny
+        let message = SharedMessage::agent(
+            sid,
+            AgentAction::Approve {
+                call_id: request.call_id.clone(),
+                decision: if request.allow {
+                    vmux_wire::protocol::ApprovalDecision::Allow
+                } else {
+                    vmux_wire::protocol::ApprovalDecision::Deny
+                },
             },
-        };
+        );
         self.applied(self.quic.request(message).await)
     }
 
@@ -235,10 +237,12 @@ impl Api {
     }
 
     async fn media(&self, sid: &str, query: &str) -> Result<Vec<RemoteMediaEntry>, ApiError> {
-        let request = SharedMessage::ListMedia {
-            sid: sid.to_string(),
-            query: query.to_string(),
-        };
+        let request = SharedMessage::agent(
+            sid,
+            AgentAction::ListMedia {
+                query: query.to_string(),
+            },
+        );
         match self.quic.request(request).await {
             Ok(SharedResponse::Media(entries)) => Ok(entries),
             Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),

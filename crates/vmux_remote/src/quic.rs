@@ -41,10 +41,14 @@ pub struct ProtocolVersion(pub u32);
 
 impl ProtocolVersion {
     /// What this build speaks.
-    pub const CURRENT: Self = Self(1);
+    ///
+    /// v2 nested every session-addressed message under one `Agent` variant, which moved rkyv's
+    /// positional discriminants. A v1 peer would not fail to decode — it would decode to the
+    /// wrong variant — so v1 is refused rather than tolerated.
+    pub const CURRENT: Self = Self(2);
 
     /// Oldest peer this build will still serve.
-    pub const MIN_SUPPORTED: Self = Self(1);
+    pub const MIN_SUPPORTED: Self = Self(2);
 
     pub fn is_supported(self) -> bool {
         self >= Self::MIN_SUPPORTED && self <= Self::CURRENT
@@ -203,7 +207,7 @@ mod tests {
     /// hello grow later without a version bump, so it is worth a test of its own.
     #[test]
     fn an_unknown_field_degrades_instead_of_failing() {
-        let wire = br#"{"protocol_version":1,"device_id":"d","teleportation":true}"#;
+        let wire = br#"{"protocol_version":2,"device_id":"d","teleportation":true}"#;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&HELLO_MAGIC);
         bytes.push(HELLO_VERSION);

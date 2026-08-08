@@ -5,7 +5,9 @@
 //! prompt size, replay dedup, attachment confinement — had to be remembered at each one. Here
 //! there is one entry point, so a control that is applied once is applied everywhere.
 
-use vmux_wire::protocol::{SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse};
+use vmux_wire::protocol::{
+    AgentAction, SharedAgentCommand, SharedFailure, SharedMessage, SharedResponse,
+};
 use vmux_wire::room::{ClientOpId, RemoteSession};
 
 use super::super::server::{MAX_PROMPT_BYTES, RemoteState};
@@ -20,23 +22,7 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
     match request {
         SharedMessage::ListSessions => SharedResponse::Sessions(sessions(state).await),
 
-        SharedMessage::ListMedia { sid, query } => {
-            if !session_exists(state, &sid).await {
-                return SharedResponse::Failed(SharedFailure::NotFound);
-            }
-            if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
-                return SharedResponse::Failed(SharedFailure::Invalid);
-            }
-            // The filesystem walk confines itself to $HOME; blocking, so off the reactor.
-            match tokio::task::spawn_blocking(move || {
-                super::super::server::remote_media_entries(&query)
-            })
-            .await
-            {
-                Ok(entries) => SharedResponse::Media(entries),
-                Err(_) => SharedResponse::Failed(SharedFailure::Internal),
-            }
-        }
+        SharedMessage::Agent { sid, action } => agent(state, &sid, action).await,
 
         SharedMessage::AgentCommand(command) => {
             // Only the chat-creating command is not idempotent, so only it needs a claim.
@@ -57,38 +43,37 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             }
             response
         }
+    }
+}
 
-        SharedMessage::AttachPageAgent { sid } => {
-            if session_exists(state, &sid).await {
+/// Everything addressed to one session, after its id has been split off.
+///
+/// Deliberately does *not* look the session up before dispatching. A prompt is size-checked
+/// first, so an oversized one is refused without touching a registry — otherwise the cheap
+/// rejection would sit behind two mutex acquisitions, and a peer could probe which session ids
+/// exist by watching which oversized prompts answer `NotFound` instead of `Invalid`.
+async fn agent(state: &RemoteState, sid: &str, action: AgentAction) -> SharedResponse {
+    match action {
+        AgentAction::Attach => {
+            if session_exists(state, sid).await {
                 SharedResponse::Ok
             } else {
                 SharedResponse::Failed(SharedFailure::NotFound)
             }
         }
 
-        SharedMessage::AgentInput { sid, text, context } => {
-            prompt(state, sid, text, context, Vec::new()).await
-        }
-
-        SharedMessage::AgentInputWithAttachments {
-            sid,
+        AgentAction::Input {
             text,
             context,
             attachments,
         } => prompt(state, sid, text, context, attachments).await,
 
-        SharedMessage::AgentCancel { sid } => {
-            push_input(state, &sid, AcpInput::Cancel, SessionInput::Cancel).await
-        }
+        AgentAction::Cancel => push_input(state, sid, AcpInput::Cancel, SessionInput::Cancel).await,
 
-        SharedMessage::AgentApprove {
-            sid,
-            call_id,
-            decision,
-        } => {
+        AgentAction::Approve { call_id, decision } => {
             push_input(
                 state,
-                &sid,
+                sid,
                 AcpInput::Approve {
                     call_id: call_id.clone(),
                     decision,
@@ -96,6 +81,24 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
                 SessionInput::Approve { call_id, decision },
             )
             .await
+        }
+
+        AgentAction::ListMedia { query } => {
+            if !session_exists(state, sid).await {
+                return SharedResponse::Failed(SharedFailure::NotFound);
+            }
+            if query.len() > super::super::server::MAX_MEDIA_QUERY_BYTES {
+                return SharedResponse::Failed(SharedFailure::Invalid);
+            }
+            // The filesystem walk confines itself to $HOME; blocking, so off the reactor.
+            match tokio::task::spawn_blocking(move || {
+                super::super::server::remote_media_entries(&query)
+            })
+            .await
+            {
+                Ok(entries) => SharedResponse::Media(entries),
+                Err(_) => SharedResponse::Failed(SharedFailure::Internal),
+            }
         }
     }
 }
@@ -139,7 +142,7 @@ async fn push_input(
 
 async fn prompt(
     state: &RemoteState,
-    sid: String,
+    sid: &str,
     text: String,
     context: Option<String>,
     attachments: Vec<vmux_wire::protocol::AgentAttachment>,
@@ -152,7 +155,7 @@ async fn prompt(
     };
     push_input(
         state,
-        &sid,
+        sid,
         AcpInput::User {
             text: text.clone(),
             context: context.clone(),
@@ -223,11 +226,14 @@ mod tests {
     }
 
     fn prompt_of(length: usize) -> SharedMessage {
-        SharedMessage::AgentInput {
-            sid: "s".into(),
-            text: "x".repeat(length),
-            context: None,
-        }
+        SharedMessage::agent(
+            "s",
+            AgentAction::Input {
+                text: "x".repeat(length),
+                context: None,
+                attachments: Vec::new(),
+            },
+        )
     }
 
     /// The cap has to be enforced here rather than at the transport, because `receive_window`
@@ -257,11 +263,14 @@ mod tests {
 
         let response = dispatch(
             &state,
-            SharedMessage::AgentInput {
-                sid: "s".into(),
-                text: "   ".into(),
-                context: None,
-            },
+            SharedMessage::agent(
+                "s",
+                AgentAction::Input {
+                    text: "   ".into(),
+                    context: None,
+                    attachments: Vec::new(),
+                },
+            ),
         )
         .await;
 
@@ -293,16 +302,14 @@ mod tests {
         let state = empty_state();
 
         for request in [
-            SharedMessage::AgentCancel {
-                sid: "ghost".into(),
-            },
-            SharedMessage::AttachPageAgent {
-                sid: "ghost".into(),
-            },
-            SharedMessage::ListMedia {
-                sid: "ghost".into(),
-                query: String::new(),
-            },
+            SharedMessage::agent("ghost", AgentAction::Cancel),
+            SharedMessage::agent("ghost", AgentAction::Attach),
+            SharedMessage::agent(
+                "ghost",
+                AgentAction::ListMedia {
+                    query: String::new(),
+                },
+            ),
         ] {
             assert!(
                 matches!(

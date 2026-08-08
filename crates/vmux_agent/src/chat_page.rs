@@ -1576,9 +1576,10 @@ fn cancel_session(
     else {
         return;
     };
-    service
-        .0
-        .send(ClientMessage::Shared(SharedMessage::AgentCancel { sid }));
+    service.0.send(ClientMessage::Shared(SharedMessage::agent(
+        sid,
+        vmux_wire::protocol::AgentAction::Cancel,
+    )));
 }
 
 #[cfg(native)]

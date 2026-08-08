@@ -153,13 +153,13 @@ pub(crate) fn handle_approval_reply(
     }
     let decision = protocol_decision(reply.decision);
     if let Some(service) = service.as_ref() {
-        service
-            .0
-            .send(ClientMessage::Shared(SharedMessage::AgentApprove {
-                sid,
+        service.0.send(ClientMessage::Shared(SharedMessage::agent(
+            sid,
+            vmux_wire::protocol::AgentAction::Approve {
                 call_id: reply.call_id.clone(),
                 decision,
-            }));
+            },
+        )));
     }
     *state = AgentRunState::Streaming;
 }

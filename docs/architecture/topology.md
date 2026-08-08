@@ -13,9 +13,9 @@ is a laptop, a phone, a tablet, or a watch.
   sessions. It outlives every client, so closing a window does not kill a running agent.
 - **Client** — anything that renders the workspace and sends intent back. A **local** client shares
   the machine with the service; a **remote** client does not.
-- **Relay** — a rendezvous point, and optional. It exists only so a remote client can reach a
-  service that is not routable from where it is standing. Its internals live in the `vmux-cloud`
-  repository; what matters here is the shape of the two endpoints each side uses.
+- **Relay** — a rendezvous point, and not optional. A host behind NAT cannot be dialled, so every
+  remote pairing goes through one. Its internals live in the `vmux-cloud` repository; what matters
+  here is that it forwards packets it cannot read.
 
 ```mermaid
 flowchart LR
@@ -31,24 +31,27 @@ flowchart LR
 
     relay(["relay<br/>vmux-cloud"])
 
-    service <-->|"SSE down · POST up"| relay
-    remote -->|"HTTP · /r/{device}/api/…"| relay
-    remote -.->|"direct HTTP · /api/… when routable"| service
+    service <-->|"QUIC control · held open"| relay
+    remote <-->|"QUIC · allocated UDP port"| relay
 
     style relay stroke-dasharray: 4 4
 ```
 
-Neither end of the relay listens for the other. The service dials out and holds a stream open; the
-remote client calls in. So a client reaches a host behind NAT without either opening a port. The
-dotted path is the same API without the rendezvous — loopback for a simulator, or a LAN address —
-and is the exception, because pairing points a client at `{relay}/r/{device_id}` by default.
+Neither end of the relay listens for the other. The service dials out and holds one QUIC connection
+open; the relay allocates it a UDP port and tells it which. The pairing link names that port, so a
+remote client reaches a host behind NAT without either side opening one.
 
-The relay is **not** a generic proxy. It carries a typed `DesktopCommandKind`, so every route a
-remote client can reach exists as an explicit variant on both sides. Add an endpoint to the service
-and it is reachable directly but invisible through the relay until a matching variant lands with it.
+**The relay cannot read any of it.** A remote client's packets belong to a second QUIC session that
+terminates on the *host*, and cross the relay as DATAGRAM frames on the control connection. TLS 1.3
+is end to end; the relay holds no key for it and links no crate that could decode a payload even
+with one. What it does see is metadata — which device talks when, and how much.
 
-Nothing is dialled until Remote is switched on. The service checks that before connecting and
-rechecks it mid-stream, so a host that never enables Remote costs no traffic.
+Forwarding only works in that direction. The desktop's NAT mapping was opened toward the control
+port, and a port-restricted NAT — most consumer routers — drops anything arriving from a different
+source port, so replies cannot be sent straight from the allocated port.
+
+Nothing is dialled until Remote is switched on. The service checks that before connecting and a
+single watcher closes every live connection the moment it goes off.
 
 ## Local and remote are the same client, differently plumbed
 
@@ -64,10 +67,10 @@ flowchart TB
     page --> hooks --> trait
 
     trait --> cefhost["CefHost — wasm in a webview<br/>window.cef binEmit/binListen"]
-    trait --> remotehost["MobileHost — native beside a webview<br/>HTTP, JSON re-encoded to rkyv"]
+    trait --> remotehost["MobileHost — native beside a webview<br/>QUIC, rkyv end to end"]
 
     cefhost -->|"crosses a process boundary"| ecs["local client ECS"]
-    remotehost -->|"HTTP + SSE"| service["service API"]
+    remotehost -->|"QUIC streams"| service["service dispatcher"]
     service -->|"broker round-trip"| ecs
 ```
 
@@ -81,14 +84,16 @@ Two consequences fall out of that, and both are current limits rather than desig
 - **`emit` is one-way on remote clients.** A page can read; it cannot push a typed payload back the
   way it does locally. Ids with no route are refused rather than silently accepted, so a half-served
   page reports as much instead of rendering empty.
-- **Subscriptions degrade to polling.** The local host pushes on change. HTTP cannot, so
-  `MobileHost` re-reads on an interval and only re-emits when the value actually moved.
+- **Subscriptions are still polled.** Nothing about QUIC requires it — a session transcript already
+  arrives on a long-lived stream — but the team roster is the only other subscribed id and has no
+  server-initiated route yet, so `MobileHost` re-reads it on an interval.
 
-The **broker round-trip** in the diagram is the other thing worth knowing. The service answers HTTP,
-but the workspace shape — installed agents, the active roster — lives in the local client's ECS, in
-a different process. So `/api/agents` and `/api/team` are not reads of service state; they are
-commands brokered into the local client and relayed back as-is. A remote client can drive sessions
-with no window open, but those two routes answer `502` until a local client is there to ask.
+The **broker round-trip** in the diagram is the other thing worth knowing. The service owns the
+sessions, but the workspace shape — installed agents, the active roster — lives in the local
+client's ECS, in a different process. So `ListAgents` and `ListTeam` are not reads of service
+state; they are commands brokered into the local client and relayed back as-is. A remote client can
+drive sessions with no window open, but those two answer `NoDesktop` until one is there to ask —
+named that way precisely because it resolves on its own, unlike `NotFound`.
 
 ## What each link carries
 
@@ -96,37 +101,39 @@ with no window open, but those two routes answer `502` until a local client is t
 | --- | --- | --- |
 | page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope, host→page bare |
 | local client ↔ service | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
-| remote client ↔ service | HTTP/1.1 + SSE | JSON, re-encoded to rkyv on-device before the page sees it |
-| service ↔ relay | HTTPS: held-open SSE down, POST up | JSON `DesktopCommandKind` / `DesktopResponse` |
+| remote client ↔ service | QUIC, one bidirectional stream per request | rkyv `SharedMessage` / `SharedResponse`, after a JSON hello |
+| service ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAllocation`, then opaque DATAGRAM frames |
 
-The gap between the last two rows and the first two is the open question. rkyv everywhere would
-remove a re-encode, but a remote client ships on its own schedule and rkyv's archived layout is not
-forward-compatible, whereas JSON tolerates a field the other side has not heard of. The relay
-already leans on that: an unrecognised command is skipped, not fatal, so one unknown variant does
-not tear down every other route.
+The last row is the one worth reading twice. Only the hello is the relay's business; everything
+after it is a remote client's own QUIC session in transit.
 
-## HTTP/1.1 today — no h2, no HTTP/3, no QUIC
+The hellos are JSON and the frames after them are rkyv, and that split is deliberate. rkyv encodes
+enum variants **positionally**, so a peer one release behind does not fail to decode a reordered
+variant — it decodes the wrong one. That is fine on the unix socket, where both sides ship together
+and the daemon respawns on an identity mismatch. It is not fine for a phone that updates on its own
+schedule, so the frame that decides whether to keep talking is JSON, which tolerates a field the
+other side has not heard of.
 
-Worth stating plainly, because "SSE" invites the question.
+`ProtocolVersion` guards the rest, and `shared_wire_format.rs` freezes the encoding of every variant
+so that reordering one turns a test red rather than a phone silently wrong.
 
-Both streaming links are **real** `text/event-stream` over **HTTP/1.1**, not long-polling: the
-session stream (`GET /api/sessions/{sid}/events`, 15-second keep-alive) and the relay command
-stream, each held open until it breaks, with a flat 2-second reconnect.
+## QUIC, end to end
 
-Nothing negotiates h2. The service runs axum on hyper with HTTP/2 off, cleartext, bound to loopback
-— TLS is the relay's job, not the host's. Clients use `reqwest` with `rustls` but without the
-`http2` feature, so ALPN offers `http/1.1` and only that. No `quinn`, `h3`, or `s2n-quic` is
-compiled anywhere in the workspace.
+The remote path was HTTP/1.1 with SSE until it wasn't; both are gone. What replaced them:
 
-That is a fine floor for what runs over it: one long stream and small JSON requests, where h2's
-multiplexing buys little. It stops being fine when a client is on a mobile network and wants many
-concurrent session streams, or wants one stream to survive walking between networks — head-of-line
-blocking and connection migration are exactly what QUIC fixes.
+- **One transport.** A remote client speaks QUIC and nothing else. There is no HTTP fallback to
+  silently answer for a failed connection, which is what made the old failures hard to see.
+- **Streams instead of routes.** A request is one bidirectional stream carrying one `SharedMessage`
+  and one `SharedResponse`. A subscription is a long-lived stream the client opens and the host
+  writes down — client-opened because the relay only forwards what the dialling side started.
+- **Certificate pinning.** No CA signs for a Mac, so the host mints its own certificate and the
+  pairing QR carries its SHA-256. A remote client trusts exactly that and nothing else — narrower
+  than the public root set. A pairing link without a fingerprint is refused rather than downgraded.
+- **Head-of-line blocking and migration** come free, which is the reason a phone walking between
+  wifi and cellular no longer drops its transcript.
 
-When that lands it is the relay link that changes, not the shape above. The client side is a
-`reqwest` feature away, though HTTP/3 there is still gated behind `--cfg reqwest_unstable`, and the
-relay would have to terminate it. The direct link stays on h1: it is loopback or LAN, where none of
-this is worth paying for.
+The relay verifies against the public roots by name instead, because its certificate is renewed on
+its own schedule and a pinned fingerprint would start rejecting it without warning.
 
 ## Which platforms exist today
 
@@ -159,7 +166,14 @@ What every client compiles, and what only one does.
 - **Not shared, by choice** — `vmux_editor`, `vmux_terminal`, `vmux_layout`. They are built on DOM
   measurement or on tiling, which a small screen has no use for.
 
-The recurring trap when adding to the first list: crates gate their desktop half on
-`not(target_arch = "wasm32")`, which is **true on iOS**. The gate has to read
-`not(any(target_arch = "wasm32", target_os = "ios"))`, and because Cargo resolves dependencies
-before any `cfg` in `src` applies, the split has to exist in `Cargo.toml` too.
+The recurring trap when adding to the first list used to be gating a desktop half on
+`not(target_arch = "wasm32")`, which is **true on iOS**. A build script now emits three aliases so
+the gate names what it means instead:
+
+- `web` — wasm32, the browser bundle.
+- `frontend` — wasm32 *or* iOS: the pages, with no Bevy and no process access.
+- `native` — everything else: the desktop app and the daemon.
+
+Write `#[cfg(native)]`, not a negation of two target predicates. Cargo's own
+`[target.'cfg(...)'.dependencies]` still has to spell the targets out, because dependency
+resolution happens before any build script runs — so the split exists in `Cargo.toml` too.

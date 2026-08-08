@@ -19,7 +19,7 @@ use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::{
     ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
 };
-use vmux_wire::protocol::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
+use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 /// Matches the daemon's cap on a control response.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -204,9 +204,7 @@ impl QuicApi {
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let request = SharedMessage::AttachPageAgent {
-            sid: sid.to_string(),
-        };
+        let request = SharedMessage::agent(sid, AgentAction::Attach);
         let mut frame = vec![StreamKind::SessionEvents.as_byte()];
         frame.extend_from_slice(
             &rkyv::to_bytes::<rkyv::rancor::Error>(&request)

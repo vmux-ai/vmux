@@ -20,53 +20,51 @@ use crate::room::{ClientOpId, RemoteAgent, RemoteMediaEntry, RemoteSession};
 /// transports may carry it, not about where it originates.
 #[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum SharedMessage {
-    /// Subscribe to a session's transcript and status.
-    AttachPageAgent { sid: String },
-    AgentInput {
-        sid: String,
-        text: String,
-        context: Option<String>,
-    },
-    /// Interrupt the session's in-flight turn without tearing the session down.
-    AgentCancel { sid: String },
-    AgentApprove {
-        sid: String,
-        call_id: String,
-        decision: ApprovalDecision,
-    },
-    AgentInputWithAttachments {
-        sid: String,
-        text: String,
-        context: Option<String>,
-        attachments: Vec<AgentAttachment>,
-    },
+    /// Anything addressed to one session.
+    ///
+    /// The id is hoisted out of the actions so a receiver resolves the session once rather than
+    /// in every arm, and so adding an action cannot accidentally forget to carry one.
+    Agent { sid: String, action: AgentAction },
     /// The running sessions a client can attach to. No local equivalent — the desktop reads the
     /// registries directly rather than asking for them.
     ListSessions,
-    /// Browse attachable files under `$HOME`. `query` is a path fragment, resolved and confined
-    /// by the daemon; a client cannot escape the home directory by crafting it.
-    ListMedia { sid: String, query: String },
     /// Something only the GUI can answer, forwarded to it through the broker.
     AgentCommand(SharedAgentCommand),
 }
 
-impl SharedMessage {
-    /// Build a prompt message, choosing the attachment-carrying variant only when needed.
-    pub fn agent_input(
-        sid: String,
+/// What a client asks of one session.
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AgentAction {
+    /// Subscribe to the transcript and status.
+    Attach,
+    /// Submit a prompt.
+    ///
+    /// `attachments` is empty when there are none. Prompts with and without them used to be two
+    /// variants, so every reader had to handle both in order to handle either.
+    Input {
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
-    ) -> Self {
-        if attachments.is_empty() {
-            Self::AgentInput { sid, text, context }
-        } else {
-            Self::AgentInputWithAttachments {
-                sid,
-                text,
-                context,
-                attachments,
-            }
+    },
+    /// Interrupt the in-flight turn without tearing the session down.
+    Cancel,
+    Approve {
+        call_id: String,
+        decision: ApprovalDecision,
+    },
+    /// Browse attachable files under `$HOME`, for this session's composer.
+    ///
+    /// `query` is a path fragment, resolved and confined by the daemon; a client cannot escape the
+    /// home directory by crafting it.
+    ListMedia { query: String },
+}
+
+impl SharedMessage {
+    /// Address an action to a session.
+    pub fn agent(sid: impl Into<String>, action: AgentAction) -> Self {
+        Self::Agent {
+            sid: sid.into(),
+            action,
         }
     }
 }

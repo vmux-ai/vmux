@@ -433,11 +433,13 @@ fn acp_auto_approval_message(
     request: &AgentApprovalRequest,
 ) -> Option<ClientMessage> {
     policy.allows(&request.name).then(|| {
-        ClientMessage::Shared(SharedMessage::AgentApprove {
-            sid: session.sid.clone(),
-            call_id: request.call_id.clone(),
-            decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
-        })
+        ClientMessage::Shared(SharedMessage::agent(
+            session.sid.clone(),
+            vmux_service::protocol::AgentAction::Approve {
+                call_id: request.call_id.clone(),
+                decision: vmux_service::protocol::ApprovalDecision::AllowAlways,
+            },
+        ))
     })
 }
 
@@ -1151,7 +1153,10 @@ mod tests {
 
         assert!(matches!(
             acp_auto_approval_message(&session, &policy, &request),
-            Some(ClientMessage::Shared(SharedMessage::AgentApprove { sid, call_id, decision }))
+            Some(ClientMessage::Shared(SharedMessage::Agent {
+                sid,
+                action: vmux_service::protocol::AgentAction::Approve { call_id, decision },
+            }))
                 if sid == "s1"
                     && call_id == "call-1"
                     && decision == vmux_service::protocol::ApprovalDecision::AllowAlways

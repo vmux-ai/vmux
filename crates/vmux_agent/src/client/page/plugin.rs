@@ -110,11 +110,10 @@ fn spawn_page_session_on_add(
             auto_tools,
             tools_json,
         });
-        service
-            .0
-            .send(ClientMessage::Shared(SharedMessage::AttachPageAgent {
-                sid: session.sid.clone(),
-            }));
+        service.0.send(ClientMessage::Shared(SharedMessage::agent(
+            session.sid.clone(),
+            vmux_wire::protocol::AgentAction::Attach,
+        )));
     }
 }
 

@@ -1,9 +1,12 @@
 //! Serving desktop pages from the phone.
 //!
 //! A shared page speaks one language: it emits typed payloads under an event id and subscribes to
-//! ids it wants pushed back. On the desktop those ids cross a process boundary into Bevy. Here the
-//! desktop is reachable only over HTTP, so a subscription becomes a poll and the JSON that comes
-//! back is re-encoded as the rkyv the page already knows how to decode. The page cannot tell.
+//! ids it wants pushed back. On the desktop those ids cross a process boundary into Bevy. Here they
+//! cross the QUIC link instead, and the page cannot tell.
+//!
+//! Subscriptions are still polled. Nothing about QUIC requires that — a session transcript is
+//! already pushed down a long-lived stream — but no event id other than the team roster has a
+//! server-initiated route yet, and the roster moves rarely enough not to have forced one.
 //!
 //! Ids with no route are refused rather than silently accepted, so a half-served page reports as
 //! much instead of rendering empty and looking broken.
@@ -20,8 +23,8 @@ use crate::Api;
 
 /// How often a subscription re-reads the desktop.
 ///
-/// The desktop pushes on change; HTTP cannot, so this trades staleness for a request. The team
-/// roster only moves when an agent starts or finishes, so it does not need to be quick.
+/// The team roster only moves when an agent starts or finishes, so staleness costs little and a
+/// push route has not been worth adding.
 const POLL_INTERVAL_MS: u32 = 3_000;
 
 pub struct MobileHost {
@@ -59,8 +62,8 @@ impl PageHost for MobileHost {
                             last = Some(members);
                         }
                     }
-                    // Pairing is gone, or the route is not there — a relay too old to carry it
-                    // answers the same way. Neither is fixed by asking again every few seconds.
+                    // Pairing is gone, or there is no such session. Neither is fixed by asking
+                    // again every few seconds.
                     Err(crate::ApiError::Unauthorized | crate::ApiError::NotFound) => return,
                     // Anything else is likely the network, which does heal.
                     Err(crate::ApiError::Message(_)) => {}

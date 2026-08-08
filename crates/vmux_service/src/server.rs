@@ -1,6 +1,6 @@
 use crate::process::{Process, ProcessManager, PtyInputWriter};
 use crate::protocol::{
-    AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
+    AgentAction, AgentAttachment, ClientMessage, ManagedMcpServer, ManagedMcpTransport, ProcessId,
     ServiceMessage, SharedMessage, compose_agent_prompt, validate_agent_command,
 };
 use crate::{read_message, write_message};
@@ -836,13 +836,19 @@ async fn handle_client(
             // endpoint and silence would make that impossible to see.
             ClientMessage::Shared(
                 SharedMessage::ListSessions
-                | SharedMessage::ListMedia { .. }
-                | SharedMessage::AgentCommand(_),
+                | SharedMessage::AgentCommand(_)
+                | SharedMessage::Agent {
+                    action: AgentAction::ListMedia { .. },
+                    ..
+                },
             ) => {
                 tracing::warn!("local socket: ignoring a remote-only request");
             }
 
-            ClientMessage::Shared(SharedMessage::AttachPageAgent { sid }) => {
+            ClientMessage::Shared(SharedMessage::Agent {
+                sid,
+                action: AgentAction::Attach,
+            }) => {
                 let rx = agent_manager.lock().await.subscribe(&sid);
                 if let Some(mut rx) = rx {
                     if let Some(snapshot) = agent_manager.lock().await.snapshot(&sid).await {
@@ -884,16 +890,14 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context }) => {
-                route_agent_input(&acp_manager, &agent_manager, sid, text, context, Vec::new())
-                    .await;
-            }
-
-            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments {
+            ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                text,
-                context,
-                attachments,
+                action:
+                    AgentAction::Input {
+                        text,
+                        context,
+                        attachments,
+                    },
             }) => {
                 route_agent_input(
                     &acp_manager,
@@ -934,7 +938,10 @@ async fn handle_client(
                 );
             }
 
-            ClientMessage::Shared(SharedMessage::AgentCancel { sid }) => {
+            ClientMessage::Shared(SharedMessage::Agent {
+                sid,
+                action: AgentAction::Cancel,
+            }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager
                         .lock()
@@ -948,10 +955,9 @@ async fn handle_client(
                 }
             }
 
-            ClientMessage::Shared(SharedMessage::AgentApprove {
+            ClientMessage::Shared(SharedMessage::Agent {
                 sid,
-                call_id,
-                decision,
+                action: AgentAction::Approve { call_id, decision },
             }) => {
                 if acp_manager.lock().await.contains(&sid) {
                     acp_manager

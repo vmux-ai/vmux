@@ -6134,7 +6134,10 @@ mod tests {
     fn chat_workspace_continuation_is_private_same_session_input() {
         assert!(matches!(
             chat_agent_continuation_message("sid-1", "continue original request"),
-            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context })
+            ClientMessage::Shared(SharedMessage::Agent {
+                sid,
+                action: vmux_wire::protocol::AgentAction::Input { text, context, .. },
+            })
                 if sid == "sid-1"
                     && text.is_empty()
                     && context.as_deref() == Some("continue original request")

@@ -3,7 +3,9 @@ pub mod shared;
 pub use layout::{
     Focus, LayoutNode, LayoutSnapshot, NodeKind, SplitDirection, Stack, Tab, format_id, parse_id,
 };
-pub use shared::{SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
+pub use shared::{
+    AgentAction, SharedAgentCommand, SharedEvent, SharedFailure, SharedMessage, SharedResponse,
+};
 
 use crate::{TermCursor, TermLine, TermSelectionRange};
 
@@ -684,14 +686,22 @@ pub enum ClientMessage {
 }
 
 impl ClientMessage {
-    /// Build a legacy-compatible prompt message when no attachments are present.
+    /// Address a prompt to a session.
     pub fn agent_input(
         sid: String,
         text: String,
         context: Option<String>,
         attachments: Vec<AgentAttachment>,
     ) -> Self {
-        SharedMessage::agent_input(sid, text, context, attachments).into()
+        SharedMessage::agent(
+            sid,
+            AgentAction::Input {
+                text,
+                context,
+                attachments,
+            },
+        )
+        .into()
     }
 }
 
@@ -1033,55 +1043,55 @@ mod tests {
     fn shared_message_variants_are_the_whole_remote_surface() {
         fn name(message: &SharedMessage) -> &'static str {
             match message {
-                SharedMessage::AttachPageAgent { .. } => "AttachPageAgent",
-                SharedMessage::AgentInput { .. } => "AgentInput",
-                SharedMessage::AgentCancel { .. } => "AgentCancel",
-                SharedMessage::AgentApprove { .. } => "AgentApprove",
-                SharedMessage::AgentInputWithAttachments { .. } => "AgentInputWithAttachments",
+                SharedMessage::Agent { action, .. } => match action {
+                    AgentAction::Attach => "Agent/Attach",
+                    AgentAction::Input { .. } => "Agent/Input",
+                    AgentAction::Cancel => "Agent/Cancel",
+                    AgentAction::Approve { .. } => "Agent/Approve",
+                    AgentAction::ListMedia { .. } => "Agent/ListMedia",
+                },
                 SharedMessage::ListSessions => "ListSessions",
-                SharedMessage::ListMedia { .. } => "ListMedia",
                 SharedMessage::AgentCommand(_) => "AgentCommand",
             }
         }
 
-        let sid = || "s".to_string();
         let every_variant = [
-            SharedMessage::AttachPageAgent { sid: sid() },
-            SharedMessage::AgentInput {
-                sid: sid(),
-                text: String::new(),
-                context: None,
-            },
-            SharedMessage::AgentCancel { sid: sid() },
-            SharedMessage::AgentApprove {
-                sid: sid(),
-                call_id: "c".into(),
-                decision: ApprovalDecision::Allow,
-            },
-            SharedMessage::AgentInputWithAttachments {
-                sid: sid(),
-                text: String::new(),
-                context: None,
-                attachments: Vec::new(),
-            },
+            SharedMessage::agent("s", AgentAction::Attach),
+            SharedMessage::agent(
+                "s",
+                AgentAction::Input {
+                    text: String::new(),
+                    context: None,
+                    attachments: Vec::new(),
+                },
+            ),
+            SharedMessage::agent("s", AgentAction::Cancel),
+            SharedMessage::agent(
+                "s",
+                AgentAction::Approve {
+                    call_id: "c".into(),
+                    decision: ApprovalDecision::Allow,
+                },
+            ),
+            SharedMessage::agent(
+                "s",
+                AgentAction::ListMedia {
+                    query: String::new(),
+                },
+            ),
             SharedMessage::ListSessions,
-            SharedMessage::ListMedia {
-                sid: sid(),
-                query: String::new(),
-            },
             SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
         ];
 
         assert_eq!(
             every_variant.iter().map(name).collect::<Vec<_>>(),
             [
-                "AttachPageAgent",
-                "AgentInput",
-                "AgentCancel",
-                "AgentApprove",
-                "AgentInputWithAttachments",
+                "Agent/Attach",
+                "Agent/Input",
+                "Agent/Cancel",
+                "Agent/Approve",
+                "Agent/ListMedia",
                 "ListSessions",
-                "ListMedia",
                 "AgentCommand",
             ]
         );
@@ -1218,11 +1228,11 @@ mod tests {
 
     #[test]
     fn agent_cancel_and_interrupted_roundtrip() {
-        let msg = ClientMessage::Shared(SharedMessage::AgentCancel { sid: "s1".into() });
+        let msg = ClientMessage::Shared(SharedMessage::agent("s1", AgentAction::Cancel));
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&msg).unwrap();
         let back = rkyv::from_bytes::<ClientMessage, rkyv::rancor::Error>(&bytes).unwrap();
         assert!(
-            matches!(back, ClientMessage::Shared(SharedMessage::AgentCancel { sid }) if sid == "s1")
+            matches!(back, ClientMessage::Shared(SharedMessage::Agent { sid, action: AgentAction::Cancel }) if sid == "s1")
         );
 
         let st = AgentRunStatus::Interrupted;
@@ -1796,40 +1806,49 @@ mod tests {
                 auto_tools: vec!["list_spaces".into()],
                 tools_json: "[]".into(),
             },
-            ClientMessage::Shared(SharedMessage::AttachPageAgent { sid: "s".into() }),
+            ClientMessage::Shared(SharedMessage::agent("s", AgentAction::Attach)),
             ClientMessage::DetachPageAgent { sid: "s".into() },
-            ClientMessage::Shared(SharedMessage::AgentInput {
-                sid: "s".into(),
-                text: "hi".into(),
-                context: Some("prior conversation".into()),
-            }),
-            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments {
-                sid: "s".into(),
-                text: "inspect".into(),
-                context: None,
-                attachments: vec![AgentAttachment {
-                    path: "/tmp/image.png".into(),
-                    name: "image.png".into(),
-                    mime_type: "image/png".into(),
-                    size: 42,
-                }],
-            }),
+            ClientMessage::Shared(SharedMessage::agent(
+                "s",
+                AgentAction::Input {
+                    text: "hi".into(),
+                    context: Some("prior conversation".into()),
+                    attachments: Vec::new(),
+                },
+            )),
+            ClientMessage::Shared(SharedMessage::agent(
+                "s",
+                AgentAction::Input {
+                    text: "inspect".into(),
+                    context: None,
+                    attachments: vec![AgentAttachment {
+                        path: "/tmp/image.png".into(),
+                        name: "image.png".into(),
+                        mime_type: "image/png".into(),
+                        size: 42,
+                    }],
+                },
+            )),
             ClientMessage::AcpSetModel {
                 sid: "s".into(),
                 request_id: 7,
                 config_id: "model".into(),
                 model_id: "sonnet".into(),
             },
-            ClientMessage::Shared(SharedMessage::AgentApprove {
-                sid: "s".into(),
-                call_id: "c".into(),
-                decision: ApprovalDecision::Allow,
-            }),
-            ClientMessage::Shared(SharedMessage::AgentApprove {
-                sid: "s".into(),
-                call_id: "ca".into(),
-                decision: ApprovalDecision::AllowAlways,
-            }),
+            ClientMessage::Shared(SharedMessage::agent(
+                "s",
+                AgentAction::Approve {
+                    call_id: "c".into(),
+                    decision: ApprovalDecision::Allow,
+                },
+            )),
+            ClientMessage::Shared(SharedMessage::agent(
+                "s",
+                AgentAction::Approve {
+                    call_id: "ca".into(),
+                    decision: ApprovalDecision::AllowAlways,
+                },
+            )),
             ClientMessage::ClosePageAgent { sid: "s".into() },
             ClientMessage::AgentToolResult {
                 request_id: AgentRequestId::new(),
@@ -1844,8 +1863,11 @@ mod tests {
         for msg in messages {
             let expects_allow_always = matches!(
                 &msg,
-                ClientMessage::Shared(SharedMessage::AgentApprove {
-                    decision: ApprovalDecision::AllowAlways,
+                ClientMessage::Shared(SharedMessage::Agent {
+                    action: AgentAction::Approve {
+                        decision: ApprovalDecision::AllowAlways,
+                        ..
+                    },
                     ..
                 })
             );
@@ -1854,8 +1876,11 @@ mod tests {
             if expects_allow_always {
                 assert!(matches!(
                     decoded,
-                    ClientMessage::Shared(SharedMessage::AgentApprove {
-                        decision: ApprovalDecision::AllowAlways,
+                    ClientMessage::Shared(SharedMessage::Agent {
+                        action: AgentAction::Approve {
+                            decision: ApprovalDecision::AllowAlways,
+                            ..
+                        },
                         ..
                     })
                 ));
@@ -1863,12 +1888,16 @@ mod tests {
         }
     }
 
+    /// One variant carries prompts with and without attachments, so the builder no longer picks
+    /// between two shapes — but it still has to route the attachments it was given.
     #[test]
-    fn agent_input_builder_preserves_legacy_variant_without_attachments() {
+    fn the_prompt_builder_addresses_the_session_and_keeps_attachments() {
         assert!(matches!(
             ClientMessage::agent_input("s".into(), "hi".into(), None, Vec::new()),
-            ClientMessage::Shared(SharedMessage::AgentInput { sid, text, context })
-                if sid == "s" && text == "hi" && context.is_none()
+            ClientMessage::Shared(SharedMessage::Agent {
+                sid,
+                action: AgentAction::Input { text, context, attachments },
+            }) if sid == "s" && text == "hi" && context.is_none() && attachments.is_empty()
         ));
         assert!(matches!(
             ClientMessage::agent_input(
@@ -1882,8 +1911,10 @@ mod tests {
                     size: 42,
                 }],
             ),
-            ClientMessage::Shared(SharedMessage::AgentInputWithAttachments { attachments, .. })
-                if attachments.len() == 1
+            ClientMessage::Shared(SharedMessage::Agent {
+                action: AgentAction::Input { attachments, .. },
+                ..
+            }) if attachments.len() == 1
         ));
     }
 

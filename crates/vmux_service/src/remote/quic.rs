@@ -291,7 +291,11 @@ async fn stream_session_events(
     mut send: quinn::SendStream,
     request: SharedMessage,
 ) {
-    let SharedMessage::AttachPageAgent { sid } = request else {
+    let SharedMessage::Agent {
+        sid,
+        action: vmux_wire::protocol::AgentAction::Attach,
+    } = request
+    else {
         return;
     };
     let Some(mut events) = subscribe(state, &sid).await else {
@@ -699,9 +703,10 @@ mod live {
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
         let mut frame = vec![StreamKind::SessionEvents.as_byte()];
         frame.extend_from_slice(
-            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::AttachPageAgent {
-                sid: "ghost".into(),
-            })
+            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
+                "ghost",
+                vmux_wire::protocol::AgentAction::Attach,
+            ))
             .expect("encode"),
         );
         send.write_all(&frame).await.expect("write");
