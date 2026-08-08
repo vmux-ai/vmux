@@ -766,22 +766,22 @@ fn App() -> Element {
         }
         pair_url.set(pairing_url(&credentials));
         let client = Api::new(credentials);
+        // Stored credentials already answer "is this paired?", so paint the start page now and let
+        // reachability resolve behind it. Waiting on the first round trip meant a spinner for as
+        // long as the dial takes to give up, which is the whole dial timeout when the Mac is off.
+        api.set(Some(client.clone()));
+        auth.set(AuthState::Paired);
         match client.sessions().await {
             Ok(next) => {
-                api.set(Some(client.clone()));
                 sessions.set(next);
                 agents.set(client.agents().await.unwrap_or_default());
-                auth.set(AuthState::Paired);
             }
             Err(ApiError::Unauthorized) => {
                 clear_credentials();
                 error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                 auth.set(AuthState::Unpaired);
             }
-            Err(other) => {
-                error.set(other.to_string());
-                auth.set(AuthState::Unpaired);
-            }
+            Err(other) => error.set(other.to_string()),
         }
     });
 
