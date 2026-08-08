@@ -24,6 +24,7 @@ use vmux_ui::components::prompt_composer::{
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
+use vmux_ui::favicon::Favicon;
 use vmux_wire::PageIcon;
 use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
@@ -986,6 +987,17 @@ fn App() -> Element {
     }
 
     let current_value = current();
+    // The session says which agent it is by name; the icon lives on the agent list the phone
+    // already fetches, so no extra round trip and nothing new on the wire.
+    let agent_icon = current_value
+        .as_ref()
+        .and_then(|session| {
+            agents()
+                .into_iter()
+                .find(|agent| agent.name == session.name)
+                .map(|agent| agent.icon)
+        })
+        .unwrap_or_default();
     let selected_sid = current_value
         .as_ref()
         .map(|session| session.sid.clone())
@@ -1060,6 +1072,14 @@ fn App() -> Element {
                         stroke_linecap: "round",
                         stroke_linejoin: "round",
                         path { d: "m15 18-6-6 6-6" }
+                    }
+                }
+                if !agent_icon.is_empty() {
+                    Favicon {
+                        favicon_url: agent_icon.clone(),
+                        url: String::new(),
+                        class: "h-8 w-8 shrink-0 rounded-lg".to_string(),
+                        globe_class: "h-5 w-5 shrink-0 text-muted-foreground".to_string(),
                     }
                 }
                 div { class: "min-w-0 flex-1",

@@ -4,7 +4,7 @@
 
 pub mod event;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
 pub mod page;
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]

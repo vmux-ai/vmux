@@ -73,9 +73,7 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title(&translate("agents-title"));
-        }
+        set_document_title(&translate("agents-title"));
         request_catalog();
     });
 
@@ -317,3 +315,14 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
         },
     }
 }
+
+/// The browser tab's title. A phone has no tab, so this is where that difference stops.
+#[cfg(target_arch = "wasm32")]
+fn set_document_title(title: &str) {
+    if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
+        doc.set_title(title);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn set_document_title(_title: &str) {}
