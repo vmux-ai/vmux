@@ -217,14 +217,18 @@ impl ServerCertVerifier for PinnedCertificate {
 }
 
 /// Length-independent only for equal-length inputs, which is all this compares: two hex digests.
+///
+/// Written as a loop rather than a fold so the absence of an early exit is visible: the whole
+/// point is that every byte is compared regardless of where the first difference falls.
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
     if left.len() != right.len() {
         return false;
     }
-    left.iter()
-        .zip(right)
-        .fold(0u8, |acc, (a, b)| acc | (a ^ b))
-        == 0
+    let mut difference = 0u8;
+    for index in 0..left.len() {
+        difference |= left[index] ^ right[index];
+    }
+    difference == 0
 }
 
 #[cfg(test)]

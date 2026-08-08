@@ -50,6 +50,16 @@ Diagnostics must use the tracing macros (`bevy::log::info!`/`warn!`) to land in 
 
 This project targets macOS (primary) and Linux (CI). When adding imports or code that uses platform-specific APIs (CEF, winit, AppKit), always add appropriate `#[cfg(...)]` gates. Let rustfmt reorder cfg-gated imports.
 
+## Code Style
+
+Prefer plain, imperative control flow. Early returns, `match`, `if let` / `let ... else`, and `for` loops read better under pressure than combinator chains, and they produce better error messages and stack traces.
+
+Avoid functional-style composition as a default: long `map` / `and_then` / `filter_map` / `fold` chains, closures passed in to build values, and iterator pipelines that assemble state. Reach for a builder or an explicit loop instead.
+
+Combinators are fine where they stay small and local — `map_err` to convert an error, `unwrap_or` for a default, a `map` that drops one half of a tuple. The line is whether a reader has to hold intermediate state in their head to follow it.
+
+`crates/vmux_service/src/remote/quic/dispatch.rs` is the reference: one `match` on the request, early returns for every refusal, and a single choke point that every session mutation passes through.
+
 ## Rules
 
 - Route every new user-facing UI string through Fluent (`vmux_ui::i18n`). Add the message to `en-US.ftl` and every bundled locale with identical IDs and variables. Do not ship untranslated English literals or rely on English fallback for bundled locales. Dynamic external content and raw diagnostic output are exempt.
