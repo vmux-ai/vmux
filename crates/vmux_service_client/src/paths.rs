@@ -73,6 +73,14 @@ pub fn remote_key_path() -> PathBuf {
     profile_file("remote-key")
 }
 
+/// Path to the fingerprint of [`remote_cert_path`], as the pairing link spells it.
+///
+/// Derived from the certificate, but written down because the CLI builds pairing links too and
+/// hashing a PEM would cost it the whole QUIC stack as a dependency for one digest.
+pub fn remote_fingerprint_path() -> PathBuf {
+    profile_file("remote-fingerprint")
+}
+
 /// Path to the stable relay device id for the active build and profile.
 pub fn remote_relay_device_path() -> PathBuf {
     profile_file("remote-device")

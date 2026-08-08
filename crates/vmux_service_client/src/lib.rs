@@ -6,6 +6,7 @@ pub mod client;
 pub mod framing;
 #[cfg(target_os = "macos")]
 pub mod launchd;
+pub mod pairing;
 pub mod paths;
 
 pub mod protocol {

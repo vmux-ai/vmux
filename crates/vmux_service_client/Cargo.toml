@@ -10,6 +10,7 @@ chrono = { workspace = true }
 rkyv = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
+url = { workspace = true }
 vmux_profile = { path = "../vmux_profile" }
 vmux_wire = { path = "../vmux_wire" }
 

@@ -791,8 +791,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "hyper",
- "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -805,11 +803,9 @@ dependencies = [
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
- "tokio",
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -828,7 +824,6 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -10655,7 +10650,6 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -10694,7 +10688,6 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -11535,7 +11528,6 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "objc2-ui-kit 0.3.2",
  "quinn",
- "reqwest",
  "rkyv",
  "serde",
  "serde_json",
@@ -11610,7 +11602,6 @@ version = "0.0.30"
 dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
- "axum",
  "base64 0.22.1",
  "bevy",
  "bevy_ecs",
@@ -11657,6 +11648,7 @@ dependencies = [
  "rkyv",
  "tokio",
  "tracing",
+ "url",
  "vmux_profile",
  "vmux_wire",
 ]

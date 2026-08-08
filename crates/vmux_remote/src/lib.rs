@@ -6,7 +6,6 @@
 //! [`vmux_wire::room`].
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 pub mod quic;
 pub use quic::{
@@ -39,49 +38,4 @@ impl From<&str> for DeviceId {
     fn from(value: &str) -> Self {
         Self(value.to_string())
     }
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct DesktopCommand {
-    pub id: String,
-    pub kind: DesktopCommandKind,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DesktopCommandKind {
-    ListSessions,
-    /// `/r/{device}/api/agents` — the installed-agent list.
-    ListAgents,
-    /// `/r/{device}/api/team` — the active space's roster.
-    ListTeam,
-    CreateChat {
-        body: Value,
-    },
-    SendPrompt {
-        sid: String,
-        body: Value,
-    },
-    Cancel {
-        sid: String,
-    },
-    Approve {
-        sid: String,
-        body: Value,
-    },
-    ListMedia {
-        sid: String,
-        query: String,
-    },
-    SubscribeSession {
-        sid: String,
-        stream_id: String,
-    },
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct DesktopResponse {
-    pub status: u16,
-    #[serde(default)]
-    pub body: Value,
 }

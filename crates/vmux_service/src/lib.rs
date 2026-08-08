@@ -3,7 +3,7 @@
 
 #[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
 pub use vmux_service_client::{
-    read_message, read_message_blocking, write_message, write_message_blocking,
+    pairing, read_message, read_message_blocking, write_message, write_message_blocking,
 };
 
 pub mod chat;

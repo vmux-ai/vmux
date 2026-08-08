@@ -6,13 +6,11 @@ mod qr_scanner;
 mod quic_api;
 
 use std::collections::HashMap;
-use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dioxus::prelude::*;
-use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, WorkingIndicator};
@@ -103,25 +101,23 @@ struct MobileRoomProjection {
 struct Credentials {
     base_url: String,
     token: String,
-    /// SHA-256 of the desktop's QUIC certificate. Absent when paired against a desktop with no
-    /// QUIC listener, which keeps the HTTP path working while both transports coexist.
+    /// SHA-256 of the desktop's QUIC certificate, pinned when dialling it.
+    ///
+    /// Defaulted rather than required so a pairing written by an older build still deserialises.
+    /// It is refused on use instead, which tells the phone to scan again rather than silently
+    /// forgetting the Mac.
     #[serde(default)]
     fingerprint: String,
 }
 
 #[derive(Clone)]
 struct Api {
-    client: Client,
-    credentials: Credentials,
-    /// Present when the pairing carried a certificate fingerprint. Absent means the desktop had
-    /// no QUIC listener when it was paired, and this stays on HTTP.
-    quic: Option<crate::quic_api::QuicApi>,
+    quic: crate::quic_api::QuicApi,
 }
 
 enum ApiError {
     Unauthorized,
-    /// The endpoint is not there. A relay too old to carry this route answers the same way, and
-    /// neither case is fixed by asking again.
+    /// No such session on the Mac. Asking again will not conjure one.
     NotFound,
     Message(String),
 }
@@ -137,153 +133,92 @@ impl std::fmt::Display for ApiError {
 }
 
 impl Api {
-    fn new(credentials: Credentials) -> Self {
-        let client = api_client(&credentials.base_url);
-        let quic = quic_endpoint(&credentials).map(crate::quic_api::QuicApi::new);
-        Self {
-            client,
-            credentials,
-            quic,
-        }
+    /// Fails when the pairing carries no certificate fingerprint.
+    ///
+    /// There is nothing to fall back to: the Mac is reached by pinning that certificate, so a
+    /// pairing without one names a desktop this build cannot dial. Re-pairing is the only fix.
+    fn new(credentials: Credentials) -> Result<Self, ApiError> {
+        let Some(endpoint) = quic_endpoint(&credentials) else {
+            return Err(ApiError::Message(
+                "This pairing is out of date. Scan the QR on your Mac again.".into(),
+            ));
+        };
+        Ok(Self {
+            quic: crate::quic_api::QuicApi::new(endpoint),
+        })
     }
 
     /// Drop any live QUIC connection so the next call redials.
     async fn reset_transport(&self) {
-        if let Some(quic) = &self.quic {
-            quic.reset().await;
-        }
-    }
-
-    fn endpoint(&self, path: &str) -> String {
-        format!("{}{path}", self.credentials.base_url.trim_end_matches('/'))
-    }
-
-    fn request(&self, method: Method, path: &str) -> reqwest::RequestBuilder {
-        self.client
-            .request(method, self.endpoint(path))
-            .bearer_auth(&self.credentials.token)
-    }
-
-    async fn get_json<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, ApiError> {
-        let response = self
-            .request(Method::GET, path)
-            .send()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return Err(ApiError::Unauthorized);
-        }
-        if response.status() == StatusCode::NOT_FOUND {
-            return Err(ApiError::NotFound);
-        }
-        if !response.status().is_success() {
-            return Err(ApiError::Message(format!(
-                "Mac returned HTTP {}.",
-                response.status()
-            )));
-        }
-        response
-            .json()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))
+        self.quic.reset().await;
     }
 
     async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
-        if let Some(quic) = &self.quic {
-            return broker_list(quic, SharedAgentCommand::ListAgents).await;
-        }
-        self.get_json("/api/agents").await
+        broker_list(&self.quic, SharedAgentCommand::ListAgents).await
     }
 
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
-        if let Some(quic) = &self.quic {
-            return match quic.request(SharedMessage::ListSessions).await {
-                Ok(SharedResponse::Sessions(sessions)) => Ok(sessions),
-                Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
-                Err(error) => Err(error.into()),
-            };
+        match self.quic.request(SharedMessage::ListSessions).await {
+            Ok(SharedResponse::Sessions(sessions)) => Ok(sessions),
+            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Err(error) => Err(error.into()),
         }
-        self.get_json("/api/sessions").await
     }
 
     async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
-        if let Some(quic) = &self.quic {
-            return broker_list(quic, SharedAgentCommand::ListTeam).await;
-        }
-        self.get_json("/api/team").await
+        broker_list(&self.quic, SharedAgentCommand::ListTeam).await
     }
 
     /// Subscribe to a session's events.
-    ///
-    /// QUIC only. The SSE equivalent is gone from the caller, so a pairing with no fingerprint
-    /// can still list and send but will not stream — which is the state a desktop too old to
-    /// offer QUIC leaves it in, and is preferable to pretending otherwise.
     async fn subscribe(&self, sid: &str) -> Result<crate::quic_api::Subscription, ApiError> {
-        let Some(quic) = &self.quic else {
-            return Err(ApiError::NotFound);
-        };
-        quic.subscribe(sid).await.map_err(Into::into)
+        self.quic.subscribe(sid).await.map_err(Into::into)
     }
 
     /// Submit a prompt to a running session.
     async fn send_prompt(&self, sid: &str, request: &PromptRequest) -> Result<(), ApiError> {
-        if let Some(quic) = &self.quic {
-            let message = SharedMessage::agent_input(
-                sid.to_string(),
-                request.text.clone(),
-                None,
-                request.attachments.clone(),
-            );
-            return self.applied(quic.request(message).await);
-        }
-        self.post_json(&format!("/api/sessions/{sid}/messages"), request)
-            .await
+        let message = SharedMessage::agent_input(
+            sid.to_string(),
+            request.text.clone(),
+            None,
+            request.attachments.clone(),
+        );
+        self.applied(self.quic.request(message).await)
     }
 
     /// Open a new chat on the desktop.
     async fn create_chat(&self, request: &NewChatRequest) -> Result<(), ApiError> {
-        if let Some(quic) = &self.quic {
-            let command = SharedAgentCommand::NewAgentChat {
-                client_op_id: request.client_op_id.clone(),
-                prompt: request.text.clone(),
-                agent_url: request.agent_url.clone(),
-            };
-            return self.applied(quic.request(SharedMessage::AgentCommand(command)).await);
-        }
-        self.post_json("/api/chats", request).await
+        let command = SharedAgentCommand::NewAgentChat {
+            client_op_id: request.client_op_id.clone(),
+            prompt: request.text.clone(),
+            agent_url: request.agent_url.clone(),
+        };
+        self.applied(
+            self.quic
+                .request(SharedMessage::AgentCommand(command))
+                .await,
+        )
     }
 
     /// Interrupt the session's in-flight turn.
     async fn cancel(&self, sid: &str) -> Result<(), ApiError> {
-        if let Some(quic) = &self.quic {
-            let message = SharedMessage::AgentCancel {
-                sid: sid.to_string(),
-            };
-            return self.applied(quic.request(message).await);
-        }
-        self.post_json(
-            &format!("/api/sessions/{sid}/cancel"),
-            &serde_json::json!({}),
-        )
-        .await
+        let message = SharedMessage::AgentCancel {
+            sid: sid.to_string(),
+        };
+        self.applied(self.quic.request(message).await)
     }
 
     /// Answer a pending tool approval.
     async fn approve(&self, sid: &str, request: &ApprovalRequest) -> Result<(), ApiError> {
-        if let Some(quic) = &self.quic {
-            let message = SharedMessage::AgentApprove {
-                sid: sid.to_string(),
-                call_id: request.call_id.clone(),
-                decision: if request.allow {
-                    vmux_wire::protocol::ApprovalDecision::Allow
-                } else {
-                    vmux_wire::protocol::ApprovalDecision::Deny
-                },
-            };
-            return self.applied(quic.request(message).await);
-        }
-        self.post_json(&format!("/api/sessions/{sid}/approval"), request)
-            .await
+        let message = SharedMessage::AgentApprove {
+            sid: sid.to_string(),
+            call_id: request.call_id.clone(),
+            decision: if request.allow {
+                vmux_wire::protocol::ApprovalDecision::Allow
+            } else {
+                vmux_wire::protocol::ApprovalDecision::Deny
+            },
+        };
+        self.applied(self.quic.request(message).await)
     }
 
     /// A replay is success, not failure: the desktop recognised the op and declined to run it
@@ -299,60 +234,16 @@ impl Api {
         }
     }
 
-    async fn post_json<T: Serialize + ?Sized>(&self, path: &str, body: &T) -> Result<(), ApiError> {
-        let response = self
-            .request(Method::POST, path)
-            .json(body)
-            .send()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            Err(ApiError::Unauthorized)
-        } else if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(ApiError::Message(format!(
-                "Mac returned HTTP {}.",
-                response.status()
-            )))
-        }
-    }
-
     async fn media(&self, sid: &str, query: &str) -> Result<Vec<RemoteMediaEntry>, ApiError> {
-        if let Some(quic) = &self.quic {
-            let request = SharedMessage::ListMedia {
-                sid: sid.to_string(),
-                query: query.to_string(),
-            };
-            return match quic.request(request).await {
-                Ok(SharedResponse::Media(entries)) => Ok(entries),
-                Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
-                Err(error) => Err(error.into()),
-            };
+        let request = SharedMessage::ListMedia {
+            sid: sid.to_string(),
+            query: query.to_string(),
+        };
+        match self.quic.request(request).await {
+            Ok(SharedResponse::Media(entries)) => Ok(entries),
+            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Err(error) => Err(error.into()),
         }
-        let mut endpoint = Url::parse(&self.endpoint(&format!("/api/sessions/{sid}/media")))
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        endpoint.query_pairs_mut().append_pair("query", query);
-        let response = self
-            .client
-            .get(endpoint)
-            .bearer_auth(&self.credentials.token)
-            .send()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return Err(ApiError::Unauthorized);
-        }
-        if !response.status().is_success() {
-            return Err(ApiError::Message(format!(
-                "Mac returned HTTP {}.",
-                response.status()
-            )));
-        }
-        response
-            .json()
-            .await
-            .map_err(|error| ApiError::Message(error.to_string()))
     }
 }
 
@@ -450,33 +341,6 @@ impl From<crate::quic_api::QuicError> for ApiError {
             other => Self::Message(other.to_string()),
         }
     }
-}
-
-fn api_client(base_url: &str) -> Client {
-    let mut builder = Client::builder();
-    if accepts_local_development_cert(base_url) {
-        builder = builder.danger_accept_invalid_certs(true);
-    }
-    builder.build().unwrap_or_else(|_| Client::new())
-}
-
-fn accepts_local_development_cert(url: &str) -> bool {
-    let Ok(url) = Url::parse(url) else {
-        return false;
-    };
-    if url.scheme() != "https" {
-        return false;
-    }
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-    if host == "localhost" {
-        return true;
-    }
-    host.parse::<IpAddr>().is_ok_and(|ip| match ip {
-        IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
-        IpAddr::V6(ip) => ip.is_loopback() || ip.is_unique_local(),
-    })
 }
 
 fn submit_remote_prompt(
@@ -768,7 +632,15 @@ fn App() -> Element {
             return;
         }
         pair_url.set(pairing_url(&credentials));
-        let client = Api::new(credentials);
+        let client = match Api::new(credentials) {
+            Ok(client) => client,
+            Err(reason) => {
+                clear_credentials();
+                error.set(reason.to_string());
+                auth.set(AuthState::Unpaired);
+                return;
+            }
+        };
         // Stored credentials already answer "is this paired?", so paint the start page now and let
         // reachability resolve behind it. Waiting on the first round trip meant a spinner for as
         // long as the dial takes to give up, which is the whole dial timeout when the Mac is off.
@@ -836,7 +708,15 @@ fn App() -> Element {
             };
             pairing.set(true);
             error.set(String::new());
-            let client = Api::new(credentials.clone());
+            let client = match Api::new(credentials.clone()) {
+                Ok(client) => client,
+                Err(reason) => {
+                    pairing.set(false);
+                    error.set(reason.to_string());
+                    auth.set(AuthState::Unpaired);
+                    continue;
+                }
+            };
             match client.sessions().await {
                 Ok(next) => {
                     save_credentials(&credentials);
@@ -2062,14 +1942,19 @@ mod tests {
         );
     }
 
-    /// A desktop with no QUIC listener sends no fingerprint. That must still pair, on HTTP,
-    /// rather than refusing — the two transports coexist until the cutover.
+    /// A link with no fingerprint parses but cannot be used: there is no unpinned transport left
+    /// to fall back to. It has to fail here, at the point of use, rather than at parse time —
+    /// that is what lets the phone say "scan again" instead of "malformed link".
     #[test]
-    fn a_link_without_a_fingerprint_still_pairs() {
+    fn a_link_without_a_fingerprint_parses_but_cannot_be_dialled() {
         let credentials = parse_pairing_url("https://mac.example.ts.net/#token=secret").unwrap();
 
         assert!(credentials.fingerprint.is_empty());
         assert_eq!(credentials.token, "secret");
+        assert!(
+            Api::new(credentials).is_err(),
+            "an unpinned pairing must be refused, not silently downgraded"
+        );
     }
 
     #[test]

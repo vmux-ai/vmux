@@ -1,31 +1,26 @@
+//! What Remote is made of, minus the transport.
+//!
+//! There is no server here any more — the axum listener this file was named for is gone, and a
+//! desktop behind NAT could never have been reached by one. [`spawn`] mints the token, builds the
+//! state, and hands it to the QUIC dialer in `quic`, which is what a phone actually talks to.
+//!
+//! What remains is everything that is true regardless of transport: the shared [`RemoteState`],
+//! replay dedup, the limits on prompts and attachments, and the `$HOME`-confined media walk.
+//! `quic/dispatch.rs` is the only caller.
+
 use std::collections::{HashSet, VecDeque};
-use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
 
-use axum::extract::{Path as AxumPath, Query, Request, State};
-use axum::http::header::AUTHORIZATION;
-use axum::http::{HeaderMap, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use base64::Engine;
-use futures_util::stream::{self, StreamExt};
-use serde::Deserialize;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::Mutex;
 
-use crate::acp::{AcpInput, AcpSessionManager};
-use crate::agent::{AgentSessionManager, SessionInput};
+use crate::acp::AcpSessionManager;
+use crate::agent::AgentSessionManager;
 use crate::agent_broker::AgentBroker;
 use crate::message::Message;
-use crate::protocol::{AgentAttachment, ApprovalDecision, ServiceMessage, SharedEvent};
-use crate::remote::{
-    ApprovalRequest, ClientOpId, NewChatRequest, PromptRequest, RemoteApproval, RemoteEvent,
-    RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent,
-};
+use crate::protocol::AgentAttachment;
+use crate::remote::{ClientOpId, RemoteMediaEntry, RemoteSession};
 
 pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
@@ -37,12 +32,6 @@ const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
 const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
 const MAX_CLIENT_OP_IDS: usize = 4096;
 const MAX_CLIENT_OP_ID_BYTES: usize = 256;
-
-#[derive(Deserialize)]
-struct MediaQuery {
-    #[serde(default)]
-    query: String,
-}
 
 #[derive(Clone)]
 pub(crate) struct RemoteState {
@@ -103,98 +92,15 @@ pub fn spawn(
         };
         // The desktop is unreachable without the relay, so a failure here is not something to
         // serve around — it is Remote being down, and it says so.
-        let quic_handle = match super::quic::spawn(state.clone()) {
-            Ok(handle) => Some(handle),
-            Err(error) => {
-                tracing::error!(%error, "remote quic: cannot reach the relay");
-                None
+        match super::quic::spawn(state) {
+            Ok(handle) => {
+                if let Err(error) = handle.await {
+                    tracing::error!(%error, "remote quic: relay task ended");
+                }
             }
-        };
-        let address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port());
-        let listener = match tokio::net::TcpListener::bind(address).await {
-            Ok(listener) => listener,
-            Err(error) => {
-                tracing::warn!(%error, port = crate::remote_port(), "remote: bind failed");
-                return;
-            }
-        };
-        tracing::info!(port = crate::remote_port(), "remote: mobile API ready");
-        if let Err(error) = axum::serve(listener, router(state)).await {
-            tracing::error!(%error, "remote: server failed");
-        }
-        if let Some(handle) = quic_handle {
-            handle.abort();
+            Err(error) => tracing::error!(%error, "remote quic: cannot reach the relay"),
         }
     })
-}
-
-fn router(state: RemoteState) -> Router {
-    let api = Router::new()
-        .route("/api/agents", get(list_agents))
-        .route("/api/team", get(list_team))
-        .route("/api/sessions", get(list_sessions))
-        .route("/api/sessions/{sid}/events", get(session_events))
-        .route("/api/sessions/{sid}/media", get(list_media))
-        .route("/api/sessions/{sid}/messages", post(send_prompt))
-        .route("/api/chats", post(create_chat))
-        .route("/api/sessions/{sid}/cancel", post(cancel))
-        .route("/api/sessions/{sid}/approval", post(approve))
-        .route_layer(middleware::from_fn_with_state(state.clone(), authorize));
-    Router::new().merge(api).with_state(state)
-}
-
-async fn create_chat(
-    State(state): State<RemoteState>,
-    Json(request): Json<NewChatRequest>,
-) -> StatusCode {
-    let prompt = request.text.trim();
-    if prompt.is_empty()
-        || prompt.len() > MAX_PROMPT_BYTES
-        || !valid_client_op_id(&request.client_op_id)
-    {
-        return StatusCode::BAD_REQUEST;
-    }
-    if !state
-        .client_ops
-        .lock()
-        .await
-        .claim(request.client_op_id.clone())
-    {
-        return StatusCode::ACCEPTED;
-    }
-    let command = crate::protocol::SharedAgentCommand::NewAgentChat {
-        client_op_id: request.client_op_id.clone(),
-        prompt: prompt.to_string(),
-        agent_url: request.agent_url.clone(),
-    }
-    .into();
-    match state
-        .broker
-        .command(crate::protocol::AgentRequestId::new(), None, command)
-        .await
-    {
-        Ok(crate::protocol::AgentCommandResult::Ok) => StatusCode::ACCEPTED,
-        Ok(crate::protocol::AgentCommandResult::Error(_)) | Err(_) => {
-            state.client_ops.lock().await.release(&request.client_op_id);
-            StatusCode::BAD_GATEWAY
-        }
-        Ok(_) => {
-            state.client_ops.lock().await.release(&request.client_op_id);
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    }
-}
-
-async fn authorize(State(state): State<RemoteState>, request: Request, next: Next) -> Response {
-    if !remote_enabled() {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
-    }
-    if request_token(request.headers()).is_some_and(|token| secure_eq(token, &state.token)) {
-        mark_paired(&state.paired);
-        next.run(request).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
 }
 
 pub(crate) fn remote_enabled() -> bool {
@@ -205,23 +111,13 @@ fn remote_enabled_at(path: &std::path::Path) -> bool {
     std::fs::read_to_string(path).is_ok_and(|state| state.trim() == "enabled")
 }
 
-fn request_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(str::trim)
-}
-
-/// Ask the GUI for something only it holds, answered as JSON.
+/// Ask the GUI for something only it holds, keeping the shape of its answer.
 ///
 /// The daemon and the ECS are separate processes, so anything derived from ECS state costs a
 /// round-trip rather than a read.
-/// Ask the GUI and keep the shape of its answer.
 ///
 /// `None` means no GUI answered. That is distinct from a GUI that answered `Ok` with no payload,
-/// which `broker_json` cannot express — collapsing the two reported a created chat as a missing
-/// desktop.
+/// and collapsing the two once reported a created chat as a missing desktop.
 pub(crate) async fn broker_result(
     state: &RemoteState,
     command: crate::protocol::AgentCommand,
@@ -231,262 +127,6 @@ pub(crate) async fn broker_result(
         .command(crate::protocol::AgentRequestId::new(), None, command)
         .await
         .ok()
-}
-
-pub(crate) async fn broker_json(
-    state: &RemoteState,
-    command: crate::protocol::AgentCommand,
-) -> Option<String> {
-    match state
-        .broker
-        .command(crate::protocol::AgentRequestId::new(), None, command)
-        .await
-    {
-        Ok(crate::protocol::AgentCommandResult::Text(json)) => Some(json),
-        _ => None,
-    }
-}
-
-/// The installed agents, so a remote client can offer the same launcher rows the desktop does.
-async fn list_agents(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::room::RemoteAgent>> {
-    let json = broker_json(
-        &state,
-        crate::protocol::SharedAgentCommand::ListAgents.into(),
-    )
-    .await;
-    Json(
-        json.and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default(),
-    )
-}
-
-/// The active space's team roster, so a remote client can render the same team page the desktop
-/// does.
-async fn list_team(State(state): State<RemoteState>) -> Json<Vec<vmux_wire::team::TeamMemberRow>> {
-    let json = broker_json(&state, crate::protocol::SharedAgentCommand::ListTeam.into()).await;
-    Json(
-        json.and_then(|json| serde_json::from_str(&json).ok())
-            .unwrap_or_default(),
-    )
-}
-
-async fn list_sessions(State(state): State<RemoteState>) -> Json<Vec<RemoteSession>> {
-    let mut sessions = state.agents.lock().await.remote_sessions();
-    sessions.extend(state.acp.lock().await.remote_sessions());
-    for session in &mut sessions {
-        if let Some(messages) = session_messages(&state, &session.sid).await {
-            session.title = vmux_wire::room::conversation_title(&messages, &session.name);
-        }
-    }
-    sessions.sort_by_key(|session| std::cmp::Reverse(session.created_at_ms));
-    Json(sessions)
-}
-
-async fn send_prompt(
-    State(state): State<RemoteState>,
-    AxumPath(sid): AxumPath<String>,
-    Json(request): Json<PromptRequest>,
-) -> StatusCode {
-    let text = request.text.trim();
-    let Some(attachments) = validate_remote_attachments(request.attachments) else {
-        return StatusCode::BAD_REQUEST;
-    };
-    if (text.is_empty() && attachments.is_empty())
-        || text.len() > MAX_PROMPT_BYTES
-        || !valid_client_op_id(&request.client_op_id)
-    {
-        return StatusCode::BAD_REQUEST;
-    }
-    if !state
-        .client_ops
-        .lock()
-        .await
-        .claim(request.client_op_id.clone())
-    {
-        return StatusCode::ACCEPTED;
-    }
-    if state.acp.lock().await.contains(&sid) {
-        state.acp.lock().await.input(
-            &sid,
-            AcpInput::User {
-                text: text.to_string(),
-                context: None,
-                attachments,
-            },
-        );
-        return StatusCode::ACCEPTED;
-    }
-    let agents = state.agents.lock().await;
-    if agents.remote_session(&sid).is_none() {
-        drop(agents);
-        state.client_ops.lock().await.release(&request.client_op_id);
-        return StatusCode::NOT_FOUND;
-    }
-    agents.input(
-        &sid,
-        SessionInput::User {
-            text: text.to_string(),
-            attachments,
-        },
-    );
-    StatusCode::ACCEPTED
-}
-
-async fn list_media(
-    State(state): State<RemoteState>,
-    AxumPath(sid): AxumPath<String>,
-    Query(query): Query<MediaQuery>,
-) -> Result<Json<Vec<RemoteMediaEntry>>, StatusCode> {
-    if query.query.len() > MAX_MEDIA_QUERY_BYTES {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let exists = state.acp.lock().await.contains(&sid)
-        || state.agents.lock().await.remote_session(&sid).is_some();
-    if !exists {
-        return Err(StatusCode::NOT_FOUND);
-    }
-    let entries = tokio::task::spawn_blocking(move || remote_media_entries(&query.query))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(entries))
-}
-
-async fn cancel(State(state): State<RemoteState>, AxumPath(sid): AxumPath<String>) -> StatusCode {
-    if state.acp.lock().await.contains(&sid) {
-        state.acp.lock().await.input(&sid, AcpInput::Cancel);
-        return StatusCode::ACCEPTED;
-    }
-    let agents = state.agents.lock().await;
-    if agents.remote_session(&sid).is_none() {
-        return StatusCode::NOT_FOUND;
-    }
-    agents.input(&sid, SessionInput::Cancel);
-    StatusCode::ACCEPTED
-}
-
-async fn approve(
-    State(state): State<RemoteState>,
-    AxumPath(sid): AxumPath<String>,
-    Json(request): Json<ApprovalRequest>,
-) -> StatusCode {
-    let decision = if request.allow {
-        ApprovalDecision::Allow
-    } else {
-        ApprovalDecision::Deny
-    };
-    if state.acp.lock().await.contains(&sid) {
-        state.acp.lock().await.input(
-            &sid,
-            AcpInput::Approve {
-                call_id: request.call_id,
-                decision,
-            },
-        );
-        return StatusCode::ACCEPTED;
-    }
-    let agents = state.agents.lock().await;
-    if agents.remote_session(&sid).is_none() {
-        return StatusCode::NOT_FOUND;
-    }
-    agents.input(
-        &sid,
-        SessionInput::Approve {
-            call_id: request.call_id,
-            decision,
-        },
-    );
-    StatusCode::ACCEPTED
-}
-
-async fn session_events(
-    State(state): State<RemoteState>,
-    AxumPath(sid): AxumPath<String>,
-) -> Result<impl IntoResponse, StatusCode> {
-    let Some((session, events, receiver)) = session_stream(&state, &sid).await else {
-        return Err(StatusCode::NOT_FOUND);
-    };
-    let room_id = session.room_id.clone();
-    let through_seq = events
-        .last()
-        .map(|event| event.server_seq)
-        .unwrap_or_default();
-    let initial = vec![
-        remote_sse(RemoteEvent::Session { session }),
-        remote_sse(RemoteEvent::Snapshot {
-            room_id,
-            through_seq,
-            events,
-        }),
-    ];
-    let live_state = state.clone();
-    let live_sid = sid.clone();
-    let disconnect_check = tokio::time::interval(Duration::from_secs(1));
-    let live = stream::unfold((receiver, disconnect_check), move |stream_state| {
-        let remote_state = live_state.clone();
-        let sid = live_sid.clone();
-        async move {
-            let (mut receiver, mut disconnect_check) = stream_state;
-            loop {
-                tokio::select! {
-                    _ = disconnect_check.tick() => {
-                        if !remote_enabled() {
-                            return None;
-                        }
-                    }
-                    message = receiver.recv() => match message {
-                        Ok(message) => {
-                            if let Some(event) = service_event(&remote_state, &sid, message).await {
-                                return Some((
-                                    remote_sse(event),
-                                    (receiver, disconnect_check),
-                                ));
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            if let Some(event) = session_snapshot(&remote_state, &sid).await {
-                                return Some((
-                                    remote_sse(event),
-                                    (receiver, disconnect_check),
-                                ));
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Closed) => return None,
-                    },
-                }
-            }
-        }
-    });
-    Ok(Sse::new(stream::iter(initial).chain(live)).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(15))
-            .text("keep-alive"),
-    ))
-}
-
-async fn session_stream(
-    state: &RemoteState,
-    sid: &str,
-) -> Option<(
-    RemoteSession,
-    Vec<RoomEvent>,
-    broadcast::Receiver<ServiceMessage>,
-)> {
-    {
-        let acp = state.acp.lock().await;
-        if let Some(mut session) = acp.remote_session(sid) {
-            let messages = acp.remote_messages(sid)?;
-            session.title = vmux_wire::room::conversation_title(&messages, &session.name);
-            let events =
-                vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
-            return Some((session, events, acp.subscribe(sid)?));
-        }
-    }
-    let agents = state.agents.lock().await;
-    let mut session = agents.remote_session(sid)?;
-    let messages = agents.remote_messages(sid).await?;
-    session.title = vmux_wire::room::conversation_title(&messages, &session.name);
-    let events = vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
-    Some((session, events, agents.subscribe(sid)?))
 }
 
 pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<Vec<Message>> {
@@ -515,81 +155,6 @@ pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<Re
     Some(session)
 }
 
-async fn session_snapshot(state: &RemoteState, sid: &str) -> Option<RemoteEvent> {
-    let session = current_session(state, sid).await?;
-    let messages = session_messages(state, sid).await?;
-    let events = vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
-    let through_seq = events
-        .last()
-        .map(|event| event.server_seq)
-        .unwrap_or_default();
-    Some(RemoteEvent::Snapshot {
-        room_id: session.room_id,
-        through_seq,
-        events,
-    })
-}
-
-async fn service_event(
-    state: &RemoteState,
-    sid: &str,
-    message: ServiceMessage,
-) -> Option<RemoteEvent> {
-    match message {
-        ServiceMessage::Shared(SharedEvent::AgentDelta { text, .. }) => Some(RemoteEvent::Delta {
-            room_id: vmux_wire::room::room_id_for_session(sid),
-            text,
-        }),
-        ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged { status, .. }) => {
-            Some(RemoteEvent::Status {
-                status: RemoteStatus::from(&status),
-            })
-        }
-        ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
-            call_id,
-            name,
-            args_json,
-            ..
-        }) => Some(RemoteEvent::Approval {
-            approval: Some(RemoteApproval {
-                call_id,
-                name,
-                args_json,
-            }),
-        }),
-        ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { .. }) => {
-            Some(RemoteEvent::Approval { approval: None })
-        }
-        ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot { messages_json, .. }) => {
-            let messages = serde_json::from_str::<Vec<Message>>(&messages_json).ok()?;
-            let session = current_session(state, sid).await?;
-            let events =
-                vmux_wire::room::room_events_from_messages(sid, session.created_at_ms, &messages);
-            let through_seq = events
-                .last()
-                .map(|event| event.server_seq)
-                .unwrap_or_default();
-            Some(RemoteEvent::Snapshot {
-                room_id: session.room_id,
-                through_seq,
-                events,
-            })
-        }
-        ServiceMessage::Shared(SharedEvent::AcpAgentInfo { .. })
-        | ServiceMessage::Shared(SharedEvent::AcpModelInfo { .. })
-        | ServiceMessage::Shared(SharedEvent::AcpWorkspaceChanged { .. }) => {
-            current_session(state, sid)
-                .await
-                .map(|session| RemoteEvent::Session { session })
-        }
-        _ => None,
-    }
-}
-
-fn remote_sse(event: RemoteEvent) -> Result<Event, Infallible> {
-    Ok(Event::default().data(serde_json::to_string(&event).unwrap()))
-}
-
 pub(crate) fn secure_eq(left: &str, right: &str) -> bool {
     if left.len() != right.len() {
         return false;
@@ -602,7 +167,11 @@ pub(crate) fn secure_eq(left: &str, right: &str) -> bool {
         == 0
 }
 
-fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
+/// A replay key the deduper is willing to hold.
+///
+/// It is remembered until 4096 newer ones push it out, so an unbounded one is retained memory the
+/// sender chooses the size of. The prompt cap does not cover this — it measures the text.
+pub(crate) fn valid_client_op_id(client_op_id: &ClientOpId) -> bool {
     let value = client_op_id.as_str();
     !value.trim().is_empty() && value.len() <= MAX_CLIENT_OP_ID_BYTES
 }
@@ -889,13 +458,6 @@ mod tests {
         assert!(secure_eq("abc", "abc"));
         assert!(!secure_eq("abc", "abd"));
         assert!(!secure_eq("abc", "ab"));
-    }
-
-    #[test]
-    fn request_token_accepts_bearer() {
-        let mut bearer = HeaderMap::new();
-        bearer.insert(AUTHORIZATION, "Bearer secret".parse().unwrap());
-        assert_eq!(request_token(&bearer), Some("secret"));
     }
 
     #[test]

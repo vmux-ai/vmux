@@ -48,6 +48,7 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     {
         let fingerprint = fingerprint_of(&certificate_pem)
             .map_err(|error| std::io::Error::other(error.to_string()))?;
+        persist_fingerprint(&fingerprint)?;
         return Ok(SelfSignedIdentity {
             certificate_pem,
             private_key_pem,
@@ -62,7 +63,20 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
     }
     std::fs::write(&cert_path, &identity.certificate_pem)?;
     super::write_private(&key_path, &identity.private_key_pem)?;
+    persist_fingerprint(&identity.fingerprint)?;
     Ok(identity)
+}
+
+/// Record the fingerprint beside the certificate, for readers that cannot hash a PEM.
+fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
+    let path = crate::remote_fingerprint_path();
+    if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, fingerprint)
 }
 
 /// The fingerprint of the certificate this desktop presents, for the pairing link.

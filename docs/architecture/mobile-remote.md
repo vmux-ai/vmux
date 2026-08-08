@@ -51,24 +51,34 @@ previous token.
 
 ## Runtime path
 
-The daemon binds an authenticated JSON and server-sent-events API to loopback. The native app uses
-`reqwest` and stores the paired endpoint and bearer token in its WebView sandbox.
+The transport is QUIC end to end. There is no HTTP fallback and no loopback listener: a Mac behind
+NAT cannot be dialled, so the daemon dials the relay and holds that connection open, and the relay
+forwards a phone's packets back over it verbatim. Those packets belong to a QUIC session that
+terminates on the Mac, so the relay cannot read them.
 
 Each phone connection uses the same daemon registries as the desktop client:
 
 - `AgentSessionManager` for provider-direct page agents.
 - `AcpSessionManager` for ACP agents.
-- Server-sent events for transcript snapshots, streamed deltas, status, and approvals.
-- JSON POST endpoints for prompts, cancellation, and approval decisions.
+- One bidirectional stream per request, and a long-lived stream per subscribed session carrying
+  transcript snapshots, streamed deltas, status and approvals.
+
+Every request funnels through `remote/quic/dispatch.rs`, the only place a remote message becomes an
+action. Prompt size, replay dedup and attachment confinement are enforced there once rather than
+remembered at each of nine handlers.
 
 ## Pairing and exposure
 
 The daemon generates a 256-bit bearer token in its profile-specific service directory with mode
-`0600`. The QR deep link and manual URL carry the endpoint and token. The native app extracts them,
-verifies them against the API, and persists them locally.
+`0600`, and a self-signed certificate beside it. The QR deep link and manual URL carry the relay
+endpoint, the token, and the certificate's SHA-256 fingerprint.
 
-The API rejects requests while Remote is off, rejects unauthenticated requests, caps prompt size,
-and listens only on loopback. Resetting the token restarts the daemon and invalidates paired phones.
+The phone pins that fingerprint and trusts nothing else — narrower than the public CA set. A
+pairing link carrying no fingerprint is refused rather than downgraded, because there is no
+unpinned transport left to fall back to.
+
+The daemon rejects connections while Remote is off, rejects an unrecognised token, and caps prompt
+size. Resetting the token restarts the daemon and invalidates paired phones.
 
 ## Reaching a Mac that is not on the network
 

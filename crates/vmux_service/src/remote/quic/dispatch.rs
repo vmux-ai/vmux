@@ -43,6 +43,9 @@ pub(crate) async fn dispatch(state: &RemoteState, request: SharedMessage) -> Sha
             let Some(client_op_id) = new_chat_op_id(&command) else {
                 return broker(state, command).await;
             };
+            if !super::super::server::valid_client_op_id(&client_op_id) {
+                return SharedResponse::Failed(SharedFailure::Invalid);
+            }
             if !claim_once(state, &client_op_id).await {
                 return SharedResponse::AlreadyApplied;
             }

@@ -217,83 +217,28 @@ fn enable_remote() -> Result<RemotePairingInfo, String> {
         .ok_or("waiting for the relay to allocate a port for this desktop")?;
     let fingerprint = vmux_service::remote::quic::identity_fingerprint()
         .ok_or("waiting for the QUIC identity to be written")?;
-    pairing_info(&base_url, &token, &fingerprint)
+    let pairing = vmux_service::pairing::pairing_info(&base_url, &token, &fingerprint)?;
+    Ok(RemotePairingInfo {
+        pairing_url: pairing.url,
+        pairing_deep_link: pairing.deep_link,
+    })
 }
 
 fn disable_remote() -> Result<(), String> {
     Ok(())
 }
 
-/// Build the pairing URL and deep link.
-///
-/// `fingerprint` is passed in rather than read here so the result depends only on the arguments —
-/// reading the certificate from disk would make this answer differ between a machine that has
-/// started Remote and one that has not.
-fn pairing_info(
-    base_url: &str,
-    token: &str,
-    fingerprint: &str,
-) -> Result<RemotePairingInfo, String> {
-    let mut pairing_url = url::Url::parse(base_url).map_err(|error| error.to_string())?;
-    pairing_url.set_fragment(Some(&if fingerprint.is_empty() {
-        format!("token={token}")
-    } else {
-        format!("token={token}&fp={fingerprint}")
-    }));
-    let mut pairing_deep_link =
-        url::Url::parse("vmuxremote://pair").map_err(|error| error.to_string())?;
-    pairing_deep_link
-        .query_pairs_mut()
-        .append_pair("base", base_url)
-        .append_pair("token", token);
-    if !fingerprint.is_empty() {
-        pairing_deep_link
-            .query_pairs_mut()
-            .append_pair("fp", fingerprint);
-    }
-    Ok(RemotePairingInfo {
-        pairing_url: pairing_url.to_string(),
-        pairing_deep_link: pairing_deep_link.to_string(),
-    })
-}
-
-/// Where the phone should dial: the relay's host, on the UDP port it allocated this desktop.
-///
-/// `None` until the daemon has registered and written that port down. Pairing cannot be offered
-/// before then, because the link would name a port nothing is listening on.
+/// Where the phone should dial, or `None` until the daemon has registered and recorded the port.
 fn relay_pairing_base_url() -> Result<Option<String>, String> {
     let relay_url = vmux_service::relay_url_from_env();
-    persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
+    vmux_service::pairing::persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
     // Minted here as well as in the daemon so both agree before the first registration.
     let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
 
-    let Some(port) = allocated_port() else {
+    let Some(port) = vmux_service::pairing::allocated_port() else {
         return Ok(None);
     };
-    let parsed = url::Url::parse(&relay_url).map_err(|error| error.to_string())?;
-    let host = parsed.host_str().ok_or("relay url has no host")?;
-    let scheme = parsed.scheme();
-    Ok(Some(format!("{scheme}://{host}:{port}")))
-}
-
-/// The port the relay gave this desktop, as recorded by the daemon at registration.
-fn allocated_port() -> Option<u16> {
-    let raw = std::fs::read_to_string(vmux_service::remote_relay_port_path()).ok()?;
-    raw.trim().parse().ok()
-}
-
-fn persist_relay_url(relay_url: &str) -> std::io::Result<()> {
-    let path = vmux_service::remote_relay_url_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, relay_url.trim().trim_end_matches('/'))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(())
+    vmux_service::pairing::relay_base_url(&relay_url, port).map(Some)
 }
 
 fn ensure_relay_device_id() -> std::io::Result<String> {
@@ -350,37 +295,5 @@ fn remove_if_exists(path: &Path) -> std::io::Result<()> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn builds_pairing_urls() {
-        let pairing = pairing_info("http://127.0.0.1:54821", "secret", "").unwrap();
-        assert_eq!(pairing.pairing_url, "http://127.0.0.1:54821/#token=secret");
-        assert_eq!(
-            pairing.pairing_deep_link,
-            "vmuxremote://pair?base=http%3A%2F%2F127.0.0.1%3A54821&token=secret"
-        );
-    }
-
-    /// The phone can only pin the desktop's certificate if the fingerprint survives into both
-    /// pairing shapes — the QR-encoded URL and the deep link. Dropping it from either would
-    /// downgrade that phone to an unpinned connection with nothing to show for it.
-    #[test]
-    fn a_fingerprint_reaches_both_pairing_shapes() {
-        let pairing = pairing_info("http://127.0.0.1:54821", "secret", "abc123").unwrap();
-
-        assert_eq!(
-            pairing.pairing_url,
-            "http://127.0.0.1:54821/#token=secret&fp=abc123"
-        );
-        assert_eq!(
-            pairing.pairing_deep_link,
-            "vmuxremote://pair?base=http%3A%2F%2F127.0.0.1%3A54821&token=secret&fp=abc123"
-        );
     }
 }
