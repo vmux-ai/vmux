@@ -436,6 +436,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
+    remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_search: KnowledgeSearchEvent,
@@ -483,6 +484,7 @@ fn SideSheetView(
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                    RemotePanel { remote: remote.clone() }
                 }
             }
             if let Some(pane) = active_pane {
@@ -969,6 +971,9 @@ fn dir_truncate_class(title: &str) -> &'static str {
         "truncate-start"
     } else {
         "truncate"
+    }
+}
+
 #[component]
 fn RemotePanel(remote: RemoteStateEvent) -> Element {
     let mut show_pairing = use_signal(|| false);
@@ -1160,9 +1165,6 @@ fn pairing_qr_svg(value: &str) -> Option<String> {
             .light_color(svg::Color("#ffffff"))
             .build(),
     )
-}
-
-    }
 }
 
 #[component]
