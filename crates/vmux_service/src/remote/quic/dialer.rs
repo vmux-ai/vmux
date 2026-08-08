@@ -58,7 +58,7 @@ async fn session(
     identity: &SelfSignedIdentity,
     liveness: &watch::Receiver<bool>,
 ) -> Result<(), String> {
-    let relay_url = crate::relay_url_from_env();
+    let relay_url = configured_relay_url();
     let device_id = ensure_device_id().map_err(|error| error.to_string())?;
     let address = resolve(&relay_url).await?;
 
@@ -124,6 +124,23 @@ async fn register(
     let (allocation, _) = decode_hello::<RelayAllocation>(&answer)
         .map_err(|error| format!("decode allocation: {error:?}"))?;
     Ok(allocation.port)
+}
+
+/// Which relay to dial.
+///
+/// The file is the normal source, not the fallback: launchd starts this daemon, so it inherits
+/// nothing from the shell that launched the app, and the environment is only ever set in a
+/// developer's terminal. The app writes what it resolved to disk for exactly this reason.
+fn configured_relay_url() -> String {
+    if let Ok(from_env) = std::env::var("VMUX_REMOTE_RELAY_URL")
+        && let Some(url) = crate::normalize_relay_url(&from_env)
+    {
+        return url;
+    }
+    match std::fs::read_to_string(crate::remote_relay_url_path()) {
+        Ok(persisted) => crate::resolve_relay_url(Some(&persisted)),
+        Err(_) => crate::resolve_relay_url(None),
+    }
 }
 
 /// The relay's QUIC control port, resolved.
