@@ -314,6 +314,34 @@ mod tests {
         }
     }
 
+    /// A claimed id is retained until 4096 newer ones evict it, so its length is memory the
+    /// sender chooses. The HTTP handlers used to bound it; deleting them moved the check here,
+    /// and the second assertion is the point — refusing after the claim would still retain it.
+    #[tokio::test]
+    async fn an_unbounded_client_op_id_is_refused_before_it_is_claimed() {
+        let state = empty_state();
+        let oversized = ClientOpId::new("x".repeat(4096));
+
+        let response = dispatch(
+            &state,
+            SharedMessage::AgentCommand(SharedAgentCommand::NewAgentChat {
+                client_op_id: oversized.clone(),
+                prompt: "hello".into(),
+                agent_url: None,
+            }),
+        )
+        .await;
+
+        assert!(matches!(
+            response,
+            SharedResponse::Failed(SharedFailure::Invalid)
+        ));
+        assert!(
+            claim_once(&state, &oversized).await,
+            "a refused id must never have been claimed"
+        );
+    }
+
     /// Replay protection is what makes a retry after a dropped connection safe.
     #[tokio::test]
     async fn a_client_op_id_can_only_be_claimed_once_but_is_reusable_after_release() {
