@@ -1130,6 +1130,7 @@ mod tests {
                 SharedEvent::AcpAgentInfo { .. } => "AcpAgentInfo",
                 SharedEvent::AcpWorkspaceChanged { .. } => "AcpWorkspaceChanged",
                 SharedEvent::AcpModelInfo { .. } => "AcpModelInfo",
+                SharedEvent::Session { .. } => "Session",
             }
         }
 
@@ -1174,6 +1175,20 @@ mod tests {
                 current_model_id: String::new(),
                 models: Vec::new(),
             },
+            SharedEvent::Session {
+                session: crate::room::RemoteSession {
+                    sid: sid(),
+                    room_id: crate::room::room_id_for_session("s"),
+                    title: String::new(),
+                    name: String::new(),
+                    runtime: String::new(),
+                    model: None,
+                    cwd: String::new(),
+                    status: crate::room::RemoteStatus::Idle,
+                    approval: None,
+                    created_at_ms: 0,
+                },
+            },
         ];
 
         assert_eq!(
@@ -1187,6 +1202,7 @@ mod tests {
                 "AcpAgentInfo",
                 "AcpWorkspaceChanged",
                 "AcpModelInfo",
+                "Session",
             ]
         );
     }

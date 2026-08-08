@@ -489,7 +489,7 @@ pub(crate) async fn session_messages(state: &RemoteState, sid: &str) -> Option<V
     state.agents.lock().await.remote_messages(sid).await
 }
 
-async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
+pub(crate) async fn current_session(state: &RemoteState, sid: &str) -> Option<RemoteSession> {
     let acp_session = {
         let acp = state.acp.lock().await;
         acp.remote_session(sid)

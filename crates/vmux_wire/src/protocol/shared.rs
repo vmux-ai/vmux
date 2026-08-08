@@ -156,6 +156,12 @@ pub enum SharedEvent {
         current_model_id: String,
         models: Vec<AcpModelOption>,
     },
+    /// The session as it now stands. Sent when an ACP agent reports its identity, model or
+    /// workspace, because the values a client renders come from daemon state it cannot see.
+    /// Appended last so the preceding positional rkyv discriminants keep their values.
+    Session {
+        session: RemoteSession,
+    },
 }
 
 impl From<SharedEvent> for ServiceMessage {

@@ -398,8 +398,9 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
                 events,
             })
         }
-        // Identity and workspace changes have no rendered equivalent yet; dropped rather than
-        // guessed at.
+        Shared::Session { session } => Some(RemoteEvent::Session { session }),
+        // The daemon resolves these into Session before they reach a client; reaching here means
+        // an older desktop that predates that, and there is nothing renderable to derive.
         Shared::AcpAgentInfo { .. }
         | Shared::AcpWorkspaceChanged { .. }
         | Shared::AcpModelInfo { .. } => None,

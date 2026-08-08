@@ -335,6 +335,10 @@ async fn stream_session_events(
                 let ServiceMessage::Shared(event) = message else {
                     continue;
                 };
+                let event = match resolve(state, &sid, event).await {
+                    Some(event) => event,
+                    None => continue,
+                };
                 if write_event(&mut send, &event).await.is_err() {
                     return;
                 }
@@ -354,6 +358,28 @@ async fn stream_session_events(
                 return;
             }
         }
+    }
+}
+
+/// Replace the ACP status events with the session they imply.
+///
+/// A client renders a session's name, model and workspace from daemon state it has no other way
+/// to read, so forwarding the raw event would leave the card stale. The HTTP path resolved these
+/// the same way before serialising.
+async fn resolve(
+    state: &super::server::RemoteState,
+    sid: &str,
+    event: vmux_wire::protocol::SharedEvent,
+) -> Option<vmux_wire::protocol::SharedEvent> {
+    use vmux_wire::protocol::SharedEvent as Shared;
+    match event {
+        Shared::AcpAgentInfo { .. }
+        | Shared::AcpModelInfo { .. }
+        | Shared::AcpWorkspaceChanged { .. } => {
+            let session = super::server::current_session(state, sid).await?;
+            Some(Shared::Session { session })
+        }
+        other => Some(other),
     }
 }
 
