@@ -26,7 +26,7 @@ use crate::worktree::WorktreePlugin;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
     LayoutSpawnRequest, LayoutStartupSet, NewAgentChatRequest, NewStackContext, Open,
-    OpenInNewStackRequest, TabLayoutSpawnRequest, reconcile, settings,
+    OpenInNewStackRequest, TabLayoutSpawnRequest, apply, settings,
 };
 
 /// Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,
@@ -51,10 +51,10 @@ impl Plugin for LayoutPlugin {
             .add_message::<BrowserGoForwardRequest>()
             .add_message::<OpenInNewStackRequest>()
             .add_message::<ExtensionInstallRequest>()
-            .add_message::<reconcile::LayoutApplyRequest>()
-            .add_message::<reconcile::LayoutApplyResponse>()
-            .add_message::<reconcile::LayoutSnapshotRequest>()
-            .add_message::<reconcile::LayoutSnapshotResponse>()
+            .add_message::<apply::LayoutApplyRequest>()
+            .add_message::<apply::LayoutApplyResponse>()
+            .add_message::<apply::LayoutSnapshotRequest>()
+            .add_message::<apply::LayoutSnapshotResponse>()
             .configure_sets(
                 Startup,
                 (
@@ -67,10 +67,7 @@ impl Plugin for LayoutPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    reconcile::apply_layout_requests,
-                    reconcile::serve_snapshot_requests,
-                ),
+                (apply::apply_layout_requests, apply::serve_snapshot_requests),
             )
             .add_systems(
                 Update,

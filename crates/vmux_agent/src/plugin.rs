@@ -729,7 +729,7 @@ pub struct AgentLookups<'w> {
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct AgentSpaceWriters<'w, 's> {
-    layout_apply: MessageWriter<'w, vmux_layout::reconcile::LayoutApplyRequest>,
+    layout_apply: MessageWriter<'w, vmux_layout::apply::LayoutApplyRequest>,
     space_command: MessageWriter<'w, vmux_space::SpaceCommandRequest>,
     bookmark_op: MessageWriter<'w, vmux_layout::bookmark::BookmarkOp>,
     focus_pane: MessageWriter<'w, FocusPaneRequest>,
@@ -2118,7 +2118,7 @@ fn handle_agent_commands(
                 }
                 writers
                     .layout_apply
-                    .write(vmux_layout::reconcile::LayoutApplyRequest {
+                    .write(vmux_layout::apply::LayoutApplyRequest {
                         request_id: request.request_id.0,
                         snapshot: layout,
                     });
@@ -4525,7 +4525,7 @@ fn handle_agent_queries(
         ),
         With<vmux_core::Bookmark>,
     >,
-    mut layout_snapshot_writer: MessageWriter<vmux_layout::reconcile::LayoutSnapshotRequest>,
+    mut layout_snapshot_writer: MessageWriter<vmux_layout::apply::LayoutSnapshotRequest>,
     mut screenshot_writer: MessageWriter<ScreenshotRequest>,
     mut browser_snapshot_writer: MessageWriter<BrowserSnapshotRequest>,
     mut browser_scroll_writer: MessageWriter<BrowserScrollRequest>,
@@ -4538,7 +4538,7 @@ fn handle_agent_queries(
     for request in reader.read() {
         match request.query {
             AgentQuery::ReadLayout { anchor } => {
-                layout_snapshot_writer.write(vmux_layout::reconcile::LayoutSnapshotRequest {
+                layout_snapshot_writer.write(vmux_layout::apply::LayoutSnapshotRequest {
                     request_id: request.request_id.0,
                     anchor,
                 });
@@ -4685,7 +4685,7 @@ fn handle_agent_queries(
 }
 
 fn forward_layout_apply_responses(
-    mut reader: MessageReader<vmux_layout::reconcile::LayoutApplyResponse>,
+    mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else { return };
@@ -4702,7 +4702,7 @@ fn forward_layout_apply_responses(
 }
 
 fn forward_layout_snapshot_responses(
-    mut reader: MessageReader<vmux_layout::reconcile::LayoutSnapshotResponse>,
+    mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else { return };
@@ -7898,10 +7898,10 @@ mod tests {
         .add_message::<vmux_layout::OpenInNewStackRequest>()
         .add_message::<vmux_layout::ExtensionInstallRequest>()
         .add_message::<vmux_layout::OpenBesideRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-        .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+        .add_message::<vmux_layout::apply::LayoutApplyRequest>()
+        .add_message::<vmux_layout::apply::LayoutApplyResponse>()
+        .add_message::<vmux_layout::apply::LayoutSnapshotRequest>()
+        .add_message::<vmux_layout::apply::LayoutSnapshotResponse>()
         .add_message::<vmux_terminal::TerminalSendRequest>()
         .add_message::<vmux_terminal::RunShellRequest>()
         .add_message::<vmux_setting::SettingsWriteRequest>()
@@ -7977,10 +7977,10 @@ mod tests {
         .add_message::<vmux_layout::OpenInNewStackRequest>()
         .add_message::<vmux_layout::ExtensionInstallRequest>()
         .add_message::<vmux_layout::OpenBesideRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutApplyRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutApplyResponse>()
-        .add_message::<vmux_layout::reconcile::LayoutSnapshotRequest>()
-        .add_message::<vmux_layout::reconcile::LayoutSnapshotResponse>()
+        .add_message::<vmux_layout::apply::LayoutApplyRequest>()
+        .add_message::<vmux_layout::apply::LayoutApplyResponse>()
+        .add_message::<vmux_layout::apply::LayoutSnapshotRequest>()
+        .add_message::<vmux_layout::apply::LayoutSnapshotResponse>()
         .add_message::<vmux_terminal::TerminalSendRequest>()
         .add_message::<vmux_terminal::RunShellRequest>()
         .add_message::<vmux_setting::SettingsWriteRequest>()

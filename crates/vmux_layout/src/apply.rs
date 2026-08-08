@@ -1,13 +1,14 @@
 //! Turning a reconciled layout into spawned panes and stacks.
 //!
-//! Gated as a whole: it needs Bevy and an ECS world, which the browser bundle has neither of.
-//! The diffing above it is pure and compiles everywhere.
+//! The peer of `reconcile`, which plans the change: that half is pure and compiles everywhere,
+//! while this one needs Bevy and an ECS world the browser bundle has neither of, so it is gated
+//! as a whole.
 
 use std::collections::HashMap;
 use std::collections::HashSet as ApplyHashSet;
 
-use super::*;
 use crate::protocol::{LayoutNode, LayoutSnapshot, NodeKind, parse_id};
+use crate::reconcile::*;
 
 use crate::pane::{
     Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps,
@@ -596,7 +597,8 @@ fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{SplitDirection, Tab as TabDto};
+    use crate::protocol::{Focus, SplitDirection, Stack as StackDto, Tab as TabDto};
+    use std::collections::HashSet;
 
     #[test]
     fn collect_existing_ids_scoped_to_active_space() {

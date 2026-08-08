@@ -263,8 +263,3 @@ fn plan_node(
         }
     }
 }
-
-#[cfg(not(web))]
-mod apply;
-#[cfg(not(web))]
-pub use apply::*;

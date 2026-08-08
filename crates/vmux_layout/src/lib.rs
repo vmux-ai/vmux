@@ -6,6 +6,8 @@
     clippy::new_ret_no_self
 )]
 
+#[cfg(not(web))]
+pub mod apply;
 pub mod command_bar;
 #[cfg(web)]
 pub mod debug_page;

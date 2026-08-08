@@ -6,7 +6,9 @@ pub use vmux_wire::history as event;
 pub mod page;
 #[cfg(native)]
 pub mod prune;
+#[cfg(native)]
 pub mod query;
+pub mod ranking;
 #[cfg(native)]
 pub mod spawn;
 #[cfg(native)]
