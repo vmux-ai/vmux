@@ -506,7 +506,7 @@ fn leave_session(
     mut connected: Signal<bool>,
     mut generation: Signal<u64>,
 ) {
-    let transition = native_transition::begin_close();
+    let dismissing = native_transition::NativeSheet::close();
     generation.set(generation().wrapping_add(1));
     current.set(None);
     room.set(MobileRoomProjection::default());
@@ -514,7 +514,7 @@ fn leave_session(
     status.set(RemoteStatus::Idle);
     approval.set(None);
     connected.set(false);
-    native_transition::finish_close(transition);
+    dismissing.finish();
 }
 
 #[component]
@@ -1603,7 +1603,7 @@ fn open_session(
     mut connected: Signal<bool>,
     mut generation: Signal<u64>,
 ) {
-    let transition = native_transition::begin_open();
+    native_transition::NativeSheet::open();
     let sid = session.sid.clone();
     current.set(Some(session.clone()));
     room.set(MobileRoomProjection {
@@ -1616,7 +1616,6 @@ fn open_session(
     connected.set(false);
     let next_generation = generation().wrapping_add(1);
     generation.set(next_generation);
-    native_transition::finish_open(transition);
     spawn(async move {
         loop {
             if generation() != next_generation {
