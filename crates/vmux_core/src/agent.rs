@@ -131,14 +131,6 @@ pub struct SpawnAgentInStackRequest {
     pub initial_attachments: Vec<vmux_wire::protocol::AgentAttachment>,
 }
 
-/// Prompt waiting for the next agent attached to this stack.
-#[derive(Component, Clone, Debug)]
-pub struct PendingAgentPrompt(pub String);
-
-/// Attachments waiting for the next agent attached to this stack.
-#[derive(Component, Clone, Debug, Default)]
-pub struct PendingAgentPromptAttachments(pub Vec<vmux_wire::protocol::AgentAttachment>);
-
 /// Swap the agent session shown on `stack` in place: tear down the current session and
 /// re-attach `target_url` (an ACP or CLI agent url) with the given `cwd`. Same tab position.
 /// Used by `/resume` (pick a past session) and the ACP↔CLI runtime handoff (`/cli`).

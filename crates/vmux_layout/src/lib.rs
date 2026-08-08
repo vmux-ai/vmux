@@ -203,8 +203,11 @@ pub enum LayoutSpawnRequest {
 #[derive(Clone, Debug)]
 pub enum TabLayoutSpawnContent {
     StartupUrlOrPrompt,
-    Url(String),
-    AgentPrompt { url: String, prompt: String },
+    Url {
+        url: String,
+        /// Left on the new stack as a [`vmux_core::PendingPrompt`] for the page to claim.
+        pending_prompt: Option<String>,
+    },
 }
 
 #[cfg(not(web))]
@@ -219,12 +222,16 @@ pub struct TabLayoutSpawnRequest {
     pub focus: bool,
 }
 
+/// Open `url` in a new focused tab in the active space.
+///
+/// Layout picks the space, the tab name and the working directory; the sender only says what to
+/// show. `pending_prompt` rides along as a [`vmux_core::PendingPrompt`] on the new stack, for
+/// whatever the URL opens to claim once it is ready.
 #[cfg(not(web))]
 #[derive(Message, Clone, Debug)]
-pub struct NewAgentChatRequest {
-    pub prompt: String,
-    /// Launch URL of the agent to start; `None` falls back to the first installed one.
-    pub agent_url: Option<String>,
+pub struct NewTabRequest {
+    pub url: String,
+    pub pending_prompt: Option<String>,
 }
 
 #[cfg(not(web))]

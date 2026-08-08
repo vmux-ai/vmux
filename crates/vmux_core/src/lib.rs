@@ -49,7 +49,7 @@ pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 #[cfg(not(web))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
-    PageOpenTarget, PageOpenTask,
+    PageOpenTarget, PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
 
 #[cfg(not(web))]

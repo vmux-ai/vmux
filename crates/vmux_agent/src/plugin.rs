@@ -7,8 +7,8 @@ use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_core::agent::{
     AgentKind, AgentProviderTargetKind, PageAgentAttachDefaultRequest, PageAgentAttachRequest,
-    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, PendingAgentPrompt,
-    PendingAgentPromptAttachments, RestartAgentPty, SpawnAgentInStackRequest,
+    PageAgentSpawnDefaultRequest, PageAgentSpawnStackRequest, RestartAgentPty,
+    SpawnAgentInStackRequest,
 };
 use vmux_core::{
     LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask, Ready,
@@ -102,7 +102,7 @@ impl Plugin for AgentSessionPlugin {
             .init_resource::<vmux_layout::pane::SpawnCounter>()
             .add_message::<AgentCommandRequest>()
             .add_message::<vmux_layout::bookmark::BookmarkOp>()
-            .add_message::<vmux_layout::NewAgentChatRequest>()
+            .add_message::<vmux_layout::NewTabRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
@@ -1855,7 +1855,7 @@ fn handle_agent_commands(
     mut stack_writers: (
         MessageWriter<vmux_layout::OpenInNewStackRequest>,
         MessageWriter<vmux_layout::ExtensionInstallRequest>,
-        MessageWriter<vmux_layout::NewAgentChatRequest>,
+        MessageWriter<vmux_layout::NewTabRequest>,
     ),
     mut terminal_send_writer: MessageWriter<vmux_terminal::TerminalSendRequest>,
     mut run_shell_writer: MessageWriter<vmux_terminal::RunShellRequest>,
@@ -2202,13 +2202,16 @@ fn handle_agent_commands(
                 prompt,
                 agent_url,
                 ..
-            }) => {
-                stack_writers.2.write(vmux_layout::NewAgentChatRequest {
-                    prompt: prompt.clone(),
-                    agent_url: agent_url.clone(),
-                });
-                AgentCommandResult::Ok
-            }
+            }) => match desktop.agents.prompt_url(agent_url.as_deref()) {
+                Some(url) => {
+                    stack_writers.2.write(vmux_layout::NewTabRequest {
+                        url,
+                        pending_prompt: Some(prompt.clone()),
+                    });
+                    AgentCommandResult::Ok
+                }
+                None => AgentCommandResult::Error("no agent is installed".to_string()),
+            },
             ServiceAgentCommand::Shared(SharedAgentCommand::ListAgents) => {
                 match serde_json::to_string(&remote_agents(&desktop.agents)) {
                     Ok(json) => AgentCommandResult::Text(json),
@@ -5047,7 +5050,10 @@ fn prepare_agent_tab_worktrees(
 fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask), PendingPageOpen>,
-        Query<(&PendingAgentPrompt, Option<&PendingAgentPromptAttachments>)>,
+        Query<(
+            &vmux_core::PendingPrompt,
+            Option<&vmux_core::PendingPromptAttachments>,
+        )>,
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
@@ -5466,10 +5472,10 @@ fn insert_initial_prompt_queue(
     }
     let mut queue = crate::components::PromptQueue::default();
     queue.enqueue_with_attachments(prompt, initial_attachments);
-    commands
-        .entity(stack)
-        .insert(queue)
-        .remove::<(PendingAgentPrompt, PendingAgentPromptAttachments)>();
+    commands.entity(stack).insert(queue).remove::<(
+        vmux_core::PendingPrompt,
+        vmux_core::PendingPromptAttachments,
+    )>();
 }
 
 fn cli_initial_prompt(
@@ -5702,9 +5708,10 @@ fn handle_spawn_agent_requests(
                             skipped: false,
                         });
                 }
-                commands
-                    .entity(req.stack)
-                    .remove::<(PendingAgentPrompt, PendingAgentPromptAttachments)>();
+                commands.entity(req.stack).remove::<(
+                    vmux_core::PendingPrompt,
+                    vmux_core::PendingPromptAttachments,
+                )>();
             }
             Err(e) => {
                 bevy::log::warn!("agent spawn ({:?}) failed: {e}", req.kind);
@@ -8491,7 +8498,7 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                PendingAgentPrompt("Show me something fun in terminal".into()),
+                vmux_core::PendingPrompt("Show me something fun in terminal".into()),
                 ChildOf(tab),
             ))
             .id();
@@ -8546,7 +8553,7 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                PendingAgentPrompt("Show me something fun in terminal".into()),
+                vmux_core::PendingPrompt("Show me something fun in terminal".into()),
                 ChildOf(tab),
             ))
             .id();
@@ -8601,8 +8608,8 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                PendingAgentPrompt("keep this prompt".to_string()),
-                PendingAgentPromptAttachments(vec![AgentAttachment {
+                vmux_core::PendingPrompt("keep this prompt".to_string()),
+                vmux_core::PendingPromptAttachments(vec![AgentAttachment {
                     path: "/tmp/reference.png".to_string(),
                     name: "reference.png".to_string(),
                     mime_type: "image/png".to_string(),
@@ -8670,10 +8677,10 @@ mod tests {
                 .map(|attachment| attachment.path.as_str()),
             Some("/tmp/reference.png")
         );
-        assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
+        assert!(app.world().get::<vmux_core::PendingPrompt>(stack).is_none());
         assert!(
             app.world()
-                .get::<PendingAgentPromptAttachments>(stack)
+                .get::<vmux_core::PendingPromptAttachments>(stack)
                 .is_none()
         );
         assert!(
@@ -8895,7 +8902,7 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                PendingAgentPrompt("fix the tests".to_string()),
+                vmux_core::PendingPrompt("fix the tests".to_string()),
             ))
             .id();
         app.world_mut().spawn(PageOpenTask {
@@ -8992,7 +8999,7 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                PendingAgentPrompt("ship it".to_string()),
+                vmux_core::PendingPrompt("ship it".to_string()),
             ))
             .id();
         app.world_mut().spawn(PageOpenTask {
@@ -9017,7 +9024,7 @@ mod tests {
                 .get::<crate::components::AgentConversationTitle>(stack),
             Some(&crate::components::AgentConversationTitle("ship it".into()))
         );
-        assert!(app.world().get::<PendingAgentPrompt>(stack).is_none());
+        assert!(app.world().get::<vmux_core::PendingPrompt>(stack).is_none());
     }
 
     #[test]

@@ -30,6 +30,17 @@ pub struct PageOpenRequest {
     pub request_id: Option<[u8; 16]>,
 }
 
+/// Prompt waiting for whatever opens on this stack.
+///
+/// Set before the page exists, because whoever holds the prompt runs before the thing that will
+/// answer it. The page claims this once it is ready and clears it.
+#[derive(Component, Clone, Debug)]
+pub struct PendingPrompt(pub String);
+
+/// Attachments waiting alongside a [`PendingPrompt`].
+#[derive(Component, Clone, Debug, Default)]
+pub struct PendingPromptAttachments(pub Vec<vmux_wire::protocol::AgentAttachment>);
+
 #[derive(Component, Clone, Debug)]
 pub struct PageOpenTask {
     pub id: PageOpenId,

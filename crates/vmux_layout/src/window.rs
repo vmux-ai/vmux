@@ -619,21 +619,17 @@ pub fn spawn_requested_tab_layouts(
                     });
                 }
             }
-            TabLayoutSpawnContent::Url(url) => {
+            TabLayoutSpawnContent::Url {
+                url,
+                pending_prompt,
+            } => {
                 new_stack_ctx.stack = None;
                 new_stack_ctx.needs_open = false;
-                page_open_requests.write(PageOpenRequest {
-                    target: PageOpenTarget::Stack(stack),
-                    url: url.clone(),
-                    request_id: None,
-                });
-            }
-            TabLayoutSpawnContent::AgentPrompt { url, prompt } => {
-                new_stack_ctx.stack = None;
-                new_stack_ctx.needs_open = false;
-                commands
-                    .entity(stack)
-                    .insert(vmux_core::agent::PendingAgentPrompt(prompt.clone()));
+                if let Some(prompt) = pending_prompt {
+                    commands
+                        .entity(stack)
+                        .insert(vmux_core::PendingPrompt(prompt.clone()));
+                }
                 page_open_requests.write(PageOpenRequest {
                     target: PageOpenTarget::Stack(stack),
                     url: url.clone(),

@@ -545,7 +545,10 @@ fn on_space_command(
                 primary_window: *primary_window,
                 name: None,
                 startup_dir,
-                content: TabLayoutSpawnContent::Url(SPACES_PAGE_URL.to_string()),
+                content: TabLayoutSpawnContent::Url {
+                    url: SPACES_PAGE_URL.to_string(),
+                    pending_prompt: None,
+                },
                 clear_pending_stack: true,
                 focus: true,
             });
@@ -606,13 +609,19 @@ fn handle_open_in_new_space(
         let content = url
             .as_deref()
             .filter(|url| !url.is_empty())
-            .map(|url| TabLayoutSpawnContent::Url(url.to_string()))
+            .map(|url| TabLayoutSpawnContent::Url {
+                url: url.to_string(),
+                pending_prompt: None,
+            })
             .or_else(|| {
                 effective_startup_url
                     .as_deref()
                     .map(|startup| startup.0.as_str())
                     .filter(|startup| !startup.is_empty())
-                    .map(|startup| TabLayoutSpawnContent::Url(startup.to_string()))
+                    .map(|startup| TabLayoutSpawnContent::Url {
+                        url: startup.to_string(),
+                        pending_prompt: None,
+                    })
             })
             .unwrap_or(TabLayoutSpawnContent::StartupUrlOrPrompt);
         layout_requests.write(TabLayoutSpawnRequest {
