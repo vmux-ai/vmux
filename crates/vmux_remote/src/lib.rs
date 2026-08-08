@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod quic;
 pub use quic::{
-    Capability, ClientHello, CloseCode, Envelope, PeerRole, ProtocolVersion, RelayHello, StreamKind,
+    ClientHello, CloseCode, Envelope, PeerRole, ProtocolVersion, RelayHello, StreamKind,
 };
 
 /// Identifies one paired desktop to the relay. Opaque: the relay routes on it and reads nothing

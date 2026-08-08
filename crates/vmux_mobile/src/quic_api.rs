@@ -17,8 +17,7 @@ use tokio::sync::Mutex;
 use vmux_remote::DeviceId;
 use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::{
-    Capability, ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello,
-    encode_hello,
+    ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
 };
 use vmux_wire::protocol::{SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
@@ -168,9 +167,6 @@ impl QuicApi {
             hello: ClientHello {
                 protocol_version: ProtocolVersion::CURRENT,
                 device_id: self.endpoint.device_id.clone(),
-                capabilities: vec![Capability::InlineMedia],
-                // Reserved. Snapshots are refetched on reconnect until the desktop can replay.
-                resume_from: None,
             },
             token: self.endpoint.token.clone(),
         };
@@ -186,7 +182,13 @@ impl QuicApi {
             .read_to_end(64 * 1024)
             .await
             .map_err(|_| classify_close(&connection))?;
-        decode_hello::<ServerHello>(&answer).map_err(|_| classify_close(&connection))?;
+        let (server_hello, _) =
+            decode_hello::<ServerHello>(&answer).map_err(|_| classify_close(&connection))?;
+        // Checked rather than discarded: a Mac speaking a version this build does not know would
+        // otherwise fail on the first real request, with nothing pointing at the mismatch.
+        if !server_hello.protocol_version.is_supported() {
+            return Err(QuicError::Refused(SharedFailure::Invalid));
+        }
         Ok(connection)
     }
 

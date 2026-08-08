@@ -132,7 +132,6 @@ pub fn admit(
     }
     Ok(ServerHello {
         protocol_version: ProtocolVersion::CURRENT,
-        capabilities: Vec::new(),
     })
 }
 
@@ -504,8 +503,6 @@ mod tests {
         ClientHello {
             protocol_version: ProtocolVersion(version),
             device_id: DeviceId::new("device"),
-            capabilities: Vec::new(),
-            resume_from: None,
         }
     }
 
@@ -649,8 +646,6 @@ mod live {
             hello: ClientHello {
                 protocol_version: ProtocolVersion::CURRENT,
                 device_id: DeviceId::new("test-device"),
-                capabilities: Vec::new(),
-                resume_from: None,
             },
             token: token.to_string(),
         };

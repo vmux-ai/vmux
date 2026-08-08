@@ -51,39 +51,25 @@ impl ProtocolVersion {
     }
 }
 
-/// An optional behaviour a peer advertises.
-///
-/// Unknown capabilities are ignored rather than refused, so a newer client can announce something
-/// an older desktop has never heard of without losing the connection.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Capability {
-    /// Client can resume a session stream from a sequence number instead of refetching a snapshot.
-    ResumeStreams,
-    /// Client renders inline media attachments.
-    InlineMedia,
-    #[serde(other)]
-    Unknown,
-}
-
 /// First application frame a client sends.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClientHello {
     pub protocol_version: ProtocolVersion,
     pub device_id: DeviceId,
-    #[serde(default)]
-    pub capabilities: Vec<Capability>,
-    /// Last `server_seq` the client already has, when resuming rather than starting cold.
-    #[serde(default)]
-    pub resume_from: Option<u64>,
 }
 
 /// The desktop's answer to a [`ClientHello`].
+///
+/// Mostly the accept signal: a client that reads a well-formed answer was admitted, where a
+/// refusal arrives as a connection close carrying a [`CloseCode`]. The version is here so a client
+/// can refuse a desktop it cannot speak to rather than failing on the first request.
+///
+/// Deliberately has no capability list. One was carried for a while and never populated or read;
+/// serde ignores unknown fields, so the negotiation can be added when something actually needs to
+/// negotiate, without a version bump to get there.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ServerHello {
     pub protocol_version: ProtocolVersion,
-    #[serde(default)]
-    pub capabilities: Vec<Capability>,
 }
 
 /// What a QUIC stream carries, written as its first byte so the peer can dispatch without
@@ -202,8 +188,6 @@ mod tests {
         let hello = ClientHello {
             protocol_version: ProtocolVersion::CURRENT,
             device_id: DeviceId::new("device-1"),
-            capabilities: vec![Capability::ResumeStreams],
-            resume_from: Some(42),
         };
         let mut bytes = encode_hello(&hello).unwrap();
         bytes.extend_from_slice(b"frames follow");
@@ -214,11 +198,12 @@ mod tests {
         assert_eq!(&bytes[consumed..], b"frames follow");
     }
 
-    /// The whole reason the hello is JSON: a client several releases ahead can announce a
-    /// capability this build has never heard of and still be understood.
+    /// The whole reason the hello is JSON: a client several releases ahead can send a field
+    /// this build has never heard of and still be understood. That tolerance is what lets the
+    /// hello grow later without a version bump, so it is worth a test of its own.
     #[test]
-    fn unknown_capability_degrades_instead_of_failing() {
-        let wire = br#"{"protocol_version":1,"device_id":"d","capabilities":["teleportation"]}"#;
+    fn an_unknown_field_degrades_instead_of_failing() {
+        let wire = br#"{"protocol_version":1,"device_id":"d","teleportation":true}"#;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&HELLO_MAGIC);
         bytes.push(HELLO_VERSION);
@@ -227,8 +212,8 @@ mod tests {
 
         let (decoded, _) = decode_hello::<ClientHello>(&bytes).unwrap();
 
-        assert_eq!(decoded.capabilities, vec![Capability::Unknown]);
-        assert_eq!(decoded.resume_from, None);
+        assert_eq!(decoded.device_id, DeviceId::new("d"));
+        assert_eq!(decoded.protocol_version, ProtocolVersion::CURRENT);
     }
 
     #[test]
@@ -244,8 +229,6 @@ mod tests {
         let hello = ClientHello {
             protocol_version: ProtocolVersion::CURRENT,
             device_id: DeviceId::new("d"),
-            capabilities: Vec::new(),
-            resume_from: None,
         };
         let bytes = encode_hello(&hello).unwrap();
 
