@@ -11,11 +11,14 @@
 
 pub mod dispatch;
 
-use std::net::SocketAddr;
+pub(crate) mod dialer;
+
 use std::time::Duration;
 
 use tokio::sync::watch;
-use vmux_remote::quic::endpoint::{SelfSignedIdentity, generate_self_signed, server_endpoint};
+
+use vmux_remote::quic::endpoint::{SelfSignedIdentity, generate_self_signed};
+
 use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
 use vmux_remote::quic::{
@@ -401,26 +404,78 @@ async fn session_snapshot(
     }
 }
 
-/// Bind the listener and serve until the endpoint closes.
+/// Register with the relay and serve the phones it tunnels back.
+///
+/// There is no listener any more. A desktop behind NAT cannot be dialled, so it dials out and the
+/// relay carries phone packets back over that connection; the endpoint those packets terminate on
+/// is built in [`inner_endpoint`], over a socket that is not a socket.
 pub(crate) fn spawn(
     state: super::server::RemoteState,
-    address: SocketAddr,
 ) -> std::io::Result<tokio::task::JoinHandle<()>> {
     let liveness = spawn_liveness_watch();
-    spawn_with_identity(state, address, ensure_identity()?, liveness).map(|(handle, _)| handle)
+    Ok(dialer::spawn(state, ensure_identity()?, liveness))
 }
 
-/// Bind with a caller-supplied identity.
+/// An endpoint that terminates phone sessions arriving through the relay tunnel.
 ///
-/// Split out so a test can use a throwaway certificate rather than writing one into the user's
-/// profile directory, which `ensure_identity` would otherwise do as a side effect.
+/// Same certificate and same server config a direct listener would have used — from the phone's
+/// side nothing about the TLS session differs, which is the point: the relay is carrying packets,
+/// not participating in them.
+pub(crate) fn inner_endpoint(
+    socket: std::sync::Arc<vmux_remote::quic::tunnel::TunnelSocket>,
+    identity: &SelfSignedIdentity,
+) -> Result<quinn::Endpoint, String> {
+    let config = vmux_remote::quic::endpoint::server_config(
+        &identity.certificate_pem,
+        &identity.private_key_pem,
+    )?;
+    quinn::Endpoint::new_with_abstract_socket(
+        quinn::EndpointConfig::default(),
+        Some(config),
+        socket,
+        std::sync::Arc::new(quinn::TokioRuntime),
+    )
+    .map_err(|error| format!("tunnel endpoint failed: {error}"))
+}
+
+/// Serve tunnelled connections until the control connection underneath them drops.
+pub(crate) async fn accept_loop(
+    endpoint: quinn::Endpoint,
+    state: super::server::RemoteState,
+    liveness: watch::Receiver<bool>,
+    control: quinn::Connection,
+) {
+    loop {
+        tokio::select! {
+            _ = control.closed() => return,
+            incoming = endpoint.accept() => {
+                let Some(incoming) = incoming else { return };
+                let state = state.clone();
+                let liveness = liveness.clone();
+                tokio::spawn(async move {
+                    match incoming.await {
+                        Ok(connection) => serve(connection, state, liveness).await,
+                        Err(error) => tracing::debug!(%error, "remote quic: handshake failed"),
+                    }
+                });
+            }
+        }
+    }
+}
+
+/// Bind a real listener for a caller-supplied identity.
+///
+/// Test-only since the cutover: production is reached through the relay tunnel, never by being
+/// dialled. The tests keep binding a socket because driving `serve` over one is what proves the
+/// hello exchange and dispatch still work.
+#[cfg(test)]
 pub(crate) fn spawn_with_identity(
     state: super::server::RemoteState,
-    address: SocketAddr,
+    address: std::net::SocketAddr,
     identity: SelfSignedIdentity,
     liveness: watch::Receiver<bool>,
-) -> std::io::Result<(tokio::task::JoinHandle<()>, SocketAddr)> {
-    let endpoint = server_endpoint(
+) -> std::io::Result<(tokio::task::JoinHandle<()>, std::net::SocketAddr)> {
+    let endpoint = vmux_remote::quic::endpoint::server_endpoint(
         address,
         &identity.certificate_pem,
         &identity.private_key_pem,

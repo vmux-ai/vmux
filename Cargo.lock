@@ -11570,6 +11570,7 @@ dependencies = [
 name = "vmux_remote"
 version = "0.0.30"
 dependencies = [
+ "bytes",
  "quinn",
  "rcgen",
  "ring",
@@ -11579,6 +11580,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "webpki-roots",
 ]
 
 [[package]]

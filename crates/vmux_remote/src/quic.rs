@@ -11,6 +11,7 @@
 /// Endpoint construction and certificate pinning. Absent on wasm, which has no UDP socket.
 #[cfg(not(target_arch = "wasm32"))]
 pub mod endpoint;
+pub mod tunnel;
 
 use serde::{Deserialize, Serialize};
 
@@ -292,4 +293,14 @@ pub struct RelayHello {
     pub role: PeerRole,
     /// Proves both ends belong to the same pairing. The relay compares, it does not mint.
     pub token: String,
+}
+
+/// The relay's answer to a desktop's hello.
+///
+/// A pairing link has to name the UDP port the phone should dial, and only the relay knows which
+/// one this desktop was given — so the desktop cannot build a link until this arrives.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RelayAllocation {
+    pub protocol_version: ProtocolVersion,
+    pub port: u16,
 }

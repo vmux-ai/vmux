@@ -414,17 +414,13 @@ fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint>
     let parsed = Url::parse(&credentials.base_url).ok()?;
     let host = parsed.host_str()?;
     let port = parsed.port().unwrap_or(443);
-    let device_id = parsed
-        .path_segments()
-        .and_then(|mut segments| segments.next_back())
-        .filter(|segment| !segment.is_empty())
-        .unwrap_or("direct")
-        .to_string();
+    // The relay routes by port, not by name — a phone's packets reach exactly one desktop because
+    // of which port they arrived on. This id only labels the hello the desktop reads.
     Some(crate::quic_api::Endpoint {
         address: format!("{host}:{port}"),
         token: credentials.token.clone(),
         fingerprint: credentials.fingerprint.clone(),
-        device_id: vmux_remote::DeviceId::new(device_id),
+        device_id: vmux_remote::DeviceId::new(format!("{host}:{port}")),
     })
 }
 

@@ -27,8 +27,6 @@ use crate::remote::{
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent,
 };
 
-mod relay;
-
 pub(crate) const MAX_PROMPT_BYTES: usize = 64 * 1024;
 const MAX_ATTACHMENTS: usize = 16;
 const MAX_ATTACHMENT_BYTES: u64 = 100 * 1024 * 1024;
@@ -103,15 +101,12 @@ pub fn spawn(
             broker,
             client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
         };
-        let relay_handle = relay::spawn(state.clone());
-        // Same port number, but UDP, so the two listeners never contend. A QUIC failure leaves
-        // HTTP serving rather than taking Remote down with it — the whole point of running them
-        // side by side until the cutover.
-        let quic_address = (std::net::Ipv4Addr::LOCALHOST, crate::remote_port()).into();
-        let quic_handle = match super::quic::spawn(state.clone(), quic_address) {
+        // The desktop is unreachable without the relay, so a failure here is not something to
+        // serve around — it is Remote being down, and it says so.
+        let quic_handle = match super::quic::spawn(state.clone()) {
             Ok(handle) => Some(handle),
             Err(error) => {
-                tracing::warn!(%error, "remote quic: unavailable, serving HTTP only");
+                tracing::error!(%error, "remote quic: cannot reach the relay");
                 None
             }
         };
@@ -127,7 +122,6 @@ pub fn spawn(
         if let Err(error) = axum::serve(listener, router(state)).await {
             tracing::error!(%error, "remote: server failed");
         }
-        relay_handle.abort();
         if let Some(handle) = quic_handle {
             handle.abort();
         }

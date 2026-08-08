@@ -109,13 +109,27 @@ impl QuicApi {
 
     async fn dial(&self) -> Result<quinn::Connection, QuicError> {
         let endpoint = client_endpoint(&self.endpoint.fingerprint).map_err(QuicError::Transport)?;
-        let address = self
+        // The pairing link names the relay by host, so this has to resolve rather than parse: a
+        // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
+        // pairing address is not valid".
+        let address = tokio::net::lookup_host(&self.endpoint.address)
+            .await
+            .map_err(|_| QuicError::Transport("That pairing address did not resolve.".into()))?
+            .next()
+            .ok_or_else(|| {
+                QuicError::Transport("That pairing address resolved to nothing.".into())
+            })?;
+        // The certificate is pinned by fingerprint and the verifier ignores the name, but the
+        // relay may still route on SNI, so send the real host rather than a placeholder.
+        let server_name = self
             .endpoint
             .address
-            .parse()
-            .map_err(|_| QuicError::Transport("That pairing address is not valid.".into()))?;
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(&self.endpoint.address)
+            .to_string();
         let connection = endpoint
-            .connect(address, "localhost")
+            .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| classify_connection_error(&error))?;

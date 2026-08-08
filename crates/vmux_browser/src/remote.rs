@@ -211,16 +211,12 @@ fn remote_worker(command_rx: Receiver<bool>, result_tx: Sender<RemoteWorkerResul
 
 fn enable_remote() -> Result<RemotePairingInfo, String> {
     let token = wait_for_token().map_err(|error| error.to_string())?;
-    let base_url = match relay_pairing_base_url()? {
-        Some(base_url) => base_url,
-        None => {
-            let port = vmux_service::remote_port();
-            format!("http://127.0.0.1:{port}")
-        }
-    };
-    // Absent until the QUIC listener has written its certificate, which leaves the phone on
-    // HTTP rather than blocking pairing.
-    let fingerprint = vmux_service::remote::quic::identity_fingerprint().unwrap_or_default();
+    // There is no loopback fallback: a desktop behind NAT is only reachable through the relay, so
+    // a link naming anything else would pair a phone that can never connect.
+    let base_url = relay_pairing_base_url()?
+        .ok_or("waiting for the relay to allocate a port for this desktop")?;
+    let fingerprint = vmux_service::remote::quic::identity_fingerprint()
+        .ok_or("waiting for the QUIC identity to be written")?;
     pairing_info(&base_url, &token, &fingerprint)
 }
 
@@ -261,16 +257,29 @@ fn pairing_info(
     })
 }
 
+/// Where the phone should dial: the relay's host, on the UDP port it allocated this desktop.
+///
+/// `None` until the daemon has registered and written that port down. Pairing cannot be offered
+/// before then, because the link would name a port nothing is listening on.
 fn relay_pairing_base_url() -> Result<Option<String>, String> {
-    // Removing the file matters: it is the daemon's only view of this setting, so a stale one
-    // would keep it dialling a relay the user just switched off.
-    let Some(relay_url) = vmux_service::relay_url_from_env() else {
-        let _ = std::fs::remove_file(vmux_service::remote_relay_url_path());
+    let relay_url = vmux_service::relay_url_from_env();
+    persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
+    // Minted here as well as in the daemon so both agree before the first registration.
+    let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
+
+    let Some(port) = allocated_port() else {
         return Ok(None);
     };
-    persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
-    let device_id = ensure_relay_device_id().map_err(|error| error.to_string())?;
-    Ok(Some(format!("{relay_url}/r/{device_id}")))
+    let parsed = url::Url::parse(&relay_url).map_err(|error| error.to_string())?;
+    let host = parsed.host_str().ok_or("relay url has no host")?;
+    let scheme = parsed.scheme();
+    Ok(Some(format!("{scheme}://{host}:{port}")))
+}
+
+/// The port the relay gave this desktop, as recorded by the daemon at registration.
+fn allocated_port() -> Option<u16> {
+    let raw = std::fs::read_to_string(vmux_service::remote_relay_port_path()).ok()?;
+    raw.trim().parse().ok()
 }
 
 fn persist_relay_url(relay_url: &str) -> std::io::Result<()> {

@@ -156,6 +156,106 @@ pub fn client_endpoint(fingerprint: &str) -> Result<Endpoint, String> {
     Ok(endpoint)
 }
 
+/// A client endpoint for dialling the relay, which presents a publicly-signed certificate.
+///
+/// Unlike the pinned path this verifies the name, because there is nothing else to verify
+/// against: the relay's certificate is renewed on its own schedule, so a fingerprint captured at
+/// pairing time would start rejecting it without warning.
+///
+/// A relay on loopback or a private address is a development stack whose certificate no public
+/// root signs, so it verifies nothing there — the same allowance the HTTP client already made,
+/// and not reachable from anywhere an attacker could sit.
+pub fn client_endpoint_relay(host: &str) -> Result<Endpoint, String> {
+    let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_protocol_versions(&[&rustls::version::TLS13])
+    .map_err(|error| format!("TLS config failed: {error}"))?;
+
+    let mut crypto = if is_local_development_host(host) {
+        builder
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AnyCertificate))
+            .with_no_client_auth()
+    } else {
+        let roots = rustls::RootCertStore {
+            roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+        };
+        builder.with_root_certificates(roots).with_no_client_auth()
+    };
+    crypto.alpn_protocols = vec![ALPN.to_vec()];
+
+    let quic = QuicClientConfig::try_from(crypto)
+        .map_err(|error| format!("QUIC client config failed: {error}"))?;
+    let mut config = ClientConfig::new(Arc::new(quic));
+    config.transport_config(transport_config());
+
+    let mut endpoint = Endpoint::client((std::net::Ipv4Addr::UNSPECIFIED, 0).into())
+        .map_err(|error| format!("QUIC client bind failed: {error}"))?;
+    endpoint.set_default_client_config(config);
+    Ok(endpoint)
+}
+
+/// Whether this host can only be a development relay.
+fn is_local_development_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
+        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.segments()[0] & 0xfe00 == 0xfc00,
+        Err(_) => false,
+    }
+}
+
+/// Accepts anything. Only ever installed for a relay on a private address.
+#[derive(Debug)]
+struct AnyCertificate;
+
+impl rustls::client::danger::ServerCertVerifier for AnyCertificate {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &rustls::pki_types::ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        Ok(rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Err(rustls::Error::PeerIncompatible(
+            rustls::PeerIncompatible::ServerTlsVersionIsDisabledByOurConfig,
+        ))
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        rustls::crypto::verify_tls13_signature(
+            message,
+            cert,
+            dss,
+            &rustls::crypto::ring::default_provider().signature_verification_algorithms,
+        )
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 /// Accepts one specific certificate and refuses everything else.
 ///
 /// Name verification is deliberately skipped: the certificate is pinned outright, so the hostname

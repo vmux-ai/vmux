@@ -90,23 +90,32 @@ pub fn remote_relay_url_path() -> PathBuf {
 pub const DEFAULT_RELAY_URL: &str = "https://relay.vmux.ai";
 
 /// The relay `VMUX_REMOTE_RELAY_URL` asks for, or the hosted one when it is unset.
-pub fn relay_url_from_env() -> Option<String> {
+pub fn relay_url_from_env() -> String {
     resolve_relay_url(std::env::var("VMUX_REMOTE_RELAY_URL").ok().as_deref())
 }
 
 /// Decide the relay from what the environment said, if anything.
 ///
-/// Setting the variable to an empty value is how the relay is turned off, leaving pairing on
-/// loopback — what the iOS Simulator needs and what a LAN-only setup wants. Absent and empty
-/// therefore mean opposite things, which is why this cannot collapse into a non-empty filter.
-pub fn resolve_relay_url(from_env: Option<&str>) -> Option<String> {
-    normalize_relay_url(from_env.unwrap_or(DEFAULT_RELAY_URL))
+/// Every pairing goes through a relay now, so a blank value means "use the hosted one" rather
+/// than "turn the relay off". There is no off: a desktop sits behind NAT and is unreachable
+/// without one.
+pub fn resolve_relay_url(from_env: Option<&str>) -> String {
+    let asked = from_env.unwrap_or(DEFAULT_RELAY_URL);
+    normalize_relay_url(asked).unwrap_or_else(|| DEFAULT_RELAY_URL.to_string())
 }
 
 /// A relay URL trimmed to canonical form, or `None` when blank.
 pub fn normalize_relay_url(url: &str) -> Option<String> {
     let trimmed = url.trim().trim_end_matches('/');
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+/// Path to the UDP port the relay allocated this desktop.
+///
+/// Written by the daemon when it registers, read by the app when it builds a pairing link — the
+/// port is the relay's to choose, and the link has no other way to learn it.
+pub fn remote_relay_port_path() -> PathBuf {
+    profile_file("remote-relay-port")
 }
 
 /// Stable loopback port for the active build and profile.
@@ -416,25 +425,22 @@ mod tests {
         assert!(s.ends_with("ai.vmux.service.dev.plist"));
     }
 
-    /// An unset variable and an empty one mean opposite things — hosted relay versus no relay at
-    /// all. Collapsing them is the plausible refactor this guards against.
+    /// There is no way to ask for no relay: a desktop behind NAT is unreachable without one, so
+    /// a blank setting falls back to the hosted relay rather than disabling pairing.
     #[test]
-    fn an_absent_relay_setting_is_hosted_and_an_empty_one_is_off() {
+    fn a_blank_relay_setting_falls_back_to_the_hosted_one() {
         for (from_env, expected) in [
-            (None, Some(DEFAULT_RELAY_URL)),
-            (Some(""), None),
-            (Some("   "), None),
+            (None, DEFAULT_RELAY_URL),
+            (Some(""), DEFAULT_RELAY_URL),
+            (Some("   "), DEFAULT_RELAY_URL),
             (
                 Some("https://relay.example.com/"),
-                Some("https://relay.example.com"),
+                "https://relay.example.com",
             ),
-            (
-                Some("  https://localhost:8788  "),
-                Some("https://localhost:8788"),
-            ),
+            (Some("  https://localhost:8788  "), "https://localhost:8788"),
         ] {
             assert_eq!(
-                resolve_relay_url(from_env).as_deref(),
+                resolve_relay_url(from_env),
                 expected,
                 "from_env = {from_env:?}"
             );
