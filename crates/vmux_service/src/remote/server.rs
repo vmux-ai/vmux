@@ -217,6 +217,22 @@ fn request_token(headers: &HeaderMap) -> Option<&str> {
 ///
 /// The daemon and the ECS are separate processes, so anything derived from ECS state costs a
 /// round-trip rather than a read.
+/// Ask the GUI and keep the shape of its answer.
+///
+/// `None` means no GUI answered. That is distinct from a GUI that answered `Ok` with no payload,
+/// which `broker_json` cannot express — collapsing the two reported a created chat as a missing
+/// desktop.
+pub(crate) async fn broker_result(
+    state: &RemoteState,
+    command: crate::protocol::AgentCommand,
+) -> Option<crate::protocol::AgentCommandResult> {
+    state
+        .broker
+        .command(crate::protocol::AgentRequestId::new(), None, command)
+        .await
+        .ok()
+}
+
 pub(crate) async fn broker_json(
     state: &RemoteState,
     command: crate::protocol::AgentCommand,

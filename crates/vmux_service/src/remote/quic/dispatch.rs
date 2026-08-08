@@ -170,8 +170,15 @@ fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
 /// Ask the GUI. `NoDesktop` rather than a generic error, because that one resolves on its own as
 /// soon as a window is open and a client should retry rather than surface it as broken.
 async fn broker(state: &RemoteState, command: SharedAgentCommand) -> SharedResponse {
-    match super::super::server::broker_json(state, command.into()).await {
-        Some(json) => SharedResponse::BrokerJson(json),
+    use crate::protocol::AgentCommandResult;
+    match super::super::server::broker_result(state, command.into()).await {
+        Some(AgentCommandResult::Text(json)) => SharedResponse::BrokerJson(json),
+        // A command the GUI carries out without answering, such as opening a new chat. It ran.
+        Some(AgentCommandResult::Ok) | Some(AgentCommandResult::Layout(_)) => SharedResponse::Ok,
+        Some(AgentCommandResult::Error(message)) => {
+            tracing::warn!(%message, "remote quic: the GUI refused a brokered command");
+            SharedResponse::Failed(SharedFailure::Invalid)
+        }
         None => SharedResponse::Failed(SharedFailure::NoDesktop),
     }
 }
