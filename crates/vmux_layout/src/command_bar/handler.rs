@@ -59,8 +59,6 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewStackContext>()
             .add_message::<crate::ContributedCommandChosen>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .add_message::<vmux_core::agent::PageAgentSpawnDefaultRequest>()
-            .add_message::<vmux_core::agent::PageAgentAttachDefaultRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
             .add_plugins(BinEventEmitterPlugin::<(
@@ -1196,10 +1194,6 @@ fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Co
         .insert(crate::start::StartAgentTransitionView);
 }
 
-fn is_legacy_default_agent_open(url: &str, inline_transition: bool) -> bool {
-    matches!(url, "vmux://agent/" | "vmux://agent") && !inline_transition
-}
-
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
     match target {
         Some(OpenTarget::InPlace) | None => OpenCommand::InPlace { url: Some(url) },
@@ -1265,8 +1259,6 @@ fn on_command_bar_action(
         MessageWriter<TerminalSpawnRequest>,
     )>,
     mut chosen_writer: MessageWriter<crate::ContributedCommandChosen>,
-    mut page_default_spawn_writer: MessageWriter<vmux_core::agent::PageAgentSpawnDefaultRequest>,
-    mut page_default_attach_writer: MessageWriter<vmux_core::agent::PageAgentAttachDefaultRequest>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -1394,11 +1386,13 @@ fn on_command_bar_action(
                 } else {
                     false
                 };
-                if is_legacy_default_agent_open(&url, inline_transition) {
+                if !inline_transition && resource_params.p2().claims_url(&url) {
                     if let Some(stack_e) = empty_stack {
-                        page_default_attach_writer.write(
-                            vmux_core::agent::PageAgentAttachDefaultRequest { stack: stack_e },
-                        );
+                        chosen_writer.write(crate::ContributedCommandChosen {
+                            id: url.clone(),
+                            stack: Some(stack_e),
+                            pane: None,
+                        });
                         new_stack_ctx.stack = None;
                         new_stack_ctx.previous_stack = None;
                         custom_keyboard_restore = true;
@@ -1412,9 +1406,11 @@ fn on_command_bar_action(
                             &queries.stack_ts,
                         );
                         if let Some(pane_e) = active_pane_opt {
-                            page_default_spawn_writer.write(
-                                vmux_core::agent::PageAgentSpawnDefaultRequest { pane: pane_e },
-                            );
+                            chosen_writer.write(crate::ContributedCommandChosen {
+                                id: url.clone(),
+                                stack: None,
+                                pane: Some(pane_e),
+                            });
                             custom_keyboard_restore = true;
                         }
                     }
@@ -3140,14 +3136,6 @@ mod tests {
     fn normalize_url_preserves_data_scheme() {
         let data = "data:text/html,<style>body{background:white}</style><h1>x</h1>";
         assert_eq!(normalize_url(data, SearchEngine::Google), data);
-    }
-
-    #[test]
-    fn inline_default_agent_open_uses_standard_page_flow() {
-        assert!(is_legacy_default_agent_open("vmux://agent/", false));
-        assert!(is_legacy_default_agent_open("vmux://agent", false));
-        assert!(!is_legacy_default_agent_open("vmux://agent/", true));
-        assert!(!is_legacy_default_agent_open("vmux://agent/codex", false));
     }
 
     #[test]

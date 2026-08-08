@@ -82,6 +82,11 @@ pub struct CommandBarContributions {
     /// Pages to list, and the targets a prompt can be sent to, most preferred first.
     pub pages: Vec<ContributedPage>,
     pub commands: Vec<ContributedCommand>,
+    /// Urls a contributor resolves itself instead of them naming a page to open.
+    ///
+    /// Opening one of these as an ordinary url would land on nothing: they stand for a choice the
+    /// contributor has to make — "the default one" — not for a page that exists yet.
+    pub claimed_urls: Vec<String>,
 }
 
 /// One contributed page: something the command bar can list, open, and send a prompt to.
@@ -121,6 +126,11 @@ impl CommandBarContributions {
     pub fn page_url(&self, id: &str) -> Option<String> {
         let entry = self.pages.iter().find(|entry| entry.id == id)?;
         Some(entry.page.url.clone())
+    }
+
+    /// Whether a contributor resolves this url itself.
+    pub fn claims_url(&self, url: &str) -> bool {
+        self.claimed_urls.iter().any(|claimed| claimed == url)
     }
 }
 
@@ -229,7 +239,7 @@ mod tests {
     fn contributions(agents: &CommandBarAgentsSnapshot) -> CommandBarContributions {
         CommandBarContributions {
             pages: agents.launcher_pages(),
-            commands: Vec::new(),
+            ..Default::default()
         }
     }
 

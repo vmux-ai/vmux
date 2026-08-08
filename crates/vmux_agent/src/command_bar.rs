@@ -9,7 +9,16 @@ use bevy::prelude::*;
 use vmux_command::snapshot::{
     CommandBarAgentsSnapshot, CommandBarContributions, ContributedCommand,
 };
-use vmux_core::agent::{PageAgentAttachRequest, PageAgentSpawnStackRequest};
+use vmux_core::agent::{
+    PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
+    PageAgentSpawnStackRequest,
+};
+
+/// Urls that name "whichever agent is default" rather than a page that exists.
+///
+/// Kept from before agent urls carried an id. The command bar cannot open these — there is nothing
+/// at them until this crate picks one — so it hands them back instead.
+const DEFAULT_AGENT_URLS: [&str; 2] = ["vmux://agent/", "vmux://agent"];
 
 /// Publish the agents to launch, and a row per model.
 pub(crate) fn publish_contributions(
@@ -32,15 +41,26 @@ pub(crate) fn publish_contributions(
             ],
         })
         .collect();
+    contributions.claimed_urls = DEFAULT_AGENT_URLS.map(str::to_string).to_vec();
 }
 
-/// Start the chat a chosen row named, in the stack the command bar offered or a new one.
+/// Act on a row or url the command bar handed back.
 pub(crate) fn claim_chosen_command(
     mut reader: MessageReader<vmux_layout::ContributedCommandChosen>,
     mut attach: MessageWriter<PageAgentAttachRequest>,
     mut spawn: MessageWriter<PageAgentSpawnStackRequest>,
+    mut attach_default: MessageWriter<PageAgentAttachDefaultRequest>,
+    mut spawn_default: MessageWriter<PageAgentSpawnDefaultRequest>,
 ) {
     for chosen in reader.read() {
+        if DEFAULT_AGENT_URLS.contains(&chosen.id.as_str()) {
+            if let Some(stack) = chosen.stack {
+                attach_default.write(PageAgentAttachDefaultRequest { stack });
+            } else if let Some(pane) = chosen.pane {
+                spawn_default.write(PageAgentSpawnDefaultRequest { pane });
+            }
+            continue;
+        }
         let Some((provider, model)) = parse_app_agent_id(&chosen.id) else {
             continue;
         };
@@ -98,5 +118,21 @@ mod tests {
         assert_eq!(parse_app_agent_id("browser_open_history"), None);
         assert_eq!(parse_app_agent_id("app_new"), None);
         assert_eq!(parse_app_agent_id("app_onlyprovider_new"), None);
+    }
+
+    /// Only the bare urls stand for "the default agent". Claiming one that carries an id would
+    /// send the user to whichever agent is default instead of the one they named.
+    #[test]
+    fn only_the_bare_agent_url_is_claimed() {
+        let contributions = CommandBarContributions {
+            claimed_urls: DEFAULT_AGENT_URLS.map(str::to_string).to_vec(),
+            ..Default::default()
+        };
+
+        assert!(contributions.claims_url("vmux://agent/"));
+        assert!(contributions.claims_url("vmux://agent"));
+
+        assert!(!contributions.claims_url("vmux://agent/codex"));
+        assert!(!contributions.claims_url("vmux://agent/codex/cli"));
     }
 }
