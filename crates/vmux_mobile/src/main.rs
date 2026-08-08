@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+mod credentials;
 mod native_transition;
 mod page_host;
 mod qr_scanner;
@@ -10,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -36,7 +38,6 @@ use vmux_wire::room::{
     replace_inline_media_query,
 };
 
-const STORAGE_KEY: &str = "vmux.remote.credentials";
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
 static OPENED_URLS: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static NEXT_CLIENT_OP_ID: AtomicU64 = AtomicU64::new(0);
@@ -553,12 +554,22 @@ fn App() -> Element {
     let new_chat_error = use_signal(String::new);
     let creating_chat = use_signal(|| false);
 
+    // Pinned to the bottom as the transcript grows. Through the mounted handle rather than by
+    // reaching into the DOM, so the renderer decides how a scroll actually happens.
+    let mut transcript_view = use_signal(|| None::<Event<MountedData>>);
     use_effect(move || {
         let _ = room.read().events.len();
         let _ = live_delta.read().len();
-        let _ = document::eval(
-            "const el = document.getElementById('remote-chat-scroll'); if (el) el.scrollTop = el.scrollHeight;",
-        );
+        let Some(view) = transcript_view() else {
+            return;
+        };
+        spawn(async move {
+            let Ok(size) = view.get_scroll_size().await else {
+                return;
+            };
+            let bottom = PixelsVector2D::new(0.0, size.height);
+            let _ = view.scroll(bottom, ScrollBehavior::Instant).await;
+        });
     });
 
     use_effect(move || {
@@ -624,7 +635,7 @@ fn App() -> Element {
             auth.set(AuthState::Unpaired);
             return;
         }
-        let Some(credentials) = load_credentials().await else {
+        let Some(credentials) = credentials::StoredCredentials::load() else {
             if deep_link_received() {
                 return;
             }
@@ -638,7 +649,7 @@ fn App() -> Element {
         let client = match Api::new(credentials) {
             Ok(client) => client,
             Err(reason) => {
-                clear_credentials();
+                credentials::StoredCredentials::clear();
                 error.set(reason.to_string());
                 auth.set(AuthState::Unpaired);
                 return;
@@ -656,7 +667,7 @@ fn App() -> Element {
                 reachable.set(true);
             }
             Err(ApiError::Unauthorized) => {
-                clear_credentials();
+                credentials::StoredCredentials::clear();
                 error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                 auth.set(AuthState::Unpaired);
             }
@@ -722,7 +733,7 @@ fn App() -> Element {
             };
             match client.sessions().await {
                 Ok(next) => {
-                    save_credentials(&credentials);
+                    credentials::StoredCredentials::save(&credentials);
                     pair_url.set(pairing_url(&credentials));
                     api.set(Some(client.clone()));
                     sessions.set(next);
@@ -758,7 +769,7 @@ fn App() -> Element {
                 }
                 Err(ApiError::Unauthorized) => {
                     reachable.set(false);
-                    clear_credentials();
+                    credentials::StoredCredentials::clear();
                     api.set(None);
                     error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
                     auth.set(AuthState::Unpaired);
@@ -869,7 +880,7 @@ fn App() -> Element {
                     }
                 },
                 on_disconnect: move |_| {
-                    clear_credentials();
+                    credentials::StoredCredentials::clear();
                     stream_generation.set(stream_generation().wrapping_add(1));
                     api.set(None);
                     sessions.set(Vec::new());
@@ -1004,7 +1015,9 @@ fn App() -> Element {
                 div { class: if connected() { "h-2 w-2 rounded-full bg-emerald-400" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
             }
 
-            main { id: "remote-chat-scroll", class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 sm:px-4 md:px-6",
+            main {
+                class: "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-5 sm:px-4 md:px-6",
+                onmounted: move |event| transcript_view.set(Some(event)),
                 if transcript_items.is_empty() && !is_streaming {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground",
                         "No messages yet."
@@ -1820,34 +1833,6 @@ fn take_opened_url() -> Option<String> {
 
 fn pairing_url(credentials: &Credentials) -> String {
     format!("{}/#token={}", credentials.base_url, credentials.token)
-}
-
-async fn load_credentials() -> Option<Credentials> {
-    let mut evaluator = document::eval(&format!(
-        "dioxus.send(window.localStorage.getItem({}));",
-        serde_json::to_string(STORAGE_KEY).ok()?
-    ));
-    let value: Option<String> = evaluator.recv().await.ok()?;
-    serde_json::from_str(&value?).ok()
-}
-
-fn save_credentials(credentials: &Credentials) {
-    let Ok(value) = serde_json::to_string(credentials) else {
-        return;
-    };
-    let Ok(key) = serde_json::to_string(STORAGE_KEY) else {
-        return;
-    };
-    let Ok(value) = serde_json::to_string(&value) else {
-        return;
-    };
-    let _ = document::eval(&format!("window.localStorage.setItem({key}, {value});"));
-}
-
-fn clear_credentials() {
-    if let Ok(key) = serde_json::to_string(STORAGE_KEY) {
-        let _ = document::eval(&format!("window.localStorage.removeItem({key});"));
-    }
 }
 
 fn cwd_name(cwd: &str) -> String {
