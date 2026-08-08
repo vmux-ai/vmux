@@ -866,12 +866,7 @@ fn ensure_token() -> std::io::Result<String> {
         uuid::Uuid::new_v4().simple()
     );
     let _ = std::fs::remove_file(crate::remote_paired_path());
-    std::fs::write(&path, &token)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
-    }
+    super::write_private(&path, &token)?;
     Ok(token)
 }
 

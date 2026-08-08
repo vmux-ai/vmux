@@ -58,7 +58,7 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(&cert_path, &identity.certificate_pem)?;
-    write_private(&key_path, &identity.private_key_pem)?;
+    super::write_private(&key_path, &identity.private_key_pem)?;
     Ok(identity)
 }
 
@@ -85,27 +85,6 @@ fn fingerprint_of(certificate_pem: &str) -> Result<String, String> {
     Ok(vmux_remote::quic::endpoint::certificate_fingerprint(
         &certificate,
     ))
-}
-
-/// Write at `0600` from the start rather than narrowing after, so the key is never briefly
-/// readable by other local users.
-fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
-    let _ = std::fs::remove_file(path);
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(path)?;
-        file.write_all(contents.as_bytes())
-    }
-    #[cfg(not(unix))]
-    std::fs::write(path, contents)
 }
 
 /// Why a connection was turned away, so the peer is told rather than merely dropped.
