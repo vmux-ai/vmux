@@ -247,15 +247,10 @@ impl Api {
     }
 }
 
-/// Build the QUIC endpoint from a pairing, when it carried a fingerprint.
-///
-/// The device id is derived from the pairing address rather than stored separately: for a relay
-/// pairing it is already the last path segment, and for a direct one the relay never sees it.
 /// Project a shared event onto the shape the pages already render.
 ///
 /// The desktop used to do this before serialising to SSE. Doing it here instead keeps the wire
-/// typed while the pages stay as they are; both this function and `RemoteEvent` go away with the
-/// HTTP path.
+/// typed — `RemoteEvent` is now a rendering concern of this app, not a thing any peer sends.
 fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<RemoteEvent> {
     use vmux_wire::protocol::SharedEvent as Shared;
     match event {
@@ -299,6 +294,10 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
     }
 }
 
+/// Build the QUIC endpoint from a pairing, when it carried a fingerprint.
+///
+/// The device id is derived from the pairing address rather than stored separately: the relay
+/// routes by port, so this only labels the hello the desktop reads.
 fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint> {
     if credentials.fingerprint.is_empty() {
         return None;
@@ -1631,8 +1630,6 @@ fn open_session(
                         if generation() != next_generation {
                             return;
                         }
-                        // Projected to the shape the page already renders. The projection goes
-                        // away with the HTTP path, not before.
                         let Some(event) = remote_event_from_shared(event) else {
                             continue;
                         };

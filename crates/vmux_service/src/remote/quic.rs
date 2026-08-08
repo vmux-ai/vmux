@@ -1,13 +1,13 @@
-//! The QUIC listener, running beside the HTTP server until the cutover.
+//! The only way a phone reaches this Mac.
 //!
-//! The controls the HTTP path gets from axum middleware have to be rebuilt here, because a QUIC
-//! connection is long-lived where a request is not. Two in particular do not survive a naive port:
+//! Two controls that came free from HTTP middleware had to be rebuilt, because a QUIC connection
+//! is long-lived where a request is not:
 //!
-//! - **The Remote kill switch.** `authorize` re-reads the state file on every request, so turning
-//!   Remote off takes effect immediately. A connection that authenticated once would otherwise
-//!   outlive the switch, so a single watcher closes every live peer instead.
+//! - **The Remote kill switch.** Re-reading the state file per request meant turning Remote off
+//!   took effect immediately. A connection that authenticated once would outlive the switch, so a
+//!   single watcher closes every live peer instead.
 //! - **Request limits.** `receive_window` bounds what a peer can buffer before the dispatcher's own
-//!   size check runs, which on HTTP was the body limit doing that job.
+//!   size check runs — the job a request body limit used to do.
 
 pub mod dispatch;
 
