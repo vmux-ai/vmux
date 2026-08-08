@@ -107,7 +107,24 @@ impl QuicApi {
         Ok(connection)
     }
 
+    /// How long a dial may take before it is reported rather than waited on.
+    ///
+    /// Without this an unreachable desktop is an infinite spinner: quinn's own idle timeout does
+    /// not apply until a connection exists, so nothing ever completes and nothing ever fails.
+    const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
     async fn dial(&self) -> Result<quinn::Connection, QuicError> {
+        match tokio::time::timeout(Self::DIAL_TIMEOUT, self.dial_inner()).await {
+            Ok(result) => result,
+            Err(_) => Err(QuicError::Transport(format!(
+                "No answer from {} after {}s.",
+                self.endpoint.address,
+                Self::DIAL_TIMEOUT.as_secs()
+            ))),
+        }
+    }
+
+    async fn dial_inner(&self) -> Result<quinn::Connection, QuicError> {
         // The pairing link names the relay by host, so this has to resolve rather than parse: a
         // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
         // pairing address is not valid".
