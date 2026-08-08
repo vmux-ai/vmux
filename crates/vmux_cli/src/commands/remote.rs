@@ -54,25 +54,21 @@ fn start_service(reset: bool) -> std::io::Result<()> {
 /// a port nothing answers on.
 #[cfg(target_os = "macos")]
 fn wait_for_pairing_url(token: &str) -> std::io::Result<String> {
-    let relay_url = vmux_client::relay_url_from_env();
-    vmux_client::pairing::persist_relay_url(&relay_url)?;
+    let relay = vmux_client::pairing::Relay::new(vmux_client::relay_url_from_env());
+    relay.persist()?;
 
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        if let (Some(port), Some(fingerprint)) = (
-            vmux_client::pairing::allocated_port(),
-            vmux_client::pairing::certificate_fingerprint(),
-        ) {
-            let base = vmux_client::pairing::relay_base_url(&relay_url, port)
-                .map_err(std::io::Error::other)?;
-            let pairing = vmux_client::pairing::pairing_info(&base, token, &fingerprint)
-                .map_err(std::io::Error::other)?;
+        if let Some(pairing) = relay.pairing(token).map_err(std::io::Error::other)? {
             return Ok(pairing.url);
         }
         if Instant::now() >= deadline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                format!("{relay_url} has not allocated a port for this Mac yet"),
+                format!(
+                    "{} has not allocated a port for this desktop yet",
+                    relay.url()
+                ),
             ));
         }
         std::thread::sleep(Duration::from_millis(100));

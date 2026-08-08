@@ -217,7 +217,7 @@ fn enable_remote() -> Result<RemotePairingInfo, String> {
         .ok_or("waiting for the relay to allocate a port for this desktop")?;
     let fingerprint = vmux_service::remote::quic::identity_fingerprint()
         .ok_or("waiting for the QUIC identity to be written")?;
-    let pairing = vmux_service::pairing::pairing_info(&base_url, &token, &fingerprint)?;
+    let pairing = vmux_service::pairing::PairingInfo::new(&base_url, &token, &fingerprint)?;
     Ok(RemotePairingInfo {
         pairing_url: pairing.url,
         pairing_deep_link: pairing.deep_link,
@@ -230,15 +230,12 @@ fn disable_remote() -> Result<(), String> {
 
 /// Where the phone should dial, or `None` until the daemon has registered and recorded the port.
 fn relay_pairing_base_url() -> Result<Option<String>, String> {
-    let relay_url = vmux_service::relay_url_from_env();
-    vmux_service::pairing::persist_relay_url(&relay_url).map_err(|error| error.to_string())?;
+    let relay = vmux_service::pairing::Relay::new(vmux_service::relay_url_from_env());
+    relay.persist().map_err(|error| error.to_string())?;
     // Minted here as well as in the daemon so both agree before the first registration.
     let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
 
-    let Some(port) = vmux_service::pairing::allocated_port() else {
-        return Ok(None);
-    };
-    vmux_service::pairing::relay_base_url(&relay_url, port).map(Some)
+    relay.base_url()
 }
 
 fn ensure_relay_device_id() -> std::io::Result<String> {
