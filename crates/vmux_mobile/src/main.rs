@@ -989,15 +989,24 @@ fn App() -> Element {
     let current_value = current();
     // The session says which agent it is by name; the icon lives on the agent list the phone
     // already fetches, so no extra round trip and nothing new on the wire.
-    let agent_icon = current_value
+    let matched_agent = current_value.as_ref().and_then(|session| {
+        agents()
+            .into_iter()
+            .find(|agent| agent.name == session.name)
+    });
+    let agent_icon = matched_agent
         .as_ref()
-        .and_then(|session| {
-            agents()
-                .into_iter()
-                .find(|agent| agent.name == session.name)
-                .map(|agent| agent.icon)
-        })
+        .map(|agent| agent.icon.clone())
         .unwrap_or_default();
+    // Derived rather than sent: agent_accent is a pure function of the agent id and already lives
+    // in the shared crate, so the phone reaches the same colours the desktop does without the
+    // wire carrying a theme.
+    let accent = vmux_ui::agent_accent::agent_accent(
+        matched_agent
+            .as_ref()
+            .map(|agent| agent.id.as_str())
+            .unwrap_or_default(),
+    );
     let selected_sid = current_value
         .as_ref()
         .map(|session| session.sid.clone())
@@ -1207,8 +1216,9 @@ fn App() -> Element {
                         value: draft_value.clone(),
                         attachments: prompt_attachments,
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
-                        accent_color: "#a78bfa".to_string(),
-                        accent_gradient: "from-violet-500 to-violet-700".to_string(),
+                        accent_bg: accent.accent_bg.to_string(),
+                        accent_color: accent.rain_rgb.to_string(),
+                        accent_gradient: accent.grad.to_string(),
                         autofocus: true,
                         disabled: current_value.is_none(),
                         action: prompt_action,
