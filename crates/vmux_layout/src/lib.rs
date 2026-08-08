@@ -7,107 +7,107 @@
 )]
 
 pub mod command_bar;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod debug_page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod error_page;
 pub mod event;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod extensions_page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
 pub mod protocol;
 pub mod reconcile;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod snapshot;
 pub mod start;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod tools_page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod vault_page;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod active_panes;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod cef;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod debug;
-#[cfg(all(not(target_arch = "wasm32"), feature = "player-mode"))]
+#[cfg(all(not(web), feature = "player-mode"))]
 mod focus_ring;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod header;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod profile;
-#[cfg(all(not(target_arch = "wasm32"), feature = "player-mode"))]
+#[cfg(all(not(web), feature = "player-mode"))]
 pub mod scene;
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "player-mode")))]
+#[cfg(all(not(web), not(feature = "player-mode")))]
 #[path = "scene_user.rs"]
 pub mod scene;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod settings;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod stack;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod unit;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod warm_page;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod webview_reveal;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod active;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod archive;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod bookmark;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod native_pointer;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod pane;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod placement;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod side_sheet;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod space;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod swap;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod tab;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod target;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod toggle;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod window;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod worktree;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use cef::{
     Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
     mirror_metadata_to_url,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use command_bar::handler::PendingCommandBarReveal;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use header::Header;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use pane::{OpenBesideRequest, handle_open_beside_requests};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::LayoutPlugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use stack::CloseStackRequest;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use webview_reveal::PendingWebviewReveal;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use window::fit_window_to_screen;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "layout",
     title: "Layout",
@@ -115,7 +115,7 @@ pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page:
     icon: None,
     command_bar: false,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
     vmux_core::page::PageManifest {
         host: "command-bar",
@@ -124,7 +124,7 @@ pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
         icon: None,
         command_bar: false,
     };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "debug",
     title: "Debug",
@@ -132,7 +132,7 @@ pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::
     icon: None,
     command_bar: false,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "error",
     title: "Error",
@@ -141,7 +141,7 @@ pub const ERROR_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::
     command_bar: false,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutStartupSet {
     Window,
@@ -150,13 +150,13 @@ pub enum LayoutStartupSet {
     Post,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout"]
 pub struct Open;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Resource, Default)]
 pub struct NewStackContext {
     pub stack: Option<Entity>,
@@ -165,15 +165,15 @@ pub struct NewStackContext {
     pub dismiss_modal: bool,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Resource, Default)]
 pub struct SpaceFilePresent(pub bool);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Resource, Default, Clone, PartialEq, Debug)]
 pub enum UpdateState {
     #[default]
@@ -191,13 +191,13 @@ pub enum UpdateState {
     },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone, Debug)]
 pub enum LayoutSpawnRequest {
     Terminal { stack: Entity },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Clone, Debug)]
 pub enum TabLayoutSpawnContent {
     StartupUrlOrPrompt,
@@ -205,7 +205,7 @@ pub enum TabLayoutSpawnContent {
     AgentPrompt { url: String, prompt: String },
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone, Debug)]
 pub struct TabLayoutSpawnRequest {
     pub space: Entity,
@@ -217,7 +217,7 @@ pub struct TabLayoutSpawnRequest {
     pub focus: bool,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone, Debug)]
 pub struct NewAgentChatRequest {
     pub prompt: String,
@@ -225,7 +225,7 @@ pub struct NewAgentChatRequest {
     pub agent_url: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct BrowserNavigateRequest {
     pub url: String,
@@ -235,25 +235,25 @@ pub struct BrowserNavigateRequest {
     pub profile: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct BrowserGoBackRequest {
     pub pane: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct BrowserGoForwardRequest {
     pub pane: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct OpenInNewStackRequest {
     pub url: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct ExtensionInstallRequest {
     pub source: String,
@@ -261,7 +261,7 @@ pub struct ExtensionInstallRequest {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(web))]
     #[test]
     fn debug_manifest_and_url_are_consistent() {
         assert_eq!(super::DEBUG_PAGE_MANIFEST.host, "debug");

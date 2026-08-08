@@ -7,21 +7,21 @@
 )]
 
 pub mod model;
-#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
+#[cfg(frontend)]
 pub mod page;
 
 pub use vmux_wire::space as event;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod cwd;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod plugin;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod snapshot_updater;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod spaces;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "spaces",
     title: "Spaces",
@@ -30,7 +30,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use plugin::{SaveSpaceRequest, SpaceCommandRequest, SpacePlugin};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use spaces::{ActiveSpace, Spaces};

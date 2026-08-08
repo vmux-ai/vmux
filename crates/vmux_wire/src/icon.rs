@@ -1,13 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-#[cfg_attr(
-    all(feature = "bevy", not(target_arch = "wasm32")),
-    derive(bevy_reflect::Reflect)
-)]
-#[cfg_attr(
-    all(feature = "bevy", not(target_arch = "wasm32")),
-    type_path = "vmux_core::icon"
-)]
+#[cfg_attr(all(feature = "bevy", not(web)), derive(bevy_reflect::Reflect))]
+#[cfg_attr(all(feature = "bevy", not(web)), type_path = "vmux_core::icon")]
 #[derive(
     Clone,
     Copy,
@@ -57,14 +51,8 @@ impl BuiltinIcon {
     }
 }
 
-#[cfg_attr(
-    all(feature = "bevy", not(target_arch = "wasm32")),
-    derive(bevy_reflect::Reflect)
-)]
-#[cfg_attr(
-    all(feature = "bevy", not(target_arch = "wasm32")),
-    type_path = "vmux_core::icon"
-)]
+#[cfg_attr(all(feature = "bevy", not(web)), derive(bevy_reflect::Reflect))]
+#[cfg_attr(all(feature = "bevy", not(web)), type_path = "vmux_core::icon")]
 #[derive(
     Clone,
     Debug,

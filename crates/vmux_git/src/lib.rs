@@ -4,24 +4,24 @@
 pub mod event;
 pub mod view;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod ui;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod highlight;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod job;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod parse;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod runner;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod worktree;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Debug, Default)]
 pub struct GitDiffSource {
     pub content: String,
@@ -30,5 +30,5 @@ pub struct GitDiffSource {
 
 pub const FILES_HOST: &str = "files";
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 include!("plugin.rs");

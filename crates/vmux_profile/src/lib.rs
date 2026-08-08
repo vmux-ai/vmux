@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod tools;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod vault;
 
 pub const fn build_profile() -> &'static str {

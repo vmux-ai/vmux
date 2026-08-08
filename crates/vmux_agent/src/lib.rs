@@ -7,102 +7,102 @@ pub mod agents_page;
 pub mod chat_page;
 pub mod vibe;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod acp_install;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod acp_registry;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod client;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod components;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod echo;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod echo_plugin;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod events;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod exec;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod handoff;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod launch;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod managed_mcp;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod mcp;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod plugin;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod providers;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod room;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod run_state;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod run_state_kind;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod session;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod snapshot_updater;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod strategy;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 mod tidy;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod systems {
     pub mod approval;
     pub mod surface_errors;
 }
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod toast;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod tools;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod url;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod variant;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use vmux_service::{http, message, stream};
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use client::acp::AcpSession;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use client::cli::strategy::CliAgentStrategy;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue, QueuedPrompt};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use events::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
 };
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use launch::build_agent_launch;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use mcp::McpServerConfig;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use message::{AssistantBlock, Message};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use plugin::AgentPlugin;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
     RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
     RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
 };
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use run_state::AgentRunState;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use toast::{AgentToast, ToastLevel};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use tools::mcp_tool_defs;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use url::{AgentKind, AgentUrl};
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use variant::AgentVariant;

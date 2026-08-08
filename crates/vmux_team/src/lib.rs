@@ -2,15 +2,15 @@
 //! team members and renders the team webview.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
+#[cfg(frontend)]
 pub mod page;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod plugin;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use plugin::TeamPlugin;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "team",
     title: "Team",

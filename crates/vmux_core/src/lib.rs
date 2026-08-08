@@ -15,53 +15,53 @@ pub use editor::{CursorPos, EditMode, KeymapKind, SelSpan};
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod host_spawn;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod page;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod page_open;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod profile;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod terminal;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod agent;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod archive;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod browser;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod extension;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod notify;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod team;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use moonshine_save::prelude::*;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 /// Registers reflection for the shared component types so they can be saved and loaded.
 pub struct CorePlugin;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 impl Plugin for CorePlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<PageMetadata>()
@@ -96,7 +96,7 @@ impl Plugin for CorePlugin {
 
 // ── Time helpers ─────────────────────────────────────────────────────
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -106,9 +106,9 @@ pub fn now_millis() -> i64 {
 
 // ── Shared components ────────────────────────────────────────────────
 
-#[cfg_attr(not(target_arch = "wasm32"), derive(Component, Reflect))]
-#[cfg_attr(not(target_arch = "wasm32"), reflect(Component, Default))]
-#[cfg_attr(not(target_arch = "wasm32"), type_path = "vmux_header::system")]
+#[cfg_attr(not(web), derive(Component, Reflect))]
+#[cfg_attr(not(web), reflect(Component, Default))]
+#[cfg_attr(not(web), type_path = "vmux_header::system")]
 #[derive(
     Clone,
     Debug,
@@ -128,46 +128,46 @@ pub struct PageMetadata {
     pub bg_color: Option<String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Debug)]
 pub struct OscTitle(pub String);
 
 /// The working directory of a non-terminal agent pane (e.g. an ACP session), so the command
 /// bar's "current work" can list its cwd contents the same way it lists open terminals' cwds.
 /// Terminals carry their cwd on `TerminalLaunch`; this covers agents that have no PTY.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Debug)]
 pub struct AgentWorkingDir(pub String);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct CreatedAt(pub i64);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 impl CreatedAt {
     pub fn now() -> Self {
         Self(now_millis())
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct LastActivatedAt(pub i64);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 impl LastActivatedAt {
     pub fn now() -> Self {
         Self(now_millis())
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Query<&ChildOf>) {
     use bevy::ecs::relationship::Relationship;
     commands.entity(entity).insert(LastActivatedAt::now());
@@ -179,102 +179,102 @@ pub fn focus_pane_entity(entity: Entity, commands: &mut Commands, child_of_q: &Q
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct Visit;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct Ready;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct Url;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct VisitCount(pub u32);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default)]
 #[reflect(Component, Default)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct LastVisitedAt(pub i64);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[require(Save)]
 #[type_path = "vmux_core"]
 pub struct Order(pub u32);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Active;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct BookmarkOrder(pub u32);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Pin;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Bookmark;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Folder;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Collapsed;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[type_path = "vmux_core"]
 pub struct Uuid(pub String);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 #[require(Save)]
 #[type_path = "vmux_history"]
 pub struct VisitedUrl(pub Entity);
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 impl Default for VisitedUrl {
     fn default() -> Self {
         Self(Entity::PLACEHOLDER)
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Component, Clone, Copy, Debug, Reflect, Default, PartialEq, Eq)]
 #[reflect(Component, Default)]
 #[require(Save)]

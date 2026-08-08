@@ -30,7 +30,7 @@ fn apply_locale(locale: &str) {
 
 /// Writing to the document element is the one part of theming that cannot be shared: wasm reaches
 /// it through `web_sys`, a native WebView host through an eval bridge.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn set_root_radius(radius: f32) {
     use wasm_bindgen::JsCast;
 
@@ -46,7 +46,7 @@ fn set_root_radius(radius: f32) {
         .set_property("--radius", &format!("{radius}px"));
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn set_root_language(locale: &str, direction: &str) {
     let Some(el) = web_sys::window()
         .and_then(|window| window.document())
@@ -64,8 +64,8 @@ fn set_root_language(locale: &str, direction: &str) {
 /// on another host and `theme.css` already carries its default. Locale still resolves — the
 /// returned signal and [`text_direction`] are the contract — but a native host applies it on its
 /// own root element rather than reaching for the document.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn set_root_radius(_radius: f32) {}
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn set_root_language(_locale: &str, _direction: &str) {}

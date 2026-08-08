@@ -56,10 +56,10 @@ pub const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
     "git log --oneline -10",
 ];
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, web))]
 const PROMPT_PAUSE_TICKS: usize = 40;
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, web))]
 fn distinct_prompt_example_index(len: usize, current: Option<usize>, candidate: usize) -> usize {
     if len <= 1 {
         return 0;
@@ -72,12 +72,12 @@ fn distinct_prompt_example_index(len: usize, current: Option<usize>, candidate: 
     }
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, web))]
 fn next_prompt_typed_count(typed: usize, full: usize) -> Option<usize> {
     (typed < full + PROMPT_PAUSE_TICKS).then_some(typed + 1)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 mod component {
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -286,7 +286,7 @@ mod component {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub use component::PromptGhost;
 
 #[cfg(test)]

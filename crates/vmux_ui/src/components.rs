@@ -1,6 +1,6 @@
 pub mod accordion;
 pub mod alert_dialog;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod app;
 pub mod aspect_ratio;
 pub mod avatar;
@@ -10,15 +10,15 @@ pub mod calendar;
 pub mod card;
 pub mod checkbox;
 pub mod collapsible;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod context_menu;
 pub mod date_picker;
 pub mod dialog;
 pub mod drag_and_drop_list;
 pub mod dropdown_menu;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod gallery;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod gallery_demos;
 pub mod hover_card;
 pub mod icon;
@@ -26,7 +26,7 @@ pub mod input;
 pub mod label;
 pub mod manager;
 pub mod menubar;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod navbar;
 pub mod pagination;
 pub mod popover;
@@ -39,7 +39,7 @@ pub mod scroll_area;
 pub mod select;
 pub mod separator;
 pub mod sheet;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod sidebar;
 pub mod skeleton;
 pub mod slider;

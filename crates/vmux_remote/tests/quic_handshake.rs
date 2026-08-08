@@ -5,7 +5,7 @@
 //! catch the failure that matters — a verifier wired up so it never runs, or a rustls config that
 //! quietly falls back to the platform roots. So both directions go through a live QUIC endpoint.
 
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(not(web))]
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;

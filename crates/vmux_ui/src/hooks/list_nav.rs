@@ -91,7 +91,7 @@ pub fn use_selection_visible(selected: Signal<usize>, item_id: impl Fn(usize) ->
     });
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn scroll_item_into_view(item_id: &str) {
     let Some(element) = web_sys::window()
         .and_then(|window| window.document())
@@ -104,7 +104,7 @@ fn scroll_item_into_view(item_id: &str) {
     element.scroll_into_view_with_scroll_into_view_options(&options);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn scroll_item_into_view(_item_id: &str) {}
 
 #[cfg(test)]

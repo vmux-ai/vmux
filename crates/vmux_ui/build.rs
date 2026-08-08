@@ -7,6 +7,9 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[path = "../build_platform_cfg.rs"]
+mod build_platform_cfg;
+
 #[cfg(feature = "gallery")]
 #[allow(dead_code)]
 #[path = "../vmux_server/src/build.rs"]
@@ -20,6 +23,7 @@ use page_build::{
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    build_platform_cfg::emit();
     generate_i18n_catalogs();
 
     #[cfg(feature = "gallery")]

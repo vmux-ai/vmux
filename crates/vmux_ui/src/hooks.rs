@@ -3,7 +3,7 @@
 //! [`transport`] is the seam: the desktop reaches Bevy across a CEF process boundary, a native
 //! host handles messages in-process. Pages call the same hooks either way.
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod cef_host;
 pub mod event_listener;
 pub mod list_nav;
@@ -16,7 +16,7 @@ pub use event_listener::{
     use_bin_event_listener, use_event,
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub use event_listener::decode_bin_host_emit_js;
 
 pub use list_nav::{

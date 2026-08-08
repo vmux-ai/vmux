@@ -6,17 +6,17 @@
     clippy::new_ret_no_self
 )]
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod appearance;
 pub mod event;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod plugin;
 pub mod schema;
 pub mod themes;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "settings",
     title: "Settings",
@@ -25,11 +25,11 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use appearance::{ColorSchemeChanged, ResolvedColorScheme, ResolvedScheme, SystemAppearance};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::SettingsPlugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::runtime::{
     AcpAgentConfig, AgentSettings, AppProviderSettings, AppSettings, AppearanceSettings,
     BrowserSettings, ColorScheme, DirSource, EXPLORER_DEFAULT_WIDTH, EXPLORER_MAX_WIDTH,
@@ -40,7 +40,7 @@ pub use plugin::runtime::{
     resolve_startup_dir_for_tab, resolve_startup_dir_for_tab_with_source, resolve_startup_url,
     resolve_tab_workspace_dir, serialize_settings_to_json, set_at_path, validate_tab_workspace_dir,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::view::Settings;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use vmux_command::event::SearchEngine;

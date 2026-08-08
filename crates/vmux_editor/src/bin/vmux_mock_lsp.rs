@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn main() {
     use std::io::{self, BufReader, Write};
 
@@ -62,5 +62,5 @@ fn main() {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn main() {}

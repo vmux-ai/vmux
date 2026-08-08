@@ -7,39 +7,39 @@
 )]
 
 pub mod event;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod matrix_rain;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
 pub mod render_model;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod clipboard;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod component;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod launch;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod link;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod pid;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod processes_monitor;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod shell_env;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod shell_input;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod snapshot_updater;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod target;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "terminal",
     title: "Terminal",
@@ -48,5 +48,5 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::*;

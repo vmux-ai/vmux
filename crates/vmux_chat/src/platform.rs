@@ -4,18 +4,18 @@
 //! Neither difference belongs in the components, so both live here.
 
 /// Resolve after `ms` milliseconds.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub async fn sleep_ms(ms: u32) {
     gloo_timers::future::TimeoutFuture::new(ms).await;
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub async fn sleep_ms(ms: u32) {
     tokio::time::sleep(std::time::Duration::from_millis(u64::from(ms))).await;
 }
 
 /// A pseudo-random index below `len`, saturating to 0 for an empty range.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub fn random_index(len: usize) -> usize {
     if len == 0 {
         return 0;
@@ -23,7 +23,7 @@ pub fn random_index(len: usize) -> usize {
     ((js_sys::Math::random() * len as f64) as usize).min(len - 1)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn random_index(len: usize) -> usize {
     if len == 0 {
         return 0;

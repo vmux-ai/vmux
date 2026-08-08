@@ -27,11 +27,11 @@ use vmux_chat::activity::{
 };
 use vmux_chat::clipboard::copy_to_clipboard;
 use vmux_chat::transcript::{ChatItemRow, MD_CSS};
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::prompt_box::PromptPopup;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 use vmux_ui::components::prompt_composer::prompt_textarea;
 use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAction, PromptComposerAttachment,
@@ -97,7 +97,7 @@ fn approval_detail_label(label: &str) -> String {
 }
 
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn has_text_selection() -> bool {
     web_sys::window()
         .and_then(|w| w.get_selection().ok().flatten())
@@ -107,7 +107,7 @@ fn has_text_selection() -> bool {
 
 /// A touch host has neither a caret nor a Ctrl+C, so the question never arises and the answer
 /// that leaves the shortcut meaning "interrupt" is the right one.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn has_text_selection() -> bool {
     false
 }
@@ -135,7 +135,7 @@ fn is_version_error(message: &str) -> bool {
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
 /// across agents and only the id differs.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn current_agent() -> String {
     web_sys::window()
         .and_then(|w| w.location().pathname().ok())
@@ -145,14 +145,14 @@ fn current_agent() -> String {
 
 /// A native host has no page URL to read the id out of, so it passes `agent_override` instead —
 /// which takes precedence over this anyway.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn current_agent() -> String {
     "agent".to_string()
 }
 
 /// Where the caret sits in the prompt, which decides whether Up moves within the text or recalls
 /// the previous prompt.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn prompt_caret() -> Option<(u32, u32)> {
     let textarea = prompt_textarea(PROMPT_INPUT_ID)?;
     let start = textarea
@@ -166,7 +166,7 @@ fn prompt_caret() -> Option<(u32, u32)> {
 
 /// Nothing to measure without an element handle. Reporting the start is what makes Up recall
 /// history rather than appear to do nothing.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn prompt_caret() -> Option<(u32, u32)> {
     Some((0, 0))
 }
@@ -339,7 +339,7 @@ fn select_media_entry(
 ///
 /// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
 /// desktop act anyway, so a native host renders nothing rather than an approximation.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 #[component]
 fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     rsx! {
@@ -349,7 +349,7 @@ fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[component]
 fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     // The prop names have to match the CEF impl, since callers name them.
@@ -2062,7 +2062,7 @@ fn activity_favicon(kind: ActivityIcon, accent: &str) -> String {
 ///
 /// A pane is a browser tab, so its title and favicon are how the conversation identifies itself in
 /// the layout. A native host has no tab and shows this in its own chrome instead.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn set_tab_identity(title: &str, favicon_href: &str) {
     if let Some(document) = web_sys::window().and_then(|window| window.document()) {
         if document.title() != title {
@@ -2072,10 +2072,10 @@ fn set_tab_identity(title: &str, favicon_href: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn set_tab_identity(_title: &str, _favicon_href: &str) {}
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn set_page_favicon(href: &str) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         return;

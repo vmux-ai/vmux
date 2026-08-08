@@ -2,23 +2,23 @@
 //! command-bar suggestions, and renders the history webview.
 
 pub use vmux_wire::history as event;
-#[cfg(any(target_arch = "wasm32", target_os = "ios"))]
+#[cfg(frontend)]
 pub mod page;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod prune;
 pub mod query;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod spawn;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod transition;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub use vmux_core::{CreatedAt, LastActivatedAt, Visit, now_millis};
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 use bevy::prelude::*;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "history",
     title: "History",
@@ -27,5 +27,5 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 include!("plugin.rs");

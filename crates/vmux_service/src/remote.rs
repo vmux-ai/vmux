@@ -3,9 +3,9 @@ pub use vmux_wire::room::{
     RemoteMediaEntry, RemoteSession, RemoteStatus, RoomEvent, RoomId,
 };
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod quic;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub mod server;
 
 /// Write a secret at `0600` from the start rather than narrowing after.
@@ -14,6 +14,7 @@ pub mod server;
 /// another local user can read it. Recreated rather than truncated because `mode` only applies
 /// when the file is created, so writing over one left behind with wider permissions would keep
 /// them.
+#[cfg(native)]
 pub(crate) fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
     let _ = std::fs::remove_file(path);
     #[cfg(unix)]

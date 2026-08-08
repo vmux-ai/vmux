@@ -4,16 +4,16 @@
 #[cfg(feature = "build")]
 pub mod build;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use vmux_core::page::{
     PAGE_READY_BIN_EVENT_ID, PageManifest, PageReady, ServerEmbedSet, ServerPlugin,
     mark_webview_page_ready,
 };
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 use dioxus::prelude::*;
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 #[allow(non_snake_case)]
 #[component]
 pub fn App() -> Element {
@@ -25,16 +25,16 @@ pub fn App() -> Element {
         .unwrap_or_else(|| rsx! { UnknownPage { host } })
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 struct WebPageManifest {
     host: &'static str,
     render: fn() -> Element,
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 const INLINE_AGENT_WINDOW_PREFIX: &str = "vmux-inline-agent:";
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartAgentTransition> {
     web_sys::window()
         .and_then(|window| window.name().ok())
@@ -51,14 +51,14 @@ fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartA
         )
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 fn set_inline_agent_url(agent_url: &str) {
     if let Some(window) = web_sys::window() {
         let _ = window.set_name(&format!("{INLINE_AGENT_WINDOW_PREFIX}{agent_url}"));
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 fn inline_agent_id(agent_url: &str) -> String {
     agent_url
         .strip_prefix("vmux://agent/")
@@ -68,7 +68,7 @@ fn inline_agent_id(agent_url: &str) -> String {
         .to_string()
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 #[component]
 fn UnknownPage(host: String) -> Element {
     use vmux_ui::i18n::{TranslationValue, translate_with};
@@ -87,7 +87,7 @@ fn UnknownPage(host: String) -> Element {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 macro_rules! web_pages {
     ($($render:ident: $host:literal => $page:path),+ $(,)?) => {
         $(
@@ -108,7 +108,7 @@ macro_rules! web_pages {
     };
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 web_pages! {
     render_layout: "layout" => vmux_layout::page::Page,
     render_command_bar: "command-bar" => vmux_layout::command_bar::page::Page,
@@ -130,7 +130,7 @@ web_pages! {
     render_start: "start" => StartAgentPage,
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 fn current_host() -> String {
     let loc = web_sys::window().map(|window| window.location());
     let protocol = loc
@@ -141,7 +141,7 @@ fn current_host() -> String {
     host_for(&protocol, &host)
 }
 
-#[cfg(any(test, all(target_arch = "wasm32", feature = "web")))]
+#[cfg(any(test, all(web, feature = "web")))]
 fn host_for(protocol: &str, host: &str) -> String {
     if protocol == "https:" && host == "vault.vmux.ai" {
         "vault".to_string()
@@ -154,7 +154,7 @@ fn host_for(protocol: &str, host: &str) -> String {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
+#[cfg(all(not(web), test))]
 mod host_tests {
     use super::*;
 
@@ -168,7 +168,7 @@ mod host_tests {
     }
 }
 
-#[cfg(all(target_arch = "wasm32", feature = "web"))]
+#[cfg(all(web, feature = "web"))]
 #[allow(non_snake_case)]
 #[component]
 fn StartAgentPage() -> Element {

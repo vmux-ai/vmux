@@ -419,39 +419,39 @@ pub fn wiki_links(text: &str) -> Vec<WikiLink> {
     links
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use std::io::{self, Write};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use std::path::{Component, Path, PathBuf};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod agent_config;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use agent_config::sync_external_agent_configs;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod index;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use index::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const MAX_SKILLS: usize = 64;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const MAX_EMBEDDED_BYTES: usize = 24 * 1024;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const SKILLS_PROMPT_MARKER: &str = "vmux Knowledge skill instructions are already loaded";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const MEMORIES_PROMPT_MARKER: &str = "vmux Knowledge memories are user-owned context";
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const KNOWLEDGE_SECTIONS: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn knowledge_dir() -> PathBuf {
     crate::profile::config_dir().join("knowledge")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn yaml_scalar(value: &str) -> String {
     format!(
         "\"{}\"",
@@ -462,7 +462,7 @@ fn yaml_scalar(value: &str) -> String {
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn property_source(
     key: &str,
     kind: KnowledgePropertyKind,
@@ -527,7 +527,7 @@ fn property_source(
     Ok(source)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn frontmatter_property_range(text: &str, key: &str) -> Option<(usize, usize, usize)> {
     let mut lines = text.split_inclusive('\n');
     let first = lines.next()?;
@@ -564,7 +564,7 @@ fn frontmatter_property_range(text: &str, key: &str) -> Option<(usize, usize, us
     None
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn edit_markdown_property(
     text: &str,
     edit: &crate::event::FilePropertyEdit,
@@ -605,12 +605,12 @@ pub fn edit_markdown_property(
     Ok(format!("---\n{source}---\n\n{text}"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn write_note(path: Option<&str>, title: &str, content: &str) -> Result<PathBuf, String> {
     write_note_in(&knowledge_dir(), path, title, content)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn write_note_in(
     root: &Path,
     path: Option<&str>,
@@ -718,7 +718,7 @@ fn write_note_in(
     Ok(destination)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn knowledge_slug(title: &str) -> String {
     let mut slug = String::new();
     let mut separator = false;
@@ -744,41 +744,41 @@ fn knowledge_slug(title: &str) -> String {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), unix))]
+#[cfg(all(not(web), unix))]
 fn set_private_directory(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
         .map_err(|error| error.to_string())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+#[cfg(all(not(web), not(unix)))]
 fn set_private_directory(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), unix))]
+#[cfg(all(not(web), unix))]
 fn set_private_file(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(unix)))]
+#[cfg(all(not(web), not(unix)))]
 fn set_private_file(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn skills_dir() -> PathBuf {
     knowledge_dir().join("skills")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn configured_skill_dirs() -> Vec<PathBuf> {
     configured_skill_dirs_from(&skills_dir())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn configured_skill_files() -> Vec<PathBuf> {
     configured_skill_dirs()
         .into_iter()
@@ -786,7 +786,7 @@ pub fn configured_skill_files() -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub(super) fn configured_skill_dirs_from(root: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -804,12 +804,12 @@ pub(super) fn configured_skill_dirs_from(root: &Path) -> Vec<PathBuf> {
     skills
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn memories_dir() -> PathBuf {
     knowledge_dir().join("memories")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn migrate_external_memories() -> io::Result<usize> {
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -828,7 +828,7 @@ pub fn migrate_external_memories() -> io::Result<usize> {
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn migrate_external_memories_from(
     destination: &Path,
     claude_projects: &Path,
@@ -854,7 +854,7 @@ fn migrate_external_memories_from(
     Ok(imported)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn migrate_claude_memories(projects: &Path, destination: &Path) -> io::Result<usize> {
     let Ok(entries) = std::fs::read_dir(projects) else {
         return Ok(0);
@@ -875,7 +875,7 @@ fn migrate_claude_memories(projects: &Path, destination: &Path) -> io::Result<us
     Ok(imported)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn migrate_memory_tree(source: &Path, destination: &Path) -> io::Result<usize> {
     let mut files = Vec::new();
     collect_markdown_files(source, &mut files);
@@ -890,7 +890,7 @@ fn migrate_memory_tree(source: &Path, destination: &Path) -> io::Result<usize> {
     Ok(imported)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn copy_new_file(source: &Path, destination: &Path) -> io::Result<bool> {
     let Some(parent) = destination.parent() else {
         return Ok(false);
@@ -915,12 +915,12 @@ fn copy_new_file(source: &Path, destination: &Path) -> io::Result<bool> {
     Ok(true)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn agent_skills_prompt() -> String {
     agent_skills_prompt_from(&skills_dir())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -945,7 +945,7 @@ fn collect_skill_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(metadata) = std::fs::symlink_metadata(dir) else {
         return;
@@ -985,7 +985,7 @@ fn collect_markdown_files(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn agent_skills_prompt_from(root: &Path) -> String {
     let mut files = Vec::new();
     collect_skill_files(root, &mut files);
@@ -1025,12 +1025,12 @@ fn agent_skills_prompt_from(root: &Path) -> String {
     prompt
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn agent_memories_prompt() -> String {
     agent_memories_prompt_from(&memories_dir())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn agent_memories_prompt_from(root: &Path) -> String {
     let mut files = Vec::new();
     collect_markdown_files(root, &mut files);
@@ -1059,7 +1059,7 @@ fn agent_memories_prompt_from(root: &Path) -> String {
     prompt
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn agent_context_prompt() -> String {
     [agent_skills_prompt(), agent_memories_prompt()]
         .into_iter()
@@ -1068,7 +1068,7 @@ pub fn agent_context_prompt() -> String {
         .join("\n\n")
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn append_agent_skills(base: &str) -> String {
     if base.contains(SKILLS_PROMPT_MARKER) {
         return base.to_string();
@@ -1083,7 +1083,7 @@ pub fn append_agent_skills(base: &str) -> String {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn append_agent_memories(base: &str) -> String {
     if base.contains(MEMORIES_PROMPT_MARKER) {
         return base.to_string();
@@ -1098,12 +1098,12 @@ pub fn append_agent_memories(base: &str) -> String {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn append_agent_context(base: &str) -> String {
     append_agent_memories(&append_agent_skills(base))
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(web)))]
 mod tests {
     use super::*;
 

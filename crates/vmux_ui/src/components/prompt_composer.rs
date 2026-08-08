@@ -6,7 +6,7 @@ use crate::components::prompt_box::PromptBox;
 use crate::i18n::translate;
 
 pub use dom::focus_prompt_end;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub use dom::prompt_textarea;
 
 /// Default DOM id for the shared prompt textarea.
@@ -62,7 +62,7 @@ pub fn PromptComposer(
     on_remove_attachment: EventHandler<usize>,
     on_action: EventHandler<()>,
 ) -> Element {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(web)]
     let ghost = ghost.or_else(|| {
         show_examples.then(|| {
             rsx! {
@@ -70,7 +70,7 @@ pub fn PromptComposer(
             }
         })
     });
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(web))]
     let ghost = {
         let _ = (show_examples, accent_bg);
         ghost

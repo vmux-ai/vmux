@@ -195,12 +195,12 @@ fn parse_locale(locale: &str) -> Option<LanguageIdentifier> {
     LanguageIdentifier::from_str(locale).ok()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn platform_locale() -> Option<String> {
     sys_locale::get_locale()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn platform_locale() -> Option<String> {
     let navigator = web_sys::window()?.navigator();
     navigator

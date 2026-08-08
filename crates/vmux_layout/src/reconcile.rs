@@ -264,64 +264,64 @@ fn plan_node(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use std::collections::HashSet as ApplyHashSet;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::pane::{
     Pane, PaneSize, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps,
     split_root_bundle,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::protocol as proto;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::protocol::format_id;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::stack::{Stack, stack_bundle};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::tab::Tab as LayoutTab;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use crate::{LayoutSpawnRequest, event::PANE_GAP_PX};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::ecs::relationship::Relationship;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use bevy::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 use vmux_history::{CreatedAt, LastActivatedAt};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct LayoutApplyRequest {
     pub request_id: [u8; 16],
     pub snapshot: LayoutSnapshot,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct LayoutApplyResponse {
     pub request_id: [u8; 16],
     pub result: Result<LayoutSnapshot, String>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotRequest {
     pub request_id: [u8; 16],
     pub anchor: Option<vmux_core::ProcessId>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(Message, Clone)]
 pub struct LayoutSnapshotResponse {
     pub request_id: [u8; 16],
     pub snapshot: LayoutSnapshot,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn serve_snapshot_requests(
     mut reader: MessageReader<LayoutSnapshotRequest>,
     tabs_q: Query<(Entity, &LayoutTab, Option<&Children>)>,
@@ -383,7 +383,7 @@ pub fn serve_snapshot_requests(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) {
     match node {
         LayoutNode::Split { children, .. } => {
@@ -404,7 +404,7 @@ fn fill_process_ids(node: &mut LayoutNode, pid_by_stack: &HashMap<u64, String>) 
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn apply_layout_requests(
     mut reader: MessageReader<LayoutApplyRequest>,
     mut commands: Commands,
@@ -427,7 +427,7 @@ pub fn apply_layout_requests(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
     use bevy::ecs::system::SystemState;
     let mut state = SystemState::<(
@@ -452,13 +452,13 @@ fn run_build_snapshot(world: &mut World) -> LayoutSnapshot {
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn apply(world: &mut World, snapshot: &LayoutSnapshot) -> Result<(), ValidationError> {
     let existing = collect_existing_ids(world);
     apply_with_existing(world, snapshot, &existing)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn apply_with_existing(
     world: &mut World,
     snapshot: &LayoutSnapshot,
@@ -557,7 +557,7 @@ pub fn apply_with_existing(
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn materialize_descendants(
     world: &mut World,
     parent: Entity,
@@ -643,7 +643,7 @@ fn materialize_descendants(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn find_root_split_child(world: &World, tab: Entity) -> Option<Entity> {
     world
         .get::<Children>(tab)?
@@ -651,7 +651,7 @@ fn find_root_split_child(world: &World, tab: Entity) -> Option<Entity> {
         .find(|&e| world.get::<PaneSplit>(e).is_some())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn set_split_direction(world: &mut World, entity: Entity, direction: proto::SplitDirection) {
     let pane_split_dir = match direction {
         proto::SplitDirection::Row => PaneSplitDirection::Row,
@@ -671,7 +671,7 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: proto::Spli
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn apply_close(world: &mut World, id: &str) {
     let Ok((_kind, value)) = parse_id(id) else {
         return;
@@ -682,7 +682,7 @@ fn apply_close(world: &mut World, id: &str) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<String>) {
     let Ok(entity_ref) = world.get_entity(entity) else {
         return;
@@ -707,7 +707,7 @@ fn collect_ids_recursive(world: &World, entity: Entity, out: &mut ApplyHashSet<S
 /// Existing ids the reconcile diff may add/remove. Scoped to the active space's
 /// tab subtrees so `update_layout` can never despawn another space's content.
 /// When there is no active space, all tabs are included (global behavior).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     let mut active_space_q =
         world.query_filtered::<Entity, (With<crate::space::Space>, With<vmux_core::Active>)>();
@@ -727,7 +727,7 @@ fn collect_existing_ids(world: &mut World) -> ApplyHashSet<String> {
     out
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn apply_tab(world: &mut World, tab: &proto::Tab) {
     if let Some(id) = &tab.id
         && let Ok((_, value)) = parse_id(id)
@@ -740,7 +740,7 @@ fn apply_tab(world: &mut World, tab: &proto::Tab) {
     apply_node(world, &tab.root);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn apply_structure(
     world: &mut World,
     parent: Option<Entity>,
@@ -784,7 +784,7 @@ fn apply_structure(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn resolve_node_entity(
     node: &proto::LayoutNode,
     new_entities: &std::collections::HashMap<*const proto::LayoutNode, Entity>,
@@ -799,7 +799,7 @@ fn resolve_node_entity(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn apply_node(world: &mut World, node: &proto::LayoutNode) {
     match node {
         proto::LayoutNode::Split {
@@ -859,7 +859,7 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn apply_focus(world: &mut World, focus: &proto::Focus) {
     let Some(mut focused) = world.get_resource_mut::<crate::stack::FocusedStack>() else {
         return;
@@ -875,7 +875,7 @@ fn apply_focus(world: &mut World, focus: &proto::Focus) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn node_entity(node: &proto::LayoutNode) -> Option<Entity> {
     match node {
         proto::LayoutNode::Split { id, .. } | proto::LayoutNode::Pane { id, .. } => id

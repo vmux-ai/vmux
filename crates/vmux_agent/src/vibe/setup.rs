@@ -1,25 +1,25 @@
 pub mod event;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 use bevy::prelude::*;
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 use crate::vibe::setup::event::{
     AGENT_SETUP_PREREQ_EVENT, AGENT_SETUP_RESULT_EVENT, AgentInstallRunRequest,
     AgentSetupPrereqRequest, AgentSetupPrereqStatus, AgentSetupResult,
 };
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 use vmux_core::agent::AgentKind;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 pub struct AgentSetupPlugin;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 impl Plugin for AgentSetupPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(BinEventEmitterPlugin::<(
@@ -33,7 +33,7 @@ impl Plugin for AgentSetupPlugin {
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 #[derive(Component)]
 struct AgentInstallPane {
     setup_stack: Entity,
@@ -43,11 +43,11 @@ struct AgentInstallPane {
     armed: bool,
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 #[derive(Component)]
 pub(crate) struct AgentSetupNavigated;
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest>, command: &str) {
     run.write(vmux_terminal::RunShellRequest {
         command: command.to_string(),
@@ -58,12 +58,12 @@ fn run_install_in_new_tab(run: &mut MessageWriter<vmux_terminal::RunShellRequest
 
 /// Homebrew is needed first only on macOS, only for cask agents, and only when
 /// `brew` is not already resolvable.
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn prereq_needs_homebrew(segment: &str, brew_present: bool) -> bool {
     cfg!(target_os = "macos") && vmux_core::agent_setup::requires_homebrew(segment) && !brew_present
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn on_agent_setup_prereq_request(
     trigger: On<BinReceive<AgentSetupPrereqRequest>>,
     browsers: NonSend<Browsers>,
@@ -87,7 +87,7 @@ fn on_agent_setup_prereq_request(
 /// `None` while not yet `armed` (ignores the shell's spurious pre-command
 /// completion). Once armed: `Some(true)` when the agent binary is present
 /// (success), `Some(false)` when still absent (failure → Retry).
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
     if !armed {
         return None;
@@ -95,12 +95,12 @@ fn install_outcome(armed: bool, installed: bool) -> Option<bool> {
     Some(installed)
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn close_install_pane_after_success(url: &str) -> bool {
     url.trim_end_matches('/') == "vmux://agents"
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn detect_agent_install_outcome(
     mut events: MessageReader<vmux_terminal::CommandLifecycleEvent>,
     mut install_panes: Query<(Entity, &mut AgentInstallPane)>,
@@ -148,7 +148,7 @@ fn detect_agent_install_outcome(
     }
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn on_agent_install_run(
     trigger: On<BinReceive<AgentInstallRunRequest>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -225,7 +225,7 @@ fn on_agent_install_run(
     });
 }
 
-#[cfg(not(any(target_arch = "wasm32", target_os = "ios")))]
+#[cfg(native)]
 fn auto_redirect_agent_setup_when_installed(
     time: Res<Time>,
     mut throttle: Local<f32>,
@@ -273,7 +273,7 @@ fn auto_redirect_agent_setup_when_installed(
     }
 }
 
-#[cfg(all(test, not(any(target_arch = "wasm32", target_os = "ios"))))]
+#[cfg(all(test, native))]
 mod tests {
     use super::*;
 

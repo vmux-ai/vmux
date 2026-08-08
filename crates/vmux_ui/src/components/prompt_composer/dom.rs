@@ -3,7 +3,7 @@
 //! Only the CEF host can reach the DOM directly; on every other target these are no-ops so the
 //! composer itself stays host-agnostic.
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub fn prompt_textarea(input_id: &str) -> Option<web_sys::HtmlTextAreaElement> {
     use wasm_bindgen::JsCast;
 
@@ -15,7 +15,7 @@ pub fn prompt_textarea(input_id: &str) -> Option<web_sys::HtmlTextAreaElement> {
 }
 
 /// Move the caret to the end of the composer input on the next tick.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub fn focus_prompt_end(input_id: &str) {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
@@ -38,5 +38,5 @@ pub fn focus_prompt_end(input_id: &str) {
     closure.forget();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub fn focus_prompt_end(_input_id: &str) {}

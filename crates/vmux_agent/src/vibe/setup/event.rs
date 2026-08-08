@@ -64,7 +64,7 @@ pub struct AgentSetupResult {
     pub ok: bool,
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(web)))]
 mod tests {
     use super::*;
 

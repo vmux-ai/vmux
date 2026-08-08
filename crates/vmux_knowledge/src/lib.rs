@@ -1,9 +1,9 @@
 //! Local-first Markdown knowledge tree and agent context.
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod store;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::KnowledgePlugin;

@@ -492,7 +492,7 @@ pub use vmux_wire::chat::{
     latest_tool_location,
 };
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(web)))]
 mod tests {
     use super::*;
 

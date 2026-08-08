@@ -3,52 +3,52 @@
 
 pub mod viewport;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod highlight;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod edit;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod fold;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod fold_store;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod keymap;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod markdown;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod wrap;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod dir;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod explorer_fs;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod explorer_model;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod preview;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::{
     EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, StackExplorerVisibility,
     restore_file_view_bundle,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod lsp;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use lsp::LspPlugin;
 
-#[cfg(any(target_arch = "wasm32", test))]
+#[cfg(any(web, test))]
 pub mod page_model;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod explorer;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod lsp_page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 mod note;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;

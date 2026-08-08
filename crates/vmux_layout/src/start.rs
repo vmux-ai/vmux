@@ -13,30 +13,30 @@ pub fn supports_inline_agent_transition(url: &str) -> bool {
         .any(|segment| matches!(segment, "cli" | "setup"))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub use plugin::StartPlugin;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]
 pub struct StartAgentTransition {
     pub webview: bevy::prelude::Entity,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 #[derive(bevy::prelude::Component)]
 pub struct StartAgentTransitionView;
 
 /// Canonical URL of the start launcher page.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const START_PAGE_URL: &str = "vmux://start/";
 
 /// Page manifest for the `vmux://start/` launcher (also reachable from the Cmd+K command bar).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "start",
     title: "Start",

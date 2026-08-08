@@ -42,7 +42,7 @@ impl fmt::Display for EventListenerError {
 }
 
 /// Decode a host payload out of a raw JS value.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub fn decode_bin_host_emit_js<T>(e: &wasm_bindgen::JsValue) -> Option<T>
 where
     T: rkyv::Archive,
@@ -101,7 +101,7 @@ pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
 ///
 /// Only wasm needs this: the bridge appears asynchronously after the page loads, whereas a native
 /// host installs its transport before the first page mounts.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
@@ -121,7 +121,7 @@ fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
     closure.forget();
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn schedule_listener_retry(_retry_tick: Signal<u32>, _current: u32) {}
 
 pub struct BevyState {

@@ -43,11 +43,11 @@ fn with_host<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerEr
     if let Some(host) = installed {
         return Ok(f(host.as_ref()));
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(web)]
     {
         Ok(f(&super::cef_host::CefHost))
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(web))]
     {
         Err(EventListenerError::NoHost)
     }

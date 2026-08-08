@@ -13,7 +13,7 @@ use std::rc::Rc;
 /// CEF finds the element by id and ignores this; a native host has nothing else to hold on to.
 pub type Container = Signal<Option<Rc<MountedData>>>;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 mod imp {
     use super::Container;
     use std::cell::Cell;
@@ -71,7 +71,7 @@ mod imp {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 mod imp {
     use super::Container;
     use dioxus::html::geometry::PixelsVector2D;

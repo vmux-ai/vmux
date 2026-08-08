@@ -317,12 +317,12 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
 }
 
 /// The browser tab's title. A phone has no tab, so this is where that difference stops.
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 fn set_document_title(title: &str) {
     if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
         doc.set_title(title);
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 fn set_document_title(_title: &str) {}
