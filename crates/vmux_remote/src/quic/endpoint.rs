@@ -148,10 +148,21 @@ pub fn server_endpoint(
     Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
 }
 
-/// Bind a client endpoint on an ephemeral local port.
-pub fn client_endpoint(fingerprint: &str) -> Result<Endpoint, String> {
-    let mut endpoint = Endpoint::client((std::net::Ipv4Addr::UNSPECIFIED, 0).into())
-        .map_err(|error| format!("QUIC client bind failed: {error}"))?;
+/// Bind a client endpoint on an ephemeral local port, in the peer's address family.
+///
+/// The family has to match: an IPv4 socket cannot dial an IPv6 peer, and `localhost` resolves to
+/// `::1` before `127.0.0.1` on macOS.
+pub fn client_endpoint(
+    fingerprint: &str,
+    remote: std::net::SocketAddr,
+) -> Result<Endpoint, String> {
+    let local: std::net::SocketAddr = if remote.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    };
+    let mut endpoint =
+        Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
     endpoint.set_default_client_config(client_config_pinned(fingerprint)?);
     Ok(endpoint)
 }
@@ -165,7 +176,11 @@ pub fn client_endpoint(fingerprint: &str) -> Result<Endpoint, String> {
 /// A relay on loopback or a private address is a development stack whose certificate no public
 /// root signs, so it verifies nothing there — the same allowance the HTTP client already made,
 /// and not reachable from anywhere an attacker could sit.
-pub fn client_endpoint_relay(host: &str) -> Result<Endpoint, String> {
+///
+/// `remote` decides which family the local socket binds. An IPv4 socket cannot dial an IPv6 peer,
+/// and `localhost` resolves to `::1` first on macOS, so binding a fixed family turns a perfectly
+/// reachable relay into `invalid remote address`.
+pub fn client_endpoint_relay(host: &str, remote: std::net::SocketAddr) -> Result<Endpoint, String> {
     let builder = rustls::ClientConfig::builder_with_provider(Arc::new(
         rustls::crypto::ring::default_provider(),
     ))
@@ -190,8 +205,13 @@ pub fn client_endpoint_relay(host: &str) -> Result<Endpoint, String> {
     let mut config = ClientConfig::new(Arc::new(quic));
     config.transport_config(transport_config());
 
-    let mut endpoint = Endpoint::client((std::net::Ipv4Addr::UNSPECIFIED, 0).into())
-        .map_err(|error| format!("QUIC client bind failed: {error}"))?;
+    let local: std::net::SocketAddr = if remote.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    };
+    let mut endpoint =
+        Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
     endpoint.set_default_client_config(config);
     Ok(endpoint)
 }

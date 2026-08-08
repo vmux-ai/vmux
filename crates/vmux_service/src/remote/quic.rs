@@ -642,7 +642,8 @@ mod live {
         harness: &Harness,
         token: &str,
     ) -> Result<quinn::Connection, quinn::ConnectionError> {
-        let endpoint = client_endpoint(&harness.fingerprint).expect("client endpoint");
+        let endpoint =
+            client_endpoint(&harness.fingerprint, harness.address).expect("client endpoint");
         let connection = endpoint
             .connect(harness.address, "localhost")
             .expect("dial")

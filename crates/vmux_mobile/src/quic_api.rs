@@ -108,7 +108,6 @@ impl QuicApi {
     }
 
     async fn dial(&self) -> Result<quinn::Connection, QuicError> {
-        let endpoint = client_endpoint(&self.endpoint.fingerprint).map_err(QuicError::Transport)?;
         // The pairing link names the relay by host, so this has to resolve rather than parse: a
         // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
         // pairing address is not valid".
@@ -128,6 +127,8 @@ impl QuicApi {
             .map(|(host, _)| host)
             .unwrap_or(&self.endpoint.address)
             .to_string();
+        let endpoint =
+            client_endpoint(&self.endpoint.fingerprint, address).map_err(QuicError::Transport)?;
         let connection = endpoint
             .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?

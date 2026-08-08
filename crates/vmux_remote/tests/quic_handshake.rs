@@ -40,7 +40,7 @@ async fn the_paired_fingerprint_connects() {
     let (identity, address, server) = desktop();
     let accepting = tokio::spawn(accept_once(server));
 
-    let client = client_endpoint(&identity.fingerprint).expect("bind client");
+    let client = client_endpoint(&identity.fingerprint, address).expect("bind client");
     let connecting = client.connect(address, "localhost").expect("dial");
     let connection = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
@@ -59,7 +59,7 @@ async fn a_different_certificate_is_refused() {
     let accepting = tokio::spawn(accept_once(server));
 
     let impostor = generate_self_signed(vec!["localhost".into()]).expect("second identity");
-    let client = client_endpoint(&impostor.fingerprint).expect("bind client");
+    let client = client_endpoint(&impostor.fingerprint, address).expect("bind client");
     let connecting = client.connect(address, "localhost").expect("dial");
     let outcome = tokio::time::timeout(Duration::from_secs(5), connecting)
         .await
