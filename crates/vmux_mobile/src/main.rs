@@ -1519,7 +1519,7 @@ fn PairCard(props: PairCardProps) -> Element {
                         props.on_pair.call(());
                     },
                     input {
-                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground",
+                        class: "h-10 min-w-0 flex-1 bg-transparent px-3 font-mono text-base text-foreground outline-none placeholder:text-muted-foreground",
                         r#type: "url",
                         inputmode: "url",
                         autocomplete: "off",
