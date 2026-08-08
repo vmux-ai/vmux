@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 use vmux_remote::quic::endpoint::{SelfSignedIdentity, generate_self_signed, server_endpoint};
-use vmux_wire::protocol::SharedMessage;
+use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
 use vmux_remote::quic::{
     ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
@@ -276,21 +276,123 @@ async fn dispatch_control(
     let Some((kind, body)) = bytes.split_first() else {
         return;
     };
-    if StreamKind::from_byte(*kind) != Some(StreamKind::Control) {
+    let Some(kind) = StreamKind::from_byte(*kind) else {
         return;
-    }
+    };
     // Copied so rkyv sees an aligned buffer; a slice at a one-byte offset is not.
     let body = body.to_vec();
     let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&body) else {
         return;
     };
 
-    let response = dispatch::dispatch(&state, request).await;
-    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+    match kind {
+        StreamKind::Control => {
+            let response = dispatch::dispatch(&state, request).await;
+            let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+                return;
+            };
+            if send.write_all(&encoded).await.is_ok() {
+                let _ = send.finish();
+            }
+        }
+        StreamKind::SessionEvents => stream_session_events(&state, send, request).await,
+    }
+}
+
+/// Push a session's events until the client goes away.
+///
+/// The client opens this stream and writes once; everything after flows the other way. That shape
+/// is deliberate: the relay only routes streams the *client* opens, so a desktop-initiated stream
+/// would work on a direct connection and vanish through the relay — a difference that would not
+/// show up until someone tested off their own network.
+async fn stream_session_events(
+    state: &super::server::RemoteState,
+    mut send: quinn::SendStream,
+    request: SharedMessage,
+) {
+    let SharedMessage::AttachPageAgent { sid } = request else {
         return;
     };
-    if send.write_all(&encoded).await.is_ok() {
+    let Some(mut events) = subscribe(state, &sid).await else {
+        // No such session. Closing empty says so without inventing an error frame.
         let _ = send.finish();
+        return;
+    };
+
+    // Snapshot first, so a client that attaches mid-conversation renders the transcript it
+    // missed rather than only what happens next.
+    if let Some(snapshot) = session_snapshot(state, &sid).await
+        && write_event(&mut send, &snapshot).await.is_err()
+    {
+        return;
+    }
+
+    loop {
+        match events.recv().await {
+            Ok(message) => {
+                // Only the shared half leaves the machine. Everything else a session emits —
+                // terminal output, proposed diffs, process lifecycle — is dropped here.
+                let ServiceMessage::Shared(event) = message else {
+                    continue;
+                };
+                if write_event(&mut send, &event).await.is_err() {
+                    return;
+                }
+            }
+            // Lagged means the client fell behind and frames were dropped. Resending a snapshot
+            // is what the HTTP path did, and it beats a gap the client cannot detect.
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                let Some(snapshot) = session_snapshot(state, &sid).await else {
+                    return;
+                };
+                if write_event(&mut send, &snapshot).await.is_err() {
+                    return;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                let _ = send.finish();
+                return;
+            }
+        }
+    }
+}
+
+/// Length-prefixed, because unlike a control response there are many of these on one stream and
+/// the reader needs to know where each ends.
+async fn write_event(
+    send: &mut quinn::SendStream,
+    event: &vmux_wire::protocol::SharedEvent,
+) -> Result<(), ()> {
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
+    let length = u32::try_from(bytes.len()).map_err(|_| ())?;
+    send.write_all(&length.to_le_bytes())
+        .await
+        .map_err(|_| ())?;
+    send.write_all(&bytes).await.map_err(|_| ())
+}
+
+async fn subscribe(
+    state: &super::server::RemoteState,
+    sid: &str,
+) -> Option<tokio::sync::broadcast::Receiver<ServiceMessage>> {
+    if let Some(receiver) = state.acp.lock().await.subscribe(sid) {
+        return Some(receiver);
+    }
+    state.agents.lock().await.subscribe(sid)
+}
+
+async fn session_snapshot(
+    state: &super::server::RemoteState,
+    sid: &str,
+) -> Option<vmux_wire::protocol::SharedEvent> {
+    let snapshot = if state.acp.lock().await.contains(sid) {
+        state.acp.lock().await.snapshot(sid)
+    } else {
+        state.agents.lock().await.snapshot(sid).await
+    }?;
+    match snapshot {
+        ServiceMessage::Shared(event) => Some(event),
+        _ => None,
     }
 }
 
@@ -523,6 +625,73 @@ mod live {
         // Copied so rkyv sees an aligned buffer, for the same reason the production readers do.
         let bytes = bytes.to_vec();
         rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(&bytes).expect("decode")
+    }
+
+    /// Read one length-prefixed event off a subscription stream.
+    async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_wire::protocol::SharedEvent> {
+        let mut length = [0u8; 4];
+        recv.read_exact(&mut length).await.ok()?;
+        let mut body = vec![0u8; u32::from_le_bytes(length) as usize];
+        recv.read_exact(&mut body).await.ok()?;
+        rkyv::from_bytes::<vmux_wire::protocol::SharedEvent, rkyv::rancor::Error>(&body).ok()
+    }
+
+    /// Subscribing to a session that does not exist must close the stream rather than hang.
+    ///
+    /// A client waiting forever on a dead subscription is the failure mode that looks like a
+    /// network problem and is not, so it is worth pinning down.
+    #[tokio::test]
+    async fn subscribing_to_an_unknown_session_closes_rather_than_hangs() {
+        let harness = start("correct-token");
+        let connection = connect(&harness, "correct-token").await.expect("handshake");
+
+        let (mut send, mut recv) = connection.open_bi().await.expect("stream");
+        let mut frame = vec![StreamKind::SessionEvents.as_byte()];
+        frame.extend_from_slice(
+            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::AttachPageAgent {
+                sid: "ghost".into(),
+            })
+            .expect("encode"),
+        );
+        send.write_all(&frame).await.expect("write");
+        send.finish().expect("finish");
+
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            read_event(&mut recv).await
+        })
+        .await;
+
+        assert!(
+            matches!(closed, Ok(None)),
+            "an unknown session must close the stream, not leave the client waiting"
+        );
+    }
+
+    /// A control request on a subscription stream, or the reverse, must not be silently treated
+    /// as the other. The kind byte is the only thing distinguishing them.
+    #[tokio::test]
+    async fn an_unknown_stream_kind_is_dropped() {
+        let harness = start("correct-token");
+        let connection = connect(&harness, "correct-token").await.expect("handshake");
+
+        let (mut send, mut recv) = connection.open_bi().await.expect("stream");
+        let mut frame = vec![200u8];
+        frame.extend_from_slice(
+            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::ListSessions).expect("encode"),
+        );
+        send.write_all(&frame).await.expect("write");
+        send.finish().expect("finish");
+
+        let answered = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            recv.read_to_end(1024 * 1024),
+        )
+        .await;
+
+        assert!(
+            matches!(answered, Ok(Ok(bytes)) if bytes.is_empty()),
+            "an unrecognised stream kind must not be answered as if it were a control request"
+        );
     }
 
     #[tokio::test]
