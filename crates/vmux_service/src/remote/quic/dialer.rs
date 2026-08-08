@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::sync::watch;
 use vmux_remote::quic::endpoint::SelfSignedIdentity;
 use vmux_remote::quic::tunnel::TunnelSocket;
-use vmux_remote::quic::{ProtocolVersion, RelayAllocation, RelayHello, decode_hello, encode_hello};
+use vmux_remote::quic::{RelayAllocation, RelayHello, decode_hello, encode_hello};
 use vmux_remote::{DeviceId, PeerRole};
 
 use super::super::server::RemoteState;
@@ -109,7 +109,6 @@ async fn register(
         .await
         .map_err(|error| format!("relay stream: {error}"))?;
     let hello = RelayHello {
-        protocol_version: ProtocolVersion::CURRENT,
         device_id: device_id.clone(),
         role: PeerRole::Desktop,
         token: token.to_string(),

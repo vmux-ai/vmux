@@ -5,37 +5,8 @@
 //! even by accident — the property the transport design depends on. Those live in
 //! [`vmux_wire::room`].
 
-use serde::{Deserialize, Serialize};
-
+pub mod device;
 pub mod quic;
-pub use quic::{
-    ClientHello, CloseCode, Envelope, PeerRole, ProtocolVersion, RelayHello, StreamKind,
-};
 
-/// Identifies one paired desktop to the relay. Opaque: the relay routes on it and reads nothing
-/// else about the peer.
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(transparent)]
-pub struct DeviceId(pub String);
-
-impl DeviceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<String> for DeviceId {
-    fn from(value: String) -> Self {
-        Self(value)
-    }
-}
-
-impl From<&str> for DeviceId {
-    fn from(value: &str) -> Self {
-        Self(value.to_string())
-    }
-}
+pub use device::DeviceId;
+pub use quic::{ClientHello, CloseCode, Envelope, PeerRole, RelayHello, StreamKind};

@@ -22,7 +22,7 @@ use vmux_remote::quic::endpoint::SelfSignedIdentity;
 use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
 use vmux_remote::quic::{
-    ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
+    ClientHello, CloseCode, ServerHello, StreamKind, decode_hello, encode_hello,
 };
 
 /// How often the kill switch is re-read. Matches the HTTP path's in-stream recheck.
@@ -93,7 +93,6 @@ fn subject_alt_names() -> Vec<String> {
 /// Why a connection was turned away, so the peer is told rather than merely dropped.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Rejection {
-    UnsupportedVersion,
     Unauthorized,
     RemoteDisabled,
     Malformed,
@@ -102,7 +101,6 @@ pub enum Rejection {
 impl Rejection {
     pub fn close_code(self) -> CloseCode {
         match self {
-            Self::UnsupportedVersion => CloseCode::UnsupportedVersion,
             Self::Unauthorized => CloseCode::Unauthorized,
             Self::RemoteDisabled => CloseCode::RemoteDisabled,
             Self::Malformed => CloseCode::ProtocolError,
@@ -113,10 +111,9 @@ impl Rejection {
 /// Decide whether a hello is acceptable, given the token and the current kill-switch state.
 ///
 /// Separated from the I/O so the decision is testable without a socket, and so the order of the
-/// checks is visible: liveness first, then version, then the secret. A peer learns nothing about
-/// the token from a `RemoteDisabled` or `UnsupportedVersion` answer.
+/// checks is visible: the kill switch first, then the secret. A peer learns nothing about the
+/// token from a `RemoteDisabled` answer.
 pub fn admit(
-    hello: &ClientHello,
     presented_token: &str,
     expected_token: &str,
     remote_enabled: bool,
@@ -124,15 +121,10 @@ pub fn admit(
     if !remote_enabled {
         return Err(Rejection::RemoteDisabled);
     }
-    if !hello.protocol_version.is_supported() {
-        return Err(Rejection::UnsupportedVersion);
-    }
     if !super::server::secure_eq(presented_token, expected_token) {
         return Err(Rejection::Unauthorized);
     }
-    Ok(ServerHello {
-        protocol_version: ProtocolVersion::CURRENT,
-    })
+    Ok(ServerHello {})
 }
 
 /// The bearer token is carried in the hello rather than a header, since QUIC has none.
@@ -189,12 +181,7 @@ async fn serve(
         return;
     };
     let admitted = match read_hello(&mut recv).await {
-        Ok(authenticated) => admit(
-            &authenticated.hello,
-            &authenticated.token,
-            &token,
-            *liveness.borrow(),
-        ),
+        Ok(authenticated) => admit(&authenticated.token, &token, *liveness.borrow()),
         Err(rejection) => Err(rejection),
     };
 
@@ -501,31 +488,15 @@ pub(crate) fn spawn_with_identity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_remote::DeviceId;
-
-    fn hello(version: u32) -> ClientHello {
-        ClientHello {
-            protocol_version: ProtocolVersion(version),
-            device_id: DeviceId::new("device"),
-        }
-    }
 
     #[test]
-    fn a_matching_token_on_a_supported_version_is_admitted() {
-        let accepted = admit(&hello(ProtocolVersion::CURRENT.0), "secret", "secret", true);
-
-        assert_eq!(
-            accepted.map(|server| server.protocol_version),
-            Ok(ProtocolVersion::CURRENT)
-        );
+    fn a_matching_token_is_admitted() {
+        assert_eq!(admit("secret", "secret", true), Ok(ServerHello {}));
     }
 
     #[test]
     fn a_wrong_token_is_refused() {
-        assert_eq!(
-            admit(&hello(ProtocolVersion::CURRENT.0), "guess", "secret", true),
-            Err(Rejection::Unauthorized)
-        );
+        assert_eq!(admit("guess", "secret", true), Err(Rejection::Unauthorized));
     }
 
     /// The kill switch outranks the secret, so flipping Remote off refuses even a correctly
@@ -533,32 +504,14 @@ mod tests {
     #[test]
     fn remote_switched_off_outranks_a_valid_token() {
         assert_eq!(
-            admit(
-                &hello(ProtocolVersion::CURRENT.0),
-                "secret",
-                "secret",
-                false
-            ),
+            admit("secret", "secret", false),
             Err(Rejection::RemoteDisabled)
-        );
-    }
-
-    /// Checked before the token, so a peer cannot use the difference between "wrong version" and
-    /// "wrong token" to learn anything about the secret.
-    #[test]
-    fn an_unsupported_version_is_refused_without_consulting_the_token() {
-        let far_future = ProtocolVersion::CURRENT.0 + 99;
-
-        assert_eq!(
-            admit(&hello(far_future), "guess", "secret", true),
-            Err(Rejection::UnsupportedVersion)
         );
     }
 
     #[test]
     fn each_rejection_carries_a_distinct_close_code() {
         let codes = [
-            Rejection::UnsupportedVersion,
             Rejection::Unauthorized,
             Rejection::RemoteDisabled,
             Rejection::Malformed,
@@ -648,7 +601,6 @@ mod live {
         let (mut send, mut recv) = connection.open_bi().await.expect("hello stream");
         let hello = AuthenticatedHello {
             hello: ClientHello {
-                protocol_version: ProtocolVersion::CURRENT,
                 device_id: DeviceId::new("test-device"),
             },
             token: token.to_string(),

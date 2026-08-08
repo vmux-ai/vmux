@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 use vmux_remote::DeviceId;
 use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::{
-    ClientHello, CloseCode, ProtocolVersion, ServerHello, StreamKind, decode_hello, encode_hello,
+    ClientHello, CloseCode, ServerHello, StreamKind, decode_hello, encode_hello,
 };
 use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
@@ -30,8 +30,6 @@ pub enum QuicError {
     /// Token rejected, or the desktop presented a certificate we are not paired with. Both mean
     /// re-pair; neither is fixed by waiting.
     Unauthorized,
-    /// This build speaks a protocol the desktop will not serve, or the reverse.
-    VersionMismatch,
     /// Remote is switched off on the desktop. Resolves when the user turns it back on.
     RemoteDisabled,
     /// The desktop answered, and the answer was a refusal.
@@ -44,7 +42,6 @@ impl std::fmt::Display for QuicError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unauthorized => f.write_str("Pairing expired. Scan the QR on your Mac again."),
-            Self::VersionMismatch => f.write_str("Update Vmux Remote to connect to this Mac."),
             Self::RemoteDisabled => f.write_str("Remote is switched off on your Mac."),
             Self::Refused(SharedFailure::NotFound) => f.write_str("That session is gone."),
             Self::Refused(SharedFailure::NoDesktop) => {
@@ -52,6 +49,44 @@ impl std::fmt::Display for QuicError {
             }
             Self::Refused(_) => f.write_str("Your Mac could not do that."),
             Self::Transport(message) => f.write_str(message),
+        }
+    }
+}
+
+impl QuicError {
+    /// Why a dial failed.
+    ///
+    /// A refused handshake is almost always the pinning, and saying so beats a TLS error string.
+    fn from_connection_error(error: &quinn::ConnectionError) -> Self {
+        match error {
+            quinn::ConnectionError::ApplicationClosed(closed) => {
+                Self::from_close_code(closed.error_code.into_inner())
+            }
+            quinn::ConnectionError::TransportError(_) => Self::Unauthorized,
+            other => Self::Transport(other.to_string()),
+        }
+    }
+
+    /// Why a live connection ended.
+    ///
+    /// The desktop closes with a code rather than just dropping, so a client can tell the user
+    /// something specific instead of "connection lost".
+    fn from_close(connection: &quinn::Connection) -> Self {
+        match connection.close_reason() {
+            Some(quinn::ConnectionError::ApplicationClosed(closed)) => {
+                Self::from_close_code(closed.error_code.into_inner())
+            }
+            Some(other) => Self::Transport(other.to_string()),
+            None => Self::Transport("The connection to your Mac dropped.".into()),
+        }
+    }
+
+    /// One close code, as advice the user can act on.
+    fn from_close_code(code: u64) -> Self {
+        match u32::try_from(code).ok().and_then(CloseCode::from_u32) {
+            Some(CloseCode::Unauthorized) => Self::Unauthorized,
+            Some(CloseCode::RemoteDisabled) => Self::RemoteDisabled,
+            _ => Self::Transport("Your Mac closed the connection.".into()),
         }
     }
 }
@@ -157,7 +192,7 @@ impl QuicApi {
             .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
-            .map_err(|error| classify_connection_error(&error))?;
+            .map_err(|error| QuicError::from_connection_error(&error))?;
 
         let (mut send, mut recv) = connection
             .open_bi()
@@ -165,7 +200,6 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         let hello = AuthenticatedHello {
             hello: ClientHello {
-                protocol_version: ProtocolVersion::CURRENT,
                 device_id: self.endpoint.device_id.clone(),
             },
             token: self.endpoint.token.clone(),
@@ -181,14 +215,10 @@ impl QuicApi {
         let answer = recv
             .read_to_end(64 * 1024)
             .await
-            .map_err(|_| classify_close(&connection))?;
-        let (server_hello, _) =
-            decode_hello::<ServerHello>(&answer).map_err(|_| classify_close(&connection))?;
-        // Checked rather than discarded: a Mac speaking a version this build does not know would
-        // otherwise fail on the first real request, with nothing pointing at the mismatch.
-        if !server_hello.protocol_version.is_supported() {
-            return Err(QuicError::Refused(SharedFailure::Invalid));
-        }
+            .map_err(|_| QuicError::from_close(&connection))?;
+        // The answer carries nothing; reading a well-formed one is the accept signal. A refusal
+        // arrives as a close code instead, which is what `from_close` turns into advice.
+        decode_hello::<ServerHello>(&answer).map_err(|_| QuicError::from_close(&connection))?;
         Ok(connection)
     }
 
@@ -241,7 +271,7 @@ impl QuicApi {
         let bytes = recv
             .read_to_end(MAX_RESPONSE_BYTES)
             .await
-            .map_err(|_| classify_close(&connection))?;
+            .map_err(|_| QuicError::from_close(&connection))?;
         // Copied so rkyv sees an aligned buffer.
         let bytes = bytes.to_vec();
         let response = rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(&bytes)
@@ -284,41 +314,6 @@ struct AuthenticatedHello {
     token: String,
 }
 
-/// A refused handshake is almost always the pinning, and saying so beats a TLS error string.
-fn classify_connection_error(error: &quinn::ConnectionError) -> QuicError {
-    match error {
-        quinn::ConnectionError::ApplicationClosed(closed) => {
-            close_code_to_error(closed.error_code.into_inner())
-        }
-        quinn::ConnectionError::TransportError(_) => QuicError::Unauthorized,
-        other => QuicError::Transport(other.to_string()),
-    }
-}
-
-/// The desktop closes with a code rather than just dropping, so a client can tell the user
-/// something specific instead of "connection lost".
-fn classify_close(connection: &quinn::Connection) -> QuicError {
-    match connection.close_reason() {
-        Some(quinn::ConnectionError::ApplicationClosed(closed)) => {
-            close_code_to_error(closed.error_code.into_inner())
-        }
-        Some(other) => QuicError::Transport(other.to_string()),
-        None => QuicError::Transport("The connection to your Mac dropped.".into()),
-    }
-}
-
-fn close_code_to_error(code: u64) -> QuicError {
-    if code == CloseCode::Unauthorized.as_u32() as u64 {
-        QuicError::Unauthorized
-    } else if code == CloseCode::UnsupportedVersion.as_u32() as u64 {
-        QuicError::VersionMismatch
-    } else if code == CloseCode::RemoteDisabled.as_u32() as u64 {
-        QuicError::RemoteDisabled
-    } else {
-        QuicError::Transport("Your Mac closed the connection.".into())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,18 +323,17 @@ mod tests {
     #[test]
     fn every_close_code_maps_to_its_own_error() {
         assert!(matches!(
-            close_code_to_error(CloseCode::Unauthorized.as_u32() as u64),
+            QuicError::from_close_code(CloseCode::Unauthorized.as_u32() as u64),
             QuicError::Unauthorized
         ));
         assert!(matches!(
-            close_code_to_error(CloseCode::UnsupportedVersion.as_u32() as u64),
-            QuicError::VersionMismatch
-        ));
-        assert!(matches!(
-            close_code_to_error(CloseCode::RemoteDisabled.as_u32() as u64),
+            QuicError::from_close_code(CloseCode::RemoteDisabled.as_u32() as u64),
             QuicError::RemoteDisabled
         ));
-        assert!(matches!(close_code_to_error(9999), QuicError::Transport(_)));
+        assert!(matches!(
+            QuicError::from_close_code(9999),
+            QuicError::Transport(_)
+        ));
     }
 
     /// A refusal reaches the user as advice, not a status code. `NoDesktop` in particular must

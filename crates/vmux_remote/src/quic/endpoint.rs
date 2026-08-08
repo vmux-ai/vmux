@@ -59,7 +59,7 @@ impl SelfSignedIdentity {
         Ok(Self {
             certificate_pem: certified.cert.pem(),
             private_key_pem: certified.signing_key.serialize_pem(),
-            fingerprint: certificate_fingerprint(certified.cert.der()),
+            fingerprint: Self::fingerprint_of(certified.cert.der()),
         })
     }
 
@@ -79,7 +79,23 @@ impl SelfSignedIdentity {
             .next()
             .ok_or_else(|| "certificate file held no certificate".to_string())?
             .map_err(|error| format!("certificate parse failed: {error}"))?;
-        Ok(certificate_fingerprint(&certificate))
+        Ok(Self::fingerprint_of(&certificate))
+    }
+
+    /// SHA-256 over the whole certificate DER, lowercase hex.
+    ///
+    /// The certificate rather than its SubjectPublicKeyInfo, because a verifier only ever sees the
+    /// peer's DER and extracting SPKI from it would mean parsing ASN.1 here. The cost is that
+    /// re-issuing invalidates every paired client — acceptable while re-pairing is a QR scan, and
+    /// the reason a stored certificate is reused instead of minted per launch.
+    pub fn fingerprint_of(certificate: &CertificateDer<'_>) -> String {
+        let digest = ring::digest::digest(&ring::digest::SHA256, certificate.as_ref());
+        let mut hex = String::with_capacity(digest.as_ref().len() * 2);
+        for byte in digest.as_ref() {
+            use std::fmt::Write;
+            let _ = write!(hex, "{byte:02x}");
+        }
+        hex
     }
 
     /// Bind a listener presenting this identity. Port 0 asks the OS to choose, which is what
@@ -153,6 +169,21 @@ impl Trust {
         Ok(endpoint)
     }
 
+    /// Whether a relay host can only be a development stack, and so has no publicly-signed
+    /// certificate to verify against.
+    fn is_local_development_host(host: &str) -> bool {
+        if host.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        match host.parse::<std::net::IpAddr>() {
+            Ok(std::net::IpAddr::V4(ip)) => {
+                ip.is_loopback() || ip.is_private() || ip.is_link_local()
+            }
+            Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.segments()[0] & 0xfe00 == 0xfc00,
+            Err(_) => false,
+        }
+    }
+
     fn client_config(&self) -> Result<ClientConfig, String> {
         let builder = rustls::ClientConfig::builder_with_provider(provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
@@ -165,7 +196,7 @@ impl Trust {
                     expected: fingerprint.to_ascii_lowercase(),
                 }))
                 .with_no_client_auth(),
-            Self::Relay { host } if is_local_development_host(host) => builder
+            Self::Relay { host } if Self::is_local_development_host(host) => builder
                 .dangerous()
                 .with_custom_certificate_verifier(Arc::new(AnyCertificate))
                 .with_no_client_auth(),
@@ -204,27 +235,8 @@ pub async fn resolve_preferring_ipv4(host: &str, port: u16) -> Result<SocketAddr
         .ok_or_else(|| format!("{host} resolved to nothing"))
 }
 
-/// SHA-256 over the whole certificate DER, lowercase hex.
-///
-/// The certificate rather than its SubjectPublicKeyInfo, because the verifier only ever sees the
-/// peer's DER and extracting SPKI from it would mean parsing ASN.1 here. The cost is that
-/// re-issuing invalidates every paired client — acceptable while re-pairing is a QR scan, and the
-/// reason a stored certificate is reused instead of minting one per launch.
-pub fn certificate_fingerprint(certificate: &CertificateDer<'_>) -> String {
-    hex_lower(ring::digest::digest(&ring::digest::SHA256, certificate.as_ref()).as_ref())
-}
-
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
-}
-
-fn hex_lower(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write;
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
 }
 
 fn transport_config() -> Arc<TransportConfig> {
@@ -239,18 +251,6 @@ fn transport_config() -> Arc<TransportConfig> {
     transport.max_concurrent_bidi_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
     transport.max_concurrent_uni_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
     Arc::new(transport)
-}
-
-/// Whether this host can only be a development relay.
-fn is_local_development_host(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("localhost") {
-        return true;
-    }
-    match host.parse::<std::net::IpAddr>() {
-        Ok(std::net::IpAddr::V4(ip)) => ip.is_loopback() || ip.is_private() || ip.is_link_local(),
-        Ok(std::net::IpAddr::V6(ip)) => ip.is_loopback() || ip.segments()[0] & 0xfe00 == 0xfc00,
-        Err(_) => false,
-    }
 }
 
 /// Accepts anything. Only ever installed for a relay on a private address.
@@ -307,6 +307,24 @@ struct PinnedCertificate {
     expected: String,
 }
 
+impl PinnedCertificate {
+    /// Length-independent for equal-length inputs, which is all this compares: two hex digests.
+    ///
+    /// Written as a loop rather than a fold so the absence of an early exit is visible — the whole
+    /// point is that every byte is compared regardless of where the first difference falls.
+    fn matches(&self, presented: &str) -> bool {
+        let (left, right) = (presented.as_bytes(), self.expected.as_bytes());
+        if left.len() != right.len() {
+            return false;
+        }
+        let mut difference = 0u8;
+        for index in 0..left.len() {
+            difference |= left[index] ^ right[index];
+        }
+        difference == 0
+    }
+}
+
 impl ServerCertVerifier for PinnedCertificate {
     fn verify_server_cert(
         &self,
@@ -316,8 +334,7 @@ impl ServerCertVerifier for PinnedCertificate {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, rustls::Error> {
-        let presented = certificate_fingerprint(end_entity);
-        if constant_time_eq(presented.as_bytes(), self.expected.as_bytes()) {
+        if self.matches(&SelfSignedIdentity::fingerprint_of(end_entity)) {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(rustls::Error::General(
@@ -355,21 +372,6 @@ impl ServerCertVerifier for PinnedCertificate {
             .signature_verification_algorithms
             .supported_schemes()
     }
-}
-
-/// Length-independent only for equal-length inputs, which is all this compares: two hex digests.
-///
-/// Written as a loop rather than a fold so the absence of an early exit is visible: the whole
-/// point is that every byte is compared regardless of where the first difference falls.
-fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0u8;
-    for index in 0..left.len() {
-        difference |= left[index] ^ right[index];
-    }
-    difference == 0
 }
 
 #[cfg(test)]
@@ -439,17 +441,21 @@ mod tests {
     /// A public relay must not fall into the verify-nothing branch meant for a dev stack.
     #[test]
     fn only_private_relay_hosts_skip_verification() {
-        assert!(is_local_development_host("localhost"));
-        assert!(is_local_development_host("127.0.0.1"));
-        assert!(is_local_development_host("192.168.1.4"));
-        assert!(!is_local_development_host("relay.vmux.ai"));
-        assert!(!is_local_development_host("8.8.8.8"));
+        assert!(Trust::is_local_development_host("localhost"));
+        assert!(Trust::is_local_development_host("127.0.0.1"));
+        assert!(Trust::is_local_development_host("192.168.1.4"));
+        assert!(!Trust::is_local_development_host("relay.vmux.ai"));
+        assert!(!Trust::is_local_development_host("8.8.8.8"));
     }
 
     #[test]
     fn comparison_rejects_a_different_or_truncated_fingerprint() {
-        assert!(constant_time_eq(b"abcd", b"abcd"));
-        assert!(!constant_time_eq(b"abcd", b"abce"));
-        assert!(!constant_time_eq(b"abcd", b"abc"));
+        let pin = PinnedCertificate {
+            expected: "abcd".into(),
+        };
+
+        assert!(pin.matches("abcd"));
+        assert!(!pin.matches("abce"));
+        assert!(!pin.matches("abc"));
     }
 }

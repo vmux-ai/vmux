@@ -20,61 +20,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::DeviceId;
 
-/// ALPN identifier offered during the TLS handshake.
+/// ALPN identifier offered during the TLS handshake, and the only compatibility gate there is.
 ///
-/// A version bump here rejects an incompatible peer during the QUIC handshake, before a single
-/// application byte is exchanged — cheaper than discovering it in [`ClientHello`].
+/// Bumping it rejects an incompatible peer during the QUIC handshake, before a single application
+/// byte is exchanged. There is deliberately no second version field in the hellos: one gate that
+/// always runs beats two that can disagree, and rkyv's positional variants mean a mismatched peer
+/// has to be refused outright rather than negotiated with.
 pub const ALPN: &[u8] = b"vmux/1";
 
 /// Leading bytes of every connection, so a mis-dialled port fails loudly rather than as a decode
 /// error hundreds of bytes later.
 pub const HELLO_MAGIC: [u8; 5] = *b"VMUXQ";
 
-/// Layout version of the hello frame *itself*, distinct from [`ProtocolVersion`]. Bumping this
-/// changes how to read the envelope; bumping that changes what the payloads mean.
+/// Layout version of the hello envelope. Bumping it changes how to *read* a hello, where bumping
+/// [`ALPN`] says the conversation after it means something different.
 pub const HELLO_VERSION: u8 = 1;
-
-/// The application protocol version a peer speaks.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(transparent)]
-pub struct ProtocolVersion(pub u32);
-
-impl ProtocolVersion {
-    /// What this build speaks.
-    ///
-    /// v2 nested every session-addressed message under one `Agent` variant, which moved rkyv's
-    /// positional discriminants. A v1 peer would not fail to decode — it would decode to the
-    /// wrong variant — so v1 is refused rather than tolerated.
-    pub const CURRENT: Self = Self(2);
-
-    /// Oldest peer this build will still serve.
-    pub const MIN_SUPPORTED: Self = Self(2);
-
-    pub fn is_supported(self) -> bool {
-        self >= Self::MIN_SUPPORTED && self <= Self::CURRENT
-    }
-}
 
 /// First application frame a client sends.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClientHello {
-    pub protocol_version: ProtocolVersion,
     pub device_id: DeviceId,
 }
 
 /// The desktop's answer to a [`ClientHello`].
 ///
-/// Mostly the accept signal: a client that reads a well-formed answer was admitted, where a
-/// refusal arrives as a connection close carrying a [`CloseCode`]. The version is here so a client
-/// can refuse a desktop it cannot speak to rather than failing on the first request.
-///
-/// Deliberately has no capability list. One was carried for a while and never populated or read;
-/// serde ignores unknown fields, so the negotiation can be added when something actually needs to
-/// negotiate, without a version bump to get there.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ServerHello {
-    pub protocol_version: ProtocolVersion,
-}
+/// The accept signal, and nothing else: a client that reads a well-formed answer was admitted,
+/// where a refusal arrives as a connection close carrying a [`CloseCode`]. Empty on purpose —
+/// a capability list and a version were both carried here for a while and neither was ever read.
+/// Serde ignores unknown fields, so a field can be added the day something needs one.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct ServerHello {}
 
 /// What a QUIC stream carries, written as its first byte so the peer can dispatch without
 /// decoding the payload — and so the relay can route without decoding it at all.
@@ -116,8 +91,6 @@ pub struct Envelope {
 #[repr(u32)]
 pub enum CloseCode {
     Normal = 0,
-    /// Peer speaks a `protocol_version` this build will not serve.
-    UnsupportedVersion = 1,
     /// Bearer token missing or wrong.
     Unauthorized = 2,
     /// Remote was switched off on the desktop while the connection was open.
@@ -129,6 +102,20 @@ pub enum CloseCode {
 impl CloseCode {
     pub fn as_u32(self) -> u32 {
         self as u32
+    }
+
+    /// The code a peer closed with, when this build recognises it.
+    ///
+    /// `None` covers anything else, including codes an older build still sends — a client turns
+    /// that into a generic message rather than guessing at what was meant.
+    pub fn from_u32(code: u32) -> Option<Self> {
+        match code {
+            0 => Some(Self::Normal),
+            2 => Some(Self::Unauthorized),
+            3 => Some(Self::RemoteDisabled),
+            4 => Some(Self::ProtocolError),
+            _ => None,
+        }
     }
 }
 
@@ -190,7 +177,6 @@ mod tests {
     #[test]
     fn hello_roundtrips_and_reports_its_length() {
         let hello = ClientHello {
-            protocol_version: ProtocolVersion::CURRENT,
             device_id: DeviceId::new("device-1"),
         };
         let mut bytes = encode_hello(&hello).unwrap();
@@ -207,7 +193,7 @@ mod tests {
     /// hello grow later without a version bump, so it is worth a test of its own.
     #[test]
     fn an_unknown_field_degrades_instead_of_failing() {
-        let wire = br#"{"protocol_version":2,"device_id":"d","teleportation":true}"#;
+        let wire = br#"{"device_id":"d","teleportation":true}"#;
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&HELLO_MAGIC);
         bytes.push(HELLO_VERSION);
@@ -217,7 +203,6 @@ mod tests {
         let (decoded, _) = decode_hello::<ClientHello>(&bytes).unwrap();
 
         assert_eq!(decoded.device_id, DeviceId::new("d"));
-        assert_eq!(decoded.protocol_version, ProtocolVersion::CURRENT);
     }
 
     #[test]
@@ -231,7 +216,6 @@ mod tests {
     #[test]
     fn a_partial_frame_is_not_mistaken_for_a_complete_one() {
         let hello = ClientHello {
-            protocol_version: ProtocolVersion::CURRENT,
             device_id: DeviceId::new("d"),
         };
         let bytes = encode_hello(&hello).unwrap();
@@ -240,14 +224,6 @@ mod tests {
             decode_hello::<ClientHello>(&bytes[..bytes.len() - 1]).unwrap_err(),
             HelloError::Truncated
         );
-    }
-
-    #[test]
-    fn version_support_window_is_closed_at_both_ends() {
-        assert!(ProtocolVersion::CURRENT.is_supported());
-        assert!(ProtocolVersion::MIN_SUPPORTED.is_supported());
-        assert!(!ProtocolVersion(ProtocolVersion::CURRENT.0 + 1).is_supported());
-        assert!(!ProtocolVersion(ProtocolVersion::MIN_SUPPORTED.0 - 1).is_supported());
     }
 
     #[test]
@@ -278,7 +254,6 @@ pub enum PeerRole {
 /// between two peers — the relay routes on `device_id` and never learns what it moved.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RelayHello {
-    pub protocol_version: ProtocolVersion,
     pub device_id: DeviceId,
     pub role: PeerRole,
     /// Proves both ends belong to the same pairing. The relay compares, it does not mint.
@@ -291,6 +266,5 @@ pub struct RelayHello {
 /// one this desktop was given — so the desktop cannot build a link until this arrives.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RelayAllocation {
-    pub protocol_version: ProtocolVersion,
     pub port: u16,
 }
