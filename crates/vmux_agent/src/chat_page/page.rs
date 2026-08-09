@@ -20,6 +20,7 @@ use crate::chat_page::event::{
     SlashCommandEntry, SlashCommands, latest_tool_location,
 };
 use crate::chat_page::scroll;
+use crate::chat_page::state;
 use dioxus::prelude::*;
 use std::collections::{HashMap, HashSet};
 use vmux_chat::activity::ActivityIcon;
@@ -362,55 +363,74 @@ pub fn Page(
 ) -> Element {
     use_theme();
     let agent = agent_override.unwrap_or_else(current_agent);
-    let transition_preview = use_signal(|| transition_prompt.unwrap_or_default());
-    let transition_attachments = use_signal(|| transition_attachments.unwrap_or_default());
-    let mut items = use_signal(Vec::<ChatItem>::new);
-    let mut loaded_start = use_signal(|| 0u32);
-    let mut messages_total = use_signal(|| 0u32);
-    let mut history_loading = use_signal(|| false);
-    let mut recent_messages_json = use_signal(String::new);
-    let mut recent_messages_start = use_signal(|| u32::MAX);
-    let status = use_signal(|| "installing".to_string());
-    let error = use_signal(String::new);
-    let mut approval = use_signal(|| Option::<(String, String, String)>::None);
-    let mut approval_sel = use_signal(|| 0usize);
-    let agent_name = use_signal(String::new);
-    let conversation_title = use_signal(String::new);
-    let agent_icon = use_signal(String::new);
-    let accent = use_signal(String::new);
-    let handoff_source = use_signal(String::new);
-    let handoff_truncated = use_signal(|| false);
-    let handoff_message_count = use_signal(|| 0u32);
-    let mut choice_question = use_signal(String::new);
-    let mut choice_options = use_signal(Vec::<String>::new);
-    let mut draft = use_signal(String::new);
-    let mut attachments = use_signal(Vec::<ChatAttachment>::new);
-    let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
-    let attachment_preview_requests = use_signal(HashSet::<String>::new);
-    let mut history_cursor = use_signal(|| None::<usize>);
-    let mut history_scratch = use_signal(String::new);
-    let mut at_bottom = use_signal(|| true);
-    let mut last_top = use_signal(|| 0i32);
-    let mut scroll_container: scroll::Container = use_signal(|| None);
-    let queued = use_signal(Vec::<QueuedPromptSnapshot>::new);
-    let paused = use_signal(|| false);
-    let mut slash_cmds = use_signal(Vec::<SlashCommandEntry>::new);
-    let mut sessions = use_signal(Vec::<ResumableSessionEntry>::new);
-    let mut models = use_signal(Vec::<ModelOptionEntry>::new);
-    let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
-    let mut media_request_id = use_signal(|| 0u64);
-    let mut media_requested_query = use_signal(|| None::<String>);
-    let mut media_loading = use_signal(|| false);
-    let mut current_model_id = use_signal(String::new);
-    let mut current_model = use_signal(String::new);
-    let mut effort_levels = use_signal(Vec::<String>::new);
-    let mut effort_current = use_signal(String::new);
-    let mut effort_agent_key = use_signal(String::new);
-    let mut effort_menu_open = use_signal(|| false);
-    let mut composer_context = use_signal(ComposerContext::default);
-    let mut menu_sel = use_signal(|| 0usize);
-    let mut resume_requested = use_signal(|| false);
-    let mut resume_loading = use_signal(|| false);
+    let state::Transcript {
+        mut items,
+        mut loaded_start,
+        mut messages_total,
+        mut history_loading,
+        mut recent_messages_json,
+        mut recent_messages_start,
+        mut at_bottom,
+        mut last_top,
+        mut scroll_container,
+    } = state::use_transcript();
+    let state::RunState {
+        status,
+        error,
+        mut approval,
+        mut approval_sel,
+        mut choice_question,
+        mut choice_options,
+    } = state::use_run_state();
+    let state::AgentIdentity {
+        agent_name,
+        conversation_title,
+        agent_icon,
+        accent,
+    } = state::use_agent_identity();
+    let state::Handoff {
+        source: handoff_source,
+        truncated: handoff_truncated,
+        message_count: handoff_message_count,
+    } = state::use_handoff();
+    let state::ComposerDraft {
+        mut draft,
+        mut attachments,
+        mut attachment_previews,
+        attachment_preview_requests,
+        mut history_cursor,
+        mut history_scratch,
+        transition_preview,
+        transition_attachments,
+    } = state::use_composer_draft(transition_prompt, transition_attachments);
+    let state::PromptQueue { queued, paused } = state::use_prompt_queue();
+    let state::MediaPicker {
+        entries: mut media_entries,
+        request_id: mut media_request_id,
+        requested_query: mut media_requested_query,
+        loading: mut media_loading,
+    } = state::use_media_picker();
+    let state::ModelPicker {
+        mut models,
+        mut current_model_id,
+        mut current_model,
+    } = state::use_model_picker();
+    let state::EffortPicker {
+        levels: mut effort_levels,
+        current: mut effort_current,
+        agent_key: mut effort_agent_key,
+        menu_open: mut effort_menu_open,
+    } = state::use_effort_picker();
+    let state::SlashCommands {
+        commands: mut slash_cmds,
+        mut menu_sel,
+        mut composer_context,
+    } = state::use_slash_commands();
+    let state::Resume {
+        mut sessions,
+        requested: mut resume_requested,
+        loading: mut resume_loading,
+    } = state::use_resume();
     let activity_counts = use_memo(move || composer_activity_counts(&items.read()));
     let latest_tool = use_memo(move || latest_tool_location(&items.read()));
 

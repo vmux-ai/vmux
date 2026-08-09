@@ -10,6 +10,8 @@ pub mod event;
 pub mod page;
 #[cfg(frontend)]
 mod scroll;
+#[cfg(frontend)]
+mod state;
 
 #[cfg(native)]
 pub mod plugin;
