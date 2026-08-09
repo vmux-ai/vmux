@@ -35,6 +35,8 @@ pub enum CommandBarResultItem {
         title: String,
         icon: PageIcon,
         shortcut: String,
+        /// Mirrors [`vmux_wire::command_bar::CommandBarPage::prompt_target`].
+        prompt_target: bool,
     },
     Navigate {
         url: String,
@@ -127,21 +129,24 @@ fn page_results(pages: &[CommandBarPage], search_lower: &str) -> Vec<CommandBarR
             title: page.title.clone(),
             icon: page.icon.clone(),
             shortcut: page.shortcut.clone(),
+            prompt_target: false,
         })
         .collect()
 }
 
-/// Installed agent launcher rows in recent-first input order. A matching query narrows the
-/// choices; ordinary prompt text that matches no agent keeps every choice visible.
-pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
+/// Pages a prompt can be sent to, in recent-first input order.
+///
+/// A matching query narrows the choices; text that matches none of them keeps every choice
+/// visible, because that text is the prompt rather than a search for a target.
+pub fn prompt_target_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandBarResultItem> {
     let search_lower = query.trim().to_lowercase();
-    let agents: Vec<_> = pages.iter().filter(|page| page.host == "agent").collect();
-    let matches: Vec<_> = agents
+    let targets: Vec<_> = pages.iter().filter(|page| page.prompt_target).collect();
+    let matches: Vec<_> = targets
         .iter()
         .copied()
         .filter(|page| page_matches(page, &search_lower))
         .collect();
-    let visible = if matches.is_empty() { agents } else { matches };
+    let visible = if matches.is_empty() { targets } else { matches };
     visible
         .into_iter()
         .map(|page| CommandBarResultItem::Page {
@@ -149,24 +154,32 @@ pub fn agent_page_results(pages: &[CommandBarPage], query: &str) -> Vec<CommandB
             title: page.title.clone(),
             icon: page.icon.clone(),
             shortcut: page.shortcut.clone(),
+            prompt_target: true,
         })
         .collect()
 }
 
-pub fn agent_page_url(item: &CommandBarResultItem) -> Option<&str> {
+pub fn prompt_target_url(item: &CommandBarResultItem) -> Option<&str> {
     match item {
-        CommandBarResultItem::Page { url, .. } if url.starts_with("vmux://agent/") => Some(url),
+        CommandBarResultItem::Page {
+            url,
+            prompt_target: true,
+            ..
+        } => Some(url),
         _ => None,
     }
 }
 
-pub fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
-    let CommandBarResultItem::Page { url, title, .. } = item else {
+pub fn prompt_target_matches_query(item: &CommandBarResultItem, query: &str) -> bool {
+    let CommandBarResultItem::Page {
+        url,
+        title,
+        prompt_target: true,
+        ..
+    } = item
+    else {
         return false;
     };
-    if !url.starts_with("vmux://agent/") {
-        return false;
-    }
     let search_lower = query.trim().to_lowercase();
     !search_lower.is_empty()
         && (title.to_lowercase().contains(&search_lower)
@@ -176,35 +189,35 @@ pub fn agent_page_matches_query(item: &CommandBarResultItem, query: &str) -> boo
 /// Whether the query should offer "Terminal".
 ///
 /// Display and activation share this so a partially typed `ter` cannot list Terminal while
-/// Enter quietly routes the text to an agent instead.
+/// Enter quietly routes the text to a prompt target instead.
 pub fn terminal_matches_query(query: &str) -> bool {
     let query = query.trim().to_lowercase();
     !query.is_empty() && "terminal".starts_with(&query)
 }
 
-pub fn prepend_prompt_agents(
+pub fn prepend_prompt_targets(
     results: &mut Vec<CommandBarResultItem>,
-    selected_agent: Option<&CommandBarResultItem>,
-    recent_agents: &[CommandBarResultItem],
+    selected_target: Option<&CommandBarResultItem>,
+    recent_targets: &[CommandBarResultItem],
     query: &str,
 ) {
     if !vmux_wire::command_bar::is_start_prompt_query(query)
-        || results.iter().any(|item| agent_page_url(item).is_some())
+        || results.iter().any(|item| prompt_target_url(item).is_some())
     {
         return;
     }
     let mut suggestions = Vec::new();
-    for agent in selected_agent.into_iter().chain(recent_agents) {
-        let Some(url) = agent_page_url(agent) else {
+    for target in selected_target.into_iter().chain(recent_targets) {
+        let Some(url) = prompt_target_url(target) else {
             continue;
         };
         if suggestions
             .iter()
-            .any(|existing| agent_page_url(existing) == Some(url))
+            .any(|existing| prompt_target_url(existing) == Some(url))
         {
             continue;
         }
-        suggestions.push(agent.clone());
+        suggestions.push(target.clone());
         if suggestions.len() == 3 {
             break;
         }
@@ -217,7 +230,7 @@ pub fn prepend_prompt_agents(
     results.splice(at..at, suggestions);
 }
 
-/// The launcher's resting state: every open agent session.
+/// The launcher's resting state: every open session.
 ///
 /// An empty query used to render nothing on the desktop launcher, so the sessions already open
 /// were the one thing it could not show you. Both hosts now open on this list.
@@ -253,13 +266,13 @@ pub fn start_page_results(
         });
     }
     results.extend(
-        agent_page_results(pages, query)
+        prompt_target_results(pages, query)
             .into_iter()
-            .filter(|item| agent_page_matches_query(item, query)),
+            .filter(|item| prompt_target_matches_query(item, query)),
     );
     let mut app_pages: Vec<_> = pages
         .iter()
-        .filter(|page| page.host != "agent" && page.host != "start" && page.host != "terminal")
+        .filter(|page| !page.prompt_target && page.host != "start" && page.host != "terminal")
         .filter(|page| page_matches(page, &search_lower))
         .collect();
     app_pages.sort_by_cached_key(|page| page.url.to_lowercase());
@@ -271,6 +284,7 @@ pub fn start_page_results(
                 title: page.title.clone(),
                 icon: page.icon.clone(),
                 shortcut: page.shortcut.clone(),
+                prompt_target: false,
             }),
     );
     results.extend(work_dir_results(work_dirs, &search_lower));
@@ -347,6 +361,7 @@ pub fn space_switch_results(
             title: translate("command-manage-spaces"),
             icon: page.icon.clone(),
             shortcut: String::new(),
+            prompt_target: false,
         });
     }
     items
@@ -544,6 +559,7 @@ mod tests {
                 keywords: vec!["preferences".into()],
                 icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Settings),
                 shortcut: String::new(),
+                prompt_target: false,
             },
             CommandBarPage {
                 host: "spaces".into(),
@@ -552,6 +568,7 @@ mod tests {
                 keywords: vec!["space".into()],
                 icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
                 shortcut: String::new(),
+                prompt_target: false,
             },
             CommandBarPage {
                 host: "history".into(),
@@ -560,6 +577,7 @@ mod tests {
                 keywords: vec!["recent".into()],
                 icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Clock),
                 shortcut: "\u{2318}Y".into(),
+                prompt_target: false,
             },
             CommandBarPage {
                 host: "agent".into(),
@@ -568,6 +586,7 @@ mod tests {
                 keywords: vec!["vibe".into(), "agent".into()],
                 icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
+                prompt_target: true,
             },
         ]
     }
@@ -640,6 +659,7 @@ mod tests {
             title: "Spaces".into(),
             icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
+            prompt_target: false,
         }));
         assert!(results.iter().any(|r| matches!(
             r, CommandBarResultItem::Space { id, .. } if id == "space-1"
@@ -674,6 +694,7 @@ mod tests {
             title: "Spaces".into(),
             icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
+            prompt_target: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "browser_open_command_bar".to_string(),
@@ -707,6 +728,7 @@ mod tests {
             title: "Spaces".into(),
             icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Layers),
             shortcut: String::new(),
+            prompt_target: false,
         }));
         assert!(results.contains(&CommandBarResultItem::Command {
             id: "space_open".to_string(),
@@ -758,6 +780,7 @@ mod tests {
             title: "Settings".into(),
             icon: vmux_wire::PageIcon::Builtin(vmux_wire::BuiltinIcon::Settings),
             shortcut: String::new(),
+            prompt_target: false,
         }));
     }
 
@@ -801,9 +824,10 @@ mod tests {
             keywords: vec!["codex".into(), "agent".into()],
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: true,
         });
 
-        let results = agent_page_results(&pages, "");
+        let results = prompt_target_results(&pages, "");
         let urls: Vec<_> = results
             .iter()
             .filter_map(|result| match result {
@@ -825,9 +849,10 @@ mod tests {
             keywords: vec!["codex".into(), "agent".into()],
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: true,
         });
 
-        let results = agent_page_results(&pages, "vibe");
+        let results = prompt_target_results(&pages, "vibe");
 
         assert_eq!(results.len(), 1);
         assert!(matches!(
@@ -846,13 +871,14 @@ mod tests {
             keywords: vec!["codex-acp".into(), "acp".into(), "agent".into()],
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: true,
         });
-        let codex = agent_page_results(&pages, "cod").remove(0);
+        let codex = prompt_target_results(&pages, "cod").remove(0);
 
-        assert!(agent_page_matches_query(&codex, "cod"));
-        assert!(agent_page_matches_query(&codex, "codex"));
-        assert!(agent_page_matches_query(&codex, "codex-acp"));
-        assert!(!agent_page_matches_query(&codex, "fix the failing test"));
+        assert!(prompt_target_matches_query(&codex, "cod"));
+        assert!(prompt_target_matches_query(&codex, "codex"));
+        assert!(prompt_target_matches_query(&codex, "codex-acp"));
+        assert!(!prompt_target_matches_query(&codex, "fix the failing test"));
     }
 
     #[test]
@@ -865,10 +891,11 @@ mod tests {
             keywords: vec!["codex".into(), "agent".into()],
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: true,
         });
 
-        let results = agent_page_results(&pages, "show me something fun in terminal");
-        let urls: Vec<_> = results.iter().filter_map(agent_page_url).collect();
+        let results = prompt_target_results(&pages, "show me something fun in terminal");
+        let urls: Vec<_> = results.iter().filter_map(prompt_target_url).collect();
 
         assert_eq!(urls, vec!["vmux://agent/vibe/", "vmux://agent/codex/cli"]);
     }
@@ -919,6 +946,7 @@ mod tests {
                 keywords: vec!["codex".into(), "agent".into()],
                 icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
+                prompt_target: true,
             },
             CommandBarPage {
                 host: "agent".into(),
@@ -927,9 +955,10 @@ mod tests {
                 keywords: vec!["claude".into(), "agent".into()],
                 icon: vmux_wire::PageIcon::None,
                 shortcut: String::new(),
+                prompt_target: true,
             },
         ]);
-        let agents = agent_page_results(&pages, "");
+        let agents = prompt_target_results(&pages, "");
         let selected = agents[1].clone();
         let mut results = start_page_results(
             &pages,
@@ -939,32 +968,35 @@ mod tests {
             "show me something fun",
         );
 
-        prepend_prompt_agents(
+        prepend_prompt_targets(
             &mut results,
             Some(&selected),
             &agents,
             "show me something fun",
         );
 
-        assert_eq!(agent_page_url(&results[0]), Some("vmux://agent/codex/cli"));
-        assert_eq!(agent_page_url(&results[1]), Some("vmux://agent/vibe/"));
-        assert_eq!(agent_page_url(&results[2]), Some("vmux://agent/claude"));
+        assert_eq!(
+            prompt_target_url(&results[0]),
+            Some("vmux://agent/codex/cli")
+        );
+        assert_eq!(prompt_target_url(&results[1]), Some("vmux://agent/vibe/"));
+        assert_eq!(prompt_target_url(&results[2]), Some("vmux://agent/claude"));
         assert!(matches!(results[3], CommandBarResultItem::Search { .. }));
     }
 
     #[test]
     fn terminal_leads_but_agents_and_search_stay_available() {
-        let agent = agent_page_results(&sample_pages(), "").remove(0);
+        let agent = prompt_target_results(&sample_pages(), "").remove(0);
         let mut results = start_page_results(&sample_pages(), &[], &[], &[], "terminal");
 
-        prepend_prompt_agents(&mut results, Some(&agent), &[], "terminal");
+        prepend_prompt_targets(&mut results, Some(&agent), &[], "terminal");
 
         assert!(
             matches!(results.first(), Some(CommandBarResultItem::Terminal { .. })),
             "terminal keeps the default selection: {results:?}"
         );
         assert!(
-            results.iter().any(|item| agent_page_url(item).is_some()),
+            results.iter().any(|item| prompt_target_url(item).is_some()),
             "asking an agent stays reachable: {results:?}"
         );
         assert!(
@@ -1007,6 +1039,7 @@ mod tests {
             keywords: vec!["shell".into()],
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: false,
         });
         let results = start_page_results(&pages, &[], &[], &[], "terminal");
         assert!(matches!(
@@ -1057,16 +1090,17 @@ mod tests {
 
     #[test]
     fn prompt_agent_url_only_accepts_agent_page_rows() {
-        let agent = agent_page_results(&sample_pages(), "").remove(0);
+        let agent = prompt_target_results(&sample_pages(), "").remove(0);
         let settings = CommandBarResultItem::Page {
             url: "vmux://settings/".into(),
             title: "Settings".into(),
             icon: vmux_wire::PageIcon::None,
             shortcut: String::new(),
+            prompt_target: false,
         };
 
-        assert_eq!(agent_page_url(&agent), Some("vmux://agent/vibe/"));
-        assert_eq!(agent_page_url(&settings), None);
+        assert_eq!(prompt_target_url(&agent), Some("vmux://agent/vibe/"));
+        assert_eq!(prompt_target_url(&settings), None);
     }
 
     #[test]

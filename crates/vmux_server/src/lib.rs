@@ -35,7 +35,7 @@ struct WebPageManifest {
 const INLINE_AGENT_WINDOW_PREFIX: &str = "vmux-inline-agent:";
 
 #[cfg(all(web, feature = "web"))]
-fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartAgentTransition> {
+fn inline_transition() -> Option<vmux_layout::command_bar::palette::StartInlineTransition> {
     web_sys::window()
         .and_then(|window| window.name().ok())
         .and_then(|name| {
@@ -43,8 +43,8 @@ fn inline_agent_transition() -> Option<vmux_layout::command_bar::palette::StartA
                 .map(str::to_string)
         })
         .map(
-            |agent_url| vmux_layout::command_bar::palette::StartAgentTransition {
-                agent_url,
+            |agent_url| vmux_layout::command_bar::palette::StartInlineTransition {
+                target_url: agent_url,
                 prompt: String::new(),
                 attachments: Vec::new(),
             },
@@ -172,11 +172,11 @@ mod host_tests {
 #[allow(non_snake_case)]
 #[component]
 fn StartAgentPage() -> Element {
-    let mut transition = use_signal(inline_agent_transition);
+    let mut transition = use_signal(inline_transition);
     if let Some(active) = transition() {
         return rsx! {
             vmux_agent::chat_page::page::Page {
-                agent_override: Some(inline_agent_id(&active.agent_url)),
+                agent_override: Some(inline_agent_id(&active.target_url)),
                 transition_prompt: Some(active.prompt),
                 transition_attachments: Some(active.attachments),
             }
@@ -184,9 +184,9 @@ fn StartAgentPage() -> Element {
     }
     rsx! {
         vmux_layout::start::page::Page {
-            on_agent_transition: move |next: vmux_layout::command_bar::palette::StartAgentTransition| {
+            on_inline_transition: move |next: vmux_layout::command_bar::palette::StartInlineTransition| {
                 vmux_layout::start::page::begin_agent_transition();
-                set_inline_agent_url(&next.agent_url);
+                set_inline_agent_url(&next.target_url);
                 transition.set(Some(next));
             },
         }

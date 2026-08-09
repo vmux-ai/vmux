@@ -9,7 +9,7 @@ use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-use crate::command_bar::palette::{CommandPalette, PaletteVariant, StartAgentTransition};
+use crate::command_bar::palette::{CommandPalette, PaletteVariant, StartInlineTransition};
 use crate::start::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
 };
@@ -21,7 +21,7 @@ const START_TRANSITIONED: &str = "_startTransitioned";
 /// entries on mount and renders [`CommandPalette`] in [`PaletteVariant::Start`].
 #[component]
 pub fn Page(
-    #[props(default)] on_agent_transition: Option<EventHandler<StartAgentTransition>>,
+    #[props(default)] on_inline_transition: Option<EventHandler<StartInlineTransition>>,
 ) -> Element {
     let locale = use_theme();
     let state = use_event::<CommandBarOpenEvent>(
@@ -62,7 +62,7 @@ pub fn Page(
                         on_close: move |_| {},
                         on_dismiss: move |_| {},
                         on_activity: move |_| {},
-                        on_start_agent_transition: on_agent_transition,
+                        on_start_inline_transition: on_inline_transition,
                     }
                 }
             }

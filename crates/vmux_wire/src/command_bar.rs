@@ -153,6 +153,12 @@ pub struct CommandBarPage {
     pub keywords: Vec<String>,
     pub icon: crate::icon::PageIcon,
     pub shortcut: String,
+    /// Whether typing a prompt and pressing Enter can send it here.
+    ///
+    /// Set by whoever contributed the page. The command bar offers these as prompt targets
+    /// without knowing what they are.
+    #[serde(default)]
+    pub prompt_target: bool,
 }
 
 #[derive(
@@ -267,7 +273,8 @@ pub struct CommandBarActionEvent {
     pub action: String,
     pub value: String,
     pub target: Option<crate::open_target::OpenTarget>,
-    pub agent_url: Option<String>,
+    /// Which prompt target the user picked, when they picked one explicitly.
+    pub target_url: Option<String>,
     pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
 }
 
@@ -782,6 +789,7 @@ mod tests {
                 keywords: vec!["preferences".to_string()],
                 icon: crate::icon::PageIcon::Builtin(crate::icon::BuiltinIcon::Settings),
                 shortcut: String::new(),
+                prompt_target: false,
             }],
             ..Default::default()
         };

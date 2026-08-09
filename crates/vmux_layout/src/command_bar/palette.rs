@@ -9,9 +9,9 @@ use crate::command_bar::keyboard::{
     ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_results, agent_page_url, filter_results, open_session_results,
-    prepend_prompt_agents, space_switch_results, start_page_results,
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
+    space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
@@ -95,8 +95,8 @@ pub enum PaletteVariant {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct StartAgentTransition {
-    pub agent_url: String,
+pub struct StartInlineTransition {
+    pub target_url: String,
     pub prompt: String,
     pub attachments: Vec<vmux_command::prompt_media::ChatAttachment>,
 }
@@ -115,7 +115,7 @@ pub struct PaletteProps {
     /// Called on query/selection change (the modal re-emits its size).
     pub on_activity: EventHandler<()>,
     #[props(default)]
-    pub on_start_agent_transition: Option<EventHandler<StartAgentTransition>>,
+    pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
 }
 
 /// The shared command-bar body: input, live-filtered results, file-path completion,
@@ -129,7 +129,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_close = props.on_close;
     let on_dismiss = props.on_dismiss;
     let on_activity = props.on_activity;
-    let on_start_agent_transition = props.on_start_agent_transition;
+    let on_start_inline_transition = props.on_start_inline_transition;
 
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
@@ -150,8 +150,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut media_loading = use_signal(|| false);
     let mut media_selected = use_signal(|| 0usize);
-    let mut start_agent_url = use_signal(String::new);
-    let mut start_agent_menu_open = use_signal(|| false);
+    let mut start_target_url = use_signal(String::new);
+    let mut target_menu_open = use_signal(|| false);
 
     let path_search_effect_timer = path_search_timer.clone();
     use_effect(move || {
@@ -349,7 +349,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         if is_start {
-            install_start_menu_click_outside(start_agent_menu_open);
+            install_start_menu_click_outside(target_menu_open);
         }
     });
 
@@ -393,16 +393,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_prompt_mode = is_start && is_start_prompt_query(&q);
-    let start_agent_items = if is_start {
-        agent_page_results(&pages, "")
+    let prompt_targets = if is_start {
+        prompt_target_results(&pages, "")
     } else {
         Vec::new()
     };
-    let default_agent_item = start_agent_items
+    let default_target = prompt_targets
         .iter()
-        .find(|item| agent_page_url(item) == Some(start_agent_url().as_str()))
+        .find(|item| prompt_target_url(item) == Some(start_target_url().as_str()))
         .cloned()
-        .or_else(|| start_agent_items.first().cloned());
+        .or_else(|| prompt_targets.first().cloned());
     let mut results: Vec<ResultItem> = if space_switch {
         space_switch_results(&spaces, &pages, &q)
     } else if is_start && q.trim().is_empty() {
@@ -456,19 +456,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     };
     if start_prompt_mode {
-        prepend_prompt_agents(
-            &mut results,
-            default_agent_item.as_ref(),
-            &start_agent_items,
-            &q,
-        );
+        prepend_prompt_targets(&mut results, default_target.as_ref(), &prompt_targets, &q);
     }
     let sel = selected().min(results.len().saturating_sub(1));
     let active_item = results.get(sel).cloned();
     let nav = nav_mode();
-    let selected_agent_accent = default_agent_item
+    let selected_agent_accent = default_target
         .as_ref()
-        .and_then(agent_page_url)
+        .and_then(prompt_target_url)
         .and_then(|url| url.strip_prefix("vmux://agent/"))
         .and_then(|path| path.split('/').next())
         .filter(|agent| !agent.is_empty())
@@ -476,9 +471,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let active_agent_accent = if nav {
         active_item.as_ref()
     } else {
-        default_agent_item.as_ref()
+        default_target.as_ref()
     }
-    .and_then(agent_page_url)
+    .and_then(prompt_target_url)
     .and_then(|url| url.strip_prefix("vmux://agent/"))
     .and_then(|path| path.split('/').next())
     .filter(|agent| !agent.is_empty())
@@ -567,14 +562,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let execute = move |item: &ResultItem| {
         let prompt = query();
         let transition = if is_start
-            && let Some(agent_url) = agent_page_url(item)
-            && crate::start::supports_inline_agent_transition(agent_url)
-            && let Some(handler) = on_start_agent_transition
+            && let Some(target_url) = prompt_target_url(item)
+            && crate::start::supports_inline_agent_transition(target_url)
+            && let Some(handler) = on_start_inline_transition
         {
             Some((
                 handler,
-                StartAgentTransition {
-                    agent_url: agent_url.to_string(),
+                StartInlineTransition {
+                    target_url: target_url.to_string(),
                     prompt: prompt.trim().to_string(),
                     attachments: attachments.peek().clone(),
                 },
@@ -584,14 +579,19 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         };
         if matches!(variant, PaletteVariant::Start)
             && (is_start_prompt_query(&prompt) || !attachments.peek().is_empty())
-            && let Some(agent_url) = agent_page_url(item)
+            && let Some(target_url) = prompt_target_url(item)
         {
             on_close.call(());
             let selected_attachments = attachments.peek().clone();
-            if agent_page_matches_query(item, &prompt) && selected_attachments.is_empty() {
-                emit_action_with_target("open", agent_url, open_target);
+            if prompt_target_matches_query(item, &prompt) && selected_attachments.is_empty() {
+                emit_action_with_target("open", target_url, open_target);
             } else {
-                emit_prompt_action(prompt.trim(), open_target, agent_url, &selected_attachments);
+                emit_prompt_action(
+                    prompt.trim(),
+                    open_target,
+                    target_url,
+                    &selected_attachments,
+                );
             }
             if let Some((handler, next)) = transition {
                 handler.call(next);
@@ -679,16 +679,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
-    let selected_agent_title = default_agent_item
+    let selected_target_title = default_target
         .as_ref()
         .and_then(|item| match item {
             ResultItem::Page { title, .. } => Some(title.clone()),
             _ => None,
         })
         .unwrap_or_else(|| "Agent".to_string());
-    let selected_agent_url_value = default_agent_item
+    let selected_target_url = default_target
         .as_ref()
-        .and_then(agent_page_url)
+        .and_then(prompt_target_url)
         .unwrap_or_default()
         .to_string();
     let workspace_label = if prompt_context.workspace_name.is_empty() {
@@ -715,7 +715,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     title: "Choose agent",
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        start_agent_menu_open.set(!start_agent_menu_open());
+                        target_menu_open.set(!target_menu_open());
                         focus_prompt_end(PROMPT_INPUT_ID);
                     },
                     svg {
@@ -729,7 +729,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
                         path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
                     }
-                    span { class: "truncate", "{selected_agent_title}" }
+                    span { class: "truncate", "{selected_target_title}" }
                     svg {
                         class: "h-3 w-3 shrink-0 opacity-50",
                         view_box: "0 0 24 24",
@@ -820,7 +820,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let start_keydown_q = q.clone();
     let start_keydown_results = results.clone();
-    let start_keydown_default_agent = default_agent_item.clone();
+    let start_keydown_default_agent = default_target.clone();
     let start_keydown_nav = nav;
     let start_keydown_ghost = ghost_text.clone();
     let start_keydown = move |e: KeyboardEvent| {
@@ -861,9 +861,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let go_up = (e.key() == Key::ArrowUp && !ctrl)
             || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
 
-        if start_agent_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
+        if target_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
             e.prevent_default();
-            start_agent_menu_open.set(false);
+            target_menu_open.set(false);
             return;
         }
 
@@ -929,7 +929,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             } else if start_prompt_mode {
                 if let Some(item) = start_keydown_results.get(sel).filter(|item| {
                     start_keydown_nav
-                        || agent_page_matches_query(item, &start_keydown_q)
+                        || prompt_target_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
                             && crate::command_bar::results::terminal_matches_query(
                                 &start_keydown_q,
@@ -1069,25 +1069,25 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             if is_start {
-                if start_agent_menu_open() {
+                if target_menu_open() {
                     PromptPopup {
                         placement: PromptPopupPlacement::Downward,
                         id: "start-agent-selector",
                         div { class: "p-1.5",
                             div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", "Agent" }
-                            for item in start_agent_items.iter() {
+                            for item in prompt_targets.iter() {
                                 if let ResultItem::Page { url, title, .. } = item {
                                     {
                                         let option_url = url.clone();
-                                        let option_selected = url == &selected_agent_url_value;
+                                        let option_selected = url == &selected_target_url;
                                         rsx! {
                                             button {
                                                 key: "{url}",
                                                 class: if option_selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-2 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
                                                 onmousedown: move |event| event.prevent_default(),
                                                 onclick: move |_| {
-                                                    start_agent_url.set(option_url.clone());
-                                                    start_agent_menu_open.set(false);
+                                                    start_target_url.set(option_url.clone());
+                                                    target_menu_open.set(false);
                                                     selected.set(0);
                                                     nav_mode.set(false);
                                                     focus_prompt_end(PROMPT_INPUT_ID);
@@ -1127,7 +1127,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     action_title: translate("command-send"),
                     action_enabled: start_action_enabled,
                     on_input: move |value| {
-                        start_agent_menu_open.set(false);
+                        target_menu_open.set(false);
                         query.set(value);
                         selected.set(0);
                         nav_mode.set(false);
@@ -1149,13 +1149,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_action: {
                         let action_results = results.clone();
                         let action_query = q.clone();
-                        let action_default_agent = default_agent_item.clone();
+                        let action_default_agent = default_target.clone();
                         let action_nav = nav;
                         move |_| {
                             if let Some(item) = action_results.get(sel).filter(|item| {
                                 !start_prompt_mode
                                     || action_nav
-                                    || agent_page_matches_query(item, &action_query)
+                                    || prompt_target_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
                                         && crate::command_bar::results::terminal_matches_query(&action_query))
                             }) {
@@ -1296,7 +1296,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !start_agent_menu_open() && media_menu_open {
+            if !target_menu_open() && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -1315,7 +1315,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !start_agent_menu_open() && !media_menu_open && !results.is_empty() {
+            if !target_menu_open() && !media_menu_open && !results.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
@@ -1422,7 +1422,7 @@ pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<
         action: action.to_string(),
         value: value.to_string(),
         target,
-        agent_url: None,
+        target_url: None,
         attachments: Vec::new(),
     });
 }
@@ -1430,14 +1430,14 @@ pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<
 fn emit_prompt_action(
     value: &str,
     target: Option<OpenTarget>,
-    agent_url: &str,
+    target_url: &str,
     attachments: &[ChatAttachment],
 ) {
     let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
         action: "prompt".to_string(),
         value: value.to_string(),
         target,
-        agent_url: (!agent_url.is_empty()).then(|| agent_url.to_string()),
+        target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
         attachments: attachments
             .iter()
             .map(

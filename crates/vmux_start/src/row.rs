@@ -11,7 +11,7 @@ use vmux_ui::icon::PageIconView;
 use vmux_wire::command_bar::looks_like_url;
 
 use crate::results::CommandBarResultItem as ResultItem;
-use crate::results::{agent_page_matches_query, agent_page_url};
+use crate::results::{prompt_target_matches_query, prompt_target_url};
 use crate::style::{
     result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
     result_leading_icon_class, result_location_class, result_primary_text_class,
@@ -115,7 +115,7 @@ pub fn ResultRow(
                                 }
                                 span { class: result_trailing_slot_class() }
                             },
-                            ResultItem::Page { url, title, icon, shortcut } => rsx! {
+                            ResultItem::Page { url, title, icon, shortcut, .. } => rsx! {
                                 div { class: result_content_row_class(),
                                     PageIconView {
                                         icon: icon.clone(),
@@ -125,8 +125,8 @@ pub fn ResultRow(
                                     }
                                     div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
                                         if start_prompt_mode
-                                            && agent_page_url(&item).is_some()
-                                            && !agent_page_matches_query(&item, q)
+                                            && prompt_target_url(&item).is_some()
+                                            && !prompt_target_matches_query(&item, q)
                                         {
                                             span { class: result_primary_text_class(), "Ask {title}" }
                                         } else {
@@ -137,8 +137,8 @@ pub fn ResultRow(
                                 }
                                 span { class: result_trailing_slot_class(),
                                     if start_prompt_mode
-                                        && agent_page_url(&item).is_some()
-                                        && !agent_page_matches_query(&item, q)
+                                        && prompt_target_url(&item).is_some()
+                                        && !prompt_target_matches_query(&item, q)
                                     {
                                         {translate("command-prompt")}
                                     } else if shortcut.is_empty() {

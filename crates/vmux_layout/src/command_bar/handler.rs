@@ -1172,7 +1172,7 @@ struct CommandBarActionQueries<'w, 's> {
     webview_sources: Query<'w, 's, &'static WebviewSource>,
 }
 
-fn start_agent_transition_stack(
+fn inline_transition_stack_for(
     webview: Entity,
     queries: &CommandBarActionQueries,
 ) -> Option<Entity> {
@@ -1185,13 +1185,13 @@ fn start_agent_transition_stack(
     queries.child_of_q.get(webview).ok().map(|parent| parent.0)
 }
 
-fn mark_start_agent_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
+fn mark_inline_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
     commands
         .entity(stack)
-        .insert(crate::start::StartAgentTransition { webview });
+        .insert(crate::start::StartInlineTransition { webview });
     commands
         .entity(webview)
-        .insert(crate::start::StartAgentTransitionView);
+        .insert(crate::start::StartInlineTransitionView);
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -1272,7 +1272,7 @@ fn on_command_bar_action(
     let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
-    let inline_transition_stack = start_agent_transition_stack(webview, &queries);
+    let inline_transition_stack = inline_transition_stack_for(webview, &queries);
     let locale = resource_params
         .p3()
         .as_deref()
@@ -1302,12 +1302,12 @@ fn on_command_bar_action(
                     &queries.stack_ts,
                 );
                 if let Some(stack) = empty_stack.or(focused_stack)
-                    && let Some(url) = resource_params.p2().prompt_url(evt.agent_url.as_deref())
+                    && let Some(url) = resource_params.p2().prompt_url(evt.target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
                         && crate::start::supports_inline_agent_transition(&url)
                     {
-                        mark_start_agent_transition(stack, webview, &mut commands);
+                        mark_inline_transition(stack, webview, &mut commands);
                     }
                     commands
                         .entity(stack)
@@ -1381,7 +1381,7 @@ fn on_command_bar_action(
                     && crate::start::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
-                    mark_start_agent_transition(stack, webview, &mut commands);
+                    mark_inline_transition(stack, webview, &mut commands);
                     true
                 } else {
                     false
@@ -1864,7 +1864,7 @@ fn reveal_command_bar(
                     action: "dismiss".to_string(),
                     value: String::new(),
                     target: None,
-                    agent_url: None,
+                    target_url: None,
                     attachments: Vec::new(),
                 },
             });
@@ -2848,7 +2848,7 @@ mod tests {
                     action: "dismiss".to_string(),
                     value: String::new(),
                     target: None,
-                    agent_url: None,
+                    target_url: None,
                     attachments: Vec::new(),
                 },
             });

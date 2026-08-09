@@ -313,7 +313,7 @@ fn sync_live_start_pages(
             Has<StartWorkSynced>,
             Has<CefKeyboardTarget>,
         ),
-        Without<crate::start::StartAgentTransitionView>,
+        Without<crate::start::StartInlineTransitionView>,
     >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
     browsers: NonSend<Browsers>,

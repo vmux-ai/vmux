@@ -23,13 +23,13 @@ pub use plugin::StartPlugin;
 
 #[cfg(not(web))]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]
-pub struct StartAgentTransition {
+pub struct StartInlineTransition {
     pub webview: bevy::prelude::Entity,
 }
 
 #[cfg(not(web))]
 #[derive(bevy::prelude::Component)]
-pub struct StartAgentTransitionView;
+pub struct StartInlineTransitionView;
 
 /// Canonical URL of the start launcher page.
 #[cfg(not(web))]

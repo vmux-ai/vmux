@@ -5074,7 +5074,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
-    transitions: Query<&vmux_layout::start::StartAgentTransition>,
+    transitions: Query<&vmux_layout::start::StartInlineTransition>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
         .p0()
@@ -5148,7 +5148,7 @@ fn handle_agent_page_open(
                 commands.entity(entity).insert(PageOpenHandled);
                 commands
                     .entity(task.stack)
-                    .remove::<vmux_layout::start::StartAgentTransition>();
+                    .remove::<vmux_layout::start::StartInlineTransition>();
             }
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
@@ -8632,13 +8632,13 @@ mod tests {
                     title: "Start".to_string(),
                     ..default()
                 },
-                vmux_layout::start::StartAgentTransitionView,
+                vmux_layout::start::StartInlineTransitionView,
                 ChildOf(stack),
             ))
             .id();
         app.world_mut()
             .entity_mut(stack)
-            .insert(vmux_layout::start::StartAgentTransition { webview });
+            .insert(vmux_layout::start::StartInlineTransition { webview });
         app.world_mut().spawn(PageOpenTask {
             id: vmux_core::PageOpenId::new(),
             stack,
@@ -8690,7 +8690,7 @@ mod tests {
         );
         assert!(
             app.world()
-                .get::<vmux_layout::start::StartAgentTransition>(stack)
+                .get::<vmux_layout::start::StartInlineTransition>(stack)
                 .is_none()
         );
     }

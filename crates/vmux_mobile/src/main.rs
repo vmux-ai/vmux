@@ -1863,6 +1863,7 @@ fn agent_result_item(agent: &RemoteAgent) -> CommandBarResultItem {
             PageIcon::Favicon(agent.icon.clone())
         },
         shortcut: String::new(),
+        prompt_target: true,
     }
 }
 

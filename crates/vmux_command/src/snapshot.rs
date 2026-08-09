@@ -35,6 +35,7 @@ impl CommandBarAgentsSnapshot {
                         vmux_core::PageIcon::Favicon(agent.icon.clone())
                     },
                     shortcut: String::new(),
+                    prompt_target: true,
                 },
             });
         }
@@ -48,6 +49,7 @@ impl CommandBarAgentsSnapshot {
                     keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
                     icon: vmux_core::PageIcon::None,
                     shortcut: String::new(),
+                    prompt_target: true,
                 },
             });
         }
@@ -224,6 +226,7 @@ pub fn update_pages_snapshot(
                 .map(vmux_core::PageIcon::Builtin)
                 .unwrap_or_default(),
             shortcut: String::new(),
+            prompt_target: false,
         })
         .collect();
     pages.sort_by(|a, b| a.url.cmp(&b.url));
