@@ -481,6 +481,10 @@ fn default_auto_update() -> bool {
 pub struct ShortcutEntry {
     pub command: String,
     pub binding: ShortcutDef,
+    /// Context keys that must hold for this binding to apply, e.g. `chat && !chat.approval`.
+    /// Absent means everywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -498,27 +502,29 @@ impl ShortcutSettings {
     /// somewhere else. When the leader will not parse, the defaults stand and only bindings that
     /// name their keys outright are added — a `Leader(..)` entry has nothing to hang off.
     pub fn keymap(&self) -> vmux_command::shortcut::Keymap {
-        let mut keymap = vmux_command::shortcut::Keymap {
-            chord_timeout_ms: self.chord_timeout_ms,
-            ..vmux_command::shortcut::Keymap::defaults()
-        };
+        use vmux_command::shortcut::{Binding, Keymap, Source, When};
+
         let leader = self.leader.to_key_combo();
+        let mut keymap = Keymap::defaults();
+        keymap.chord_timeout_ms = self.chord_timeout_ms;
         if let Some(leader) = &leader {
-            for (binding, _) in &mut keymap.bindings {
-                if let vmux_command::shortcut::Shortcut::Chord(prefix, _) = binding {
-                    *prefix = leader.clone();
-                }
-            }
+            keymap.set_leader(leader);
         }
+
+        let mut configured = Vec::new();
         for entry in &self.bindings {
-            let binding = match leader.as_ref() {
+            let shortcut = match leader.as_ref() {
                 Some(leader) => entry.binding.to_shortcut_with_leader(leader),
                 None => entry.binding.to_shortcut(),
             };
-            if let Some(binding) = binding {
-                keymap.bindings.push((binding, entry.command.clone()));
-            }
+            let Some(shortcut) = shortcut else { continue };
+            configured.push(Binding {
+                shortcut,
+                command: entry.command.clone(),
+                when: entry.when.as_deref().and_then(When::parse),
+            });
         }
+        keymap.extend(Source::Settings, configured);
         keymap
     }
 }

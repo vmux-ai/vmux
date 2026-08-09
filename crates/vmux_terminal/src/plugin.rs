@@ -16,6 +16,7 @@ use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, StackCommand, WriteAppCommands,
 };
+use vmux_core::input::KeyStroke;
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
 use vmux_core::{
@@ -72,7 +73,6 @@ impl Plugin for TerminalPlugin {
                 TermResizeEvent,
                 TermMouseEvent,
                 TermScrollEvent,
-                TermKeyEvent,
                 TermLinkOpenRequest,
             )>::for_hosts(&["terminal"]))
             .add_systems(
@@ -2459,7 +2459,7 @@ fn logical_key_to_bytes(key: &Key, ctrl: bool, alt: bool) -> Vec<u8> {
     }
 }
 
-fn term_key_event_to_key(event: &TermKeyEvent) -> Key {
+fn term_key_event_to_key(event: &KeyStroke) -> Key {
     match event.key.as_str() {
         "Enter" => Key::Enter,
         "Backspace" => Key::Backspace,
@@ -2476,10 +2476,7 @@ fn term_key_event_to_key(event: &TermKeyEvent) -> Key {
         "PageDown" => Key::PageDown,
         "Delete" => Key::Delete,
         "Insert" => Key::Insert,
-        _ => {
-            let text = event.text.as_deref().unwrap_or(event.key.as_str());
-            Key::Character(text.into())
-        }
+        _ => Key::Character(event.typed_text().into()),
     }
 }
 
@@ -2557,34 +2554,12 @@ fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn term_key_event_to_bytes(event: &TermKeyEvent) -> Vec<u8> {
-    if is_web_modifier_key_event(event) {
+fn term_key_event_to_bytes(event: &KeyStroke) -> Vec<u8> {
+    if event.is_modifier_key() {
         return Vec::new();
     }
-    let ctrl = event.modifiers & MOD_CTRL != 0;
-    let alt = event.modifiers & MOD_ALT != 0;
     let key = term_key_event_to_key(event);
-    logical_key_to_bytes(&key, ctrl, alt)
-}
-
-fn is_web_modifier_key_event(event: &TermKeyEvent) -> bool {
-    matches!(
-        event.key.as_str(),
-        "Shift" | "Control" | "Alt" | "Meta" | "OS" | "Fn" | "CapsLock"
-    ) || matches!(
-        event.code.as_str(),
-        "ShiftLeft"
-            | "ShiftRight"
-            | "ControlLeft"
-            | "ControlRight"
-            | "AltLeft"
-            | "AltRight"
-            | "MetaLeft"
-            | "MetaRight"
-            | "OSLeft"
-            | "OSRight"
-            | "CapsLock"
-    )
+    logical_key_to_bytes(&key, event.mods.ctrl, event.mods.alt)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2595,7 +2570,7 @@ enum TerminalWebShortcutAction {
 }
 
 fn resolve_terminal_web_shortcut(
-    event: &TermKeyEvent,
+    event: &KeyStroke,
     settings: Option<&AppSettings>,
     state: &mut TerminalWebShortcutState,
 ) -> TerminalWebShortcutAction {
@@ -2636,18 +2611,18 @@ fn resolve_terminal_web_shortcut(
     TerminalWebShortcutAction::PassThrough
 }
 
-fn term_key_event_to_shortcut_combo(event: &TermKeyEvent) -> Option<KeyCombo> {
-    if is_web_modifier_key_event(event) {
+fn term_key_event_to_shortcut_combo(event: &KeyStroke) -> Option<KeyCombo> {
+    if event.is_modifier_key() {
         return None;
     }
     let key = shortcut_key_code_from_web_code(&event.code)?;
     Some(KeyCombo {
         key,
         modifiers: Modifiers {
-            ctrl: event.modifiers & MOD_CTRL != 0,
-            shift: event.modifiers & MOD_SHIFT != 0,
-            alt: event.modifiers & MOD_ALT != 0,
-            super_key: event.modifiers & MOD_SUPER != 0,
+            ctrl: event.mods.ctrl,
+            shift: event.mods.shift,
+            alt: event.mods.alt,
+            super_key: event.mods.super_key,
         },
     })
 }
@@ -3041,7 +3016,8 @@ fn on_term_link_open(
 }
 
 fn on_term_key(
-    trigger: On<BinReceive<TermKeyEvent>>,
+    trigger: On<BinReceive<KeyStroke>>,
+    terminals: Query<(), With<Terminal>>,
     q: Query<&ProcessId, With<Terminal>>,
     agents: Query<&vmux_core::agent::AgentSession>,
     launches: Query<&crate::launch::TerminalLaunch>,
@@ -3057,6 +3033,9 @@ fn on_term_key(
 ) {
     let entity = trigger.event_target();
     let event = &trigger.payload;
+    if terminals.get(entity).is_err() {
+        return;
+    }
     match resolve_terminal_web_shortcut(event, settings.as_deref(), &mut web_shortcuts) {
         TerminalWebShortcutAction::Command(cmd) => {
             let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
@@ -3073,13 +3052,13 @@ fn on_term_key(
         TerminalWebShortcutAction::Consume => return,
         TerminalWebShortcutAction::PassThrough => {}
     }
-    if is_web_modifier_key_event(event) {
+    if event.is_modifier_key() {
         return;
     }
     let Some(service) = service else { return };
     let Ok(pid) = q.get(entity) else { return };
     let process_id = *pid;
-    let super_key = event.modifiers & MOD_SUPER != 0;
+    let super_key = event.mods.super_key;
     if super_key {
         match event.code.as_str() {
             "KeyV" => {
@@ -3112,8 +3091,8 @@ fn on_term_key(
             CopyModeKeyInput {
                 key: &key,
                 key_code: key_code_from_web_code(&event.code),
-                ctrl: event.modifiers & MOD_CTRL != 0,
-                shift: event.modifiers & MOD_SHIFT != 0,
+                ctrl: event.mods.ctrl,
+                shift: event.mods.shift,
             },
         );
         for k in mapped {
@@ -3805,6 +3784,7 @@ mod tests {
     use bevy::ecs::schedule::Schedules;
     use std::time::{Duration, Instant};
     use vmux_core::agent::{AgentKind, AgentSession};
+    use vmux_core::input::KeyModifiers;
     use vmux_core::page::PageReady;
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -4490,11 +4470,11 @@ mod tests {
 
     #[test]
     fn web_terminal_key_events_delegate_text_to_pty_bytes() {
-        let event = TermKeyEvent {
+        let event = KeyStroke {
             key: "a".to_string(),
             code: "KeyA".to_string(),
-            modifiers: 0,
             text: Some("a".to_string()),
+            ..Default::default()
         };
 
         assert_eq!(term_key_event_to_bytes(&event), b"a".to_vec());
@@ -4502,11 +4482,14 @@ mod tests {
 
     #[test]
     fn web_terminal_key_events_delegate_control_sequences() {
-        let event = TermKeyEvent {
+        let event = KeyStroke {
             key: "c".to_string(),
             code: "KeyC".to_string(),
-            modifiers: MOD_CTRL,
-            text: None,
+            mods: KeyModifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+            ..Default::default()
         };
 
         assert_eq!(term_key_event_to_bytes(&event), vec![3]);
@@ -4514,11 +4497,14 @@ mod tests {
 
     #[test]
     fn web_terminal_key_events_ignore_modifier_keys() {
-        let event = TermKeyEvent {
+        let event = KeyStroke {
             key: "Shift".to_string(),
             code: "ShiftLeft".to_string(),
-            modifiers: MOD_SHIFT,
-            text: None,
+            mods: KeyModifiers {
+                shift: true,
+                ..Default::default()
+            },
+            ..Default::default()
         };
 
         assert!(term_key_event_to_bytes(&event).is_empty());
@@ -4526,11 +4512,15 @@ mod tests {
 
     #[test]
     fn web_terminal_shortcuts_emit_app_command_before_pty_input() {
-        let event = TermKeyEvent {
+        let event = KeyStroke {
             key: "l".to_string(),
             code: "KeyL".to_string(),
-            modifiers: MOD_SUPER,
+            mods: KeyModifiers {
+                super_key: true,
+                ..Default::default()
+            },
             text: Some("l".to_string()),
+            ..Default::default()
         };
         let mut state = TerminalWebShortcutState::default();
 
@@ -4546,11 +4536,16 @@ mod tests {
 
     #[test]
     fn web_terminal_menu_accel_shortcuts_emit_app_command_before_pty_input() {
-        let event = TermKeyEvent {
+        let event = KeyStroke {
             key: "S".to_string(),
             code: "KeyS".to_string(),
-            modifiers: MOD_SUPER | MOD_SHIFT,
+            mods: KeyModifiers {
+                shift: true,
+                super_key: true,
+                ..Default::default()
+            },
             text: Some("S".to_string()),
+            ..Default::default()
         };
         let mut state = TerminalWebShortcutState::default();
 
@@ -4570,7 +4565,7 @@ mod tests {
 
         assert!(source.contains("emit_key("));
         assert!(source.contains("onkeydown"));
-        assert!(source.contains("TermKeyEvent"));
+        assert!(source.contains("WebKey"));
     }
 
     #[test]

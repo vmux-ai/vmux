@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
@@ -880,41 +880,13 @@ fn emit_key(e: &Event<KeyboardData>) {
     let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
         return;
     };
-    let key = raw.key();
-    if is_modifier_key_name(&key) {
+    let Some(stroke) = WebKey::new(raw).stroke() else {
+        return;
+    };
+    if stroke.is_modifier_key() {
         return;
     }
-    let text = (key.chars().count() == 1).then_some(key.clone());
-    let _ = send(&TermKeyEvent {
-        key,
-        code: raw.code(),
-        modifiers: key_modifier_bits(raw),
-        text,
-    });
-}
-
-fn is_modifier_key_name(key: &str) -> bool {
-    matches!(
-        key,
-        "Shift" | "Control" | "Alt" | "Meta" | "OS" | "Fn" | "CapsLock"
-    )
-}
-
-fn key_modifier_bits(e: &web_sys::KeyboardEvent) -> u8 {
-    let mut m = 0;
-    if e.ctrl_key() {
-        m |= MOD_CTRL;
-    }
-    if e.alt_key() {
-        m |= MOD_ALT;
-    }
-    if e.shift_key() {
-        m |= MOD_SHIFT;
-    }
-    if e.meta_key() {
-        m |= MOD_SUPER;
-    }
-    m
+    let _ = send(&stroke);
 }
 
 /// The native-scroll container element (also the measurement/mouse origin).

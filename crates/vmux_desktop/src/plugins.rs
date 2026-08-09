@@ -171,11 +171,16 @@ impl Plugin for NotificationPlugin {
 
 /// The user-facing feature domains, each owned by its crate. Every plugin here may register
 /// pages, so the group must be added before `BrowserPlugin`.
+///
+/// `KeyStrokePlugin` comes first and is owned by no domain: keystrokes reach several of these
+/// crates, and registering the shared type once here is what stops two of them registering it and
+/// delivering every key twice.
 pub struct FeaturePlugins;
 
 impl PluginGroup for FeaturePlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(vmux_core::input::KeyStrokePlugin)
             .add(vmux_terminal::TerminalPlugin)
             .add(vmux_editor::EditorPlugin)
             .add(vmux_git::GitPlugin)

@@ -9,12 +9,14 @@
 //! `Host` names those, implemented once in `cef_host` and once in `native_host`, so the hooks
 //! themselves carry no target test.
 //!
-//! [`event_listener`] and [`list_nav`] hold no hooks — they are the host bridge and the pure
-//! keyboard logic that the hooks here are built on.
+//! [`event_listener`], [`key_stroke`] and [`list_nav`] hold no hooks — they are the host bridge,
+//! the keystroke encoder and the pure keyboard logic that the hooks here are built on.
 
 #[cfg(web)]
 pub mod cef_host;
 pub mod event_listener;
+#[cfg(web)]
+pub mod key_stroke;
 pub mod list_nav;
 #[cfg(not(web))]
 mod native_host;
@@ -38,6 +40,9 @@ pub use event_listener::{EventListenerError, send, try_cef_bin_listen, try_emit_
 
 #[cfg(web)]
 pub use cef_host::decode_bin_host_emit_js;
+
+#[cfg(web)]
+pub use key_stroke::WebKey;
 
 pub use list_nav::{
     ListKey, MenuDirection, choice_number_index, list_key, menu_direction, move_selection,

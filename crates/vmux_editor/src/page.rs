@@ -22,7 +22,7 @@ use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -1259,7 +1259,6 @@ pub fn Page() -> Element {
                                                     return;
                                                 }
                                                 let key = raw.key();
-                                                let mods = key_mods(raw);
                                                 if comp_open() && !note_input_comp_keys.is_empty() {
                                                     match key.as_str() {
                                                         "ArrowDown" => {
@@ -1298,12 +1297,9 @@ pub fn Page() -> Element {
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
                                                     }
-                                                    let _ = send(&FileKeyEvent {
-                                                        key,
-                                                        code: raw.code(),
-                                                        mods,
-                                                        repeat: raw.repeat(),
-                                                    });
+                                                    if let Some(stroke) = WebKey::new(raw).stroke() {
+                                                        let _ = send(&stroke);
+                                                    }
                                                     if keymap() == vmux_core::KeymapKind::Vim {
                                                         focus_file_input();
                                                     } else {
@@ -4334,41 +4330,20 @@ fn send_committed_text() {
     }
 }
 
-fn key_mods(raw: &web_sys::KeyboardEvent) -> KeyMods {
-    KeyMods {
-        ctrl: raw.ctrl_key(),
-        alt: raw.alt_key(),
-        shift: raw.shift_key(),
-        meta: raw.meta_key(),
-    }
-}
-
 fn forward_file_key(
     event: &Event<KeyboardData>,
     raw: &web_sys::KeyboardEvent,
     mode: vmux_core::editor::EditMode,
 ) -> bool {
-    if raw.is_composing() {
+    let Some(stroke) = WebKey::new(raw).stroke() else {
         return false;
-    }
-    let key = raw.key();
-    let mods = key_mods(raw);
-    let chord = mods.ctrl || mods.alt || mods.meta;
-    if mode.accepts_text() && !chord && is_text_key(&key) {
+    };
+    if mode.accepts_text() && stroke.is_text_input() {
         return false;
     }
     event.prevent_default();
-    let _ = send(&FileKeyEvent {
-        key,
-        code: raw.code(),
-        mods,
-        repeat: raw.repeat(),
-    });
+    let _ = send(&stroke);
     true
-}
-
-fn is_text_key(key: &str) -> bool {
-    key.chars().count() == 1
 }
 
 fn setup_measurement(

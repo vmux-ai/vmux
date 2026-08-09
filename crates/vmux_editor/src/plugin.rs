@@ -8,6 +8,7 @@ use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
+use vmux_core::input::KeyStroke;
 use vmux_core::page_open::{PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_layout::Browser;
 
@@ -72,7 +73,6 @@ impl Plugin for EditorPlugin {
                 FilePreviewRequest,
                 FileOpenEvent,
                 FileTextInput,
-                FileKeyEvent,
                 FilePointerEvent,
                 FileHoverRequest,
                 FileDefinitionRequest,
@@ -2384,7 +2384,7 @@ fn run_commands(
 
 #[allow(clippy::too_many_arguments)]
 fn on_file_key(
-    trigger: On<BinReceive<FileKeyEvent>>,
+    trigger: On<BinReceive<KeyStroke>>,
     mut q: Query<(
         &mut EditState,
         &mut EditorKeymap,
@@ -2409,7 +2409,7 @@ fn on_file_key(
             ctrl: evt.mods.ctrl,
             alt: evt.mods.alt,
             shift: evt.mods.shift,
-            meta: evt.mods.meta,
+            meta: evt.mods.super_key,
         },
         repeat: evt.repeat,
     };

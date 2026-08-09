@@ -1719,26 +1719,6 @@ pub fn cursor_row_update(previous: Option<&TermCursor>, next: &TermCursor) -> Cu
     CursorRowUpdate { clear, set }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    Eq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct TermKeyEvent {
-    pub key: String,
-    #[serde(default)]
-    pub code: String,
-    pub modifiers: u8,
-    pub text: Option<String>,
-}
-
 pub const MOD_CTRL: u8 = 1;
 pub const MOD_ALT: u8 = 2;
 pub const MOD_SHIFT: u8 = 4;
@@ -1833,44 +1813,6 @@ pub struct TermTitleEvent {
 )]
 pub struct FileTextInput {
     pub text: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct KeyMods {
-    pub ctrl: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub meta: bool,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FileKeyEvent {
-    pub key: String,
-    pub code: String,
-    pub mods: KeyMods,
-    pub repeat: bool,
 }
 
 #[derive(

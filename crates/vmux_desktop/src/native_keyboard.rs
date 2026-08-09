@@ -279,10 +279,7 @@ mod tests {
     use vmux_command::{AppCommand, LayoutCommand, PaneCommand};
 
     fn map() -> Keymap {
-        Keymap {
-            bindings: AppCommand::default_shortcuts(),
-            chord_timeout_ms: 1000,
-        }
+        Keymap::defaults()
     }
 
     fn combo(key: KeyCode, ctrl: bool) -> KeyCombo {

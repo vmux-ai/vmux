@@ -153,7 +153,7 @@ mod tests {
     use bevy::ecs::message::Messages;
     use vmux_command::{
         AppCommand, BrowserCommand, CommandPlugin, LayoutCommand, OpenCommand, PaneDirection,
-        PaneOpenMode, PaneTarget, SpaceCommand, StackCommand, TabCommand,
+        PaneOpenMode, PaneTarget, SpaceCommand, TabCommand,
     };
     use vmux_layout::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
@@ -227,6 +227,7 @@ mod tests {
                 alt: false,
                 super_key: false,
             }),
+            when: None,
         });
         settings.shortcuts.bindings.push(ShortcutEntry {
             command: "split_h".into(),
@@ -237,6 +238,7 @@ mod tests {
                 alt: false,
                 super_key: false,
             }),
+            when: None,
         });
         settings
     }
@@ -252,6 +254,7 @@ mod tests {
                 alt: false,
                 super_key: false,
             }),
+            when: None,
         });
         settings.shortcuts.bindings.push(ShortcutEntry {
             command: "close_pane".into(),
@@ -262,6 +265,7 @@ mod tests {
                 alt: false,
                 super_key: false,
             }),
+            when: None,
         });
         settings
     }
@@ -282,6 +286,7 @@ mod tests {
                     alt: false,
                     super_key: false,
                 }),
+                when: None,
             });
         }
         settings
@@ -558,7 +563,10 @@ mod tests {
     }
 
     #[test]
-    fn configured_legacy_leader_x_emits_stack_close() {
+    /// The compiled-in default binds this chord to closing the whole stack and the settings file
+    /// rebinds it to closing one pane, so it is the only test here where the two disagree.
+    fn configured_leader_x_overrides_the_default_stack_close() {
+        use vmux_command::PaneCommand;
         let mut app = test_app_with_settings(current_settings_with_leader("b"));
 
         press(&mut app, KeyCode::ControlLeft);
@@ -582,9 +590,7 @@ mod tests {
 
         assert_eq!(
             commands,
-            vec![AppCommand::Layout(LayoutCommand::Stack(
-                StackCommand::Close
-            ))]
+            vec![AppCommand::Layout(LayoutCommand::Pane(PaneCommand::Close))]
         );
     }
 
