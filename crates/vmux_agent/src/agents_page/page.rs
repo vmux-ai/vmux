@@ -1,86 +1,23 @@
 #![allow(non_snake_case)]
 
-use crate::agents_page::event::{
-    AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
-    AgentsOpen, AgentsUninstall,
-};
-use crate::vibe::setup::event::{
-    AGENT_SETUP_RESULT_EVENT, AgentInstallRunRequest, AgentSetupResult,
-};
+use crate::agents_page::event::{AgentEntry, AgentsInstall, AgentsOpen, AgentsUninstall};
+use crate::agents_page::state::{Catalog, use_catalog};
+use crate::vibe::setup::event::AgentInstallRunRequest;
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::try_cef_bin_emit_rkyv;
 use vmux_ui::i18n::translate;
-
-fn request_catalog() {
-    let _ = try_cef_bin_emit_rkyv(&AgentsCatalogRequest {});
-}
-
-fn set_status(mut agents: Signal<Vec<AgentEntry>>, id: &str, status: &str, detail: &str) {
-    agents.with_mut(|list| {
-        if let Some(agent) = list.iter_mut().find(|agent| agent.id == id) {
-            agent.status = status.to_string();
-            agent.detail = detail.to_string();
-        }
-    });
-}
-
-fn runtime_tone(runtime: &str) -> ManagerTone {
-    match runtime {
-        "native" => ManagerTone::Green,
-        "node" => ManagerTone::Cyan,
-        "python" => ManagerTone::Amber,
-        _ => ManagerTone::Neutral,
-    }
-}
-
-fn matches_search(agent: &AgentEntry, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
-    query.is_empty()
-        || agent.name.to_lowercase().contains(&query)
-        || agent.id.to_lowercase().contains(&query)
-        || agent.description.to_lowercase().contains(&query)
-        || agent.runtime.to_lowercase().contains(&query)
-        || agent.source.to_lowercase().contains(&query)
-}
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
-    let mut agents = use_signal(Vec::<AgentEntry>::new);
-    let mut query = use_signal(String::new);
-    let mut loaded = use_signal(|| false);
-
-    let _catalog = use_listener::<AgentsCatalog, _>(AGENTS_CATALOG_EVENT, move |catalog| {
-        agents.set(catalog.agents);
-        loaded.set(true);
-    });
-    let _setup = use_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |result| {
-        let id = format!("cli:{}", result.agent);
-        if result.ok {
-            set_status(agents, &id, "installed", "");
-            request_catalog();
-        } else {
-            set_status(agents, &id, "error", &translate("agents-install-failed"));
-        }
-    });
-
-    use_effect(move || {
-        locale();
-        set_document_title(&translate("agents-title"));
-        request_catalog();
-    });
-
-    let all_agents = agents();
-    let filtered: Vec<AgentEntry> = all_agents
-        .iter()
-        .filter(|agent| matches_search(agent, &query()))
-        .cloned()
-        .collect();
+    let catalog = use_catalog();
+    let mut query = catalog.query;
+    let all_agents = catalog.all();
+    let filtered = catalog.matching();
 
     rsx! {
         ManagerPage {
@@ -94,7 +31,7 @@ pub fn Page() -> Element {
                 actions: rsx! {},
             }
             ManagerList {
-                if !loaded() {
+                if !(catalog.loaded)() {
                     ManagerSkeleton {}
                 } else if filtered.is_empty() {
                     ManagerEmpty {
@@ -103,7 +40,7 @@ pub fn Page() -> Element {
                     }
                 }
                 for agent in filtered.iter() {
-                    AgentRow { agent: agent.clone(), agents }
+                    AgentRow { agent: agent.clone(), catalog }
                 }
             }
         }
@@ -112,7 +49,7 @@ pub fn Page() -> Element {
 
 /// One installed agent, with its version and install controls.
 #[component]
-fn AgentRow(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+fn AgentRow(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
     let icon_url = agent.icon.clone();
     let launch_url = agent.launch_url.clone();
@@ -136,20 +73,12 @@ fn AgentRow(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
             meta: rsx! {
                 ManagerBadge { tone: ManagerTone::Neutral, "{agent.source}" }
                 if agent.runtime != agent.source {
-                    ManagerBadge { tone: runtime_tone(&agent.runtime), "{agent.runtime}" }
+                    ManagerBadge { tone: ManagerTone::for_runtime(&agent.runtime), "{agent.runtime}" }
                 }
             },
-            actions: rsx! { AgentActions { agent: agent.clone(), agents } },
+            actions: rsx! { AgentActions { agent: agent.clone(), catalog } },
         }
     }
-}
-
-fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &str) {
-    agents.with_mut(|list| {
-        if let Some(agent) = list.iter_mut().find(|agent| agent.id == id) {
-            agent.pinned_version = version.to_string();
-        }
-    });
 }
 
 /// A version-pin control, shown only for npx/uvx agents (native binaries can't be pinned). Renders
@@ -157,7 +86,7 @@ fn set_pinned_version(mut agents: Signal<Vec<AgentEntry>>, id: &str, version: &s
 /// still works before the fetch lands or when the registry can't be queried).
 /// The pinned-version field, for runtimes that support pinning.
 #[component]
-fn AgentVersionInput(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+fn AgentVersionInput(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
     let id = agent.id.clone();
     if agent.available_versions.is_empty() {
@@ -170,7 +99,7 @@ fn AgentVersionInput(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Elem
                 value: "{agent.pinned_version}",
                 placeholder: translate("agents-version-latest"),
                 title: translate("agents-version-hint"),
-                oninput: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+                oninput: move |event: FormEvent| catalog.set_pinned_version(&id, &event.value()),
             }
         };
     }
@@ -192,7 +121,7 @@ fn AgentVersionInput(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Elem
         select {
             class: "w-32 truncate rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground ring-1 ring-white/[0.06] focus:outline-none",
             title: translate("agents-version-hint"),
-            onchange: move |event: FormEvent| set_pinned_version(agents, &id, &event.value()),
+            onchange: move |event: FormEvent| catalog.set_pinned_version(&id, &event.value()),
             option { value: "", selected: agent.pinned_version.is_empty(), "{latest_label}" }
             for version in agent.available_versions.iter().filter(|version| *version != &latest) {
                 option {
@@ -208,20 +137,20 @@ fn AgentVersionInput(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Elem
 
 /// The controls on the right of an agent row.
 #[component]
-fn AgentActions(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+fn AgentActions(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
     let pinnable = agent.source == "acp" && matches!(agent.runtime.as_str(), "node" | "python");
     rsx! {
         if pinnable {
-            AgentVersionInput { agent: agent.clone(), agents }
+            AgentVersionInput { agent: agent.clone(), catalog }
         }
-        AgentStatusButtons { agent: agent.clone(), agents }
+        AgentStatusButtons { agent: agent.clone(), catalog }
     }
 }
 
 /// Install, apply and uninstall, according to what the agent needs.
 #[component]
-fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Element {
+fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
     let agent = &agent;
     let id = agent.id.clone();
     let install_id = agent.id.clone();
@@ -246,7 +175,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
                 ManagerButton {
                     variant: ManagerButtonVariant::Primary,
                     onclick: move |_| {
-                        set_status(agents, &apply_id, "installing", &translate("agents-updating"));
+                        catalog.set_status(&apply_id, "installing", &translate("agents-updating"));
                         let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: apply_id.clone(), version: apply_version.clone() });
                     },
                     {translate("agents-apply-version")}
@@ -263,7 +192,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
                 ManagerButton {
                     variant: ManagerButtonVariant::Danger,
                     onclick: move |_| {
-                        set_status(agents, &uninstall_id, "available", "");
+                        catalog.set_status(&uninstall_id, "available", "");
                         let _ = try_cef_bin_emit_rkyv(&AgentsUninstall { id: uninstall_id.clone() });
                     },
                     {translate("common-uninstall")}
@@ -274,7 +203,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    set_status(agents, &id, "installing", &translate("agents-updating"));
+                    catalog.set_status(&id, "installing", &translate("agents-updating"));
                     let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version: update_version.clone() });
                 },
                 {translate("common-update")}
@@ -285,7 +214,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
-                    set_status(agents, &install_id, "installing", &translate("agents-retrying"));
+                    catalog.set_status(&install_id, "installing", &translate("agents-retrying"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
@@ -300,7 +229,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    set_status(agents, &install_id, "installing", &translate("agents-preparing"));
+                    catalog.set_status(&install_id, "installing", &translate("agents-preparing"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
                         let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
@@ -313,14 +242,3 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
         },
     }
 }
-
-/// The browser tab's title. A phone has no tab, so this is where that difference stops.
-#[cfg(web)]
-fn set_document_title(title: &str) {
-    if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-        doc.set_title(title);
-    }
-}
-
-#[cfg(not(web))]
-fn set_document_title(_title: &str) {}

@@ -59,6 +59,19 @@ pub struct AgentEntry {
     pub available_versions: Vec<String>,
 }
 
+impl AgentEntry {
+    /// Whether the search leaves this entry visible. An empty search leaves all of them.
+    pub fn matches(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        query.is_empty()
+            || self.name.to_lowercase().contains(&query)
+            || self.id.to_lowercase().contains(&query)
+            || self.description.to_lowercase().contains(&query)
+            || self.runtime.to_lowercase().contains(&query)
+            || self.source.to_lowercase().contains(&query)
+    }
+}
+
 /// Page → native: the page mounted and wants the catalog pushed to it.
 #[derive(
     Clone,

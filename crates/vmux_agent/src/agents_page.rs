@@ -6,6 +6,8 @@ pub mod event;
 
 #[cfg(frontend)]
 pub mod page;
+#[cfg(frontend)]
+mod state;
 
 #[cfg(native)]
 pub mod plugin;
