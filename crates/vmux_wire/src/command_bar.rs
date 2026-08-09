@@ -348,24 +348,36 @@ pub fn command_bar_should_refocus(last_focus_open_id: u64, incoming_open_id: u64
     last_focus_open_id != incoming_open_id
 }
 
-pub fn should_open_typed_query_on_enter(
-    open_target: Option<crate::open_target::OpenTarget>,
-    nav_mode: bool,
-    query: &str,
-) -> bool {
-    matches!(open_target, Some(crate::open_target::OpenTarget::InPlace))
-        && !nav_mode
-        && !query.trim().is_empty()
-        && !query.trim_start().starts_with('>')
-        && looks_like_url(query.trim())
-}
+/// What the user has typed into the command bar.
+///
+/// The palette decides what Enter means from the text alone, so the rules live together here
+/// rather than beside whichever caller happens to need one of them.
+#[derive(Clone, Copy, Debug)]
+pub struct CommandBarQuery<'a>(pub &'a str);
 
-pub fn is_start_prompt_query(query: &str) -> bool {
-    let query = query.trim();
-    !query.is_empty()
-        && !query.starts_with('>')
-        && !looks_like_url(query)
-        && !looks_like_explicit_path(query)
+impl CommandBarQuery<'_> {
+    /// Whether Enter should navigate to what was typed rather than run the highlighted result.
+    pub fn opens_typed_url_on_enter(
+        &self,
+        open_target: Option<crate::open_target::OpenTarget>,
+        nav_mode: bool,
+    ) -> bool {
+        let query = self.0.trim();
+        matches!(open_target, Some(crate::open_target::OpenTarget::InPlace))
+            && !nav_mode
+            && !query.is_empty()
+            && !self.0.trim_start().starts_with('>')
+            && looks_like_url(query)
+    }
+
+    /// Whether this reads as a prompt for an agent rather than a command, a url or a path.
+    pub fn is_start_prompt(&self) -> bool {
+        let query = self.0.trim();
+        !query.is_empty()
+            && !query.starts_with('>')
+            && !looks_like_url(query)
+            && !looks_like_explicit_path(query)
+    }
 }
 
 pub const PATH_COMPLETE_REQUEST: &str = "path-complete-request";
@@ -540,7 +552,7 @@ mod tests {
         let prompt = "Continue DSK-627 in:\n\nWorktree:\n  /tmp/dashboard\n\nPR:\n  https://github.com/mistralai/dashboard/pull/39364";
 
         assert!(!looks_like_url(prompt));
-        assert!(is_start_prompt_query(prompt));
+        assert!(CommandBarQuery(prompt).is_start_prompt());
     }
 
     #[test]
@@ -644,52 +656,47 @@ mod tests {
 
     #[test]
     fn in_place_enter_opens_typed_query_without_nav_selection() {
-        assert!(should_open_typed_query_on_enter(
-            Some(crate::open_target::OpenTarget::InPlace),
-            false,
-            "https://example.com"
-        ));
+        assert!(
+            CommandBarQuery("https://example.com")
+                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
+        );
     }
 
     #[test]
     fn in_place_enter_keeps_explicit_nav_selection() {
-        assert!(!should_open_typed_query_on_enter(
-            Some(crate::open_target::OpenTarget::InPlace),
-            true,
-            "https://example.com"
-        ));
+        assert!(
+            !CommandBarQuery("https://example.com")
+                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), true)
+        );
     }
 
     #[test]
     fn command_query_enter_keeps_command_selection() {
-        assert!(!should_open_typed_query_on_enter(
-            Some(crate::open_target::OpenTarget::InPlace),
-            false,
-            "> close"
-        ));
+        assert!(
+            !CommandBarQuery("> close")
+                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
+        );
     }
 
     #[test]
     fn in_place_enter_keeps_highlighted_suggestion_for_plain_text_query() {
-        assert!(!should_open_typed_query_on_enter(
-            Some(crate::open_target::OpenTarget::InPlace),
-            false,
-            "terminal"
-        ));
+        assert!(
+            !CommandBarQuery("terminal")
+                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
+        );
     }
 
     #[test]
     fn in_place_enter_opens_typed_domain_query() {
-        assert!(should_open_typed_query_on_enter(
-            Some(crate::open_target::OpenTarget::InPlace),
-            false,
-            "google.com"
-        ));
+        assert!(
+            CommandBarQuery("google.com")
+                .opens_typed_url_on_enter(Some(crate::open_target::OpenTarget::InPlace), false)
+        );
     }
 
     #[test]
     fn start_plain_text_is_prompt_query() {
-        assert!(is_start_prompt_query("fix the failing test"));
+        assert!(CommandBarQuery("fix the failing test").is_start_prompt());
     }
 
     #[test]
@@ -718,7 +725,7 @@ mod tests {
 
     #[test]
     fn start_agent_name_is_still_prompt_query() {
-        assert!(is_start_prompt_query("codex"));
+        assert!(CommandBarQuery("codex").is_start_prompt());
     }
 
     #[test]
@@ -733,7 +740,7 @@ mod tests {
             "../repo",
             "> close tab",
         ] {
-            assert!(!is_start_prompt_query(query), "{query}");
+            assert!(!CommandBarQuery(query).is_start_prompt(), "{query}");
         }
     }
 

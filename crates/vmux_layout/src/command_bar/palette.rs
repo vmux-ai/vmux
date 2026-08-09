@@ -20,10 +20,10 @@ use crate::command_bar::style::{
 use crate::start::event::StartSelectWorkspace;
 use dioxus::prelude::*;
 use vmux_command::event::{
-    CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
-    HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
-    PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_should_refocus, is_data_uri,
-    is_start_prompt_query, should_open_typed_query_on_enter,
+    CommandBarActionEvent, CommandBarOpenEvent, CommandBarQuery,
+    HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
+    HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
+    PathEntry, command_bar_should_refocus, is_data_uri,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
@@ -392,7 +392,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             is_dir: entry.is_dir,
         })
         .collect::<Vec<_>>();
-    let start_prompt_mode = is_start && is_start_prompt_query(&q);
+    let start_prompt_mode = is_start && CommandBarQuery(&q).is_start_prompt();
     let prompt_targets = if is_start {
         prompt_target_results(&pages, "")
     } else {
@@ -578,7 +578,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             None
         };
         if matches!(variant, PaletteVariant::Start)
-            && (is_start_prompt_query(&prompt) || !attachments.peek().is_empty())
+            && (CommandBarQuery(&prompt).is_start_prompt() || !attachments.peek().is_empty())
             && let Some(target_url) = prompt_target_url(item)
         {
             on_close.call(());
@@ -956,7 +956,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             && url.starts_with(start_keydown_q.trim())
                 );
                 if !prefer_page
-                    && should_open_typed_query_on_enter(open_target, nav_mode(), &start_keydown_q)
+                    && CommandBarQuery(&start_keydown_q)
+                        .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
                     emit_action_with_target("open", &start_keydown_q, open_target);
@@ -1047,7 +1048,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             && url.starts_with(modal_keydown_q.trim())
                 );
                 if !prefer_page
-                    && should_open_typed_query_on_enter(open_target, nav_mode(), &modal_keydown_q)
+                    && CommandBarQuery(&modal_keydown_q)
+                        .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
                     emit_action_with_target("open", &modal_keydown_q, open_target);

@@ -7,7 +7,7 @@
 use dioxus::prelude::*;
 use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
 use vmux_ui::i18n::translate;
-use vmux_wire::chat::is_guardian_tool;
+use vmux_wire::chat::ToolName;
 
 /// The glyph standing in for a kind of agent activity.
 #[component]
@@ -188,7 +188,7 @@ impl ToolActivity {
     /// Classify by name, since that is all every agent reliably gives us.
     pub fn of(name: &str) -> Self {
         let lower = name.to_ascii_lowercase();
-        if is_guardian_tool(name) {
+        if ToolName(name).is_guardian() {
             ToolActivity::Guardian
         } else if lower.contains("read_file")
             || lower.contains("read file")

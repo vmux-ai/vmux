@@ -100,14 +100,22 @@ pub struct ChatTurn {
     pub step_count: u32,
 }
 
-pub fn is_guardian_tool(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower.contains("guardian")
-        || lower.contains("approval")
-        || lower == "review"
-        || lower.ends_with("_review")
-        || lower.ends_with(".review")
-        || lower.ends_with(":review")
+/// The name of a tool an agent called.
+#[derive(Clone, Copy, Debug)]
+pub struct ToolName<'a>(pub &'a str);
+
+impl ToolName<'_> {
+    /// Whether this is a review or approval tool, which the transcript renders differently
+    /// because its output is a verdict on other work rather than work of its own.
+    pub fn is_guardian(&self) -> bool {
+        let lower = self.0.to_ascii_lowercase();
+        lower.contains("guardian")
+            || lower.contains("approval")
+            || lower == "review"
+            || lower.ends_with("_review")
+            || lower.ends_with(".review")
+            || lower.ends_with(":review")
+    }
 }
 
 impl ChatTurn {
@@ -146,7 +154,7 @@ impl ChatTurn {
                 .parent_call_id
                 .as_deref()
                 .and_then(|parent_call_id| self.call_index(parent_call_id)),
-            ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {
+            ChatBlock::ToolUse { name, .. } if ToolName(name).is_guardian() => {
                 self.guardian_parent_index(index)
             }
             ChatBlock::ToolResult { call_id, .. } if !call_id.is_empty() => {
@@ -170,7 +178,7 @@ impl ChatTurn {
     fn guardian_parent_index(&self, index: usize) -> Option<usize> {
         for (candidate, block) in self.blocks[..index].iter().enumerate().rev() {
             match block {
-                ChatBlock::ToolUse { name, .. } if is_guardian_tool(name) => {}
+                ChatBlock::ToolUse { name, .. } if ToolName(name).is_guardian() => {}
                 ChatBlock::ToolUse { .. } | ChatBlock::Subagent(_) => return Some(candidate),
                 _ => return None,
             }

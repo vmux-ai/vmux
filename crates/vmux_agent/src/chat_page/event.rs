@@ -488,7 +488,7 @@ pub struct RuntimeSwitchRequest {
 }
 
 pub use vmux_wire::chat::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, WORKING_VERB_IDS, is_guardian_tool,
+    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, ToolName, WORKING_VERB_IDS,
     latest_tool_location,
 };
 

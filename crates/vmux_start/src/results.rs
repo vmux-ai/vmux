@@ -201,7 +201,7 @@ pub fn prepend_prompt_targets(
     recent_targets: &[CommandBarResultItem],
     query: &str,
 ) {
-    if !vmux_wire::command_bar::is_start_prompt_query(query)
+    if !vmux_wire::command_bar::CommandBarQuery(query).is_start_prompt()
         || results.iter().any(|item| prompt_target_url(item).is_some())
     {
         return;
@@ -290,7 +290,7 @@ pub fn start_page_results(
     results.extend(work_dir_results(work_dirs, &search_lower));
     results.extend(recent_file_results(recent_files, &search_lower));
     let trimmed = query.trim();
-    if vmux_wire::command_bar::is_start_prompt_query(trimmed) {
+    if vmux_wire::command_bar::CommandBarQuery(trimmed).is_start_prompt() {
         let engines = if search_engines.is_empty() {
             SearchEngine::ALL.as_slice()
         } else {
