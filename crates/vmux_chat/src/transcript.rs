@@ -5,8 +5,9 @@
 
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::file_icon::{FilePath, TypeIcon};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::icon::{LineIcon, LineIconView};
 use vmux_wire::chat::{ChatBlock, ChatItem, ChatTurn, WORKING_VERB_IDS};
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
@@ -15,16 +16,6 @@ use crate::activity::{
 };
 use crate::clipboard::copy_to_clipboard;
 use crate::platform::{random_index, sleep_ms};
-
-/// Uppercased file extension used as an attachment pill's fallback glyph.
-pub fn file_extension_label(name: &str) -> String {
-    std::path::Path::new(name)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_uppercase())
-        .filter(|extension| !extension.is_empty())
-        .unwrap_or_else(|| "FILE".to_string())
-}
 
 #[component]
 pub fn UserBubble(
@@ -68,17 +59,7 @@ pub fn MessageCopyButton(text: String) -> Element {
                 event.stop_propagation();
                 copy_to_clipboard(&text);
             },
-            svg {
-                class: "h-3.5 w-3.5",
-                view_box: "0 0 24 24",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "1.8",
-                stroke_linecap: "round",
-                stroke_linejoin: "round",
-                rect { x: "9", y: "9", width: "13", height: "13", rx: "2" }
-                path { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" }
-            }
+            LineIconView { icon: LineIcon::Copy, class: "h-3.5 w-3.5" }
         }
     }
 }
@@ -109,16 +90,7 @@ pub fn ChatItemRow(
                     details { class: "disclosure user-context-panel rounded-xl border",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 text-xs list-none [&::-webkit-details-marker]:hidden",
                             span { class: "agent-themed-activity flex h-5 w-5 shrink-0 items-center justify-center rounded-md",
-                                svg {
-                                    class: "h-3 w-3",
-                                    view_box: "0 0 24 24",
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "1.8",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
-                                    path { d: "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z" }
-                                }
+                                LineIconView { icon: LineIcon::Shield, class: "h-3 w-3" }
                             }
                             span { class: "font-medium", {translate("agent-prompt-context")} }
                             span {
@@ -189,7 +161,7 @@ fn UserAttachment(
         div {
             key: "message-attachment-{attachment.path}",
             class: "flex min-w-32 max-w-64 items-center gap-2 rounded-xl bg-foreground/[0.06] px-3 py-2 ring-1 ring-inset ring-foreground/10",
-            span { class: "font-mono text-[10px] font-semibold tracking-wide text-muted-foreground", "{file_extension_label(&attachment.name)}" }
+            span { class: "font-mono text-[10px] font-semibold tracking-wide text-muted-foreground", "{FilePath(&attachment.name).extension_label()}" }
             span { class: "truncate text-xs text-muted-foreground", "{attachment.name}" }
         }
     }
@@ -513,7 +485,7 @@ pub fn TurnBlock(
         ChatBlock::Text(text) => rsx! {
             div {
                 key: "{key}",
-                class: "chat-md px-0.5 text-sm leading-relaxed text-foreground/95",
+                class: CHAT_MD_CLASS,
                 dangerous_inner_html: md_to_html(text),
             }
         },
@@ -902,6 +874,41 @@ fn plan_text_class(status: &str) -> &'static str {
     }
 }
 
+/// Typography for the HTML [`md_to_html`] generates, as descendant variants on its container.
+///
+/// The markup does not exist at build time, so the styling has to be attached to the one element
+/// that does. Every selector here is scoped so that no two rules touch the same property on the
+/// same element — `:not(pre) > code` against `pre code`, `:not(li) > ul` against `li > ul` — which
+/// keeps the result independent of the order Tailwind happens to emit the utilities in.
+const CHAT_MD_CLASS: &str = "chat-md px-0.5 text-sm text-foreground/95 leading-[1.6] break-words \
+    [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 \
+    [&_:is(h1,h2,h3,h4)]:font-semibold [&_:is(h1,h2,h3,h4)]:leading-[1.3] \
+    [&_:is(h1,h2,h3,h4)]:[margin:0.9em_0_0.35em] \
+    [&_h1]:text-[1.35em] [&_h2]:text-[1.2em] [&_h3]:text-[1.05em] [&_h4]:text-[1em] \
+    [&_p]:my-[0.5em] \
+    [&_:is(ul,ol)]:pl-[1.4em] [&_:not(li)>:is(ul,ol)]:my-[0.4em] [&_li>:is(ul,ol)]:my-[0.15em] \
+    [&_ul]:list-disc [&_ol]:list-decimal [&_li]:my-[0.15em] \
+    [&_strong]:font-semibold [&_em]:italic \
+    [&_a]:text-[color-mix(in_srgb,var(--agent-accent)_82%,currentColor)] \
+    [&_a]:decoration-[color-mix(in_srgb,var(--agent-accent)_45%,transparent)] \
+    [&_a]:underline-offset-[0.16em] \
+    [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.88em] \
+    [&_:not(pre)>code]:bg-[color-mix(in_srgb,var(--agent-accent)_10%,transparent)] \
+    [&_:not(pre)>code]:border \
+    [&_:not(pre)>code]:border-[color-mix(in_srgb,var(--agent-accent)_11%,transparent)] \
+    [&_:not(pre)>code]:[padding:0.1em_0.35em] [&_:not(pre)>code]:rounded-[0.4em] \
+    [&_pre]:bg-[linear-gradient(135deg,color-mix(in_srgb,var(--agent-accent)_7%,transparent),color-mix(in_srgb,var(--agent-accent)_3%,transparent))] \
+    [&_pre]:border [&_pre]:border-[color-mix(in_srgb,var(--agent-accent)_11%,transparent)] \
+    [&_pre]:[padding:0.7em_0.9em] [&_pre]:rounded-[0.7em] [&_pre]:overflow-x-auto \
+    [&_pre]:my-[0.6em] [&_pre]:font-mono [&_pre_code]:text-[0.85em] \
+    [&_blockquote]:border-l-2 \
+    [&_blockquote]:border-l-[color-mix(in_srgb,var(--agent-accent)_48%,transparent)] \
+    [&_blockquote]:pl-[0.8em] [&_blockquote]:my-[0.5em] [&_blockquote]:opacity-85 \
+    [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-t-[rgba(127,127,127,0.25)] [&_hr]:my-[0.9em] \
+    [&_table]:border-collapse [&_table]:my-[0.5em] [&_table]:text-[0.95em] \
+    [&_:is(th,td)]:border [&_:is(th,td)]:border-[rgba(127,127,127,0.3)] \
+    [&_:is(th,td)]:[padding:0.3em_0.6em] [&_:is(th,td)]:text-left";
+
 /// Render assistant markdown to HTML, dropping any raw HTML the agent emits (markdown only —
 /// never inject arbitrary markup into the page).
 fn md_to_html(src: &str) -> String {
@@ -916,14 +923,18 @@ fn md_to_html(src: &str) -> String {
     out
 }
 
-/// Scoped styling for markdown rendered via `dangerous_inner_html` (Tailwind can't see generated
-/// HTML, and its preflight strips heading/list defaults). Theme-neutral rgba so it works in both
-/// light and dark.
+/// The accent chrome that does not survive as utilities: `::before` layers, and the
+/// `color-mix(… var(--agent-accent) …)` gradients and shadows built on top of them.
+///
+/// Markdown typography moved to [`CHAT_MD_CLASS`] and containment to the utilities on
+/// [`UserBubble`] and [`AssistantTurn`], so what is left is only the pseudo-element work and the
+/// multi-stop gradients keyed off the runtime accent — each one a `background`/`box-shadow`
+/// value rather than anything a utility names. Theme-neutral rgba, so it works in light and dark.
 pub const MD_CSS: &str = r#"
 .agent-chat-prompt-shell::before{content:"";position:absolute;inset:-28px -42px;z-index:-1;border-radius:2.5rem;background:radial-gradient(60% 90% at 50% 75%,rgba(255,255,255,0.1),transparent 72%);pointer-events:none}
 .agent-chat-page{background-image:radial-gradient(80% 55% at 15% 0%,color-mix(in srgb,var(--agent-accent) 9%,transparent),transparent 65%),radial-gradient(75% 55% at 90% 10%,color-mix(in srgb,var(--agent-accent) 7%,transparent),transparent 62%),radial-gradient(65% 45% at 55% 100%,color-mix(in srgb,var(--agent-accent) 5%,transparent),transparent 70%)}
 .agent-chat-header{border-color:color-mix(in srgb,var(--agent-accent) 12%,transparent)}
-.chat-user-bubble,.chat-assistant-turn{content-visibility:auto;contain-intrinsic-size:auto 160px;contain:layout paint style;transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
+.chat-user-bubble,.chat-assistant-turn{transition:border-color 180ms ease,box-shadow 180ms ease,transform 180ms ease}
 .chat-user-bubble{border-color:color-mix(in srgb,var(--agent-accent) 18%,transparent);background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 19%,transparent),color-mix(in srgb,var(--agent-accent) 9%,transparent) 58%,color-mix(in srgb,var(--agent-accent) 4%,transparent));box-shadow:0 10px 32px color-mix(in srgb,var(--agent-accent) 9%,transparent)}
 .chat-user-bubble:hover{border-color:color-mix(in srgb,var(--agent-accent) 30%,transparent);box-shadow:0 14px 38px color-mix(in srgb,var(--agent-accent) 14%,transparent);transform:translateY(-1px)}
 .chat-assistant-turn{border-color:color-mix(in srgb,var(--agent-accent) 9%,rgba(127,127,127,0.08));background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 5%,transparent),rgba(127,127,127,0.025) 55%,transparent);box-shadow:0 10px 35px rgba(0,0,0,0.035)}
@@ -941,29 +952,5 @@ pub const MD_CSS: &str = r#"
 .agent-turn-meta-dot{background:var(--agent-accent)}
 .user-context-panel{border-color:color-mix(in srgb,var(--agent-accent) 14%,transparent);background:color-mix(in srgb,var(--agent-accent) 5%,rgba(127,127,127,0.025))}
 .user-context-panel>summary:hover{color:color-mix(in srgb,currentColor 65%,var(--agent-accent))}
-.chat-md{line-height:1.6;word-break:break-word}
-.chat-md>*:first-child{margin-top:0}
-.chat-md>*:last-child{margin-bottom:0}
-.chat-md h1,.chat-md h2,.chat-md h3,.chat-md h4{font-weight:600;line-height:1.3;margin:0.9em 0 0.35em}
-.chat-md h1{font-size:1.35em}
-.chat-md h2{font-size:1.2em}
-.chat-md h3{font-size:1.05em}
-.chat-md h4{font-size:1em}
-.chat-md p{margin:0.5em 0}
-.chat-md ul,.chat-md ol{margin:0.4em 0;padding-left:1.4em}
-.chat-md ul{list-style:disc}
-.chat-md ol{list-style:decimal}
-.chat-md li{margin:0.15em 0}
-.chat-md li>ul,.chat-md li>ol{margin:0.15em 0}
-.chat-md strong{font-weight:600}
-.chat-md em{font-style:italic}
-.chat-md a{color:color-mix(in srgb,var(--agent-accent) 82%,currentColor);text-decoration-color:color-mix(in srgb,var(--agent-accent) 45%,transparent);text-underline-offset:0.16em}
-.chat-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.88em;background:color-mix(in srgb,var(--agent-accent) 10%,transparent);border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.1em 0.35em;border-radius:0.4em}
-.chat-md pre{background:linear-gradient(135deg,color-mix(in srgb,var(--agent-accent) 7%,transparent),color-mix(in srgb,var(--agent-accent) 3%,transparent));border:1px solid color-mix(in srgb,var(--agent-accent) 11%,transparent);padding:0.7em 0.9em;border-radius:0.7em;overflow-x:auto;margin:0.6em 0}
-.chat-md pre code{background:none;border:0;padding:0;font-size:0.85em}
-.chat-md blockquote{border-left:2px solid color-mix(in srgb,var(--agent-accent) 48%,transparent);padding-left:0.8em;margin:0.5em 0;opacity:0.85}
-.chat-md hr{border:0;border-top:1px solid rgba(127,127,127,0.25);margin:0.9em 0}
-.chat-md table{border-collapse:collapse;margin:0.5em 0;font-size:0.95em}
-.chat-md th,.chat-md td{border:1px solid rgba(127,127,127,0.3);padding:0.3em 0.6em;text-align:left}
 @media (prefers-reduced-motion:reduce){.agent-chat-caret{animation:none}.chat-user-bubble,.chat-assistant-turn{transition:none}.chat-user-bubble:hover{transform:none}}
 "#;

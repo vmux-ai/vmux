@@ -12,8 +12,8 @@ use vmux_layout::event::RestartRequestEvent;
 
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    persistence::PersistencePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
-    tools::ToolsPlugin, window_state::WindowStatePlugin,
+    persistence::PersistencePlugin, remote::RemotePlugin, runtime::RuntimePlugin,
+    shortcut::ShortcutPlugin, tools::ToolsPlugin, window_state::WindowStatePlugin,
 };
 
 /// Foundation plugins: shared type registration, the page server, command routing, settings,
@@ -32,7 +32,8 @@ impl PluginGroup for VmuxCorePlugins {
 }
 
 /// The OS-facing layer of the desktop app: window and display management, wake and render
-/// pacing, the native menu bar and tray, global shortcuts, permissions, and updates.
+/// pacing, the native menu bar and tray, global shortcuts, permissions, phone pairing, and
+/// updates.
 pub struct DesktopPlugins;
 
 impl PluginGroup for DesktopPlugins {
@@ -46,6 +47,7 @@ impl PluginGroup for DesktopPlugins {
             .add(ShortcutPlugin)
             .add(NotificationPlugin)
             .add(MediaPlugin)
+            .add(RemotePlugin)
             .add(UpdaterPlugin);
 
         #[cfg(feature = "tray")]

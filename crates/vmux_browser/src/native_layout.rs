@@ -1,23 +1,22 @@
 //! Pointer, scroll and click forwarding between the platform's native event
 //! monitors and the offscreen layout webview, isolated by platform.
 
+/// The layout webview as the native event monitors see it. Every platform-specific
+/// operation is implemented once per platform in a sibling module — exactly one of
+/// which is compiled.
+pub struct NativeLayout;
+
+impl NativeLayout {
+    /// Whether the pointer sits over a region the layout webview owns.
+    pub fn pointer_is_inside() -> bool {
+        crate::NATIVE_LAYOUT_POINTER_INSIDE.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(not(target_os = "macos"))]
 mod other;
 
 #[cfg(target_os = "macos")]
-pub use macos::{
-    NativeLayoutPointerMoveResult, flush_native_layout_pointer_move, forward_native_layout_click,
-    forward_native_layout_scroll, queue_native_layout_pointer_move,
-};
-#[cfg(target_os = "macos")]
-pub(crate) use macos::{
-    clear_native_layout_pointer_state, physical_cef_pointer_hit_rect,
-    set_native_layout_mouse_presenter, set_native_layout_pointer_regions,
-};
-
-/// The layout webview as the native event monitors see it. Every operation is
-/// implemented once per platform in a sibling module — exactly one of which is
-/// compiled.
-pub(crate) struct NativeLayout;
+pub use macos::NativeLayoutPointerMoveResult;

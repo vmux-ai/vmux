@@ -8,6 +8,31 @@ use vmux_wire::room::{
 use crate::client::acp::AcpSession;
 use crate::components::{AgentConversationTitle, AgentMessages, AgentSession};
 
+/// Projects each agent session into a collaborative room: members, a draft document, and one
+/// materialized event per message, kept in step with the session's transcript.
+pub struct RoomPlugin;
+
+impl Plugin for RoomPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<RoomIndex>()
+            .init_resource::<RoomEventIndex>()
+            .add_message::<RoomIntent>()
+            .add_message::<RoomOpReceived>()
+            .add_message::<RoomOpCommitted>()
+            .add_message::<CrdtChangeReceived>()
+            .add_systems(
+                PostUpdate,
+                (
+                    ensure_implicit_rooms,
+                    sync_room_messages,
+                    sync_room_titles,
+                    cleanup_orphaned_rooms,
+                )
+                    .chain(),
+            );
+    }
+}
+
 #[derive(Component, Clone, Debug, Eq, PartialEq)]
 pub struct ChatRoom {
     pub room_id: RoomId,
@@ -117,29 +142,6 @@ pub struct CrdtChangeReceived {
     pub document_id: String,
     pub actor_id: MemberId,
     pub change: Vec<u8>,
-}
-
-pub struct RoomPlugin;
-
-impl Plugin for RoomPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<RoomIndex>()
-            .init_resource::<RoomEventIndex>()
-            .add_message::<RoomIntent>()
-            .add_message::<RoomOpReceived>()
-            .add_message::<RoomOpCommitted>()
-            .add_message::<CrdtChangeReceived>()
-            .add_systems(
-                PostUpdate,
-                (
-                    ensure_implicit_rooms,
-                    sync_room_messages,
-                    sync_room_titles,
-                    cleanup_orphaned_rooms,
-                )
-                    .chain(),
-            );
-    }
 }
 
 fn session_identity<'a>(

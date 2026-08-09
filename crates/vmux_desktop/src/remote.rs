@@ -11,11 +11,13 @@ use vmux_layout::event::{
 };
 use vmux_service::RemotePaths;
 
-pub(crate) struct RemoteDesktopPlugin;
+/// Turning phone pairing on and off: owns the desktop's remote-control state, drives the worker
+/// thread that mints the pairing link, and pushes the result to the layout page.
+pub(crate) struct RemotePlugin;
 
-impl Plugin for RemoteDesktopPlugin {
+impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RemoteDesktopState>()
+        app.init_resource::<RemoteState>()
             .add_observer(on_remote_command)
             .add_observer(on_remote_copy)
             .add_systems(Startup, reconcile_remote_on_startup)
@@ -31,7 +33,7 @@ impl Plugin for RemoteDesktopPlugin {
     }
 }
 
-fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteDesktopState>) {
+fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteState>) {
     if state.phase == RemotePhase::Enabled && !state.pairing_url.is_empty() {
         vmux_terminal::clipboard::write(state.pairing_url.clone());
     }
@@ -49,7 +51,7 @@ struct RemoteWorkerResult {
 }
 
 #[derive(Resource)]
-struct RemoteDesktopState {
+struct RemoteState {
     enabled: bool,
     phase: RemotePhase,
     pairing_url: String,
@@ -62,7 +64,7 @@ struct RemoteDesktopState {
     reconcile_on_startup: bool,
 }
 
-impl Default for RemoteDesktopState {
+impl Default for RemoteState {
     fn default() -> Self {
         let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
         let enabled = persisted.as_deref().map(str::trim) == Some("enabled");
@@ -92,16 +94,13 @@ impl Default for RemoteDesktopState {
     }
 }
 
-fn reconcile_remote_on_startup(state: Res<RemoteDesktopState>) {
+fn reconcile_remote_on_startup(state: Res<RemoteState>) {
     if state.reconcile_on_startup {
         let _ = state.command_tx.send(state.enabled);
     }
 }
 
-fn on_remote_command(
-    trigger: On<BinReceive<RemoteCommandEvent>>,
-    mut state: ResMut<RemoteDesktopState>,
-) {
+fn on_remote_command(trigger: On<BinReceive<RemoteCommandEvent>>, mut state: ResMut<RemoteState>) {
     let enabled = trigger.event().payload.enabled;
     if enabled == state.enabled && state.phase != RemotePhase::Error {
         return;
@@ -122,7 +121,7 @@ fn on_remote_command(
     }
 }
 
-fn poll_remote_worker(mut state: ResMut<RemoteDesktopState>) {
+fn poll_remote_worker(mut state: ResMut<RemoteState>) {
     while let Ok(message) = state.result_rx.try_recv() {
         if message.enabled != state.enabled {
             continue;
@@ -154,7 +153,7 @@ fn poll_remote_worker(mut state: ResMut<RemoteDesktopState>) {
     }
 }
 
-fn poll_paired_marker(mut state: ResMut<RemoteDesktopState>) {
+fn poll_paired_marker(mut state: ResMut<RemoteState>) {
     if state.paired_checked_at.elapsed() < Duration::from_secs(1) {
         return;
     }
@@ -166,7 +165,7 @@ fn push_remote_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    state: Res<RemoteDesktopState>,
+    state: Res<RemoteState>,
     mut last: Local<Option<RemoteStateEvent>>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {

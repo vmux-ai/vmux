@@ -39,6 +39,7 @@ pub mod plugins;
 #[cfg(feature = "recording")]
 mod recording;
 mod relaunch;
+mod remote;
 mod runtime;
 #[cfg(feature = "screenshots")]
 mod screenshot;

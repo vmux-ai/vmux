@@ -43,7 +43,7 @@ impl RemoteArgs {
             // A new device id earns a different port, so the recorded one would name someone else's.
             let _ = std::fs::remove_file(remote.relay_port());
         }
-        agent.ensure_running(&super::service::current_service_binary()?)
+        agent.ensure_running(vmux_client::DaemonBinary::current()?.path())
     }
 }
 

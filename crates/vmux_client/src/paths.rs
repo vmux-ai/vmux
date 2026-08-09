@@ -172,19 +172,6 @@ impl RemotePaths {
     pub fn relay_port(&self) -> PathBuf {
         self.service.runtime_file("remote-relay-port")
     }
-
-    /// Stable loopback port for the active build and profile.
-    pub fn loopback_port(&self) -> u16 {
-        if self.service.build == "release" && self.service.profile == "personal" {
-            return 54_821;
-        }
-        let hash = format!("{}:{}", self.service.build, self.service.profile)
-            .bytes()
-            .fold(5381_u32, |hash, byte| {
-                hash.wrapping_mul(33).wrapping_add(u32::from(byte))
-            });
-        54_822 + (hash % 1_000) as u16
-    }
 }
 
 /// The secret a phone presents to prove it has been paired.
@@ -308,13 +295,6 @@ mod tests {
         assert!(name.starts_with("vmux-"));
         assert!(name.ends_with(".sock"));
         assert!(name.contains(ServicePaths::build_profile()));
-    }
-
-    #[test]
-    fn remote_port_is_stable_and_non_privileged() {
-        let port = RemotePaths::current().loopback_port();
-        assert!((54_821..=55_821).contains(&port));
-        assert_eq!(port, RemotePaths::current().loopback_port());
     }
 
     #[test]

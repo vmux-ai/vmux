@@ -354,7 +354,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
     );
     let flush_layout = native_throttle("native-layout-pointer-throttle", || {
         dispatch2::DispatchQueue::main().exec_async(|| {
-            vmux_browser::flush_native_layout_pointer_move();
+            vmux_browser::NativeLayout::flush_pointer_move();
         });
     });
     let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
@@ -443,7 +443,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
         }
         let layout_pointer = pointer_position_changed
             .then(|| {
-                location.map(|(x, y)| vmux_browser::queue_native_layout_pointer_move(x, y, buttons))
+                location.map(|(x, y)| vmux_browser::NativeLayout::queue_pointer_move(x, y, buttons))
             })
             .flatten();
         if event_type == NSEventType::LeftMouseDown
@@ -464,7 +464,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
                 let activity_started = vmux_browser::set_native_layout_activity(true);
                 settle_layout();
                 if result.region_changed {
-                    vmux_browser::flush_native_layout_pointer_move();
+                    vmux_browser::NativeLayout::flush_pointer_move();
                     local_wake(interval);
                 } else if result.pending {
                     flush_layout(interval);
@@ -482,14 +482,14 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
         } else if scroll {
             let forwarded = location.is_some_and(|(x, y)| {
                 let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
-                vmux_browser::forward_native_layout_scroll(Vec2::new(x, y), delta)
+                vmux_browser::NativeLayout::forward_scroll(Vec2::new(x, y), delta)
             });
             if forwarded {
                 local_wake(NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL);
                 return std::ptr::null_mut();
             }
             if native_scroll_should_wake(
-                vmux_browser::native_layout_pointer_is_inside(),
+                vmux_browser::NativeLayout::pointer_is_inside(),
                 sampled_over_windowed_page,
             ) {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
@@ -508,7 +508,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
                         | NSEventType::RightMouseUp
                         | NSEventType::OtherMouseUp
                 );
-                if vmux_browser::forward_native_layout_click(Vec2::new(x, y), button, mouse_up) {
+                if vmux_browser::NativeLayout::forward_click(Vec2::new(x, y), button, mouse_up) {
                     local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
                     return std::ptr::null_mut();
                 }
@@ -520,7 +520,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
                 vmux_browser::set_native_layout_activity(true);
                 settle_layout();
                 if result.pending {
-                    vmux_browser::flush_native_layout_pointer_move();
+                    vmux_browser::NativeLayout::flush_pointer_move();
                 }
             }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
@@ -703,6 +703,6 @@ pub(super) fn live_resize_active() -> bool {
 /// Whether the pointer sits over native CEF content that owns it, so winit should stop
 /// waking on window events.
 pub(super) fn native_pointer_inside() -> bool {
-    vmux_browser::native_layout_pointer_is_inside()
+    vmux_browser::NativeLayout::pointer_is_inside()
         || NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed)
 }

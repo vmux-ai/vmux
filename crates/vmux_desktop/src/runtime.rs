@@ -562,11 +562,11 @@ mod tests {
         assert!(monitor.contains("NSEventMask::LeftMouseDown"));
         assert!(monitor.contains("WinitUserEvent::WakeUp"));
         assert!(monitor.contains("vmux_layout::native_pointer::publish"));
-        assert!(monitor.contains("vmux_browser::queue_native_layout_pointer_move"));
+        assert!(monitor.contains("vmux_browser::NativeLayout::queue_pointer_move"));
         assert!(monitor.contains("flush_layout(interval)"));
         assert!(monitor.contains("if result.region_changed"));
-        assert!(monitor.contains("vmux_browser::flush_native_layout_pointer_move()"));
-        assert!(!monitor.contains("forward_native_layout_pointer_move"));
+        assert!(monitor.contains("vmux_browser::NativeLayout::flush_pointer_move()"));
+        assert!(!monitor.contains("forward_pointer_move"));
         assert!(!monitor.contains("vmux_layout::pane::wake_on_move"));
         assert!(monitor.contains("let global_mask = NSEventMask::LeftMouseDown"));
     }

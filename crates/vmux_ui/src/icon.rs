@@ -1,11 +1,158 @@
-pub use wasm::{BuiltinIconView, PageIconView};
+pub use wasm::{BuiltinIconView, LineIconView, PageIconView};
+
+/// The stroked glyphs any page may draw, independent of what a caller means by them.
+///
+/// A feature names the *meaning* ("the agent read a file") and maps it to one of these; the
+/// glyph itself stays here so the same outline is not redrawn per crate. Anything carrying a
+/// feature's own semantics — a brand logo, a tinted wrapper, an emoji — is not a [`LineIcon`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LineIcon {
+    AlertCircle,
+    BookOpen,
+    Brain,
+    Camera,
+    Clock,
+    Copy,
+    ExternalLink,
+    File,
+    FileOutput,
+    GitBranch,
+    Globe,
+    Image,
+    Layout,
+    Notebook,
+    Package,
+    Pencil,
+    Search,
+    Shield,
+    ShieldCheck,
+    Terminal,
+    Users,
+    Wifi,
+    Wrench,
+}
+
+impl LineIcon {
+    /// The SVG path data drawn inside the glyph's 24x24 box.
+    pub fn paths(self) -> &'static [&'static str] {
+        match self {
+            Self::AlertCircle => &[
+                "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z",
+                "M12 8v4",
+                "M12 16h.01",
+            ],
+            Self::BookOpen => &[
+                "M12 7v14",
+                "M3 18a1 1 0 0 1-1-1V5a2 2 0 0 1 2-2h5a3 3 0 0 1 3 3v15a3 3 0 0 0-3-3Z",
+                "M21 18a1 1 0 0 0 1-1V5a2 2 0 0 0-2-2h-5a3 3 0 0 0-3 3v15a3 3 0 0 1 3-3Z",
+            ],
+            Self::Brain => &[
+                "M9.5 4.5a3.2 3.2 0 0 1 5.35 1.05 3.35 3.35 0 0 1 2.8 3.35 3.5 3.5 0 0 1 .55 6.45A3.4 3.4 0 0 1 15 18.5H9a4 4 0 0 1-3.75-5.4 3.5 3.5 0 0 1 1.2-6.3A3.2 3.2 0 0 1 9.5 4.5Z",
+                "M14.5 18.5c0 1.4.9 2.5 2.5 2.5v-4.4",
+                "M9.4 4.7c-.9 1.2-.8 2.8.3 3.8",
+                "M6.2 9.4c1.3-.7 2.8-.4 3.8.6",
+                "M13.9 5.8c-.7 1-.6 2.2.2 3.1",
+                "M14.1 9c1.4-.2 2.6.6 3.1 1.7",
+                "M8.5 13.2c1-.7 2.4-.5 3.2.4",
+                "M12.6 11.9c-.1 1.9.8 3.6 2.4 4.4",
+            ],
+            Self::Camera => &[
+                "M9 4 7.5 6H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2.5L15 4Z",
+                "M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z",
+            ],
+            Self::Clock => &["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 6v6l4 2"],
+            Self::Copy => &[
+                "M11 9h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z",
+                "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
+            ],
+            Self::ExternalLink => &[
+                "M14 3h7v7",
+                "m21 3-9 9",
+                "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6",
+            ],
+            Self::File => &[
+                "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z",
+                "M14 2v4a2 2 0 0 0 2 2h4",
+            ],
+            Self::FileOutput => &[
+                "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z",
+                "M14 2v6h6",
+                "m10 17 3-3-3-3",
+                "M13 14H7",
+            ],
+            Self::GitBranch => &[
+                "M6 3v12",
+                "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M6 15c0 3 2 5 5 5h4",
+            ],
+            Self::Globe => &[
+                "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Z",
+                "M2 12h20",
+                "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z",
+            ],
+            Self::Image => &[
+                "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z",
+                "M10.5 8.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z",
+                "m21 15-5-5L5 21",
+            ],
+            Self::Layout => &["M4 4h9v16H4Z", "M15 4h5v7h-5Z", "M15 13h5v7h-5Z"],
+            Self::Notebook => &[
+                "M4 19.5A2.5 2.5 0 0 1 6.5 17H20",
+                "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z",
+            ],
+            Self::Package => &[
+                "m7.5 4.27 9 5.15",
+                "M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z",
+                "M3.3 7 12 12l8.7-5",
+                "M12 22V12",
+            ],
+            Self::Pencil => &["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"],
+            Self::Search => &["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z", "m21 21-4.35-4.35"],
+            Self::Shield => &["M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z"],
+            Self::ShieldCheck => &[
+                "M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3v8Z",
+                "m9 12 2 2 4-4",
+            ],
+            Self::Terminal => &["m4 17 6-6-6-6", "M12 19h8"],
+            Self::Users => &[
+                "M12 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+                "M5 21v-2a7 7 0 0 1 14 0v2",
+                "M5.5 11a2.5 2.5 0 1 0 0-5",
+                "M18.5 11a2.5 2.5 0 1 1 0-5",
+            ],
+            Self::Wifi => &[
+                "M5 12.55a11 11 0 0 1 14.08 0",
+                "M1.42 9a16 16 0 0 1 21.16 0",
+                "M8.53 16.11a6 6 0 0 1 6.95 0",
+                "M12 20h.01",
+            ],
+            Self::Wrench => &[
+                "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z",
+            ],
+        }
+    }
+}
 
 mod wasm {
+    use super::LineIcon;
     use crate::components::icon::Icon;
     use crate::favicon::Favicon;
     use crate::file_icon::TypeIcon;
     use dioxus::prelude::*;
     use vmux_wire::icon::{BuiltinIcon, PageIcon};
+
+    /// One of the shared stroked glyphs, at whatever size `class` gives it.
+    #[component]
+    pub fn LineIconView(icon: LineIcon, class: String) -> Element {
+        rsx! {
+            Icon { class: "{class}", stroke_width: 1.8,
+                for d in icon.paths() {
+                    path { d: "{d}" }
+                }
+            }
+        }
+    }
 
     /// The glyph for a builtin page kind.
     #[component]

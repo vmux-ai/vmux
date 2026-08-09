@@ -32,6 +32,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::PromptMediaOption;
+use vmux_ui::file_icon::FilePath;
 use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
 use vmux_ui::i18n::translate;
 use vmux_wire::prompt_media::{
@@ -527,7 +528,7 @@ impl Chat {
                 name: entry.name.clone(),
                 display_path: entry.display_path(),
                 preview_data_url: entry.preview_data_url.clone(),
-                label: file_extension_label(&entry.name),
+                label: FilePath(&entry.name).extension_label(),
                 is_dir: entry.is_dir,
             });
         }
@@ -552,7 +553,7 @@ impl Chat {
             pills.push(PromptComposerAttachment {
                 key: format!("transition-attachment-{}", attachment.path),
                 name: attachment.name.clone(),
-                label: file_extension_label(&attachment.name),
+                label: FilePath(&attachment.name).extension_label(),
                 preview_data_url: preview_of(attachment),
                 remove_index: None,
             });
@@ -561,7 +562,7 @@ impl Chat {
             pills.push(PromptComposerAttachment {
                 key: format!("attachment-pill-{}", attachment.path),
                 name: attachment.name.clone(),
-                label: file_extension_label(&attachment.name),
+                label: FilePath(&attachment.name).extension_label(),
                 preview_data_url: preview_of(attachment),
                 remove_index: Some(index),
             });
@@ -1058,16 +1059,6 @@ fn composer_activity_counts(items: &[ChatItem]) -> (usize, usize) {
         }
     }
     (subagents, tasks)
-}
-
-/// The badge on an attachment pill: its extension, or `FILE` when it has none.
-fn file_extension_label(name: &str) -> String {
-    std::path::Path::new(name)
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_uppercase())
-        .filter(|extension| !extension.is_empty())
-        .unwrap_or_else(|| "FILE".to_string())
 }
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared

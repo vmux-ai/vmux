@@ -10,20 +10,10 @@ mod native_layout;
 mod scroll;
 mod snapshot;
 pub use host_focus::HostFocusIntent;
-mod remote;
 
+pub use native_layout::NativeLayout;
 #[cfg(target_os = "macos")]
-pub use native_layout::{
-    NativeLayoutPointerMoveResult, flush_native_layout_pointer_move, forward_native_layout_click,
-    forward_native_layout_scroll, queue_native_layout_pointer_move,
-};
-
-use native_layout::NativeLayout;
-#[cfg(target_os = "macos")]
-use native_layout::{
-    clear_native_layout_pointer_state, physical_cef_pointer_hit_rect,
-    set_native_layout_mouse_presenter, set_native_layout_pointer_regions,
-};
+pub use native_layout::NativeLayoutPointerMoveResult;
 
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
@@ -92,6 +82,7 @@ use vmux_layout::{
 
 use vmux_setting::AppSettings;
 use vmux_terminal::{self as terminal, RestartPty, Terminal};
+use vmux_ui::i18n::Locale;
 use vmux_ui::theme::{THEME_EVENT, ThemeEvent};
 
 /// Wires browser orchestration: resolves CEF embedded hosts from page manifests, manages
@@ -103,7 +94,7 @@ impl Plugin for BrowserPlugin {
         let profile = vmux_core::profile::active_profile_name();
         let startup_settings = vmux_setting::read_settings_from_disk();
         let startup_locale =
-            vmux_ui::i18n::requested_locale(Some(&startup_settings.appearance.locale));
+            Locale::requested(Some(&startup_settings.appearance.locale)).into_string();
         let startup_accept_language_list = browser_accept_language_list(&startup_locale);
         let prepared_extensions = crate::extensions::load::apply_env().unwrap_or_else(|error| {
             bevy::log::error!(%error, "failed to prepare extensions; starting without them");
@@ -235,7 +226,6 @@ impl Plugin for BrowserPlugin {
                         embedded_hosts,
                         ..default()
                     },
-                    remote::RemoteDesktopPlugin,
                     BinEventEmitterPlugin::<(
                         HeaderCommandEvent,
                         SideSheetCommandEvent,
@@ -466,11 +456,11 @@ fn on_webview_ready_send_theme(
 }
 
 fn theme_event(settings: &AppSettings) -> ThemeEvent {
-    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
+    let locale = Locale::requested(Some(&settings.appearance.locale));
     ThemeEvent {
         radius: settings.layout.radius,
-        catalog: external_locale_catalog(&locale),
-        locale,
+        catalog: external_locale_catalog(locale.as_str()),
+        locale: locale.into_string(),
     }
 }
 
@@ -517,8 +507,8 @@ fn sync_appearance_to_cef(
     if scheme.0 != mode {
         scheme.0 = mode;
     }
-    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
-    let next_accept_language_list = browser_accept_language_list(&locale);
+    let locale = Locale::requested(Some(&settings.appearance.locale));
+    let next_accept_language_list = browser_accept_language_list(locale.as_str());
     if accept_language_list
         .as_deref()
         .is_none_or(|current| current.0 != next_accept_language_list)
@@ -590,10 +580,6 @@ fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
     let min = rect.center - half;
     let max = rect.center + half;
     point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
-}
-
-pub fn native_layout_pointer_is_inside() -> bool {
-    NATIVE_LAYOUT_POINTER_INSIDE.load(Ordering::Relaxed)
 }
 
 pub fn set_native_layout_activity(active: bool) -> bool {
@@ -1957,7 +1943,7 @@ fn reset_layout_cef_hover(
     #[cfg(target_os = "macos")]
     {
         let _ = (browsers, buttons, layout);
-        clear_native_layout_pointer_state();
+        NativeLayout::clear_pointer_state();
         *state = LayoutHoverRefreshState::default();
     }
     #[cfg(not(target_os = "macos"))]
@@ -1988,7 +1974,7 @@ fn refresh_layout_cef_hover(
 ) {
     let Ok(layout) = layout_q.single() else {
         #[cfg(target_os = "macos")]
-        clear_native_layout_pointer_state();
+        NativeLayout::clear_pointer_state();
         #[cfg(not(target_os = "macos"))]
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         *state = LayoutHoverRefreshState::default();
@@ -2019,16 +2005,14 @@ fn refresh_layout_cef_hover(
     #[cfg(target_os = "macos")]
     {
         if pointer_capture {
-            set_native_layout_pointer_regions([physical_cef_pointer_hit_rect(
-                CefPointerHitRect {
-                    center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
-                    size: Vec2::new(window.width(), window.height()),
-                    interactive: true,
-                },
-                scale,
-            )]);
+            NativeLayout::set_pointer_regions([CefPointerHitRect {
+                center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
+                size: Vec2::new(window.width(), window.height()),
+                interactive: true,
+            }
+            .physical(scale)]);
         } else {
-            set_native_layout_pointer_regions(
+            NativeLayout::set_pointer_regions(
                 cef_regions
                     .iter()
                     .map(
@@ -2039,18 +2023,18 @@ fn refresh_layout_cef_hover(
                         },
                     )
                     .filter(|rect| rect.interactive)
-                    .map(|rect| physical_cef_pointer_hit_rect(rect, scale)),
+                    .map(|rect| rect.physical(scale)),
             );
         }
-        set_native_layout_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
+        NativeLayout::set_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
         if let Some(pointer) = vmux_layout::native_pointer::snapshot() {
-            let result = queue_native_layout_pointer_move(
+            let result = NativeLayout::queue_pointer_move(
                 pointer.position_px.x,
                 pointer.position_px.y,
                 pointer.buttons,
             );
             if result.owns_pointer {
-                flush_native_layout_pointer_move();
+                NativeLayout::flush_pointer_move();
             }
         }
         *state = LayoutHoverRefreshState::default();
@@ -2230,7 +2214,7 @@ fn sync_layout_cef_frame_rate(
     mut state: Local<LayoutFrameRateState>,
 ) {
     let owns_keyboard = layout_q.iter().any(|(_, keyboard_target)| keyboard_target);
-    let inside = native_layout_pointer_is_inside();
+    let inside = NativeLayout::pointer_is_inside();
     let pointer = vmux_layout::native_pointer::snapshot();
     let native_changed = pointer.is_some_and(|pointer| {
         if pointer.sequence == state.native_sequence {
@@ -4270,15 +4254,15 @@ fn handle_browser_commands(
             },
             #[allow(clippy::single_match)]
             BrowserCommand::Open(open_cmd) => match open_cmd {
-                OpenCommand::InPlace { url } => {
-                    let resolved = vmux_command::open::resolve_url(
-                        url.as_deref(),
+                OpenCommand::InPlace { .. } => {
+                    let resolved = vmux_command::open::OpenUrl::of(
+                        open_cmd,
                         effective_startup_url.as_ref().map(|s| s.0.as_str()),
                     );
                     if resolved.is_empty() {
                         continue;
                     }
-                    let resolved = normalize_vmux_url(&resolved);
+                    let resolved = normalize_vmux_url(resolved.as_str());
                     let current_url = meta_q
                         .get(webview)
                         .map(|m| m.url.clone())
@@ -6979,11 +6963,11 @@ mod tests {
             .unwrap_or_default();
 
         assert!(refresh_fn.contains("vmux_layout::native_pointer::snapshot()"));
-        assert!(refresh_fn.contains("set_native_layout_pointer_regions"));
-        assert!(refresh_fn.contains("physical_cef_pointer_hit_rect"));
+        assert!(refresh_fn.contains("NativeLayout::set_pointer_regions"));
+        assert!(refresh_fn.contains(".physical(scale)"));
         assert!(refresh_fn.contains("browsers.native_mouse_move_presenter"));
-        assert!(refresh_fn.contains("queue_native_layout_pointer_move"));
-        assert!(refresh_fn.contains("flush_native_layout_pointer_move"));
+        assert!(refresh_fn.contains("NativeLayout::queue_pointer_move"));
+        assert!(refresh_fn.contains("NativeLayout::flush_pointer_move"));
         assert!(refresh_fn.contains("window.resolution.scale_factor()"));
         assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
     }
@@ -6991,28 +6975,28 @@ mod tests {
     #[test]
     fn native_layout_pointer_queue_retains_only_latest_sample() {
         let source = include_str!("native_layout/macos.rs");
-        let sample = source
-            .split("fn queue_native_layout_pointer_sample")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn queue_native_layout_pointer_move").next())
-            .unwrap_or_default();
         let queue = source
-            .split("pub fn queue_native_layout_pointer_move")
+            .split("pub fn queue_pointer_move")
             .nth(1)
-            .and_then(|tail| tail.split("pub fn flush_native_layout_pointer_move").next())
+            .and_then(|tail| tail.split("pub fn flush_pointer_move").next())
             .unwrap_or_default();
         let flush = source
-            .split("pub fn flush_native_layout_pointer_move")
+            .split("pub fn flush_pointer_move")
             .nth(1)
-            .and_then(|tail| tail.split("pub fn forward_native_layout_scroll").next())
+            .and_then(|tail| tail.split("pub fn forward_scroll").next())
+            .unwrap_or_default();
+        let sample = source
+            .split("fn queue_sample")
+            .nth(1)
+            .and_then(|tail| tail.split("#[cfg(test)]").next())
             .unwrap_or_default();
 
-        assert!(sample.contains("state.position_px = Some(position)"));
-        assert!(sample.contains("state.buttons = buttons"));
-        assert!(source.contains("fn queue_native_layout_pointer_sample"));
+        assert!(sample.contains("self.position_px = Some(position)"));
+        assert!(sample.contains("self.buttons = buttons"));
+        assert!(source.contains("fn queue_sample"));
         assert!(sample.contains("sample_changed"));
-        assert!(sample.contains("state.pending = true"));
-        assert!(queue.contains("queue_native_layout_pointer_sample"));
+        assert!(sample.contains("self.pending = true"));
+        assert!(queue.contains("state.queue_sample("));
         assert!(flush.contains("state.pending = false"));
         assert!(flush.contains("presenter.send(position_px / state.scale"));
     }

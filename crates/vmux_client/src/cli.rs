@@ -18,29 +18,35 @@ pub struct StatusInfo {
     pub process_count: Option<u32>,
 }
 
-pub fn format_status(s: &StatusInfo) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("profile     {}\n", s.profile));
-    out.push_str(&format!(
-        "pid         {}\n",
-        s.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into())
-    ));
-    out.push_str(&format!(
-        "uptime      {}\n",
-        s.uptime.map(format_uptime).unwrap_or_else(|| "-".into())
-    ));
-    out.push_str(&format!("socket      {}\n", s.socket.display()));
-    out.push_str(&format!(
-        "identity    {}\n",
-        s.identity_short.clone().unwrap_or_else(|| "-".into())
-    ));
-    out.push_str(&format!(
-        "processes   {}\n",
-        s.process_count
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "-".into())
-    ));
-    out
+impl StatusInfo {
+    /// The `vmux service status` report, one field per line. Anything the daemon did not answer
+    /// for reads as `-`.
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str(&format!("profile     {}\n", self.profile));
+        out.push_str(&format!(
+            "pid         {}\n",
+            self.pid
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "-".into())
+        ));
+        out.push_str(&format!(
+            "uptime      {}\n",
+            self.uptime.map(format_uptime).unwrap_or_else(|| "-".into())
+        ));
+        out.push_str(&format!("socket      {}\n", self.socket.display()));
+        out.push_str(&format!(
+            "identity    {}\n",
+            self.identity_short.clone().unwrap_or_else(|| "-".into())
+        ));
+        out.push_str(&format!(
+            "processes   {}\n",
+            self.process_count
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "-".into())
+        ));
+        out
+    }
 }
 
 fn format_uptime(d: Duration) -> String {
@@ -108,7 +114,7 @@ pub fn cmd_status() -> std::io::Result<i32> {
         identity_short: read_identity_short(),
         process_count: live.map(|(_, c)| c),
     };
-    print!("{}", format_status(&info));
+    print!("{}", info.render());
     Ok(if live.is_some() { 0 } else { 1 })
 }
 
@@ -172,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn format_status_renders_all_fields() {
+    fn render_shows_every_field() {
         let info = StatusInfo {
             profile: "dev".into(),
             pid: Some(12345),
@@ -181,7 +187,7 @@ mod tests {
             identity_short: Some("abcd1234".into()),
             process_count: Some(2),
         };
-        let out = format_status(&info);
+        let out = info.render();
         assert!(out.contains("profile     dev"));
         assert!(out.contains("pid         12345"));
         assert!(out.contains("uptime      1m 0s"));
@@ -191,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn format_status_renders_dashes_when_unknown() {
+    fn render_shows_dashes_when_unknown() {
         let info = StatusInfo {
             profile: "dev".into(),
             pid: None,
@@ -200,7 +206,7 @@ mod tests {
             identity_short: None,
             process_count: None,
         };
-        let out = format_status(&info);
+        let out = info.render();
         assert!(out.contains("pid         -"));
         assert!(out.contains("uptime      -"));
         assert!(out.contains("identity    -"));
