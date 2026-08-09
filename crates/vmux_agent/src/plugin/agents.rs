@@ -8,12 +8,12 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use crossbeam_channel::{Receiver, Sender};
 use std::collections::{HashMap, HashSet};
 
-use super::event::{
+use crate::acp_registry::Runtime;
+use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
+use crate::event::agents::{
     AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
     AgentsOpen, AgentsUninstall,
 };
-use crate::acp_registry::Runtime;
-use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
 use vmux_core::agent::AgentKind;
 use vmux_core::page::PrewarmPage;
 

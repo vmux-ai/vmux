@@ -12,17 +12,17 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 use self::model::{effort_current_for, emit_model_state};
-use super::event::{
+use crate::client::acp::{AcpModelState, AcpSession};
+use crate::components::{
+    AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
+    provisional_conversation_title,
+};
+use crate::event::chat::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
     CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt,
     ChatChoiceSelected, ChatClearQueue, ChatCreateWorktree, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatOpenPage, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit,
     ComposerContext, QueuedPromptSnapshot,
-};
-use crate::client::acp::{AcpModelState, AcpSession};
-use crate::components::{
-    AgentApprovalPolicy, AgentConversationTitle, AgentMessages, AgentSession, PromptQueue,
-    provisional_conversation_title,
 };
 use crate::events::{
     AgentApprovalReply, AgentChoiceSelected, AgentCommandRequest, ApprovalDecision, CommandOrigin,

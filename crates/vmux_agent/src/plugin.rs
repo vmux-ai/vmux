@@ -4,6 +4,9 @@
 //! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_agent::plugin` still
 //! resolves from outside and `crate::plugin` still resolves from within.
 
+pub mod agents;
+pub mod chat;
+
 pub mod acp_install;
 pub mod acp_registry;
 pub mod client;
@@ -17,7 +20,8 @@ pub mod handoff;
 pub mod launch;
 pub mod managed_mcp;
 pub mod mcp;
-pub mod plugin;
+pub mod root;
+pub use root::*;
 pub mod providers;
 pub mod room;
 pub mod run_state;
@@ -49,13 +53,13 @@ pub use events::{
 pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
-pub use plugin::AgentPlugin;
 pub use room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
     RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
     RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
 };
+pub use root::AgentPlugin;
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};

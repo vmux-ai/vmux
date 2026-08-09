@@ -6,11 +6,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::chat_page::event::{
+use super::scroll;
+use crate::event::chat::{
     ChatAttachment, ChatItem, ChatMediaEntry, ComposerContext, ModelOptionEntry,
     QueuedPromptSnapshot, ResumableSessionEntry, SlashCommandEntry,
 };
-use crate::chat_page::scroll;
 use dioxus::prelude::*;
 
 /// The rendered transcript, the window of it that is loaded, and where the reader is in it.

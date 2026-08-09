@@ -73,8 +73,8 @@ pub struct AgentPagesPlugin;
 impl Plugin for AgentPagesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            crate::chat_page::AgentChatPagePlugin,
-            crate::agents_page::AgentsManagerPlugin,
+            crate::plugin::chat::AgentChatPagePlugin,
+            crate::plugin::agents::AgentsManagerPlugin,
             crate::vibe::setup::AgentSetupPlugin,
         ));
     }
@@ -378,8 +378,6 @@ fn detect_agent_provider_availability(
     }
 }
 
-pub use crate::build_agent_launch;
-
 pub fn attach_page_agent_to_stack(
     stack: Entity,
     provider: &str,
@@ -440,7 +438,7 @@ fn attach_page_agent_to_stack_with_webview(
         commands
             .entity(webview)
             .insert((
-                crate::chat_page::AgentChatView,
+                crate::plugin::chat::AgentChatView,
                 PageMetadata {
                     url,
                     title: format!("{provider}/{model}"),
@@ -448,11 +446,11 @@ fn attach_page_agent_to_stack_with_webview(
                     ..default()
                 },
             ))
-            .remove::<crate::chat_page::ChatSynced>();
+            .remove::<crate::plugin::chat::ChatSynced>();
     } else {
         commands.spawn((
             vmux_layout::Browser::new(meshes, webview_mt, &url),
-            crate::chat_page::AgentChatView,
+            crate::plugin::chat::AgentChatView,
             ChildOf(stack),
         ));
     }
@@ -533,7 +531,7 @@ fn attach_acp_agent_to_stack_with_webview(
         commands
             .entity(webview)
             .insert((
-                crate::chat_page::AgentChatView,
+                crate::plugin::chat::AgentChatView,
                 PageMetadata {
                     url,
                     title: name.to_string(),
@@ -542,11 +540,11 @@ fn attach_acp_agent_to_stack_with_webview(
                 },
                 anchor,
             ))
-            .remove::<crate::chat_page::ChatSynced>();
+            .remove::<crate::plugin::chat::ChatSynced>();
     } else {
         commands.spawn((
             vmux_layout::Browser::new(meshes, webview_mt, &url),
-            crate::chat_page::AgentChatView,
+            crate::plugin::chat::AgentChatView,
             ChildOf(stack),
             anchor,
         ));
@@ -2865,7 +2863,7 @@ struct PendingWorkspacePicker {
 struct WorkspacePickerContext<'w, 's> {
     pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     choices: Query<'w, 's, &'static PendingAgentChoice>,
-    chat_views: Query<'w, 's, (), With<crate::chat_page::AgentChatView>>,
+    chat_views: Query<'w, 's, (), With<crate::plugin::chat::AgentChatView>>,
     page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
     cli_sessions: Query<'w, 's, &'static AgentSession>,
     conversation_titles: Query<'w, 's, &'static mut crate::components::AgentConversationTitle>,
@@ -2912,7 +2910,7 @@ fn handle_agent_choice_selected(
     commands
         .entity(event.webview)
         .remove::<PendingAgentChoice>()
-        .remove::<crate::chat_page::ChatSynced>();
+        .remove::<crate::plugin::chat::ChatSynced>();
 }
 
 fn workspace_picker_task(
@@ -3591,7 +3589,7 @@ fn handle_agent_self_commands(
                                 question: question.clone(),
                                 options: options.clone(),
                             })
-                            .remove::<crate::chat_page::ChatSynced>();
+                            .remove::<crate::plugin::chat::ChatSynced>();
                         AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                     } else {
                         AgentCommandResult::Error(
@@ -4227,7 +4225,7 @@ fn handle_agent_self_commands(
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    chat_views: Query<(), With<crate::chat_page::AgentChatView>>,
+    chat_views: Query<(), With<crate::plugin::chat::AgentChatView>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
     mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
     child_of: Query<&ChildOf>,
@@ -4286,7 +4284,7 @@ fn drain_workspace_picker_tasks(
                                                     .map(str::to_string)
                                                     .collect(),
                                             })
-                                            .remove::<crate::chat_page::ChatSynced>();
+                                            .remove::<crate::plugin::chat::ChatSynced>();
                                         None
                                     }
                                     SelectedWorkspaceKind::Plain => Some(format!(
@@ -6203,7 +6201,7 @@ mod tests {
             .id();
         let view = app
             .world_mut()
-            .spawn((crate::chat_page::AgentChatView, anchor, ChildOf(stack)))
+            .spawn((crate::plugin::chat::AgentChatView, anchor, ChildOf(stack)))
             .id();
 
         let project_for_system = project_dir.clone();
@@ -6273,7 +6271,7 @@ mod tests {
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
         assert!(
             app.world()
-                .get::<crate::chat_page::AgentChatView>(view)
+                .get::<crate::plugin::chat::AgentChatView>(view)
                 .is_some()
         );
         assert!(matches!(
@@ -8595,7 +8593,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query_filtered::<&ChildOf, With<crate::chat_page::AgentChatView>>()
+                .query_filtered::<&ChildOf, With<crate::plugin::chat::AgentChatView>>()
                 .iter(app.world())
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
@@ -8654,7 +8652,7 @@ mod tests {
         assert!(app.world().get_entity(webview).is_ok());
         assert!(
             app.world()
-                .get::<crate::chat_page::AgentChatView>(webview)
+                .get::<crate::plugin::chat::AgentChatView>(webview)
                 .is_some()
         );
         assert!(
@@ -9527,7 +9525,7 @@ mod tests {
 
     #[test]
     fn agent_run_spawns_terminal_before_next_agent_command_frame() {
-        let source = include_str!("plugin.rs");
+        let source = include_str!("root.rs");
         let non_test_source = source
             .split("#[cfg(test)]")
             .next()
@@ -9544,7 +9542,7 @@ mod tests {
 
     #[test]
     fn agent_restart_runs_before_terminal_service_messages() {
-        let source = include_str!("plugin.rs");
+        let source = include_str!("root.rs");
         let non_test_source = source
             .split("#[cfg(test)]")
             .next()

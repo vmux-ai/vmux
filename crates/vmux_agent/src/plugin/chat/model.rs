@@ -8,11 +8,11 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
-use crate::chat_page::event::{
+use crate::client::acp::{AcpModelState, AcpSession};
+use crate::event::chat::{
     MODEL_STATE_EVENT, ModelOptionEntry, ModelState, SLASH_COMMANDS_EVENT, SelectModel,
     SetAgentEffort, SlashCommands,
 };
-use crate::client::acp::{AcpModelState, AcpSession};
 use crate::events::AgentCommandRequest;
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_service::client::ServiceClient;

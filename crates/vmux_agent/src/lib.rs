@@ -3,11 +3,16 @@
 //! recordings, browser snapshots, and layout commands.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-pub mod agents_page;
-pub mod chat_page;
+pub mod event;
+
+#[cfg(any(test, frontend))]
+pub mod format;
+
+#[cfg(frontend)]
+pub mod ui;
 pub mod vibe;
 
 #[cfg(native)]
-mod native;
+pub mod plugin;
 #[cfg(native)]
-pub use native::*;
+pub use plugin::*;

@@ -16,7 +16,7 @@ use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runti
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 
-use crate::chat_page::event::{
+use crate::event::chat::{
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest,
 };

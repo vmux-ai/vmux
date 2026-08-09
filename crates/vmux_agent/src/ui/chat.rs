@@ -1,12 +1,9 @@
 #![allow(non_snake_case)]
 
-use crate::chat_page::composer::{
-    PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, approval_decision_for_index,
-    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
-    move_prompt_history, prompt_history_direction, resume_menu_state, selector_mode,
-    should_clear_draft_on_escape, should_fetch_resume,
-};
-use crate::chat_page::event::{
+mod scroll;
+mod state;
+
+use crate::event::chat::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
     CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
     ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
@@ -19,8 +16,12 @@ use crate::chat_page::event::{
     ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
     SlashCommandEntry, SlashCommands, latest_tool_location,
 };
-use crate::chat_page::scroll;
-use crate::chat_page::state;
+use crate::format::composer::{
+    PromptEdit, PromptHistoryDirection, ResumeMenuState, SelectorMode, approval_decision_for_index,
+    chat_page_title, edit_prompt, filter_models, filter_sessions, is_handoff_boundary,
+    move_prompt_history, prompt_history_direction, resume_menu_state, selector_mode,
+    should_clear_draft_on_escape, should_fetch_resume,
+};
 use dioxus::prelude::*;
 use std::collections::{HashMap, HashSet};
 use vmux_chat::activity::ActivityIcon;
@@ -1602,7 +1603,7 @@ pub fn Page(
 
             if !installing && let Some((call_id, name, args_json)) = approval() {
                 {
-                    let details = crate::chat_page::approval::ApprovalDetail::rows(&args_json);
+                    let details = crate::format::approval::ApprovalDetail::rows(&args_json);
                     rsx! {
                         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
                             div { class: "mx-auto flex max-w-3xl flex-col gap-3",
