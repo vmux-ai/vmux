@@ -4,23 +4,19 @@
 //! Gated as a whole rather than item by item — a hundred attributes down one file said nothing
 //! that one on the module does not. The rendered counterpart is the sibling `page`.
 
-use base64::Engine;
+mod media;
+mod resume;
+
 use bevy::prelude::*;
-use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 use super::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_MAX_PAGE_SIZE,
-    CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT, CHAT_MEDIA_ENTRIES_EVENT,
-    CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
-    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatCancelQueuedPrompt,
+    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
+    CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt,
     ChatChoiceSelected, ChatClearQueue, ChatCreateWorktree, ChatEscape, ChatHistoryPage,
-    ChatHistoryRequest, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatOpenPage,
-    ChatPasteMedia, ChatPickFiles, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit,
+    ChatHistoryRequest, ChatOpenPage, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit,
     ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
-    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort,
-    SlashCommandEntry, SlashCommands,
+    SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort, SlashCommandEntry, SlashCommands,
 };
 use crate::client::acp::{AcpModelState, AcpSession};
 use crate::components::{
@@ -30,11 +26,10 @@ use crate::components::{
 use crate::events::{
     AgentApprovalReply, AgentChoiceSelected, AgentCommandRequest, ApprovalDecision, CommandOrigin,
 };
-use crate::handoff::{DEFAULT_CONTEXT_LIMIT, ImportedConversation, build_context};
+use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
-use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
+use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_core::PageMetadata;
-use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
 use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};
 use vmux_service::client::ServiceClient;
@@ -60,24 +55,17 @@ impl Plugin for AgentChatPagePlugin {
                 ChatClearQueue,
                 ChatCancelQueuedPrompt,
                 ChatEscape,
-                ResumeListRequest,
-                ResumeSession,
-                RuntimeSwitchRequest,
                 SelectModel,
                 SetAgentEffort,
             )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
-                ChatPickFiles,
-                ChatPasteMedia,
-                ChatMediaListRequest,
-                ChatAttachPaths,
-                ChatAttachmentPreviewRequest,
                 ChatChoiceSelected,
                 ChatHistoryRequest,
                 ChatSelectWorkspace,
                 ChatCreateWorktree,
                 ChatOpenPage,
             )>::for_hosts(&["agent", "start"]))
+            .add_plugins((media::ChatMediaPlugin, resume::ChatResumePlugin))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -87,14 +75,6 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_escape)
             .add_observer(on_chat_choice_selected)
             .add_observer(on_chat_history_request)
-            .add_observer(on_chat_pick_files)
-            .add_observer(on_chat_paste_media)
-            .add_observer(on_chat_media_list_request)
-            .add_observer(on_chat_attach_paths)
-            .add_observer(on_chat_attachment_preview_request)
-            .add_observer(on_resume_list_request)
-            .add_observer(on_resume_session)
-            .add_observer(on_runtime_switch_request)
             .add_observer(on_select_model)
             .add_observer(on_set_agent_effort)
             .add_observer(on_chat_open_page)
@@ -112,11 +92,6 @@ impl Plugin for AgentChatPagePlugin {
                     apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
                     send_acp_model_requests,
                     save_last_used_acp_models.after(apply_last_used_acp_model),
-                    drain_chat_attachment_tasks,
-                    drain_chat_media_list_tasks,
-                    drain_chat_media_preview_tasks,
-                    drain_resume_list_tasks,
-                    drain_resume_handoff_tasks,
                 ),
             );
     }
@@ -239,503 +214,11 @@ pub struct AgentChatView;
 #[derive(Component)]
 pub(crate) struct ChatSynced;
 
-#[derive(Component)]
-struct ResumeListTask {
-    webview: Entity,
-    task: Task<ResumableSessions>,
-}
-
-#[derive(Component)]
-struct ResumeHandoffTask {
-    stack: Entity,
-    target_url: String,
-    cwd: std::path::PathBuf,
-    task: Task<Result<StackSessionHandoff, String>>,
-}
-
-#[derive(Component)]
-struct ChatAttachmentTask {
-    webview: Entity,
-    event: &'static str,
-    task: Task<ChatAttachments>,
-}
-
-#[derive(Component)]
-struct ChatMediaListTask {
-    webview: Entity,
-    task: Task<ChatMediaEntries>,
-}
-
-#[derive(Component)]
-struct ChatMediaPreviewTask {
-    webview: Entity,
-    task: Task<ChatMediaEntries>,
-}
-
-const MEDIA_THUMBNAIL_SOURCE_LIMIT: u64 = 25 * 1024 * 1024;
-const MEDIA_THUMBNAIL_TOTAL_LIMIT: u64 = 64 * 1024 * 1024;
-const MEDIA_THUMBNAIL_MAX_EDGE: u32 = 96;
-
-fn attachment_mime(path: &std::path::Path) -> String {
-    let path_str = path.to_string_lossy();
-    if let Some(mime) = vmux_core::media::media_mime(&path_str) {
-        return mime.to_string();
-    }
-    let extension = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    match extension.as_str() {
-        "tif" | "tiff" => "image/tiff",
-        "heic" | "heif" => "image/heic",
-        "json" => "application/json",
-        "csv" => "text/csv",
-        "html" | "htm" => "text/html",
-        "md" | "markdown" => "text/markdown",
-        "txt" | "rs" | "toml" | "ron" | "yaml" | "yml" | "js" | "ts" | "tsx" | "jsx" | "css"
-        | "sh" | "zsh" | "bash" | "py" | "go" | "c" | "h" | "cc" | "cpp" | "hpp" | "java"
-        | "kt" | "swift" => "text/plain",
-        "zip" => "application/zip",
-        "gz" => "application/gzip",
-        "tar" => "application/x-tar",
-        _ => "application/octet-stream",
-    }
-    .to_string()
-}
-
-fn chat_attachment(path: std::path::PathBuf) -> Option<ChatAttachment> {
-    let metadata = std::fs::metadata(&path).ok()?;
-    if !metadata.is_file() {
-        return None;
-    }
-    let name = path.file_name()?.to_string_lossy().into_owned();
-    let mime_type = attachment_mime(&path);
-    Some(ChatAttachment {
-        path: path.to_string_lossy().into_owned(),
-        name,
-        mime_type,
-        size: metadata.len(),
-        preview_data_url: String::new(),
-    })
-}
-
-fn media_thumbnail_data_url(path: &std::path::Path, source_size: u64) -> String {
-    if source_size > MEDIA_THUMBNAIL_SOURCE_LIMIT {
-        return String::new();
-    }
-    let Some(mime) = vmux_core::media::image_mime(&path.to_string_lossy()) else {
-        return String::new();
-    };
-    if mime == "image/svg+xml" || mime == "image/avif" {
-        return String::new();
-    }
-    let Ok(bytes) = std::fs::read(path) else {
-        return String::new();
-    };
-    let Ok(image) = image::load_from_memory(&bytes) else {
-        return String::new();
-    };
-    let thumbnail = image.thumbnail(MEDIA_THUMBNAIL_MAX_EDGE, MEDIA_THUMBNAIL_MAX_EDGE);
-    let mut output = std::io::Cursor::new(Vec::new());
-    if thumbnail
-        .write_to(&mut output, image::ImageFormat::Png)
-        .is_err()
-    {
-        return String::new();
-    }
-    format!(
-        "data:image/png;base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(output.into_inner())
-    )
-}
-
-fn chat_attachment_preview(path: std::path::PathBuf) -> Option<ChatAttachment> {
-    let mut attachment = chat_attachment(path)?;
-    if !attachment.mime_type.starts_with("image/") {
-        return None;
-    }
-    attachment.preview_data_url =
-        media_thumbnail_data_url(std::path::Path::new(&attachment.path), attachment.size);
-    (!attachment.preview_data_url.is_empty()).then_some(attachment)
-}
-
-fn spawn_chat_attachment_task(
-    webview: Entity,
-    event: &'static str,
-    paths: Vec<std::path::PathBuf>,
-    previews: bool,
-    commands: &mut Commands,
-) {
-    if paths.is_empty() {
-        return;
-    }
-    let task = IoTaskPool::get().spawn(async move {
-        ChatAttachments {
-            attachments: paths
-                .into_iter()
-                .filter_map(if previews {
-                    chat_attachment_preview
-                } else {
-                    chat_attachment
-                })
-                .collect(),
-        }
-    });
-    commands.spawn(ChatAttachmentTask {
-        webview,
-        event,
-        task,
-    });
-}
-
-fn spawn_selected_attachment_tasks(
-    webview: Entity,
-    paths: Vec<std::path::PathBuf>,
-    commands: &mut Commands,
-) {
-    spawn_chat_attachment_task(
-        webview,
-        CHAT_ATTACHMENTS_EVENT,
-        paths.clone(),
-        false,
-        commands,
-    );
-}
-
-fn decode_media_query_path(value: &str) -> std::path::PathBuf {
-    let bytes = value.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let (Some(high), Some(low)) = (
-                char::from(bytes[index + 1]).to_digit(16),
-                char::from(bytes[index + 2]).to_digit(16),
-            )
-        {
-            decoded.push(((high << 4) | low) as u8);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    std::path::PathBuf::from(String::from_utf8_lossy(&decoded).into_owned())
-}
-
-fn chat_media_entries(request_id: u64, query: String) -> ChatMediaEntries {
-    let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    };
-    let candidate = if let Some(rest) = query.strip_prefix("file://") {
-        decode_media_query_path(rest)
-    } else if let Some(rest) = query.strip_prefix("~/") {
-        home.join(decode_media_query_path(rest))
-    } else if query == "~" {
-        home.clone()
-    } else {
-        let path = decode_media_query_path(&query);
-        if path.is_absolute() {
-            path
-        } else {
-            home.join(path)
-        }
-    };
-    let query_is_dir = query.is_empty() || query.ends_with('/') || candidate.is_dir();
-    let (directory, filter) = if query_is_dir {
-        (candidate, String::new())
-    } else {
-        (
-            candidate
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| home.clone()),
-            candidate
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase(),
-        )
-    };
-    let Ok(home) = home.canonicalize() else {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    };
-    let Ok(directory) = directory.canonicalize() else {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    };
-    if !directory.starts_with(&home) {
-        return ChatMediaEntries {
-            request_id,
-            query,
-            entries: Vec::new(),
-        };
-    }
-    let mut entries = std::fs::read_dir(&directory)
-        .ok()
-        .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.')
-                || (!filter.is_empty() && !name.to_ascii_lowercase().contains(&filter))
-            {
-                return None;
-            }
-            let is_dir = entry.file_type().ok()?.is_dir();
-            let mime_type = if is_dir {
-                String::new()
-            } else {
-                attachment_mime(&path)
-            };
-            if !is_dir
-                && !mime_type.starts_with("image/")
-                && !mime_type.starts_with("audio/")
-                && !mime_type.starts_with("video/")
-                && mime_type != "application/pdf"
-            {
-                return None;
-            }
-            let parent = path
-                .parent()
-                .and_then(|parent| parent.strip_prefix(&home).ok())
-                .map(|parent| {
-                    if parent.as_os_str().is_empty() {
-                        "~".to_string()
-                    } else {
-                        format!("~/{}", parent.to_string_lossy())
-                    }
-                })
-                .unwrap_or_else(|| "~".to_string());
-            Some(ChatMediaEntry {
-                path: path.to_string_lossy().into_owned(),
-                name,
-                parent,
-                mime_type,
-                is_dir,
-                preview_data_url: String::new(),
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| {
-        b.is_dir.cmp(&a.is_dir).then_with(|| {
-            a.name
-                .to_ascii_lowercase()
-                .cmp(&b.name.to_ascii_lowercase())
-        })
-    });
-    entries.truncate(100);
-    ChatMediaEntries {
-        request_id,
-        query,
-        entries,
-    }
-}
-
-fn chat_media_previews(mut response: ChatMediaEntries) -> ChatMediaEntries {
-    let mut remaining_thumbnail_bytes = MEDIA_THUMBNAIL_TOTAL_LIMIT;
-    for entry in &mut response.entries {
-        if entry.is_dir || !entry.mime_type.starts_with("image/") {
-            continue;
-        }
-        let source_size = std::fs::metadata(&entry.path)
-            .map(|metadata| metadata.len())
-            .unwrap_or(u64::MAX);
-        if source_size > remaining_thumbnail_bytes {
-            continue;
-        }
-        entry.preview_data_url =
-            media_thumbnail_data_url(std::path::Path::new(&entry.path), source_size);
-        if !entry.preview_data_url.is_empty() {
-            remaining_thumbnail_bytes = remaining_thumbnail_bytes.saturating_sub(source_size);
-        }
-    }
-    response
-}
-
-fn on_chat_media_list_request(
-    trigger: On<BinReceive<ChatMediaListRequest>>,
-    mut commands: Commands,
-) {
-    let request = trigger.event().payload.clone();
-    let task = IoTaskPool::get()
-        .spawn(async move { chat_media_entries(request.request_id, request.query) });
-    commands.spawn(ChatMediaListTask {
-        webview: trigger.event().webview,
-        task,
-    });
-}
-
-fn on_chat_attach_paths(trigger: On<BinReceive<ChatAttachPaths>>, mut commands: Commands) {
-    let paths = trigger
-        .event()
-        .payload
-        .paths
-        .iter()
-        .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
-        .collect();
-    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
-}
-
-fn on_chat_attachment_preview_request(
-    trigger: On<BinReceive<ChatAttachmentPreviewRequest>>,
-    mut commands: Commands,
-) {
-    let paths = trigger
-        .event()
-        .payload
-        .paths
-        .iter()
-        .filter(|path| !path.is_empty())
-        .map(std::path::PathBuf::from)
-        .collect();
-    spawn_chat_attachment_task(
-        trigger.event().webview,
-        CHAT_ATTACHMENT_PREVIEWS_EVENT,
-        paths,
-        true,
-        &mut commands,
-    );
-}
-
 fn on_chat_choice_selected(trigger: On<BinReceive<ChatChoiceSelected>>, mut commands: Commands) {
     commands.trigger(AgentChoiceSelected {
         webview: trigger.event().webview,
         index: trigger.event().payload.index as usize,
     });
-}
-
-fn on_chat_pick_files(trigger: On<BinReceive<ChatPickFiles>>, mut commands: Commands) {
-    let mut dialog = rfd::FileDialog::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        dialog = dialog.set_directory(std::path::PathBuf::from(home));
-    }
-    let Some(paths) = dialog.pick_files() else {
-        return;
-    };
-    spawn_selected_attachment_tasks(trigger.event().webview, paths, &mut commands);
-}
-
-fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
-    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Tiff).ok()?;
-    let mut output = std::io::Cursor::new(Vec::new());
-    image.write_to(&mut output, image::ImageFormat::Png).ok()?;
-    Some(output.into_inner())
-}
-
-fn clipboard_image_path() -> Option<std::path::PathBuf> {
-    if let Some(path) = vmux_terminal::clipboard::image_file_path() {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let png = vmux_terminal::clipboard::read_image_png().or_else(|| {
-        vmux_terminal::clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes))
-    })?;
-    let directory = std::env::temp_dir().join("vmux-prompt-attachments");
-    std::fs::create_dir_all(&directory).ok()?;
-    let path = directory.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));
-    std::fs::write(&path, png).ok()?;
-    Some(path)
-}
-
-fn on_chat_paste_media(trigger: On<BinReceive<ChatPasteMedia>>, mut commands: Commands) {
-    let Some(path) = clipboard_image_path() else {
-        return;
-    };
-    spawn_selected_attachment_tasks(trigger.event().webview, vec![path], &mut commands);
-}
-
-fn drain_chat_attachment_tasks(
-    mut tasks: Query<(Entity, &mut ChatAttachmentTask)>,
-    mut commands: Commands,
-) {
-    for (entity, mut pending) in &mut tasks {
-        let Some(attachments) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        let preview_paths = (pending.event == CHAT_ATTACHMENTS_EVENT).then(|| {
-            attachments
-                .attachments
-                .iter()
-                .map(|attachment| std::path::PathBuf::from(&attachment.path))
-                .collect::<Vec<_>>()
-        });
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            pending.event,
-            &attachments,
-        ));
-        if let Some(paths) = preview_paths {
-            spawn_chat_attachment_task(
-                pending.webview,
-                CHAT_ATTACHMENT_PREVIEWS_EVENT,
-                paths,
-                true,
-                &mut commands,
-            );
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
-fn drain_chat_media_list_tasks(
-    mut tasks: Query<(Entity, &mut ChatMediaListTask)>,
-    mut commands: Commands,
-) {
-    for (entity, mut pending) in &mut tasks {
-        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            CHAT_MEDIA_ENTRIES_EVENT,
-            &entries,
-        ));
-        if entries
-            .entries
-            .iter()
-            .any(|entry| !entry.is_dir && entry.mime_type.starts_with("image/"))
-        {
-            let task = IoTaskPool::get().spawn(async move { chat_media_previews(entries) });
-            commands.spawn(ChatMediaPreviewTask {
-                webview: pending.webview,
-                task,
-            });
-        }
-        commands.entity(entity).despawn();
-    }
-}
-
-fn drain_chat_media_preview_tasks(
-    mut tasks: Query<(Entity, &mut ChatMediaPreviewTask)>,
-    mut commands: Commands,
-) {
-    for (entity, mut pending) in &mut tasks {
-        let Some(entries) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            pending.webview,
-            CHAT_MEDIA_ENTRIES_EVENT,
-            &entries,
-        ));
-        commands.entity(entity).despawn();
-    }
 }
 
 /// Push the current transcript + slash commands to any chat webview that is ready but not yet
@@ -1544,14 +1027,6 @@ fn on_chat_approval(
     });
 }
 
-/// Age in seconds for a session's last-modified time.
-fn relative_time_seconds(mtime: std::time::SystemTime) -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(mtime)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// The slash commands offered on an ACP pane.
 fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommandEntry> {
     let mut v = vec![
@@ -1759,272 +1234,10 @@ fn send_acp_model_requests(
     }
 }
 
-/// The target url + cwd for an ACP↔CLI runtime handoff of the current session, or `None` when
-/// the handoff is unavailable (unknown agent, no session id yet, bad `to`).
-fn runtime_switch_target(
-    agent_id: &str,
-    resume: Option<&str>,
-    cwd: &std::path::Path,
-    to: &str,
-    acp_ids: &[String],
-) -> Option<(String, std::path::PathBuf)> {
-    let kind = acp_agent_kind(agent_id)?;
-    if !kind_supports_cross_runtime(kind) {
-        return None;
-    }
-    let sid = resume?;
-    let target = match to {
-        "cli" => crate::AgentUrl::Cli {
-            kind,
-            sid: sid.to_string(),
-        },
-        "acp" => crate::AgentUrl::for_session(kind, sid, true, acp_ids),
-        _ => return None,
-    };
-    Some((target.format(), cwd.to_path_buf()))
-}
-
-/// Page → native: `/resume` was opened — reply with the on-disk session list.
-fn resume_entries(
-    sessions: Vec<crate::client::cli::strategy::ResumableSession>,
-    active_kind: Option<AgentKind>,
-    active_name: &str,
-) -> Vec<ResumableSessionEntry> {
-    sessions
-        .into_iter()
-        .map(|session| {
-            let dir = session
-                .cwd
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| session.cwd.to_string_lossy().to_string());
-            let agent_name = if Some(session.kind) == active_kind && !active_name.is_empty() {
-                active_name.to_string()
-            } else {
-                session.kind.display_name().to_string()
-            };
-            ResumableSessionEntry {
-                kind: session.kind.as_url_segment().to_string(),
-                sid: session.sid,
-                cwd: session.cwd.to_string_lossy().to_string(),
-                title: session.title,
-                subtitle: dir,
-                age_seconds: relative_time_seconds(session.mtime),
-                agent_name,
-                cross_runtime: session.cross_runtime,
-            }
-        })
-        .collect()
-}
-
-fn foreign_handoff_target(
-    active_agent_id: &str,
-    active_kind: Option<AgentKind>,
-    source_kind: AgentKind,
-) -> Option<String> {
-    (active_kind != Some(source_kind)).then(|| {
-        crate::AgentUrl::Acp {
-            id: active_agent_id.to_string(),
-            sid: None,
-        }
-        .format()
-    })
-}
-
-fn resume_agent_name(
-    profile: Option<&Profile>,
-    kind: Option<AgentKind>,
-    acp_id: Option<&str>,
-) -> String {
-    profile
-        .map(|profile| profile.name.trim())
-        .filter(|name| !name.is_empty())
-        .map(str::to_string)
-        .or_else(|| kind.map(|kind| kind.display_name().to_string()))
-        .or_else(|| acp_id.map(str::to_string))
-        .unwrap_or_default()
-}
-
-fn on_resume_list_request(
-    trigger: On<BinReceive<ResumeListRequest>>,
-    strategies: Option<Res<AgentStrategies>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    agent_sessions: Query<&AgentSession>,
-    profiles: Query<&Profile>,
-    mut commands: Commands,
-) {
-    let webview = trigger.event().webview;
-    let strategies = strategies.map(|s| (*s).clone()).unwrap_or_default();
-    let stack = child_of.get(webview).ok().map(ChildOf::parent);
-    let acp = stack.and_then(|stack| acp_sessions.get(stack).ok());
-    let kind = acp
-        .and_then(|acp| acp_agent_kind(&acp.agent_id))
-        .or_else(|| {
-            stack.and_then(|stack| agent_sessions.get(stack).ok().map(|session| session.kind))
-        });
-    let agent_name = resume_agent_name(
-        stack.and_then(|stack| profiles.get(stack).ok()),
-        kind,
-        acp.map(|acp| acp.agent_id.as_str()),
-    );
-    let task = IoTaskPool::get().spawn(async move {
-        let sessions = resume_entries(strategies.list_all_sessions(), kind, &agent_name);
-        ResumableSessions { sessions }
-    });
-    commands.spawn(ResumeListTask { webview, task });
-}
-
-fn drain_resume_list_tasks(
-    mut tasks: Query<(Entity, &mut ResumeListTask)>,
-    mut commands: Commands,
-) {
-    for (entity, mut task) in &mut tasks {
-        let Some(sessions) = future::block_on(future::poll_once(&mut task.task)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            task.webview,
-            RESUMABLE_SESSIONS_EVENT,
-            &sessions,
-        ));
-    }
-}
-
-fn drain_resume_handoff_tasks(
-    mut tasks: Query<(Entity, &mut ResumeHandoffTask)>,
-    mut states: Query<&mut AgentRunState>,
-    mut swap: MessageWriter<SwapStackSession>,
-    mut commands: Commands,
-) {
-    for (entity, mut pending) in &mut tasks {
-        let Some(result) = future::block_on(future::poll_once(&mut pending.task)) else {
-            continue;
-        };
-        commands.entity(entity).despawn();
-        match result {
-            Ok(handoff) => {
-                swap.write(SwapStackSession {
-                    stack: pending.stack,
-                    target_url: pending.target_url.clone(),
-                    cwd: pending.cwd.clone(),
-                    handoff: Some(handoff),
-                });
-            }
-            Err(message) => {
-                if let Ok(mut state) = states.get_mut(pending.stack) {
-                    *state = AgentRunState::Errored(message);
-                }
-            }
-        }
-    }
-}
-
-/// Page → native: resume a picked session on this stack, in the current runtime.
-fn on_resume_session(
-    trigger: On<BinReceive<ResumeSession>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    settings: Res<vmux_setting::AppSettings>,
-    strategies: Option<Res<AgentStrategies>>,
-    mut commands: Commands,
-    mut swap: MessageWriter<SwapStackSession>,
-) {
-    let payload = &trigger.event().payload;
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let stack = parent.parent();
-    let Some(kind) = AgentKind::from_url_segment(&payload.kind) else {
-        return;
-    };
-    if let Ok(acp) = acp_sessions.get(stack)
-        && let Some(target_url) =
-            foreign_handoff_target(&acp.agent_id, acp_agent_kind(&acp.agent_id), kind)
-    {
-        let strategies = strategies
-            .map(|strategies| (*strategies).clone())
-            .unwrap_or_default();
-        let source_sid = payload.sid.clone();
-        let source_agent = kind.display_name().to_string();
-        let cwd = std::path::PathBuf::from(&payload.cwd);
-        let task = IoTaskPool::get().spawn(async move {
-            let messages = strategies.load_transcript(kind, &source_sid)?;
-            let built = build_context(&messages, DEFAULT_CONTEXT_LIMIT);
-            let messages_json = serde_json::to_string(&messages)
-                .map_err(|err| format!("serialize imported conversation: {err}"))?;
-            Ok(StackSessionHandoff {
-                source_agent,
-                source_kind: kind,
-                source_sid,
-                messages_json,
-                context: built.text,
-                truncated: built.truncated,
-            })
-        });
-        commands.spawn(ResumeHandoffTask {
-            stack,
-            target_url,
-            cwd,
-            task,
-        });
-        return;
-    }
-    let prefer_acp = acp_sessions.get(stack).is_ok();
-    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
-    let target = crate::AgentUrl::for_session(kind, &payload.sid, prefer_acp, &acp_ids);
-    swap.write(SwapStackSession {
-        stack,
-        target_url: target.format(),
-        cwd: std::path::PathBuf::from(&payload.cwd),
-        handoff: None,
-    });
-}
-
-/// Page → native: hand the current ACP session off to the other runtime (the `/cli` fallback).
-fn on_runtime_switch_request(
-    trigger: On<BinReceive<RuntimeSwitchRequest>>,
-    child_of: Query<&ChildOf>,
-    acp_sessions: Query<&AcpSession>,
-    settings: Res<vmux_setting::AppSettings>,
-    mut swap: MessageWriter<SwapStackSession>,
-) {
-    let to = trigger.event().payload.to.clone();
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let stack = parent.parent();
-    let Ok(acp) = acp_sessions.get(stack) else {
-        bevy::log::warn!("runtime switch: current pane is not an ACP session");
-        return;
-    };
-    let acp_ids: Vec<String> = settings.agent.acp.iter().map(|c| c.id.clone()).collect();
-    let Some((target_url, cwd)) = runtime_switch_target(
-        &acp.agent_id,
-        acp.resume.as_deref(),
-        &acp.cwd,
-        &to,
-        &acp_ids,
-    ) else {
-        bevy::log::warn!(
-            "runtime switch to '{to}' unavailable for ACP agent '{}' (no shared session id yet)",
-            acp.agent_id
-        );
-        return;
-    };
-    swap.write(SwapStackSession {
-        stack,
-        target_url,
-        cwd,
-        handoff: None,
-    });
-}
-
 #[cfg(test)]
 mod native_tests {
     use super::*;
-    use std::path::Path;
+    use vmux_core::agent::AgentKind;
 
     #[test]
     fn streaming_snapshots_wait_for_frame_interval() {
@@ -2052,93 +1265,6 @@ mod native_tests {
             false,
             Some(std::time::Duration::ZERO),
         ));
-    }
-
-    #[test]
-    fn media_query_paths_decode_percent_escapes() {
-        assert_eq!(
-            decode_media_query_path("Pictures/My%20Image%25.png"),
-            std::path::PathBuf::from("Pictures/My Image%.png")
-        );
-    }
-
-    #[test]
-    fn media_thumbnail_is_small_png_data_url() {
-        let path =
-            std::env::temp_dir().join(format!("vmux-media-thumbnail-{}.png", uuid::Uuid::new_v4()));
-        let image = image::RgbaImage::from_pixel(240, 120, image::Rgba([20, 40, 60, 255]));
-        image.save(&path).unwrap();
-        let source_size = std::fs::metadata(&path).unwrap().len();
-
-        let data_url = media_thumbnail_data_url(&path, source_size);
-
-        std::fs::remove_file(path).unwrap();
-        let encoded = data_url.strip_prefix("data:image/png;base64,").unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD
-            .decode(encoded)
-            .unwrap();
-        let thumbnail = image::load_from_memory(&bytes).unwrap();
-        assert_eq!(thumbnail.width().max(thumbnail.height()), 96);
-    }
-
-    #[test]
-    fn clipboard_tiff_is_converted_to_png() {
-        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            4,
-            3,
-            image::Rgba([20, 40, 60, 255]),
-        ));
-        let mut tiff = std::io::Cursor::new(Vec::new());
-        image.write_to(&mut tiff, image::ImageFormat::Tiff).unwrap();
-
-        let png = tiff_to_png(&tiff.into_inner()).unwrap();
-        let decoded = image::load_from_memory_with_format(&png, image::ImageFormat::Png).unwrap();
-
-        assert_eq!((decoded.width(), decoded.height()), (4, 3));
-    }
-
-    #[test]
-    fn runtime_switch_builtin_acp_agents_to_cli() {
-        let cases = [
-            ("claude", "claude"),
-            ("claude-acp", "claude"),
-            ("codex", "codex"),
-            ("codex-acp", "codex"),
-            ("vibe", "vibe"),
-            ("mistral-vibe", "vibe"),
-        ];
-        let ids = cases
-            .iter()
-            .map(|(id, _)| (*id).to_string())
-            .collect::<Vec<_>>();
-        for (agent_id, cli_segment) in cases {
-            let got = runtime_switch_target(agent_id, Some("sid-9"), Path::new("/w"), "cli", &ids);
-            assert_eq!(
-                got,
-                Some((
-                    format!("vmux://agent/{cli_segment}/cli/sid-9"),
-                    std::path::PathBuf::from("/w")
-                ))
-            );
-        }
-    }
-
-    #[test]
-    fn runtime_switch_requires_session_id() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("claude", None, Path::new("/w"), "cli", &ids),
-            None
-        );
-    }
-
-    #[test]
-    fn runtime_switch_gated_for_unknown_agent() {
-        let ids = vec!["claude".to_string()];
-        assert_eq!(
-            runtime_switch_target("custom", Some("s"), Path::new("/w"), "cli", &ids),
-            None
-        );
     }
 
     #[test]
@@ -2351,48 +1477,6 @@ mod native_tests {
             requests[1].command,
             ServiceAgentCommand::CreateWorktree { anchor: got } if got == anchor
         ));
-    }
-
-    #[test]
-    fn resume_results_include_all_agent_kinds_with_source_labels() {
-        use crate::client::cli::strategy::ResumableSession;
-        use std::time::SystemTime;
-
-        let session = |kind, sid: &str| ResumableSession {
-            kind,
-            sid: sid.into(),
-            cwd: "/work".into(),
-            mtime: SystemTime::UNIX_EPOCH,
-            title: sid.into(),
-            cross_runtime: kind_supports_cross_runtime(kind),
-        };
-        let entries = resume_entries(
-            vec![
-                session(AgentKind::Claude, "claude-1"),
-                session(AgentKind::Codex, "codex-1"),
-            ],
-            Some(AgentKind::Claude),
-            "Antigravity",
-        );
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].agent_name, "Antigravity");
-        assert_eq!(entries[1].agent_name, "Codex");
-    }
-
-    #[test]
-    fn foreign_resume_keeps_active_acp_agent_fresh() {
-        assert_eq!(
-            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Codex,),
-            Some("vmux://agent/claude".to_string())
-        );
-        assert_eq!(
-            foreign_handoff_target("claude", Some(AgentKind::Claude), AgentKind::Claude,),
-            None
-        );
-        assert_eq!(
-            foreign_handoff_target("custom-acp", None, AgentKind::Codex),
-            Some("vmux://agent/custom-acp".to_string())
-        );
     }
 
     #[test]
@@ -2657,23 +1741,6 @@ mod native_tests {
         let queue = app.world().get::<PromptQueue>(stack).unwrap();
         assert_eq!(queue.items.len(), 1);
         assert_eq!(queue.items[0].text, "first");
-    }
-
-    #[test]
-    fn resume_agent_name_prefers_profile_then_kind_then_id() {
-        let profile = Profile::registry("Antigravity", "antigravity");
-        assert_eq!(
-            resume_agent_name(Some(&profile), Some(AgentKind::Claude), Some("claude")),
-            "Antigravity"
-        );
-        assert_eq!(
-            resume_agent_name(None, Some(AgentKind::Claude), Some("claude")),
-            "Claude"
-        );
-        assert_eq!(
-            resume_agent_name(None, None, Some("custom-acp")),
-            "custom-acp"
-        );
     }
 
     #[test]
