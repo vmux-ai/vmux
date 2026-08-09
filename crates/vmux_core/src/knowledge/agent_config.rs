@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::collections::HashSet;
 
-use super::{
+use super::store::{
     configured_skill_dirs_from, knowledge_dir, memories_dir, migrate_external_memories, skills_dir,
 };
 
