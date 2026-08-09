@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{emit, use_listener};
+use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::event::*;
@@ -148,7 +148,7 @@ pub fn GitBar(
         let p = path();
         let _ = nonce();
         if !p.is_empty() {
-            let _ = emit(&GitStatusRequest { path: p });
+            let _ = send(&GitStatusRequest { path: p });
         }
     });
 
@@ -179,7 +179,7 @@ pub fn GitBar(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
                     onclick: move |_| {
-                        let _ = emit(&GitStageRequest { path: path() });
+                        let _ = send(&GitStageRequest { path: path() });
                     },
                     {translate("git-accept-all")}
                 }
@@ -188,7 +188,7 @@ pub fn GitBar(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
                     onclick: move |_| {
-                        let _ = emit(&GitUnstageRequest { path: path() });
+                        let _ = send(&GitUnstageRequest { path: path() });
                     },
                     {translate("git-unstage")}
                 }
@@ -198,7 +198,7 @@ pub fn GitBar(
                     button {
                         class: "shrink-0 rounded bg-ansi-1/20 px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/30",
                         onclick: move |_| {
-                            let _ = emit(&GitDiscardRequest { path: path() });
+                            let _ = send(&GitDiscardRequest { path: path() });
                             confirming.set(false);
                         },
                         {translate("git-confirm-deny-all")}
@@ -279,7 +279,7 @@ pub fn GitFooter(
                         onclick: move |_| {
                             let m = commit_msg();
                             if !m.is_empty() {
-                                let _ = emit(&GitCommitRequest { path: path(), message: m });
+                                let _ = send(&GitCommitRequest { path: path(), message: m });
                                 commit_msg.set(String::new());
                             }
                         },
@@ -302,7 +302,7 @@ pub fn GitFooter(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
                     onclick: move |_| {
-                        let _ = emit(&GitPushRequest { path: path() });
+                        let _ = send(&GitPushRequest { path: path() });
                     },
                     {translate("git-push")}
                 }
@@ -351,7 +351,7 @@ pub fn DiffView(
                 lines.set(Vec::new());
                 expanded.set(HashSet::new());
             }
-            let _ = emit(&GitDiffRequest {
+            let _ = send(&GitDiffRequest {
                 path: p,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -425,14 +425,14 @@ pub fn DiffView(
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
                                             onclick: move |_| {
-                                                let _ = emit(&GitHunkRequest { path: path(), hunk: h, accept: true });
+                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
                                             },
                                             {translate("git-accept")}
                                         }
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                                             onclick: move |_| {
-                                                let _ = emit(&GitHunkRequest { path: path(), hunk: h, accept: false });
+                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
                                             },
                                             {translate("git-deny")}
                                         }

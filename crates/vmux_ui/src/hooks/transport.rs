@@ -23,7 +23,7 @@ pub type BytesListener = Box<dyn FnMut(&[u8])>;
 /// `"theme"`. Keeping the id a parameter lets each implementation honour its own convention.
 pub trait PageHost {
     /// Deliver a serialized payload to the host. Fire-and-forget.
-    fn emit(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
+    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError>;
 
     /// Register interest in an event id. The callback receives raw payload bytes.
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
@@ -54,7 +54,7 @@ fn with_host<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerEr
 }
 
 pub fn emit_bytes(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-    with_host(|host| host.emit(id, bytes))?
+    with_host(|host| host.send(id, bytes))?
 }
 
 pub fn listen_bytes(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
@@ -86,7 +86,7 @@ mod tests {
     }
 
     impl PageHost for LoopbackHost {
-        fn emit(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
             for (registered, on_bytes) in self.listeners.borrow_mut().iter_mut() {
                 if registered == id {
                     on_bytes(bytes);

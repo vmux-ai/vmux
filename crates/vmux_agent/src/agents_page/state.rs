@@ -1,7 +1,7 @@
 //! The agent catalog the page renders, and the search over it.
 
 use dioxus::prelude::*;
-use vmux_ui::hooks::{emit, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::translate;
 
 use crate::agents_page::event::{
@@ -57,7 +57,7 @@ pub fn use_catalog() -> Catalog {
 impl Catalog {
     /// Ask the host to send the catalog.
     pub fn request() {
-        let _ = emit(&AgentsCatalogRequest {});
+        let _ = send(&AgentsCatalogRequest {});
     }
 
     pub fn all(&self) -> Vec<AgentEntry> {

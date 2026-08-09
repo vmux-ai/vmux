@@ -37,7 +37,7 @@ pub fn install(api: Api) {
 }
 
 impl PageHost for MobileHost {
-    fn emit(&self, _id: &str, _bytes: &[u8]) -> Result<(), EventListenerError> {
+    fn send(&self, _id: &str, _bytes: &[u8]) -> Result<(), EventListenerError> {
         Err(EventListenerError::Unsupported)
     }
 

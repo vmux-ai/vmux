@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
-use vmux_ui::hooks::{emit, use_event, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -39,7 +39,7 @@ pub fn Page(
         if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
             doc.set_title(&translate("start-title"));
         }
-        let _ = emit(&StartDataRequest);
+        let _ = send(&StartDataRequest);
         set_start_transitioned(false);
         mounted.set(true);
     });

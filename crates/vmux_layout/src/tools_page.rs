@@ -12,7 +12,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner,
 };
-use vmux_ui::hooks::{emit, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -224,7 +224,7 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
 }
 
 fn request_snapshot(refresh: bool) {
-    let _ = emit(&ToolsRefreshRequest { refresh });
+    let _ = send(&ToolsRefreshRequest { refresh });
 }
 
 fn send_action(
@@ -235,7 +235,7 @@ fn send_action(
     value: String,
 ) {
     pending.write().insert(action_key(provider, action, &id));
-    let _ = emit(&ToolActionRequest {
+    let _ = send(&ToolActionRequest {
         provider,
         action,
         id,
@@ -347,5 +347,5 @@ fn action_key(provider: ToolProvider, action: ToolAction, id: &str) -> String {
 }
 
 fn open_tool_file(path: String) {
-    let _ = emit(&ToolOpenRequest { path });
+    let _ = send(&ToolOpenRequest { path });
 }

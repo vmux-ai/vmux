@@ -160,8 +160,8 @@ pub fn tools_to_function_specs(tools: &[ToolDef]) -> Vec<Value> {
 mod tests {
     use super::*;
 
-    const MISTRAL_TEXT: &str = include_str!("../../tests/fixtures/mistral/text.sse");
-    const MISTRAL_TOOLS: &str = include_str!("../../tests/fixtures/mistral/tools.sse");
+    const MISTRAL_TEXT: &str = include_str!("../../../tests/fixtures/mistral/text.sse");
+    const MISTRAL_TOOLS: &str = include_str!("../../../tests/fixtures/mistral/tools.sse");
 
     fn frames(raw: &str) -> Vec<&str> {
         raw.split("\n\n").filter(|s| !s.trim().is_empty()).collect()

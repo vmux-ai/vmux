@@ -204,8 +204,8 @@ pub fn parse_messages_sse(frame: &str) -> Option<StreamEvent> {
 mod tests {
     use super::*;
 
-    const TEXT: &str = include_str!("../../tests/fixtures/anthropic/text.sse");
-    const TOOLS: &str = include_str!("../../tests/fixtures/anthropic/tools.sse");
+    const TEXT: &str = include_str!("../../../tests/fixtures/anthropic/text.sse");
+    const TOOLS: &str = include_str!("../../../tests/fixtures/anthropic/tools.sse");
 
     fn frames(raw: &str) -> Vec<&str> {
         raw.split("\n\n").filter(|s| !s.trim().is_empty()).collect()

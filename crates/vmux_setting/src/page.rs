@@ -15,7 +15,7 @@ use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
 };
 use vmux_ui::dioxus_ext::attributes;
-use vmux_ui::hooks::{emit, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 
@@ -191,7 +191,7 @@ fn text_matches(value: &str, query: &str) -> bool {
 }
 
 fn emit_update(path: &str, value: Value) {
-    let _ = emit(&SettingsCommandEvent {
+    let _ = send(&SettingsCommandEvent {
         path: path.to_string(),
         value: value.to_string(),
     });
@@ -429,7 +429,7 @@ fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
                     disabled,
                     onclick: move |_| {
                         status.set(UpdateCheckStatus::Checking);
-                        let _ = emit(&CheckForUpdatesEvent);
+                        let _ = send(&CheckForUpdatesEvent);
                     },
                     "{button_label}"
                 }

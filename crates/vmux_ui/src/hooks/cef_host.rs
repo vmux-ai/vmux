@@ -64,7 +64,7 @@ pub fn js_value_bytes(value: &JsValue) -> Option<Vec<u8>> {
 }
 
 impl PageHost for CefHost {
-    fn emit(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         use js_sys::{ArrayBuffer, Uint8Array};
 
         let cef = window_cef()?;

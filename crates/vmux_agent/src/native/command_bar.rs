@@ -29,18 +29,21 @@ pub(crate) fn publish_contributions(
         return;
     }
     contributions.pages = agents.launcher_pages();
-    contributions.commands = agents
-        .strategies
-        .iter()
-        .map(|strategy| ContributedCommand {
-            id: app_agent_id(&strategy.provider, &strategy.model),
+    contributions.commands.clear();
+    for strategy in &agents.strategies {
+        let row = AppAgentId {
+            provider: strategy.provider.clone(),
+            model: strategy.model.clone(),
+        };
+        contributions.commands.push(ContributedCommand {
+            id: row.to_string(),
             message_id: "command-new-app-chat".to_string(),
             args: vec![
-                ("provider".to_string(), strategy.provider.clone()),
-                ("model".to_string(), strategy.model.clone()),
+                ("provider".to_string(), row.provider),
+                ("model".to_string(), row.model),
             ],
-        })
-        .collect();
+        });
+    }
     contributions.claimed_urls = DEFAULT_AGENT_URLS.map(str::to_string).to_vec();
 }
 
@@ -61,9 +64,10 @@ pub(crate) fn claim_chosen_command(
             }
             continue;
         }
-        let Some((provider, model)) = parse_app_agent_id(&chosen.id) else {
+        let Some(row) = AppAgentId::parse(&chosen.id) else {
             continue;
         };
+        let AppAgentId { provider, model } = row;
         let sid = uuid::Uuid::new_v4().to_string();
         if let Some(stack) = chosen.stack {
             attach.write(PageAgentAttachRequest {
@@ -83,16 +87,32 @@ pub(crate) fn claim_chosen_command(
     }
 }
 
-/// Command-bar row id for starting a chat with one provider and model.
-fn app_agent_id(provider: &str, model: &str) -> String {
-    format!("app_{provider}_{model}_new")
+/// The id of a command-bar row that starts a chat with one provider and model.
+///
+/// Round trips through [`Display`](std::fmt::Display) and [`AppAgentId::parse`]: the command bar
+/// carries the id and hands it back, so the two must agree on a format nobody else writes.
+struct AppAgentId {
+    provider: String,
+    model: String,
 }
 
-/// The provider and model an [`app_agent_id`] names, or `None` when the row is someone else's.
-fn parse_app_agent_id(id: &str) -> Option<(String, String)> {
-    let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
-    let (provider, model) = body.split_once('_')?;
-    Some((provider.to_string(), model.to_string()))
+impl AppAgentId {
+    /// The provider and model an id names, or `None` when the row is someone else's.
+    fn parse(id: &str) -> Option<Self> {
+        let body = id.strip_prefix("app_")?.strip_suffix("_new")?;
+        let (provider, model) = body.split_once('_')?;
+        Some(Self {
+            provider: provider.to_string(),
+            model: model.to_string(),
+        })
+    }
+}
+
+impl std::fmt::Display for AppAgentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { provider, model } = self;
+        write!(f, "app_{provider}_{model}_new")
+    }
 }
 
 #[cfg(test)]
@@ -103,10 +123,15 @@ mod tests {
     /// survive it is published and then silently ignored when the user picks it.
     #[test]
     fn a_published_row_id_parses_back_to_what_named_it() {
-        let id = app_agent_id("anthropic", "claude-opus-4");
+        let id = AppAgentId {
+            provider: "anthropic".to_string(),
+            model: "claude-opus-4".to_string(),
+        }
+        .to_string();
+        let parsed = AppAgentId::parse(&id).expect("an id this file wrote must parse");
         assert_eq!(
-            parse_app_agent_id(&id),
-            Some(("anthropic".to_string(), "claude-opus-4".to_string())),
+            (parsed.provider.as_str(), parsed.model.as_str()),
+            ("anthropic", "claude-opus-4"),
             "model names contain the separator, so only the first underscore may split"
         );
     }
@@ -115,9 +140,9 @@ mod tests {
     /// agent for something entirely unrelated.
     #[test]
     fn another_crates_row_is_left_alone() {
-        assert_eq!(parse_app_agent_id("browser_open_history"), None);
-        assert_eq!(parse_app_agent_id("app_new"), None);
-        assert_eq!(parse_app_agent_id("app_onlyprovider_new"), None);
+        for id in ["browser_open_history", "app_new", "app_onlyprovider_new"] {
+            assert!(AppAgentId::parse(id).is_none(), "{id} is not ours to claim");
+        }
     }
 
     /// Only the bare urls stand for "the default agent". Claiming one that carries an id would

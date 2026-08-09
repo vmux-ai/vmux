@@ -40,7 +40,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::hooks::{emit, use_listener};
+use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -195,7 +195,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if *path_request_id.peek() != request_id {
                 return;
             }
-            let _ = emit(&PathCompleteRequest { query: path_query });
+            let _ = send(&PathCompleteRequest { query: path_query });
         });
     });
 
@@ -278,7 +278,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if *suggestions_request_id.peek() != id {
                 return;
             }
-            let _ = emit(&HistorySuggestionsRequest {
+            let _ = send(&HistorySuggestionsRequest {
                 query,
                 limit: 5,
                 request_id: id,
@@ -318,7 +318,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             {
                 return;
             }
-            if emit(&ChatMediaListRequest {
+            if send(&ChatMediaListRequest {
                 request_id,
                 query: media_query,
             })
@@ -760,7 +760,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| {
-                            let _ = emit(&StartSelectWorkspace {
+                            let _ = send(&StartSelectWorkspace {
                                 current_dir: prompt_context.cwd.clone(),
                             });
                             focus_prompt_end(PROMPT_INPUT_ID);
@@ -1134,10 +1134,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     },
                     on_keydown: start_keydown,
                     on_paste: move |_| {
-                        let _ = emit(&ChatPasteMedia);
+                        let _ = send(&ChatPasteMedia);
                     },
                     on_attach: move |_| {
-                        let _ = emit(&ChatPickFiles);
+                        let _ = send(&ChatPickFiles);
                     },
                     on_remove_attachment: move |index| {
                         let mut next = attachments.peek().clone();
@@ -1280,7 +1280,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             onclick: move |event| {
                                 event.prevent_default();
                                 event.stop_propagation();
-                                let _ = emit(&crate::event::BookmarksCommandEvent {
+                                let _ = send(&crate::event::BookmarksCommandEvent {
                                     command: "toggle_active".into(),
                                     uuid: None,
                                     name: None,
@@ -1393,7 +1393,7 @@ fn select_start_media_entry(
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
-        if emit(&ChatAttachPaths {
+        if send(&ChatAttachPaths {
             paths: vec![entry.path.clone()],
         })
         .is_err()
@@ -1418,7 +1418,7 @@ pub(crate) fn emit_action(action: &str, value: &str) {
 
 /// Emit a [`CommandBarActionEvent`] to the host (open / command / space / terminal / switch_tab).
 pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<OpenTarget>) {
-    let _ = emit(&CommandBarActionEvent {
+    let _ = send(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
         target,
@@ -1433,7 +1433,7 @@ fn emit_prompt_action(
     target_url: &str,
     attachments: &[ChatAttachment],
 ) {
-    let _ = emit(&CommandBarActionEvent {
+    let _ = send(&CommandBarActionEvent {
         action: "prompt".to_string(),
         value: value.to_string(),
         target,

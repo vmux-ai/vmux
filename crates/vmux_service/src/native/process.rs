@@ -202,7 +202,7 @@ pub struct Process {
     pub created_at: Instant,
     term: Term<ServiceEventProxy>,
     processor: Processor,
-    osc133: crate::osc133::Osc133Scanner,
+    osc133: crate::native::osc133::Osc133Scanner,
     command_ended_seq: u64,
     last_command_exit: Option<i32>,
     run_marker: crate::run_marker::RunMarkerScanner,
@@ -418,11 +418,11 @@ impl Process {
         wake_tx: mpsc::UnboundedSender<ProcessId>,
         reader_send_delay: Duration,
     ) -> Result<Self, String> {
-        crate::shell_integration::inject(
+        crate::native::shell_integration::inject(
             &command,
             &mut args,
             &mut env,
-            &crate::paths::shell_integration_dir(),
+            &crate::native::paths::shell_integration_dir(),
         );
         let pty_system = NativePtySystem::default();
         let pair = pty_system
@@ -572,7 +572,7 @@ impl Process {
             created_at: Instant::now(),
             term,
             processor: Processor::new(),
-            osc133: crate::osc133::Osc133Scanner::new(),
+            osc133: crate::native::osc133::Osc133Scanner::new(),
             command_ended_seq: 0,
             last_command_exit: None,
             run_marker: crate::run_marker::RunMarkerScanner::new(),
@@ -1532,10 +1532,10 @@ impl Process {
             self.processor.advance(&mut self.term, &data);
             for event in self.osc133.feed(&data) {
                 let kind = match event {
-                    crate::osc133::Osc133Event::CommandStart => {
+                    crate::native::osc133::Osc133Event::CommandStart => {
                         crate::protocol::CommandLifecycleKind::Started
                     }
-                    crate::osc133::Osc133Event::CommandEnd(exit_code) => {
+                    crate::native::osc133::Osc133Event::CommandEnd(exit_code) => {
                         self.command_ended_seq = self.command_ended_seq.wrapping_add(1);
                         self.last_command_exit = exit_code;
                         crate::protocol::CommandLifecycleKind::Ended { exit_code }

@@ -8,7 +8,7 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
 };
-use vmux_ui::hooks::{emit, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn approval_message(extension: &ExtRow) -> String {
@@ -56,7 +56,7 @@ pub fn Page() -> Element {
         if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
             doc.set_title(&translate("extensions-title"));
         }
-        let _ = emit(&ExtListRequest);
+        let _ = send(&ExtListRequest);
     });
 
     let snapshot = state();
@@ -86,7 +86,7 @@ pub fn Page() -> Element {
                     if event.key() == Key::Enter {
                         let query = search();
                         if !query.trim().is_empty() {
-                            let _ = emit(&ExtBrowseStoreRequest { query });
+                            let _ = send(&ExtBrowseStoreRequest { query });
                         }
                     }
                 },
@@ -95,7 +95,7 @@ pub fn Page() -> Element {
                         ManagerButton {
                             variant: ManagerButtonVariant::Primary,
                             onclick: move |_| {
-                                let _ = emit(&crate::event::RestartRequestEvent);
+                                let _ = send(&crate::event::RestartRequestEvent);
                             },
                             {translate("extensions-relaunch")}
                         }
@@ -179,7 +179,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                         if enabling && needs_approval && !approve_permissions {
                             return;
                         }
-                        let _ = emit(&ExtToggleRequest {
+                        let _ = send(&ExtToggleRequest {
                             id: toggle_id.clone(),
                             enabled: enabling,
                             approve_permissions,
@@ -190,7 +190,7 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                 ManagerButton {
                     variant: ManagerButtonVariant::Danger,
                     onclick: move |_| {
-                        let _ = emit(&ExtUninstallRequest { id: remove_id.clone() });
+                        let _ = send(&ExtUninstallRequest { id: remove_id.clone() });
                     },
                     {translate("common-remove")}
                 }

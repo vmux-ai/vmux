@@ -185,8 +185,8 @@ pub fn parse_responses_sse(frame: &str) -> Option<StreamEvent> {
 mod tests {
     use super::*;
 
-    const TEXT: &str = include_str!("../../tests/fixtures/openai/text.sse");
-    const TOOLS: &str = include_str!("../../tests/fixtures/openai/tools.sse");
+    const TEXT: &str = include_str!("../../../tests/fixtures/openai/text.sse");
+    const TOOLS: &str = include_str!("../../../tests/fixtures/openai/tools.sse");
 
     fn frames(raw: &str) -> Vec<&str> {
         raw.split("\n\n").filter(|s| !s.trim().is_empty()).collect()

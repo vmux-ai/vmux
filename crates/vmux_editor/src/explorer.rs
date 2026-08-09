@@ -9,7 +9,7 @@ use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{emit, use_listener};
+use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -54,34 +54,34 @@ struct ExplorerNotice {
 }
 
 fn open_file(path: String) {
-    let _ = emit(&FileOpenEvent { path });
+    let _ = send(&FileOpenEvent { path });
 }
 
 fn toggle_dir(path: String) {
-    let _ = emit(&ExplorerTreeToggle { path });
+    let _ = send(&ExplorerTreeToggle { path });
 }
 
 fn prefetch_dir(path: String) {
-    let _ = emit(&ExplorerTreePrefetch { path });
+    let _ = send(&ExplorerTreePrefetch { path });
 }
 
 fn refresh_dir(path: String) {
-    let _ = emit(&ExplorerTreeRefresh { path });
+    let _ = send(&ExplorerTreeRefresh { path });
 }
 
 fn close_editor(path: String) {
-    let _ = emit(&ExplorerCloseEditor { path });
+    let _ = send(&ExplorerCloseEditor { path });
 }
 
 fn goto_line(line: u32) {
-    let _ = emit(&ExplorerGoto {
+    let _ = send(&ExplorerGoto {
         path: String::new(),
         line,
     });
 }
 
 fn open_search_match(result: ExplorerSearchMatch) {
-    let _ = emit(&ExplorerSearchOpen {
+    let _ = send(&ExplorerSearchOpen {
         path: result.path,
         line: result.line,
         col: result.col,
@@ -98,7 +98,7 @@ fn search_result_path(root: &str, path: &str) -> String {
 }
 
 fn create_entry(parent: String, name: String, is_dir: bool) {
-    let _ = emit(&ExplorerCreate {
+    let _ = send(&ExplorerCreate {
         parent,
         name,
         is_dir,
@@ -106,11 +106,11 @@ fn create_entry(parent: String, name: String, is_dir: bool) {
 }
 
 fn rename_entry(path: String, name: String) {
-    let _ = emit(&ExplorerRename { path, name });
+    let _ = send(&ExplorerRename { path, name });
 }
 
 fn delete_entry(path: String) {
-    let _ = emit(&ExplorerDelete { path });
+    let _ = send(&ExplorerDelete { path });
 }
 
 fn menu_position(x: f64, y: f64) -> (f64, f64) {

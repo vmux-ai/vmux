@@ -6,15 +6,6 @@
 pub mod page;
 
 #[cfg(native)]
-pub mod plugin;
+mod native;
 #[cfg(native)]
-pub use plugin::TeamPlugin;
-
-#[cfg(native)]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "team",
-    title: "Team",
-    keywords: &["team", "agents", "profile"],
-    icon: Some(vmux_core::BuiltinIcon::Users),
-    command_bar: true,
-};
+pub use native::*;

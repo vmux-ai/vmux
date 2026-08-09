@@ -10,7 +10,7 @@ use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, command_bar_open_should_ack, command_bar_open_should_reset_input,
 };
-use vmux_ui::hooks::{emit, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -50,7 +50,7 @@ pub fn Page() -> Element {
         });
 
     use_effect(move || {
-        if !(open_listener.is_loading)() && !ready_sent() && emit(&CommandBarReadyEvent).is_ok() {
+        if !(open_listener.is_loading)() && !ready_sent() && send(&CommandBarReadyEvent).is_ok() {
             ready_sent.set(true);
         }
     });
@@ -233,7 +233,7 @@ fn emit_command_bar_size(open_id: u64) {
     if !should_emit {
         return;
     }
-    if emit(&CommandBarSizeEvent {
+    if send(&CommandBarSizeEvent {
         width,
         height,
         shell_left,
@@ -319,7 +319,7 @@ fn schedule_command_bar_rendered_emit(
             ) {
                 scheduled_open_id.set(0);
             }
-        } else if emit(&CommandBarRenderedEvent { open_id }).is_ok() {
+        } else if send(&CommandBarRenderedEvent { open_id }).is_ok() {
             last_rendered_open_id.set(open_id);
         } else {
             scheduled_open_id.set(0);
