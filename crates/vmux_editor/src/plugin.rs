@@ -3875,17 +3875,868 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
 };
 
 #[cfg(test)]
-#[path = "plugin.edit_flow.test.rs"]
-mod edit_flow_tests;
+mod edit_flow_tests {
+    use super::*;
+    use crate::keymap::{KeyInput, KeymapKindExt, Mods};
+
+    #[test]
+    fn file_view_mode_is_shared_across_editors() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        let first = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/a.rs"),
+            })
+            .id();
+        let second = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/b.rs"),
+            })
+            .id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: first,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Diff,
+            },
+        });
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Diff
+        );
+        assert!(app.world().get::<FileView>(second).is_some());
+    }
+
+    #[test]
+    fn switching_to_note_reveals_the_current_cursor_line() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        app.world_mut().resource_mut::<SharedFileViewMode>().0 = FileViewMode::Editor;
+
+        let path = PathBuf::from("/note.md");
+        let mut core = EditCore::new(
+            path.clone(),
+            "Markdown".into(),
+            "one\ntwo\nthree\n",
+            crate::edit::EditMode::Normal,
+        );
+        core.apply(EditCommand::Move(Motion::GotoLine(2)));
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                EditState::new(
+                    core,
+                    HighlightCache::new(&path),
+                    crate::fold::FoldState::default(),
+                ),
+            ))
+            .id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: entity,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Note,
+            },
+        });
+        app.update();
+
+        assert_eq!(
+            app.world().get::<NoteRevealLine>(entity).map(|line| line.0),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn missing_file_view_loads_when_file_is_created() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = temp.path().join("created-after-open");
+        let path = parent.join("file.txt");
+        let (tx, rx) = mpsc::channel();
+        let watcher = notify::recommended_watcher(|_| {}).unwrap();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_systems(
+            Update,
+            (
+                reconcile_file_watches,
+                drain_file_changes,
+                reload_changed_files,
+                load_file_buffers,
+            )
+                .chain(),
+        );
+        app.world_mut().insert_non_send(FileWatch {
+            watcher,
+            rx,
+            dirs: HashSet::new(),
+        });
+        app.world_mut().insert_non_send(SelfWrites::default());
+        app.world_mut().insert_non_send(Browsers::default());
+        app.world_mut()
+            .insert_non_send(crate::lsp::manager::LspManager::default());
+        let entity = app
+            .world_mut()
+            .spawn((
+                FileView { path: path.clone() },
+                FileViewport {
+                    top_row: 0,
+                    rows: 0,
+                    wrap_columns: 0,
+                    word_wrap: vmux_core::editor::WordWrap::default(),
+                    word_wrap_column: 80,
+                },
+            ))
+            .id();
+
+        app.update();
+        assert!(
+            app.world()
+                .get::<FileBuffer>(entity)
+                .unwrap()
+                .language
+                .starts_with("__error__:cannot open")
+        );
+
+        std::fs::create_dir(&parent).unwrap();
+        std::fs::write(&path, "created\n").unwrap();
+        tx.send(Ok(
+            notify::Event::new(notify::EventKind::Any).add_path(parent)
+        ))
+        .unwrap();
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .get::<EditState>(entity)
+                .unwrap()
+                .core
+                .buffer
+                .text(),
+            "created\n"
+        );
+    }
+
+    #[test]
+    fn file_view_mode_request_updates_shared_mode() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_message::<FileViewModeRequest>()
+            .add_systems(Update, apply_file_view_mode_requests);
+
+        app.world_mut()
+            .resource_mut::<Messages<FileViewModeRequest>>()
+            .write(FileViewModeRequest(FileViewMode::Diff));
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Diff
+        );
+    }
+
+    #[test]
+    fn non_editor_cannot_change_file_view_mode() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SharedFileViewMode>()
+            .add_observer(on_file_view_mode_set);
+        let other = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(BinReceive {
+            webview: other,
+            payload: FileViewModeSet {
+                mode: FileViewMode::Diff,
+            },
+        });
+
+        assert_eq!(
+            app.world().resource::<SharedFileViewMode>().0,
+            FileViewMode::Note
+        );
+    }
+
+    #[test]
+    fn file_view_mode_defaults_to_note() {
+        assert_eq!(SharedFileViewMode::default().0, FileViewMode::Note);
+    }
+
+    #[test]
+    fn parse_goto_fragment_line_and_select() {
+        let g = parse_goto_fragment("file:///a/b.rs#L10").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 0, None));
+        let g = parse_goto_fragment("file:///a/b.rs#L10:5-12").unwrap();
+        assert_eq!((g.line, g.utf16_col, g.select_end_col), (9, 5, Some(12)));
+        assert!(parse_goto_fragment("file:///a/b.rs").is_none());
+        assert!(parse_goto_fragment("file:///a/b.rs#x").is_none());
+    }
+
+    #[test]
+    fn vim_dd_deletes_line_via_keymap_and_core() {
+        let mut km = vmux_core::KeymapKind::Vim.make(&[], " ");
+        let mut core = EditCore::new(
+            std::path::PathBuf::from("a.txt"),
+            "Plain Text".into(),
+            "one\ntwo\nthree\n",
+            crate::edit::EditMode::Normal,
+        );
+        for key in ["d", "d"] {
+            for cmd in km.handle(&KeyInput {
+                key: key.into(),
+                mods: Mods::default(),
+                repeat: false,
+            }) {
+                core.apply(cmd);
+            }
+        }
+        assert_eq!(core.buffer.text(), "two\nthree\n");
+    }
+
+    #[test]
+    fn vscode_typing_inserts_and_marks_dirty() {
+        let mut core = EditCore::new(
+            std::path::PathBuf::from("a.txt"),
+            "Plain Text".into(),
+            "",
+            crate::edit::EditMode::Insert,
+        );
+        core.apply(EditCommand::InsertText("hello".into()));
+        assert_eq!(core.buffer.text(), "hello");
+        assert!(core.dirty);
+    }
+
+    #[test]
+    fn repeated_navigation_advances_two_steps_without_accelerating_edits() {
+        assert_eq!(
+            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
+            [
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down)
+            ]
+        );
+        assert_eq!(
+            accelerate_repeated_navigation(vec![EditCommand::DeleteBack], true),
+            [EditCommand::DeleteBack]
+        );
+    }
+
+    #[test]
+    fn repeated_note_navigation_skips_a_separator_after_the_first_step() {
+        let blocks = crate::markdown::parse_note("- one\n- two\n\nnext\n");
+        let commands = remap_note_vertical_commands(
+            accelerate_repeated_navigation(vec![EditCommand::Move(Motion::Down)], true),
+            &blocks,
+            0,
+        );
+        assert_eq!(
+            commands,
+            [
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down),
+                EditCommand::Move(Motion::Down),
+            ]
+        );
+    }
+}
 #[cfg(test)]
-#[path = "plugin.explorer.test.rs"]
-mod explorer_tests;
+mod explorer_tests {
+    use super::*;
+    use std::fs;
+
+    fn git_repo() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir(tmp.path().join(".git")).unwrap();
+        fs::create_dir(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("README.md"), "# hi\n").unwrap();
+        fs::write(tmp.path().join("src").join("lib.rs"), "fn main(){}\n").unwrap();
+        tmp
+    }
+
+    fn toggle(app: &mut App, e: Entity, path: &Path) {
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerTreeToggle {
+                path: path.to_string_lossy().to_string(),
+            },
+        });
+    }
+
+    fn wait_for_children(app: &mut App, e: Entity, path: &Path) {
+        for _ in 0..1000 {
+            app.update();
+            if app
+                .world()
+                .get::<ExplorerState>(e)
+                .is_some_and(|st| st.children.contains_key(path))
+            {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("directory load did not finish: {}", path.display());
+    }
+
+    #[test]
+    fn init_builds_root_listing_and_marks_dirty() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads));
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.root.as_path(), tmp.path());
+        assert!(st.expanded.contains(&tmp.path().to_path_buf()));
+        assert!(
+            st.children
+                .get(tmp.path())
+                .unwrap()
+                .iter()
+                .any(|x| x.name == "src")
+        );
+        assert!(app.world().get::<ExplorerTreeDirty>(e).is_some());
+    }
+
+    #[test]
+    fn toggle_expands_then_collapses_subdir() {
+        let tmp = git_repo();
+        let file = tmp.path().join("README.md");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_tree_toggle);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        let src = tmp.path().join("src");
+        toggle(&mut app, e, &src);
+        wait_for_children(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(st.expanded.contains(&src));
+        assert!(
+            st.children
+                .get(&src)
+                .unwrap()
+                .iter()
+                .any(|x| x.name == "lib.rs")
+        );
+        toggle(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(!st.expanded.contains(&src));
+    }
+
+    #[test]
+    fn reveal_current_expands_ancestors_and_focuses_file() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_reveal_current);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file.clone() }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        let src = tmp.path().join("src");
+        wait_for_children(&mut app, e, &src);
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert!(st.expanded.contains(tmp.path()));
+        assert!(st.expanded.contains(&src));
+        assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
+    }
+
+    #[test]
+    fn repeated_reveal_skips_unchanged_tree_rebuild() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_reveal_current);
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: file }, ExplorerState::default()))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        app.world_mut().entity_mut(e).remove::<ExplorerTreeDirty>();
+        app.world_mut()
+            .get_mut::<ExplorerState>(e)
+            .unwrap()
+            .focus_path = None;
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerRevealCurrent,
+        });
+        assert!(app.world().get::<ExplorerTreeDirty>(e).is_none());
+        assert!(
+            app.world()
+                .get::<ExplorerState>(e)
+                .unwrap()
+                .focus_path
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn panel_visibility_is_shared_only_within_stack() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_observer(on_explorer_panel_set_visible);
+        let first_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: true })
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: true })
+            .id();
+        let first = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/a.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(first_stack),
+            ))
+            .id();
+        let peer = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/b.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(first_stack),
+            ))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/c.rs"),
+                },
+                ExplorerState::default(),
+                ExplorerChromeSent,
+                ChildOf(second_stack),
+            ))
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: first,
+            payload: ExplorerPanelSetVisible {
+                visible: false,
+                client_id: 7,
+                request_id: 1,
+            },
+        });
+        app.update();
+        assert!(
+            !app.world()
+                .get::<StackExplorerVisibility>(first_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(second_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(app.world().get::<ExplorerChromeSent>(first).is_some());
+        assert!(app.world().get::<ExplorerChromeSent>(peer).is_none());
+        assert!(app.world().get::<ExplorerChromeSent>(other).is_some());
+
+        app.world_mut().trigger(BinReceive {
+            webview: first,
+            payload: ExplorerPanelSetVisible {
+                visible: false,
+                client_id: 7,
+                request_id: 2,
+            },
+        });
+        app.update();
+        let revision = app
+            .world()
+            .get::<StackExplorerRevision>(first_stack)
+            .unwrap();
+        assert_eq!(revision.client_id, 7);
+        assert_eq!(revision.request_id, 2);
+    }
+
+    #[test]
+    fn global_search_opens_only_the_target_stack_explorer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                default_visible: false,
+                width: 240,
+            })
+            .init_resource::<PendingGlobalSearch>()
+            .add_message::<GlobalSearchRequest>()
+            .add_systems(Update, apply_global_search_requests);
+        let first_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let second_stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let target = PathBuf::from("/project/a.rs");
+        let first = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: target.clone(),
+                },
+                ChildOf(first_stack),
+            ))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((
+                FileView {
+                    path: PathBuf::from("/project/b.rs"),
+                },
+                ChildOf(second_stack),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Messages<GlobalSearchRequest>>()
+            .write(GlobalSearchRequest {
+                target_path: target,
+                root: "/project".to_string(),
+                query: "needle".to_string(),
+                matches: Vec::new(),
+            });
+        app.update();
+
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(first_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(
+            !app.world()
+                .get::<StackExplorerVisibility>(second_stack)
+                .unwrap()
+                .visible
+        );
+        assert!(app.world().get::<GlobalSearchState>(first).is_some());
+        assert!(app.world().get::<GlobalSearchState>(second).is_none());
+    }
+
+    #[test]
+    fn panel_open_reveals_current_file() {
+        let tmp = git_repo();
+        let file = tmp.path().join("src").join("lib.rs");
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, (init_explorer_state, drain_explorer_dir_loads))
+            .add_observer(on_explorer_panel_set_visible);
+        let stack = app
+            .world_mut()
+            .spawn(StackExplorerVisibility { visible: false })
+            .id();
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView { path: file.clone() },
+                ExplorerState::default(),
+                ChildOf(stack),
+            ))
+            .id();
+        wait_for_children(&mut app, e, tmp.path());
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelSetVisible {
+                visible: true,
+                client_id: 9,
+                request_id: 1,
+            },
+        });
+        wait_for_children(&mut app, e, &tmp.path().join("src"));
+        assert!(
+            app.world()
+                .get::<StackExplorerVisibility>(stack)
+                .unwrap()
+                .visible
+        );
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.focus_path.as_deref(), Some(file.as_path()));
+    }
+
+    #[test]
+    fn panel_width_clamps() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(ExplorerChrome {
+                default_visible: true,
+                width: 240,
+            })
+            .add_observer(on_explorer_panel_width);
+        let e = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/x"),
+            })
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerPanelWidth { px: 9000 },
+        });
+        assert_eq!(app.world().resource::<ExplorerChrome>().width, 600);
+    }
+
+    #[test]
+    fn open_editors_track_on_navigate_and_close() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, sync_open_editors)
+            .add_observer(on_explorer_close_editor);
+        let a = PathBuf::from("/proj/a.rs");
+        let b = PathBuf::from("/proj/b.rs");
+        let e = app
+            .world_mut()
+            .spawn((FileView { path: a.clone() }, ExplorerState::default()))
+            .id();
+        app.update();
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
+        app.update();
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.open_editors, vec![a.clone(), b.clone()]);
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerCloseEditor {
+                path: a.to_string_lossy().to_string(),
+            },
+        });
+        let st = app.world().get::<ExplorerState>(e).unwrap();
+        assert_eq!(st.open_editors, vec![b]);
+    }
+
+    #[test]
+    fn explorer_goto_writes_lsp_goto_message() {
+        use crate::lsp::manager::LspGoto;
+        use bevy::ecs::message::Messages;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<LspGoto>()
+            .add_observer(on_explorer_goto);
+        let e = app
+            .world_mut()
+            .spawn(FileView {
+                path: PathBuf::from("/x.rs"),
+            })
+            .id();
+        app.world_mut().trigger(BinReceive {
+            webview: e,
+            payload: ExplorerGoto {
+                path: "/x.rs".to_string(),
+                line: 12,
+            },
+        });
+        let mut msgs = app.world_mut().resource_mut::<Messages<LspGoto>>();
+        let got: Vec<_> = msgs.drain().collect();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].line, 12);
+        assert_eq!(got[0].path, PathBuf::from("/x.rs"));
+    }
+}
 #[cfg(test)]
-#[path = "plugin.fold_window.test.rs"]
-mod fold_window_tests;
+mod fold_window_tests {
+    use crate::fold::{FoldState, indent_regions};
+    use ropey::Rope;
+
+    #[test]
+    fn collapsed_region_hidden_from_window() {
+        let r = Rope::from_str("fn a() {\n    x;\n    y;\n}\nz;\n");
+        let mut folds = FoldState::default();
+        folds.set_regions(indent_regions(&r));
+        folds.close(0);
+        let view = folds.view(r.len_lines() as u32);
+        let visible = view.lines_for_window(0, view.visible_count());
+        assert!(visible.contains(&0));
+        assert!(!visible.contains(&1) && !visible.contains(&2));
+        assert!(visible.contains(&3));
+    }
+}
 #[cfg(test)]
-#[path = "plugin.page_open.test.rs"]
-mod page_open_tests;
+mod page_open_tests {
+    use super::*;
+    use vmux_core::PageOpenId;
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<vmux_core::event::RecordVisitRequest>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Update, handle_file_page_open);
+        app
+    }
+
+    #[test]
+    fn file_open_records_history_visit() {
+        use bevy::ecs::message::Messages;
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn(PageOpenTask {
+            id: PageOpenId::new(),
+            stack,
+            url: "file:///etc/hostname#L3".to_string(),
+            request_id: None,
+        });
+        app.update();
+        let msgs = app
+            .world()
+            .resource::<Messages<vmux_core::event::RecordVisitRequest>>();
+        let mut cursor = msgs.get_cursor();
+        let recorded: Vec<_> = cursor.read(msgs).collect();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].url, "file:///etc/hostname");
+        assert_eq!(recorded[0].title, "hostname");
+    }
+
+    #[test]
+    fn claims_files_url_and_attaches_fileview() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: "file:///etc/hostname".to_string(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(task).is_some());
+        let mut q = app.world_mut().query::<(&ChildOf, &FileView)>();
+        let found: Vec<_> = q
+            .iter(app.world())
+            .filter(|(c, _)| c.0 == stack)
+            .map(|(_, fv)| fv.path.clone())
+            .collect();
+        assert_eq!(found, vec![PathBuf::from("/etc/hostname")]);
+    }
+
+    #[test]
+    fn ignores_non_files_url() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        let task = app
+            .world_mut()
+            .spawn(PageOpenTask {
+                id: PageOpenId::new(),
+                stack,
+                url: "vmux://terminal/".to_string(),
+                request_id: None,
+            })
+            .id();
+        app.update();
+        assert!(app.world().get::<PageOpenHandled>(task).is_none());
+    }
+
+    #[test]
+    fn navigate_relists_when_path_changes() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir(&a).unwrap();
+        fs::write(a.join("f1"), "").unwrap();
+        let b = tmp.path().join("b");
+        fs::create_dir(&b).unwrap();
+        fs::write(b.join("f2"), "").unwrap();
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, load_file_buffers);
+        let e = app
+            .world_mut()
+            .spawn((
+                FileView { path: a.clone() },
+                FileViewport {
+                    top_row: 0,
+                    rows: 0,
+                    wrap_columns: 0,
+                    word_wrap: vmux_core::editor::WordWrap::default(),
+                    word_wrap_column: 80,
+                },
+            ))
+            .id();
+        app.update();
+        assert!(
+            app.world()
+                .get::<FileDir>(e)
+                .unwrap()
+                .entries
+                .iter()
+                .any(|x| x.name == "f1")
+        );
+
+        app.world_mut().get_mut::<FileView>(e).unwrap().path = b.clone();
+        app.world_mut().entity_mut(e).remove::<FileDir>();
+        app.update();
+        let dir = app.world().get::<FileDir>(e).unwrap();
+        assert!(dir.entries.iter().any(|x| x.name == "f2"));
+        assert!(!dir.entries.iter().any(|x| x.name == "f1"));
+    }
+}
 #[cfg(test)]
-#[path = "plugin.url.test.rs"]
-mod url_tests;
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn parses_simple_path() {
+        assert_eq!(
+            path_from_files_url("file:///Users/me/src/main.rs"),
+            Some(PathBuf::from("/Users/me/src/main.rs"))
+        );
+    }
+
+    #[test]
+    fn decodes_percent_escapes() {
+        assert_eq!(
+            path_from_files_url("file:///Users/me/a%20b.rs"),
+            Some(PathBuf::from("/Users/me/a b.rs"))
+        );
+    }
+
+    #[test]
+    fn rejects_non_files_scheme() {
+        assert_eq!(path_from_files_url("vmux://terminal/"), None);
+    }
+
+    #[test]
+    fn empty_path_is_root() {
+        assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
+    }
+}

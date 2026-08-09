@@ -246,11 +246,295 @@ pub fn layout_cef_bundle(
 }
 
 #[cfg(test)]
-#[path = "cef.apply_cef_state.test.rs"]
-mod apply_cef_state_tests;
+mod apply_cef_state_tests {
+    use super::*;
+    use bevy_cef_core::prelude::WebviewCefStateEvent;
+    use vmux_core::PageMetadata;
+
+    fn vmux_meta() -> PageMetadata {
+        PageMetadata {
+            url: "vmux://history/".into(),
+            title: "History".into(),
+            icon: vmux_core::PageIcon::None,
+            bg_color: None,
+        }
+    }
+
+    fn external_meta() -> PageMetadata {
+        PageMetadata {
+            url: "https://example.com".into(),
+            title: "old".into(),
+            icon: vmux_core::PageIcon::None,
+            bg_color: None,
+        }
+    }
+
+    fn ev(title: Option<&str>, favicon: Option<&str>, url: Option<&str>) -> WebviewCefStateEvent {
+        WebviewCefStateEvent {
+            webview: Entity::PLACEHOLDER,
+            url: url.map(str::to_string),
+            title: title.map(str::to_string),
+            favicon_url: favicon.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn vmux_url_preserves_title_against_cef_update() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(Some("vmux history POC"), None, None));
+        assert_eq!(meta.title, "History");
+    }
+
+    #[test]
+    fn vmux_agent_url_accepts_dynamic_title_only() {
+        let mut meta = PageMetadata {
+            url: "vmux://agent/codex".into(),
+            title: "Codex".into(),
+            icon: vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles),
+            bg_color: None,
+        };
+        apply_cef_state_to_meta(
+            &mut meta,
+            ev(
+                Some("● Codex"),
+                Some("https://example.com/favicon.ico"),
+                None,
+            ),
+        );
+        assert_eq!(meta.title, "● Codex");
+        assert_eq!(meta.url, "vmux://agent/codex");
+        assert_eq!(
+            meta.icon,
+            vmux_core::PageIcon::Builtin(vmux_core::BuiltinIcon::Sparkles)
+        );
+    }
+
+    #[test]
+    fn vmux_url_preserves_favicon_against_cef_update() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
+        assert_eq!(meta.icon, vmux_core::PageIcon::None);
+    }
+
+    #[test]
+    fn vmux_url_preserves_url_when_cef_reports_same_vmux_url() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("vmux://history/")));
+        assert_eq!(meta.url, "vmux://history/");
+        assert_eq!(meta.title, "History");
+    }
+
+    #[test]
+    fn vmux_url_updates_when_cef_navigates_to_external_url() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
+        assert_eq!(meta.url, "https://anthropic.com");
+    }
+
+    #[test]
+    fn after_navigation_away_subsequent_title_updates_apply() {
+        let mut meta = vmux_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://anthropic.com")));
+        apply_cef_state_to_meta(&mut meta, ev(Some("Frontier AI"), None, None));
+        assert_eq!(meta.title, "Frontier AI");
+    }
+
+    #[test]
+    fn external_url_accepts_title_update() {
+        let mut meta = external_meta();
+        apply_cef_state_to_meta(&mut meta, ev(Some("New Title"), None, None));
+        assert_eq!(meta.title, "New Title");
+    }
+
+    #[test]
+    fn external_url_accepts_favicon_update() {
+        let mut meta = external_meta();
+        apply_cef_state_to_meta(&mut meta, ev(None, Some("https://x/fav.ico"), None));
+        assert_eq!(
+            meta.icon,
+            vmux_core::PageIcon::Favicon("https://x/fav.ico".into())
+        );
+    }
+
+    #[test]
+    fn external_url_url_change_clears_favicon() {
+        let mut meta = PageMetadata {
+            url: "https://example.com".into(),
+            title: "Old".into(),
+            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            bg_color: None,
+        };
+        apply_cef_state_to_meta(&mut meta, ev(None, None, Some("https://other.com")));
+        assert_eq!(meta.url, "https://other.com");
+        assert_eq!(meta.icon, vmux_core::PageIcon::None);
+    }
+}
 #[cfg(test)]
-#[path = "cef.test.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    fn build_test_cef(
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) {
+        let host = commands.spawn_empty().id();
+        commands.spawn(layout_cef_bundle(host, &mut meshes, &mut webview_mt));
+    }
+
+    fn build_test_page(
+        mut commands: Commands,
+        mut meshes: ResMut<Assets<Mesh>>,
+        mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
+    ) {
+        commands.spawn(Browser::new(
+            &mut meshes,
+            &mut webview_mt,
+            "https://example.com",
+        ));
+    }
+
+    #[test]
+    fn layout_cef_uses_manual_pointer_routing() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Startup, build_test_cef);
+        app.update();
+
+        let pickable = app
+            .world_mut()
+            .query_filtered::<&Pickable, With<LayoutCef>>()
+            .single(app.world())
+            .expect("layout CEF shell pickable");
+
+        assert_eq!(pickable, &Pickable::IGNORE);
+    }
+
+    #[test]
+    fn page_cef_uses_opaque_dark_initial_background() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Startup, build_test_page);
+        app.update();
+
+        let page = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Browser>, Without<LayoutCef>)>()
+            .single(app.world())
+            .expect("page CEF");
+
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(page)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn page_cef_allows_native_first_responder() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .add_systems(Startup, build_test_page);
+        app.update();
+
+        let page = app
+            .world_mut()
+            .query_filtered::<Entity, (With<Browser>, Without<LayoutCef>)>()
+            .single(app.world())
+            .expect("page CEF");
+
+        assert!(
+            app.world()
+                .get::<WebviewWindowedNativeFocus>(page)
+                .is_some(),
+            "windowed web pages must allow native first-responder so they are typeable without a click"
+        );
+    }
+}
 #[cfg(test)]
-#[path = "cef.url_mirror.test.rs"]
-mod url_mirror_tests;
+mod url_mirror_tests {
+    use super::*;
+    use vmux_core::{CorePlugin, CreatedAt, LastVisitedAt, PageMetadata, Url, VisitCount};
+
+    #[test]
+    fn updates_matching_url_meta() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            icon: vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into()),
+            bg_color: None,
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "Example");
+        assert_eq!(
+            url_meta.icon,
+            vmux_core::PageIcon::Favicon("https://example.com/fav.ico".into())
+        );
+    }
+
+    #[test]
+    fn skips_empty_tab_url() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(CorePlugin)
+            .add_systems(Update, mirror_metadata_to_url);
+
+        app.world_mut().spawn((
+            Url,
+            PageMetadata {
+                url: "https://example.com".into(),
+                title: "old".into(),
+                ..default()
+            },
+            VisitCount(1),
+            LastVisitedAt(0),
+            CreatedAt(0),
+        ));
+
+        app.world_mut().spawn(PageMetadata {
+            url: "".into(),
+            title: "new".into(),
+            ..default()
+        });
+
+        app.update();
+
+        let url_meta = app
+            .world_mut()
+            .query_filtered::<&PageMetadata, With<Url>>()
+            .iter(app.world())
+            .next()
+            .unwrap();
+        assert_eq!(url_meta.title, "old");
+    }
+}

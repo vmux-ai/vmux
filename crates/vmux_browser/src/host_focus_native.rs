@@ -98,5 +98,22 @@ fn reclaim_first_responder(window_entity: Entity) -> ReclaimOutcome {
 }
 
 #[cfg(test)]
-#[path = "host_focus_native.test.rs"]
-mod tests;
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_key_window_releases_keys_when_winit_becomes_responder() {
+        let mut pending = false;
+
+        assert!(!should_release_keys(
+            ReclaimOutcome::PendingKeyWindow,
+            &mut pending
+        ));
+        assert!(pending);
+        assert!(should_release_keys(
+            ReclaimOutcome::AlreadyWinit,
+            &mut pending
+        ));
+        assert!(!pending);
+    }
+}
