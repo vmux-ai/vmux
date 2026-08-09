@@ -28,6 +28,14 @@ use crate::DeviceId;
 /// has to be refused outright rather than negotiated with.
 pub const ALPN: &[u8] = b"vmux/1";
 
+/// ALPN a liveness probe negotiates instead of [`ALPN`].
+///
+/// A probe is closed as soon as the handshake completes, so reaching that point already proves
+/// what a deploy needs to know: the UDP port is open through the firewall, the certificate is
+/// present and valid, and the accept loop is running. None of that is visible over TCP, and a
+/// probe that spoke [`ALPN`] would have to invent a device id and leave a registration behind.
+pub const PROBE_ALPN: &[u8] = b"vmux-probe/1";
+
 /// Leading bytes of every connection, so a mis-dialled port fails loudly rather than as a decode
 /// error hundreds of bytes later.
 pub const HELLO_MAGIC: [u8; 5] = *b"VMUXQ";

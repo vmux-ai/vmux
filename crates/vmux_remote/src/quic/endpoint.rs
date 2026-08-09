@@ -20,7 +20,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 
-use super::ALPN;
+use super::{ALPN, PROBE_ALPN};
 
 /// How long a connection may sit idle before either end considers it dead.
 ///
@@ -105,8 +105,22 @@ impl SelfSignedIdentity {
         Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
     }
 
+    /// Bind a listener that also completes [`PROBE_ALPN`] handshakes.
+    ///
+    /// Only the relay offers this. On a desktop it would be an unauthenticated way for anyone who
+    /// found the port to confirm someone is home, which is what pinning and the pairing token are
+    /// there to prevent.
+    pub fn listen_answering_probes(&self, address: SocketAddr) -> Result<Endpoint, String> {
+        let config = self.server_config_offering(vec![ALPN.to_vec(), PROBE_ALPN.to_vec()])?;
+        Endpoint::server(config, address).map_err(|error| format!("QUIC bind failed: {error}"))
+    }
+
     /// The server half of the TLS configuration, for callers driving their own endpoint.
     pub fn server_config(&self) -> Result<ServerConfig, String> {
+        self.server_config_offering(vec![ALPN.to_vec()])
+    }
+
+    fn server_config_offering(&self, alpn_protocols: Vec<Vec<u8>>) -> Result<ServerConfig, String> {
         let certificates: Vec<CertificateDer<'static>> =
             rustls_pemfile::certs(&mut self.certificate_pem.as_bytes())
                 .collect::<Result<_, _>>()
@@ -122,7 +136,7 @@ impl SelfSignedIdentity {
             .with_no_client_auth()
             .with_single_cert(certificates, key)
             .map_err(|error| format!("TLS config failed: {error}"))?;
-        crypto.alpn_protocols = vec![ALPN.to_vec()];
+        crypto.alpn_protocols = alpn_protocols;
 
         let quic = QuicServerConfig::try_from(crypto)
             .map_err(|error| format!("QUIC server config failed: {error}"))?;
@@ -169,6 +183,31 @@ impl Trust {
         Ok(endpoint)
     }
 
+    /// Complete a [`PROBE_ALPN`] handshake against `remote` and hang up.
+    ///
+    /// Returning `Ok` means the UDP port answered, the certificate verified, and the peer's accept
+    /// loop was running — the four things a deploy wants to know, none of which a TCP check on a
+    /// companion port can establish. Nothing is registered and nothing is sent.
+    pub async fn probe(&self, remote: SocketAddr, server_name: &str) -> Result<(), String> {
+        let local: SocketAddr = if remote.is_ipv4() {
+            (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+        } else {
+            (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+        };
+        let mut endpoint =
+            Endpoint::client(local).map_err(|error| format!("QUIC client bind failed: {error}"))?;
+        endpoint.set_default_client_config(self.client_config_offering(PROBE_ALPN)?);
+
+        let connection = endpoint
+            .connect(remote, server_name)
+            .map_err(|error| format!("probe connect failed: {error}"))?
+            .await
+            .map_err(|error| format!("probe handshake failed: {error}"))?;
+        connection.close(0u32.into(), b"probe");
+        endpoint.wait_idle().await;
+        Ok(())
+    }
+
     /// Whether a relay host can only be a development stack, and so has no publicly-signed
     /// certificate to verify against.
     fn is_local_development_host(host: &str) -> bool {
@@ -185,6 +224,10 @@ impl Trust {
     }
 
     fn client_config(&self) -> Result<ClientConfig, String> {
+        self.client_config_offering(ALPN)
+    }
+
+    fn client_config_offering(&self, alpn: &[u8]) -> Result<ClientConfig, String> {
         let builder = rustls::ClientConfig::builder_with_provider(provider())
             .with_protocol_versions(&[&rustls::version::TLS13])
             .map_err(|error| format!("TLS config failed: {error}"))?;
@@ -207,7 +250,7 @@ impl Trust {
                 builder.with_root_certificates(roots).with_no_client_auth()
             }
         };
-        crypto.alpn_protocols = vec![ALPN.to_vec()];
+        crypto.alpn_protocols = vec![alpn.to_vec()];
 
         let quic = QuicClientConfig::try_from(crypto)
             .map_err(|error| format!("QUIC client config failed: {error}"))?;

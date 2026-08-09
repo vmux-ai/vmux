@@ -110,6 +110,52 @@ async fn a_peer_offering_another_alpn_is_rejected() {
     assert!(!accepting.await.expect("accept task"));
 }
 
+/// A probe is the deploy gate's only evidence, so it has to reach a listener that offers it.
+#[tokio::test]
+async fn a_probe_completes_against_a_listener_that_answers_them() {
+    let identity = SelfSignedIdentity::generate(vec!["localhost".into(), "127.0.0.1".into()])
+        .expect("generate identity");
+    let server = identity
+        .listen_answering_probes((Ipv4Addr::LOCALHOST, 0).into())
+        .expect("bind server");
+    let address = server.local_addr().expect("local addr");
+    let accepting = tokio::spawn(accept_once(server));
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        Trust::Desktop {
+            fingerprint: identity.fingerprint.clone(),
+        }
+        .probe(address, "localhost"),
+    )
+    .await
+    .expect("probe did not settle");
+
+    assert_eq!(outcome, Ok(()));
+    assert!(accepting.await.expect("accept task"));
+}
+
+/// Only the relay opts in. A desktop offering the probe ALPN would let anyone who found the port
+/// confirm someone is home, without a pinned certificate or a pairing token.
+#[tokio::test]
+async fn an_ordinary_listener_refuses_a_probe() {
+    let (identity, address, server) = desktop();
+    let accepting = tokio::spawn(accept_once(server));
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        Trust::Desktop {
+            fingerprint: identity.fingerprint.clone(),
+        }
+        .probe(address, "localhost"),
+    )
+    .await
+    .expect("probe did not settle");
+
+    assert!(outcome.is_err(), "the probe ALPN must not be offered here");
+    assert!(!accepting.await.expect("accept task"));
+}
+
 /// Trusts everything, so the ALPN test above isolates protocol mismatch from certificate
 /// mismatch. Never used outside this file.
 #[derive(Debug)]
