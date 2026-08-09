@@ -12,7 +12,6 @@ use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 
 use crate::activity::{
     ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
-    should_expand_thinking,
 };
 use crate::clipboard::copy_to_clipboard;
 use crate::platform::{random_index, sleep_ms};
@@ -276,7 +275,7 @@ pub fn TurnView(turn_index: usize, turn: ChatTurn, latest_tool_index: Option<usi
                                 .iter()
                                 .map(|(index, child)| (*index, (*child).clone()))
                                 .collect::<Vec<_>>(),
-                            latest_thinking: should_expand_thinking(j, block_count),
+                            latest_thinking: j + 1 == block_count,
                             latest_tool: latest_tool_index == Some(j),
                         }
                     }

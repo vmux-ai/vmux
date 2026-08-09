@@ -295,10 +295,6 @@ fn tool_args_read_skill(args: &str) -> bool {
     skill_path(&value)
 }
 
-pub fn should_expand_thinking(block_index: usize, block_count: usize) -> bool {
-    block_index + 1 == block_count
-}
-
 /// The glyph standing in for a kind of agent activity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ActivityIcon {

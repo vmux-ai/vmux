@@ -1,12 +1,6 @@
 use super::*;
 
 #[test]
-fn thinking_expands_only_until_the_next_block() {
-    assert!(should_expand_thinking(0, 1));
-    assert!(!should_expand_thinking(0, 2));
-}
-
-#[test]
 fn tool_activity_classifies_timeline_icons() {
     assert_eq!(ToolActivity::of("guardian_review"), ToolActivity::Guardian);
     assert_eq!(ToolActivity::of("read_file"), ToolActivity::ReadFile);
