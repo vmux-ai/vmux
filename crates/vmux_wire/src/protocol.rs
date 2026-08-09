@@ -1106,6 +1106,9 @@ mod tests {
                 SharedAgentCommand::NewAgentChat { .. } => "NewAgentChat",
                 SharedAgentCommand::ListAgents => "ListAgents",
                 SharedAgentCommand::ListTeam => "ListTeam",
+                SharedAgentCommand::ListModels { .. } => "ListModels",
+                SharedAgentCommand::SelectModel { .. } => "SelectModel",
+                SharedAgentCommand::SetEffort { .. } => "SetEffort",
             }
         }
 
@@ -1117,11 +1120,27 @@ mod tests {
             },
             SharedAgentCommand::ListAgents,
             SharedAgentCommand::ListTeam,
+            SharedAgentCommand::ListModels { sid: String::new() },
+            SharedAgentCommand::SelectModel {
+                sid: String::new(),
+                model_id: String::new(),
+            },
+            SharedAgentCommand::SetEffort {
+                sid: String::new(),
+                level: String::new(),
+            },
         ];
 
         assert_eq!(
             every_variant.iter().map(name).collect::<Vec<_>>(),
-            ["NewAgentChat", "ListAgents", "ListTeam"]
+            [
+                "NewAgentChat",
+                "ListAgents",
+                "ListTeam",
+                "ListModels",
+                "SelectModel",
+                "SetEffort",
+            ]
         );
     }
 

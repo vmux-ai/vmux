@@ -2223,8 +2223,11 @@ fn handle_agent_commands(
                     Err(error) => AgentCommandResult::Error(format!("list_agents: {error}")),
                 }
             }
-            // Answered in vmux_team, which already holds the queries the roster is built from.
+            // Answered where the state lives: the roster in vmux_team, the models in chat_page.
             ServiceAgentCommand::Shared(SharedAgentCommand::ListTeam)
+            | ServiceAgentCommand::Shared(SharedAgentCommand::ListModels { .. })
+            | ServiceAgentCommand::Shared(SharedAgentCommand::SelectModel { .. })
+            | ServiceAgentCommand::Shared(SharedAgentCommand::SetEffort { .. })
             | ServiceAgentCommand::OpenBeside { .. }
             | ServiceAgentCommand::Run { .. }
             | ServiceAgentCommand::RunWithPlacementOverride { .. }

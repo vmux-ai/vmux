@@ -508,6 +508,29 @@ pub enum RemoteEvent {
     },
 }
 
+/// One model a session can be switched to.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RemoteModel {
+    pub id: String,
+    pub name: String,
+}
+
+/// The models a session can run and how hard its agent is asked to think.
+///
+/// Both live in the GUI's ECS rather than the daemon, so this crosses the wire as JSON in answer
+/// to [`ListModels`](crate::protocol::SharedAgentCommand::ListModels) rather than as a typed
+/// response.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct RemoteModelState {
+    pub models: Vec<RemoteModel>,
+    /// The model in effect, including one selected but not yet acknowledged by the agent.
+    pub selected_id: String,
+    /// Empty for agents that have no effort setting, which is most of them.
+    pub effort_levels: Vec<String>,
+    /// Empty when the agent is left at its own default.
+    pub effort: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct PromptRequest {
     pub client_op_id: ClientOpId,

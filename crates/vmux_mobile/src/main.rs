@@ -33,8 +33,8 @@ use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
-    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteSession,
-    RemoteStatus, RoomEvent, RoomId, inline_media_query, replace_inline_media_query,
+    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState,
+    RemoteSession, RemoteStatus, RoomEvent, RoomId, inline_media_query, replace_inline_media_query,
 };
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
@@ -154,7 +154,7 @@ impl Api {
     }
 
     async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
-        broker_list(&self.quic, SharedAgentCommand::ListAgents).await
+        broker_json(&self.quic, SharedAgentCommand::ListAgents).await
     }
 
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
@@ -165,8 +165,45 @@ impl Api {
         }
     }
 
+    /// The models this session can run, and its current effort level.
+    async fn models(&self, sid: &str) -> Result<RemoteModelState, ApiError> {
+        broker_json(
+            &self.quic,
+            SharedAgentCommand::ListModels {
+                sid: sid.to_string(),
+            },
+        )
+        .await
+    }
+
+    /// Switch the session to another of its models.
+    async fn select_model(&self, sid: &str, model_id: &str) -> Result<(), ApiError> {
+        self.command(SharedAgentCommand::SelectModel {
+            sid: sid.to_string(),
+            model_id: model_id.to_string(),
+        })
+        .await
+    }
+
+    /// Set how hard the session's agent is asked to think. An empty level restores its default.
+    async fn set_effort(&self, sid: &str, level: &str) -> Result<(), ApiError> {
+        self.command(SharedAgentCommand::SetEffort {
+            sid: sid.to_string(),
+            level: level.to_string(),
+        })
+        .await
+    }
+
+    async fn command(&self, command: SharedAgentCommand) -> Result<(), ApiError> {
+        self.applied(
+            self.quic
+                .request(SharedMessage::AgentCommand(command))
+                .await,
+        )
+    }
+
     async fn team(&self) -> Result<Vec<vmux_wire::team::TeamMemberRow>, ApiError> {
-        broker_list(&self.quic, SharedAgentCommand::ListTeam).await
+        broker_json(&self.quic, SharedAgentCommand::ListTeam).await
     }
 
     /// Subscribe to a session's events.
@@ -319,9 +356,9 @@ fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint>
     })
 }
 
-/// A GUI-held list comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
+/// GUI-held state comes back as JSON the desktop forwarded verbatim, so it is parsed here rather
 /// than re-typed on the wire — the shape belongs to the page that renders it.
-async fn broker_list<T: serde::de::DeserializeOwned>(
+async fn broker_json<T: serde::de::DeserializeOwned>(
     quic: &crate::quic_api::QuicApi,
     command: SharedAgentCommand,
 ) -> Result<T, ApiError> {
@@ -342,6 +379,94 @@ impl From<crate::quic_api::QuicError> for ApiError {
             QuicError::Unauthorized => Self::Unauthorized,
             QuicError::Refused(SharedFailure::NotFound) => Self::NotFound,
             other => Self::Message(other.to_string()),
+        }
+    }
+}
+
+/// The model and effort pickers under the composer.
+///
+/// Fetched per session rather than carried on [`RemoteSession`], because the list arrives from the
+/// agent after the session exists and a stale copy would offer models it has since dropped.
+#[component]
+fn ComposerOptions(sid: String, api: Signal<Option<Api>>) -> Element {
+    let mut state = use_signal(RemoteModelState::default);
+    use_effect(use_reactive!(|sid| {
+        // Read reactively: pairing can finish after a session is selected, and a peek here would
+        // leave the pickers empty until the next session change.
+        let Some(client) = api() else {
+            return;
+        };
+        if sid.is_empty() {
+            state.set(RemoteModelState::default());
+            return;
+        }
+        spawn(async move {
+            if let Ok(fetched) = client.models(&sid).await {
+                state.set(fetched);
+            }
+        });
+    }));
+
+    let current = state();
+    if current.models.is_empty() && current.effort_levels.is_empty() {
+        return rsx! {
+            div { class: "truncate text-[10px] text-muted-foreground/55", "Enter to send" }
+        };
+    }
+    let select_class = "min-w-0 max-w-[45%] truncate rounded-md bg-white/[0.05] px-2 py-1 text-[11px] text-foreground outline-none";
+    rsx! {
+        div { class: "flex min-w-0 flex-1 items-center gap-2",
+            if !current.models.is_empty() {
+                select {
+                    class: select_class,
+                    value: "{current.selected_id}",
+                    onchange: {
+                        let sid = sid.clone();
+                        move |event: FormEvent| {
+                            let (sid, model_id) = (sid.clone(), event.value());
+                            let Some(client) = api.peek().clone() else { return };
+                            state.write().selected_id = model_id.clone();
+                            spawn(async move {
+                                let _ = client.select_model(&sid, &model_id).await;
+                            });
+                        }
+                    },
+                    for model in current.models.iter() {
+                        option {
+                            key: "{model.id}",
+                            value: "{model.id}",
+                            selected: model.id == current.selected_id,
+                            "{model.name}"
+                        }
+                    }
+                }
+            }
+            if !current.effort_levels.is_empty() {
+                select {
+                    class: select_class,
+                    value: "{current.effort}",
+                    onchange: {
+                        let sid = sid.clone();
+                        move |event: FormEvent| {
+                            let (sid, level) = (sid.clone(), event.value());
+                            let Some(client) = api.peek().clone() else { return };
+                            state.write().effort = level.clone();
+                            spawn(async move {
+                                let _ = client.set_effort(&sid, &level).await;
+                            });
+                        }
+                    },
+                    option { value: "", selected: current.effort.is_empty(), "Default effort" }
+                    for level in current.effort_levels.iter() {
+                        option {
+                            key: "{level}",
+                            value: "{level}",
+                            selected: *level == current.effort,
+                            "{level}"
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1132,6 +1257,7 @@ fn AppBody() -> Element {
                     PromptComposer {
                         value: draft_value.clone(),
                         attachments: prompt_attachments,
+                        footer: rsx! { ComposerOptions { sid: submit_sid.clone(), api } },
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
                         accent_bg: accent.accent_bg.to_string(),
                         accent_color: accent.rain_rgb.to_string(),

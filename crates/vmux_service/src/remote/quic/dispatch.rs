@@ -169,7 +169,11 @@ async fn prompt(
 fn new_chat_op_id(command: &SharedAgentCommand) -> Option<ClientOpId> {
     match command {
         SharedAgentCommand::NewAgentChat { client_op_id, .. } => Some(client_op_id.clone()),
-        SharedAgentCommand::ListAgents | SharedAgentCommand::ListTeam => None,
+        SharedAgentCommand::ListAgents
+        | SharedAgentCommand::ListTeam
+        | SharedAgentCommand::ListModels { .. }
+        | SharedAgentCommand::SelectModel { .. }
+        | SharedAgentCommand::SetEffort { .. } => None,
     }
 }
 

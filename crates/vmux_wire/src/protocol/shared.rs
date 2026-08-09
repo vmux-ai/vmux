@@ -99,6 +99,15 @@ pub enum SharedAgentCommand {
     /// ECS state, and the daemon serving the remote API runs in a different process from the ECS
     /// that holds it.
     ListTeam,
+    /// Ask the GUI which models a session can run, and its current effort level. Answered as JSON
+    /// ([`RemoteModelState`](crate::room::RemoteModelState)) in
+    /// [`AgentCommandResult::Text`](super::AgentCommandResult::Text), for the same reason as
+    /// [`ListAgents`](Self::ListAgents): the state lives in ECS, not in the daemon.
+    ListModels { sid: String },
+    /// Switch a session to another of its models. Ignored when the id is not one of them.
+    SelectModel { sid: String, model_id: String },
+    /// Set how hard a session's agent is asked to think. An empty level restores its default.
+    SetEffort { sid: String, level: String },
 }
 
 impl From<SharedAgentCommand> for AgentCommand {

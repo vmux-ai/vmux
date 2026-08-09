@@ -5,18 +5,19 @@
 //! that one on the module does not. The rendered counterpart is the sibling `page`.
 
 mod media;
+mod model;
 mod resume;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
+use self::model::{effort_current_for, emit_model_state};
 use super::event::{
     CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
     CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT, ChatApproval, ChatCancel, ChatCancelQueuedPrompt,
     ChatChoiceSelected, ChatClearQueue, ChatCreateWorktree, ChatEscape, ChatHistoryPage,
     ChatHistoryRequest, ChatOpenPage, ChatResume, ChatSelectWorkspace, ChatSnapshot, ChatSubmit,
-    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
-    SLASH_COMMANDS_EVENT, SelectModel, SetAgentEffort, SlashCommandEntry, SlashCommands,
+    ComposerContext, QueuedPromptSnapshot,
 };
 use crate::client::acp::{AcpModelState, AcpSession};
 use crate::components::{
@@ -43,21 +44,15 @@ pub struct AgentChatPagePlugin;
 impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
-        app.init_resource::<AcpModelRequestCounter>()
-            .init_resource::<LastUsedAcpModels>()
-            .add_message::<AcpSetModelRequest>()
-            .add_systems(Startup, load_last_used_acp_models)
-            .add_plugins(BinEventEmitterPlugin::<(
-                ChatSubmit,
-                ChatApproval,
-                ChatCancel,
-                ChatResume,
-                ChatClearQueue,
-                ChatCancelQueuedPrompt,
-                ChatEscape,
-                SelectModel,
-                SetAgentEffort,
-            )>::for_hosts(&["agent", "start"]))
+        app.add_plugins(BinEventEmitterPlugin::<(
+            ChatSubmit,
+            ChatApproval,
+            ChatCancel,
+            ChatResume,
+            ChatClearQueue,
+            ChatCancelQueuedPrompt,
+            ChatEscape,
+        )>::for_hosts(&["agent", "start"]))
             .add_plugins(BinEventEmitterPlugin::<(
                 ChatChoiceSelected,
                 ChatHistoryRequest,
@@ -65,7 +60,11 @@ impl Plugin for AgentChatPagePlugin {
                 ChatCreateWorktree,
                 ChatOpenPage,
             )>::for_hosts(&["agent", "start"]))
-            .add_plugins((media::ChatMediaPlugin, resume::ChatResumePlugin))
+            .add_plugins((
+                media::ChatMediaPlugin,
+                model::ChatModelPlugin,
+                resume::ChatResumePlugin,
+            ))
             .add_observer(on_chat_submit)
             .add_observer(on_chat_approval)
             .add_observer(on_chat_cancel)
@@ -75,8 +74,6 @@ impl Plugin for AgentChatPagePlugin {
             .add_observer(on_chat_escape)
             .add_observer(on_chat_choice_selected)
             .add_observer(on_chat_history_request)
-            .add_observer(on_select_model)
-            .add_observer(on_set_agent_effort)
             .add_observer(on_chat_open_page)
             .add_observer(on_chat_select_workspace)
             .add_observer(on_chat_create_worktree)
@@ -86,12 +83,7 @@ impl Plugin for AgentChatPagePlugin {
                 (
                     (track_turn_duration, push_chat_to_page).chain(),
                     sync_chat_to_ready_views,
-                    push_acp_model_state_to_page,
-                    push_removed_acp_model_state_to_page,
                     push_composer_context_to_page,
-                    apply_last_used_acp_model.after(crate::client::acp::apply_acp_model_info),
-                    send_acp_model_requests,
-                    save_last_used_acp_models.after(apply_last_used_acp_model),
                 ),
             );
     }
@@ -104,81 +96,6 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: false,
 };
-
-#[derive(Message)]
-struct AcpSetModelRequest {
-    sid: String,
-    request_id: u64,
-    config_id: String,
-    model_id: String,
-}
-
-#[derive(Resource, Default)]
-struct LastUsedAcpModels {
-    by_agent: std::collections::BTreeMap<String, String>,
-    dirty: bool,
-}
-
-impl LastUsedAcpModels {
-    fn remember(&mut self, agent_id: &str, model_id: &str) {
-        if self
-            .by_agent
-            .get(agent_id)
-            .is_some_and(|saved| saved == model_id)
-        {
-            return;
-        }
-        self.by_agent
-            .insert(agent_id.to_string(), model_id.to_string());
-        self.dirty = true;
-    }
-}
-
-fn last_used_acp_models_path() -> std::path::PathBuf {
-    vmux_core::profile::profile_dir().join("agent-models.json")
-}
-
-fn load_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
-    let Ok(bytes) = std::fs::read(last_used_acp_models_path()) else {
-        return;
-    };
-    let Ok(saved) = serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes)
-    else {
-        return;
-    };
-    models.by_agent = saved;
-    models.dirty = false;
-}
-
-fn save_last_used_acp_models(mut models: ResMut<LastUsedAcpModels>) {
-    if !models.dirty {
-        return;
-    }
-    let path = last_used_acp_models_path();
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    let Ok(bytes) = serde_json::to_vec_pretty(&models.by_agent) else {
-        return;
-    };
-    let temp = path.with_extension("json.tmp");
-    if std::fs::create_dir_all(parent).is_ok()
-        && std::fs::write(&temp, bytes).is_ok()
-        && std::fs::rename(&temp, &path).is_ok()
-    {
-        models.dirty = false;
-    }
-}
-
-#[derive(Resource, Default)]
-struct AcpModelRequestCounter(u64);
-
-impl AcpModelRequestCounter {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
-    }
-}
 
 /// Record per-turn wall-clock from `AgentRunState` edges (covers page + ACP mutation sites
 /// uniformly). Idempotent: the `turn_start` guard tolerates repeated same-state sets and does
@@ -303,65 +220,6 @@ fn sync_chat_to_ready_views(
         );
         commands.entity(webview).insert(ChatSynced);
     }
-}
-
-fn model_state_of(state: Option<&AcpModelState>) -> ModelState {
-    let Some(state) = state else {
-        return ModelState::default();
-    };
-    ModelState {
-        current_model_id: state.display_model_id().to_string(),
-        current_model_name: state.current_name().to_string(),
-        models: state
-            .models
-            .iter()
-            .map(|model| ModelOptionEntry {
-                id: model.id.clone(),
-                name: model.name.clone(),
-                description: model.description.clone().unwrap_or_default(),
-            })
-            .collect(),
-        ..Default::default()
-    }
-}
-
-fn emit_model_state(
-    webview: Entity,
-    model_state: Option<&AcpModelState>,
-    cross_runtime: bool,
-    agent_key: &str,
-    effort_current: &str,
-    commands: &mut Commands,
-) {
-    let mut state = model_state_of(model_state);
-    state.agent_key = agent_key.to_string();
-    state.effort_current = effort_current.to_string();
-    state.effort_levels = vmux_core::agent::effort_levels(agent_key)
-        .iter()
-        .map(|level| level.to_string())
-        .collect();
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        MODEL_STATE_EVENT,
-        &state,
-    ));
-    commands.trigger(BinHostEmitEvent::from_rkyv(
-        webview,
-        SLASH_COMMANDS_EVENT,
-        &SlashCommands {
-            commands: slash_commands_for(cross_runtime, model_state.is_some()),
-        },
-    ));
-}
-
-/// The persisted launch-time effort for `agent_key`, or `""` (agent default).
-fn effort_current_for<'a>(
-    settings: Option<&'a Res<vmux_setting::AppSettings>>,
-    agent_key: &str,
-) -> &'a str {
-    settings
-        .and_then(|settings| settings.agent.effort_for(agent_key))
-        .unwrap_or("")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -516,74 +374,6 @@ fn push_composer_context_to_page(
         cache
             .entries
             .insert(webview, ComposerContextCacheEntry { input, context });
-    }
-}
-
-fn push_acp_model_state_to_page(
-    sessions: Query<(Entity, &AcpSession, &AcpModelState), Changed<AcpModelState>>,
-    children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for (stack, session, model_state) in &sessions {
-        let Ok(kids) = children.get(stack) else {
-            continue;
-        };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
-            continue;
-        };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
-            continue;
-        }
-        let cross = acp_agent_kind(&session.agent_id)
-            .map(kind_supports_cross_runtime)
-            .unwrap_or(false);
-        emit_model_state(
-            webview,
-            Some(model_state),
-            cross,
-            &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
-        );
-    }
-}
-
-fn push_removed_acp_model_state_to_page(
-    mut removed: RemovedComponents<AcpModelState>,
-    sessions: Query<&AcpSession>,
-    children: Query<&Children>,
-    is_browser: Query<(), With<vmux_layout::Browser>>,
-    settings: Option<Res<vmux_setting::AppSettings>>,
-    browsers: NonSend<Browsers>,
-    mut commands: Commands,
-) {
-    for stack in removed.read() {
-        let Ok(session) = sessions.get(stack) else {
-            continue;
-        };
-        let Ok(kids) = children.get(stack) else {
-            continue;
-        };
-        let Some(webview) = kids.iter().find(|&entity| is_browser.contains(entity)) else {
-            continue;
-        };
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
-            continue;
-        }
-        let cross = acp_agent_kind(&session.agent_id)
-            .map(kind_supports_cross_runtime)
-            .unwrap_or(false);
-        emit_model_state(
-            webview,
-            None,
-            cross,
-            &session.agent_id,
-            effort_current_for(settings.as_ref(), &session.agent_id),
-            &mut commands,
-        );
     }
 }
 
@@ -1028,107 +818,6 @@ fn on_chat_approval(
 }
 
 /// The slash commands offered on an ACP pane.
-fn slash_commands_for(cross_runtime: bool, has_models: bool) -> Vec<SlashCommandEntry> {
-    let mut v = vec![
-        SlashCommandEntry {
-            name: "upload".into(),
-            description: "Attach files".into(),
-        },
-        SlashCommandEntry {
-            name: "resume".into(),
-            description: "Resume a past session".into(),
-        },
-    ];
-    if has_models {
-        v.push(SlashCommandEntry {
-            name: "model".into(),
-            description: "Select model".into(),
-        });
-    }
-    if cross_runtime {
-        v.push(SlashCommandEntry {
-            name: "cli".into(),
-            description: "Continue this session in the CLI".into(),
-        });
-    }
-    v
-}
-
-fn on_select_model(
-    trigger: On<BinReceive<SelectModel>>,
-    child_of: Query<&ChildOf>,
-    mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
-    mut counter: ResMut<AcpModelRequestCounter>,
-    mut last_used: ResMut<LastUsedAcpModels>,
-    mut requests: MessageWriter<AcpSetModelRequest>,
-) {
-    let Ok(parent) = child_of.get(trigger.event().webview) else {
-        return;
-    };
-    let Ok((session, mut model_state)) = sessions.get_mut(parent.parent()) else {
-        return;
-    };
-    let model_id = trigger.event().payload.model_id.clone();
-    if model_state.display_model_id() == model_id
-        || !model_state.models.iter().any(|model| model.id == model_id)
-    {
-        return;
-    }
-    let request_id = counter.next();
-    last_used.remember(&session.agent_id, &model_id);
-    requests.write(AcpSetModelRequest {
-        sid: session.sid.clone(),
-        request_id,
-        config_id: model_state.config_id.clone(),
-        model_id: model_id.clone(),
-    });
-    model_state.pending = Some(crate::client::acp::PendingAcpModelSelection {
-        request_id,
-        model_id,
-    });
-}
-
-/// Persist the launch-time effort level for an agent. Blank `level` clears the override; only
-/// levels valid for the agent (see [`vmux_core::agent::effort_levels`]) are stored. Takes effect
-/// when the agent next launches a session/process.
-fn on_set_agent_effort(
-    trigger: On<BinReceive<SetAgentEffort>>,
-    mut settings: ResMut<vmux_setting::AppSettings>,
-    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
-) {
-    let payload = &trigger.event().payload;
-    let agent_key = payload.agent_key.trim();
-    let level = payload.level.trim();
-    if agent_key.is_empty() {
-        return;
-    }
-    if !level.is_empty() && !vmux_core::agent::effort_levels(agent_key).contains(&level) {
-        return;
-    }
-    let mut effort = settings.agent.effort.clone();
-    if level.is_empty() {
-        if effort.remove(agent_key).is_none() {
-            return;
-        }
-    } else if effort.get(agent_key).map(String::as_str) == Some(level) {
-        return;
-    } else {
-        effort.insert(agent_key.to_string(), level.to_string());
-    }
-    let value = match serde_json::to_value(&effort) {
-        Ok(value) => value,
-        Err(error) => {
-            bevy::log::warn!("effort: serialize failed: {error}");
-            return;
-        }
-    };
-    match vmux_setting::apply_settings_update(settings.as_mut(), "agent.effort", value) {
-        Ok(ron_bytes) => {
-            writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
-        }
-        Err(error) => bevy::log::warn!("effort: persist for {agent_key} failed: {error}"),
-    }
-}
 
 /// Open a vmux page URL in a new stack (the error card's "change version" action → `vmux://agents`).
 fn on_chat_open_page(
@@ -1144,35 +833,6 @@ fn on_chat_open_page(
             url: Some(url),
         }),
     ));
-}
-
-fn apply_last_used_acp_model(
-    mut sessions: Query<(&AcpSession, &mut AcpModelState), Added<AcpModelState>>,
-    last_used: Res<LastUsedAcpModels>,
-    mut counter: ResMut<AcpModelRequestCounter>,
-    mut requests: MessageWriter<AcpSetModelRequest>,
-) {
-    for (session, mut state) in &mut sessions {
-        let Some(model_id) = last_used.by_agent.get(&session.agent_id) else {
-            continue;
-        };
-        if state.display_model_id() == model_id
-            || !state.models.iter().any(|model| &model.id == model_id)
-        {
-            continue;
-        }
-        let request_id = counter.next();
-        requests.write(AcpSetModelRequest {
-            sid: session.sid.clone(),
-            request_id,
-            config_id: state.config_id.clone(),
-            model_id: model_id.clone(),
-        });
-        state.pending = Some(crate::client::acp::PendingAcpModelSelection {
-            request_id,
-            model_id: model_id.clone(),
-        });
-    }
 }
 
 fn on_chat_select_workspace(
@@ -1217,23 +877,6 @@ fn on_chat_create_worktree(
     });
 }
 
-fn send_acp_model_requests(
-    mut requests: MessageReader<AcpSetModelRequest>,
-    service: Option<Res<ServiceClient>>,
-) {
-    let Some(service) = service else {
-        return;
-    };
-    for request in requests.read() {
-        service.0.send(ClientMessage::AcpSetModel {
-            sid: request.sid.clone(),
-            request_id: request.request_id,
-            config_id: request.config_id.clone(),
-            model_id: request.model_id.clone(),
-        });
-    }
-}
-
 #[cfg(test)]
 mod native_tests {
     use super::*;
@@ -1265,173 +908,6 @@ mod native_tests {
             false,
             Some(std::time::Duration::ZERO),
         ));
-    }
-
-    #[test]
-    fn slash_commands_include_cli_only_when_cross_runtime() {
-        let base = slash_commands_for(false, false);
-        assert_eq!(base.len(), 2);
-        assert_eq!(base[0].name, "upload");
-        let with_model = slash_commands_for(false, true);
-        assert_eq!(with_model.len(), 3);
-        assert_eq!(with_model[2].name, "model");
-        let with_cli = slash_commands_for(true, false);
-        assert_eq!(with_cli.len(), 3);
-        assert_eq!(with_cli[2].name, "cli");
-    }
-
-    #[test]
-    fn model_selection_updates_cached_state_before_response() {
-        let mut app = App::new();
-        app.init_resource::<AcpModelRequestCounter>()
-            .init_resource::<LastUsedAcpModels>()
-            .add_message::<AcpSetModelRequest>()
-            .add_observer(on_select_model);
-        let stack = app
-            .world_mut()
-            .spawn((
-                AcpSession {
-                    agent_id: "claude".into(),
-                    sid: "s1".into(),
-                    cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
-                    resume: None,
-                },
-                AcpModelState {
-                    config_id: "model".into(),
-                    current_model_id: "default".into(),
-                    pending: None,
-                    models: vec![
-                        vmux_service::protocol::AcpModelOption {
-                            id: "default".into(),
-                            name: "Default".into(),
-                            description: None,
-                        },
-                        vmux_service::protocol::AcpModelOption {
-                            id: "fable".into(),
-                            name: "Fable".into(),
-                            description: None,
-                        },
-                    ],
-                },
-            ))
-            .id();
-        let webview = app.world_mut().spawn(ChildOf(stack)).id();
-
-        app.world_mut().trigger(BinReceive {
-            webview,
-            payload: SelectModel {
-                model_id: "fable".into(),
-            },
-        });
-
-        let state = app.world().get::<AcpModelState>(stack).unwrap();
-        assert_eq!(state.current_model_id, "default");
-        assert_eq!(
-            state.pending.as_ref().map(|pending| pending.request_id),
-            Some(1)
-        );
-        assert_eq!(
-            state
-                .pending
-                .as_ref()
-                .map(|pending| pending.model_id.as_str()),
-            Some("fable")
-        );
-        assert_eq!(state.current_name(), "Fable");
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<AcpSetModelRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].sid, "s1");
-        assert_eq!(requests[0].request_id, 1);
-        assert_eq!(requests[0].config_id, "model");
-        assert_eq!(requests[0].model_id, "fable");
-        assert_eq!(
-            app.world()
-                .resource::<LastUsedAcpModels>()
-                .by_agent
-                .get("claude")
-                .map(String::as_str),
-            Some("fable")
-        );
-
-        app.world_mut().trigger(BinReceive {
-            webview,
-            payload: SelectModel {
-                model_id: "fable".into(),
-            },
-        });
-        app.world_mut().trigger(BinReceive {
-            webview,
-            payload: SelectModel {
-                model_id: "missing".into(),
-            },
-        });
-        assert_eq!(
-            app.world_mut()
-                .resource_mut::<Messages<AcpSetModelRequest>>()
-                .drain()
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn fresh_agent_session_applies_last_used_model() {
-        let mut app = App::new();
-        app.init_resource::<AcpModelRequestCounter>()
-            .init_resource::<LastUsedAcpModels>()
-            .add_message::<AcpSetModelRequest>()
-            .add_systems(Update, apply_last_used_acp_model);
-        app.world_mut()
-            .resource_mut::<LastUsedAcpModels>()
-            .by_agent
-            .insert("claude".into(), "fable".into());
-        let stack = app
-            .world_mut()
-            .spawn((
-                AcpSession {
-                    agent_id: "claude".into(),
-                    sid: "s2".into(),
-                    cwd: "/tmp".into(),
-                    anchor: vmux_core::ProcessId::new(),
-                    resume: None,
-                },
-                AcpModelState {
-                    config_id: "model".into(),
-                    current_model_id: "default".into(),
-                    pending: None,
-                    models: vec![
-                        vmux_service::protocol::AcpModelOption {
-                            id: "default".into(),
-                            name: "Default".into(),
-                            description: None,
-                        },
-                        vmux_service::protocol::AcpModelOption {
-                            id: "fable".into(),
-                            name: "Fable".into(),
-                            description: None,
-                        },
-                    ],
-                },
-            ))
-            .id();
-
-        app.update();
-
-        let state = app.world().get::<AcpModelState>(stack).unwrap();
-        assert_eq!(state.display_model_id(), "fable");
-        let requests: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<AcpSetModelRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].sid, "s2");
-        assert_eq!(requests[0].model_id, "fable");
     }
 
     #[test]
