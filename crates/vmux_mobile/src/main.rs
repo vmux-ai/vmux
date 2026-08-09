@@ -519,6 +519,19 @@ fn leave_session(
 
 #[component]
 fn App() -> Element {
+    rsx! {
+        AppHead {}
+        AppBody {}
+    }
+}
+
+/// Everything below the head.
+///
+/// Split out so [`AppHead`] mounts exactly once. Dioxus records an inserted stylesheet href in a
+/// root context and skips that href ever after, so a head rendered inside a branch loses its
+/// stylesheet the first time the branch changes, and nothing puts it back.
+#[component]
+fn AppBody() -> Element {
     native_transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
@@ -783,7 +796,6 @@ fn App() -> Element {
 
     if auth() == AuthState::Loading {
         return rsx! {
-            AppHead {}
             div { class: "flex h-dvh items-center justify-center bg-background text-foreground",
                 div { class: "h-8 w-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" }
             }
@@ -794,7 +806,6 @@ fn App() -> Element {
         // vmux_team::page::Page is the desktop's team page, unmodified — it reads TEAM_EVENT off
         // the installed host exactly as it does inside CEF. Only the way back is ours.
         return rsx! {
-            AppHead {}
             div { class: "flex h-dvh flex-col bg-background text-foreground",
                 div { class: "flex items-center gap-1 border-b border-border px-2 pt-[env(safe-area-inset-top)]",
                     button {
@@ -811,7 +822,6 @@ fn App() -> Element {
 
     if current().is_none() {
         return rsx! {
-            AppHead {}
             MobileStartPage {
                 paired: auth() == AuthState::Paired,
                 reachable: reachable(),
@@ -960,7 +970,6 @@ fn App() -> Element {
     let attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
 
     rsx! {
-        AppHead {}
         div {
             class: "flex h-dvh min-h-0 flex-col bg-background text-foreground",
             header { class: "flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl sm:px-5",
