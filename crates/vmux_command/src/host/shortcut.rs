@@ -1,6 +1,89 @@
+use crate::{AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget};
 use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
 use std::time::Instant;
+
+/// Every binding in force, and how long a chord may stay half-typed.
+///
+/// Built once and held as a resource. Two surfaces consult it — the native keyboard and a webview
+/// page — and they used to carry a copy of these lookups each, which is how they drifted: the web
+/// copy rebuilt the whole binding list on every keystroke, and the pair of legacy command aliases
+/// below had to be fixed in both places or in neither.
+#[derive(Resource, Debug, Clone)]
+pub struct Keymap {
+    pub bindings: Vec<(Shortcut, String)>,
+    pub chord_timeout_ms: u64,
+}
+
+/// A chord that has not been answered within this long is abandoned, so a half-typed prefix cannot
+/// silently swallow the next real keystroke.
+const DEFAULT_CHORD_TIMEOUT_MS: u64 = 1000;
+
+impl Keymap {
+    /// The bindings compiled into the command tree, before settings have their say.
+    pub fn defaults() -> Self {
+        Self {
+            bindings: AppCommand::default_shortcuts(),
+            chord_timeout_ms: DEFAULT_CHORD_TIMEOUT_MS,
+        }
+    }
+
+    /// The command bound to this key on its own.
+    pub fn direct(&self, pressed: &KeyCombo) -> Option<AppCommand> {
+        self.bindings
+            .iter()
+            .find_map(|(binding, id)| match binding {
+                Shortcut::Direct(combo) if combo == pressed => AppCommand::from_shortcut_id(id),
+                _ => None,
+            })
+    }
+
+    /// Whether this key opens a chord, and so should be held rather than acted on.
+    pub fn has_chord_prefix(&self, pressed: &KeyCombo) -> bool {
+        self.bindings
+            .iter()
+            .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
+    }
+
+    /// The command bound to this key as the second half of a chord.
+    pub fn chord(&self, prefix: &KeyCombo, pressed: &KeyCombo) -> Option<AppCommand> {
+        let second = pressed.chord_second_after(prefix);
+        self.bindings
+            .iter()
+            .find_map(|(binding, id)| match binding {
+                Shortcut::Chord(bound_prefix, bound_second)
+                    if bound_prefix == prefix && bound_second == &second =>
+                {
+                    AppCommand::from_shortcut_id(id)
+                }
+                _ => None,
+            })
+    }
+}
+
+impl AppCommand {
+    /// The command a binding names, accepting two ids that predate the command tree.
+    ///
+    /// `split_v` and `split_h` were never menu items, so they have no generated id; they are kept
+    /// because they appear in settings files already written.
+    pub fn from_shortcut_id(id: &str) -> Option<Self> {
+        let split = |direction| {
+            Some(AppCommand::Browser(BrowserCommand::Open(
+                OpenCommand::InPane {
+                    direction,
+                    target: PaneTarget::NewSplit,
+                    mode: PaneOpenMode::NewStack,
+                    url: None,
+                },
+            )))
+        };
+        match id {
+            "split_v" => split(PaneDirection::Right),
+            "split_h" => split(PaneDirection::Bottom),
+            _ => AppCommand::from_menu_id(id),
+        }
+    }
+}
 
 #[derive(Resource, Default)]
 pub struct ChordState {
@@ -19,6 +102,21 @@ pub struct Modifiers {
 pub struct KeyCombo {
     pub key: KeyCode,
     pub modifiers: Modifiers,
+}
+
+impl KeyCombo {
+    /// This key read as the second half of a chord opened by `prefix`.
+    ///
+    /// A modifier the prefix already holds is dropped, because people keep Ctrl down through
+    /// `Ctrl+g s` rather than releasing it between the halves. Shift is kept: it distinguishes the
+    /// second key rather than merely surviving from the first.
+    fn chord_second_after(&self, prefix: &KeyCombo) -> KeyCombo {
+        let mut second = self.clone();
+        second.modifiers.ctrl &= !prefix.modifiers.ctrl;
+        second.modifiers.alt &= !prefix.modifiers.alt;
+        second.modifiers.super_key &= !prefix.modifiers.super_key;
+        second
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

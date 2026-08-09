@@ -490,6 +490,39 @@ pub enum ShortcutDef {
     Leader(KeyComboDef),
 }
 
+impl ShortcutSettings {
+    /// The compiled-in bindings with this file's say applied.
+    ///
+    /// A configured leader replaces the prefix of every default chord, so rebinding it moves the
+    /// whole family at once rather than leaving the defaults on `Ctrl+g` and the overrides
+    /// somewhere else. When the leader will not parse, the defaults stand and only bindings that
+    /// name their keys outright are added — a `Leader(..)` entry has nothing to hang off.
+    pub fn keymap(&self) -> vmux_command::shortcut::Keymap {
+        let mut keymap = vmux_command::shortcut::Keymap {
+            chord_timeout_ms: self.chord_timeout_ms,
+            ..vmux_command::shortcut::Keymap::defaults()
+        };
+        let leader = self.leader.to_key_combo();
+        if let Some(leader) = &leader {
+            for (binding, _) in &mut keymap.bindings {
+                if let vmux_command::shortcut::Shortcut::Chord(prefix, _) = binding {
+                    *prefix = leader.clone();
+                }
+            }
+        }
+        for entry in &self.bindings {
+            let binding = match leader.as_ref() {
+                Some(leader) => entry.binding.to_shortcut_with_leader(leader),
+                None => entry.binding.to_shortcut(),
+            };
+            if let Some(binding) = binding {
+                keymap.bindings.push((binding, entry.command.clone()));
+            }
+        }
+        keymap
+    }
+}
+
 impl ShortcutDef {
     pub fn to_shortcut(&self) -> Option<vmux_command::shortcut::Shortcut> {
         match self {

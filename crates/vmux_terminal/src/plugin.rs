@@ -12,10 +12,9 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use vmux_command::shortcut::{KeyCombo, Modifiers, Shortcut};
+use vmux_command::shortcut::{KeyCombo, Keymap, Modifiers};
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneDirection, PaneOpenMode,
-    PaneTarget, StackCommand, WriteAppCommands,
+    AppCommand, BrowserCommand, LayoutCommand, OpenCommand, StackCommand, WriteAppCommands,
 };
 use vmux_core::page::PageReady;
 use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
@@ -2595,42 +2594,6 @@ enum TerminalWebShortcutAction {
     PassThrough,
 }
 
-struct TerminalWebShortcutMap {
-    bindings: Vec<(Shortcut, String)>,
-    chord_timeout_ms: u64,
-}
-
-fn terminal_web_shortcut_map(settings: Option<&AppSettings>) -> TerminalWebShortcutMap {
-    let mut map = TerminalWebShortcutMap {
-        bindings: AppCommand::default_shortcuts(),
-        chord_timeout_ms: 1000,
-    };
-
-    if let Some(settings) = settings {
-        map.chord_timeout_ms = settings.shortcuts.chord_timeout_ms;
-        if let Some(leader) = settings.shortcuts.leader.to_key_combo() {
-            for (binding, _) in &mut map.bindings {
-                if let Shortcut::Chord(prefix, _) = binding {
-                    *prefix = leader.clone();
-                }
-            }
-            for entry in &settings.shortcuts.bindings {
-                if let Some(binding) = entry.binding.to_shortcut_with_leader(&leader) {
-                    map.bindings.push((binding, entry.command.clone()));
-                }
-            }
-        } else {
-            for entry in &settings.shortcuts.bindings {
-                if let Some(binding) = entry.binding.to_shortcut() {
-                    map.bindings.push((binding, entry.command.clone()));
-                }
-            }
-        }
-    }
-
-    map
-}
-
 fn resolve_terminal_web_shortcut(
     event: &TermKeyEvent,
     settings: Option<&AppSettings>,
@@ -2639,7 +2602,10 @@ fn resolve_terminal_web_shortcut(
     let Some(combo) = term_key_event_to_shortcut_combo(event) else {
         return TerminalWebShortcutAction::PassThrough;
     };
-    let map = terminal_web_shortcut_map(settings);
+    let map = match settings {
+        Some(settings) => settings.shortcuts.keymap(),
+        None => Keymap::defaults(),
+    };
     let now = Instant::now();
     if let Some((_, started)) = state.pending_prefix.as_ref()
         && now.duration_since(*started) > Duration::from_millis(map.chord_timeout_ms)
@@ -2648,20 +2614,21 @@ fn resolve_terminal_web_shortcut(
     }
 
     if let Some((prefix, _)) = state.pending_prefix.clone() {
-        if let Some(cmd) = terminal_web_chord_command(&map, &prefix, &combo) {
+        if let Some(cmd) = map.chord(&prefix, &combo) {
             state.pending_prefix = None;
             return TerminalWebShortcutAction::Command(cmd);
         }
         state.pending_prefix = None;
     }
 
-    if let Some(cmd) = terminal_web_direct_command(&map, &combo)
+    // A bare key must stay typeable, so only a modified one can be claimed here.
+    if let Some(cmd) = map.direct(&combo)
         && (combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key)
     {
         return TerminalWebShortcutAction::Command(cmd);
     }
 
-    if terminal_web_has_chord_prefix(&map, &combo) {
+    if map.has_chord_prefix(&combo) {
         state.pending_prefix = Some((combo, now));
         return TerminalWebShortcutAction::Consume;
     }
@@ -2683,80 +2650,6 @@ fn term_key_event_to_shortcut_combo(event: &TermKeyEvent) -> Option<KeyCombo> {
             super_key: event.modifiers & MOD_SUPER != 0,
         },
     })
-}
-
-fn terminal_web_direct_command(
-    map: &TerminalWebShortcutMap,
-    pressed: &KeyCombo,
-) -> Option<AppCommand> {
-    map.bindings
-        .iter()
-        .find_map(|(binding, cmd_id)| match binding {
-            Shortcut::Direct(combo) if combo == pressed => {
-                terminal_command_from_shortcut_id(cmd_id)
-            }
-            _ => None,
-        })
-}
-
-fn terminal_web_has_chord_prefix(map: &TerminalWebShortcutMap, pressed: &KeyCombo) -> bool {
-    map.bindings
-        .iter()
-        .any(|(binding, _)| matches!(binding, Shortcut::Chord(prefix, _) if prefix == pressed))
-}
-
-fn terminal_web_chord_command(
-    map: &TerminalWebShortcutMap,
-    prefix: &KeyCombo,
-    pressed: &KeyCombo,
-) -> Option<AppCommand> {
-    let effective = effective_terminal_web_chord_second(prefix, pressed);
-    map.bindings
-        .iter()
-        .find_map(|(binding, cmd_id)| match binding {
-            Shortcut::Chord(binding_prefix, second)
-                if binding_prefix == prefix && second == &effective =>
-            {
-                terminal_command_from_shortcut_id(cmd_id)
-            }
-            _ => None,
-        })
-}
-
-fn effective_terminal_web_chord_second(prefix: &KeyCombo, pressed: &KeyCombo) -> KeyCombo {
-    let mut effective = pressed.clone();
-    if prefix.modifiers.ctrl {
-        effective.modifiers.ctrl = false;
-    }
-    if prefix.modifiers.alt {
-        effective.modifiers.alt = false;
-    }
-    if prefix.modifiers.super_key {
-        effective.modifiers.super_key = false;
-    }
-    effective
-}
-
-fn terminal_command_from_shortcut_id(cmd_id: &str) -> Option<AppCommand> {
-    match cmd_id {
-        "split_v" => Some(AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InPane {
-                direction: PaneDirection::Right,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: None,
-            },
-        ))),
-        "split_h" => Some(AppCommand::Browser(BrowserCommand::Open(
-            OpenCommand::InPane {
-                direction: PaneDirection::Bottom,
-                target: PaneTarget::NewSplit,
-                mode: PaneOpenMode::NewStack,
-                url: None,
-            },
-        ))),
-        _ => AppCommand::from_menu_id(cmd_id),
-    }
 }
 
 fn shortcut_key_code_from_web_code(code: &str) -> Option<KeyCode> {

@@ -12,8 +12,6 @@ pub mod handler;
 #[cfg(not(web))]
 pub mod panel;
 #[cfg(not(web))]
-pub mod shortcut;
-#[cfg(not(web))]
 pub mod state;
 #[cfg(not(web))]
 pub mod work_snapshot;
