@@ -31,6 +31,7 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{MenuDirection, move_selection};
+use vmux_ui::i18n::translate;
 use vmux_wire::PageIcon;
 use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
@@ -172,8 +173,8 @@ enum ApiError {
 impl std::fmt::Display for ApiError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unauthorized => f.write_str("Pairing expired. Scan the QR on your Mac again."),
-            Self::NotFound => f.write_str("Your Mac does not offer this yet."),
+            Self::Unauthorized => f.write_str(&translate("mobile-error-pairing-expired")),
+            Self::NotFound => f.write_str(&translate("mobile-error-not-offered")),
             Self::Message(message) => f.write_str(message),
         }
     }
@@ -186,9 +187,9 @@ impl Api {
     /// pairing without one names a desktop this build cannot dial. Re-pairing is the only fix.
     fn new(credentials: Credentials) -> Result<Self, ApiError> {
         let Some(endpoint) = quic_endpoint(&credentials) else {
-            return Err(ApiError::Message(
-                "This pairing is out of date. Scan the QR on your Mac again.".into(),
-            ));
+            return Err(ApiError::Message(translate(
+                "mobile-error-pairing-outdated",
+            )));
         };
         Ok(Self {
             quic: crate::quic_api::QuicApi::new(endpoint),
@@ -207,7 +208,9 @@ impl Api {
     async fn sessions(&self) -> Result<Vec<RemoteSession>, ApiError> {
         match self.quic.request(SharedMessage::ListSessions).await {
             Ok(SharedResponse::Sessions(sessions)) => Ok(sessions),
-            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Ok(_) => Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            ))),
             Err(error) => Err(error.into()),
         }
     }
@@ -311,7 +314,9 @@ impl Api {
     ) -> Result<(), ApiError> {
         match outcome {
             Ok(SharedResponse::Ok | SharedResponse::AlreadyApplied) => Ok(()),
-            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Ok(_) => Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            ))),
             Err(error) => Err(error.into()),
         }
     }
@@ -325,7 +330,9 @@ impl Api {
         );
         match self.quic.request(request).await {
             Ok(SharedResponse::Media(entries)) => Ok(entries),
-            Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+            Ok(_) => Err(ApiError::Message(translate(
+                "mobile-error-unexpected-answer",
+            ))),
             Err(error) => Err(error.into()),
         }
     }
@@ -409,7 +416,9 @@ async fn broker_json<T: serde::de::DeserializeOwned>(
         Ok(SharedResponse::BrokerJson(json)) => {
             serde_json::from_str(&json).map_err(|error| ApiError::Message(error.to_string()))
         }
-        Ok(_) => Err(ApiError::Message("Your Mac answered unexpectedly.".into())),
+        Ok(_) => Err(ApiError::Message(translate(
+            "mobile-error-unexpected-answer",
+        ))),
         Err(error) => Err(error.into()),
     }
 }
@@ -641,10 +650,10 @@ fn start_new_chat(
                         }
                     }
                 }
-                error.set("The desktop opened the chat, but its stack did not appear.".to_string());
+                error.set(translate("mobile-error-stack-missing"));
             }
             Err(ApiError::Unauthorized) => {
-                error.set("Pairing expired. Pair with the Mac again.".to_string());
+                error.set(translate("mobile-error-pairing-lost"));
             }
             Err(other) => error.set(other.to_string()),
         }
@@ -835,7 +844,7 @@ fn AppBody() -> Element {
             }
             Err(ApiError::Unauthorized) => {
                 credentials::StoredCredentials::clear();
-                error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
+                error.set(translate("mobile-error-pairing-expired"));
                 auth.set(AuthState::Unpaired);
             }
             Err(other) => error.set(other.to_string()),
@@ -907,7 +916,7 @@ fn AppBody() -> Element {
                     auth.set(AuthState::Paired);
                 }
                 Err(ApiError::Unauthorized) => {
-                    error.set("Pairing token was rejected.".to_string());
+                    error.set(translate("mobile-error-token-rejected"));
                     auth.set(AuthState::Unpaired);
                 }
                 Err(other) => {
@@ -938,7 +947,7 @@ fn AppBody() -> Element {
                     reachable.set(false);
                     credentials::StoredCredentials::clear();
                     api.set(None);
-                    error.set("Pairing expired. Scan the QR on your Mac again.".to_string());
+                    error.set(translate("mobile-error-pairing-expired"));
                     auth.set(AuthState::Unpaired);
                 }
                 Err(other) => {
@@ -967,7 +976,7 @@ fn AppBody() -> Element {
                         class: "rounded-lg px-3 py-2 text-sm text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| team_open.set(false),
-                        "Back"
+                        {translate("mobile-chat-back")}
                     }
                 }
                 div { class: "min-h-0 flex-1", vmux_team::page::Page {} }
@@ -1158,7 +1167,7 @@ fn AppBody() -> Element {
                         connected,
                         stream_generation,
                     ),
-                    aria_label: "Back to stacks",
+                    aria_label: translate("mobile-chat-back-to-stacks"),
                     svg {
                         class: "h-5 w-5",
                         view_box: "0 0 24 24",
@@ -1194,7 +1203,7 @@ fn AppBody() -> Element {
                         }
                     } else {
                         div { class: "text-sm font-semibold", "Vmux" }
-                        div { class: "mt-1 text-[11px] text-muted-foreground", "No active session" }
+                        div { class: "mt-1 text-[11px] text-muted-foreground", {translate("mobile-chat-no-session")} }
                     }
                 }
                 div { class: if connected() { "h-2 w-2 rounded-full bg-success" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
@@ -1205,7 +1214,7 @@ fn AppBody() -> Element {
                 onmounted: move |event| transcript_view.set(Some(event)),
                 if transcript_items.is_empty() && !is_streaming {
                     div { class: "flex h-full items-center justify-center px-8 text-center text-sm leading-6 text-muted-foreground",
-                        "No messages yet."
+                        {translate("mobile-chat-no-messages")}
                     }
                 }
                 div { class: "mx-auto flex w-full max-w-none flex-col gap-5 md:max-w-3xl",
@@ -1314,14 +1323,14 @@ fn AppBody() -> Element {
                                 }
                             }
                         },
-                        placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
+                        placeholder: if current_value.is_some() { translate("mobile-chat-placeholder") } else { translate("mobile-chat-no-session") },
                         accent_bg: accent.accent_bg.to_string(),
                         accent_color: accent_css.clone(),
                         accent_gradient: accent.grad.to_string(),
                         autofocus: true,
                         disabled: current_value.is_none(),
                         action: prompt_action,
-                        action_title: if is_streaming { "Stop".to_string() } else { "Send".to_string() },
+                        action_title: if is_streaming { translate("mobile-chat-stop") } else { translate("mobile-chat-send") },
                         action_enabled: if is_streaming { true } else { can_send },
                         on_input: move |value| draft.set(value),
                         on_keydown: {
@@ -1514,20 +1523,20 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                 span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
                 span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
                     span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-success" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
-                    if props.reachable { "Connected" } else if props.paired { "Reaching your Mac…" } else { "Not connected" }
+                    {if props.reachable { translate("mobile-status-connected") } else if props.paired { translate("mobile-status-reaching") } else { translate("mobile-status-disconnected") }}
                 }
                 if props.paired {
                     button {
                         class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_open_team.call(()),
-                        "Team"
+                        {translate("mobile-start-team")}
                     }
                     button {
                         class: "rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_disconnect.call(()),
-                        "Disconnect"
+                        {translate("mobile-pair-disconnect")}
                     }
                 }
             }
@@ -1540,14 +1549,14 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                         div { class: "w-full",
                             PromptComposer {
                                 value: props.draft.clone(),
-                                placeholder: "Search or ask…".to_string(),
+                                placeholder: translate("mobile-start-search-placeholder"),
                                 accent_color: "#a78bfa".to_string(),
                                 accent_gradient: "from-violet-500 to-violet-700".to_string(),
                                 autofocus: true,
                                 show_attach: false,
                                 disabled: props.creating,
                                 action: PromptComposerAction::Send,
-                                action_title: if props.creating { "Starting…".to_string() } else { "Start chat".to_string() },
+                                action_title: if props.creating { translate("mobile-start-starting") } else { translate("mobile-start-new-chat") },
                                 action_enabled: can_submit,
                                 on_input: move |value| props.on_draft.call(value),
                                 on_keydown: move |event: KeyboardEvent| {
@@ -1567,12 +1576,12 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                         }
                         section { class: "mt-6 w-full",
                             div { class: "mb-3 flex items-center gap-2 px-1",
-                                h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground", "Stacks" }
+                                h2 { class: "text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground", {translate("mobile-start-stacks")} }
                                 span { class: "rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground", "{props.sessions.len()}" }
                             }
                             div { class: "overflow-hidden rounded-2xl border border-border bg-card",
                                 if props.sessions.is_empty() {
-                                    div { class: "px-4 py-8 text-center text-sm text-muted-foreground", "No open stacks" }
+                                    div { class: "px-4 py-8 text-center text-sm text-muted-foreground", {translate("mobile-start-no-stacks")} }
                                 }
                                 for (index, session) in props.sessions.iter().cloned().enumerate() {
                                     ResultRow {
@@ -1657,8 +1666,8 @@ fn PairCard(props: PairCardProps) -> Element {
     rsx! {
         div { class: "w-full",
             div { class: "mb-5 text-center",
-                h2 { class: "text-base font-semibold text-foreground", "Connect to your Mac" }
-                p { class: "mt-1 text-xs leading-5 text-muted-foreground", "In Vmux, open Remote and choose Connect device." }
+                h2 { class: "text-base font-semibold text-foreground", {translate("mobile-pair-title")} }
+                p { class: "mt-1 text-xs leading-5 text-muted-foreground", {translate("mobile-pair-subtitle")} }
             }
             button {
                 class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 active:scale-[0.99] active:bg-primary/90",
@@ -1681,13 +1690,13 @@ fn PairCard(props: PairCardProps) -> Element {
                     path { d: "M17 12v5" }
                     path { d: "M12 17h5" }
                 }
-                "Scan QR code"
+                {translate("mobile-pair-scan")}
             }
             button {
                 class: "mx-auto mt-4 block rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground active:bg-accent active:text-accent-foreground",
                 r#type: "button",
                 onclick: move |_| show_link.set(!show_link()),
-                if show_link() { "Hide pairing link" } else { "Enter pairing link manually" }
+                {if show_link() { translate("mobile-pair-hide-link") } else { translate("mobile-pair-show-link") }}
             }
             if show_link() {
                 form {
@@ -1702,7 +1711,7 @@ fn PairCard(props: PairCardProps) -> Element {
                         inputmode: "url",
                         autocomplete: "off",
                         autocapitalize: "none",
-                        placeholder: "Paste pairing link",
+                        placeholder: translate("mobile-pair-link-placeholder"),
                         value: "{props.value}",
                         oninput: move |event| props.on_value.call(event.value()),
                     }
@@ -1710,7 +1719,7 @@ fn PairCard(props: PairCardProps) -> Element {
                         class: "h-10 shrink-0 rounded-xl bg-secondary px-4 text-xs font-semibold text-secondary-foreground disabled:opacity-50 active:bg-secondary/80",
                         r#type: "submit",
                         disabled: props.pairing,
-                        if props.pairing { "Connecting…" } else { "Connect" }
+                        {if props.pairing { translate("mobile-pair-connecting") } else { translate("mobile-pair-connect") }}
                     }
                 }
             }
@@ -1976,9 +1985,9 @@ fn apply_remote_event(
 fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
     let input = input.trim();
     if input.starts_with("vmux://") {
-        let parsed = Url::parse(input).map_err(|_| "Pairing URL is invalid.".to_string())?;
+        let parsed = Url::parse(input).map_err(|_| translate("mobile-url-invalid"))?;
         if parsed.scheme() != "vmux" || parsed.host_str() != Some("pair") {
-            return Err("Pairing URL is invalid.".to_string());
+            return Err(translate("mobile-url-invalid"));
         }
         let params = parsed
             .query_pairs()
@@ -1986,16 +1995,15 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         let base_url = params
             .get("base")
             .map(|value| value.to_string())
-            .ok_or_else(|| "Pairing URL has no server address.".to_string())?;
+            .ok_or_else(|| translate("mobile-url-no-address"))?;
         let token = params
             .get("token")
             .map(|value| value.to_string())
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| "Pairing URL has no token.".to_string())?;
-        let base = Url::parse(&base_url)
-            .map_err(|_| "Pairing URL has an invalid server address.".to_string())?;
+            .ok_or_else(|| translate("mobile-url-no-token"))?;
+        let base = Url::parse(&base_url).map_err(|_| translate("mobile-url-bad-address"))?;
         if !matches!(base.scheme(), "http" | "https") {
-            return Err("Pairing URL must use HTTPS or HTTP.".to_string());
+            return Err(translate("mobile-url-scheme"));
         }
         // Absent when the desktop has no QUIC listener yet, which leaves the phone on HTTP
         // rather than failing to pair.
@@ -2005,7 +2013,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
             .unwrap_or_default();
         let base_url = normalized_pairing_base(base)?;
         if base_url.is_empty() {
-            return Err("Pairing URL has no server address.".to_string());
+            return Err(translate("mobile-url-no-address"));
         }
         return Ok(Credentials {
             base_url,
@@ -2016,11 +2024,11 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
     let start = input
         .find("https://")
         .or_else(|| input.find("http://"))
-        .ok_or_else(|| "Paste the full pairing URL shown by Vmux on your Mac.".to_string())?;
+        .ok_or_else(|| translate("mobile-url-paste-full"))?;
     let candidate = input[start..].split_whitespace().next().unwrap_or_default();
-    let parsed = Url::parse(candidate).map_err(|_| "Pairing URL is invalid.".to_string())?;
+    let parsed = Url::parse(candidate).map_err(|_| translate("mobile-url-invalid"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("Pairing URL must use HTTPS or HTTP.".to_string());
+        return Err(translate("mobile-url-scheme"));
     }
     let token = parsed
         .fragment()
@@ -2030,7 +2038,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
                 .map(|(_, value)| value.into_owned())
         })
         .filter(|token| !token.is_empty())
-        .ok_or_else(|| "Pairing URL has no token.".to_string())?;
+        .ok_or_else(|| translate("mobile-url-no-token"))?;
     let fingerprint = parsed
         .fragment()
         .and_then(|fragment| {
@@ -2041,7 +2049,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         .unwrap_or_default();
     let base_url = normalized_pairing_base(parsed)?;
     if base_url.is_empty() {
-        return Err("Pairing URL has no server address.".to_string());
+        return Err(translate("mobile-url-no-address"));
     }
     Ok(Credentials {
         base_url,
