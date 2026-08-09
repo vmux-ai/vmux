@@ -817,8 +817,6 @@ fn on_chat_approval(
     });
 }
 
-/// The slash commands offered on an ACP pane.
-
 /// Open a vmux page URL in a new stack (the error card's "change version" action → `vmux://agents`).
 fn on_chat_open_page(
     trigger: On<BinReceive<ChatOpenPage>>,

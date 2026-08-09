@@ -494,6 +494,28 @@ fn send_acp_model_requests(
     }
 }
 
+impl LastUsedAcpModels {
+    fn remember(&mut self, agent_id: &str, model_id: &str) {
+        if self
+            .by_agent
+            .get(agent_id)
+            .is_some_and(|saved| saved == model_id)
+        {
+            return;
+        }
+        self.by_agent
+            .insert(agent_id.to_string(), model_id.to_string());
+        self.dirty = true;
+    }
+}
+
+impl AcpModelRequestCounter {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(1);
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -671,27 +693,5 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].sid, "s2");
         assert_eq!(requests[0].model_id, "fable");
-    }
-}
-
-impl LastUsedAcpModels {
-    fn remember(&mut self, agent_id: &str, model_id: &str) {
-        if self
-            .by_agent
-            .get(agent_id)
-            .is_some_and(|saved| saved == model_id)
-        {
-            return;
-        }
-        self.by_agent
-            .insert(agent_id.to_string(), model_id.to_string());
-        self.dirty = true;
-    }
-}
-
-impl AcpModelRequestCounter {
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(1);
-        self.0
     }
 }
