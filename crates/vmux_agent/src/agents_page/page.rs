@@ -240,7 +240,7 @@ fn AgentStatusButtons(agent: AgentEntry, agents: Signal<Vec<AgentEntry>>) -> Ele
         "installing" => rsx! { ManagerSpinner { detail: agent.detail.clone() } },
         "installed" => rsx! {
             if !has_version_selector {
-                span { class: "text-xs font-medium text-emerald-600 dark:text-emerald-400", {translate("common-installed")} }
+                span { class: "text-xs font-medium text-success", {translate("common-installed")} }
             }
             if has_version_selector && agent.pinned_version != agent.installed_version {
                 ManagerButton {

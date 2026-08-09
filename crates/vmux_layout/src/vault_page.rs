@@ -239,7 +239,7 @@ pub fn Page() -> Element {
                     if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
                         div {
                             class: if result.success {
-                                "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
+                                "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                             } else {
                                 "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                             },
@@ -494,7 +494,7 @@ fn VaultPanel(
                                     }
                                     div {
                                         class: if github_device_code_copied() {
-                                            "mt-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                                            "mt-2 text-[10px] font-medium text-success"
                                         } else {
                                             "mt-2 text-[10px] text-muted-foreground/60"
                                         },
@@ -517,8 +517,8 @@ fn VaultPanel(
                             div {
                                 key: "destination-{provider.name()}",
                                 class: "pt-5 transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
-                                div { class: "flex items-center justify-center gap-2 text-xs text-emerald-700 dark:text-emerald-300",
-                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-emerald-400/15 ring-1 ring-inset ring-emerald-400/25",
+                                div { class: "flex items-center justify-center gap-2 text-xs text-success",
+                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-success/15 ring-1 ring-inset ring-success/25",
                                         svg { class: "h-3 w-3", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
                                             path { d: "m5 12 4 4L19 6" }
                                         }
@@ -802,7 +802,7 @@ fn RecoveryCard(
                         r#type: "button",
                         title: translate("vault-recovery-key-copy-hint"),
                         class: if recovery_key_copied() {
-                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-emerald-400/[0.08] px-3 py-3 text-left ring-1 ring-inset ring-emerald-400/25 transition-colors hover:bg-emerald-400/[0.12]"
+                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-success/[0.08] px-3 py-3 text-left ring-1 ring-inset ring-success/25 transition-colors hover:bg-success/[0.12]"
                         } else {
                             "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-3 text-left ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.07]"
                         },
@@ -818,7 +818,7 @@ fn RecoveryCard(
                             }
                         }
                         span { class: if recovery_key_copied() {
-                                "shrink-0 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                                "shrink-0 text-[11px] font-medium text-success"
                             } else {
                                 "shrink-0 text-[11px] text-muted-foreground/60"
                             },
@@ -893,7 +893,7 @@ fn RecoveryCard(
                     }
                 }
             } else if vault.recovery_enabled {
-                div { class: "mt-3 text-xs font-medium text-emerald-700 dark:text-emerald-300", {translate("vault-recovery-key-ready")} }
+                div { class: "mt-3 text-xs font-medium text-success", {translate("vault-recovery-key-ready")} }
                 if recovery_upload_pending() {
                     div { class: "mt-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300", {translate("vault-recovery-key-upload-pending")} }
                 }

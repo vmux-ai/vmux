@@ -1020,7 +1020,7 @@ fn AppBody() -> Element {
                         div { class: "mt-1 text-[11px] text-muted-foreground", "No active session" }
                     }
                 }
-                div { class: if connected() { "h-2 w-2 rounded-full bg-emerald-400" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
+                div { class: if connected() { "h-2 w-2 rounded-full bg-success" } else { "h-2 w-2 rounded-full bg-muted-foreground/50" } }
             }
 
             main {
@@ -1284,8 +1284,8 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
             StartBackdrop {}
             header { class: "flex shrink-0 items-center gap-2 px-4 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-6",
                 span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
-                span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/[0.08] px-2.5 py-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-300" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
-                    span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-emerald-500" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
+                span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
+                    span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-success" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
                     if props.reachable { "Connected" } else if props.paired { "Reaching your Mac…" } else { "Not connected" }
                 }
                 if props.paired {
@@ -1904,7 +1904,7 @@ fn status_dot(status: &RemoteStatus) -> &'static str {
         }
         RemoteStatus::Errored(_) => "h-2 w-2 shrink-0 rounded-full bg-red-400",
         RemoteStatus::Interrupted => "h-2 w-2 shrink-0 rounded-full bg-amber-400",
-        RemoteStatus::Idle => "h-2 w-2 shrink-0 rounded-full bg-emerald-400",
+        RemoteStatus::Idle => "h-2 w-2 shrink-0 rounded-full bg-success",
     }
 }
 

@@ -134,7 +134,7 @@ fn ServiceIcon() -> Element {
 #[component]
 fn StatusBadge(connected: bool) -> Element {
     let (color, text) = if connected {
-        ("bg-green-500", translate("services-connected"))
+        ("bg-success", translate("services-connected"))
     } else {
         ("bg-red-500", translate("services-disconnected"))
     };

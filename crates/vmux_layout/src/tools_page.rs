@@ -98,7 +98,7 @@ pub fn Page() -> Element {
                 if let Some(result) = notice() {
                     div {
                         class: if result.success {
-                            "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
+                            "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                         } else {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
@@ -289,7 +289,7 @@ fn status_label(status: ToolStatus) -> String {
 
 fn status_dot_class(status: ToolStatus) -> &'static str {
     match status {
-        ToolStatus::Installed => "bg-emerald-500",
+        ToolStatus::Installed => "bg-success",
         ToolStatus::Outdated => "bg-amber-500",
         ToolStatus::Conflict | ToolStatus::Failed => "bg-rose-500",
         ToolStatus::Missing => "bg-muted-foreground/40",

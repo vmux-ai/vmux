@@ -776,7 +776,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             if let Some(current) = notice() {
                 button {
                     class: if current.ok {
-                        "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-emerald-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
+                        "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-success/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     } else {
                         "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-red-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     },

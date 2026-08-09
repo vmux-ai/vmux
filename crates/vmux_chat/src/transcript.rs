@@ -396,7 +396,7 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
                 div { class: "relative py-1.5 pl-1 before:absolute before:-left-3 before:top-3 before:h-px before:w-2 before:bg-foreground/20",
                     if !key.is_empty() {
                         div { class: "mb-1.5 flex items-center gap-1.5 {label_class}",
-                            span { class: "h-1.5 w-1.5 rounded-full bg-emerald-400/70" }
+                            span { class: "h-1.5 w-1.5 rounded-full bg-success/70" }
                             "{label}"
                         }
                     }
@@ -414,7 +414,7 @@ fn ToolArg(name: String, value: serde_json::Value) -> Element {
         },
         serde_json::Value::Bool(value) => {
             let tone = if value {
-                "bg-emerald-500/10 text-emerald-600 ring-emerald-500/20 dark:text-emerald-300"
+                "bg-success/10 text-success ring-success/20"
             } else {
                 "bg-foreground/[0.04] text-muted-foreground ring-foreground/10"
             };
@@ -677,14 +677,14 @@ pub fn TurnBlock(
                         )),
                         similar::ChangeTag::Insert => Some((
                             format!("+ {}", c.value().trim_end_matches('\n')),
-                            "px-3 bg-emerald-500/10 text-emerald-300",
+                            "px-3 bg-success/10 text-success",
                         )),
                         similar::ChangeTag::Equal => None,
                     })
                     .collect();
             let fname = path.rsplit('/').next().unwrap_or(path.as_str()).to_string();
             rsx! {
-                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-green-500/[0.035]",
+                div { key: "{key}", class: "grid grid-cols-[1.5rem_minmax(0,1fr)] items-start gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-success/[0.035]",
                     FileActivityIcon { path: path.clone(), write: true }
                     details { class: "disclosure min-w-0 text-sm text-muted-foreground",
                         summary { class: "flex cursor-pointer select-none items-center gap-2 list-none [&::-webkit-details-marker]:hidden",
@@ -790,7 +790,7 @@ fn subagent_status_label(status: &str) -> String {
 fn subagent_status_class(status: &str) -> &'static str {
     match status {
         "in_progress" => "bg-violet-500/10 text-violet-700 dark:text-violet-300",
-        "completed" => "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        "completed" => "bg-success/10 text-success",
         "failed" => "bg-red-500/10 text-red-700 dark:text-red-300",
         _ => "bg-amber-500/10 text-amber-700 dark:text-amber-300",
     }
@@ -889,7 +889,7 @@ fn plan_glyph(status: &str) -> &'static str {
 
 fn plan_glyph_class(status: &str) -> &'static str {
     match status {
-        "completed" => "text-emerald-500",
+        "completed" => "text-success",
         "in_progress" => "text-amber-500",
         _ => "text-muted-foreground",
     }

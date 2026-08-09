@@ -571,7 +571,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
         div {
             class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2 rounded-md glass px-3 py-2 text-foreground",
             div { class: "flex items-center gap-2",
-                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" }
+                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-success" }
                 span { class: "min-w-0 flex-1 text-ui font-medium", "{label}" }
                 span { class: "shrink-0 text-xs text-muted-foreground", "{version}" }
             }
@@ -995,14 +995,14 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
     rsx! {
         div {
             class: if remote.enabled {
-                "border-t border-emerald-400/30 bg-emerald-500/10 px-2.5 py-2.5"
+                "border-t border-success/30 bg-success/10 px-2.5 py-2.5"
             } else {
                 "border-t border-foreground/10 px-2.5 py-2.5"
             },
             div { class: "flex items-center gap-2",
                 div {
                     class: if remote.enabled {
-                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-success/15 text-success"
                     } else {
                         "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/5 text-muted-foreground"
                     },
@@ -1016,8 +1016,8 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     div { class: "flex items-center gap-1.5",
                         span { class: "text-ui font-semibold", "Remote" }
                         if active {
-                            span { class: "inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400",
-                                span { class: "size-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400" }
+                            span { class: "inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success",
+                                span { class: "size-1.5 rounded-full bg-success" }
                                 "Live"
                             }
                         }
@@ -1026,7 +1026,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         class: if remote.phase == RemotePhase::Error {
                             "mt-0.5 truncate text-[10px] text-destructive"
                         } else if remote.enabled {
-                            "mt-0.5 text-[10px] text-emerald-700/90 dark:text-emerald-400/80"
+                            "mt-0.5 text-[10px] text-success/90"
                         } else {
                             "mt-0.5 text-[10px] text-muted-foreground"
                         },
@@ -1036,7 +1036,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                 button {
                     r#type: "button",
                     class: if remote.enabled {
-                        "relative h-5 w-9 shrink-0 rounded-full bg-emerald-400 transition-colors"
+                        "relative h-5 w-9 shrink-0 rounded-full bg-success transition-colors"
                     } else {
                         "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
                     },
@@ -1076,7 +1076,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                 }
             } else if transitioning {
                 div { class: "mt-2 h-1 overflow-hidden rounded-full bg-foreground/10",
-                    div { class: "h-full w-full rounded-full bg-emerald-400" }
+                    div { class: "h-full w-full rounded-full bg-success" }
                 }
             } else if active {
                 if let Some(svg) = qr {
@@ -1093,10 +1093,12 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         }
                     }
                     div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
-                        // The renderer sizes the QR in whole modules, so a long pairing link comes
-                        // out wider than the panel. Scale it to the card instead of cropping it.
+                        // The renderer sizes the QR in whole modules, so its intrinsic width has
+                        // nothing to do with the panel's. The viewBox is what scales; the width
+                        // and height attributes it also emits are what would not, so both are
+                        // overridden here and the square is held by aspect-ratio.
                         div {
-                            class: "w-full max-w-[220px] rounded-sm [&>svg]:block [&>svg]:h-auto [&>svg]:w-full",
+                            class: "w-full rounded-sm [&>svg]:block [&>svg]:aspect-square [&>svg]:h-auto [&>svg]:w-full",
                             dangerous_inner_html: "{svg}",
                         }
                         div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
@@ -1123,8 +1125,8 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     }
                 } else {
                     div { class: "mt-2 flex items-center gap-2",
-                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
-                            span { class: if remote.paired { "size-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400" } else { "size-1.5 rounded-full bg-foreground/25" } }
+                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-success" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
+                            span { class: if remote.paired { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-foreground/25" } }
                             if remote.paired { "Phone paired" } else { "No phone paired" }
                         }
                         button {
@@ -1367,7 +1369,7 @@ fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool)
                     } else if pending > 0 {
                         "size-1.5 rounded-full bg-amber-500"
                     } else {
-                        "size-1.5 rounded-full bg-emerald-500"
+                        "size-1.5 rounded-full bg-success"
                     }
                 }
             }
@@ -2245,7 +2247,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                         }
                                     }
                                     if m.is_running {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-2 ring-background" }
                                     } else if m.is_done_unseen {
                                         span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
                                     }
@@ -3757,7 +3759,7 @@ enum UpdatePhase {
 #[component]
 fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
     let status_class = match item.status {
-        ToolStatus::Installed => "bg-emerald-400",
+        ToolStatus::Installed => "bg-success",
         ToolStatus::Outdated => "bg-amber-400",
         ToolStatus::Conflict | ToolStatus::Failed => "bg-ansi-1",
         ToolStatus::Missing => "bg-muted-foreground/40",

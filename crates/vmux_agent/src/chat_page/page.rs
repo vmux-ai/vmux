@@ -1206,7 +1206,7 @@ pub fn Page(
                                             },
                                             span { class: "min-w-0 flex-1 truncate", {translate("agent-effort-default")} }
                                             if is_default {
-                                                svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                                svg { class: "h-3.5 w-3.5 shrink-0 text-success", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
                                             }
                                         }
                                     }
@@ -1229,7 +1229,7 @@ pub fn Page(
                                                 },
                                                 span { class: "min-w-0 flex-1 truncate capitalize", "{level}" }
                                                 if selected {
-                                                    svg { class: "h-3.5 w-3.5 shrink-0 text-emerald-500", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
+                                                    svg { class: "h-3.5 w-3.5 shrink-0 text-success", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round", path { d: "m5 12 4 4L19 6" } }
                                                 }
                                             }
                                         }
@@ -1747,7 +1747,7 @@ pub fn Page(
                                                 div { class: "flex min-w-0 items-baseline gap-2",
                                                     span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }
                                                     if selected {
-                                                        span { class: "shrink-0 text-[10px] uppercase tracking-wide text-emerald-500", {translate("common-current")} }
+                                                        span { class: "shrink-0 text-[10px] uppercase tracking-wide text-success", {translate("common-current")} }
                                                     }
                                                 }
                                                 if !model.description.is_empty() {
@@ -2119,7 +2119,7 @@ fn status_dot_class(status: &str) -> &'static str {
         "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
         "awaiting" => "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
-        _ => "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.65)]",
+        _ => "bg-success shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     }
 }
 

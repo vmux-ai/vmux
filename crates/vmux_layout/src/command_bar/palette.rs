@@ -813,7 +813,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
-                span { class: "h-1.5 w-1.5 rounded-full bg-emerald-500" }
+                span { class: "h-1.5 w-1.5 rounded-full bg-success" }
                 "Ready"
             }
         }
@@ -1096,7 +1096,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                                 span { class: "min-w-0 flex-1 truncate", "{title}" }
                                                 if option_selected {
                                                     svg {
-                                                        class: "h-3.5 w-3.5 shrink-0 text-emerald-500",
+                                                        class: "h-3.5 w-3.5 shrink-0 text-success",
                                                         view_box: "0 0 24 24",
                                                         fill: "none",
                                                         stroke: "currentColor",
