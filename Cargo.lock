@@ -11339,6 +11339,7 @@ dependencies = [
  "parking_lot",
  "raw-window-handle 0.6.2",
  "rfd 0.15.4",
+ "rkyv",
  "ron 0.8.1",
  "semver",
  "serde",

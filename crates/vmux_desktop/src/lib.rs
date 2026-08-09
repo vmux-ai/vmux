@@ -26,6 +26,7 @@ mod display;
 mod event_tap;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
+mod key_claim;
 mod log_forward;
 #[cfg(target_os = "macos")]
 mod native_keyboard;

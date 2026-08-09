@@ -1,7 +1,9 @@
 use crate::{AppCommand, BrowserCommand, OpenCommand, PaneDirection, PaneOpenMode, PaneTarget};
+use bevy::ecs::component::Component;
 use bevy::ecs::resource::Resource;
 use bevy::input::keyboard::KeyCode;
 use std::time::Instant;
+use vmux_core::input::{ClaimedKey, KeyClaims, KeyModifiers};
 
 /// Every binding in force, and how long a chord may stay half-typed.
 ///
@@ -156,6 +158,35 @@ impl KeymapView<'_> {
                 _ => None,
             })
     }
+
+    /// Every stroke a page in this context has to hand over rather than let the browser act on.
+    ///
+    /// A chord contributes its prefix, not its second key: pressing the prefix is what the page
+    /// must give up, and by the time the second key is typed the core has already stopped
+    /// forwarding keys to the page at all.
+    ///
+    /// Bindings naming a command that no longer exists are skipped, because claiming a key that
+    /// goes on to do nothing costs the page the key for nothing.
+    pub fn claims(&self) -> KeyClaims {
+        let mut keys: Vec<ClaimedKey> = Vec::new();
+        for binding in self.applicable() {
+            if AppCommand::from_shortcut_id(&binding.command).is_none() {
+                continue;
+            }
+            let combo = match &binding.shortcut {
+                Shortcut::Direct(combo) => combo,
+                Shortcut::Chord(prefix, _) => prefix,
+            };
+            let Some(claimed) = combo.claimed() else {
+                continue;
+            };
+            if keys.contains(&claimed) {
+                continue;
+            }
+            keys.push(claimed);
+        }
+        KeyClaims { keys }
+    }
 }
 
 impl AppCommand {
@@ -234,7 +265,15 @@ impl When {
 ///
 /// Strings rather than a closed enum because a settings file has to name them, and the set grows
 /// with the pages rather than with this crate.
-#[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
+///
+/// A component on the webview it describes, not a resource. Two chat panes have to be able to
+/// differ — one with a picker open and one without — and they can only differ if the context hangs
+/// off the entity. That costs nothing, because a page's message already names its webview.
+///
+/// Deriving `Resource` here would look equivalent and is not: a resource-derived type also
+/// implements `Component`, but Bevy keeps its singleton semantics, so the *second* entity to be
+/// given one silently gets nothing.
+#[derive(Component, Debug, Clone, Default, PartialEq, Eq)]
 pub struct KeyContext(std::collections::BTreeSet<String>);
 
 impl KeyContext {
@@ -272,6 +311,17 @@ pub struct Modifiers {
     pub super_key: bool,
 }
 
+impl From<Modifiers> for KeyModifiers {
+    fn from(modifiers: Modifiers) -> Self {
+        Self {
+            ctrl: modifiers.ctrl,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+            super_key: modifiers.super_key,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyCombo {
     pub key: KeyCode,
@@ -279,6 +329,73 @@ pub struct KeyCombo {
 }
 
 impl KeyCombo {
+    /// This combo as a claim a page can test, or `None` when the page decides it without asking.
+    ///
+    /// The excluded case is exactly [`KeyCombo::is_text_input`]: a printable key held with nothing
+    /// but Shift. A page answers that from the keystroke alone, in the same tick, so putting it in
+    /// a set that is briefly stale after every context change could only lose a character.
+    /// Everything else is claimable, because a page has no way to know whether it is bound.
+    pub fn claimed(&self) -> Option<ClaimedKey> {
+        if self.is_text_input() {
+            return None;
+        }
+        Some(ClaimedKey {
+            code: self.web_code(),
+            mods: KeyModifiers::from(self.modifiers),
+        })
+    }
+
+    /// True when pressing this is someone typing rather than invoking something.
+    ///
+    /// The counterpart of [`vmux_core::input::KeyStroke::is_text_input`] on the keymap side of the
+    /// wire, and it has to agree with it: this decides what is left out of the claimed set, and
+    /// that one decides what the page keeps when the set says nothing.
+    fn is_text_input(&self) -> bool {
+        if KeyModifiers::from(self.modifiers).has_chord() {
+            return false;
+        }
+        !matches!(
+            self.key,
+            KeyCode::Backspace
+                | KeyCode::CapsLock
+                | KeyCode::Delete
+                | KeyCode::End
+                | KeyCode::Enter
+                | KeyCode::Escape
+                | KeyCode::Home
+                | KeyCode::Insert
+                | KeyCode::PageDown
+                | KeyCode::PageUp
+                | KeyCode::Tab
+                | KeyCode::ArrowDown
+                | KeyCode::ArrowLeft
+                | KeyCode::ArrowRight
+                | KeyCode::ArrowUp
+                | KeyCode::F1
+                | KeyCode::F2
+                | KeyCode::F3
+                | KeyCode::F4
+                | KeyCode::F5
+                | KeyCode::F6
+                | KeyCode::F7
+                | KeyCode::F8
+                | KeyCode::F9
+                | KeyCode::F10
+                | KeyCode::F11
+                | KeyCode::F12
+        )
+    }
+
+    /// This key's `code` attribute, as a page reports it.
+    ///
+    /// [`KeyCode`]'s variants are named after the W3C `code` values, so its `Debug` spelling *is*
+    /// the wire name. Mirroring [`key_code_from_str`] by hand instead would be a second copy of
+    /// that table with nothing keeping the two in step; `web_code_round_trips_through_resolve_key`
+    /// pins the assumption against the table itself and fails loudly if Bevy ever renames one.
+    fn web_code(&self) -> String {
+        format!("{:?}", self.key)
+    }
+
     /// This key read as the second half of a chord opened by `prefix`.
     ///
     /// A modifier the prefix already holds is dropped, because people keep Ctrl down through
@@ -563,5 +680,175 @@ mod tests {
         assert_eq!(When::parse("   "), None);
         assert_eq!(When::parse("chat && "), None);
         assert_eq!(When::parse("!"), None);
+    }
+
+    fn modified(key: KeyCode, modifiers: Modifiers) -> KeyCombo {
+        KeyCombo { key, modifiers }
+    }
+
+    const CTRL: Modifiers = Modifiers {
+        ctrl: true,
+        shift: false,
+        alt: false,
+        super_key: false,
+    };
+    const SHIFT: Modifiers = Modifiers {
+        ctrl: false,
+        shift: true,
+        alt: false,
+        super_key: false,
+    };
+
+    /// `web_code` reads a page-facing string off `KeyCode`'s `Debug`. The `key_code_from_str` table
+    /// is the independent oracle: every name it accepts has to come back out unchanged, so a Bevy
+    /// rename shows up here rather than as a shortcut that silently stops firing in the browser.
+    #[test]
+    fn web_code_round_trips_through_resolve_key() {
+        for name in [
+            "KeyA",
+            "KeyG",
+            "KeyZ",
+            "Digit0",
+            "Digit9",
+            "Backquote",
+            "Backslash",
+            "BracketLeft",
+            "BracketRight",
+            "Comma",
+            "Equal",
+            "IntlBackslash",
+            "IntlRo",
+            "IntlYen",
+            "Minus",
+            "Period",
+            "Quote",
+            "Semicolon",
+            "Slash",
+            "Backspace",
+            "CapsLock",
+            "Enter",
+            "Space",
+            "Tab",
+            "Delete",
+            "End",
+            "Home",
+            "Insert",
+            "PageDown",
+            "PageUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "ArrowUp",
+            "Escape",
+            "F1",
+            "F9",
+            "F12",
+        ] {
+            let key = resolve_key(name).expect("table key resolves").key;
+            assert_eq!(combo(key).web_code(), name);
+        }
+    }
+
+    /// The rule that decides the claimed set. A printable key held with nothing but Shift stays
+    /// with the page, because a stale set claiming it would swallow a character; everything else is
+    /// claimable, because the page cannot tell whether it is bound.
+    #[test]
+    fn only_strokes_a_page_cannot_decide_for_itself_are_claimable() {
+        assert_eq!(combo(KeyCode::KeyX).claimed(), None);
+        assert_eq!(combo(KeyCode::Space).claimed(), None);
+        assert_eq!(combo(KeyCode::Digit5).claimed(), None);
+        assert_eq!(modified(KeyCode::KeyX, SHIFT).claimed(), None);
+
+        assert!(modified(KeyCode::KeyX, CTRL).claimed().is_some());
+        assert!(combo(KeyCode::Escape).claimed().is_some());
+        assert!(combo(KeyCode::Enter).claimed().is_some());
+        assert!(combo(KeyCode::ArrowUp).claimed().is_some());
+        assert!(combo(KeyCode::F5).claimed().is_some());
+    }
+
+    /// What a page is told to hand over, and what changes when its context does. A chord is
+    /// represented by its prefix, since that is the press the page has to give up.
+    #[test]
+    fn the_claimed_set_follows_the_context() {
+        let mut keymap = Keymap::default();
+        keymap.extend(
+            Source::Settings,
+            [
+                Binding {
+                    shortcut: Shortcut::Direct(modified(KeyCode::KeyX, CTRL)),
+                    command: STACK_CLOSE.to_string(),
+                    when: None,
+                },
+                Binding {
+                    shortcut: Shortcut::Direct(combo(KeyCode::Escape)),
+                    command: PANE_CLOSE.to_string(),
+                    when: When::parse("chat.selector"),
+                },
+                Binding {
+                    shortcut: Shortcut::Chord(modified(KeyCode::KeyG, CTRL), combo(KeyCode::KeyS)),
+                    command: PANE_CLOSE.to_string(),
+                    when: None,
+                },
+            ],
+        );
+
+        let codes = |context: &KeyContext| -> Vec<String> {
+            let mut codes: Vec<String> = keymap
+                .in_context(context)
+                .claims()
+                .keys
+                .into_iter()
+                .map(|claimed| claimed.code)
+                .collect();
+            codes.sort();
+            codes
+        };
+
+        assert_eq!(codes(KeyContext::NONE), vec!["KeyG", "KeyX"]);
+        assert_eq!(
+            codes(&context(&["chat.selector"])),
+            vec!["Escape", "KeyG", "KeyX"]
+        );
+    }
+
+    /// A binding naming a command that no longer exists would otherwise cost the page a key and
+    /// give it nothing back.
+    #[test]
+    fn a_binding_on_an_unknown_command_claims_nothing() {
+        let mut keymap = Keymap::default();
+        keymap.extend(
+            Source::Settings,
+            [Binding {
+                shortcut: Shortcut::Direct(modified(KeyCode::KeyX, CTRL)),
+                command: "no_such_command".to_string(),
+                when: None,
+            }],
+        );
+
+        assert_eq!(keymap.in_context(KeyContext::NONE).claims().keys, vec![]);
+    }
+
+    /// The two sides of the wire have to agree on what a claim matches, or the page would hand over
+    /// a key the core does not act on — or keep one it does.
+    #[test]
+    fn a_claim_matches_the_stroke_that_produced_it() {
+        let claims = KeyClaims {
+            keys: vec![modified(KeyCode::KeyX, CTRL).claimed().unwrap()],
+        };
+        let stroke = |mods: KeyModifiers| vmux_core::input::KeyStroke {
+            key: "x".to_string(),
+            code: "KeyX".to_string(),
+            mods,
+            text: None,
+            repeat: false,
+        };
+
+        assert!(claims.contains(&stroke(KeyModifiers::from(CTRL))));
+        assert!(!claims.contains(&stroke(KeyModifiers::default())));
+        assert!(!claims.contains(&stroke(KeyModifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        })));
     }
 }

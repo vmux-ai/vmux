@@ -7,7 +7,8 @@ use vmux_setting::{AppSettings, load_settings};
 
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, init_shortcuts.after(load_settings))
+        app.add_plugins(crate::key_claim::KeyClaimPlugin)
+            .add_systems(Startup, init_shortcuts.after(load_settings))
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
 
         #[cfg(target_os = "macos")]

@@ -4560,15 +4560,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_page_emits_key_events_from_native_webview() {
-        let source = include_str!("page.rs");
-
-        assert!(source.contains("emit_key("));
-        assert!(source.contains("onkeydown"));
-        assert!(source.contains("WebKey"));
-    }
-
-    #[test]
     fn terminal_page_focus_does_not_draw_browser_outline() {
         let source = include_str!("page.rs");
 

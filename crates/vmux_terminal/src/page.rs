@@ -10,9 +10,10 @@ use dioxus::html::Modifiers;
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
+use vmux_core::input::Unclaimed;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
+use vmux_ui::hooks::{send, use_key_claim, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
@@ -65,6 +66,17 @@ pub fn Page() -> Element {
     let mut loading = use_signal(|| None::<(String, String)>);
     let mut prompt_draft = use_signal(|| (String::new(), false));
     let client_h = use_signal(|| 0.0f64);
+
+    let keys = use_key_claim(Unclaimed::Forwards, move || {
+        let mut context = vec!["terminal".to_string()];
+        if alt() {
+            context.push("terminal.alt".to_string());
+        }
+        if copy_mode() {
+            context.push("terminal.copy-mode".to_string());
+        }
+        context
+    });
 
     let _err_listener =
         use_listener::<ServiceUnavailableEvent, _>(SERVICE_UNAVAILABLE_EVENT, move |evt| {
@@ -307,10 +319,7 @@ pub fn Page() -> Element {
                 }
             },
 
-            onkeydown: move |e: Event<KeyboardData>| {
-                e.prevent_default();
-                emit_key(&e);
-            },
+            onkeydown: move |e: Event<KeyboardData>| keys.on_keydown(&e, |_| false),
 
             onmouseup: move |e: Event<MouseData>| {
                 let dims = cell_dims();
@@ -873,20 +882,6 @@ fn focus_terminal_container() {
         return;
     };
     let _ = html.focus();
-}
-
-fn emit_key(e: &Event<KeyboardData>) {
-    let data = e.data();
-    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-        return;
-    };
-    let Some(stroke) = WebKey::new(raw).stroke() else {
-        return;
-    };
-    if stroke.is_modifier_key() {
-        return;
-    }
-    let _ = send(&stroke);
 }
 
 /// The native-scroll container element (also the measurement/mouse origin).

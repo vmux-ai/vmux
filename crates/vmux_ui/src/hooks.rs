@@ -8,6 +8,8 @@
 //! here; new code should reach for the owning module.
 
 mod use_event;
+#[cfg(web)]
+mod use_key_claim;
 mod use_listener;
 #[cfg(web)]
 mod use_mobile;
@@ -15,6 +17,8 @@ mod use_selector;
 mod use_theme;
 
 pub use use_event::use_event;
+#[cfg(web)]
+pub use use_key_claim::{KeyClaim, use_key_claim};
 pub use use_listener::{BevyState, use_listener};
 #[cfg(web)]
 pub use use_mobile::use_mobile;

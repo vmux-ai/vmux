@@ -231,6 +231,7 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+rkyv = { workspace = true }
 tempfile = "3"
 
 [package.metadata.packager]
