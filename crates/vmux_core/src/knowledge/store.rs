@@ -3,9 +3,9 @@
 //! Split from the parent so the wire types and markdown parsing stay compilable on web,
 //! where there is no filesystem to reach. Everything here is gated once, at the module.
 //!
-//! [`KnowledgeVault`] is the root every path is derived from. The free functions below are the
-//! stable façade other crates call; each one opens the user's vault and delegates, so the
-//! behaviour itself lives on the type and a test can run the same code against a temporary root.
+//! [`KnowledgeVault`] is the root every path is derived from, and [`KnowledgeVault::user`] opens
+//! the one under the active profile. Every path the vault hands out is derived from that root, so
+//! a test can run the same code against a temporary one.
 
 use super::{KnowledgePropertyKind, markdown_metadata};
 use std::ffi::{OsStr, OsString};
@@ -18,83 +18,6 @@ const SKILLS_PROMPT_MARKER: &str = "vmux Knowledge skill instructions are alread
 const MEMORIES_PROMPT_MARKER: &str = "vmux Knowledge memories are user-owned context";
 const KNOWLEDGE_SECTIONS: [&str; 5] = ["skills", "memories", "projects", "meetings", "handbook"];
 const MAX_NOTE_BYTES: usize = 2 * 1024 * 1024;
-
-/// The root of the user's knowledge vault.
-pub fn knowledge_dir() -> PathBuf {
-    KnowledgeVault::user().root().to_path_buf()
-}
-
-/// The user's `skills/` directory.
-pub fn skills_dir() -> PathBuf {
-    KnowledgeVault::user().skills().into_path()
-}
-
-/// The user's `memories/` directory.
-pub fn memories_dir() -> PathBuf {
-    KnowledgeVault::user().memories().into_path()
-}
-
-/// Write `content` as a markdown note in the user's vault, returning where it landed.
-pub fn write_note(path: Option<&str>, title: &str, content: &str) -> Result<PathBuf, String> {
-    KnowledgeVault::user().write_note(path, title, content)
-}
-
-/// Apply one property edit to a note's frontmatter, returning the rewritten source.
-pub fn edit_markdown_property(
-    text: &str,
-    edit: &crate::event::FilePropertyEdit,
-) -> Result<String, String> {
-    Frontmatter(text).apply(edit)
-}
-
-/// The `SKILL.md` of every configured skill in the user's vault.
-pub fn configured_skill_files() -> Vec<PathBuf> {
-    KnowledgeVault::user().skills().skill_files()
-}
-
-/// Copy any not-yet-imported external agent memories into the user's vault.
-pub fn migrate_external_memories() -> io::Result<usize> {
-    KnowledgeVault::user().memories().import_external()
-}
-
-/// The prompt section carrying every configured skill's instructions.
-pub fn agent_skills_prompt() -> String {
-    KnowledgeVault::user().skills().prompt()
-}
-
-/// The prompt section carrying every migrated memory.
-pub fn agent_memories_prompt() -> String {
-    KnowledgeVault::user().memories().prompt()
-}
-
-/// Both vault sections, for a launcher with no base prompt of its own.
-///
-/// Unlike [`append_agent_context`] there is no base to have already embedded them, so neither
-/// section is marker-guarded.
-pub fn agent_context_prompt() -> String {
-    let mut prompt = AgentPrompt::new("");
-    prompt.push(agent_skills_prompt());
-    prompt.push(agent_memories_prompt());
-    prompt.into_string()
-}
-
-/// `base` with the skills section appended, or unchanged when it is already there.
-pub fn append_agent_skills(base: &str) -> String {
-    AgentPrompt::new(base).with_skills().into_string()
-}
-
-/// `base` with the memories section appended, or unchanged when it is already there.
-pub fn append_agent_memories(base: &str) -> String {
-    AgentPrompt::new(base).with_memories().into_string()
-}
-
-/// `base` with both vault sections appended.
-pub fn append_agent_context(base: &str) -> String {
-    AgentPrompt::new(base)
-        .with_skills()
-        .with_memories()
-        .into_string()
-}
 
 /// One knowledge vault: a root directory holding the sections a user's notes, skills and
 /// memories live under.
@@ -118,6 +41,10 @@ impl KnowledgeVault {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn into_root(self) -> PathBuf {
+        self.root
     }
 
     /// Where skills live.
@@ -728,15 +655,23 @@ impl MemoryTree {
     }
 }
 
-/// A system prompt with the vault's sections appended.
+/// A system prompt with the user vault's skills and memories sections appended.
 ///
 /// Each section opens with a marker sentence and is skipped when the base already carries it, so
 /// a launcher that composes prompts in layers cannot embed the vault twice.
-struct AgentPrompt(String);
+pub struct AgentPrompt(String);
 
 impl AgentPrompt {
-    fn new(base: &str) -> Self {
-        Self(base.to_string())
+    /// `base` with both vault sections appended.
+    ///
+    /// An empty `base` carries no marker, so it yields the two sections alone — what a launcher
+    /// with no prompt of its own wants.
+    pub fn of(base: &str) -> Self {
+        Self(base.to_string()).with_skills().with_memories()
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
     }
 
     fn with_skills(mut self) -> Self {
@@ -764,20 +699,21 @@ impl AgentPrompt {
         self.0.push_str("\n\n");
         self.0.push_str(&section);
     }
-
-    fn into_string(self) -> String {
-        self.0
-    }
 }
 
 /// The YAML block at the top of a markdown note.
 #[derive(Clone, Copy)]
-struct Frontmatter<'a>(&'a str);
+pub struct Frontmatter<'a>(&'a str);
 
-impl Frontmatter<'_> {
+impl<'a> Frontmatter<'a> {
+    /// The frontmatter of one note's source.
+    pub fn of(source: &'a str) -> Self {
+        Self(source)
+    }
+
     /// The note's source with `edit` applied: the property renamed, retyped, replaced, removed,
     /// or added — creating the frontmatter block itself when the note has none.
-    fn apply(&self, edit: &crate::event::FilePropertyEdit) -> Result<String, String> {
+    pub fn apply(&self, edit: &crate::event::FilePropertyEdit) -> Result<String, String> {
         let text = self.0;
         let original = edit.original_key.trim();
         let key = edit.key.trim();
@@ -983,68 +919,58 @@ mod tests {
     #[test]
     fn edits_frontmatter_properties_without_touching_body() {
         let text = "---\ntitle: Old\ntags:\n  - alpha\nstatus: draft\n---\n\nBody\n";
-        let edited = edit_markdown_property(
-            text,
-            &crate::event::FilePropertyEdit {
+        let edited = Frontmatter::of(text)
+            .apply(&crate::event::FilePropertyEdit {
                 original_key: "tags".into(),
                 key: "tags".into(),
                 kind: KnowledgePropertyKind::Tags,
                 values: vec!["alpha".into(), "beta".into()],
                 remove: false,
-            },
-        )
-        .unwrap();
-        let renamed = edit_markdown_property(
-            &edited,
-            &crate::event::FilePropertyEdit {
+            })
+            .unwrap();
+        let renamed = Frontmatter::of(&edited)
+            .apply(&crate::event::FilePropertyEdit {
                 original_key: "status".into(),
                 key: "stage".into(),
                 kind: KnowledgePropertyKind::Text,
                 values: vec!["ready".into()],
                 remove: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         assert!(renamed.contains("tags:\n  - \"alpha\"\n  - \"beta\"\n"));
         assert!(renamed.contains("stage: \"ready\"\n"));
         assert!(!renamed.contains("status:"));
         assert!(renamed.ends_with("\nBody\n"));
         assert!(
-            edit_markdown_property(
-                &renamed,
-                &crate::event::FilePropertyEdit {
+            Frontmatter::of(&renamed)
+                .apply(&crate::event::FilePropertyEdit {
                     original_key: "stage".into(),
                     key: "title".into(),
                     kind: KnowledgePropertyKind::Text,
                     values: vec!["Duplicate".into()],
                     remove: false,
-                },
-            )
-            .is_err()
+                })
+                .is_err()
         );
 
-        let with_link = edit_markdown_property(
-            &renamed,
-            &crate::event::FilePropertyEdit {
+        let with_link = Frontmatter::of(&renamed)
+            .apply(&crate::event::FilePropertyEdit {
                 original_key: String::new(),
                 key: "related".into(),
                 kind: KnowledgePropertyKind::Link,
                 values: vec!["Roadmap".into()],
                 remove: false,
-            },
-        )
-        .unwrap();
-        let with_date = edit_markdown_property(
-            &with_link,
-            &crate::event::FilePropertyEdit {
+            })
+            .unwrap();
+        let with_date = Frontmatter::of(&with_link)
+            .apply(&crate::event::FilePropertyEdit {
                 original_key: String::new(),
                 key: "due".into(),
                 kind: KnowledgePropertyKind::Date,
                 values: vec!["2026-07-25".into()],
                 remove: false,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let metadata = markdown_metadata(&with_date);
         let related = metadata
             .properties

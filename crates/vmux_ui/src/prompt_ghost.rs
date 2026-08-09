@@ -1,3 +1,77 @@
+//! The example prompt that types itself into an empty composer.
+//!
+//! The animation is a pure state machine — [`PromptTypewriter`] — with one platform-shaped hole:
+//! it needs a random index to move on to and cannot pick one itself. The frontend that has a
+//! random source and a timer fills that in, which is the only part of this file the web build owns.
+
+#[cfg(web)]
+pub use component::PromptGhost;
+
+/// One example prompt being typed out, and how far through it the animation is.
+///
+/// [`advance`](Self::advance) is the whole animation, and the candidate index it takes is
+/// everything it needs from the outside — so the state stays plain, total and testable on any
+/// target, and `js_sys::Math::random` stays at the edge that has it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PromptTypewriter {
+    examples: &'static [&'static str],
+    index: usize,
+    typed: usize,
+}
+
+impl PromptTypewriter {
+    /// How long a finished line holds before the next one starts, in ticks.
+    const PAUSE_TICKS: usize = 40;
+
+    /// Start on `candidate`, clamped into range.
+    pub fn new(examples: &'static [&'static str], candidate: usize) -> Self {
+        Self {
+            examples,
+            index: Self::distinct_index(examples.len(), None, candidate),
+            typed: 0,
+        }
+    }
+
+    /// The prefix to render this tick.
+    pub fn shown(&self) -> String {
+        let example = self.example();
+        let full = example.chars().count();
+        example.chars().take(self.typed.min(full)).collect()
+    }
+
+    /// One tick: another character, or — once the finished line has held for [`Self::PAUSE_TICKS`]
+    /// — the start of `candidate`.
+    ///
+    /// `candidate` is taken every tick and used only on the one that wraps, which keeps this a
+    /// function of its arguments rather than of a generator the caller has to thread through.
+    pub fn advance(&mut self, candidate: usize) {
+        let full = self.example().chars().count();
+        if self.typed < full + Self::PAUSE_TICKS {
+            self.typed += 1;
+            return;
+        }
+        self.typed = 0;
+        self.index = Self::distinct_index(self.examples.len(), Some(self.index), candidate);
+    }
+
+    fn example(&self) -> &'static str {
+        self.examples[self.index]
+    }
+
+    /// Never the line already showing, so a reroll visibly changes something.
+    fn distinct_index(len: usize, current: Option<usize>, candidate: usize) -> usize {
+        if len <= 1 {
+            return 0;
+        }
+        let next = candidate.min(len - 1);
+        if current == Some(next) {
+            (next + 1) % len
+        } else {
+            next
+        }
+    }
+}
+
 pub const AGENT_PROMPT_EXAMPLES: &[&str] = &[
     "Find me the best flight from Paris to Tokyo next month",
     "Find a quiet hotel with AC near central Paris for this weekend",
@@ -56,27 +130,6 @@ pub const TERMINAL_PROMPT_EXAMPLES: &[&str] = &[
     "git log --oneline -10",
 ];
 
-#[cfg(any(test, web))]
-const PROMPT_PAUSE_TICKS: usize = 40;
-
-#[cfg(any(test, web))]
-fn distinct_prompt_example_index(len: usize, current: Option<usize>, candidate: usize) -> usize {
-    if len <= 1 {
-        return 0;
-    }
-    let next = candidate.min(len - 1);
-    if current == Some(next) {
-        (next + 1) % len
-    } else {
-        next
-    }
-}
-
-#[cfg(any(test, web))]
-fn next_prompt_typed_count(typed: usize, full: usize) -> Option<usize> {
-    (typed < full + PROMPT_PAUSE_TICKS).then_some(typed + 1)
-}
-
 #[cfg(web)]
 mod component {
     use std::cell::RefCell;
@@ -85,10 +138,7 @@ mod component {
     use dioxus::prelude::*;
     use wasm_bindgen::{JsCast, closure::Closure};
 
-    use super::{
-        AGENT_PROMPT_EXAMPLES, TERMINAL_PROMPT_EXAMPLES, distinct_prompt_example_index,
-        next_prompt_typed_count,
-    };
+    use super::{AGENT_PROMPT_EXAMPLES, PromptTypewriter, TERMINAL_PROMPT_EXAMPLES};
 
     const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}.vmux-prompt-caret-paused{animation-play-state:paused}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
     type PromptTimerCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
@@ -101,8 +151,8 @@ mod component {
         } else {
             AGENT_PROMPT_EXAMPLES
         };
-        let ex_idx = use_signal(|| random_prompt_example_index(examples.len(), None));
-        let typed = use_signal(|| 0usize);
+        let typewriter =
+            use_signal(|| PromptTypewriter::new(examples, random_index(examples.len())));
         let cb: PromptTimerCallback = use_hook(|| Rc::new(RefCell::new(None)));
         let timer: Rc<RefCell<Option<i32>>> = use_hook(|| Rc::new(RefCell::new(None)));
         let mut active = use_signal(document_active);
@@ -150,7 +200,7 @@ mod component {
             move || {
                 stop_prompt_typewriter(cb.clone(), timer.clone());
                 if active() {
-                    start_prompt_typewriter(examples, ex_idx, typed, cb.clone(), timer.clone());
+                    start_prompt_typewriter(examples, typewriter, cb.clone(), timer.clone());
                 }
             }
         });
@@ -190,9 +240,7 @@ mod component {
                 }
             }
         });
-        let example = examples[ex_idx() % examples.len()];
-        let full = example.chars().count();
-        let shown: String = example.chars().take(typed().min(full)).collect();
+        let shown = typewriter().shown();
         let ghost_class = if terminal {
             "w-80 whitespace-pre-wrap break-words font-mono text-sm text-muted-foreground/50"
         } else {
@@ -220,9 +268,8 @@ mod component {
         }
     }
 
-    fn random_prompt_example_index(len: usize, current: Option<usize>) -> usize {
-        let candidate = (js_sys::Math::random() * len as f64) as usize;
-        distinct_prompt_example_index(len, current, candidate)
+    fn random_index(len: usize) -> usize {
+        (js_sys::Math::random() * len as f64) as usize
     }
 
     fn document_visible() -> bool {
@@ -258,21 +305,14 @@ mod component {
 
     fn start_prompt_typewriter(
         examples: &'static [&'static str],
-        mut ex_idx: Signal<usize>,
-        mut typed: Signal<usize>,
+        mut typewriter: Signal<PromptTypewriter>,
         cb_cell: PromptTimerCallback,
         timer_cell: Rc<RefCell<Option<i32>>>,
     ) {
         let cb = Closure::wrap(Box::new(move || {
-            let idx = *ex_idx.peek();
-            let full = examples[idx % examples.len()].chars().count();
-            let t = *typed.peek();
-            if let Some(next) = next_prompt_typed_count(t, full) {
-                typed.set(next);
-            } else {
-                typed.set(0);
-                ex_idx.set(random_prompt_example_index(examples.len(), Some(idx)));
-            }
+            let mut next = *typewriter.peek();
+            next.advance(random_index(examples.len()));
+            typewriter.set(next);
         }) as Box<dyn FnMut()>);
         if let Some(win) = web_sys::window()
             && let Ok(id) = win.set_interval_with_callback_and_timeout_and_arguments_0(
@@ -286,18 +326,17 @@ mod component {
     }
 }
 
-#[cfg(web)]
-pub use component::PromptGhost;
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EXAMPLES: &[&str] = &["abc", "defgh"];
 
     #[test]
     fn prompt_example_index_never_repeats_current() {
         for current in 0..4 {
             assert_ne!(
-                distinct_prompt_example_index(4, Some(current), current),
+                PromptTypewriter::distinct_index(4, Some(current), current),
                 current
             );
         }
@@ -305,14 +344,15 @@ mod tests {
 
     #[test]
     fn prompt_typewriter_resets_after_pause() {
-        let full = 12;
-        assert_eq!(
-            next_prompt_typed_count(full + PROMPT_PAUSE_TICKS - 1, full),
-            Some(full + PROMPT_PAUSE_TICKS)
-        );
-        assert_eq!(
-            next_prompt_typed_count(full + PROMPT_PAUSE_TICKS, full),
-            None
-        );
+        let mut typewriter = PromptTypewriter::new(EXAMPLES, 0);
+        let full = EXAMPLES[0].chars().count();
+        for _ in 0..full + PromptTypewriter::PAUSE_TICKS {
+            typewriter.advance(0);
+        }
+        assert_eq!(typewriter.shown(), "abc");
+
+        typewriter.advance(1);
+        assert_eq!(typewriter.shown(), "");
+        assert_eq!(typewriter.index, 1);
     }
 }

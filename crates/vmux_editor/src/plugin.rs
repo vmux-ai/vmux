@@ -1800,7 +1800,7 @@ fn on_knowledge_link_open(
 ) {
     let entity = trigger.event().webview;
     let request = &trigger.event().payload;
-    let root = vmux_core::knowledge::knowledge_dir();
+    let root = vmux_core::knowledge::KnowledgeVault::user().into_root();
     let requested = PathBuf::from(&request.path);
     let path = if request.create {
         let Ok(relative) = requested.strip_prefix(&root) else {
@@ -1825,7 +1825,7 @@ fn on_knowledge_link_open(
             path
         } else {
             let relative = relative.to_string_lossy();
-            match vmux_core::knowledge::write_note(
+            match vmux_core::knowledge::KnowledgeVault::user().write_note(
                 Some(&relative),
                 &request.title,
                 &format!("# {}", request.title),
@@ -2588,18 +2588,18 @@ fn on_file_property_edit(
         return;
     }
     let text = edit.core.buffer.text();
-    let updated =
-        match vmux_core::knowledge::edit_markdown_property(&text, &trigger.event().payload) {
-            Ok(updated) => updated,
-            Err(message) => {
-                commands.trigger(BinHostEmitEvent::from_rkyv(
-                    entity,
-                    FILE_ERROR_EVENT,
-                    &FileErrorEvent { message },
-                ));
-                return;
-            }
-        };
+    let updated = match vmux_core::knowledge::Frontmatter::of(&text).apply(&trigger.event().payload)
+    {
+        Ok(updated) => updated,
+        Err(message) => {
+            commands.trigger(BinHostEmitEvent::from_rkyv(
+                entity,
+                FILE_ERROR_EVENT,
+                &FileErrorEvent { message },
+            ));
+            return;
+        }
+    };
     if updated == text {
         return;
     }
@@ -3238,7 +3238,7 @@ fn run_explorer_mutation(
                 .ok_or_else(|| "Explorer root cannot be changed".to_string())?
                 .to_path_buf();
             let next_path = path.with_file_name(&name);
-            let knowledge_root = vmux_core::knowledge::knowledge_dir();
+            let knowledge_root = vmux_core::knowledge::KnowledgeVault::user().into_root();
             let rename_plan = (root
                 .canonicalize()
                 .ok()

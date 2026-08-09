@@ -1,7 +1,7 @@
 //! Subscribing a page to one typed host event.
 
-use crate::hooks::Host;
-use crate::hooks::event_listener::{try_cef_bin_listen, try_emit_page_ready};
+use crate::host::Host;
+use crate::host::event_listener::{try_cef_bin_listen, try_emit_page_ready};
 use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;

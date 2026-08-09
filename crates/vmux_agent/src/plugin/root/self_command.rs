@@ -708,7 +708,11 @@ pub(crate) fn handle_agent_self_commands(
             } => match resolve_self_pane(*anchor, &agent_terms, &ctx.child_of_q) {
                 None => AgentCommandResult::Error("agent pane not found".to_string()),
                 Some((_, pane)) => {
-                    match vmux_core::knowledge::write_note(path.as_deref(), title, content) {
+                    match vmux_core::knowledge::KnowledgeVault::user().write_note(
+                        path.as_deref(),
+                        title,
+                        content,
+                    ) {
                         Ok(path) => {
                             writers.open_beside.write(vmux_layout::OpenBesideRequest {
                                 pane,

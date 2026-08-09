@@ -7,8 +7,8 @@
 
 use dioxus::prelude::Signal;
 
-use crate::hooks::Host;
-use crate::hooks::transport::PageHost;
+use crate::host::Host;
+use crate::host::transport::PageHost;
 
 impl Host {
     /// No default. A native host installs its own transport, and a page served by nothing says so

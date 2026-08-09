@@ -1318,7 +1318,7 @@ fn session_meta_for_agent(
     }
     session_meta_for_agent_with_knowledge(
         agent_id,
-        &vmux_core::knowledge::agent_context_prompt(),
+        &vmux_core::knowledge::AgentPrompt::of("").into_string(),
         effort,
     )
 }

@@ -30,9 +30,9 @@ impl KeyStrokePlugin {
 #[cfg(not(web))]
 impl bevy::prelude::Plugin for KeyStrokePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(
-            KeyStroke,
-        )>::for_hosts(Self::SENDERS));
+        app.add_plugins(
+            bevy_cef::prelude::BinEventEmitterPlugin::<(KeyStroke,)>::for_hosts(Self::SENDERS),
+        );
     }
 }
 

@@ -431,11 +431,7 @@ pub use agent_config::sync_external_agent_configs;
 #[cfg(not(web))]
 pub use index::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
 #[cfg(not(web))]
-pub use store::{
-    agent_context_prompt, agent_memories_prompt, agent_skills_prompt, append_agent_context,
-    append_agent_memories, append_agent_skills, configured_skill_files, edit_markdown_property,
-    knowledge_dir, memories_dir, migrate_external_memories, skills_dir, write_note,
-};
+pub use store::{AgentPrompt, Frontmatter, KnowledgeVault, MemoriesDir, SkillsDir};
 
 #[cfg(test)]
 mod tests {

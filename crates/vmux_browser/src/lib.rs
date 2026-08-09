@@ -4616,9 +4616,10 @@ fn on_side_sheet_command_emit(
             }
         }
         "open_knowledge_path" => {
-            let Some(mut url) =
-                knowledge_path_url(&vmux_core::knowledge::knowledge_dir(), Path::new(&evt.path))
-            else {
+            let Some(mut url) = knowledge_path_url(
+                &vmux_core::knowledge::KnowledgeVault::user().into_root(),
+                Path::new(&evt.path),
+            ) else {
                 return;
             };
             if evt.stack_index > 0 && !Path::new(&evt.path).is_dir() {

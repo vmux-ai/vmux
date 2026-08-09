@@ -91,9 +91,7 @@ impl CliAgentStrategy for CodexStrategy {
         args.push("-c".into());
         args.push(format!(
             "developer_instructions={}",
-            quote_toml(&vmux_core::knowledge::append_agent_context(
-                RUN_STEER_PROMPT
-            ))
+            quote_toml(&vmux_core::knowledge::AgentPrompt::of(RUN_STEER_PROMPT).into_string())
         ));
         args.push("-c".into());
         args.push("features.hooks=true".into());
@@ -253,7 +251,9 @@ fn build_skills_config_override(skill_files: &[PathBuf]) -> Option<String> {
 }
 
 pub(crate) fn codex_disabled_skill_files() -> Vec<PathBuf> {
-    let mut files = vmux_core::knowledge::configured_skill_files();
+    let mut files = vmux_core::knowledge::KnowledgeVault::user()
+        .skills()
+        .skill_files();
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"));

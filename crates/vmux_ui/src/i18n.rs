@@ -260,26 +260,6 @@ pub enum TranslationValue<'a> {
     Number(i64),
 }
 
-/// [`Locale::preferred`] as a raw tag, for callers that still thread locales around as `String`.
-pub fn preferred_locale() -> String {
-    Locale::preferred().into_string()
-}
-
-/// [`Locale::requested`] as a raw tag, for callers that still thread locales around as `String`.
-pub fn requested_locale(override_locale: Option<&str>) -> String {
-    Locale::requested(override_locale).into_string()
-}
-
-/// [`Locale::translate`] for callers that hold a raw tag rather than a [`Locale`].
-pub fn translate_for(locale: &str, id: &str) -> String {
-    Locale::from(locale).translate(id)
-}
-
-/// [`Locale::register_catalog`] for callers that hold a raw tag rather than a [`Locale`].
-pub fn register_catalog(locale: &str, source: &str) -> Result<(), String> {
-    Locale::from(locale).register_catalog(source)
-}
-
 #[cfg(not(web))]
 fn platform_locale() -> Option<String> {
     sys_locale::get_locale()

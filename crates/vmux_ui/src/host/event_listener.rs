@@ -1,11 +1,10 @@
 //! The host bridge: encoding a payload, handing it to whatever transport is installed, and
 //! naming every way that can fail.
-//!
-//! No hooks live here — see the `use_*` modules beside it for those.
 
 use std::fmt;
 
-use crate::hooks::transport::{decode_bin_payload, emit_bytes, listen_bytes};
+use crate::host::Host;
+use crate::host::transport::HostPayload;
 
 const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
@@ -19,7 +18,7 @@ pub enum EventListenerError {
     NoEmitMethod,
     EmitNotCallable,
     SerializePayload,
-    /// No [`crate::hooks::transport::PageHost`] installed on a target with no default.
+    /// No [`crate::host::transport::PageHost`] installed on a target with no default.
     NoHost,
     /// The installed host has no route for that event id. Unlike the other variants this is not a
     /// fault: a host that can only serve part of a page says so rather than silently succeeding.
@@ -58,7 +57,7 @@ where
 {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(payload)
         .map_err(|_| EventListenerError::SerializePayload)?;
-    emit_bytes(std::any::type_name::<T>(), &bytes)
+    Host::emit(std::any::type_name::<T>(), &bytes)
 }
 
 pub fn try_cef_bin_listen<T, F>(name: &str, on_event: F) -> Result<(), EventListenerError>
@@ -69,10 +68,10 @@ where
     F: FnMut(T) + 'static,
 {
     let mut on_event = on_event;
-    listen_bytes(
+    Host::listen(
         name,
         Box::new(move |bytes| {
-            if let Some(msg) = decode_bin_payload::<T>(bytes) {
+            if let Some(msg) = HostPayload::new(bytes).decode::<T>() {
                 on_event(msg);
             }
         }),
@@ -85,5 +84,5 @@ struct PageReadyPayload {}
 pub fn try_emit_page_ready() -> Result<(), EventListenerError> {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&PageReadyPayload {})
         .map_err(|_| EventListenerError::SerializePayload)?;
-    emit_bytes(PAGE_READY_BIN_EVENT_ID, &bytes)
+    Host::emit(PAGE_READY_BIN_EVENT_ID, &bytes)
 }

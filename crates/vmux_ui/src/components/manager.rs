@@ -1,4 +1,5 @@
-use crate::hooks::{MenuDirection, move_selection, use_selector};
+use crate::hooks::use_selector;
+use crate::list_nav::{MenuDirection, move_selection};
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

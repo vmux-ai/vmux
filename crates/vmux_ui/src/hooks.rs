@@ -1,26 +1,12 @@
 //! Dioxus hooks connecting a page to whatever hosts it.
 //!
-//! One hook per module, named after it. [`transport`] is the seam underneath them: the desktop
-//! reaches Bevy across a CEF process boundary, a native host handles messages in-process. Pages
-//! call the same hooks either way.
+//! One hook per module, named after it, and nothing else — the platform seam they are built on is
+//! [`crate::host`], the keystroke encoder is `crate::key_stroke` and the pure keyboard logic is
+//! [`crate::list_nav`]. Pages call the same hooks whichever frontend they are compiled for.
 //!
-//! Which frontend a page is compiled for decides the rest — whether there is a default transport,
-//! whether a failed subscription is worth retrying, and whether there is a document to write to.
-//! `Host` names those, implemented once in `cef_host` and once in `native_host`, so the hooks
-//! themselves carry no target test.
-//!
-//! [`event_listener`], [`key_stroke`] and [`list_nav`] hold no hooks — they are the host bridge,
-//! the keystroke encoder and the pure keyboard logic that the hooks here are built on.
+//! The re-exports below keep `vmux_ui::hooks::*` resolving for pages that import the seam through
+//! here; new code should reach for the owning module.
 
-#[cfg(web)]
-pub mod cef_host;
-pub mod event_listener;
-#[cfg(web)]
-pub mod key_stroke;
-pub mod list_nav;
-#[cfg(not(web))]
-mod native_host;
-pub mod transport;
 mod use_event;
 mod use_listener;
 #[cfg(web)]
@@ -28,29 +14,25 @@ mod use_mobile;
 mod use_selector;
 mod use_theme;
 
-/// What the frontend hosting a page can do for it, decided at compile time.
-///
-/// Every capability is implemented once per frontend in a sibling module — exactly one of which is
-/// compiled. Distinct from [`transport::PageHost`], which an app installs at runtime and which two
-/// builds of the same frontend may answer differently; this one *is* the target.
-pub(crate) struct Host;
-
-#[allow(unused_imports)]
-pub use event_listener::{EventListenerError, send, try_cef_bin_listen, try_emit_page_ready};
-
-#[cfg(web)]
-pub use cef_host::decode_bin_host_emit_js;
-
-#[cfg(web)]
-pub use key_stroke::WebKey;
-
-pub use list_nav::{
-    ListKey, MenuDirection, choice_number_index, list_key, menu_direction, move_selection,
-};
-pub use transport::{PageHost, install_host};
 pub use use_event::use_event;
 pub use use_listener::{BevyState, use_listener};
 #[cfg(web)]
 pub use use_mobile::use_mobile;
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
+
+#[allow(unused_imports)]
+pub use crate::host::event_listener::{
+    EventListenerError, send, try_cef_bin_listen, try_emit_page_ready,
+};
+pub use crate::host::transport;
+
+#[cfg(web)]
+pub use crate::host::cef::decode_bin_host_emit_js;
+
+#[cfg(web)]
+pub use crate::key_stroke::WebKey;
+
+pub use crate::list_nav::{
+    ListKey, MenuDirection, choice_number_index, list_key, menu_direction, move_selection,
+};

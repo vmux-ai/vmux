@@ -66,7 +66,9 @@ impl CliAgentStrategy for VibeStrategy {
                 "VIBE_SKILL_PATHS".to_string(),
                 merged_skill_paths(
                     std::env::var("VIBE_SKILL_PATHS").ok().as_deref(),
-                    &vmux_core::knowledge::skills_dir(),
+                    &vmux_core::knowledge::KnowledgeVault::user()
+                        .skills()
+                        .into_path(),
                 ),
             ),
         ]

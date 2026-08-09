@@ -11,11 +11,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::hooks::Host;
-use crate::hooks::event_listener::EventListenerError;
-
-/// Receives the raw payload bytes of one host event.
-pub type BytesListener = Box<dyn FnMut(&[u8])>;
+use crate::host::Host;
+use crate::host::event_listener::EventListenerError;
 
 /// A page's channel to whatever is hosting it.
 ///
@@ -30,42 +27,65 @@ pub trait PageHost {
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
 }
 
-thread_local! {
-    static HOST: RefCell<Option<Rc<dyn PageHost>>> = const { RefCell::new(None) };
-}
+/// Receives the raw payload bytes of one host event.
+pub type BytesListener = Box<dyn FnMut(&[u8])>;
 
 /// Install the host for this thread. Call once, before the first page mounts.
+///
+/// An embedding app calls this at startup the way a runtime calls `main` — before there is a page,
+/// and so before there is a [`Host`] for it to hang off.
 pub fn install_host(host: Rc<dyn PageHost>) {
     HOST.with(|slot| *slot.borrow_mut() = Some(host));
 }
 
-fn with_host<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerError> {
-    let installed = HOST.with(|slot| slot.borrow().clone());
-    if let Some(host) = installed {
-        return Ok(f(host.as_ref()));
+impl Host {
+    pub(crate) fn emit(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        Self::with_installed(|host| host.send(id, bytes))?
     }
-    let Some(fallback) = Host::fallback() else {
-        return Err(EventListenerError::NoHost);
-    };
-    Ok(f(fallback))
+
+    pub(crate) fn listen(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
+        Self::with_installed(|host| host.listen(id, on_bytes))?
+    }
+
+    /// The host an app installed, or the one this target assumes when nobody did.
+    fn with_installed<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerError> {
+        let installed = HOST.with(|slot| slot.borrow().clone());
+        if let Some(host) = installed {
+            return Ok(f(host.as_ref()));
+        }
+        let Some(fallback) = Self::fallback() else {
+            return Err(EventListenerError::NoHost);
+        };
+        Ok(f(fallback))
+    }
 }
 
-pub fn emit_bytes(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-    with_host(|host| host.send(id, bytes))?
+/// The bytes of one host event, before anything has read a type into them.
+///
+/// Every transport delivers the same thing and only the delivery differs, so decoding hangs off
+/// the payload rather than off whichever bridge happened to carry it.
+pub struct HostPayload<'a>(&'a [u8]);
+
+impl<'a> HostPayload<'a> {
+    pub fn new(bytes: &'a [u8]) -> Self {
+        Self(bytes)
+    }
+
+    /// Read the payload as `T`, or `None` if the bytes are not a valid archived `T`.
+    pub fn decode<T>(&self) -> Option<T>
+    where
+        T: rkyv::Archive,
+        T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
+            + for<'b> rkyv::bytecheck::CheckBytes<
+                rkyv::api::high::HighValidator<'b, rkyv::rancor::Error>,
+            >,
+    {
+        rkyv::from_bytes::<T, rkyv::rancor::Error>(self.0).ok()
+    }
 }
 
-pub fn listen_bytes(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
-    with_host(|host| host.listen(id, on_bytes))?
-}
-
-/// Decode a host payload. Shared by every transport — only the delivery differs.
-pub fn decode_bin_payload<T>(bytes: &[u8]) -> Option<T>
-where
-    T: rkyv::Archive,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    rkyv::from_bytes::<T, rkyv::rancor::Error>(bytes).ok()
+thread_local! {
+    static HOST: RefCell<Option<Rc<dyn PageHost>>> = const { RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -104,10 +124,10 @@ mod tests {
 
         let seen = Rc::new(RefCell::new(Vec::<Ping>::new()));
         let sink = seen.clone();
-        listen_bytes(
+        Host::listen(
             "ping",
             Box::new(move |bytes| {
-                if let Some(ping) = decode_bin_payload::<Ping>(bytes) {
+                if let Some(ping) = HostPayload::new(bytes).decode::<Ping>() {
                     sink.borrow_mut().push(ping);
                 }
             }),
@@ -115,8 +135,8 @@ mod tests {
         .unwrap();
 
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&Ping { value: 7 }).unwrap();
-        emit_bytes("ping", &bytes).unwrap();
-        emit_bytes("other", &bytes).unwrap();
+        Host::emit("ping", &bytes).unwrap();
+        Host::emit("other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
     }

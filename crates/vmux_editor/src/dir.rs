@@ -46,7 +46,10 @@ pub fn parent_listing(path: &Path) -> (String, Vec<FileDirEntry>) {
 /// (or its parent when `start` is a file). Falls back to the containing
 /// directory when no git root is found.
 pub fn project_root(start: &Path) -> std::path::PathBuf {
-    project_root_with_knowledge(start, &vmux_core::knowledge::knowledge_dir())
+    project_root_with_knowledge(
+        start,
+        &vmux_core::knowledge::KnowledgeVault::user().into_root(),
+    )
 }
 
 fn project_root_with_knowledge(start: &Path, knowledge: &Path) -> std::path::PathBuf {

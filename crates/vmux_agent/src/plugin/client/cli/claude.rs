@@ -68,7 +68,7 @@ impl CliAgentStrategy for ClaudeStrategy {
             "--allowedTools".to_string(),
             ALLOWED_TOOLS.to_string(),
             "--append-system-prompt".to_string(),
-            vmux_core::knowledge::append_agent_context(RUN_STEER_PROMPT),
+            vmux_core::knowledge::AgentPrompt::of(RUN_STEER_PROMPT).into_string(),
         ];
         if let Some(sid) = session_id {
             args.push("--resume".to_string());

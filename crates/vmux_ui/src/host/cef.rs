@@ -1,8 +1,8 @@
 //! The wasm frontend: a page inside a CEF browser, reaching the Bevy process.
 //!
-//! The framing is asymmetric and load-bearing. Page→host sends one buffer carrying a
-//! `vmux-bin-ipc-v1` envelope whose id the Bevy side matches with `bin_ipc_event_id::<E>()`;
-//! host→page arrives as a bare `ArrayBuffer` under a short string id. Both are preserved exactly.
+//! The framing is asymmetric and load-bearing. Page→host sends one [`BinIpcEnvelope`] whose id the
+//! Bevy side matches with `bin_ipc_event_id::<E>()`; host→page arrives as a bare `ArrayBuffer`
+//! under a short string id. Both are preserved exactly.
 //!
 //! This is also the frontend that has a real document, so the parts of theming and scrolling that
 //! reach for one are answered here.
@@ -14,10 +14,10 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
 use web_sys::window;
 
-use crate::bin_ipc_envelope::encode_bin_ipc_envelope;
-use crate::hooks::Host;
-use crate::hooks::event_listener::EventListenerError;
-use crate::hooks::transport::{BytesListener, PageHost, decode_bin_payload};
+use crate::host::Host;
+use crate::host::bin_ipc_envelope::BinIpcEnvelope;
+use crate::host::event_listener::EventListenerError;
+use crate::host::transport::{BytesListener, HostPayload, PageHost};
 
 impl Host {
     /// The CEF bridge, assumed when no host installs one — which is every desktop page.
@@ -91,10 +91,10 @@ impl PageHost for CefHost {
         let cef = window_cef()?;
         let emit_fn = cef_bin_emit_fn(&cef)?;
 
-        let envelope = encode_bin_ipc_envelope(id, bytes);
-        let buffer = ArrayBuffer::new(envelope.len() as u32);
+        let envelope = BinIpcEnvelope::new(id, bytes);
+        let buffer = ArrayBuffer::new(envelope.as_bytes().len() as u32);
         let view = Uint8Array::new(&buffer);
-        view.copy_from(&envelope);
+        view.copy_from(envelope.as_bytes());
 
         let _ = emit_fn.call1(&cef, &buffer.into());
         Ok(())
@@ -124,7 +124,7 @@ where
     T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
         + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
 {
-    js_value_bytes(e).and_then(|bytes| decode_bin_payload::<T>(&bytes))
+    js_value_bytes(e).and_then(|bytes| HostPayload::new(&bytes).decode::<T>())
 }
 
 /// Copy an `ArrayBuffer` or `Uint8Array` out of JS.
