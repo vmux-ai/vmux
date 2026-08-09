@@ -83,6 +83,7 @@ android: mobile-android-run
 
 mobile-ios: ensure-mobile-ios-deps
 	"$(DX_BIN)" build --ios -p vmux_mobile
+	./scripts/inject-ios-resources.sh
 
 mobile-android: ensure-mobile-android-deps
 	"$(DX_BIN)" build --android -p vmux_mobile
