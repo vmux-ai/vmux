@@ -9,7 +9,7 @@ use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener};
+use vmux_ui::hooks::{emit, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -54,34 +54,34 @@ struct ExplorerNotice {
 }
 
 fn open_file(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+    let _ = emit(&FileOpenEvent { path });
 }
 
 fn toggle_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreeToggle { path });
+    let _ = emit(&ExplorerTreeToggle { path });
 }
 
 fn prefetch_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreePrefetch { path });
+    let _ = emit(&ExplorerTreePrefetch { path });
 }
 
 fn refresh_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreeRefresh { path });
+    let _ = emit(&ExplorerTreeRefresh { path });
 }
 
 fn close_editor(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerCloseEditor { path });
+    let _ = emit(&ExplorerCloseEditor { path });
 }
 
 fn goto_line(line: u32) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerGoto {
+    let _ = emit(&ExplorerGoto {
         path: String::new(),
         line,
     });
 }
 
 fn open_search_match(result: ExplorerSearchMatch) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerSearchOpen {
+    let _ = emit(&ExplorerSearchOpen {
         path: result.path,
         line: result.line,
         col: result.col,
@@ -98,7 +98,7 @@ fn search_result_path(root: &str, path: &str) -> String {
 }
 
 fn create_entry(parent: String, name: String, is_dir: bool) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerCreate {
+    let _ = emit(&ExplorerCreate {
         parent,
         name,
         is_dir,
@@ -106,11 +106,11 @@ fn create_entry(parent: String, name: String, is_dir: bool) {
 }
 
 fn rename_entry(path: String, name: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerRename { path, name });
+    let _ = emit(&ExplorerRename { path, name });
 }
 
 fn delete_entry(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerDelete { path });
+    let _ = emit(&ExplorerDelete { path });
 }
 
 fn menu_position(x: f64, y: f64) -> (f64, f64) {

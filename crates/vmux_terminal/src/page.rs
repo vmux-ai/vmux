@@ -12,7 +12,7 @@ use dioxus::prelude::*;
 use unicode_width::UnicodeWidthChar;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::prompt_ghost::PromptGhost;
 use wasm_bindgen::JsCast;
@@ -388,7 +388,7 @@ pub fn Page() -> Element {
                 if follow != *following.peek() {
                     following.set(follow);
                     last_scroll_req.set(if follow { u32::MAX } else { vis_first });
-                    let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
+                    let _ = emit(&TermScrollEvent {
                         top_row: vis_first,
                         follow,
                     });
@@ -406,7 +406,7 @@ pub fn Page() -> Element {
                     && last_scroll_req() != vis_first
                 {
                     last_scroll_req.set(vis_first);
-                    let _ = try_cef_bin_emit_rkyv(&TermScrollEvent {
+                    let _ = emit(&TermScrollEvent {
                         top_row: vis_first,
                         follow: false,
                     });
@@ -628,7 +628,7 @@ fn TerminalRow(
                             onclick: move |e: Event<MouseData>| {
                                 e.stop_propagation();
                                 e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&TermLinkOpenRequest { url: url.clone() });
+                                let _ = emit(&TermLinkOpenRequest { url: url.clone() });
                             },
                         }
                     }
@@ -757,7 +757,7 @@ fn do_measure(mut cell_dims: Signal<(f64, f64)>, mut client_h: Signal<f64>) {
     let vh = viewport_client_h - pad_y;
     client_h.set(viewport_client_h);
 
-    let _ = try_cef_bin_emit_rkyv(&TermResizeEvent {
+    let _ = emit(&TermResizeEvent {
         char_width: cw as f32,
         char_height: ch as f32,
         viewport_width: vw as f32,
@@ -885,7 +885,7 @@ fn emit_key(e: &Event<KeyboardData>) {
         return;
     }
     let text = (key.chars().count() == 1).then_some(key.clone());
-    let _ = try_cef_bin_emit_rkyv(&TermKeyEvent {
+    let _ = emit(&TermKeyEvent {
         key,
         code: raw.code(),
         modifiers: key_modifier_bits(raw),
@@ -942,7 +942,7 @@ fn pin_scroll_to_bottom() {
 
 /// Emit a TermMouseEvent to the Bevy host via the CEF bridge.
 fn emit_mouse(button: u8, col: u16, row: u16, modifiers: u8, pressed: bool, moving: bool) {
-    let _ = try_cef_bin_emit_rkyv(&TermMouseEvent {
+    let _ = emit(&TermMouseEvent {
         button,
         col,
         row,

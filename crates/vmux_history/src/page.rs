@@ -7,7 +7,7 @@ use crate::event::{
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::platform::now_millis;
 
@@ -22,7 +22,7 @@ fn emit_query(query: &str, offset: u32, request_id: u64) {
         limit: 50,
         request_id,
     };
-    let _ = try_cef_bin_emit_rkyv(&req);
+    let _ = emit(&req);
 }
 
 #[component]
@@ -120,7 +120,7 @@ pub fn Page() -> Element {
                             onclick: {
                                 let url = entry.url.clone();
                                 move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&HistoryOpenRequest {
+                                    let _ = emit(&HistoryOpenRequest {
                                         url: url.clone(),
                                         in_new_stack: true,
                                     });
@@ -142,7 +142,7 @@ pub fn Page() -> Element {
                                     let url_bits = entry.url_entity_bits;
                                     move |e: Event<MouseData>| {
                                         e.stop_propagation();
-                                        let _ = try_cef_bin_emit_rkyv(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                        let _ = emit(&HistoryDeleteRequest { url_entity_bits: url_bits });
                                         entries.write().retain(|x| x.url_entity_bits != url_bits);
                                     }
                                 },
@@ -168,7 +168,7 @@ pub fn Page() -> Element {
                         button {
                             class: "px-3 py-1 text-sm bg-destructive text-destructive-foreground rounded",
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&HistoryClearAllRequest);
+                                let _ = emit(&HistoryClearAllRequest);
                                 entries.write().clear();
                                 confirm_open.set(false);
                             },

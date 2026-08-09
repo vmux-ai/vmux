@@ -57,7 +57,7 @@ where
 /// Send a typed payload to the host.
 ///
 /// The event id is the payload's type name, which is what the Bevy side matches on.
-pub fn try_cef_bin_emit_rkyv<T>(payload: &T) -> Result<(), EventListenerError>
+pub fn emit<T>(payload: &T) -> Result<(), EventListenerError>
 where
     T: for<'a> rkyv::Serialize<
             rkyv::api::high::HighSerializer<

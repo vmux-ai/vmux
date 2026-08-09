@@ -22,7 +22,7 @@ use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -424,7 +424,7 @@ pub fn Page() -> Element {
                     pct: None,
                     message: translate("lsp-status-installing"),
                 }));
-                let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: package });
+                let _ = emit(&LspInstallRequest { name: package });
             }
         }
         lsp_status.set(Some(s));
@@ -666,7 +666,7 @@ pub fn Page() -> Element {
                 editor_drag_origin.set(None);
                 if explorer_resizing() {
                     explorer_resizing.set(false);
-                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
+                    let _ = emit(&ExplorerPanelWidth { px: explorer_width() });
                 }
             },
 
@@ -873,7 +873,7 @@ pub fn Page() -> Element {
                                     title: translate("editor-rendered-markdown"),
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Note);
-                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
+                                        let _ = emit(&FileViewModeSet { mode: FileViewMode::Note });
                                         let line = source_cursor().line;
                                         if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
                                             activate_note_cursor_centered(
@@ -900,7 +900,7 @@ pub fn Page() -> Element {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
                                     schedule_line_center(cursor().row, cell_dims().1, true);
-                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
+                                    let _ = emit(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
                                 {translate("editor-editor")}
@@ -912,7 +912,7 @@ pub fn Page() -> Element {
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Diff);
                                         git_nonce.set(git_nonce().wrapping_add(1));
-                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
+                                        let _ = emit(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
                                 }
@@ -929,7 +929,7 @@ pub fn Page() -> Element {
                                 keymap.set(next);
                                 ed_mode.set(vmux_core::editor::EditMode::Insert);
                                 ed_label.set(String::new());
-                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                let _ = emit(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
                                     && !note_editing()
@@ -949,7 +949,7 @@ pub fn Page() -> Element {
                                 let next_mode = vmux_core::editor::EditMode::Normal;
                                 ed_mode.set(next_mode);
                                 ed_label.set(next_mode.label().to_string());
-                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                let _ = emit(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
                                     && !note_editing()
@@ -978,7 +978,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full bg-cyan-400/20 px-2 py-0.5 font-medium text-cyan-700 hover:bg-cyan-400/30 dark:text-cyan-100",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Tidy });
+                                        let _ = emit(&FileTidyActionEvent { choice: TidyChoice::Tidy });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-tidy")}
@@ -986,7 +986,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Always });
+                                        let _ = emit(&FileTidyActionEvent { choice: TidyChoice::Always });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-always")}
@@ -994,7 +994,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
+                                        let _ = emit(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
                                         tidy_prompt.set(None);
                                     },
                                     "\u{2715}"
@@ -1060,7 +1060,7 @@ pub fn Page() -> Element {
                                             button {
                                                 class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-400/25",
                                                 onclick: move |_| {
-                                                    let _ = try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path: abs.clone() });
+                                                    let _ = emit(&FileOpenExternalRequest { path: abs.clone() });
                                                 },
                                                 {translate("editor-open-externally")}
                                             }
@@ -1185,7 +1185,7 @@ pub fn Page() -> Element {
                                             pointer.client_y() as f64,
                                             &note_blocks.read(),
                                         ) {
-                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                            let _ = emit(&FilePointerEvent {
                                                 line,
                                                 col,
                                                 extend: true,
@@ -1276,7 +1276,7 @@ pub fn Page() -> Element {
                                                             event.prevent_default();
                                                             if let Some(item) = note_input_comp_keys.get(comp_sel_clamped) {
                                                                 let (line, replace_from_col) = comp_anchor();
-                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
+                                                                let _ = emit(&FileCompletionCommit {
                                                                     line,
                                                                     replace_from_col,
                                                                     text: item.insert_text.clone(),
@@ -1298,7 +1298,7 @@ pub fn Page() -> Element {
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
                                                     }
-                                                    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+                                                    let _ = emit(&FileKeyEvent {
                                                         key,
                                                         code: raw.code(),
                                                         mods,
@@ -1330,7 +1330,7 @@ pub fn Page() -> Element {
                                                                     class: "rounded-lg px-3 py-2 text-left text-xs text-foreground/75 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
                                                                     title: "{reference.path}",
                                                                     onclick: move |_| {
-                                                                        let _ = try_cef_bin_emit_rkyv(&KnowledgeLinkOpen {
+                                                                        let _ = emit(&KnowledgeLinkOpen {
                                                                             path: open_path.clone(),
                                                                             title: open_title.clone(),
                                                                             line: Some(open_line),
@@ -1421,7 +1421,7 @@ pub fn Page() -> Element {
                                             false,
                                         ) {
                                             event.prevent_default();
-                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                            let _ = emit(&FilePointerEvent {
                                                 line,
                                                 col,
                                                 extend: true,
@@ -1458,7 +1458,7 @@ pub fn Page() -> Element {
                                             && last_scroll_req() != vis_first
                                         {
                                             last_scroll_req.set(vis_first);
-                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_row: vis_first });
+                                            let _ = emit(&FileScrollEvent { top_row: vis_first });
                                         }
                                     },
                                     div { class: "relative", style: "height:{spacer}px;",
@@ -1517,7 +1517,7 @@ pub fn Page() -> Element {
                                                                 if raw.meta_key() {
                                                                     editor_dragging.set(false);
                                                                     editor_drag_origin.set(None);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
+                                                                    let _ = emit(&FileDefinitionRequest {
                                                                         line,
                                                                         col,
                                                                     });
@@ -1528,7 +1528,7 @@ pub fn Page() -> Element {
                                                                         raw.client_y(),
                                                                     )));
                                                                     set_pointer_capture(&e, "file-scroll", true);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                    let _ = emit(&FilePointerEvent {
                                                                         line,
                                                                         col,
                                                                         extend: raw.shift_key(),
@@ -1596,7 +1596,7 @@ pub fn Page() -> Element {
                                                                 if hover_pos() != Some((ln, col)) {
                                                                     hover_pos.set(Some((ln, col)));
                                                                     lsp_hover.set(None);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FileHoverRequest {
+                                                                    let _ = emit(&FileHoverRequest {
                                                                         line: ln,
                                                                         col,
                                                                     });
@@ -1632,7 +1632,7 @@ pub fn Page() -> Element {
                                                                             onmousedown: move |e: Event<MouseData>| {
                                                                                 e.stop_propagation();
                                                                                 e.prevent_default();
-                                                                                let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                                let _ = emit(&FileFoldToggle { line: ln });
                                                                             },
                                                                             "⌄"
                                                                         }
@@ -1644,7 +1644,7 @@ pub fn Page() -> Element {
                                                                         onmousedown: move |e: Event<MouseData>| {
                                                                             e.stop_propagation();
                                                                             e.prevent_default();
-                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                            let _ = emit(&FileFoldToggle { line: ln });
                                                                         },
                                                                         "›"
                                                                     }
@@ -1773,7 +1773,7 @@ pub fn Page() -> Element {
                                                             e.prevent_default();
                                                             if let Some(it) = comp_keys.get(comp_sel_clamped) {
                                                                 let (cline, cfrom) = comp_anchor();
-                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
+                                                                let _ = emit(&FileCompletionCommit {
                                                                     line: cline,
                                                                     replace_from_col: cfrom,
                                                                     text: it.insert_text.clone(),
@@ -1924,7 +1924,7 @@ pub fn Page() -> Element {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
                             onmousedown: move |e: Event<MouseData>| {
                                 e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest { line, col });
+                                let _ = emit(&FileDefinitionRequest { line, col });
                                 ctx_menu.set(None);
                             },
                             {translate("editor-go-to-definition")}
@@ -1933,7 +1933,7 @@ pub fn Page() -> Element {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
                             onmousedown: move |e: Event<MouseData>| {
                                 e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&FileReferencesRequest { line, col });
+                                let _ = emit(&FileReferencesRequest { line, col });
                                 ctx_menu.set(None);
                             },
                             {translate("editor-find-references")}
@@ -1984,7 +1984,7 @@ pub fn Page() -> Element {
                                     "Enter" => {
                                         e.prevent_default();
                                         if let Some(it) = refs.read().get(refs_sel()) {
-                                            let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
+                                            let _ = emit(&FileGotoRequest {
                                                 path: it.path.clone(),
                                                 line: it.line,
                                                 col: it.col,
@@ -2016,7 +2016,7 @@ pub fn Page() -> Element {
                                             class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                                             onmousedown: move |e: Event<MouseData>| {
                                                 e.prevent_default();
-                                                let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
+                                                let _ = emit(&FileGotoRequest {
                                                     path: nav.0.clone(),
                                                     line: nav.1,
                                                     col: nav.2,
@@ -2532,7 +2532,7 @@ fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
         let rect = target.get_bounding_client_rect();
         let col =
             prefix + note_col_at_point(&target, client_x, rect.top() + rect.height() / 2.0, &text);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+        let _ = emit(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -2564,7 +2564,7 @@ fn place_note_block_caret(
         };
         let offset = note_col_at_point(&target, client_x, client_y, &source);
         let (line, col) = note_source_position(&source, start_line, offset);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+        let _ = emit(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -2933,7 +2933,7 @@ fn emit_property_edit(
     values: Vec<String>,
     remove: bool,
 ) {
-    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
+    let _ = emit(&FilePropertyEdit {
         original_key,
         key,
         kind,
@@ -3265,7 +3265,7 @@ fn NoteBlockView(
                                 );
                                 note_dragging.set(true);
                                 set_pointer_capture(&event, "file-scroll", true);
-                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                let _ = emit(&FilePointerEvent {
                                     line,
                                     col,
                                     extend,
@@ -3347,7 +3347,7 @@ fn NoteBlockView(
                                                     );
                                                 note_dragging.set(true);
                                                 set_pointer_capture(&event, "file-scroll", true);
-                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                let _ = emit(&FilePointerEvent {
                                                     line,
                                                     col,
                                                     extend,
@@ -3454,15 +3454,15 @@ fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<Str
 }
 
 fn request_preview(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
+    let _ = emit(&FilePreviewRequest { path, thumb: false });
 }
 
 fn request_thumb(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: true });
+    let _ = emit(&FilePreviewRequest { path, thumb: true });
 }
 
 fn open_path(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+    let _ = emit(&FileOpenEvent { path });
 }
 
 fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
@@ -3736,7 +3736,7 @@ fn set_explorer_visible(
     request_id.set(next_request_id);
     preferred_visible.set(next);
     visible.set(next && explorer_has_room(width()));
-    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
+    let _ = emit(&ExplorerPanelSetVisible {
         visible: next,
         client_id: client_id(),
         request_id: next_request_id,
@@ -3875,7 +3875,7 @@ fn reveal_current_in_explorer(
     mode: Signal<Mode>,
 ) {
     if visible() {
-        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
+        let _ = emit(&ExplorerRevealCurrent);
     } else {
         set_explorer_visible(
             true,
@@ -4328,7 +4328,7 @@ fn send_committed_text() {
     {
         let v = el.value();
         if !v.is_empty() {
-            let _ = try_cef_bin_emit_rkyv(&FileTextInput { text: v });
+            let _ = emit(&FileTextInput { text: v });
             el.set_value("");
         }
     }
@@ -4358,7 +4358,7 @@ fn forward_file_key(
         return false;
     }
     event.prevent_default();
-    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
+    let _ = emit(&FileKeyEvent {
         key,
         code: raw.code(),
         mods,
@@ -4435,7 +4435,7 @@ fn emit_video_rect(path: &str) {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&FileVideoRect {
+    let _ = emit(&FileVideoRect {
         path: path.to_string(),
         x: rect.left() as f32,
         y: rect.top() as f32,
@@ -4538,5 +4538,5 @@ fn do_measure(
         return;
     }
     last_resize.set(next.clone());
-    let _ = try_cef_bin_emit_rkyv(&next);
+    let _ = emit(&next);
 }

@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn current_agent_segment() -> String {
@@ -60,7 +60,7 @@ pub fn Page() -> Element {
     {
         let seg = segment.clone();
         use_effect(move || {
-            let _ = try_cef_bin_emit_rkyv(&AgentSetupPrereqRequest { agent: seg.clone() });
+            let _ = emit(&AgentSetupPrereqRequest { agent: seg.clone() });
         });
     }
 
@@ -149,7 +149,7 @@ pub fn Page() -> Element {
                     onclick: move |_| {
                         installing.set(true);
                         failed.set(false);
-                        let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: emit_segment.clone() });
+                        let _ = emit(&AgentInstallRunRequest { agent: emit_segment.clone() });
                     },
                     if installing() {
                         span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" }

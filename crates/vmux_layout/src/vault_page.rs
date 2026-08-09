@@ -11,7 +11,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -960,7 +960,7 @@ fn send_recovery_action(
     recovery_key: String,
 ) {
     pending.set(Some(action));
-    if try_cef_bin_emit_rkyv(&VaultActionRequest {
+    if emit(&VaultActionRequest {
         action,
         repository: String::new(),
         private: true,
@@ -1057,7 +1057,7 @@ fn start_passkey(
         };
         match result {
             Ok((credential_id, prf_output)) => {
-                if let Err(error) = try_cef_bin_emit_rkyv(&VaultActionRequest {
+                if let Err(error) = emit(&VaultActionRequest {
                     action,
                     repository: String::new(),
                     private: true,
@@ -1351,7 +1351,7 @@ fn js_error(error: JsValue) -> String {
 }
 
 fn request_snapshot(load_repositories: bool) {
-    let _ = try_cef_bin_emit_rkyv(&VaultRefreshRequest { load_repositories });
+    let _ = emit(&VaultRefreshRequest { load_repositories });
 }
 
 fn send_action(
@@ -1361,7 +1361,7 @@ fn send_action(
     private: bool,
 ) {
     pending.set(Some(action));
-    let _ = try_cef_bin_emit_rkyv(&VaultActionRequest {
+    let _ = emit(&VaultActionRequest {
         action,
         repository,
         private,
@@ -1373,7 +1373,7 @@ fn send_action(
 
 fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name: &str) {
     pending.set(Some(VaultAction::CreateCloudFolder));
-    let _ = try_cef_bin_emit_rkyv(&VaultActionRequest {
+    let _ = emit(&VaultActionRequest {
         action: VaultAction::CreateCloudFolder,
         repository: root.to_string(),
         private: true,

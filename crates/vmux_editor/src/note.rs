@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
-use vmux_ui::hooks::try_cef_bin_emit_rkyv;
+use vmux_ui::hooks::emit;
 use vmux_ui::i18n::translate;
 
 use crate::page_model::{heading_class, span_style, table_align_style};
@@ -272,7 +272,7 @@ fn MdInlineView(inline: MdInline, inline_key: usize) -> Element {
                     },
                     onclick: move |event: Event<MouseData>| {
                         event.stop_propagation();
-                        let _ = try_cef_bin_emit_rkyv(&vmux_core::event::KnowledgeLinkOpen {
+                        let _ = emit(&vmux_core::event::KnowledgeLinkOpen {
                             path: open_path.clone(),
                             title: open_title.clone(),
                             line: open_line,

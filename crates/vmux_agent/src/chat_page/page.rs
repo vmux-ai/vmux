@@ -43,8 +43,8 @@ use vmux_wire::prompt_media::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{
-    choice_number_index, menu_direction, move_selection, try_cef_bin_emit_rkyv, use_listener,
-    use_selector, use_theme,
+    choice_number_index, emit, menu_direction, move_selection, use_listener, use_selector,
+    use_theme,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
@@ -199,7 +199,7 @@ fn request_chat_history(before: u32, mut loading: Signal<bool>) {
     if before == 0 || *loading.peek() {
         return;
     }
-    if try_cef_bin_emit_rkyv(&ChatHistoryRequest {
+    if emit(&ChatHistoryRequest {
         before,
         limit: CHAT_HISTORY_PAGE_SIZE,
     })
@@ -247,7 +247,7 @@ fn request_attachment_previews(
         })
         .map(|attachment| attachment.path.clone())
         .collect::<Vec<_>>();
-    if !paths.is_empty() && try_cef_bin_emit_rkyv(&ChatAttachmentPreviewRequest { paths }).is_ok() {
+    if !paths.is_empty() && emit(&ChatAttachmentPreviewRequest { paths }).is_ok() {
         requests.set(requested);
     }
 }
@@ -319,7 +319,7 @@ fn select_media_entry(
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
-        if try_cef_bin_emit_rkyv(&ChatAttachPaths {
+        if emit(&ChatAttachPaths {
             paths: vec![entry.path.clone()],
         })
         .is_err()
@@ -567,7 +567,7 @@ pub fn Page(
         let should_fetch = should_fetch_resume(&draft(), &slash_cmds.read());
         if should_fetch && !resume_requested() {
             resume_loading.set(true);
-            if try_cef_bin_emit_rkyv(&ResumeListRequest).is_err() {
+            if emit(&ResumeListRequest).is_err() {
                 resume_loading.set(false);
             }
             resume_requested.set(true);
@@ -596,7 +596,7 @@ pub fn Page(
         media_requested_query.set(Some(query.clone()));
         media_entries.set(Vec::new());
         media_loading.set(true);
-        if try_cef_bin_emit_rkyv(&ChatMediaListRequest { request_id, query }).is_err() {
+        if emit(&ChatMediaListRequest { request_id, query }).is_err() {
             media_loading.set(false);
         }
     });
@@ -820,7 +820,7 @@ pub fn Page(
                 e.prevent_default();
                 let selected = *menu_sel.peek();
                 let index = choice_number_index(&key, pending_choices.len()).unwrap_or(selected);
-                if try_cef_bin_emit_rkyv(&ChatChoiceSelected {
+                if emit(&ChatChoiceSelected {
                     index: index as u32,
                 })
                 .is_ok()
@@ -980,7 +980,7 @@ pub fn Page(
             );
         } else if e.key() == Key::Escape {
             e.prevent_default();
-            let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+            let _ = emit(&ChatEscape);
             if should_clear_draft_on_escape(
                 streaming,
                 queued.peek().is_empty(),
@@ -993,7 +993,7 @@ pub fn Page(
             && !has_text_selection()
         {
             e.prevent_default();
-            let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+            let _ = emit(&ChatCancel);
         }
     };
 
@@ -1201,7 +1201,7 @@ pub fn Page(
                                             onclick: move |_| {
                                                 effort_current.set(String::new());
                                                 effort_menu_open.set(false);
-                                                let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: String::new() });
+                                                let _ = emit(&SetAgentEffort { agent_key: key.clone(), level: String::new() });
                                                 focus_prompt_end(PROMPT_INPUT_ID);
                                             },
                                             span { class: "min-w-0 flex-1 truncate", {translate("agent-effort-default")} }
@@ -1224,7 +1224,7 @@ pub fn Page(
                                                 onclick: move |_| {
                                                     effort_current.set(level_value.clone());
                                                     effort_menu_open.set(false);
-                                                    let _ = try_cef_bin_emit_rkyv(&SetAgentEffort { agent_key: key.clone(), level: level_value.clone() });
+                                                    let _ = emit(&SetAgentEffort { agent_key: key.clone(), level: level_value.clone() });
                                                     focus_prompt_end(PROMPT_INPUT_ID);
                                                 },
                                                 span { class: "min-w-0 flex-1 truncate capitalize", "{level}" }
@@ -1261,7 +1261,7 @@ pub fn Page(
                         title: "{workspace_title}",
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&ChatSelectWorkspace);
+                            let _ = emit(&ChatSelectWorkspace);
                             focus_prompt_end(PROMPT_INPUT_ID);
                         },
                         svg {
@@ -1323,7 +1323,7 @@ pub fn Page(
                             title: "Create or select a worktree for this project",
                             onmousedown: move |event| event.prevent_default(),
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&ChatCreateWorktree);
+                                let _ = emit(&ChatCreateWorktree);
                                 focus_prompt_end(PROMPT_INPUT_ID);
                             },
                             "+ Worktree"
@@ -1566,7 +1566,7 @@ pub fn Page(
                                             button {
                                                 class: "vmux-gradient-outline inline-flex items-center gap-2 self-end rounded-xl px-6 py-3 text-sm font-semibold transition hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]",
                                                 onclick: move |_| {
-                                                    let _ = try_cef_bin_emit_rkyv(&ChatOpenPage { url: "vmux://agents".to_string() });
+                                                    let _ = emit(&ChatOpenPage { url: "vmux://agents".to_string() });
                                                 },
                                                 svg {
                                                     class: "h-4 w-4 text-indigo-500",
@@ -1602,7 +1602,7 @@ pub fn Page(
 
             if !installing && let Some((call_id, name, args_json)) = approval() {
                 {
-                    let details = super::approval_details(&args_json);
+                    let details = crate::chat_page::approval::ApprovalDetail::rows(&args_json);
                     rsx! {
                         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
                             div { class: "mx-auto flex max-w-3xl flex-col gap-3",
@@ -1771,7 +1771,7 @@ pub fn Page(
                                         onmouseenter: move |_| menu_sel.set(index),
                                         class: if index == menu_sel() { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
                                         onclick: move |_| {
-                                            if try_cef_bin_emit_rkyv(&ChatChoiceSelected { index: index as u32 }).is_ok() {
+                                            if emit(&ChatChoiceSelected { index: index as u32 }).is_ok() {
                                                 choice_question.set(String::new());
                                                 choice_options.set(Vec::new());
                                                 menu_sel.set(0);
@@ -1810,7 +1810,7 @@ pub fn Page(
                                         class: "flex shrink-0 items-center rounded-lg p-1 text-foreground/35 opacity-70 transition hover:bg-foreground/10 hover:text-foreground hover:opacity-100 focus:opacity-100",
                                         title: translate("agent-cancel-queued"),
                                         onclick: move |_| {
-                                            let _ = try_cef_bin_emit_rkyv(&ChatCancelQueuedPrompt {
+                                            let _ = emit(&ChatCancelQueuedPrompt {
                                                 id: queued_prompt.id,
                                             });
                                         },
@@ -1832,7 +1832,7 @@ pub fn Page(
                                         class: "flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                                         title: translate("agent-resume-queued"),
                                         onclick: move |_| {
-                                            let _ = try_cef_bin_emit_rkyv(&ChatResume);
+                                            let _ = emit(&ChatResume);
                                         },
                                         svg {
                                             class: "h-3.5 w-3.5",
@@ -1846,7 +1846,7 @@ pub fn Page(
                                         class: "flex items-center rounded-lg p-1 text-muted-foreground transition hover:bg-foreground/10 hover:text-foreground",
                                         title: translate("agent-clear-queue"),
                                         onclick: move |_| {
-                                            let _ = try_cef_bin_emit_rkyv(&ChatClearQueue);
+                                            let _ = emit(&ChatClearQueue);
                                         },
                                         svg {
                                             class: "h-3.5 w-3.5",
@@ -1887,10 +1887,10 @@ pub fn Page(
                         },
                         on_keydown: prompt_keydown,
                         on_paste: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
+                            let _ = emit(&ChatPasteMedia);
                         },
                         on_attach: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                            let _ = emit(&ChatPickFiles);
                         },
                         on_remove_attachment: move |index| {
                             let mut next = attachments.peek().clone();
@@ -1902,9 +1902,9 @@ pub fn Page(
                         on_action: move |_| {
                             if prompt_streaming {
                                 if queued.peek().is_empty() {
-                                    let _ = try_cef_bin_emit_rkyv(&ChatCancel);
+                                    let _ = emit(&ChatCancel);
                                 } else {
-                                    let _ = try_cef_bin_emit_rkyv(&ChatEscape);
+                                    let _ = emit(&ChatEscape);
                                 }
                             } else {
                                 do_submit(
@@ -1929,7 +1929,7 @@ pub fn Page(
 fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal<usize>) {
     match name {
         "upload" => {
-            let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+            let _ = emit(&ChatPickFiles);
             draft.set(String::new());
         }
         "resume" => {
@@ -1941,11 +1941,11 @@ fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal
             draft.set("/model ".to_string());
         }
         "cli" => {
-            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "cli".into() });
+            let _ = emit(&RuntimeSwitchRequest { to: "cli".into() });
             draft.set(String::new());
         }
         "acp" => {
-            let _ = try_cef_bin_emit_rkyv(&RuntimeSwitchRequest { to: "acp".into() });
+            let _ = emit(&RuntimeSwitchRequest { to: "acp".into() });
             draft.set(String::new());
         }
         _ => {}
@@ -1953,14 +1953,14 @@ fn run_slash_command(name: &str, mut draft: Signal<String>, mut menu_sel: Signal
 }
 
 fn select_model(model: &ModelOptionEntry, mut draft: Signal<String>) {
-    let _ = try_cef_bin_emit_rkyv(&SelectModel {
+    let _ = emit(&SelectModel {
         model_id: model.id.clone(),
     });
     draft.set(String::new());
 }
 
 fn select_resume_session(session: &ResumableSessionEntry, mut draft: Signal<String>) {
-    let _ = try_cef_bin_emit_rkyv(&ResumeSession {
+    let _ = emit(&ResumeSession {
         kind: session.kind.clone(),
         sid: session.sid.clone(),
         cwd: session.cwd.clone(),
@@ -1991,7 +1991,7 @@ fn do_submit(
             size: attachment.size,
         })
         .collect();
-    if try_cef_bin_emit_rkyv(&ChatSubmit {
+    if emit(&ChatSubmit {
         text,
         attachments: attachments_to_submit,
     })
@@ -2007,7 +2007,7 @@ fn do_submit(
 }
 
 fn send_approval(call_id: String, decision: u8) -> bool {
-    try_cef_bin_emit_rkyv(&ChatApproval { call_id, decision }).is_ok()
+    emit(&ChatApproval { call_id, decision }).is_ok()
 }
 
 fn current_activity_icon(items: &[ChatItem], status: &str) -> Option<ActivityIcon> {

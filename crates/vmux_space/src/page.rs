@@ -2,7 +2,7 @@
 
 use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -132,7 +132,7 @@ fn new_space_name(typed: &str, count: usize) -> String {
 }
 
 fn emit_command(command: &str, space_id: Option<String>, name: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&SpaceCommandEvent {
+    let _ = emit(&SpaceCommandEvent {
         command: command.to_string(),
         space_id,
         name,

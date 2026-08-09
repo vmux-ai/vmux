@@ -4,7 +4,7 @@ use crate::event::{
     DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, RestartRequestEvent,
 };
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_theme};
+use vmux_ui::hooks::{emit, use_theme};
 use vmux_ui::i18n::translate;
 
 const BTN: &str = "cursor-pointer rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground transition-colors hover:border-foreground/30 hover:bg-muted";
@@ -33,7 +33,7 @@ pub fn Page() -> Element {
                         r#type: "button",
                         class: "{BTN}",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&DebugUpdateReady { version: version() });
+                            let _ = emit(&DebugUpdateReady { version: version() });
                         },
                         {translate("debug-simulate-update")}
                     }
@@ -41,7 +41,7 @@ pub fn Page() -> Element {
                         r#type: "button",
                         class: "{BTN}",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&DebugSimulateDownload);
+                            let _ = emit(&DebugSimulateDownload);
                         },
                         {translate("debug-simulate-download")}
                     }
@@ -49,7 +49,7 @@ pub fn Page() -> Element {
                         r#type: "button",
                         class: "{BTN}",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&DebugUpdateClear);
+                            let _ = emit(&DebugUpdateClear);
                         },
                         {translate("debug-clear-update")}
                     }
@@ -57,7 +57,7 @@ pub fn Page() -> Element {
                         r#type: "button",
                         class: "{BTN}",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&RestartRequestEvent);
+                            let _ = emit(&RestartRequestEvent);
                         },
                         {translate("debug-trigger-restart")}
                     }

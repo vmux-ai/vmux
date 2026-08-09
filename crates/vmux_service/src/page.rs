@@ -2,7 +2,7 @@
 
 use crate::event::*;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_theme};
+use vmux_ui::hooks::{emit, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -59,7 +59,7 @@ pub fn Page() -> Element {
                         class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: move |e: Event<MouseData>| {
                             e.stop_propagation();
-                            let _ = try_cef_bin_emit_rkyv(&ProcessKillAllEvent { kill_all: true });
+                            let _ = emit(&ProcessKillAllEvent { kill_all: true });
                         },
                         {translate("services-kill-all")}
                     }
@@ -166,7 +166,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
     let kill_id = process.id.clone();
 
     let onclick = move |_| {
-        let _ = try_cef_bin_emit_rkyv(&ProcessNavigateEvent {
+        let _ = emit(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
@@ -174,7 +174,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
 
     let onkill = move |e: Event<MouseData>| {
         e.stop_propagation();
-        let _ = try_cef_bin_emit_rkyv(&ProcessKillEvent {
+        let _ = emit(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });

@@ -9,7 +9,7 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::try_cef_bin_emit_rkyv;
+use vmux_ui::hooks::emit;
 use vmux_ui::i18n::translate;
 
 #[component]
@@ -176,7 +176,7 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
                     variant: ManagerButtonVariant::Primary,
                     onclick: move |_| {
                         catalog.set_status(&apply_id, "installing", &translate("agents-updating"));
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: apply_id.clone(), version: apply_version.clone() });
+                        let _ = emit(&AgentsInstall { id: apply_id.clone(), version: apply_version.clone() });
                     },
                     {translate("agents-apply-version")}
                 }
@@ -184,7 +184,7 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&AgentsOpen { url: launch_url.clone() });
+                    let _ = emit(&AgentsOpen { url: launch_url.clone() });
                 },
                 {translate("common-open")}
             }
@@ -193,7 +193,7 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
                     variant: ManagerButtonVariant::Danger,
                     onclick: move |_| {
                         catalog.set_status(&uninstall_id, "available", "");
-                        let _ = try_cef_bin_emit_rkyv(&AgentsUninstall { id: uninstall_id.clone() });
+                        let _ = emit(&AgentsUninstall { id: uninstall_id.clone() });
                     },
                     {translate("common-uninstall")}
                 }
@@ -204,7 +204,7 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
                     catalog.set_status(&id, "installing", &translate("agents-updating"));
-                    let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: id.clone(), version: update_version.clone() });
+                    let _ = emit(&AgentsInstall { id: id.clone(), version: update_version.clone() });
                 },
                 {translate("common-update")}
             }
@@ -217,9 +217,9 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
                     catalog.set_status(&install_id, "installing", &translate("agents-retrying"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
-                        let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
+                        let _ = emit(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
+                        let _ = emit(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-retry")}
@@ -232,9 +232,9 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
                     catalog.set_status(&install_id, "installing", &translate("agents-preparing"));
                     if source == "cli" {
                         let segment = install_id.trim_start_matches("cli:").to_string();
-                        let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: segment });
+                        let _ = emit(&AgentInstallRunRequest { agent: segment });
                     } else {
-                        let _ = try_cef_bin_emit_rkyv(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
+                        let _ = emit(&AgentsInstall { id: install_id.clone(), version: install_version.clone() });
                     }
                 },
                 {translate("common-install")}

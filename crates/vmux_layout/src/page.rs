@@ -36,7 +36,7 @@ use vmux_ui::components::context_menu::{
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, PageIconView};
 use wasm_bindgen::{JsCast, closure::Closure};
@@ -124,7 +124,7 @@ pub fn Page() -> Element {
     let extensions_state =
         use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
     use_effect(move || {
-        let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
+        let _ = emit(&ExtListRequest);
     });
 
     let mut update_phase = use_signal(|| None::<UpdatePhase>);
@@ -319,7 +319,7 @@ pub fn Page() -> Element {
 /// the keyboard on the layout shell and no pane can ever reclaim it, and unmount is the one event
 /// every close route has in common.
 fn set_command_bar_panel_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&CommandBarPanelActiveEvent { active });
+    let _ = emit(&CommandBarPanelActiveEvent { active });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -587,7 +587,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
                         r#type: "button",
                         class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
+                            let _ = emit(&crate::event::RestartRequestEvent);
                         },
                         {translate("layout-restart-update")}
                     }
@@ -707,7 +707,7 @@ fn HeaderView(
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+                                let _ = emit(&BookmarksCommandEvent {
                                     command: "toggle_active".into(),
                                     uuid: None,
                                     name: None,
@@ -869,7 +869,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
             r#type: "button",
             class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-foreground/5",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
+                let _ = emit(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),
                     space_id: Some(space.id.clone()),
                     name: None,
@@ -1047,7 +1047,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             pairing_generation.set(pairing_generation().wrapping_add(1));
                             show_pairing.set(false);
                         }
-                        let _ = try_cef_bin_emit_rkyv(&RemoteCommandEvent {
+                        let _ = emit(&RemoteCommandEvent {
                             enabled: !remote.enabled,
                         });
                     },
@@ -1067,7 +1067,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         r#type: "button",
                         class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&RemoteCommandEvent {
+                            let _ = emit(&RemoteCommandEvent {
                                 enabled: remote.enabled,
                             });
                         },
@@ -1114,7 +1114,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                             r#type: "button",
                             class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&RemoteCopyEvent);
+                                let _ = emit(&RemoteCopyEvent);
                                 copied.set(true);
                             },
                             if copied() { "Copied" } else { "Copy" }
@@ -1520,7 +1520,7 @@ fn KnowledgeCard(
                                         oninput: move |event| {
                                             let value = event.value();
                                             query.set(value.clone());
-                                            let _ = try_cef_bin_emit_rkyv(&KnowledgeSearchRequest { query: value });
+                                            let _ = emit(&KnowledgeSearchRequest { query: value });
                                         },
                                     }
                                 }
@@ -1667,7 +1667,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
 }
 
 fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = emit(&crate::event::SideSheetCommandEvent {
         command: if expanded {
             "expand_section".to_string()
         } else {
@@ -1878,7 +1878,7 @@ fn open_knowledge_path(pane_id: u64, path: String) {
 }
 
 fn open_knowledge_result(pane_id: u64, path: String, line: u32) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = emit(&crate::event::SideSheetCommandEvent {
         command: "open_knowledge_path".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: line,
@@ -1925,7 +1925,7 @@ fn submit_knowledge_create(mut prompt: Signal<Option<KnowledgeCreatePrompt>>, na
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&KnowledgeCreateRequest {
+    let _ = emit(&KnowledgeCreateRequest {
         parent: current.parent,
         name,
         is_directory: current.kind == KnowledgeCreateKind::Folder,
@@ -2005,7 +2005,7 @@ fn Tab(tab: TabRow) -> Element {
             class: "{tab_class}",
             style: "{tab_style}",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                let _ = emit(&TabsCommandEvent {
                     command: "switch".to_string(),
                     tab_id: Some(id_switch.clone()),
                 });
@@ -2035,7 +2035,7 @@ fn Tab(tab: TabRow) -> Element {
                 onclick: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                    let _ = emit(&TabsCommandEvent {
                         command: "close".to_string(),
                         tab_id: Some(id_close.clone()),
                     });
@@ -2076,7 +2076,7 @@ fn NewTabButton() -> Element {
             title: translate("layout-new-tab"),
             class: "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                let _ = emit(&TabsCommandEvent {
                     command: "new".to_string(),
                     tab_id: None,
                 });
@@ -2110,7 +2110,7 @@ fn NavButton(
             class,
             onclick: move |_| {
                 if !disabled {
-                    let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
+                    let _ = emit(&HeaderCommandEvent {
                         header_command: command.to_string(),
                     });
                 }
@@ -2138,7 +2138,7 @@ fn KnowledgeGitIndicator(status: KnowledgeGitStatus) -> Element {
 }
 
 fn open_tools(pane_id: u64) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = emit(&crate::event::SideSheetCommandEvent {
         command: "open_tools".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: 0,
@@ -2147,7 +2147,7 @@ fn open_tools(pane_id: u64) {
 }
 
 fn open_vault(pane_id: u64) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = emit(&crate::event::SideSheetCommandEvent {
         command: "open_vault".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: 0,
@@ -2174,7 +2174,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
+                let _ = emit(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
@@ -2206,7 +2206,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("layout-team"),
                     onclick: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                        let _ = emit(&TeamCommandEvent {
                             command: "open".to_string(),
                             member_id: None,
                         });
@@ -2232,7 +2232,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                     title: "{m.name}",
                                     class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                        let _ = emit(&TeamCommandEvent {
                                             command: "focus".to_string(),
                                             member_id: Some(id.clone()),
                                         });
@@ -2260,7 +2260,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                             class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
                             title: translate("layout-team"),
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                let _ = emit(&TeamCommandEvent {
                                     command: "open".to_string(),
                                     member_id: None,
                                 });
@@ -2288,7 +2288,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                             key: "{ext.id}",
                             class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-foreground/[0.08]",
                             title: "{name}",
-                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtActionRequest { id: id.clone() }); },
+                            onclick: move |_| { let _ = emit(&ExtActionRequest { id: id.clone() }); },
                             img { class: "h-4 w-4", src: "{icon}" }
                         }
                     }
@@ -2297,7 +2297,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
             button {
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
                 title: translate("layout-manage-extensions"),
-                onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
+                onclick: move |_| { let _ = emit(&ExtOpenManagerRequest); },
                 Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
                 }
@@ -2437,7 +2437,7 @@ fn PinTile(row: BookmarkRow) -> Element {
 }
 
 fn open_bookmark(url: String) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "open".into(),
         url: Some(url),
         uuid: None,
@@ -2448,7 +2448,7 @@ fn open_bookmark(url: String) {
 }
 
 fn bookmark_cmd(command: &str, uuid: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: command.into(),
         uuid,
         name: None,
@@ -2459,7 +2459,7 @@ fn bookmark_cmd(command: &str, uuid: Option<String>) {
 }
 
 fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: command.into(),
         uuid: None,
         name: None,
@@ -2470,7 +2470,7 @@ fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String
 }
 
 fn move_bookmark(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "move".into(),
         uuid: Some(uuid),
         name: None,
@@ -2481,7 +2481,7 @@ fn move_bookmark(uuid: String, folder: Option<String>) {
 }
 
 fn move_pin(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "move_pin".into(),
         uuid: Some(uuid),
         name: None,
@@ -2492,7 +2492,7 @@ fn move_pin(uuid: String, folder: Option<String>) {
 }
 
 fn move_bookmark_folder(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "move_folder".into(),
         uuid: Some(uuid),
         name: None,
@@ -2507,7 +2507,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "rename".into(),
         uuid: Some(uuid),
         name: Some(name),
@@ -2522,7 +2522,7 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "new_folder".into(),
         uuid: None,
         name: Some(name),
@@ -2749,11 +2749,11 @@ fn bookmark_drop_targeted(
 }
 
 fn set_bookmark_text_input_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarkTextInputEvent { active });
+    let _ = emit(&BookmarkTextInputEvent { active });
 }
 
 fn set_bookmark_context_menu_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarkContextMenuEvent { active });
+    let _ = emit(&BookmarkContextMenuEvent { active });
 }
 
 #[component]
@@ -3222,7 +3222,7 @@ fn BookmarkEntry(
 }
 
 fn request_bookmark_menu() {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: "menu_new_folder".into(),
         uuid: None,
         name: None,
@@ -3239,7 +3239,7 @@ fn commit_folder_rename(uuid: String, name: String) {
     } else {
         "rename_folder"
     };
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = emit(&BookmarksCommandEvent {
         command: command.into(),
         uuid: Some(uuid),
         name: if name.is_empty() { None } else { Some(name) },
@@ -3563,7 +3563,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                        let _ = emit(&crate::event::SideSheetCommandEvent {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_index,
@@ -3592,7 +3592,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                            let _ = emit(&crate::event::SideSheetCommandEvent {
                                 command: "close_stack".to_string(),
                                 pane_id: pane_id.to_string(),
                                 stack_index,
@@ -3672,7 +3672,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                let _ = emit(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,

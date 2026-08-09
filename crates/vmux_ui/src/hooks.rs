@@ -20,9 +20,7 @@ mod use_selector;
 mod use_theme;
 
 #[allow(unused_imports)]
-pub use event_listener::{
-    EventListenerError, try_cef_bin_emit_rkyv, try_cef_bin_listen, try_emit_page_ready,
-};
+pub use event_listener::{EventListenerError, emit, try_cef_bin_listen, try_emit_page_ready};
 
 #[cfg(web)]
 pub use event_listener::decode_bin_host_emit_js;

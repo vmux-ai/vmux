@@ -9,13 +9,13 @@ use vmux_ui::components::manager::{
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
 use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_listener, use_theme};
+use vmux_ui::hooks::{emit, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
 
 fn request_catalog(query: String, refresh: bool) {
-    let _ = try_cef_bin_emit_rkyv(&LspCatalogRequest {
+    let _ = emit(&LspCatalogRequest {
         query,
         language: String::new(),
         category: String::new(),
@@ -232,7 +232,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: install_name.clone() });
+                    let _ = emit(&LspInstallRequest { name: install_name.clone() });
                 },
                 {translate("common-install")}
             }
@@ -241,7 +241,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspUpdateRequest { name: update_name.clone() });
+                    let _ = emit(&LspUpdateRequest { name: update_name.clone() });
                 },
                 {translate("common-update")}
             }
@@ -250,7 +250,7 @@ fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> E
             ManagerButton {
                 variant: ManagerButtonVariant::Danger,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspUninstallRequest { name: uninstall_name.clone() });
+                    let _ = emit(&LspUninstallRequest { name: uninstall_name.clone() });
                 },
                 {translate("common-uninstall")}
             }
