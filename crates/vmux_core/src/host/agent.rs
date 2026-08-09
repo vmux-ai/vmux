@@ -16,6 +16,7 @@ use crate::terminal::TerminalKind;
     serde::Deserialize,
     bevy::prelude::Reflect,
 )]
+#[type_path = "vmux_core::agent"]
 pub enum AgentKind {
     Vibe,
     Claude,

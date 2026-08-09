@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::hooks::Host;
 use crate::hooks::event_listener::EventListenerError;
 
 /// Receives the raw payload bytes of one host event.
@@ -43,14 +44,10 @@ fn with_host<R>(f: impl FnOnce(&dyn PageHost) -> R) -> Result<R, EventListenerEr
     if let Some(host) = installed {
         return Ok(f(host.as_ref()));
     }
-    #[cfg(web)]
-    {
-        Ok(f(&super::cef_host::CefHost))
-    }
-    #[cfg(not(web))]
-    {
-        Err(EventListenerError::NoHost)
-    }
+    let Some(fallback) = Host::fallback() else {
+        return Err(EventListenerError::NoHost);
+    };
+    Ok(f(fallback))
 }
 
 pub fn emit_bytes(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {

@@ -22,8 +22,8 @@ use dioxus::prelude::*;
 use vmux_command::event::{
     CommandBarActionEvent, CommandBarOpenEvent, CommandBarQuery,
     HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
-    HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, command_bar_should_refocus, is_data_uri,
+    HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    PathCompleteResponse, PathEntry, is_data_uri,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
@@ -140,8 +140,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
     let mut suggestions_request_id = use_signal(|| 0u64);
     let suggestions_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
-    let mut last_open_id = use_signal(|| u64::MAX);
-    let mut last_focus_open_id = use_signal(|| u64::MAX);
+    let mut last_open_id = use_signal(|| OpenId(u64::MAX));
+    let mut last_focus_open_id = use_signal(|| OpenId(u64::MAX));
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
     let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
@@ -337,7 +337,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let open_id = state().open_id;
-        if command_bar_should_refocus(last_focus_open_id(), open_id) {
+        if open_id.should_refocus(last_focus_open_id()) {
             last_focus_open_id.set(open_id);
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);

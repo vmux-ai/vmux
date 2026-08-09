@@ -3,6 +3,7 @@
 //! Both the app and `vmux remote` hand out pairing links, and a phone that follows one is stuck
 //! with whatever it says — a wrong port or a missing fingerprint surfaces much later as a stalled
 //! connection. Built here so the two agree by construction.
+use std::time::{Duration, Instant};
 
 use std::path::Path;
 
@@ -67,6 +68,30 @@ impl Relay {
             return Ok(None);
         };
         PairingInfo::new(&base_url, token, &fingerprint).map(Some)
+    }
+
+    /// Block until the relay has allocated a port for this desktop, then return the pairing link.
+    ///
+    /// The port comes from the relay and the fingerprint from the certificate the daemon loads, so
+    /// neither exists until it has started and dialled out. Waiting beats printing a link that
+    /// names a port nothing answers on.
+    pub fn wait_for_pairing(&self, token: &str, timeout: Duration) -> std::io::Result<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(pairing) = self.pairing(token).map_err(std::io::Error::other)? {
+                return Ok(pairing.url);
+            }
+            if Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!(
+                        "{} has not allocated a port for this desktop yet",
+                        self.url()
+                    ),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 

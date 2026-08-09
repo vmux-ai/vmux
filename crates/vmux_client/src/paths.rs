@@ -257,6 +257,36 @@ pub fn service_identity_matches(recorded: &str, current: &str) -> bool {
     recorded.trim() == current.trim()
 }
 
+/// The secret a phone presents to prove it has been paired.
+pub struct RemoteToken(pub String);
+
+impl RemoteToken {
+    /// The shortest token the daemon will ever write. Anything shorter is a partial read of a
+    /// file being written, not a token.
+    const MIN_LEN: usize = 32;
+
+    /// Block until the daemon has written one.
+    pub fn wait(timeout: std::time::Duration) -> std::io::Result<Self> {
+        let path = remote_token_path();
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Ok(token) = std::fs::read_to_string(&path) {
+                let token = token.trim();
+                if token.len() >= Self::MIN_LEN {
+                    return Ok(Self(token.to_string()));
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("remote token not created: {}", path.display()),
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -88,14 +88,65 @@ pub enum OpenCommand {
     },
 }
 
+impl OpenCommand {
+    /// The URL this command carries. Every variant has one, and it is optional in all of them.
+    pub fn url(&self) -> Option<&str> {
+        match self {
+            OpenCommand::InPlace { url }
+            | OpenCommand::InNewStack { url }
+            | OpenCommand::InNewTab { url }
+            | OpenCommand::InNewSpace { url }
+            | OpenCommand::InPane { url, .. } => url.as_deref(),
+        }
+    }
+}
+
+/// The URL an open command opens.
+///
+/// The command's own URL wins. When it has none — or an empty one, which the command bar and the
+/// MCP surface both produce for "just open something" — the configured startup URL stands in, and
+/// when neither is set there is nothing to open.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OpenUrl(String);
+
+impl OpenUrl {
+    /// The URL `command` opens, given the configured startup URL.
+    pub fn of(command: &OpenCommand, startup_url: Option<&str>) -> Self {
+        Self::resolve(command.url(), startup_url)
+    }
+
+    /// The URL to open, choosing between a command's own URL and the configured startup URL.
+    pub fn resolve(cmd_url: Option<&str>, startup_url: Option<&str>) -> Self {
+        for candidate in [cmd_url, startup_url] {
+            let Some(url) = candidate else {
+                continue;
+            };
+            if !url.is_empty() {
+                return Self(url.to_string());
+            }
+        }
+        Self::default()
+    }
+
+    /// Whether there is nothing to open.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
 pub use crate::open_target::*;
 
+/// [`OpenUrl::resolve`] as a bare `String`, for callers that predate [`OpenUrl`].
 pub fn resolve_url(cmd_url: Option<&str>, startup_url: Option<&str>) -> String {
-    cmd_url
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| startup_url.filter(|s| !s.is_empty()).map(|s| s.to_string()))
-        .unwrap_or_default()
+    OpenUrl::resolve(cmd_url, startup_url).into_string()
 }
 
 #[cfg(test)]
@@ -103,26 +154,77 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_url_prefers_explicit_url() {
-        let resolved = resolve_url(Some("https://explicit"), Some("https://startup"));
-        assert_eq!(resolved, "https://explicit");
+    fn open_url_prefers_the_commands_own_url() {
+        let resolved = OpenUrl::resolve(Some("https://explicit"), Some("https://startup"));
+        assert_eq!(resolved.as_str(), "https://explicit");
     }
 
     #[test]
-    fn resolve_url_falls_back_to_startup_when_none() {
-        let resolved = resolve_url(None, Some("https://startup"));
-        assert_eq!(resolved, "https://startup");
+    fn open_url_falls_back_to_startup_when_none() {
+        let resolved = OpenUrl::resolve(None, Some("https://startup"));
+        assert_eq!(resolved.as_str(), "https://startup");
     }
 
     #[test]
-    fn resolve_url_empty_string_is_treated_as_none() {
-        let resolved = resolve_url(Some(""), Some("https://startup"));
-        assert_eq!(resolved, "https://startup");
+    fn open_url_treats_an_empty_url_as_absent() {
+        let resolved = OpenUrl::resolve(Some(""), Some("https://startup"));
+        assert_eq!(resolved.as_str(), "https://startup");
     }
 
     #[test]
-    fn resolve_url_empty_when_neither_provided() {
-        let resolved = resolve_url(None, None);
-        assert_eq!(resolved, "");
+    fn open_url_is_empty_when_neither_is_provided() {
+        let resolved = OpenUrl::resolve(None, None);
+        assert!(resolved.is_empty());
+        assert_eq!(resolved.as_str(), "");
+    }
+
+    #[test]
+    fn every_open_command_variant_carries_its_url() {
+        let commands = [
+            OpenCommand::InPlace {
+                url: Some("https://in-place".to_string()),
+            },
+            OpenCommand::InNewStack {
+                url: Some("https://in-new-stack".to_string()),
+            },
+            OpenCommand::InNewTab {
+                url: Some("https://in-new-tab".to_string()),
+            },
+            OpenCommand::InNewSpace {
+                url: Some("https://in-new-space".to_string()),
+            },
+            OpenCommand::InPane {
+                direction: PaneDirection::Right,
+                target: PaneTarget::NewSplit,
+                mode: PaneOpenMode::NewStack,
+                url: Some("https://in-pane".to_string()),
+            },
+        ];
+        let urls: Vec<Option<&str>> = commands.iter().map(OpenCommand::url).collect();
+        assert_eq!(
+            urls,
+            [
+                Some("https://in-place"),
+                Some("https://in-new-stack"),
+                Some("https://in-new-tab"),
+                Some("https://in-new-space"),
+                Some("https://in-pane"),
+            ]
+        );
+        for command in &commands {
+            assert_eq!(
+                OpenUrl::of(command, Some("https://startup")).as_str(),
+                command.url().expect("every variant was given a url")
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_without_a_url_opens_the_startup_url() {
+        let command = OpenCommand::InNewTab { url: None };
+        assert_eq!(
+            OpenUrl::of(&command, Some("https://startup")).as_str(),
+            "https://startup"
+        );
     }
 }

@@ -4,6 +4,7 @@
 mod expand;
 mod named_fields;
 mod string_id;
+mod variant_names;
 
 use proc_macro::TokenStream;
 use quote::{format_ident, quote};
@@ -20,6 +21,30 @@ use syn::{Attribute, Data, DeriveInput, Fields, LitStr, parse_macro_input};
 pub fn string_id(_args: TokenStream, input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match string_id::expand(input) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+/// Generate `VARIANT_NAMES`, every variant of the enum named in declaration order.
+///
+/// For a policy test that pins a surface to an exact set: the enumeration is derived so a new
+/// variant cannot be missed, while the list it is compared against stays hand-written so widening
+/// the surface still costs somebody a deliberate edit.
+///
+/// ```ignore
+/// #[derive(VariantNames)]
+/// enum Surface {
+///     First,
+///     Second,
+/// }
+///
+/// assert_eq!(Surface::VARIANT_NAMES, ["First", "Second"]);
+/// ```
+#[proc_macro_derive(VariantNames)]
+pub fn derive_variant_names(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match variant_names::expand(input) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }

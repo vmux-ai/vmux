@@ -26,7 +26,7 @@ use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
-    CommandBarSpace, CommandBarTab, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    CommandBarSpace, CommandBarTab, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
     PathCompleteResponse, PathEntry, SearchEngine, SearchEngineSetting,
 };
 use vmux_command::open::OpenCommand;
@@ -125,10 +125,10 @@ pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u
 struct CommandBarReady;
 
 #[derive(Component)]
-struct CommandBarRenderedOpen(u64);
+struct CommandBarRenderedOpen(OpenId);
 
 #[derive(Component)]
-struct CommandBarPaintedOpen(u64);
+struct CommandBarPaintedOpen(OpenId);
 
 #[derive(Component)]
 struct CommandBarOpenedOnce;
@@ -149,16 +149,16 @@ pub struct CommandBarNativeSize {
 #[derive(Component)]
 pub struct PendingCommandBarReveal {
     frames: u8,
-    open_id: u64,
+    open_id: OpenId,
     payload: Option<Vec<u8>>,
     started_at: Option<Instant>,
 }
 
 impl PendingCommandBarReveal {
-    /// True once a real open is in flight (open_id != 0). The prewarm placeholder
-    /// (open_id == 0) is idle and must not keep the event loop awake.
+    /// True once a real open is in flight. The prewarm placeholder carries [`OpenId::NONE`], is
+    /// idle, and must not keep the event loop awake.
     pub fn is_active(&self) -> bool {
-        self.open_id != 0
+        self.open_id.is_open()
     }
 }
 
@@ -346,7 +346,7 @@ fn prewarm_command_bar_modal(
         .insert(Pickable::IGNORE)
         .insert(PendingCommandBarReveal {
             frames: 0,
-            open_id: 0,
+            open_id: OpenId::NONE,
             payload: None,
             started_at: None,
         });
@@ -354,11 +354,11 @@ fn prewarm_command_bar_modal(
 
 fn next_command_bar_reveal_frames(
     frames: u8,
-    open_id: u64,
-    rendered_open_id: Option<u64>,
-    _painted_open_id: Option<u64>,
+    open_id: OpenId,
+    rendered_open_id: Option<OpenId>,
+    _painted_open_id: Option<OpenId>,
 ) -> Option<u8> {
-    if open_id == 0 {
+    if !open_id.is_open() {
         return Some(frames);
     }
     if rendered_open_id != Some(open_id) {
@@ -378,13 +378,13 @@ fn next_command_bar_reveal_frames_for_backend(
     native_windowed: bool,
     native_overlay: bool,
     frames: u8,
-    open_id: u64,
-    rendered_open_id: Option<u64>,
-    painted_open_id: Option<u64>,
+    open_id: OpenId,
+    rendered_open_id: Option<OpenId>,
+    painted_open_id: Option<OpenId>,
     has_native_size: bool,
 ) -> Option<u8> {
     if (native_windowed || native_overlay)
-        && open_id != 0
+        && open_id.is_open()
         && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
     {
         return Some(frames.saturating_add(1));
@@ -396,22 +396,22 @@ fn native_command_bar_reveal_timed_out(
     native_windowed: bool,
     native_overlay: bool,
     elapsed: Duration,
-    open_id: u64,
-    rendered_open_id: Option<u64>,
+    open_id: OpenId,
+    rendered_open_id: Option<OpenId>,
     has_native_size: bool,
 ) -> bool {
     (native_windowed || native_overlay)
-        && open_id != 0
+        && open_id.is_open()
         && elapsed >= COMMAND_BAR_NATIVE_REVEAL_TIMEOUT
         && (rendered_open_id != Some(open_id) || (native_windowed && !has_native_size))
 }
 
 fn should_retry_command_bar_open_payload(
-    open_id: u64,
+    open_id: OpenId,
     payload: Option<&[u8]>,
-    rendered_open_id: Option<u64>,
+    rendered_open_id: Option<OpenId>,
 ) -> bool {
-    open_id != 0 && payload.is_some() && rendered_open_id != Some(open_id)
+    open_id.is_open() && payload.is_some() && rendered_open_id != Some(open_id)
 }
 
 fn on_command_bar_ready(
@@ -421,7 +421,7 @@ fn on_command_bar_ready(
 ) {
     let webview = trigger.event().webview;
     if let Ok(mut pending) = pending_q.get_mut(webview)
-        && pending.open_id != 0
+        && pending.open_id.is_open()
         && pending.started_at.is_none()
     {
         pending.started_at = Some(Instant::now());
@@ -446,7 +446,7 @@ fn on_command_bar_rendered(
     webview_debug_log(format!(
         "command_bar rendered entity={:?} open_id={}",
         webview,
-        trigger.event().payload.open_id
+        trigger.event().payload.open_id.0
     ));
     commands.entity(webview).insert((
         CommandBarRenderedOpen(trigger.event().payload.open_id),
@@ -479,7 +479,7 @@ fn on_command_bar_size(
     let payload = trigger.event().payload;
     if native_windowed
         && let Some(open_id) = pending_reveal
-            .filter(|pending| pending.open_id != 0)
+            .filter(|pending| pending.open_id.is_open())
             .map(|pending| pending.open_id)
     {
         browsers.set_windowed_focus(&webview, true);
@@ -520,7 +520,8 @@ fn command_bar_size_should_apply(
     pending_reveal: Option<&PendingCommandBarReveal>,
 ) -> bool {
     visibility != Visibility::Hidden
-        || pending_reveal.is_some_and(|pending| pending.open_id != 0 && pending.payload.is_some())
+        || pending_reveal
+            .is_some_and(|pending| pending.open_id.is_open() && pending.payload.is_some())
 }
 
 #[derive(Default)]
@@ -882,7 +883,7 @@ fn handle_open_command_bar(
         None
     };
     let mut payload = build_command_bar_open_payload(
-        now_millis() as u64,
+        OpenId(now_millis() as u64),
         false,
         space_name,
         current_url,
@@ -918,7 +919,7 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
 
 #[allow(clippy::too_many_arguments)]
 fn command_bar_open_payload(
-    open_id: u64,
+    open_id: OpenId,
     native_windowed: bool,
     space_name: String,
     url: String,
@@ -1051,7 +1052,7 @@ pub(crate) fn gather_command_bar_tabs(
 /// bar and the home launcher, from the current snapshots and gathered tabs.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_command_bar_open_payload(
-    open_id: u64,
+    open_id: OpenId,
     native_windowed: bool,
     space_name: String,
     url: String,
@@ -1945,7 +1946,7 @@ fn mark_command_bar_painted(
         let Ok(pending) = query.get(texture.webview) else {
             continue;
         };
-        if pending.open_id == 0 {
+        if !pending.open_id.is_open() {
             continue;
         }
         commands
@@ -2060,7 +2061,7 @@ mod tests {
         let agents = CommandBarContributions::default();
         let work = vmux_command::snapshot::CommandBarWorkSnapshot::default();
         let payload = build_command_bar_open_payload(
-            7,
+            OpenId(7),
             false,
             String::new(),
             String::new(),
@@ -2073,7 +2074,7 @@ mod tests {
             Vec::new(),
             Some(OpenTarget::InPlace),
         );
-        assert_eq!(payload.open_id, 7);
+        assert_eq!(payload.open_id, OpenId(7));
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
         assert!(!payload.commands.is_empty());
     }
@@ -2093,26 +2094,30 @@ mod tests {
     #[test]
     fn command_bar_open_payload_retries_until_rendered_ack() {
         assert!(should_retry_command_bar_open_payload(
-            7,
+            OpenId(7),
             Some(b"payload"),
             None
         ));
         assert!(should_retry_command_bar_open_payload(
-            7,
+            OpenId(7),
             Some(b"payload"),
-            Some(6)
+            Some(OpenId(6))
         ));
         assert!(!should_retry_command_bar_open_payload(
-            7,
+            OpenId(7),
             Some(b"payload"),
-            Some(7)
+            Some(OpenId(7))
         ));
         assert!(!should_retry_command_bar_open_payload(
-            0,
+            OpenId::NONE,
             Some(b"payload"),
             None
         ));
-        assert!(!should_retry_command_bar_open_payload(7, None, None));
+        assert!(!should_retry_command_bar_open_payload(
+            OpenId(7),
+            None,
+            None
+        ));
     }
 
     #[test]
@@ -2195,7 +2200,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(*visibility, Visibility::Hidden);
-        assert_eq!(reveal.open_id, 0);
+        assert_eq!(reveal.open_id, OpenId::NONE);
         assert!(app.world().get::<CefKeyboardTarget>(modal).is_none());
         assert_eq!(
             app.world().get::<bevy::picking::Pickable>(modal),
@@ -2229,51 +2234,93 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(*visibility, Visibility::Hidden);
-        assert_eq!(reveal.open_id, 0);
+        assert_eq!(reveal.open_id, OpenId::NONE);
     }
 
     #[test]
     fn command_bar_reveal_waits_for_matching_open_id() {
-        assert_eq!(next_command_bar_reveal_frames(1, 7, None, None), Some(2));
         assert_eq!(
-            next_command_bar_reveal_frames(1, 7, Some(6), Some(7)),
+            next_command_bar_reveal_frames(1, OpenId(7), None, None),
             Some(2)
         );
         assert_eq!(
-            next_command_bar_reveal_frames(0, 7, Some(7), Some(7)),
+            next_command_bar_reveal_frames(1, OpenId(7), Some(OpenId(6)), Some(OpenId(7))),
+            Some(2)
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames(0, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
             Some(1)
         );
-        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), Some(7)), None);
+        assert_eq!(
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
+            None
+        );
     }
 
     #[test]
     fn command_bar_reveal_falls_back_when_rendered_event_is_missing() {
-        assert_eq!(next_command_bar_reveal_frames(0, 7, None, None), Some(1));
-        assert_eq!(next_command_bar_reveal_frames(10, 7, None, None), None);
         assert_eq!(
-            next_command_bar_reveal_frames(10, 7, Some(6), Some(7)),
+            next_command_bar_reveal_frames(0, OpenId(7), None, None),
+            Some(1)
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames(10, OpenId(7), None, None),
+            None
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames(10, OpenId(7), Some(OpenId(6)), Some(OpenId(7))),
             None
         );
     }
 
     #[test]
     fn command_bar_reveal_does_not_require_texture_after_rendered_event() {
-        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), None), None);
-        assert_eq!(next_command_bar_reveal_frames(2, 7, Some(7), Some(7)), None);
+        assert_eq!(
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), None),
+            None
+        );
+        assert_eq!(
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
+            None
+        );
     }
 
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 10, 7, None, None, true),
+            next_command_bar_reveal_frames_for_backend(
+                true,
+                false,
+                10,
+                OpenId(7),
+                None,
+                None,
+                true
+            ),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 10, 7, Some(7), None, false,),
+            next_command_bar_reveal_frames_for_backend(
+                true,
+                false,
+                10,
+                OpenId(7),
+                Some(OpenId(7)),
+                None,
+                false,
+            ),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 2, 7, Some(7), None, true,),
+            next_command_bar_reveal_frames_for_backend(
+                true,
+                false,
+                2,
+                OpenId(7),
+                Some(OpenId(7)),
+                None,
+                true,
+            ),
             None
         );
     }
@@ -2284,7 +2331,7 @@ mod tests {
             true,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT - Duration::from_millis(1),
-            7,
+            OpenId(7),
             None,
             false,
         ));
@@ -2292,7 +2339,7 @@ mod tests {
             true,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            7,
+            OpenId(7),
             None,
             false,
         ));
@@ -2300,23 +2347,23 @@ mod tests {
             true,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            7,
-            Some(7),
+            OpenId(7),
+            Some(OpenId(7)),
             false,
         ));
         assert!(!native_command_bar_reveal_timed_out(
             true,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            7,
-            Some(7),
+            OpenId(7),
+            Some(OpenId(7)),
             true,
         ));
         assert!(!native_command_bar_reveal_timed_out(
             false,
             false,
             COMMAND_BAR_NATIVE_REVEAL_TIMEOUT,
-            7,
+            OpenId(7),
             None,
             false,
         ));
@@ -2325,11 +2372,27 @@ mod tests {
     #[test]
     fn native_overlay_waits_for_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(false, true, 10, 7, None, None, false,),
+            next_command_bar_reveal_frames_for_backend(
+                false,
+                true,
+                10,
+                OpenId(7),
+                None,
+                None,
+                false,
+            ),
             Some(11)
         );
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(false, true, 2, 7, Some(7), None, false,),
+            next_command_bar_reveal_frames_for_backend(
+                false,
+                true,
+                2,
+                OpenId(7),
+                Some(OpenId(7)),
+                None,
+                false,
+            ),
             None
         );
     }
@@ -2347,7 +2410,7 @@ mod tests {
                 Visibility::Hidden,
                 PendingCommandBarReveal {
                     frames: u8::MAX,
-                    open_id: 7,
+                    open_id: OpenId(7),
                     payload: Some(b"payload".to_vec()),
                     started_at: Some(Instant::now() - COMMAND_BAR_NATIVE_REVEAL_TIMEOUT),
                 },
@@ -2376,7 +2439,7 @@ mod tests {
                 Visibility::Hidden,
                 PendingCommandBarReveal {
                     frames: 0,
-                    open_id: 7,
+                    open_id: OpenId(7),
                     payload: Some(b"payload".to_vec()),
                     started_at: Some(Instant::now()),
                 },
@@ -2404,7 +2467,7 @@ mod tests {
     fn native_command_bar_accepts_hidden_open_size() {
         let pending = PendingCommandBarReveal {
             frames: 0,
-            open_id: 7,
+            open_id: OpenId(7),
             payload: Some(Vec::new()),
             started_at: Some(Instant::now()),
         };
@@ -2414,7 +2477,7 @@ mod tests {
             Some(&pending)
         ));
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 0, 7, None, None, true),
+            next_command_bar_reveal_frames_for_backend(true, false, 0, OpenId(7), None, None, true),
             Some(1)
         );
     }
@@ -2436,7 +2499,7 @@ mod tests {
                 Visibility::Hidden,
                 PendingCommandBarReveal {
                     frames: 2,
-                    open_id: 7,
+                    open_id: OpenId(7),
                     payload: Some(b"payload".to_vec()),
                     started_at: Some(Instant::now()),
                 },
@@ -2468,7 +2531,7 @@ mod tests {
         app.update();
         app.world_mut()
             .entity_mut(modal)
-            .insert(CommandBarRenderedOpen(7));
+            .insert(CommandBarRenderedOpen(OpenId(7)));
         app.update();
 
         assert!(app.world().get::<CommandBarPaintedOpen>(modal).is_some());
@@ -2482,7 +2545,7 @@ mod tests {
     #[test]
     fn command_bar_payload_includes_space_name() {
         let payload = command_bar_open_payload(
-            7,
+            OpenId(7),
             false,
             "Work".to_string(),
             "https://example.com".to_string(),
@@ -2497,7 +2560,7 @@ mod tests {
         );
 
         assert_eq!(payload.space_name, "Work");
-        assert_eq!(payload.open_id, 7);
+        assert_eq!(payload.open_id, OpenId(7));
     }
 
     #[test]
@@ -2511,7 +2574,7 @@ mod tests {
         }];
 
         let payload = command_bar_open_payload(
-            8,
+            OpenId(8),
             true,
             "Work".to_string(),
             "vmux://spaces/".to_string(),
@@ -2837,7 +2900,7 @@ mod tests {
                 },
                 Visibility::Inherited,
                 CefKeyboardTarget,
-                CommandBarRenderedOpen(1),
+                CommandBarRenderedOpen(OpenId(1)),
             ))
             .id();
 
@@ -2920,8 +2983,9 @@ mod tests {
         );
         if let Some(open_id) = pending_open_id_after_prewarm {
             assert_eq!(
-                open_id, 0,
-                "prewarm should re-arm reveal at open_id=0 (which never fires until handle_open_command_bar bumps it)"
+                open_id,
+                OpenId::NONE,
+                "prewarm should re-arm reveal at OpenId::NONE (which never fires until handle_open_command_bar bumps it)"
             );
         }
     }
@@ -3143,7 +3207,7 @@ mod tests {
         assert!(
             !PendingCommandBarReveal {
                 frames: 0,
-                open_id: 0,
+                open_id: OpenId::NONE,
                 payload: None,
                 started_at: None,
             }
@@ -3152,7 +3216,7 @@ mod tests {
         assert!(
             PendingCommandBarReveal {
                 frames: 0,
-                open_id: 7,
+                open_id: OpenId(7),
                 payload: None,
                 started_at: Some(Instant::now()),
             }

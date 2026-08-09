@@ -1,36 +1,10 @@
 //! Subscribing a page to one typed host event.
 
+use crate::hooks::Host;
 use crate::hooks::event_listener::{try_cef_bin_listen, try_emit_page_ready};
 use crate::listener_guard::GuardedListener;
 use dioxus::core::{Runtime, current_scope_id};
 use dioxus::prelude::*;
-
-/// Retry until the CEF bridge is injected.
-///
-/// Only wasm needs this: the bridge appears asynchronously after the page loads, whereas a native
-/// host installs its transport before the first page mounts.
-#[cfg(web)]
-fn schedule_listener_retry(mut retry_tick: Signal<u32>, current: u32) {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen::closure::Closure;
-
-    const LISTENER_RETRY_MS: i32 = 16;
-
-    let Some(win) = web_sys::window() else {
-        return;
-    };
-    let closure = Closure::once(move || {
-        retry_tick.set(current.wrapping_add(1));
-    });
-    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
-        closure.as_ref().unchecked_ref(),
-        LISTENER_RETRY_MS,
-    );
-    closure.forget();
-}
-
-#[cfg(not(web))]
-fn schedule_listener_retry(_retry_tick: Signal<u32>, _current: u32) {}
 
 pub struct BevyState {
     pub is_loading: Signal<bool>,
@@ -84,7 +58,7 @@ where
             Err(e) => {
                 is_loading.set(true);
                 error.set(Some(format!("host listen failed: {e}")));
-                schedule_listener_retry(retry_tick, current_retry);
+                Host::schedule_listener_retry(retry_tick, current_retry);
             }
         }
     });

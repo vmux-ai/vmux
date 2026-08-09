@@ -8,7 +8,7 @@ use crate::command_bar::style::{command_bar_root_class, command_bar_shell_class}
 use dioxus::prelude::*;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, command_bar_open_should_ack, command_bar_open_should_reset_input,
+    CommandBarSizeEvent, OpenId,
 };
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -25,27 +25,26 @@ pub fn Page() -> Element {
     use_theme();
     let mut state = use_signal(CommandBarOpenEvent::default);
     let mut is_open = use_signal(|| false);
-    let mut current_open_id = use_signal(|| 0u64);
-    let mut last_rendered_open_id = use_signal(|| 0u64);
-    let mut render_ack_scheduled_open_id = use_signal(|| 0u64);
+    let mut current_open_id = use_signal(|| OpenId::NONE);
+    let mut last_rendered_open_id = use_signal(|| OpenId::NONE);
+    let mut render_ack_scheduled_open_id = use_signal(|| OpenId::NONE);
     let mut ready_sent = use_signal(|| false);
-    let mut observed_size_open_id = use_signal(|| None::<u64>);
+    let mut observed_size_open_id = use_signal(|| None::<OpenId>);
     let mut outside_pointer_listener_installed = use_signal(|| false);
 
     let open_listener =
         use_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
             let open_id = data.open_id;
-            let should_reset_input =
-                command_bar_open_should_reset_input(current_open_id(), open_id);
+            let should_reset_input = open_id.should_reset_input(current_open_id());
             if !should_reset_input {
                 return;
             }
             current_open_id.set(open_id);
             state.set(data);
             is_open.set(true);
-            if command_bar_open_should_ack(open_id) {
-                last_rendered_open_id.set(0);
-                render_ack_scheduled_open_id.set(0);
+            if open_id.is_open() {
+                last_rendered_open_id.set(OpenId::NONE);
+                render_ack_scheduled_open_id.set(OpenId::NONE);
             }
         });
 
@@ -59,7 +58,7 @@ pub fn Page() -> Element {
         let open = is_open();
         let open_id = current_open_id();
         if open
-            && open_id != 0
+            && open_id.is_open()
             && last_rendered_open_id() != open_id
             && render_ack_scheduled_open_id() != open_id
         {
@@ -70,7 +69,7 @@ pub fn Page() -> Element {
                 last_rendered_open_id,
                 render_ack_scheduled_open_id,
             ) {
-                render_ack_scheduled_open_id.set(0);
+                render_ack_scheduled_open_id.set(OpenId::NONE);
             }
         }
     });
@@ -190,7 +189,7 @@ fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
     true
 }
 
-fn emit_command_bar_size(open_id: u64) {
+fn emit_command_bar_size(open_id: OpenId) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -280,7 +279,7 @@ fn css_px_value(value: &str) -> Option<f64> {
     value.is_finite().then_some(value.max(0.0))
 }
 
-fn schedule_command_bar_size_emit(open_id: u64) {
+fn schedule_command_bar_size_emit(open_id: OpenId) {
     emit_command_bar_size(open_id);
     let should_schedule = COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().schedule());
     if !should_schedule {
@@ -301,10 +300,10 @@ fn schedule_command_bar_size_emit(open_id: u64) {
 }
 
 fn schedule_command_bar_rendered_emit(
-    open_id: u64,
+    open_id: OpenId,
     frames_left: u8,
-    mut last_rendered_open_id: Signal<u64>,
-    mut scheduled_open_id: Signal<u64>,
+    mut last_rendered_open_id: Signal<OpenId>,
+    mut scheduled_open_id: Signal<OpenId>,
 ) -> bool {
     let Some(window) = web_sys::window() else {
         return false;
@@ -317,12 +316,12 @@ fn schedule_command_bar_rendered_emit(
                 last_rendered_open_id,
                 scheduled_open_id,
             ) {
-                scheduled_open_id.set(0);
+                scheduled_open_id.set(OpenId::NONE);
             }
         } else if send(&CommandBarRenderedEvent { open_id }).is_ok() {
             last_rendered_open_id.set(open_id);
         } else {
-            scheduled_open_id.set(0);
+            scheduled_open_id.set(OpenId::NONE);
         }
     });
     match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
@@ -334,7 +333,7 @@ fn schedule_command_bar_rendered_emit(
     }
 }
 
-fn install_command_bar_size_observer(current_open_id: Signal<u64>) -> bool {
+fn install_command_bar_size_observer(current_open_id: Signal<OpenId>) -> bool {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
         return false;
     };

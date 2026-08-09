@@ -824,6 +824,22 @@ pub struct LspCatalogRequest {
     pub refresh: bool,
 }
 
+impl LspCatalogRequest {
+    /// Ask for the whole catalogue, narrowed by a search string.
+    ///
+    /// The page has no use for the language, category or installed-only filters, so it would
+    /// otherwise spell four empty defaults at every call.
+    pub fn for_query(query: impl Into<String>, refresh: bool) -> Self {
+        Self {
+            query: query.into(),
+            language: String::new(),
+            category: String::new(),
+            installed_only: false,
+            refresh,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,

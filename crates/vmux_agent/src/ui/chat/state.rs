@@ -1,20 +1,797 @@
-//! The chat page's signals, grouped by what they are for.
+//! The chat page's state: the signals it holds, the host events that fill them, and everything
+//! the render derives from them.
 //!
 //! `Page` held forty-nine `use_signal` calls in one scope, which said nothing about which of them
-//! move together. Each hook here owns one cluster and hands it back as a `Copy` struct, so `Page`
-//! destructures it and the rest of the body reads exactly as before.
+//! move together. Each cluster here owns one group, [`Chat`] gathers the clusters, and
+//! [`use_chat`] is the single hook `Page` calls — so the page reaches its `rsx!` in a few lines
+//! and every component below it takes the same `Chat` handle as a prop.
 
 use std::collections::{HashMap, HashSet};
 
 use super::scroll;
+use super::tab::{Accent, TabIdentity};
 use crate::event::chat::{
-    ChatAttachment, ChatItem, ChatMediaEntry, ComposerContext, ModelOptionEntry,
-    QueuedPromptSnapshot, ResumableSessionEntry, SlashCommandEntry,
+    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
+    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
+    ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
+    ChatBlock, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage, ChatHistoryRequest,
+    ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPickFiles, ChatSnapshot,
+    ChatSubmit, ChatSubmitAttachment, ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry,
+    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
+    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
+    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands as SlashCommandsEvent,
+    latest_tool_location,
+};
+use crate::format::composer::{
+    ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
+    resume_menu_state, selector_mode, should_fetch_resume,
 };
 use dioxus::prelude::*;
+use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::components::prompt_composer::{
+    PROMPT_INPUT_ID, PromptComposerAction, PromptComposerAttachment, focus_prompt_end,
+};
+use vmux_ui::components::prompt_media_options::PromptMediaOption;
+use vmux_ui::hooks::{send, use_listener, use_selector, use_theme};
+use vmux_ui::i18n::translate;
+use vmux_wire::prompt_media::{
+    inline_media_query, merge_chat_attachments, replace_inline_media_query,
+};
+
+/// One conversation, as the page sees it: every signal cluster behind it plus the two derived
+/// views the transcript is read through.
+///
+/// `Copy` and compared by signal identity, so passing it to a child component costs nothing and
+/// never defeats that component's memoization.
+#[derive(Clone, Copy, PartialEq)]
+pub struct Chat {
+    /// The agent this page is for — from the URL, or from the caller on a host without one.
+    pub agent: Signal<String>,
+    pub transcript: Transcript,
+    pub run: RunState,
+    pub identity: AgentIdentity,
+    pub handoff: Handoff,
+    pub composer: ComposerDraft,
+    pub queue: PromptQueue,
+    pub media: MediaPicker,
+    pub models: ModelPicker,
+    pub effort: EffortPicker,
+    pub slash: SlashCommands,
+    pub resume: Resume,
+    /// Running subagents and open plan steps, shown in the composer footer.
+    pub activity_counts: Memo<(usize, usize)>,
+    /// Item and block index of the tool the transcript should keep expanded.
+    pub latest_tool: Memo<Option<(usize, usize)>>,
+}
+
+/// Build the page's state, subscribe it to the host, and start the effects that keep it current.
+pub fn use_chat(
+    agent_override: Option<String>,
+    transition_prompt: Option<String>,
+    transition_attachments: Option<Vec<ChatAttachment>>,
+) -> Chat {
+    use_theme();
+    let transcript = use_transcript();
+    let items = transcript.items;
+    let chat = Chat {
+        agent: use_signal(|| agent_override.unwrap_or_else(current_agent)),
+        transcript,
+        run: use_run_state(),
+        identity: use_agent_identity(),
+        handoff: use_handoff(),
+        composer: use_composer_draft(transition_prompt, transition_attachments),
+        queue: use_prompt_queue(),
+        media: use_media_picker(),
+        models: use_model_picker(),
+        effort: use_effort_picker(),
+        slash: use_slash_commands(),
+        resume: use_resume(),
+        activity_counts: use_memo(move || composer_activity_counts(&items.read())),
+        latest_tool: use_memo(move || latest_tool_location(&items.read())),
+    };
+    chat.listen();
+    chat.watch();
+    chat
+}
+
+impl Chat {
+    /// Take every host event the page runs on.
+    fn listen(&self) {
+        let chat = *self;
+        let _snapshot = use_listener::<ChatSnapshot, _>(CHAT_SNAPSHOT_EVENT, move |snapshot| {
+            chat.apply_snapshot(snapshot);
+        });
+        let _history = use_listener::<ChatHistoryPage, _>(CHAT_HISTORY_PAGE_EVENT, move |page| {
+            chat.apply_history_page(page);
+        });
+        let _attachments =
+            use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+                let mut attachments = chat.composer.attachments;
+                let current = attachments.peek().clone();
+                attachments.set(merge_chat_attachments(&current, &selected.attachments));
+                focus_prompt_end(PROMPT_INPUT_ID);
+            });
+        let _previews =
+            use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
+                let mut known = chat.composer.attachment_previews;
+                let mut previews = known.peek().clone();
+                for attachment in &loaded.attachments {
+                    previews.insert(attachment.path.clone(), attachment.clone());
+                }
+                known.set(previews);
+            });
+        let _media =
+            use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+                if response.request_id != (chat.media.request_id)() {
+                    return;
+                }
+                let mut entries = chat.media.entries;
+                let mut loading = chat.media.loading;
+                let mut menu_sel = chat.slash.menu_sel;
+                entries.set(response.entries.clone());
+                loading.set(false);
+                menu_sel.set(0);
+            });
+        let _commands =
+            use_listener::<SlashCommandsEvent, _>(SLASH_COMMANDS_EVENT, move |incoming| {
+                let mut commands = chat.slash.commands;
+                commands.set(incoming.commands.clone());
+            });
+        let _models = use_listener::<ModelState, _>(MODEL_STATE_EVENT, move |state| {
+            let mut models = chat.models.models;
+            let mut current_model_id = chat.models.current_model_id;
+            let mut current_model = chat.models.current_model;
+            let mut levels = chat.effort.levels;
+            let mut current = chat.effort.current;
+            let mut agent_key = chat.effort.agent_key;
+            let mut menu_sel = chat.slash.menu_sel;
+            models.set(state.models.clone());
+            current_model_id.set(state.current_model_id.clone());
+            current_model.set(state.current_model_name.clone());
+            levels.set(state.effort_levels.clone());
+            current.set(state.effort_current.clone());
+            agent_key.set(state.agent_key.clone());
+            menu_sel.set(0);
+        });
+        let _context = use_listener::<ComposerContext, _>(COMPOSER_CONTEXT_EVENT, move |context| {
+            let mut composer_context = chat.slash.composer_context;
+            composer_context.set(context.clone());
+        });
+        let _sessions =
+            use_listener::<ResumableSessions, _>(RESUMABLE_SESSIONS_EVENT, move |incoming| {
+                let mut sessions = chat.resume.sessions;
+                let mut menu_sel = chat.slash.menu_sel;
+                let mut loading = chat.resume.loading;
+                sessions.set(incoming.sessions.clone());
+                menu_sel.set(0);
+                loading.set(false);
+            });
+    }
+
+    /// Keep the derived surfaces — focus, scroll pin, fetches and the tab — in step with the state.
+    fn watch(&self) {
+        let chat = *self;
+        use_effect(move || focus_prompt_end(PROMPT_INPUT_ID));
+        use_effect(move || {
+            // Subscribe to any transcript/status change (each snapshot is a fresh `set`). Only pin
+            // to the bottom when the user is already there — if they scrolled up to read, leave
+            // them.
+            let _ = chat.transcript.items.read().len();
+            let _ = chat.run.status.read();
+            if !*chat.transcript.at_bottom.peek() {
+                return;
+            }
+            scroll::to_bottom(chat.transcript.scroll_container);
+        });
+        use_effect(move || chat.fetch_resume_sessions());
+        use_effect(move || chat.fetch_media_entries());
+        use_effect(move || {
+            let items = chat.transcript.items.read();
+            TabIdentity::of(
+                chat.title(),
+                &items,
+                &(chat.run.status)(),
+                &(chat.identity.agent_icon)(),
+                &chat.agent(),
+                &chat.accent(),
+            )
+            .apply();
+        });
+        use_selector(chat.slash.menu_sel, move |selected| {
+            let media_open = {
+                let draft = chat.composer.draft.read();
+                inline_media_query(&draft).is_some()
+            };
+            let _ = chat.resume.sessions.read().len();
+            let _ = chat.models.models.read().len();
+            let _ = chat.media.entries.read().len();
+            if !chat.run.choice_options.read().is_empty() {
+                format!("agent-choice-item-{selected}")
+            } else if media_open {
+                format!("prompt-media-item-{selected}")
+            } else {
+                format!("agent-selector-item-{selected}")
+            }
+        });
+    }
+
+    fn apply_snapshot(&self, snapshot: ChatSnapshot) {
+        let transcript = self.transcript;
+        let messages_changed = (transcript.recent_messages_start)() != snapshot.messages_start
+            || *transcript.recent_messages_json.peek() != snapshot.messages_json;
+        if messages_changed
+            && let Ok(parsed) = serde_json::from_str::<Vec<ChatItem>>(&snapshot.messages_json)
+        {
+            self.request_attachment_previews(&parsed);
+            let mut items = transcript.items;
+            let mut recent_json = transcript.recent_messages_json;
+            let mut recent_start = transcript.recent_messages_start;
+            let start = merge_transcript_page(
+                &mut items.write(),
+                (transcript.loaded_start)(),
+                parsed,
+                snapshot.messages_start,
+            );
+            set_if_changed(transcript.loaded_start, start);
+            recent_json.set(snapshot.messages_json.clone());
+            recent_start.set(snapshot.messages_start);
+            if start == 0 {
+                set_if_changed(transcript.history_loading, false);
+            }
+        }
+        set_if_changed(transcript.messages_total, snapshot.messages_total);
+        set_if_changed(self.run.status, snapshot.status.clone());
+        set_if_changed(self.run.error, snapshot.error.clone());
+        set_if_changed(self.queue.queued, snapshot.queued.clone());
+        set_if_changed(self.composer.transition_preview, String::new());
+        set_if_changed(self.composer.transition_attachments, Vec::new());
+        set_if_changed(self.queue.paused, snapshot.paused);
+        set_if_changed(self.identity.agent_name, snapshot.agent_name.clone());
+        set_if_changed(
+            self.identity.conversation_title,
+            snapshot.conversation_title.clone(),
+        );
+        set_if_changed(self.identity.agent_icon, snapshot.agent_icon.clone());
+        set_if_changed(self.identity.accent, snapshot.accent_color.clone());
+        set_if_changed(self.handoff.source, snapshot.handoff_source.clone());
+        set_if_changed(self.handoff.truncated, snapshot.handoff_truncated);
+        set_if_changed(self.handoff.message_count, snapshot.handoff_message_count);
+        set_if_changed(self.run.choice_question, snapshot.choice_question.clone());
+        let mut choice_options = self.run.choice_options;
+        if choice_options.peek().as_slice() != snapshot.choice_options.as_slice() {
+            set_if_changed(self.slash.menu_sel, 0);
+            choice_options.set(snapshot.choice_options.clone());
+        }
+        let next_approval = if snapshot.status == "awaiting" {
+            Some((
+                snapshot.approval_call_id.clone(),
+                snapshot.approval_name.clone(),
+                snapshot.approval_args_json.clone(),
+            ))
+        } else {
+            None
+        };
+        let mut approval = self.run.approval;
+        if approval.peek().ne(&next_approval) {
+            approval.set(next_approval);
+            set_if_changed(self.run.approval_sel, 0);
+        }
+    }
+
+    fn apply_history_page(&self, page: ChatHistoryPage) {
+        let transcript = self.transcript;
+        let mut history_loading = transcript.history_loading;
+        history_loading.set(false);
+        if page.end != (transcript.loaded_start)() {
+            return;
+        }
+        let Ok(older) = serde_json::from_str::<Vec<ChatItem>>(&page.items_json) else {
+            return;
+        };
+        self.request_attachment_previews(&older);
+        let metrics = scroll::metrics(transcript.scroll_container);
+        let mut items = transcript.items;
+        let mut loaded_start = transcript.loaded_start;
+        let mut messages_total = transcript.messages_total;
+        drop(items.write().splice(0..0, older));
+        loaded_start.set(page.start);
+        messages_total.set(page.total);
+        if let Some((height, top)) = metrics {
+            scroll::restore(transcript.scroll_container, height, top);
+        }
+    }
+
+    /// Ask the host for thumbnails of any image attachment we have not seen or asked about yet.
+    fn request_attachment_previews(&self, items: &[ChatItem]) {
+        let previews = self.composer.attachment_previews;
+        let mut requests = self.composer.attachment_preview_requests;
+        let known = previews.peek().keys().cloned().collect::<HashSet<_>>();
+        let mut requested = requests.peek().clone();
+        let mut paths = Vec::new();
+        for item in items {
+            let ChatItem::User { attachments, .. } = item else {
+                continue;
+            };
+            for attachment in attachments {
+                if !attachment.mime_type.starts_with("image/")
+                    || known.contains(&attachment.path)
+                    || !requested.insert(attachment.path.clone())
+                {
+                    continue;
+                }
+                paths.push(attachment.path.clone());
+            }
+        }
+        if !paths.is_empty() && send(&ChatAttachmentPreviewRequest { paths }).is_ok() {
+            requests.set(requested);
+        }
+    }
+
+    /// Fetch the resumable session list while `/resume` is open, and forget it once it closes.
+    fn fetch_resume_sessions(&self) {
+        let mut requested = self.resume.requested;
+        let mut loading = self.resume.loading;
+        let should_fetch =
+            should_fetch_resume(&(self.composer.draft)(), &self.slash.commands.read());
+        if should_fetch && !requested() {
+            loading.set(true);
+            if send(&ResumeListRequest).is_err() {
+                loading.set(false);
+            }
+            requested.set(true);
+        } else if !should_fetch && requested() {
+            requested.set(false);
+            loading.set(false);
+        }
+    }
+
+    /// Fetch matches for the `@`-mention in the draft, and clear them when it goes away.
+    fn fetch_media_entries(&self) {
+        let mut entries = self.media.entries;
+        let mut request_id = self.media.request_id;
+        let mut requested_query = self.media.requested_query;
+        let mut loading = self.media.loading;
+        let value = (self.composer.draft)();
+        let Some(query) = inline_media_query(&value).map(|query| query.query.to_string()) else {
+            entries.set(Vec::new());
+            if requested_query.peek().is_some() {
+                request_id.set(request_id().wrapping_add(1).max(1));
+            }
+            requested_query.set(None);
+            loading.set(false);
+            return;
+        };
+        if requested_query().as_deref() == Some(query.as_str()) {
+            return;
+        }
+        let next_id = request_id().wrapping_add(1).max(1);
+        request_id.set(next_id);
+        requested_query.set(Some(query.clone()));
+        entries.set(Vec::new());
+        loading.set(true);
+        if send(&ChatMediaListRequest {
+            request_id: next_id,
+            query,
+        })
+        .is_err()
+        {
+            loading.set(false);
+        }
+    }
+
+    /// Ask for the page of transcript before the one loaded, unless a request is already out.
+    pub fn request_history(&self) {
+        let mut loading = self.transcript.history_loading;
+        let before = (self.transcript.loaded_start)();
+        if before == 0 || *loading.peek() {
+            return;
+        }
+        if send(&ChatHistoryRequest {
+            before,
+            limit: CHAT_HISTORY_PAGE_SIZE,
+        })
+        .is_ok()
+        {
+            loading.set(true);
+        }
+    }
+}
+
+/// What the page reads off the state to render itself.
+impl Chat {
+    pub fn agent(&self) -> String {
+        (self.agent)()
+    }
+
+    /// The agent's display name, falling back to the id when the snapshot has not landed.
+    pub fn header_name(&self) -> String {
+        let name = (self.identity.agent_name)();
+        if name.is_empty() { self.agent() } else { name }
+    }
+
+    /// What the conversation is called, in the header and in the tab.
+    pub fn title(&self) -> String {
+        chat_page_title(&(self.identity.conversation_title)(), &self.header_name())
+    }
+
+    pub fn accent(&self) -> Accent {
+        Accent::resolve(
+            &(self.identity.accent)(),
+            agent_accent(&self.agent()).rain_rgb,
+        )
+    }
+
+    pub fn status(&self) -> String {
+        (self.run.status)()
+    }
+
+    pub fn installing(&self) -> bool {
+        self.status() == "installing"
+    }
+
+    /// An install with nothing to show yet takes over the page.
+    pub fn installing_splash(&self) -> bool {
+        self.installing() && self.transcript.items.read().is_empty()
+    }
+
+    /// What the install is doing, or a placeholder until it says.
+    pub fn install_detail(&self) -> String {
+        let detail = (self.run.error)();
+        if detail.is_empty() {
+            translate("agent-preparing")
+        } else {
+            detail
+        }
+    }
+
+    /// Nothing written or queued anywhere, so the composer can still suggest what to ask for.
+    pub fn show_examples(&self) -> bool {
+        self.transcript.items.read().is_empty()
+            && self.queue.queued.read().is_empty()
+            && self.composer.attachments.read().is_empty()
+            && self.composer.transition_attachments.read().is_empty()
+    }
+
+    pub fn draft(&self) -> String {
+        (self.composer.draft)()
+    }
+
+    /// The slash commands the draft narrows to — empty unless it has opened the command menu.
+    pub fn filtered_commands(&self) -> Vec<SlashCommandEntry> {
+        let draft = self.draft();
+        let SelectorMode::Commands(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        let query = query.to_lowercase();
+        let mut matching = Vec::new();
+        for command in self.slash.commands.read().iter() {
+            if command.name.starts_with(&query) {
+                matching.push(command.clone());
+            }
+        }
+        matching
+    }
+
+    pub fn filtered_sessions(&self) -> Vec<ResumableSessionEntry> {
+        let draft = self.draft();
+        let SelectorMode::Resume(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        filter_sessions(&self.resume.sessions.read(), query)
+    }
+
+    pub fn filtered_models(&self) -> Vec<ModelOptionEntry> {
+        let draft = self.draft();
+        let SelectorMode::Models(query) = selector_mode(&draft) else {
+            return Vec::new();
+        };
+        filter_models(&self.models.models.read(), query)
+    }
+
+    /// The command menu is only worth opening when something matches what has been typed.
+    pub fn command_menu_open(&self) -> bool {
+        !self.filtered_commands().is_empty()
+    }
+
+    /// The resume and model menus open on the bare prefix, because they explain an empty result.
+    pub fn resume_menu_open(&self) -> bool {
+        matches!(selector_mode(&self.draft()), SelectorMode::Resume(_))
+    }
+
+    pub fn model_menu_open(&self) -> bool {
+        matches!(selector_mode(&self.draft()), SelectorMode::Models(_))
+    }
+
+    /// Whether the resume menu should show its list, or say why it cannot.
+    pub fn resume_state(&self) -> Option<ResumeMenuState> {
+        if !self.resume_menu_open() {
+            return None;
+        }
+        Some(resume_menu_state(
+            (self.resume.requested)(),
+            (self.resume.loading)(),
+            self.resume.sessions.read().len(),
+            self.filtered_sessions().len(),
+        ))
+    }
+
+    pub fn media_menu_open(&self) -> bool {
+        inline_media_query(&self.draft()).is_some()
+    }
+
+    pub fn media_options(&self) -> Vec<PromptMediaOption> {
+        let mut options = Vec::new();
+        for entry in self.media.entries.read().iter() {
+            options.push(PromptMediaOption {
+                key: format!("media-{}", entry.path),
+                name: entry.name.clone(),
+                display_path: entry.display_path(),
+                preview_data_url: entry.preview_data_url.clone(),
+                label: file_extension_label(&entry.name),
+                is_dir: entry.is_dir,
+            });
+        }
+        options
+    }
+
+    /// The pills above the prompt: what came in from the launcher first, then what was attached
+    /// here — only the latter can be removed, so only it carries an index.
+    pub fn composer_attachments(&self) -> Vec<PromptComposerAttachment> {
+        let previews = self.composer.attachment_previews.read();
+        let preview_of = |attachment: &ChatAttachment| {
+            let loaded = previews
+                .get(&attachment.path)
+                .filter(|preview| !preview.preview_data_url.is_empty());
+            match loaded {
+                Some(preview) => preview.preview_data_url.clone(),
+                None => attachment.preview_data_url.clone(),
+            }
+        };
+        let mut pills = Vec::new();
+        for attachment in self.composer.transition_attachments.read().iter() {
+            pills.push(PromptComposerAttachment {
+                key: format!("transition-attachment-{}", attachment.path),
+                name: attachment.name.clone(),
+                label: file_extension_label(&attachment.name),
+                preview_data_url: preview_of(attachment),
+                remove_index: None,
+            });
+        }
+        for (index, attachment) in self.composer.attachments.read().iter().enumerate() {
+            pills.push(PromptComposerAttachment {
+                key: format!("attachment-pill-{}", attachment.path),
+                name: attachment.name.clone(),
+                label: file_extension_label(&attachment.name),
+                preview_data_url: preview_of(attachment),
+                remove_index: Some(index),
+            });
+        }
+        pills
+    }
+
+    pub fn streaming(&self) -> bool {
+        matches!(self.status().as_str(), "streaming" | "awaiting")
+    }
+
+    /// Stop while a turn is running with nothing behind it; otherwise send.
+    pub fn prompt_action(&self) -> PromptComposerAction {
+        if self.streaming() && self.queue.queued.read().is_empty() {
+            PromptComposerAction::Stop
+        } else {
+            PromptComposerAction::Send
+        }
+    }
+
+    pub fn prompt_action_title(&self) -> String {
+        if self.streaming() && !self.queue.queued.read().is_empty() {
+            translate("agent-send-all-queued")
+        } else if self.streaming() {
+            translate("common-stop")
+        } else {
+            translate("agent-send")
+        }
+    }
+
+    pub fn prompt_action_enabled(&self) -> bool {
+        !self.choice_pending()
+            && (self.streaming()
+                || !self.draft().trim().is_empty()
+                || !self.composer.attachments.read().is_empty())
+    }
+
+    /// The agent is waiting on an answer, so the composer must not send anything else.
+    pub fn choice_pending(&self) -> bool {
+        !self.run.choice_options.read().is_empty() || self.run.approval.read().is_some()
+    }
+}
+
+/// What the page does to the state, or asks the host to do.
+impl Chat {
+    /// Emit the draft as a submit intent, clearing the input only if the IPC succeeded so a failed
+    /// emit never silently swallows the user's message. The queued/sent turn arrives via snapshot.
+    pub fn submit(&self) {
+        let mut draft = self.composer.draft;
+        let mut attachments = self.composer.attachments;
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
+        let mut at_bottom = self.transcript.at_bottom;
+        let text = draft.peek().trim().to_string();
+        let selected = attachments.peek().clone();
+        if text.is_empty() && selected.is_empty() {
+            return;
+        }
+        let mut to_submit = Vec::with_capacity(selected.len());
+        for attachment in &selected {
+            to_submit.push(ChatSubmitAttachment {
+                path: attachment.path.clone(),
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                size: attachment.size,
+            });
+        }
+        if send(&ChatSubmit {
+            text,
+            attachments: to_submit,
+        })
+        .is_err()
+        {
+            return;
+        }
+        at_bottom.set(true);
+        draft.set(String::new());
+        attachments.set(Vec::new());
+        history_cursor.set(None);
+        history_scratch.set(String::new());
+    }
+
+    /// Interrupt the running turn, or send everything queued when there is a queue behind it.
+    pub fn stop_or_flush(&self) {
+        if self.queue.queued.peek().is_empty() {
+            let _ = send(&ChatCancel);
+        } else {
+            let _ = send(&ChatEscape);
+        }
+    }
+
+    /// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the
+    /// current session to the other runtime. Unknown names are ignored (the raw text still submits
+    /// via the normal Enter path).
+    pub fn run_slash_command(&self, name: &str) {
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        match name {
+            "upload" => {
+                let _ = send(&ChatPickFiles);
+                draft.set(String::new());
+            }
+            "resume" => {
+                menu_sel.set(0);
+                draft.set("/resume ".to_string());
+            }
+            "model" => {
+                menu_sel.set(0);
+                draft.set("/model ".to_string());
+            }
+            "cli" => {
+                let _ = send(&RuntimeSwitchRequest { to: "cli".into() });
+                draft.set(String::new());
+            }
+            "acp" => {
+                let _ = send(&RuntimeSwitchRequest { to: "acp".into() });
+                draft.set(String::new());
+            }
+            _ => {}
+        }
+    }
+
+    pub fn select_model(&self, model: &ModelOptionEntry) {
+        let mut draft = self.composer.draft;
+        let _ = send(&SelectModel {
+            model_id: model.id.clone(),
+        });
+        draft.set(String::new());
+    }
+
+    pub fn select_resume_session(&self, session: &ResumableSessionEntry) {
+        let mut draft = self.composer.draft;
+        let _ = send(&ResumeSession {
+            kind: session.kind.clone(),
+            sid: session.sid.clone(),
+            cwd: session.cwd.clone(),
+        });
+        draft.set(String::new());
+    }
+
+    /// Take a `@`-mention match: a directory descends into it, a file becomes an attachment.
+    pub fn select_media_entry(&self, entry: &ChatMediaEntry) {
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        let value = draft.peek().clone();
+        let Some(query) = inline_media_query(&value) else {
+            return;
+        };
+        let reference = entry.reference();
+        let replacement = if entry.is_dir {
+            format!("@{reference}/")
+        } else {
+            if send(&ChatAttachPaths {
+                paths: vec![entry.path.clone()],
+            })
+            .is_err()
+            {
+                return;
+            }
+            String::new()
+        };
+        draft.set(replace_inline_media_query(&value, query, &replacement));
+        menu_sel.set(0);
+        focus_prompt_end(PROMPT_INPUT_ID);
+    }
+
+    /// Answer the agent's multiple-choice question, clearing it only once the reply is away.
+    pub fn answer_choice(&self, index: usize) {
+        let mut question = self.run.choice_question;
+        let mut options = self.run.choice_options;
+        let mut menu_sel = self.slash.menu_sel;
+        if send(&ChatChoiceSelected {
+            index: index as u32,
+        })
+        .is_ok()
+        {
+            question.set(String::new());
+            options.set(Vec::new());
+            menu_sel.set(0);
+        }
+    }
+
+    /// Answer a tool approval, clearing the prompt only once the reply is away.
+    pub fn answer_approval(&self, call_id: String, decision: u8) {
+        let mut approval = self.run.approval;
+        let mut approval_sel = self.run.approval_sel;
+        if send(&ChatApproval { call_id, decision }).is_ok() {
+            approval.set(None);
+            approval_sel.set(0);
+        }
+    }
+
+    /// Drop the draft's `@`-mention, or the whole draft when there is none to drop.
+    pub fn dismiss_selector(&self) {
+        let mut draft = self.composer.draft;
+        let mut menu_sel = self.slash.menu_sel;
+        let value = draft.peek().clone();
+        if let Some(query) = inline_media_query(&value) {
+            draft.set(replace_inline_media_query(&value, query, ""));
+            focus_prompt_end(PROMPT_INPUT_ID);
+        } else {
+            draft.set(String::new());
+        }
+        menu_sel.set(0);
+    }
+
+    /// Typing anywhere in the draft leaves prompt recall, so the next Up starts from the newest.
+    pub fn edit_draft(&self, value: String) {
+        let mut draft = self.composer.draft;
+        let mut history_cursor = self.composer.history_cursor;
+        let mut history_scratch = self.composer.history_scratch;
+        let mut menu_sel = self.slash.menu_sel;
+        draft.set(value);
+        history_cursor.set(None);
+        history_scratch.set(String::new());
+        menu_sel.set(0);
+    }
+
+    pub fn remove_attachment(&self, index: usize) {
+        let mut attachments = self.composer.attachments;
+        let mut next = attachments.peek().clone();
+        if index < next.len() {
+            next.remove(index);
+            attachments.set(next);
+        }
+    }
+}
 
 /// The rendered transcript, the window of it that is loaded, and where the reader is in it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Transcript {
     pub items: Signal<Vec<ChatItem>>,
     pub loaded_start: Signal<u32>,
@@ -43,7 +820,7 @@ pub fn use_transcript() -> Transcript {
 }
 
 /// What the agent is doing, and anything it is blocked on waiting for the user.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct RunState {
     pub status: Signal<String>,
     pub error: Signal<String>,
@@ -65,7 +842,7 @@ pub fn use_run_state() -> RunState {
 }
 
 /// How the agent presents itself in the header.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct AgentIdentity {
     pub agent_name: Signal<String>,
     pub conversation_title: Signal<String>,
@@ -83,7 +860,7 @@ pub fn use_agent_identity() -> AgentIdentity {
 }
 
 /// Where this conversation was picked up from, when it was handed over from another agent.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Handoff {
     pub source: Signal<String>,
     pub truncated: Signal<bool>,
@@ -99,7 +876,7 @@ pub fn use_handoff() -> Handoff {
 }
 
 /// The prompt being written: its text, its attachments, and the recall of earlier prompts.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ComposerDraft {
     pub draft: Signal<String>,
     pub attachments: Signal<Vec<ChatAttachment>>,
@@ -131,7 +908,7 @@ pub fn use_composer_draft(
 }
 
 /// Prompts typed while the agent was busy, and whether the queue is holding them back.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct PromptQueue {
     pub queued: Signal<Vec<QueuedPromptSnapshot>>,
     pub paused: Signal<bool>,
@@ -145,7 +922,7 @@ pub fn use_prompt_queue() -> PromptQueue {
 }
 
 /// The `@`-mention file picker.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct MediaPicker {
     pub entries: Signal<Vec<ChatMediaEntry>>,
     pub request_id: Signal<u64>,
@@ -163,7 +940,7 @@ pub fn use_media_picker() -> MediaPicker {
 }
 
 /// Which model the agent is running, and what else it offers.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct ModelPicker {
     pub models: Signal<Vec<ModelOptionEntry>>,
     pub current_model_id: Signal<String>,
@@ -179,7 +956,7 @@ pub fn use_model_picker() -> ModelPicker {
 }
 
 /// How hard the agent is asked to think, for the agents that expose the choice.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct EffortPicker {
     pub levels: Signal<Vec<String>>,
     pub current: Signal<String>,
@@ -198,7 +975,7 @@ pub fn use_effort_picker() -> EffortPicker {
 }
 
 /// The slash-command menu and the context it offers completions against.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct SlashCommands {
     pub commands: Signal<Vec<SlashCommandEntry>>,
     pub menu_sel: Signal<usize>,
@@ -214,7 +991,7 @@ pub fn use_slash_commands() -> SlashCommands {
 }
 
 /// Earlier sessions this agent can be resumed into.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Resume {
     pub sessions: Signal<Vec<ResumableSessionEntry>>,
     pub requested: Signal<bool>,
@@ -227,4 +1004,85 @@ pub fn use_resume() -> Resume {
         requested: use_signal(|| false),
         loading: use_signal(|| false),
     }
+}
+
+/// Writing a signal it already holds would wake every reader for nothing, and each snapshot
+/// rewrites every field.
+fn set_if_changed<T: PartialEq + 'static>(mut signal: Signal<T>, value: T) {
+    if signal.peek().ne(&value) {
+        signal.set(value);
+    }
+}
+
+/// Splice a fresh tail onto the loaded window, keeping the older messages already paged in when
+/// the two overlap and starting over when they do not.
+fn merge_transcript_page(
+    current: &mut Vec<ChatItem>,
+    current_start: u32,
+    incoming: Vec<ChatItem>,
+    incoming_start: u32,
+) -> u32 {
+    if current_start <= incoming_start {
+        let keep = incoming_start.saturating_sub(current_start) as usize;
+        if keep <= current.len() {
+            current.truncate(keep);
+            current.extend(incoming);
+            return current_start;
+        }
+    }
+    *current = incoming;
+    incoming_start
+}
+
+/// Running subagents and unfinished plan steps across the transcript.
+fn composer_activity_counts(items: &[ChatItem]) -> (usize, usize) {
+    let mut subagents = 0usize;
+    let mut tasks = 0usize;
+    for item in items {
+        let ChatItem::Turn(turn) = item else {
+            continue;
+        };
+        for block in &turn.blocks {
+            match block {
+                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
+                    subagents += 1;
+                }
+                ChatBlock::Plan { steps } => {
+                    tasks += steps
+                        .iter()
+                        .filter(|step| step.status != "completed")
+                        .count();
+                }
+                _ => {}
+            }
+        }
+    }
+    (subagents, tasks)
+}
+
+/// The badge on an attachment pill: its extension, or `FILE` when it has none.
+fn file_extension_label(name: &str) -> String {
+    std::path::Path::new(name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_uppercase())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or_else(|| "FILE".to_string())
+}
+
+/// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
+/// across agents and only the id differs.
+#[cfg(web)]
+fn current_agent() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().pathname().ok())
+        .and_then(|path| path.split('/').find(|s| !s.is_empty()).map(str::to_string))
+        .unwrap_or_else(|| "agent".to_string())
+}
+
+/// A native host has no page URL to read the id out of, so it passes `agent_override` instead —
+/// which takes precedence over this anyway.
+#[cfg(not(web))]
+fn current_agent() -> String {
+    "agent".to_string()
 }

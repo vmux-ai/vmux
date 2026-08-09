@@ -10,6 +10,7 @@ pub type PtyExited = ProcessExited;
 
 #[derive(Component, Debug, Clone, Reflect, serde::Serialize, serde::Deserialize)]
 #[reflect(Component)]
+#[type_path = "vmux_core::terminal"]
 pub struct TerminalLaunch {
     pub command: String,
     pub args: Vec<String>,
@@ -19,6 +20,7 @@ pub struct TerminalLaunch {
 }
 
 #[derive(Debug, Clone, Reflect, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[type_path = "vmux_core::terminal"]
 pub enum TerminalKind {
     Plain,
     Vibe,

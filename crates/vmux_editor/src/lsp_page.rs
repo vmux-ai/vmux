@@ -14,16 +14,6 @@ use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
 
-fn request_catalog(query: String, refresh: bool) {
-    let _ = send(&LspCatalogRequest {
-        query,
-        language: String::new(),
-        category: String::new(),
-        installed_only: false,
-        refresh,
-    });
-}
-
 #[component]
 pub fn Page() -> Element {
     let locale = use_theme();
@@ -71,7 +61,7 @@ pub fn Page() -> Element {
         if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
             doc.set_title(&translate("lsp-title"));
         }
-        request_catalog(String::new(), false);
+        let _ = send(&LspCatalogRequest::for_query("", false));
     });
 
     let visible = packages();
@@ -85,7 +75,7 @@ pub fn Page() -> Element {
                 onsearch: move |event: FormEvent| {
                     let value = event.value();
                     query.set(value.clone());
-                    request_catalog(value, false);
+                    let _ = send(&LspCatalogRequest::for_query(value, false));
                 },
                 onkeydown: None,
                 actions: rsx! {
@@ -93,7 +83,7 @@ pub fn Page() -> Element {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
                             loading.set(true);
-                            request_catalog(query(), true);
+                            let _ = send(&LspCatalogRequest::for_query(query(), true));
                         },
                         {translate("common-refresh")}
                     }

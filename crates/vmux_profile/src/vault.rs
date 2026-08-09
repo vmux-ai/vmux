@@ -1,14 +1,20 @@
+mod files;
+mod keys;
+
+pub use keys::{
+    authorize_key_broker_parent, key_broker_load, key_broker_load_silent, key_broker_store,
+};
+
+use files::FileAttributes;
+use keys::{KeyStore, SilentSystemKeyStore, SystemKeyStore};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
-
-#[cfg(target_os = "macos")]
-use std::io::Write;
 
 use ring::aead;
 use ring::digest;
@@ -26,8 +32,6 @@ const OBJECTS_DIR: &str = "objects";
 const PASSKEYS_DIR: &str = "keys/passkeys";
 const RECOVERY_DIR: &str = "keys/recovery";
 const RECOVERY_FILE: &str = "default.ron";
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "ai.vmux.vault";
 const INDEX_AAD: &[u8] = b"vmux-vault-index-v1";
 const OBJECT_AAD_PREFIX: &[u8] = b"vmux-vault-object-v1\0";
 const PASSKEY_AAD_PREFIX: &[u8] = b"vmux-vault-passkey-v1\0";
@@ -38,9 +42,6 @@ const RECOVERY_KDF_PREFIX: &[u8] = b"vmux-vault-recovery-kdf-v1\0";
 const GITHUB_VIEWER_QUERY: &str = "query { viewer { login organizations(first: 100) { nodes { login viewerCanCreateRepositories } } } }";
 const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
-static SESSION_KEYS: OnceLock<Mutex<HashMap<String, Zeroizing<Vec<u8>>>>> = OnceLock::new();
-#[cfg(any(target_os = "macos", test))]
-static SESSION_KEY_LOAD: OnceLock<Mutex<()>> = OnceLock::new();
 const IGNORED_ROOTS: [&str; 8] = [
     "agents",
     "extensions",
@@ -241,53 +242,6 @@ struct ReconcileOutcome {
 enum TextMergeStrategy {
     Local,
     Union,
-}
-
-trait KeyStore {
-    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
-    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String>;
-    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String>;
-}
-
-struct SystemKeyStore;
-
-struct SilentSystemKeyStore;
-
-impl KeyStore for SystemKeyStore {
-    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        load_system_key(vault_id)
-    }
-
-    fn create(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        create_system_key(vault_id)
-    }
-
-    fn store(&self, vault_id: &str, key: &[u8]) -> Result<(), String> {
-        store_system_key(vault_id, key)
-    }
-}
-
-impl KeyStore for SilentSystemKeyStore {
-    fn load(&self, vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        if let Some(key) = load_session_key(vault_id)? {
-            return Ok(key);
-        }
-        let Some(key) = load_key_from_broker_silent(vault_id)? else {
-            return Err(
-                "This Vault is locked on this device. Unlock it with a passkey.".to_string(),
-            );
-        };
-        store_session_key(vault_id, &key)?;
-        Ok(key)
-    }
-
-    fn create(&self, _vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-        Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
-    }
-
-    fn store(&self, _vault_id: &str, _key: &[u8]) -> Result<(), String> {
-        Err("This Vault is locked on this device. Unlock it with a passkey.".to_string())
-    }
 }
 
 pub fn root_dir() -> PathBuf {
@@ -1232,9 +1186,9 @@ fn collect_directory(
         validate_relative_path(&relative)?;
         let data = match kind {
             EntryKind::File => std::fs::read(&path).map_err(|error| error.to_string())?,
-            EntryKind::Symlink => symlink_target_bytes(&path)?,
+            EntryKind::Symlink => FileAttributes::symlink_target(&path)?,
         };
-        let mode = file_mode(&metadata);
+        let mode = FileAttributes::mode(&metadata);
         let (modified_secs, modified_nanos) = modified_time(&metadata);
         let digest = entry_digest(kind, mode, &data);
         files.insert(
@@ -1295,7 +1249,7 @@ fn collect_fingerprint_directory(
             relative,
             LocalFingerprint {
                 kind,
-                mode: file_mode(&metadata),
+                mode: FileAttributes::mode(&metadata),
                 size: metadata.len(),
                 modified_secs,
                 modified_nanos,
@@ -1838,9 +1792,9 @@ fn apply_local_entry(
             match entry.kind {
                 EntryKind::File => {
                     write_atomic(&path, &entry.data)?;
-                    set_file_mode(&path, entry.mode)?;
+                    FileAttributes::set_mode(&path, entry.mode)?;
                 }
-                EntryKind::Symlink => create_symlink(&path, &entry.data)?,
+                EntryKind::Symlink => FileAttributes::create_symlink(&path, &entry.data)?,
             }
         }
         None => {
@@ -2393,482 +2347,6 @@ fn decode_hex_digit(byte: u8) -> Result<u8, String> {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn keychain_options(
-    service: &str,
-    vault_id: &str,
-    synchronized: bool,
-) -> security_framework::passwords::PasswordOptions {
-    let mut options =
-        security_framework::passwords::PasswordOptions::new_generic_password(service, vault_id);
-    options.set_access_synchronized(Some(synchronized));
-    options
-}
-
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
-pub fn key_broker_load(vault_id: &str) -> Result<Option<String>, String> {
-    use security_framework::passwords::generic_password;
-    use security_framework_sys::base::errSecItemNotFound;
-
-    match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, false)) {
-        Ok(key) => {
-            validate_key(&key)?;
-            Ok(Some(hex(&key)))
-        }
-        Err(error) if error.code() == errSecItemNotFound => Ok(None),
-        Err(error) => Err(format!("failed to unlock Vault key: {error}")),
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
-pub fn key_broker_load_silent(vault_id: &str) -> Result<Option<String>, String> {
-    use security_framework::item::{ItemClass, ItemSearchOptions, SearchResult};
-
-    let mut search = ItemSearchOptions::new();
-    let results = search
-        .class(ItemClass::generic_password())
-        .service(KEYCHAIN_SERVICE)
-        .account(vault_id)
-        .load_data(true)
-        .skip_authenticated_items(true)
-        .search();
-    let Ok(results) = results else {
-        return Ok(None);
-    };
-    if let Some(key) = results.into_iter().find_map(|result| match result {
-        SearchResult::Data(key) => Some(key),
-        _ => None,
-    }) {
-        validate_key(&key)?;
-        return Ok(Some(hex(&key)));
-    }
-    Ok(None)
-}
-
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
-pub fn key_broker_store(vault_id: &str, encoded_key: &str) -> Result<(), String> {
-    let key = decode_key_hex(encoded_key)?;
-    store_keychain_key(KEYCHAIN_SERVICE, vault_id, &key)
-}
-
-#[cfg(target_os = "macos")]
-#[doc(hidden)]
-pub fn authorize_key_broker_parent() -> Result<(), String> {
-    use security_framework::os::macos::code_signing::{
-        Flags, GuestAttributes, SecCode, SecRequirement,
-    };
-    use std::str::FromStr;
-
-    let parent_pid = unsafe { libc::getppid() };
-    let mut attributes = GuestAttributes::new();
-    attributes.set_pid(parent_pid);
-    let parent = SecCode::copy_guest_with_attribues(None, &attributes, Flags::NONE)
-        .map_err(|error| format!("failed to identify Vault key broker caller: {error}"))?;
-    let broker = std::env::current_exe().map_err(|error| error.to_string())?;
-    let certificate = signing_leaf_hash(&broker)?;
-    let requirement =
-        SecRequirement::from_str(&format!("certificate leaf = H\"{certificate}\""))
-            .map_err(|error| format!("failed to create Vault key broker requirement: {error}"))?;
-    validate_key_broker_caller(&parent, &requirement)?;
-
-    let expected = broker
-        .parent()
-        .ok_or_else(|| "Vault key broker has no parent directory".to_string())?
-        .join("vmux_desktop")
-        .canonicalize()
-        .map_err(|error| format!("failed to locate vmux desktop: {error}"))?;
-    let actual = parent_process_path(parent_pid)?
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve Vault key broker caller: {error}"))?;
-    if actual != expected {
-        return Err("Vault key broker rejected its caller".to_string());
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn validate_key_broker_caller(
-    caller: &security_framework::os::macos::code_signing::SecCode,
-    requirement: &security_framework::os::macos::code_signing::SecRequirement,
-) -> Result<(), String> {
-    use security_framework::os::macos::code_signing::Flags;
-
-    caller
-        .check_validity(Flags::NONE, requirement)
-        .map_err(|_| "Vault key broker rejected its caller".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[doc(hidden)]
-pub fn key_broker_load(_vault_id: &str) -> Result<Option<String>, String> {
-    Err("Vault key broker is only available on macOS".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[doc(hidden)]
-pub fn key_broker_load_silent(_vault_id: &str) -> Result<Option<String>, String> {
-    Err("Vault key broker is only available on macOS".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[doc(hidden)]
-pub fn key_broker_store(_vault_id: &str, _encoded_key: &str) -> Result<(), String> {
-    Err("Vault key broker is only available on macOS".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-#[doc(hidden)]
-pub fn authorize_key_broker_parent() -> Result<(), String> {
-    Err("Vault key broker is only available on macOS".to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn load_keychain_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    use security_framework::passwords::generic_password;
-    use security_framework_sys::base::errSecItemNotFound;
-
-    match generic_password(keychain_options(KEYCHAIN_SERVICE, vault_id, false)) {
-        Ok(key) => {
-            validate_key(&key)?;
-            Ok(Some(Zeroizing::new(key)))
-        }
-        Err(error) if error.code() == errSecItemNotFound => Ok(None),
-        Err(error) => Err(format!("failed to unlock Vault encryption key: {error}")),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    load_or_store_session_key(vault_id, || {
-        let key = if key_broker_path().is_some() {
-            load_key_from_broker(vault_id)?
-        } else {
-            load_keychain_key(vault_id)?
-        };
-        key.ok_or_else(|| {
-            "This Vault is locked on this device. Unlock it with a passkey.".to_string()
-        })
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn create_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    let mut key = Zeroizing::new(vec![0_u8; KEY_LEN]);
-    SystemRandom::new()
-        .fill(&mut key)
-        .map_err(|_| "failed to generate Vault encryption key".to_string())?;
-    store_system_key(vault_id, &key)?;
-    Ok(key)
-}
-
-#[cfg(target_os = "macos")]
-fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    if key_broker_path().is_some() {
-        store_key_with_broker(vault_id, key)?;
-    } else {
-        store_keychain_key(KEYCHAIN_SERVICE, vault_id, key)?;
-    }
-    store_session_key(vault_id, key)
-}
-
-#[cfg(target_os = "macos")]
-fn store_keychain_key(service: &str, vault_id: &str, key: &[u8]) -> Result<(), String> {
-    use security_framework::passwords::set_generic_password_options;
-
-    validate_key(key)?;
-    set_generic_password_options(key, keychain_options(service, vault_id, false))
-        .map_err(|error| format!("failed to store Vault key in system Keychain: {error}"))
-}
-
-#[cfg(target_os = "macos")]
-fn key_broker_path() -> Option<PathBuf> {
-    if super::build_profile() == "dev" {
-        return None;
-    }
-    let path = std::env::current_exe().ok()?.parent()?.join("vmux");
-    path.is_file().then_some(path)
-}
-
-#[cfg(target_os = "macos")]
-fn parent_process_path(pid: libc::pid_t) -> Result<PathBuf, String> {
-    use std::os::unix::ffi::OsStringExt;
-
-    let mut buffer = vec![0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-    let length = unsafe {
-        libc::proc_pidpath(
-            pid,
-            buffer.as_mut_ptr().cast(),
-            buffer.len().try_into().unwrap_or(u32::MAX),
-        )
-    };
-    if length <= 0 {
-        return Err("failed to locate Vault key broker caller".to_string());
-    }
-    buffer.truncate(length as usize);
-    Ok(PathBuf::from(std::ffi::OsString::from_vec(buffer)))
-}
-
-#[cfg(target_os = "macos")]
-fn signing_leaf_hash(path: &Path) -> Result<String, String> {
-    let directory =
-        std::env::temp_dir().join(format!("vmux-vault-certificate-{}", random_hex(16)?));
-    std::fs::create_dir(&directory)
-        .map_err(|error| format!("failed to prepare Vault certificate check: {error}"))?;
-    let output = Command::new("/usr/bin/codesign")
-        .args(["--display", "--extract-certificates"])
-        .arg(path)
-        .current_dir(&directory)
-        .output()
-        .map_err(|error| format!("failed to inspect Vault key broker signature: {error}"))?;
-    let certificate_path = directory.join("codesign0");
-    let result = if output.status.success() {
-        std::fs::read(&certificate_path)
-            .map(|certificate| {
-                hex(
-                    ring::digest::digest(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY, &certificate)
-                        .as_ref(),
-                )
-            })
-            .map_err(|error| format!("failed to read Vault key broker certificate: {error}"))
-    } else {
-        Err("Vault key broker is not signed with a certificate".to_string())
-    };
-    let _ = std::fs::remove_dir_all(directory);
-    result
-}
-
-#[cfg(target_os = "macos")]
-fn run_key_broker(
-    action: &str,
-    vault_id: &str,
-    input: Option<&str>,
-    silent: bool,
-) -> Result<Option<Output>, String> {
-    let Some(path) = key_broker_path() else {
-        return Ok(None);
-    };
-    let mut command = Command::new(path);
-    command
-        .args(["vault-key", action, "--vault-id", vault_id])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if silent {
-        command.arg("--no-ui");
-    }
-    if input.is_none() {
-        return command
-            .output()
-            .map(Some)
-            .map_err(|error| format!("failed to run Vault key broker: {error}"));
-    }
-    let mut child = command
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("failed to run Vault key broker: {error}"))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| "failed to open Vault key broker input".to_string())?
-        .write_all(input.unwrap_or_default().as_bytes())
-        .map_err(|error| format!("failed to send key to Vault key broker: {error}"))?;
-    child
-        .wait_with_output()
-        .map(Some)
-        .map_err(|error| format!("failed to wait for Vault key broker: {error}"))
-}
-
-#[cfg(target_os = "macos")]
-fn load_key_from_broker(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    let Some(output) = run_key_broker("load", vault_id, None, false)? else {
-        return Ok(None);
-    };
-    if output.status.success() {
-        let key = decode_key_hex(String::from_utf8_lossy(&output.stdout).trim())?;
-        return Ok(Some(Zeroizing::new(key)));
-    }
-    if output.status.code() == Some(2) {
-        return Ok(None);
-    }
-    Err(key_broker_error(&output))
-}
-
-#[cfg(target_os = "macos")]
-fn load_key_from_broker_silent(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    let Some(output) = run_key_broker("load", vault_id, None, true)? else {
-        return Ok(None);
-    };
-    if output.status.success() {
-        let key = decode_key_hex(String::from_utf8_lossy(&output.stdout).trim())?;
-        return Ok(Some(Zeroizing::new(key)));
-    }
-    if output.status.code() == Some(2) {
-        return Ok(None);
-    }
-    Err(key_broker_error(&output))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn load_key_from_broker_silent(_vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    Ok(None)
-}
-
-#[cfg(target_os = "macos")]
-fn store_key_with_broker(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    let encoded = Zeroizing::new(hex(key));
-    let Some(output) = run_key_broker("store", vault_id, Some(&encoded), false)? else {
-        return store_keychain_key(KEYCHAIN_SERVICE, vault_id, key);
-    };
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(key_broker_error(&output))
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn key_broker_error(output: &Output) -> String {
-    let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if error.is_empty() {
-        "Vault key broker failed".to_string()
-    } else {
-        error
-    }
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn decode_key_hex(value: &str) -> Result<Vec<u8>, String> {
-    if value.len() != KEY_LEN * 2 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err("Vault encryption key has an invalid encoding".to_string());
-    }
-    let bytes = value.as_bytes();
-    let mut key = Vec::with_capacity(KEY_LEN);
-    for pair in bytes.chunks_exact(2) {
-        let high = hex_value(pair[0])?;
-        let low = hex_value(pair[1])?;
-        key.push((high << 4) | low);
-    }
-    validate_key(&key)?;
-    Ok(key)
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn hex_value(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        b'A'..=b'F' => Ok(byte - b'A' + 10),
-        _ => Err("Vault encryption key has an invalid encoding".to_string()),
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn load_system_key(vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    load_session_key(vault_id)?
-        .ok_or_else(|| "This Vault is locked on this device. Unlock it with a passkey.".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn create_system_key(_vault_id: &str) -> Result<Zeroizing<Vec<u8>>, String> {
-    Err("Encrypted Vault key storage is not available on this platform".to_string())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn store_system_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    store_session_key(vault_id, key)
-}
-
-fn load_session_key(vault_id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
-    Ok(SESSION_KEYS
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?
-        .get(vault_id)
-        .map(|key| Zeroizing::new(key.to_vec())))
-}
-
-fn store_session_key(vault_id: &str, key: &[u8]) -> Result<(), String> {
-    validate_key(key)?;
-    SESSION_KEYS
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?
-        .insert(vault_id.to_string(), Zeroizing::new(key.to_vec()));
-    Ok(())
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn load_or_store_session_key<F>(vault_id: &str, load: F) -> Result<Zeroizing<Vec<u8>>, String>
-where
-    F: FnOnce() -> Result<Zeroizing<Vec<u8>>, String>,
-{
-    if let Some(key) = load_session_key(vault_id)? {
-        return Ok(key);
-    }
-    let _load = SESSION_KEY_LOAD
-        .get_or_init(Default::default)
-        .lock()
-        .map_err(|error| error.to_string())?;
-    if let Some(key) = load_session_key(vault_id)? {
-        return Ok(key);
-    }
-    let key = load()?;
-    store_session_key(vault_id, &key)?;
-    Ok(key)
-}
-
-#[cfg(unix)]
-fn file_mode(metadata: &std::fs::Metadata) -> u32 {
-    use std::os::unix::fs::PermissionsExt;
-    metadata.permissions().mode() & 0o777
-}
-
-#[cfg(not(unix))]
-fn file_mode(_metadata: &std::fs::Metadata) -> u32 {
-    0
-}
-
-#[cfg(unix)]
-fn set_file_mode(path: &Path, mode: u32) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(not(unix))]
-fn set_file_mode(_path: &Path, _mode: u32) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn symlink_target_bytes(path: &Path) -> Result<Vec<u8>, String> {
-    use std::os::unix::ffi::OsStrExt;
-    Ok(std::fs::read_link(path)
-        .map_err(|error| error.to_string())?
-        .as_os_str()
-        .as_bytes()
-        .to_vec())
-}
-
-#[cfg(not(unix))]
-fn symlink_target_bytes(_path: &Path) -> Result<Vec<u8>, String> {
-    Err("Vault symlinks are not supported on this platform".to_string())
-}
-
-#[cfg(unix)]
-fn create_symlink(path: &Path, target: &[u8]) -> Result<(), String> {
-    use std::ffi::OsStr;
-    use std::os::unix::ffi::OsStrExt;
-    std::os::unix::fs::symlink(OsStr::from_bytes(target), path).map_err(|error| error.to_string())
-}
-
-#[cfg(not(unix))]
-fn create_symlink(_path: &Path, _target: &[u8]) -> Result<(), String> {
-    Err("Vault symlinks are not supported on this platform".to_string())
-}
-
 fn commit_changes(root: &Path, message: &str) -> Result<(), String> {
     git(root, &["add", "--all"])?;
     if git_optional(root, &["status", "--porcelain"]).is_empty() {
@@ -3153,70 +2631,7 @@ fn command_success(output: Output) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Barrier, Mutex};
-
-    #[test]
-    fn vault_key_broker_encoding_round_trips() {
-        let key = (0..KEY_LEN).map(|value| value as u8).collect::<Vec<_>>();
-
-        assert_eq!(decode_key_hex(&hex(&key)), Ok(key));
-        assert!(decode_key_hex("00").is_err());
-        assert!(decode_key_hex(&"z".repeat(KEY_LEN * 2)).is_err());
-    }
-
-    #[test]
-    fn concurrent_vault_key_loads_prompt_once_per_session() {
-        let vault_id = "test-concurrent-vault-key-load";
-        SESSION_KEYS
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap()
-            .remove(vault_id);
-        let loads = Arc::new(AtomicUsize::new(0));
-        let barrier = Arc::new(Barrier::new(8));
-        let threads = (0..8)
-            .map(|_| {
-                let loads = loads.clone();
-                let barrier = barrier.clone();
-                thread::spawn(move || {
-                    barrier.wait();
-                    load_or_store_session_key(vault_id, || {
-                        loads.fetch_add(1, Ordering::SeqCst);
-                        thread::sleep(Duration::from_millis(10));
-                        Ok(Zeroizing::new(vec![7; KEY_LEN]))
-                    })
-                    .unwrap()
-                })
-            })
-            .collect::<Vec<_>>();
-
-        for thread in threads {
-            assert_eq!(*thread.join().unwrap(), vec![7; KEY_LEN]);
-        }
-        assert_eq!(loads.load(Ordering::SeqCst), 1);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn vault_key_broker_reads_signing_leaf_certificate() {
-        let hash = signing_leaf_hash(Path::new("/usr/bin/codesign")).unwrap();
-
-        assert_eq!(hash.len(), 40);
-        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn vault_key_broker_validates_running_callers() {
-        use security_framework::os::macos::code_signing::{Flags, SecCode, SecRequirement};
-        use std::str::FromStr;
-
-        let caller = SecCode::for_self(Flags::NONE).unwrap();
-        let requirement = SecRequirement::from_str("true").unwrap();
-
-        validate_key_broker_caller(&caller, &requirement).unwrap();
-    }
+    use std::sync::Mutex;
 
     struct FixedKeyStore {
         key: Vec<u8>,

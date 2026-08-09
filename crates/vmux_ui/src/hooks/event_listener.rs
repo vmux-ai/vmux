@@ -43,17 +43,6 @@ impl fmt::Display for EventListenerError {
     }
 }
 
-/// Decode a host payload out of a raw JS value.
-#[cfg(web)]
-pub fn decode_bin_host_emit_js<T>(e: &wasm_bindgen::JsValue) -> Option<T>
-where
-    T: rkyv::Archive,
-    T::Archived: rkyv::Deserialize<T, rkyv::api::high::HighDeserializer<rkyv::rancor::Error>>
-        + for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>,
-{
-    crate::hooks::cef_host::js_value_bytes(e).and_then(|bytes| decode_bin_payload::<T>(&bytes))
-}
-
 /// Send a typed payload to the host.
 ///
 /// The event id is the payload's type name, which is what the Bevy side matches on.

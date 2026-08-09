@@ -13,12 +13,13 @@ use super::{
     ServiceMessage,
 };
 use crate::room::{ClientOpId, RemoteAgent, RemoteMediaEntry, RemoteSession};
+use vmux_macro::VariantNames;
 
 /// Operations a remote peer is permitted to perform.
 ///
 /// Carried over the local link too, wrapped in [`ClientMessage::Shared`] — "shared" is about which
 /// transports may carry it, not about where it originates.
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
 pub enum SharedMessage {
     /// Anything addressed to one session.
     ///
@@ -33,7 +34,7 @@ pub enum SharedMessage {
 }
 
 /// What a client asks of one session.
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
 pub enum AgentAction {
     /// Subscribe to the transcript and status.
     Attach,
@@ -79,7 +80,9 @@ impl From<SharedMessage> for ClientMessage {
 ///
 /// All three are answered by the GUI rather than the daemon, because only the ECS holds the
 /// registry and the roster.
-#[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames,
+)]
 pub enum SharedAgentCommand {
     /// Open a focused desktop tab with the default agent and submit its first prompt.
     NewAgentChat {
@@ -120,7 +123,7 @@ impl From<SharedAgentCommand> for AgentCommand {
 ///
 /// Everything else a session emits — terminal output, proposed diffs, process lifecycle — stays
 /// flat on [`ServiceMessage`] and never leaves the machine.
-#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Debug, Clone, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, VariantNames)]
 pub enum SharedEvent {
     AgentDelta {
         sid: String,

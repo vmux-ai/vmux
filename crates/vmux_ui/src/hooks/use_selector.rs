@@ -1,5 +1,6 @@
 //! Keeping the selected row on screen.
 
+use crate::hooks::Host;
 use dioxus::prelude::*;
 
 /// Keep the selected row on screen as the selection moves.
@@ -13,22 +14,6 @@ use dioxus::prelude::*;
 /// which row is highlighted.
 pub fn use_selector(selected: Signal<usize>, item_id: impl Fn(usize) -> String + 'static) {
     use_effect(move || {
-        scroll_item_into_view(&item_id(selected()));
+        Host::scroll_item_into_view(&item_id(selected()));
     });
 }
-
-#[cfg(web)]
-fn scroll_item_into_view(item_id: &str) {
-    let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(item_id))
-    else {
-        return;
-    };
-    let options = web_sys::ScrollIntoViewOptions::new();
-    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    element.scroll_into_view_with_scroll_into_view_options(&options);
-}
-
-#[cfg(not(web))]
-fn scroll_item_into_view(_item_id: &str) {}

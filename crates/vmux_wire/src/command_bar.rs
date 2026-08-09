@@ -5,6 +5,56 @@ pub use crate::history::{
 
 pub const COMMAND_BAR_OPEN_EVENT: &str = "command-bar-open";
 
+/// Which opening of the command bar a payload belongs to.
+///
+/// The host mints one per open and the page echoes it back, so both ends can tell a fresh open
+/// from a live data refresh of the one already on screen — the palette resets, acks and refocuses
+/// on the former and must leave the user's typing alone on the latter.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
+pub struct OpenId(pub u64);
+
+impl OpenId {
+    /// No open. The prewarmed command bar carries this until a real open replaces it, and the
+    /// start page's live refreshes keep it so they do not read as reopens.
+    pub const NONE: Self = Self(0);
+
+    /// Whether this names a real open rather than [`OpenId::NONE`].
+    ///
+    /// Only a real open is worth acknowledging, revealing, or keeping the event loop awake for.
+    pub const fn is_open(self) -> bool {
+        self.0 != Self::NONE.0
+    }
+
+    /// Whether a payload arriving under this id should replace what the palette is showing and
+    /// clear its input, given the `current` id on screen.
+    pub const fn should_reset_input(self, current: Self) -> bool {
+        !self.is_open() || current.0 != self.0
+    }
+
+    /// Whether the palette should (re)focus and select-all its input, given the id it last
+    /// focused for.
+    ///
+    /// Only on a fresh (re)open. Live data refreshes (e.g. the start page's current-work
+    /// snapshot) reuse the same id and MUST NOT re-select, or they clobber in-progress typing.
+    pub const fn should_refocus(self, last_focused: Self) -> bool {
+        last_focused.0 != self.0
+    }
+}
+
 /// Search provider used when command-bar input is not a URL or local path.
 #[derive(
     Clone,
@@ -86,7 +136,7 @@ impl SearchEngine {
 )]
 pub struct CommandBarOpenEvent {
     #[serde(default)]
-    pub open_id: u64,
+    pub open_id: OpenId,
     #[serde(default)]
     pub native_windowed: bool,
     pub url: String,
@@ -307,7 +357,7 @@ pub struct CommandBarReadyEvent;
     rkyv::Deserialize,
 )]
 pub struct CommandBarRenderedEvent {
-    pub open_id: u64,
+    pub open_id: OpenId,
 }
 
 #[derive(
@@ -330,22 +380,6 @@ pub struct CommandBarSizeEvent {
     pub shell_top: i32,
     pub shell_width: u32,
     pub shell_height: u32,
-}
-
-pub fn command_bar_open_should_reset_input(current_open_id: u64, incoming_open_id: u64) -> bool {
-    incoming_open_id == 0 || current_open_id != incoming_open_id
-}
-
-pub fn command_bar_open_should_ack(open_id: u64) -> bool {
-    open_id != 0
-}
-
-/// Whether the palette should (re)focus and select-all its input. Only on a fresh
-/// (re)open — i.e. when `open_id` changed. Live data refreshes (e.g. the start
-/// page's current-work snapshot) reuse the same `open_id` and MUST NOT re-select,
-/// or they clobber the user's in-progress typing.
-pub fn command_bar_should_refocus(last_focus_open_id: u64, incoming_open_id: u64) -> bool {
-    last_focus_open_id != incoming_open_id
 }
 
 /// What the user has typed into the command bar.
@@ -602,11 +636,11 @@ mod tests {
     #[test]
     fn command_bar_open_event_carries_open_id() {
         let event = CommandBarOpenEvent {
-            open_id: 7,
+            open_id: OpenId(7),
             ..Default::default()
         };
 
-        assert_eq!(event.open_id, 7);
+        assert_eq!(event.open_id, OpenId(7));
     }
 
     #[test]
@@ -631,27 +665,27 @@ mod tests {
 
     #[test]
     fn command_bar_duplicate_open_id_does_not_reset_input() {
-        assert!(!command_bar_open_should_reset_input(7, 7));
-        assert!(command_bar_open_should_reset_input(7, 8));
-        assert!(command_bar_open_should_reset_input(0, 8));
-        assert!(command_bar_open_should_reset_input(0, 0));
+        assert!(!OpenId(7).should_reset_input(OpenId(7)));
+        assert!(OpenId(8).should_reset_input(OpenId(7)));
+        assert!(OpenId(8).should_reset_input(OpenId::NONE));
+        assert!(OpenId::NONE.should_reset_input(OpenId::NONE));
     }
 
     #[test]
     fn command_bar_refocus_only_on_open_id_change() {
-        // Fresh open (open_id changed) → focus + select-all.
-        assert!(command_bar_should_refocus(u64::MAX, 0));
-        assert!(command_bar_should_refocus(7, 8));
-        // Live refresh reuses the same open_id → must NOT refocus (else it
+        // Fresh open (open id changed) → focus + select-all.
+        assert!(OpenId::NONE.should_refocus(OpenId(u64::MAX)));
+        assert!(OpenId(8).should_refocus(OpenId(7)));
+        // Live refresh reuses the same open id → must NOT refocus (else it
         // select-alls and clobbers in-progress typing on vmux://start).
-        assert!(!command_bar_should_refocus(0, 0));
-        assert!(!command_bar_should_refocus(7, 7));
+        assert!(!OpenId::NONE.should_refocus(OpenId::NONE));
+        assert!(!OpenId(7).should_refocus(OpenId(7)));
     }
 
     #[test]
-    fn command_bar_retried_open_payload_still_gets_ack() {
-        assert!(command_bar_open_should_ack(7));
-        assert!(!command_bar_open_should_ack(0));
+    fn only_a_real_open_is_acked_and_revealed() {
+        assert!(OpenId(7).is_open());
+        assert!(!OpenId::NONE.is_open());
     }
 
     #[test]

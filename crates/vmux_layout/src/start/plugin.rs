@@ -5,7 +5,7 @@ use bevy_cef::prelude::{
     BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
     WebviewExtendStandardMaterial, WebviewSource,
 };
-use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext};
+use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
     CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
@@ -295,7 +295,7 @@ fn drain_start_workspace_pickers(
 /// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs,
 /// recent files, agent order, spaces, and pages auto-update without a reopen. Pushes to a ready
 /// start page when a launcher snapshot changed this frame, or when newly ready and not yet synced
-/// (covers panes that spawn before the start page's CEF is ready). Uses `open_id: 0`,
+/// (covers panes that spawn before the start page's CEF is ready). Uses [`OpenId::NONE`],
 /// which does not reset the palette's input/selection.
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
@@ -619,7 +619,7 @@ fn build_start_payload(
         locale,
     );
     let mut payload = build_command_bar_open_payload(
-        0,
+        OpenId::NONE,
         false,
         space_name,
         String::new(),

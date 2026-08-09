@@ -1041,59 +1041,13 @@ mod tests {
     /// side effect of adding a variant to `ClientMessage`.
     #[test]
     fn shared_message_variants_are_the_whole_remote_surface() {
-        fn name(message: &SharedMessage) -> &'static str {
-            match message {
-                SharedMessage::Agent { action, .. } => match action {
-                    AgentAction::Attach => "Agent/Attach",
-                    AgentAction::Input { .. } => "Agent/Input",
-                    AgentAction::Cancel => "Agent/Cancel",
-                    AgentAction::Approve { .. } => "Agent/Approve",
-                    AgentAction::ListMedia { .. } => "Agent/ListMedia",
-                },
-                SharedMessage::ListSessions => "ListSessions",
-                SharedMessage::AgentCommand(_) => "AgentCommand",
-            }
-        }
-
-        let every_variant = [
-            SharedMessage::agent("s", AgentAction::Attach),
-            SharedMessage::agent(
-                "s",
-                AgentAction::Input {
-                    text: String::new(),
-                    context: None,
-                    attachments: Vec::new(),
-                },
-            ),
-            SharedMessage::agent("s", AgentAction::Cancel),
-            SharedMessage::agent(
-                "s",
-                AgentAction::Approve {
-                    call_id: "c".into(),
-                    decision: ApprovalDecision::Allow,
-                },
-            ),
-            SharedMessage::agent(
-                "s",
-                AgentAction::ListMedia {
-                    query: String::new(),
-                },
-            ),
-            SharedMessage::ListSessions,
-            SharedMessage::AgentCommand(SharedAgentCommand::ListAgents),
-        ];
-
         assert_eq!(
-            every_variant.iter().map(name).collect::<Vec<_>>(),
-            [
-                "Agent/Attach",
-                "Agent/Input",
-                "Agent/Cancel",
-                "Agent/Approve",
-                "Agent/ListMedia",
-                "ListSessions",
-                "AgentCommand",
-            ]
+            SharedMessage::VARIANT_NAMES,
+            ["Agent", "ListSessions", "AgentCommand"]
+        );
+        assert_eq!(
+            AgentAction::VARIANT_NAMES,
+            ["Attach", "Input", "Cancel", "Approve", "ListMedia"]
         );
     }
 
@@ -1101,38 +1055,8 @@ mod tests {
     /// commands a remote peer may issue.
     #[test]
     fn shared_agent_command_variants_are_the_whole_remote_surface() {
-        fn name(command: &SharedAgentCommand) -> &'static str {
-            match command {
-                SharedAgentCommand::NewAgentChat { .. } => "NewAgentChat",
-                SharedAgentCommand::ListAgents => "ListAgents",
-                SharedAgentCommand::ListTeam => "ListTeam",
-                SharedAgentCommand::ListModels { .. } => "ListModels",
-                SharedAgentCommand::SelectModel { .. } => "SelectModel",
-                SharedAgentCommand::SetEffort { .. } => "SetEffort",
-            }
-        }
-
-        let every_variant = [
-            SharedAgentCommand::NewAgentChat {
-                client_op_id: ClientOpId::new("op"),
-                prompt: String::new(),
-                agent_url: None,
-            },
-            SharedAgentCommand::ListAgents,
-            SharedAgentCommand::ListTeam,
-            SharedAgentCommand::ListModels { sid: String::new() },
-            SharedAgentCommand::SelectModel {
-                sid: String::new(),
-                model_id: String::new(),
-            },
-            SharedAgentCommand::SetEffort {
-                sid: String::new(),
-                level: String::new(),
-            },
-        ];
-
         assert_eq!(
-            every_variant.iter().map(name).collect::<Vec<_>>(),
+            SharedAgentCommand::VARIANT_NAMES,
             [
                 "NewAgentChat",
                 "ListAgents",
@@ -1149,79 +1073,8 @@ mod tests {
     /// absent by design.
     #[test]
     fn shared_event_variants_are_the_whole_remote_surface() {
-        fn name(event: &SharedEvent) -> &'static str {
-            match event {
-                SharedEvent::AgentDelta { .. } => "AgentDelta",
-                SharedEvent::AgentRunStatusChanged { .. } => "AgentRunStatusChanged",
-                SharedEvent::AgentAwaitingApproval { .. } => "AgentAwaitingApproval",
-                SharedEvent::AgentApprovalResolved { .. } => "AgentApprovalResolved",
-                SharedEvent::AgentMessagesSnapshot { .. } => "AgentMessagesSnapshot",
-                SharedEvent::AcpAgentInfo { .. } => "AcpAgentInfo",
-                SharedEvent::AcpWorkspaceChanged { .. } => "AcpWorkspaceChanged",
-                SharedEvent::AcpModelInfo { .. } => "AcpModelInfo",
-                SharedEvent::Session { .. } => "Session",
-            }
-        }
-
-        let sid = || "s".to_string();
-        let every_variant = [
-            SharedEvent::AgentDelta {
-                sid: sid(),
-                text: String::new(),
-            },
-            SharedEvent::AgentRunStatusChanged {
-                sid: sid(),
-                status: AgentRunStatus::Idle,
-            },
-            SharedEvent::AgentAwaitingApproval {
-                sid: sid(),
-                call_id: String::new(),
-                name: String::new(),
-                args_json: String::new(),
-            },
-            SharedEvent::AgentApprovalResolved {
-                sid: sid(),
-                call_id: String::new(),
-            },
-            SharedEvent::AgentMessagesSnapshot {
-                sid: sid(),
-                messages_json: String::new(),
-            },
-            SharedEvent::AcpAgentInfo {
-                sid: sid(),
-                name: String::new(),
-            },
-            SharedEvent::AcpWorkspaceChanged {
-                sid: sid(),
-                name: String::new(),
-                branch: String::new(),
-                cwd: String::new(),
-                workspace_cwd: String::new(),
-            },
-            SharedEvent::AcpModelInfo {
-                sid: sid(),
-                config_id: String::new(),
-                current_model_id: String::new(),
-                models: Vec::new(),
-            },
-            SharedEvent::Session {
-                session: crate::room::RemoteSession {
-                    sid: sid(),
-                    room_id: crate::room::RoomId::for_session("s"),
-                    title: String::new(),
-                    name: String::new(),
-                    runtime: String::new(),
-                    model: None,
-                    cwd: String::new(),
-                    status: crate::room::RemoteStatus::Idle,
-                    approval: None,
-                    created_at_ms: 0,
-                },
-            },
-        ];
-
         assert_eq!(
-            every_variant.iter().map(name).collect::<Vec<_>>(),
+            SharedEvent::VARIANT_NAMES,
             [
                 "AgentDelta",
                 "AgentRunStatusChanged",
