@@ -33,6 +33,21 @@
 	<string>en_US</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
+
+	<!-- Mirrors actool's partial plist. iPhone only, so no CFBundleIcons~ipad. -->
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
+
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UISupportsTrueScreenSizeOnMac</key>
