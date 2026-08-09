@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 
-use crate::event::agents::{AgentEntry, AgentsInstall, AgentsOpen, AgentsUninstall};
+use crate::event::{AgentEntry, AgentsInstall, AgentsOpen, AgentsUninstall};
 use crate::vibe::setup::event::AgentInstallRunRequest;
 use dioxus::prelude::*;
 use vmux_ui::components::manager::{
@@ -242,7 +242,7 @@ fn AgentStatusButtons(agent: AgentEntry, catalog: Catalog) -> Element {
     }
 }
 
-use crate::event::agents::{AGENTS_CATALOG_EVENT, AgentsCatalog, AgentsCatalogRequest};
+use crate::event::{AGENTS_CATALOG_EVENT, AgentsCatalog, AgentsCatalogRequest};
 use crate::vibe::setup::event::{AGENT_SETUP_RESULT_EVENT, AgentSetupResult};
 
 /// Every installed agent, the search narrowing them, and whether the first fetch has landed.

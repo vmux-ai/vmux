@@ -4,6 +4,10 @@
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(target_os = "macos")]
+use crate::paths::LaunchAgent;
+use crate::paths::ServicePaths;
+
 #[derive(Debug, Clone)]
 pub struct StatusInfo {
     pub profile: String,
@@ -53,13 +57,13 @@ fn format_uptime(d: Duration) -> String {
 }
 
 fn read_pid() -> Option<i32> {
-    std::fs::read_to_string(crate::pid_path())
+    std::fs::read_to_string(ServicePaths::current().pid())
         .ok()
         .and_then(|s| s.trim().parse().ok())
 }
 
 fn read_identity_short() -> Option<String> {
-    std::fs::read_to_string(crate::identity_path())
+    std::fs::read_to_string(ServicePaths::current().identity())
         .ok()
         .map(|s| {
             let mut hash: u64 = 5381;
@@ -77,7 +81,7 @@ fn live_status() -> Option<(u64, u32)> {
 
 fn live_status_inner() -> std::io::Result<Option<(u64, u32)>> {
     use crate::protocol::{ClientMessage, ServiceMessage};
-    let stream = std::os::unix::net::UnixStream::connect(crate::socket_path())?;
+    let stream = std::os::unix::net::UnixStream::connect(ServicePaths::current().socket())?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
     let mut stream = stream;
@@ -97,10 +101,10 @@ pub fn cmd_status() -> std::io::Result<i32> {
     let pid = read_pid();
     let live = live_status();
     let info = StatusInfo {
-        profile: crate::current_profile().to_string(),
+        profile: ServicePaths::build_profile().to_string(),
         pid,
         uptime: live.map(|(s, _)| Duration::from_secs(s)),
-        socket: crate::socket_path(),
+        socket: ServicePaths::current().socket(),
         identity_short: read_identity_short(),
         process_count: live.map(|(_, c)| c),
     };
@@ -110,39 +114,36 @@ pub fn cmd_status() -> std::io::Result<i32> {
 
 #[cfg(target_os = "macos")]
 pub fn cmd_install(binary_path: &Path) -> std::io::Result<i32> {
-    let profile = crate::current_profile();
-    let plist = crate::launchd::install(profile, binary_path)?;
+    let plist = LaunchAgent::current().install(binary_path)?;
     println!("installed: {}", plist.display());
     Ok(0)
 }
 
 #[cfg(target_os = "macos")]
 pub fn cmd_uninstall() -> std::io::Result<i32> {
-    let profile = crate::current_profile();
-    crate::launchd::uninstall(profile)?;
-    println!("uninstalled: {}", crate::plist_path(profile).display());
+    let agent = LaunchAgent::current();
+    agent.uninstall()?;
+    println!("uninstalled: {}", agent.plist_path().display());
     Ok(0)
 }
 
 #[cfg(target_os = "macos")]
 pub fn cmd_start(binary_path: &Path) -> std::io::Result<i32> {
-    let profile = crate::current_profile();
-    crate::launchd::ensure_running(profile, binary_path)?;
+    LaunchAgent::current().ensure_running(binary_path)?;
     Ok(0)
 }
 
 #[cfg(target_os = "macos")]
 pub fn cmd_stop() -> std::io::Result<i32> {
-    let profile = crate::current_profile();
-    crate::launchd::bootout(profile)?;
+    LaunchAgent::current().bootout()?;
     Ok(0)
 }
 
 #[cfg(target_os = "macos")]
 pub fn cmd_restart(binary_path: &Path) -> std::io::Result<i32> {
-    let profile = crate::current_profile();
-    let _ = crate::launchd::bootout(profile);
-    crate::launchd::ensure_running(profile, binary_path)?;
+    let agent = LaunchAgent::current();
+    let _ = agent.bootout();
+    agent.ensure_running(binary_path)?;
     Ok(0)
 }
 
@@ -152,7 +153,7 @@ pub fn cmd_logs(follow: bool) -> std::io::Result<i32> {
     if follow {
         cmd.arg("-f");
     }
-    cmd.arg(crate::current_log_file());
+    cmd.arg(ServicePaths::current().current_log());
     let err = cmd.exec();
     Err(err)
 }

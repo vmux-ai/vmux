@@ -1,13 +1,19 @@
 //! macOS LaunchAgent integration for vmux_service.
+//!
+//! The verbs live on [`LaunchAgent`], which names the profile they act on. [`kickstart`] does not:
+//! it takes a bare label so the bundled login item, which has no vmux profile of its own, can be
+//! restarted the same way.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Render the LaunchAgent plist XML for a profile.
-pub fn generate_plist(profile: &str, binary_path: &Path, log_path: &Path) -> String {
-    let label = crate::launchd_label(profile);
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?>
+use crate::paths::{LaunchAgent, ServicePaths};
+
+impl LaunchAgent {
+    /// Render this agent's plist XML.
+    pub fn plist_xml(&self, binary_path: &Path, log_path: &Path) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -40,54 +46,83 @@ pub fn generate_plist(profile: &str, binary_path: &Path, log_path: &Path) -> Str
 </dict>
 </plist>
 "#,
-        label = label,
-        binary = binary_path.display(),
-        log = log_path.display(),
-        profile = profile,
-    )
-}
-
-/// Write the plist for `profile` pointing at `binary_path`.
-pub fn install(profile: &str, binary_path: &Path) -> std::io::Result<PathBuf> {
-    let plist = crate::plist_path(profile);
-    std::fs::create_dir_all(crate::service_dir())?;
-    std::fs::create_dir_all(crate::log_dir())?;
-    let log = crate::log_path();
-    reconcile_plist_at(&plist, profile, binary_path, &log)?;
-    bootstrap(&plist)?;
-    Ok(plist)
-}
-
-fn reconcile_plist_at(
-    plist: &Path,
-    profile: &str,
-    binary_path: &Path,
-    log_path: &Path,
-) -> std::io::Result<bool> {
-    let desired = generate_plist(profile, binary_path, log_path);
-    let current = match std::fs::read_to_string(plist) {
-        Ok(s) => Some(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e),
-    };
-    if current.as_deref() == Some(desired.as_str()) {
-        return Ok(false);
+            label = self.label(),
+            binary = binary_path.display(),
+            log = log_path.display(),
+            profile = self.profile(),
+        )
     }
-    if let Some(parent) = plist.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(plist, desired)?;
-    Ok(true)
-}
 
-/// Remove the plist and unload from launchd.
-pub fn uninstall(profile: &str) -> std::io::Result<()> {
-    let plist = crate::plist_path(profile);
-    if plist.exists() {
-        let _ = bootout(profile);
-        std::fs::remove_file(&plist)?;
+    /// Write this agent's plist pointing at `binary_path`, and load it.
+    pub fn install(&self, binary_path: &Path) -> std::io::Result<PathBuf> {
+        let plist = self.plist_path();
+        std::fs::create_dir_all(ServicePaths::dir())?;
+        std::fs::create_dir_all(ServicePaths::log_dir())?;
+        let log = ServicePaths::current().log();
+        self.reconcile_plist_at(&plist, binary_path, &log)?;
+        bootstrap(&plist)?;
+        Ok(plist)
     }
-    Ok(())
+
+    /// Remove the plist and unload from launchd.
+    pub fn uninstall(&self) -> std::io::Result<()> {
+        let plist = self.plist_path();
+        if plist.exists() {
+            let _ = self.bootout();
+            std::fs::remove_file(&plist)?;
+        }
+        Ok(())
+    }
+
+    /// `launchctl bootout gui/<uid>/<label>`.
+    pub fn bootout(&self) -> std::io::Result<()> {
+        let uid = current_uid();
+        let label = self.label();
+        let status = Command::new("launchctl")
+            .args(["bootout", &format!("gui/{uid}/{label}")])
+            .status()?;
+        if !status.success() {
+            tracing::warn!(code = ?status.code(), "launchctl bootout exited nonzero");
+        }
+        Ok(())
+    }
+
+    /// Make sure the daemon is installed and running. Idempotent.
+    /// `binary_path` is the daemon executable (resolved by the caller).
+    pub fn ensure_running(&self, binary_path: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(ServicePaths::dir())?;
+        std::fs::create_dir_all(ServicePaths::log_dir())?;
+        let plist = self.plist_path();
+        let log = ServicePaths::current().log();
+        let rewrote = self.reconcile_plist_at(&plist, binary_path, &log)?;
+        if rewrote {
+            let _ = self.bootout();
+        }
+        bootstrap(&plist)?;
+        kickstart(&self.label())
+    }
+
+    fn reconcile_plist_at(
+        &self,
+        plist: &Path,
+        binary_path: &Path,
+        log_path: &Path,
+    ) -> std::io::Result<bool> {
+        let desired = self.plist_xml(binary_path, log_path);
+        let current = match std::fs::read_to_string(plist) {
+            Ok(s) => Some(s),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
+        if current.as_deref() == Some(desired.as_str()) {
+            return Ok(false);
+        }
+        if let Some(parent) = plist.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(plist, desired)?;
+        Ok(true)
+    }
 }
 
 fn current_uid() -> u32 {
@@ -95,7 +130,7 @@ fn current_uid() -> u32 {
 }
 
 /// `launchctl bootstrap gui/<uid> <plist>`.
-pub fn bootstrap(plist: &Path) -> std::io::Result<()> {
+fn bootstrap(plist: &Path) -> std::io::Result<()> {
     let uid = current_uid();
     let status = Command::new("launchctl")
         .args(["bootstrap", &format!("gui/{uid}")])
@@ -107,20 +142,10 @@ pub fn bootstrap(plist: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `launchctl bootout gui/<uid>/<label>`.
-pub fn bootout(profile: &str) -> std::io::Result<()> {
-    let uid = current_uid();
-    let label = crate::launchd_label(profile);
-    let status = Command::new("launchctl")
-        .args(["bootout", &format!("gui/{uid}/{label}")])
-        .status()?;
-    if !status.success() {
-        tracing::warn!(code = ?status.code(), "launchctl bootout exited nonzero");
-    }
-    Ok(())
-}
-
 /// `launchctl kickstart -k gui/<uid>/<label>` -- restart cleanly.
+///
+/// Free rather than a [`LaunchAgent`] method because the bundled login item is kickstarted by its
+/// packaged label, which belongs to no profile this build could name.
 pub fn kickstart(label: &str) -> std::io::Result<()> {
     let uid = current_uid();
     let status = Command::new("launchctl")
@@ -130,21 +155,6 @@ pub fn kickstart(label: &str) -> std::io::Result<()> {
         tracing::warn!(code = ?status.code(), "launchctl kickstart exited nonzero");
     }
     Ok(())
-}
-
-/// Make sure the daemon is installed and running. Idempotent.
-/// `binary_path` is the daemon executable (resolved by the caller).
-pub fn ensure_running(profile: &str, binary_path: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(crate::service_dir())?;
-    std::fs::create_dir_all(crate::log_dir())?;
-    let plist = crate::plist_path(profile);
-    let log = crate::log_path();
-    let rewrote = reconcile_plist_at(&plist, profile, binary_path, &log)?;
-    if rewrote {
-        let _ = bootout(profile);
-    }
-    bootstrap(&plist)?;
-    kickstart(&crate::launchd_label(profile))
 }
 
 #[cfg(test)]
@@ -166,8 +176,7 @@ mod tests {
 
     #[test]
     fn generated_plist_contains_label_binary_log_profile() {
-        let xml = generate_plist(
-            "dev",
+        let xml = LaunchAgent::for_profile("dev").plist_xml(
             &PathBuf::from("/usr/local/bin/vmux_service"),
             &PathBuf::from("/tmp/vmux-dev.log"),
         );
@@ -183,28 +192,34 @@ mod tests {
 
     #[test]
     fn reconcile_plist_at_writes_when_missing() {
+        let agent = LaunchAgent::for_profile("dev");
         let plist = temp_plist("missing");
         let _ = std::fs::remove_file(&plist);
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
 
-        let rewrote = reconcile_plist_at(&plist, "dev", &bin, &log).expect("reconcile");
+        let rewrote = agent
+            .reconcile_plist_at(&plist, &bin, &log)
+            .expect("reconcile");
 
         assert!(rewrote, "expected reconcile to report write");
         let on_disk = std::fs::read_to_string(&plist).expect("plist exists");
-        assert_eq!(on_disk, generate_plist("dev", &bin, &log));
+        assert_eq!(on_disk, agent.plist_xml(&bin, &log));
         let _ = std::fs::remove_file(&plist);
     }
 
     #[test]
     fn reconcile_plist_at_rewrites_when_binary_path_drifts() {
+        let agent = LaunchAgent::for_profile("dev");
         let plist = temp_plist("binary-drift");
         let log = PathBuf::from("/tmp/vmux-dev.log");
         let old_bin = PathBuf::from("/old/worktree/target/debug/vmux_service");
         let new_bin = PathBuf::from("/new/worktree/target/debug/vmux_service");
-        std::fs::write(&plist, generate_plist("dev", &old_bin, &log)).expect("seed plist");
+        std::fs::write(&plist, agent.plist_xml(&old_bin, &log)).expect("seed plist");
 
-        let rewrote = reconcile_plist_at(&plist, "dev", &new_bin, &log).expect("reconcile");
+        let rewrote = agent
+            .reconcile_plist_at(&plist, &new_bin, &log)
+            .expect("reconcile");
 
         assert!(rewrote, "expected reconcile to rewrite drifted plist");
         let on_disk = std::fs::read_to_string(&plist).expect("plist exists");
@@ -221,14 +236,18 @@ mod tests {
 
     #[test]
     fn reconcile_plist_at_rewrites_when_env_var_key_drifts() {
+        let agent = LaunchAgent::for_profile("dev");
         let plist = temp_plist("env-drift");
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
-        let legacy_xml =
-            generate_plist("dev", &bin, &log).replace("VMUX_BUILD_PROFILE", "VMUX_PROFILE");
+        let legacy_xml = agent
+            .plist_xml(&bin, &log)
+            .replace("VMUX_BUILD_PROFILE", "VMUX_PROFILE");
         std::fs::write(&plist, &legacy_xml).expect("seed legacy plist");
 
-        let rewrote = reconcile_plist_at(&plist, "dev", &bin, &log).expect("reconcile");
+        let rewrote = agent
+            .reconcile_plist_at(&plist, &bin, &log)
+            .expect("reconcile");
 
         assert!(
             rewrote,
@@ -248,10 +267,11 @@ mod tests {
 
     #[test]
     fn reconcile_plist_at_no_op_when_matching() {
+        let agent = LaunchAgent::for_profile("dev");
         let plist = temp_plist("match");
         let bin = PathBuf::from("/usr/local/bin/vmux_service");
         let log = PathBuf::from("/tmp/vmux-dev.log");
-        let xml = generate_plist("dev", &bin, &log);
+        let xml = agent.plist_xml(&bin, &log);
         std::fs::write(&plist, &xml).expect("seed matching plist");
         let mtime_before = std::fs::metadata(&plist)
             .expect("metadata")
@@ -259,7 +279,9 @@ mod tests {
             .expect("mtime");
 
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let rewrote = reconcile_plist_at(&plist, "dev", &bin, &log).expect("reconcile");
+        let rewrote = agent
+            .reconcile_plist_at(&plist, &bin, &log)
+            .expect("reconcile");
 
         assert!(!rewrote, "expected reconcile to skip matching plist");
         let mtime_after = std::fs::metadata(&plist)

@@ -28,7 +28,7 @@ impl Host {
     pub(crate) fn set_root_radius(_radius: f32) {}
 
     /// Locale still resolves — the signal [`crate::hooks::use_theme()`] returns and
-    /// [`crate::i18n::text_direction`] are the contract — but a native host applies it to its own
+    /// [`crate::i18n::Locale::direction`] are the contract — but a native host applies it to its own
     /// root element.
     pub(crate) fn set_root_language(_locale: &str, _direction: &str) {}
 }

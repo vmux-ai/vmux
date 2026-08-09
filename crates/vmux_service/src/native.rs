@@ -38,5 +38,7 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
+mod daemon;
 mod paths;
+pub use daemon::*;
 pub use paths::*;

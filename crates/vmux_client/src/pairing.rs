@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use std::path::Path;
 
+use crate::paths::RemotePaths;
+
 /// The relay a desktop pairs through.
 ///
 /// Registration is asynchronous: the daemon dials out, the relay allocates it a port, and only
@@ -18,8 +20,50 @@ pub struct Relay {
 }
 
 impl Relay {
+    /// The hosted relay, used when nothing overrides it.
+    pub const DEFAULT_URL: &'static str = "https://relay.vmux.ai";
+
     pub fn new(url: impl Into<String>) -> Self {
         Self { url: url.into() }
+    }
+
+    /// The relay `VMUX_REMOTE_RELAY_URL` asks for, or the hosted one when it is unset.
+    pub fn from_env() -> Self {
+        Self::resolve(std::env::var("VMUX_REMOTE_RELAY_URL").ok().as_deref())
+    }
+
+    /// Which relay the daemon should dial.
+    ///
+    /// The persisted file is the normal source, not the fallback: launchd starts the daemon, so it
+    /// inherits nothing from the shell that launched the app, and the environment is only ever set
+    /// in a developer's terminal. Whoever enables Remote writes what it resolved with
+    /// [`Relay::persist`] for exactly this reason.
+    pub fn configured() -> Self {
+        if let Ok(from_env) = std::env::var("VMUX_REMOTE_RELAY_URL")
+            && let Some(relay) = Self::normalized(&from_env)
+        {
+            return relay;
+        }
+        match std::fs::read_to_string(RemotePaths::current().relay_url()) {
+            Ok(persisted) => Self::resolve(Some(&persisted)),
+            Err(_) => Self::resolve(None),
+        }
+    }
+
+    /// Decide the relay from what the environment said, if anything.
+    ///
+    /// Every pairing goes through a relay now, so a blank value means "use the hosted one" rather
+    /// than "turn the relay off". There is no off: a desktop sits behind NAT and is unreachable
+    /// without one.
+    pub fn resolve(from_env: Option<&str>) -> Self {
+        let asked = from_env.unwrap_or(Self::DEFAULT_URL);
+        Self::normalized(asked).unwrap_or_else(|| Self::new(Self::DEFAULT_URL))
+    }
+
+    /// A relay whose URL has been trimmed to canonical form, or `None` when the URL is blank.
+    pub fn normalized(url: &str) -> Option<Self> {
+        let trimmed = url.trim().trim_end_matches('/');
+        (!trimmed.is_empty()).then(|| Self::new(trimmed))
     }
 
     pub fn url(&self) -> &str {
@@ -31,7 +75,7 @@ impl Relay {
     /// launchd starts the daemon, so it inherits no environment; whoever enables Remote has to
     /// write down what `VMUX_REMOTE_RELAY_URL` said or the daemon will only ever see the default.
     pub fn persist(&self) -> std::io::Result<()> {
-        let path = crate::remote_relay_url_path();
+        let path = RemotePaths::current().relay_url();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -137,12 +181,14 @@ impl PairingInfo {
 
 /// The port the relay gave this desktop, as recorded by the daemon at registration.
 fn recorded_port() -> Option<u16> {
-    read_trimmed(&crate::remote_relay_port_path())?.parse().ok()
+    read_trimmed(&RemotePaths::current().relay_port())?
+        .parse()
+        .ok()
 }
 
 /// The fingerprint of the certificate the desktop presents, as recorded beside it.
 fn recorded_fingerprint() -> Option<String> {
-    read_trimmed(&crate::remote_fingerprint_path())
+    read_trimmed(&RemotePaths::current().fingerprint())
 }
 
 fn read_trimmed(path: &Path) -> Option<String> {
@@ -198,5 +244,27 @@ mod tests {
             pairing.deep_link,
             "vmuxremote://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret"
         );
+    }
+
+    /// There is no way to ask for no relay: a desktop behind NAT is unreachable without one, so
+    /// a blank setting falls back to the hosted relay rather than disabling pairing.
+    #[test]
+    fn a_blank_relay_setting_falls_back_to_the_hosted_one() {
+        for (from_env, expected) in [
+            (None, Relay::DEFAULT_URL),
+            (Some(""), Relay::DEFAULT_URL),
+            (Some("   "), Relay::DEFAULT_URL),
+            (
+                Some("https://relay.example.com/"),
+                "https://relay.example.com",
+            ),
+            (Some("  https://localhost:8788  "), "https://localhost:8788"),
+        ] {
+            assert_eq!(
+                Relay::resolve(from_env).url(),
+                expected,
+                "from_env = {from_env:?}"
+            );
+        }
     }
 }

@@ -1,3 +1,9 @@
+//! The chat page itself: one conversation's transcript, approvals and composer.
+//!
+//! Gated once here rather than per module, so what ships to wasm and iOS is this file and the
+//! directory beside it. The desktop half that feeds it lives outside this crate, and speaks to
+//! it only through the bin-ipc payloads in [`crate::event`].
+
 #![allow(non_snake_case)]
 
 mod keys;
@@ -6,15 +12,15 @@ mod state;
 mod tab;
 
 use self::state::{Chat, use_chat};
-use crate::event::chat::{
+use crate::clipboard::copy_to_clipboard;
+use crate::event::{
     ChatAttachment, ChatCancelQueuedPrompt, ChatClearQueue, ChatCreateWorktree, ChatOpenPage,
     ChatPasteMedia, ChatPickFiles, ChatResume, ChatSelectWorkspace, SetAgentEffort,
     SlashCommandEntry,
 };
 use crate::format::composer::{ResumeMenuState, approval_decision_for_index, is_handoff_boundary};
+use crate::transcript::{ChatItemRow, MD_CSS};
 use dioxus::prelude::*;
-use vmux_chat::clipboard::copy_to_clipboard;
-use vmux_chat::transcript::{ChatItemRow, MD_CSS};
 #[cfg(web)]
 use vmux_terminal::matrix_rain::MatrixRain;
 use vmux_ui::agent_accent::agent_accent;

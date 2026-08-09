@@ -46,7 +46,7 @@ use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_history::{LastActivatedAt, now_millis};
-use vmux_ui::i18n::{TranslationValue, requested_locale, translate_for, translate_for_with};
+use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::settings::ResolvedLocale;
 
@@ -179,13 +179,13 @@ pub struct CommandBarEntry {
 const COMMAND_BAR_SKIP_IDS: &[&str] = &["service_open", "browser_open_history"];
 
 /// Built-in command rows plus whatever other crates contributed, already named.
-pub fn command_list(locale: &str, contributed: Vec<CommandBarEntry>) -> Vec<CommandBarEntry> {
+pub fn command_list(locale: &Locale, contributed: Vec<CommandBarEntry>) -> Vec<CommandBarEntry> {
     let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
         .into_iter()
         .filter(|(id, _, _)| !COMMAND_BAR_SKIP_IDS.contains(id))
         .map(|(id, name, shortcut)| CommandBarEntry {
             id: id.to_string(),
-            name: localized_command_name(locale, id, name),
+            name: localized_command_name(locale.as_str(), id, name),
             shortcut: shortcut.to_string(),
         })
         .collect();
@@ -194,9 +194,13 @@ pub fn command_list(locale: &str, contributed: Vec<CommandBarEntry>) -> Vec<Comm
 }
 
 /// Resolve a command-bar menu path for the requested locale.
+///
+/// Takes a raw tag rather than a [`Locale`] because the macOS menu bar in `vmux_desktop` calls it
+/// with the tag it already threads through its own menu state.
 pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> String {
+    let locale = Locale::from(locale);
     let message_id = format!("command-{}", id.replace('_', "-"));
-    let translated = translate_for(locale, &message_id);
+    let translated = locale.translate(&message_id);
     if translated == message_id {
         return fallback;
     }
@@ -210,11 +214,11 @@ pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> Strin
     if segments.is_empty() {
         return translated;
     }
-    segments[0] = translate_for(locale, root_id);
+    segments[0] = locale.translate(root_id);
     if let Some(group_id) = group_id
         && segments.len() > 2
     {
-        segments[1] = translate_for(locale, group_id);
+        segments[1] = locale.translate(group_id);
     }
     segments.join(" > ")
 }
@@ -689,7 +693,7 @@ fn handle_open_command_bar(
         .p7()
         .as_deref()
         .map(|locale| locale.0.clone())
-        .unwrap_or_else(|| requested_locale(None));
+        .unwrap_or_else(Locale::preferred);
 
     let request = command_bar_open_request(reader.read().cloned());
     let mut should_open = false;
@@ -978,7 +982,7 @@ pub(crate) fn gather_command_bar_tabs(
     browser_meta: &Query<&PageMetadata, With<Browser>>,
     child_of_q: &Query<&ChildOf>,
     space_name: &str,
-    locale: &str,
+    locale: &Locale,
 ) -> Vec<CommandBarTab> {
     let mut bar_tabs = Vec::new();
     let Some(active_tab_e) = active_tab else {
@@ -1009,8 +1013,7 @@ pub(crate) fn gather_command_bar_tabs(
             let pane_number = pane_pos as i64 + 1;
             let stack_number = tab_index as i64 + 1;
             let location = if space_name.is_empty() {
-                translate_for_with(
-                    locale,
+                locale.translate_with(
                     "command-pane-stack-location",
                     &[
                         ("pane", TranslationValue::Number(pane_number)),
@@ -1018,8 +1021,7 @@ pub(crate) fn gather_command_bar_tabs(
                     ],
                 )
             } else {
-                translate_for_with(
-                    locale,
+                locale.translate_with(
                     "command-space-pane-stack-location",
                     &[
                         ("space", TranslationValue::String(space_name)),
@@ -1060,7 +1062,7 @@ pub(crate) fn build_command_bar_open_payload(
     contributions: &CommandBarContributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
-    locale: &str,
+    locale: &Locale,
     active_stack_count: usize,
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
@@ -1074,14 +1076,14 @@ pub(crate) fn build_command_bar_open_payload(
             .collect();
         contributed.push(CommandBarEntry {
             id: command.id.clone(),
-            name: translate_for_with(locale, &command.message_id, &args),
+            name: locale.translate_with(&command.message_id, &args),
             shortcut: String::new(),
         });
     }
     let mut pages = pages_snapshot.pages.clone();
     for page in &mut pages {
         if let Some(message_id) = page_title_message_id(&page.host) {
-            page.title = translate_for(locale, message_id);
+            page.title = locale.translate(message_id);
         }
     }
     pages.extend(contributions.pages.iter().map(|entry| entry.page.clone()));
@@ -1278,7 +1280,7 @@ fn on_command_bar_action(
         .p3()
         .as_deref()
         .map(|locale| locale.0.clone())
-        .unwrap_or_else(|| requested_locale(None));
+        .unwrap_or_else(Locale::preferred);
     match evt.action.as_str() {
         "prompt" => {
             let prompt = evt.value.trim();
@@ -1358,8 +1360,7 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
                         url: terminal_page_url.clone(),
-                        title: translate_for_with(
-                            &locale,
+                        title: locale.translate_with(
                             "command-terminal-path",
                             &[("path", TranslationValue::String(&dir.display().to_string()))],
                         ),
@@ -1467,7 +1468,7 @@ fn on_command_bar_action(
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(PageMetadata {
                         url: terminal_page_url.clone(),
-                        title: translate_for(&locale, "command-terminal"),
+                        title: locale.translate("command-terminal"),
                         ..default()
                     });
                     writer_params.p2().write(TerminalSpawnRequest {
@@ -1496,7 +1497,7 @@ fn on_command_bar_action(
                             .id();
                         commands.entity(stack_e).insert(PageMetadata {
                             url: terminal_page_url.clone(),
-                            title: translate_for(&locale, "command-terminal"),
+                            title: locale.translate("command-terminal"),
                             ..default()
                         });
                         writer_params.p2().write(TerminalSpawnRequest {
@@ -2069,7 +2070,7 @@ mod tests {
             &agents,
             &pages,
             &work,
-            "en-US",
+            &Locale::from("en-US"),
             0,
             Vec::new(),
             Some(OpenTarget::InPlace),

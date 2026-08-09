@@ -13,7 +13,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 rkyv = { workspace = true }
 similar = "2"
-unicode-segmentation = "1"
 vmux_chat = { path = "../vmux_chat" }
 vmux_wire = { path = "../vmux_wire" }
 
@@ -46,10 +45,6 @@ vmux_remote = { path = "../vmux_remote" }
 vmux_service = { path = "../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
-
-# MatrixRain is a canvas animation the CEF page renders, and the desktop half needs the crate
-# too; only a phone build can do without it.
-[target.'cfg(not(target_os = "ios"))'.dependencies]
 vmux_terminal = { path = "../vmux_terminal" }
 
 # Shared by both page hosts. Everything web-bound stays in the wasm-only block below, so a phone
@@ -83,9 +78,6 @@ web-sys = { version = "0.3", features = [
 
 [dev-dependencies]
 mockito = "1"
-# The composer also compiles under `cfg(test)` on the host, where the page-side block above does
-# not apply, so its shared list-navigation helpers need a path in from here too.
-vmux_ui = { path = "../vmux_ui", default-features = false }
 serial_test = "3"
 tempfile = "3"
 tokio = { workspace = true, features = ["rt", "macros"] }

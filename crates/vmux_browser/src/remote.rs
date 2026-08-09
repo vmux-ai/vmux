@@ -9,6 +9,7 @@ use vmux_layout::LayoutCef;
 use vmux_layout::event::{
     REMOTE_STATE_EVENT, RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent,
 };
+use vmux_service::RemotePaths;
 
 pub(crate) struct RemoteDesktopPlugin;
 
@@ -63,7 +64,7 @@ struct RemoteDesktopState {
 
 impl Default for RemoteDesktopState {
     fn default() -> Self {
-        let persisted = std::fs::read_to_string(vmux_service::remote_state_path()).ok();
+        let persisted = std::fs::read_to_string(RemotePaths::current().state()).ok();
         let enabled = persisted.as_deref().map(str::trim) == Some("enabled");
         let reconcile_on_startup = persisted.is_some();
         let (command_tx, command_rx) = crossbeam_channel::unbounded();
@@ -81,7 +82,7 @@ impl Default for RemoteDesktopState {
             },
             pairing_url: String::new(),
             pairing_deep_link: String::new(),
-            paired: vmux_service::remote_paired_path().exists(),
+            paired: RemotePaths::current().paired().exists(),
             error: String::new(),
             command_tx,
             result_rx,
@@ -136,7 +137,7 @@ fn poll_remote_worker(mut state: ResMut<RemoteDesktopState>) {
             Ok(None) => {
                 state.pairing_url.clear();
                 state.pairing_deep_link.clear();
-                if let Err(error) = remove_if_exists(&vmux_service::remote_state_path()) {
+                if let Err(error) = remove_if_exists(&RemotePaths::current().state()) {
                     state.phase = RemotePhase::Error;
                     state.error =
                         format!("Remote is off, but its state could not be saved: {error}");
@@ -158,7 +159,7 @@ fn poll_paired_marker(mut state: ResMut<RemoteDesktopState>) {
         return;
     }
     state.paired_checked_at = Instant::now();
-    state.paired = vmux_service::remote_paired_path().exists();
+    state.paired = RemotePaths::current().paired().exists();
 }
 
 fn push_remote_state_emit(
@@ -230,7 +231,7 @@ fn disable_remote() -> Result<(), String> {
 
 /// Where the phone should dial, or `None` until the daemon has registered and recorded the port.
 fn relay_pairing_base_url() -> Result<Option<String>, String> {
-    let relay = vmux_service::pairing::Relay::new(vmux_service::relay_url_from_env());
+    let relay = vmux_service::pairing::Relay::from_env();
     relay.persist().map_err(|error| error.to_string())?;
     // Minted here as well as in the daemon so both agree before the first registration.
     let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
@@ -239,7 +240,7 @@ fn relay_pairing_base_url() -> Result<Option<String>, String> {
 }
 
 fn ensure_relay_device_id() -> std::io::Result<String> {
-    let path = vmux_service::remote_relay_device_path();
+    let path = RemotePaths::current().relay_device();
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let existing = existing.trim();
         if !existing.is_empty() {
@@ -260,7 +261,7 @@ fn ensure_relay_device_id() -> std::io::Result<String> {
 }
 
 fn wait_for_token() -> std::io::Result<String> {
-    let path = vmux_service::remote_token_path();
+    let path = RemotePaths::current().token();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         if let Ok(token) = std::fs::read_to_string(&path) {
@@ -280,7 +281,7 @@ fn wait_for_token() -> std::io::Result<String> {
 }
 
 fn persist_enabled(enabled: bool) -> std::io::Result<()> {
-    let path = vmux_service::remote_state_path();
+    let path = RemotePaths::current().state();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

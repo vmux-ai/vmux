@@ -9,9 +9,7 @@ use vmux_layout::{
     stack::FocusedStack,
     warm_page::WarmPage,
 };
-use vmux_ui::i18n::{
-    available_locales, locale_name, register_catalog, requested_locale, translate_for,
-};
+use vmux_ui::i18n::Locale;
 
 use crate::event::{
     CheckForUpdatesEvent, CheckForUpdatesRequest, CurrentUpdateCheckStatus, SETTINGS_LIST_EVENT,
@@ -109,8 +107,8 @@ pub(crate) fn localize_settings_metadata(
     settings: Res<AppSettings>,
     mut views: Query<&mut PageMetadata, With<Settings>>,
 ) {
-    let locale = requested_locale(Some(&settings.appearance.locale));
-    let title = translate_for(&locale, "settings-title");
+    let locale = Locale::requested(Some(&settings.appearance.locale));
+    let title = locale.translate("settings-title");
     for mut metadata in &mut views {
         if metadata.title != title {
             metadata.title.clone_from(&title);
@@ -163,7 +161,7 @@ pub(crate) fn broadcast_schema_to_views(
     if pending.is_empty() && (!settings.is_changed() || sent.is_empty()) {
         return;
     }
-    let locale = requested_locale(Some(&settings.appearance.locale));
+    let locale = Locale::requested(Some(&settings.appearance.locale));
     let payload = SettingsSchemaEvent {
         json: serde_json::to_string(&build_settings_schema_for(&locale)).unwrap_or_default(),
     };
@@ -291,27 +289,30 @@ pub(crate) fn handle_open_settings_command(
 
 #[cfg(test)]
 fn build_settings_schema() -> SettingsSchema {
-    build_settings_schema_for("en-US")
+    build_settings_schema_for(&Locale::from("en-US"))
 }
 
-fn build_settings_schema_for(locale: &str) -> SettingsSchema {
+fn build_settings_schema_for(locale: &Locale) -> SettingsSchema {
     let directory = vmux_core::profile::config_dir().join("locales");
-    if let Some(source) = [locale, locale.split('-').next().unwrap_or(locale)]
+    let tag = locale.as_str();
+    if let Some(source) = [tag, tag.split('-').next().unwrap_or(tag)]
         .into_iter()
         .find_map(|tag| std::fs::read_to_string(directory.join(format!("{tag}.ftl"))).ok())
     {
-        let _ = register_catalog(locale, &source);
+        let _ = locale.register_catalog(&source);
     }
-    let t = |id| translate_for(locale, id);
-    let locale_options = std::iter::once(SelectOption {
+    let t = |id| locale.translate(id);
+    let mut locale_options = vec![SelectOption {
         value: "system".to_string(),
         label: t("schema-system"),
-    })
-    .chain(available_locales().iter().map(|locale| SelectOption {
-        value: (*locale).to_string(),
-        label: locale_name(locale).to_string(),
-    }))
-    .collect::<Vec<_>>();
+    }];
+    for available in Locale::available() {
+        let label = available.name().to_string();
+        locale_options.push(SelectOption {
+            value: available.into_string(),
+            label,
+        });
+    }
     SettingsSchema {
         sections: vec![
             SectionSpec {
@@ -803,7 +804,10 @@ mod appearance_schema_tests {
             .map(|option| option.value.as_str())
             .collect::<Vec<_>>();
         assert_eq!(values.first(), Some(&"system"));
-        assert_eq!(&values[1..], available_locales());
+        let bundled = Locale::available()
+            .map(Locale::into_string)
+            .collect::<Vec<_>>();
+        assert_eq!(bundled[..], values[1..]);
         assert_eq!(
             language
                 .options
@@ -816,7 +820,7 @@ mod appearance_schema_tests {
 
     #[test]
     fn schema_uses_requested_locale() {
-        let schema = build_settings_schema_for("ja");
+        let schema = build_settings_schema_for(&Locale::from("ja"));
         let appearance = schema
             .sections
             .iter()

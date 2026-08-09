@@ -6,7 +6,7 @@
 //! the rules live in one place rather than being restated for the unfocused case.
 
 use super::state::Chat;
-use crate::event::chat::{ChatCancel, ChatEscape, ChatItem};
+use crate::event::{ChatCancel, ChatEscape, ChatItem};
 use crate::format::composer::{
     PromptEdit, PromptHistoryDirection, SelectorMode, approval_decision_for_index, edit_prompt,
     move_prompt_history, prompt_history_direction, selector_mode, should_clear_draft_on_escape,

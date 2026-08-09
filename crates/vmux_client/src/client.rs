@@ -1,5 +1,6 @@
+use crate::paths::ServicePaths;
 use crate::protocol::{ClientMessage, ServiceMessage};
-use crate::{read_message, socket_path, write_message};
+use crate::{read_message, write_message};
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tokio::sync::Mutex;
@@ -14,7 +15,7 @@ pub struct ServiceConnection {
 impl ServiceConnection {
     /// Connect to the service socket.
     pub async fn connect() -> std::io::Result<Self> {
-        let sock = socket_path();
+        let sock = ServicePaths::current().socket();
         let stream = UnixStream::connect(&sock).await?;
         let (reader, writer) = stream.into_split();
         Ok(Self {

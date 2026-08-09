@@ -13,13 +13,13 @@ use super::model::{effort_current_for, emit_model_state};
 use super::{AgentChatView, ChatSynced};
 use crate::client::acp::{AcpModelState, AcpSession};
 use crate::components::{AgentConversationTitle, AgentMessages, PromptQueue};
-use crate::event::chat::{
-    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
-    CHAT_SNAPSHOT_EVENT, ChatHistoryPage, ChatHistoryRequest, ChatSnapshot, QueuedPromptSnapshot,
-};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
+use vmux_chat::event::{
+    CHAT_HISTORY_MAX_PAGE_SIZE, CHAT_HISTORY_PAGE_EVENT, CHAT_INITIAL_ITEM_LIMIT,
+    CHAT_SNAPSHOT_EVENT, ChatHistoryPage, ChatHistoryRequest, ChatSnapshot, QueuedPromptSnapshot,
+};
 use vmux_core::PageMetadata;
 use vmux_core::team::Profile;
 use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};

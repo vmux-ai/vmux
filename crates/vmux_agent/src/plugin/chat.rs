@@ -2,7 +2,9 @@
 //! daemon and the webview.
 //!
 //! Gated as a whole rather than item by item — a hundred attributes down one file said nothing
-//! that one on the module does not. The rendered counterpart is the sibling `page`.
+//! that one on the module does not. The rendered counterpart is `vmux_chat::ui`, which this
+//! reaches only through the payloads in `vmux_chat::event`; everything here that is about
+//! driving an agent — sessions, strategies, run state — stays on this side of that line.
 
 mod media;
 mod model;
@@ -14,7 +16,7 @@ mod workspace;
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
-use crate::event::chat::ChatOpenPage;
+use vmux_chat::event::ChatOpenPage;
 
 pub struct AgentChatPagePlugin;
 

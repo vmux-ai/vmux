@@ -1,6 +1,9 @@
-//! Shared bin-ipc payloads for the `vmux://agent` chat page. Compiled for both native
-//! (emit/receive in the Bevy host) and wasm (the Dioxus page). rkyv for the bin-ipc wire;
-//! serde for the JSON-encoded message list.
+//! What the chat page and its host say to each other.
+//!
+//! Shared bin-ipc payloads for the chat page. Ungated: it is the one part both halves compile,
+//! and the reason neither has to know how the other is built — the host lives in another crate
+//! and reaches the page only through these. rkyv for the bin-ipc wire; serde for the
+//! JSON-encoded message list.
 
 /// Bin-event id: native → page conversation/run-state snapshot.
 pub const CHAT_SNAPSHOT_EVENT: &str = "chat_snapshot";

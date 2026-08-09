@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use base64::Engine;
 use tokio::sync::Mutex;
 
+use crate::RemotePaths;
 use crate::acp::AcpSessionManager;
 use crate::agent::AgentSessionManager;
 use crate::agent_broker::AgentBroker;
@@ -84,7 +85,7 @@ pub fn spawn(
         };
         let state = RemoteState {
             token: Arc::from(token),
-            paired: Arc::new(AtomicBool::new(crate::remote_paired_path().exists())),
+            paired: Arc::new(AtomicBool::new(RemotePaths::current().paired().exists())),
             agents,
             acp,
             broker,
@@ -104,7 +105,7 @@ pub fn spawn(
 }
 
 pub(crate) fn remote_enabled() -> bool {
-    remote_enabled_at(&crate::remote_state_path())
+    remote_enabled_at(&RemotePaths::current().state())
 }
 
 fn remote_enabled_at(path: &std::path::Path) -> bool {
@@ -416,7 +417,7 @@ pub(crate) fn mark_paired(paired: &AtomicBool) {
     if paired.swap(true, Ordering::AcqRel) {
         return;
     }
-    let path = crate::remote_paired_path();
+    let path = RemotePaths::current().paired();
     let result = path
         .parent()
         .map(std::fs::create_dir_all)
@@ -429,7 +430,8 @@ pub(crate) fn mark_paired(paired: &AtomicBool) {
 }
 
 fn ensure_token() -> std::io::Result<String> {
-    let path = crate::remote_token_path();
+    let remote = RemotePaths::current();
+    let path = remote.token();
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let existing = existing.trim();
         if existing.len() >= 32 {
@@ -444,7 +446,7 @@ fn ensure_token() -> std::io::Result<String> {
         uuid::Uuid::new_v4().simple(),
         uuid::Uuid::new_v4().simple()
     );
-    let _ = std::fs::remove_file(crate::remote_paired_path());
+    let _ = std::fs::remove_file(remote.paired());
     super::write_private(&path, &token)?;
     Ok(token)
 }

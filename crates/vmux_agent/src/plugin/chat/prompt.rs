@@ -12,12 +12,12 @@ use crate::client::acp::AcpSession;
 use crate::components::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
 };
-use crate::event::chat::{
+use crate::events::{AgentApprovalReply, AgentChoiceSelected, ApprovalDecision};
+use crate::run_state::AgentRunState;
+use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
     ChatEscape, ChatResume, ChatSubmit,
 };
-use crate::events::{AgentApprovalReply, AgentChoiceSelected, ApprovalDecision};
-use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentAttachment, ClientMessage, SharedMessage};
 

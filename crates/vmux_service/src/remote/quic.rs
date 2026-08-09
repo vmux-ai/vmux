@@ -37,8 +37,9 @@ const MAX_HELLO_BYTES: usize = 16 * 1024;
 /// Reused across launches because the pairing link records the fingerprint; minting per start
 /// would unpair every phone on restart.
 pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
-    let cert_path = crate::remote_cert_path();
-    let key_path = crate::remote_key_path();
+    let remote = crate::RemotePaths::current();
+    let cert_path = remote.certificate();
+    let key_path = remote.key();
 
     if let (Ok(certificate_pem), Ok(private_key_pem)) = (
         std::fs::read_to_string(&cert_path),
@@ -65,7 +66,7 @@ pub fn ensure_identity() -> std::io::Result<SelfSignedIdentity> {
 
 /// Record the fingerprint beside the certificate, for readers that cannot hash a PEM.
 fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
-    let path = crate::remote_fingerprint_path();
+    let path = crate::RemotePaths::current().fingerprint();
     if std::fs::read_to_string(&path).is_ok_and(|existing| existing.trim() == fingerprint) {
         return Ok(());
     }
@@ -80,7 +81,7 @@ fn persist_fingerprint(fingerprint: &str) -> std::io::Result<()> {
 /// Reads the persisted identity rather than the live listener, so the GUI can build a pairing
 /// link without reaching into the daemon's process.
 pub fn identity_fingerprint() -> Option<String> {
-    let pem = std::fs::read_to_string(crate::remote_cert_path()).ok()?;
+    let pem = std::fs::read_to_string(crate::RemotePaths::current().certificate()).ok()?;
     SelfSignedIdentity::fingerprint_of_pem(&pem).ok()
 }
 

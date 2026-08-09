@@ -1,5 +1,5 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
-use crate::socket_path;
+use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
 use bevy::ecs::resource::Resource;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,20 +39,22 @@ fn forward_service_message(
 }
 
 fn clean_service_files(sock: &std::path::Path) {
+    let paths = ServicePaths::current();
     let _ = std::fs::remove_file(sock);
-    let _ = std::fs::remove_file(crate::pid_path());
-    let _ = std::fs::remove_file(crate::identity_path());
+    let _ = std::fs::remove_file(paths.pid());
+    let _ = std::fs::remove_file(paths.identity());
 }
 
 impl ServiceHandle {
     /// Check if the service process is actually alive.
     pub fn service_running() -> bool {
-        let sock = socket_path();
+        let paths = ServicePaths::current();
+        let sock = paths.socket();
         if !sock.exists() {
             return false;
         }
         // Check if the PID file references a live process
-        let pid_file = crate::pid_path();
+        let pid_file = paths.pid();
         let pid_str = match std::fs::read_to_string(&pid_file) {
             Ok(s) => s,
             Err(_) => {
@@ -79,7 +81,7 @@ impl ServiceHandle {
             return false;
         }
 
-        let current_identity = match crate::current_executable_identity() {
+        let current_identity = match DaemonBinary::current().and_then(|daemon| daemon.identity()) {
             Ok(identity) => identity,
             Err(e) => {
                 tracing::error!(error = %e, "failed to identify current executable");
@@ -87,16 +89,15 @@ impl ServiceHandle {
                 return false;
             }
         };
-        let id_path = crate::identity_path();
-        let service_identity = match std::fs::read_to_string(&id_path) {
-            Ok(identity) => identity,
+        let service_identity = match std::fs::read_to_string(paths.identity()) {
+            Ok(identity) => DaemonIdentity::recorded(&identity),
             Err(_) => {
                 tracing::warn!("service identity missing, cleaning up");
                 clean_service_files(&sock);
                 return false;
             }
         };
-        if !crate::service_identity_matches(&service_identity, &current_identity) {
+        if !service_identity.matches(&current_identity) {
             tracing::warn!(pid, "service identity mismatch, replacing running daemon");
             let outcome = crate::supervisor::replace_running(pid, || {
                 let stream = std::os::unix::net::UnixStream::connect(&sock)?;

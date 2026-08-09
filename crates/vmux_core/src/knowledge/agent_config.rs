@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::collections::HashSet;
 
-use super::store::{
-    configured_skill_dirs_from, knowledge_dir, memories_dir, migrate_external_memories, skills_dir,
-};
+use super::store::{SkillsDir, knowledge_dir, memories_dir, migrate_external_memories, skills_dir};
 
 const KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
 const KNOWLEDGE_END: &str = "<!-- vmux-knowledge:end -->";
@@ -77,7 +75,7 @@ fn sync_external_agent_configs_from(
     memories_root: &Path,
     canonical: &Path,
 ) -> io::Result<()> {
-    let skills = configured_skill_dirs_from(skills_root);
+    let skills = SkillsDir::at(skills_root).skills();
     let mut error = None;
     keep_first_error(
         &mut error,

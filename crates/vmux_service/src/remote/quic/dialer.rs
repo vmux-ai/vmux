@@ -17,6 +17,8 @@ use vmux_remote::quic::{RelayAllocation, RelayHello, decode_hello, encode_hello}
 use vmux_remote::{DeviceId, PeerRole};
 
 use super::super::server::RemoteState;
+use crate::RemotePaths;
+use crate::pairing::Relay;
 
 /// Smallest inner packet size QUIC allows. A tunnel that cannot carry this cannot carry a
 /// handshake, so coming up would only produce an unreachable desktop.
@@ -58,11 +60,11 @@ async fn session(
     identity: &SelfSignedIdentity,
     liveness: &watch::Receiver<bool>,
 ) -> Result<(), String> {
-    let relay_url = configured_relay_url();
+    let relay = Relay::configured();
     let device_id = ensure_device_id().map_err(|error| error.to_string())?;
-    let address = resolve(&relay_url).await?;
+    let address = resolve(relay.url()).await?;
 
-    let server_name = host_of(&relay_url)?;
+    let server_name = host_of(relay.url())?;
     let endpoint = vmux_remote::quic::endpoint::Trust::Relay {
         host: server_name.clone(),
     }
@@ -76,7 +78,7 @@ async fn session(
 
     let port = register(&control, &device_id, &state.token).await?;
     persist_port(port).map_err(|error| format!("persist relay port: {error}"))?;
-    tracing::info!(port, relay = %relay_url, "remote quic: registered with the relay");
+    tracing::info!(port, relay = %relay.url(), "remote quic: registered with the relay");
 
     let socket = TunnelSocket::new(control.clone());
     let budget = socket
@@ -128,23 +130,6 @@ async fn register(
     Ok(allocation.port)
 }
 
-/// Which relay to dial.
-///
-/// The file is the normal source, not the fallback: launchd starts this daemon, so it inherits
-/// nothing from the shell that launched the app, and the environment is only ever set in a
-/// developer's terminal. The app writes what it resolved to disk for exactly this reason.
-fn configured_relay_url() -> String {
-    if let Ok(from_env) = std::env::var("VMUX_REMOTE_RELAY_URL")
-        && let Some(url) = crate::normalize_relay_url(&from_env)
-    {
-        return url;
-    }
-    match std::fs::read_to_string(crate::remote_relay_url_path()) {
-        Ok(persisted) => crate::resolve_relay_url(Some(&persisted)),
-        Err(_) => crate::resolve_relay_url(None),
-    }
-}
-
 /// The relay's QUIC control port, resolved.
 ///
 /// The URL names the HTTPS endpoint; QUIC listens on the same host and port number over UDP.
@@ -165,7 +150,7 @@ fn host_of(relay_url: &str) -> Result<String, String> {
 
 /// This desktop's identity to the relay, minted once and kept.
 fn ensure_device_id() -> std::io::Result<DeviceId> {
-    let path = crate::remote_relay_device_path();
+    let path = RemotePaths::current().relay_device();
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let existing = existing.trim();
         if !existing.is_empty() {
@@ -178,5 +163,5 @@ fn ensure_device_id() -> std::io::Result<DeviceId> {
 }
 
 fn persist_port(port: u16) -> std::io::Result<()> {
-    super::super::write_private(&crate::remote_relay_port_path(), &port.to_string())
+    super::super::write_private(&RemotePaths::current().relay_port(), &port.to_string())
 }

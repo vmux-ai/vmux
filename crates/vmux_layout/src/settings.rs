@@ -29,11 +29,11 @@ pub struct EffectiveStartupUrl(pub String);
 pub struct EffectiveStartupDir(pub Option<(Entity, Option<std::path::PathBuf>)>);
 
 #[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedLocale(pub String);
+pub struct ResolvedLocale(pub vmux_ui::i18n::Locale);
 
 impl Default for ResolvedLocale {
     fn default() -> Self {
-        Self(vmux_ui::i18n::requested_locale(None))
+        Self(vmux_ui::i18n::Locale::preferred())
     }
 }
 

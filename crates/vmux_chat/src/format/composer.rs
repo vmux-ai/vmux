@@ -1,4 +1,4 @@
-use crate::event::chat::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry};
+use crate::event::{ModelOptionEntry, ResumableSessionEntry, SlashCommandEntry};
 use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
@@ -325,7 +325,7 @@ fn utf16_to_byte(value: &str, offset: u32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::chat::SlashCommandEntry;
+    use crate::event::SlashCommandEntry;
 
     fn session(sid: &str, title: &str, cwd: &str) -> ResumableSessionEntry {
         ResumableSessionEntry {

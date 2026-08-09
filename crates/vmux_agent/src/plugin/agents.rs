@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::acp_registry::Runtime;
 use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
-use crate::event::agents::{
+use crate::event::{
     AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
     AgentsOpen, AgentsUninstall,
 };

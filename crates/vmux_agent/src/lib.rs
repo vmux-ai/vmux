@@ -5,9 +5,6 @@
 
 pub mod event;
 
-#[cfg(any(test, frontend))]
-pub mod format;
-
 #[cfg(frontend)]
 pub mod ui;
 pub mod vibe;

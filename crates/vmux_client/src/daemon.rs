@@ -1,0 +1,178 @@
+//! The daemon executable: where it is, and whether the one already running is still it.
+
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
+use crate::paths::ServicePaths;
+
+/// The `vmux_service` executable, resolved as a sibling of whoever asked.
+///
+/// The daemon and its clients both resolve it the same way — for the daemon `current_exe` *is* the
+/// daemon, for the GUI and CLI it sits alongside them — so an identity check compares the same
+/// file on both sides instead of two paths that merely ought to agree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DaemonBinary(PathBuf);
+
+impl DaemonBinary {
+    /// The daemon this process would start, resolved from the running executable.
+    pub fn current() -> std::io::Result<Self> {
+        Ok(Self::beside(&std::env::current_exe()?))
+    }
+
+    /// The daemon that belongs with `exe`: `exe` itself when it is already the daemon, the bundled
+    /// login item when `exe` lives in a `.app`, and a plain sibling otherwise.
+    pub fn beside(exe: &Path) -> Self {
+        if matches!(
+            exe.file_name().and_then(|n| n.to_str()),
+            Some("vmux_service" | "Vmux Service")
+        ) {
+            return Self(exe.to_path_buf());
+        }
+
+        if let Some(root) = crate::bundle::bundle_root_for(exe) {
+            return Self(
+                root.join("Contents")
+                    .join("Library")
+                    .join("LoginItems")
+                    .join("Vmux Service.app")
+                    .join("Contents")
+                    .join("MacOS")
+                    .join("Vmux Service"),
+            );
+        }
+
+        let mut path = exe.to_path_buf();
+        path.pop();
+        path.push("vmux_service");
+        Self(path)
+    }
+
+    /// Where it lives.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Where it lives, for a caller that needs to keep the path.
+    pub fn into_path(self) -> PathBuf {
+        self.0
+    }
+
+    /// Fingerprint the file on disk right now.
+    pub fn identity(&self) -> std::io::Result<DaemonIdentity> {
+        DaemonIdentity::of(&self.0)
+    }
+
+    /// Write this binary's identity into the per-profile identity file.
+    pub fn record_identity(&self) -> std::io::Result<()> {
+        std::fs::write(
+            ServicePaths::current().identity(),
+            self.identity()?.as_str(),
+        )
+    }
+}
+
+/// A fingerprint of the daemon binary: its canonical path, its size, and when it was last written.
+///
+/// Recorded beside the socket so a client can tell whether the daemon already running is the one
+/// it would have started, or a leftover from a previous build that has to be replaced.
+#[derive(Clone, Debug)]
+pub struct DaemonIdentity(String);
+
+impl DaemonIdentity {
+    /// Fingerprint the file at `path`.
+    pub fn of(path: &Path) -> std::io::Result<Self> {
+        let path = std::fs::canonicalize(path)?;
+        let metadata = std::fs::metadata(&path)?;
+        let modified = metadata
+            .modified()?
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        Ok(Self(format!(
+            "{}\n{}\n{modified}",
+            path.display(),
+            metadata.len()
+        )))
+    }
+
+    /// Take one back off disk, as the identity file spells it.
+    pub fn recorded(text: &str) -> Self {
+        Self(text.to_string())
+    }
+
+    /// Whether two fingerprints describe the same binary. Trailing whitespace from the file is not
+    /// part of the answer.
+    pub fn matches(&self, other: &Self) -> bool {
+        self.0.trim() == other.0.trim()
+    }
+
+    /// The recorded form, as written to the identity file.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn executable_identity_changes_when_file_changes() {
+        let path = std::env::temp_dir().join(format!("vmux-identity-test-{}", std::process::id()));
+        {
+            let mut file = std::fs::File::create(&path).expect("create identity test file");
+            file.write_all(b"old").expect("write old identity bytes");
+        }
+        let old_identity = DaemonIdentity::of(&path).expect("old identity");
+
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        {
+            let mut file = std::fs::File::create(&path).expect("rewrite identity test file");
+            file.write_all(b"newer").expect("write new identity bytes");
+        }
+        let new_identity = DaemonIdentity::of(&path).expect("new identity");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(!old_identity.matches(&new_identity));
+    }
+
+    #[test]
+    fn bundled_main_app_resolves_named_service_app_executable() {
+        let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
+
+        assert_eq!(
+            DaemonBinary::beside(&exe).path(),
+            Path::new(
+                "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service"
+            )
+        );
+    }
+
+    #[test]
+    fn bundled_service_app_resolves_to_self() {
+        let exe = PathBuf::from(
+            "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
+        );
+
+        assert_eq!(DaemonBinary::beside(&exe).path(), exe);
+    }
+
+    #[test]
+    fn unbundled_debug_app_resolves_legacy_service_binary() {
+        let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_desktop");
+
+        assert_eq!(
+            DaemonBinary::beside(&exe).path(),
+            Path::new("/Users/x/repo/target/debug/vmux_service")
+        );
+    }
+
+    #[test]
+    fn service_identity_match_requires_exact_record() {
+        assert!(
+            DaemonIdentity::recorded("a\n1\n2\n").matches(&DaemonIdentity::recorded("a\n1\n2"))
+        );
+        assert!(!DaemonIdentity::recorded("a\n1\n2").matches(&DaemonIdentity::recorded("a\n1\n3")));
+    }
+}

@@ -5,8 +5,8 @@
 //! the layout. A native host has no tab and shows this in its own chrome instead, so applying an
 //! identity there is a no-op.
 
-use crate::event::chat::{ChatBlock, ChatItem};
-use vmux_chat::activity::ActivityIcon;
+use crate::activity::ActivityIcon;
+use crate::event::{ChatBlock, ChatItem};
 use vmux_ui::favicon::favicon_src_for_url;
 
 /// The colour a conversation paints itself with: the profile's, when that is a usable hex, else

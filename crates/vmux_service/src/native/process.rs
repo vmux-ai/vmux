@@ -422,7 +422,7 @@ impl Process {
             &command,
             &mut args,
             &mut env,
-            &crate::native::paths::shell_integration_dir(),
+            &crate::ServicePaths::shell_integration_dir(),
         );
         let pty_system = NativePtySystem::default();
         let pair = pty_system

@@ -804,8 +804,7 @@ fn read_settings_and_path() -> (AppSettings, Option<std::path::PathBuf>) {
 
 pub fn load_settings(mut commands: Commands) {
     let (settings, config_path) = read_settings_and_path();
-    let locale = vmux_ui::i18n::requested_locale(Some(&settings.appearance.locale));
-    vmux_ui::i18n::set_current_locale(&locale);
+    vmux_ui::i18n::Locale::requested(Some(&settings.appearance.locale)).make_current();
 
     sync_layout_resources(&mut commands, &settings);
     commands.insert_resource(settings);
@@ -873,8 +872,8 @@ pub(crate) fn reload_settings_on_change(
                 Ok(new_settings) => {
                     bevy::log::info!("Settings reloaded from {}", watcher.path.display());
                     let locale =
-                        vmux_ui::i18n::requested_locale(Some(&new_settings.appearance.locale));
-                    vmux_ui::i18n::set_current_locale(&locale);
+                        vmux_ui::i18n::Locale::requested(Some(&new_settings.appearance.locale));
+                    locale.make_current();
                     resolved_locale.0 = locale;
                     *layout_settings = new_settings.layout.clone();
                     confirm_close.enabled = new_settings
@@ -900,7 +899,7 @@ fn load_embedded_settings() -> AppSettings {
 
 fn sync_layout_resources(commands: &mut Commands, settings: &AppSettings) {
     commands.insert_resource(settings.layout.clone());
-    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::requested_locale(Some(
+    commands.insert_resource(ResolvedLocale(vmux_ui::i18n::Locale::requested(Some(
         &settings.appearance.locale,
     ))));
     commands.insert_resource(ConfirmCloseSettings {

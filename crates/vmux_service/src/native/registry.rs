@@ -23,7 +23,7 @@ pub enum StartMode {
 }
 
 pub fn start_mode_for(exe: &Path) -> StartMode {
-    start_mode_for_profile(crate::current_profile(), exe)
+    start_mode_for_profile(crate::ServicePaths::build_profile(), exe)
 }
 
 pub fn start_mode_for_profile(profile: &str, exe: &Path) -> StartMode {
@@ -98,7 +98,7 @@ pub fn ensure_running(profile: &str, exe: &Path) -> Result<(), RegistrationError
         Backend::Launchctl => {
             #[cfg(target_os = "macos")]
             {
-                crate::launchd::ensure_running(profile, exe)?;
+                crate::LaunchAgent::for_profile(profile).ensure_running(exe)?;
                 Ok(())
             }
             #[cfg(not(target_os = "macos"))]

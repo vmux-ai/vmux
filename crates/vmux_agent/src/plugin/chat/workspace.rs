@@ -10,10 +10,10 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use super::AgentChatView;
 use crate::client::acp::AcpSession;
 use crate::components::AgentApprovalPolicy;
-use crate::event::chat::{
+use crate::events::{AgentCommandRequest, CommandOrigin};
+use vmux_chat::event::{
     COMPOSER_CONTEXT_EVENT, ChatCreateWorktree, ChatSelectWorkspace, ComposerContext,
 };
-use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
 
 /// The composer's project context, and the two controls that change it.

@@ -1,4 +1,4 @@
-use crate::{identity_path, pid_path, service_dir, socket_path, write_service_identity};
+use crate::{DaemonBinary, ServicePaths};
 use tracing_subscriber::{EnvFilter, fmt};
 
 /// Daemon entry point. Initializes logging, writes pid/identity, binds the socket,
@@ -13,23 +13,26 @@ pub fn run() {
 }
 
 async fn run_async() {
-    let dir = service_dir();
+    let paths = ServicePaths::current();
+    let dir = ServicePaths::dir();
     std::fs::create_dir_all(&dir).expect("failed to create service dir");
 
     init_tracing();
 
     let pid = std::process::id();
-    std::fs::write(pid_path(), pid.to_string()).expect("failed to write PID file");
-    write_service_identity().expect("failed to write service identity file");
+    std::fs::write(paths.pid(), pid.to_string()).expect("failed to write PID file");
+    DaemonBinary::current()
+        .and_then(|daemon| daemon.record_identity())
+        .expect("failed to write service identity file");
 
-    let sock = socket_path();
+    let sock = paths.socket();
     let _ = std::fs::remove_file(&sock);
     let listener = tokio::net::UnixListener::bind(&sock).expect("failed to bind Unix socket");
 
     tracing::info!(
         target: "vmux_service::startup",
         version = env!("CARGO_PKG_VERSION"),
-        profile = crate::current_profile(),
+        profile = ServicePaths::build_profile(),
         pid = pid,
         socket = %sock.display(),
         "vmux_service started"
@@ -45,8 +48,8 @@ async fn run_async() {
         }
         tracing::info!("shutdown signal received, cleaning up");
         let _ = std::fs::remove_file(&sock_cleanup);
-        let _ = std::fs::remove_file(pid_path());
-        let _ = std::fs::remove_file(identity_path());
+        let _ = std::fs::remove_file(paths.pid());
+        let _ = std::fs::remove_file(paths.identity());
         std::process::exit(0);
     });
 
@@ -54,11 +57,11 @@ async fn run_async() {
 }
 
 fn init_tracing() {
-    let dir = crate::log_dir();
+    let dir = ServicePaths::log_dir();
     std::fs::create_dir_all(&dir).expect("failed to create log dir");
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix(format!("vmux-{}", crate::current_profile()))
+        .filename_prefix(format!("vmux-{}", ServicePaths::build_profile()))
         .filename_suffix("log")
         .max_log_files(7)
         .build(&dir)

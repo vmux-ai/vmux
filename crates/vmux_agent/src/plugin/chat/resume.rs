@@ -13,13 +13,12 @@ use crate::components::AgentSession;
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
-use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
-use vmux_core::team::Profile;
-
-use crate::event::chat::{
+use vmux_chat::event::{
     RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
     ResumeSession, RuntimeSwitchRequest,
 };
+use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
+use vmux_core::team::Profile;
 
 /// Resuming a session, and switching the runtime that serves one.
 pub(super) struct ChatResumePlugin;

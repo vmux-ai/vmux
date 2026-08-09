@@ -73,9 +73,10 @@ where
 
 /// Best-effort cleanup of stale runtime files for the current profile.
 pub fn clean_runtime_files() {
-    let _ = std::fs::remove_file(crate::socket_path());
-    let _ = std::fs::remove_file(crate::pid_path());
-    let _ = std::fs::remove_file(crate::identity_path());
+    let paths = crate::ServicePaths::current();
+    let _ = std::fs::remove_file(paths.socket());
+    let _ = std::fs::remove_file(paths.pid());
+    let _ = std::fs::remove_file(paths.identity());
 }
 
 #[cfg(test)]

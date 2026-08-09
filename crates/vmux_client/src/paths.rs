@@ -1,260 +1,190 @@
-use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+//! Where the service keeps its files, and what launchd calls it.
+
+use std::path::PathBuf;
 use vmux_profile::{active_profile_name, build_profile, git_hash, shared_data_dir};
 
-/// Profile this build was compiled for ("release", "local", or "dev").
-pub fn current_profile() -> &'static str {
-    build_profile()
+/// Every runtime file the service owns, for the build and the profile this process runs as.
+///
+/// Read from the environment rather than passed in, because the profile is a property of the
+/// process: two components disagreeing about it would talk past each other over different sockets.
+#[derive(Clone, Debug)]
+pub struct ServicePaths {
+    build: &'static str,
+    profile: String,
 }
 
-/// Directory for service runtime files (socket, pid, identity). Nested under the
-/// profile-specific data dir so `dev` builds stay isolated under `Vmux/dev`.
-pub fn service_dir() -> PathBuf {
-    shared_data_dir().join("services")
-}
+impl ServicePaths {
+    /// The paths this process should use.
+    pub fn current() -> Self {
+        Self {
+            build: build_profile(),
+            profile: active_profile_name(),
+        }
+    }
 
-fn profile_file_stem(build: &str, profile: &str) -> String {
-    if profile == "personal" {
-        format!("vmux-{build}")
-    } else {
-        format!("vmux-{build}-{profile}")
+    /// Profile this build was compiled for ("release", "local", or "dev").
+    pub fn build_profile() -> &'static str {
+        build_profile()
+    }
+
+    /// Directory for service runtime files (socket, pid, identity). Nested under the
+    /// profile-specific data dir so `dev` builds stay isolated under `Vmux/dev`.
+    pub fn dir() -> PathBuf {
+        shared_data_dir().join("services")
+    }
+
+    /// Directory for application log files, separate from the runtime files in
+    /// [`ServicePaths::dir`]. Nested under the profile-specific data dir so `dev` builds stay
+    /// isolated under `Vmux/dev`.
+    pub fn log_dir() -> PathBuf {
+        shared_data_dir().join("logs")
+    }
+
+    /// Directory holding the shell integration snippets a spawned shell sources.
+    pub fn shell_integration_dir() -> PathBuf {
+        shared_data_dir().join("shell-integration")
+    }
+
+    /// The per-profile Unix domain socket.
+    pub fn socket(&self) -> PathBuf {
+        self.runtime_file("sock")
+    }
+
+    /// The per-profile PID file.
+    pub fn pid(&self) -> PathBuf {
+        self.runtime_file("pid")
+    }
+
+    /// The per-profile record of which daemon binary is running, as [`DaemonIdentity`] spells it.
+    ///
+    /// [`DaemonIdentity`]: crate::daemon::DaemonIdentity
+    pub fn identity(&self) -> PathBuf {
+        self.runtime_file("identity")
+    }
+
+    /// The per-profile service stdout/stderr capture log. Lives alongside the rotated application
+    /// logs in [`ServicePaths::log_dir`], not in [`ServicePaths::dir`].
+    pub fn log(&self) -> PathBuf {
+        Self::log_dir().join(self.file_name("log"))
+    }
+
+    /// Today's unified log file. Matches the filename the tracing-appender DAILY rotation writes
+    /// (`vmux-{profile}.{YYYY-MM-DD}.log`, UTC date), so the daemon, the desktop file layer, and
+    /// the panic hook all target the same file.
+    pub fn current_log(&self) -> PathBuf {
+        let date = chrono::Utc::now().format("%Y-%m-%d");
+        Self::log_dir().join(format!("{}.{date}.log", self.stem()))
+    }
+
+    /// The files Remote keeps beside these.
+    pub fn remote(&self) -> RemotePaths {
+        RemotePaths {
+            service: self.clone(),
+        }
+    }
+
+    fn stem(&self) -> String {
+        if self.profile == "personal" {
+            format!("vmux-{}", self.build)
+        } else {
+            format!("vmux-{}-{}", self.build, self.profile)
+        }
+    }
+
+    fn file_name(&self, ext: &str) -> String {
+        format!("{}.{ext}", self.stem())
+    }
+
+    fn runtime_file(&self, ext: &str) -> PathBuf {
+        Self::dir().join(self.file_name(ext))
     }
 }
 
-fn profile_file_name(build: &str, profile: &str, ext: &str) -> String {
-    format!("{}.{ext}", profile_file_stem(build, profile))
-}
-
-fn profile_file(ext: &str) -> PathBuf {
-    let profile = active_profile_name();
-    service_dir().join(profile_file_name(current_profile(), &profile, ext))
-}
-
-/// Path to the per-profile Unix domain socket.
-pub fn socket_path() -> PathBuf {
-    profile_file("sock")
-}
-
-/// Path to the per-profile PID file.
-pub fn pid_path() -> PathBuf {
-    profile_file("pid")
-}
-
-/// Path to the per-profile service executable identity file.
-pub fn identity_path() -> PathBuf {
-    profile_file("identity")
-}
-
-/// Path to the bearer token accepted by the local mobile remote server.
-pub fn remote_token_path() -> PathBuf {
-    profile_file("remote-token")
-}
-
-/// Path to the desired Remote exposure state.
-pub fn remote_state_path() -> PathBuf {
-    profile_file("remote-state")
-}
-
-/// Path to the marker written after a phone first authenticates successfully.
-pub fn remote_paired_path() -> PathBuf {
-    profile_file("remote-paired")
-}
-
-/// Path to the self-signed certificate the QUIC listener presents.
+/// The files Remote writes, for the build and the profile this process runs as.
 ///
-/// Persisted rather than minted per launch: the pairing link records its fingerprint, so a fresh
-/// certificate on every start would silently unpair every phone.
-pub fn remote_cert_path() -> PathBuf {
-    profile_file("remote-cert")
+/// Separate from [`ServicePaths`] because they answer a different question. The socket and the pid
+/// file exist whenever the daemon does; these appear only once someone turns Remote on, and every
+/// reader has to cope with them being absent.
+#[derive(Clone, Debug)]
+pub struct RemotePaths {
+    service: ServicePaths,
 }
 
-/// Path to the private key for [`remote_cert_path`]. Written at mode `0600`.
-pub fn remote_key_path() -> PathBuf {
-    profile_file("remote-key")
-}
-
-/// Path to the fingerprint of [`remote_cert_path`], as the pairing link spells it.
-///
-/// Derived from the certificate, but written down because the CLI builds pairing links too and
-/// hashing a PEM would cost it the whole QUIC stack as a dependency for one digest.
-pub fn remote_fingerprint_path() -> PathBuf {
-    profile_file("remote-fingerprint")
-}
-
-/// Path to the stable relay device id for the active build and profile.
-pub fn remote_relay_device_path() -> PathBuf {
-    profile_file("remote-device")
-}
-
-/// Path to the resolved relay URL for the active build and profile.
-///
-/// The desktop app writes this so the daemon can read it: launchd starts the daemon, so it does
-/// not inherit the environment the app was launched with.
-pub fn remote_relay_url_path() -> PathBuf {
-    profile_file("remote-relay-url")
-}
-
-/// The hosted relay, used when nothing overrides it.
-pub const DEFAULT_RELAY_URL: &str = "https://relay.vmux.ai";
-
-/// The relay `VMUX_REMOTE_RELAY_URL` asks for, or the hosted one when it is unset.
-pub fn relay_url_from_env() -> String {
-    resolve_relay_url(std::env::var("VMUX_REMOTE_RELAY_URL").ok().as_deref())
-}
-
-/// Decide the relay from what the environment said, if anything.
-///
-/// Every pairing goes through a relay now, so a blank value means "use the hosted one" rather
-/// than "turn the relay off". There is no off: a desktop sits behind NAT and is unreachable
-/// without one.
-pub fn resolve_relay_url(from_env: Option<&str>) -> String {
-    let asked = from_env.unwrap_or(DEFAULT_RELAY_URL);
-    normalize_relay_url(asked).unwrap_or_else(|| DEFAULT_RELAY_URL.to_string())
-}
-
-/// A relay URL trimmed to canonical form, or `None` when blank.
-pub fn normalize_relay_url(url: &str) -> Option<String> {
-    let trimmed = url.trim().trim_end_matches('/');
-    (!trimmed.is_empty()).then(|| trimmed.to_string())
-}
-
-/// Path to the UDP port the relay allocated this desktop.
-///
-/// Written by the daemon when it registers, read by the app when it builds a pairing link — the
-/// port is the relay's to choose, and the link has no other way to learn it.
-pub fn remote_relay_port_path() -> PathBuf {
-    profile_file("remote-relay-port")
-}
-
-/// Stable loopback port for the active build and profile.
-pub fn remote_port() -> u16 {
-    let build = current_profile();
-    let profile = active_profile_name();
-    if build == "release" && profile == "personal" {
-        return 54_821;
-    }
-    let hash = format!("{build}:{profile}")
-        .bytes()
-        .fold(5381_u32, |hash, byte| {
-            hash.wrapping_mul(33).wrapping_add(u32::from(byte))
-        });
-    54_822 + (hash % 1_000) as u16
-}
-
-/// Path to the per-profile service stdout/stderr capture log. Lives alongside
-/// the rotated application logs in `log_dir`, not in `service_dir`.
-pub fn log_path() -> PathBuf {
-    let profile = active_profile_name();
-    log_dir().join(profile_file_name(current_profile(), &profile, "log"))
-}
-
-/// Directory for application log files (separate from runtime files in
-/// `service_dir`). Nested under the profile-specific data dir so `dev` builds
-/// stay isolated under `Vmux/dev`.
-pub fn log_dir() -> PathBuf {
-    shared_data_dir().join("logs")
-}
-
-pub fn shell_integration_dir() -> PathBuf {
-    shared_data_dir().join("shell-integration")
-}
-
-/// Path to today's unified log file. Matches the filename the tracing-appender
-/// DAILY rotation writes (`vmux-{profile}.{YYYY-MM-DD}.log`, UTC date), so the
-/// daemon, the desktop file layer, and the panic hook all target the same file.
-pub fn current_log_file() -> PathBuf {
-    let date = chrono::Utc::now().format("%Y-%m-%d");
-    let profile = active_profile_name();
-    log_dir().join(format!(
-        "{}.{date}.log",
-        profile_file_stem(current_profile(), &profile)
-    ))
-}
-
-/// LaunchAgent label for the given profile.
-///
-/// `release` drops the suffix; `local` expands to the build-time git SHA so
-/// each per-SHA local install registers a distinct background service. All
-/// other profiles (including `dev`) keep the literal profile name as suffix.
-pub fn launchd_label(profile: &str) -> String {
-    match profile {
-        "release" => "ai.vmux.service".to_string(),
-        "local" => format!("ai.vmux.service.{}", git_hash()),
-        _ => format!("ai.vmux.service.{profile}"),
-    }
-}
-
-/// Path to the LaunchAgent plist for the given profile.
-pub fn plist_path(profile: &str) -> PathBuf {
-    let home = std::env::var_os("HOME").expect("HOME not set");
-    PathBuf::from(home)
-        .join("Library/LaunchAgents")
-        .join(format!("{}.plist", launchd_label(profile)))
-}
-
-/// Path to the daemon binary, resolved as a sibling of the current executable.
-/// Used by both the daemon (where current_exe IS the daemon) and the GUI/CLI
-/// (where it points to the daemon binary alongside them) so identity checks
-/// agree on the same target file.
-pub fn daemon_binary_path() -> std::io::Result<PathBuf> {
-    Ok(daemon_binary_path_for_exe(&std::env::current_exe()?))
-}
-
-fn daemon_binary_path_for_exe(exe: &Path) -> PathBuf {
-    if matches!(
-        exe.file_name().and_then(|n| n.to_str()),
-        Some("vmux_service" | "Vmux Service")
-    ) {
-        return exe.to_path_buf();
+impl RemotePaths {
+    /// The Remote files this process should use.
+    pub fn current() -> Self {
+        ServicePaths::current().remote()
     }
 
-    if let Some(root) = crate::bundle::bundle_root_for(exe) {
-        return root
-            .join("Contents")
-            .join("Library")
-            .join("LoginItems")
-            .join("Vmux Service.app")
-            .join("Contents")
-            .join("MacOS")
-            .join("Vmux Service");
+    /// The bearer token accepted by the local mobile remote server.
+    pub fn token(&self) -> PathBuf {
+        self.service.runtime_file("remote-token")
     }
 
-    let mut p = exe.to_path_buf();
-    p.pop();
-    p.push("vmux_service");
-    p
-}
+    /// The desired Remote exposure state.
+    pub fn state(&self) -> PathBuf {
+        self.service.runtime_file("remote-state")
+    }
 
-/// Identity for the daemon binary. Changes when the binary path, size,
-/// or modification timestamp changes. Computed from `daemon_binary_path()`
-/// so the daemon and its clients agree on the same target.
-pub fn current_executable_identity() -> std::io::Result<String> {
-    executable_identity_for_path(&daemon_binary_path()?)
-}
+    /// The marker written after a phone first authenticates successfully.
+    pub fn paired(&self) -> PathBuf {
+        self.service.runtime_file("remote-paired")
+    }
 
-/// Write the daemon binary's identity into the per-profile identity file.
-pub fn write_service_identity() -> std::io::Result<()> {
-    std::fs::write(identity_path(), current_executable_identity()?)
-}
+    /// The self-signed certificate the QUIC listener presents.
+    ///
+    /// Persisted rather than minted per launch: the pairing link records its fingerprint, so a
+    /// fresh certificate on every start would silently unpair every phone.
+    pub fn certificate(&self) -> PathBuf {
+        self.service.runtime_file("remote-cert")
+    }
 
-pub(crate) fn executable_identity_for_path(path: &Path) -> std::io::Result<String> {
-    let path = std::fs::canonicalize(path)?;
-    let metadata = std::fs::metadata(&path)?;
-    let modified = metadata
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    Ok(format!(
-        "{}\n{}\n{modified}",
-        path.display(),
-        metadata.len()
-    ))
-}
+    /// The private key for [`RemotePaths::certificate`]. Written at mode `0600`.
+    pub fn key(&self) -> PathBuf {
+        self.service.runtime_file("remote-key")
+    }
 
-#[doc(hidden)]
-pub fn service_identity_matches(recorded: &str, current: &str) -> bool {
-    recorded.trim() == current.trim()
+    /// The fingerprint of [`RemotePaths::certificate`], as the pairing link spells it.
+    ///
+    /// Derived from the certificate, but written down because the CLI builds pairing links too and
+    /// hashing a PEM would cost it the whole QUIC stack as a dependency for one digest.
+    pub fn fingerprint(&self) -> PathBuf {
+        self.service.runtime_file("remote-fingerprint")
+    }
+
+    /// The stable relay device id for the active build and profile.
+    pub fn relay_device(&self) -> PathBuf {
+        self.service.runtime_file("remote-device")
+    }
+
+    /// The resolved relay URL for the active build and profile.
+    ///
+    /// The desktop app writes this so the daemon can read it: launchd starts the daemon, so it
+    /// does not inherit the environment the app was launched with.
+    pub fn relay_url(&self) -> PathBuf {
+        self.service.runtime_file("remote-relay-url")
+    }
+
+    /// The UDP port the relay allocated this desktop.
+    ///
+    /// Written by the daemon when it registers, read by the app when it builds a pairing link —
+    /// the port is the relay's to choose, and the link has no other way to learn it.
+    pub fn relay_port(&self) -> PathBuf {
+        self.service.runtime_file("remote-relay-port")
+    }
+
+    /// Stable loopback port for the active build and profile.
+    pub fn loopback_port(&self) -> u16 {
+        if self.service.build == "release" && self.service.profile == "personal" {
+            return 54_821;
+        }
+        let hash = format!("{}:{}", self.service.build, self.service.profile)
+            .bytes()
+            .fold(5381_u32, |hash, byte| {
+                hash.wrapping_mul(33).wrapping_add(u32::from(byte))
+            });
+        54_822 + (hash % 1_000) as u16
+    }
 }
 
 /// The secret a phone presents to prove it has been paired.
@@ -267,7 +197,7 @@ impl RemoteToken {
 
     /// Block until the daemon has written one.
     pub fn wait(timeout: std::time::Duration) -> std::io::Result<Self> {
-        let path = remote_token_path();
+        let path = RemotePaths::current().token();
         let deadline = std::time::Instant::now() + timeout;
         loop {
             if let Ok(token) = std::fs::read_to_string(&path) {
@@ -287,80 +217,80 @@ impl RemoteToken {
     }
 }
 
+/// The LaunchAgent that starts the daemon for one profile.
+///
+/// Named by a profile rather than reading the current one, because uninstalling a stale install
+/// means addressing an agent this build was not compiled for.
+///
+/// The launchctl verbs — installing, booting out, kickstarting — hang off this too, in the
+/// macOS-only `launchd` module.
+#[derive(Clone, Debug)]
+pub struct LaunchAgent {
+    profile: String,
+}
+
+impl LaunchAgent {
+    /// The agent for the profile this build was compiled for.
+    pub fn current() -> Self {
+        Self::for_profile(ServicePaths::build_profile())
+    }
+
+    /// The agent for a named profile.
+    pub fn for_profile(profile: impl Into<String>) -> Self {
+        Self {
+            profile: profile.into(),
+        }
+    }
+
+    /// The profile this agent runs the daemon as.
+    pub fn profile(&self) -> &str {
+        &self.profile
+    }
+
+    /// The launchd label.
+    ///
+    /// `release` drops the suffix; `local` expands to the build-time git SHA so each per-SHA local
+    /// install registers a distinct background service. All other profiles (including `dev`) keep
+    /// the literal profile name as suffix.
+    pub fn label(&self) -> String {
+        match self.profile.as_str() {
+            "release" => "ai.vmux.service".to_string(),
+            "local" => format!("ai.vmux.service.{}", git_hash()),
+            profile => format!("ai.vmux.service.{profile}"),
+        }
+    }
+
+    /// Path to this agent's plist.
+    pub fn plist_path(&self) -> PathBuf {
+        let home = std::env::var_os("HOME").expect("HOME not set");
+        PathBuf::from(home)
+            .join("Library/LaunchAgents")
+            .join(format!("{}.plist", self.label()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-
-    #[test]
-    fn executable_identity_changes_when_file_changes() {
-        let path = std::env::temp_dir().join(format!("vmux-identity-test-{}", std::process::id()));
-        {
-            let mut file = std::fs::File::create(&path).expect("create identity test file");
-            file.write_all(b"old").expect("write old identity bytes");
-        }
-        let old_identity = executable_identity_for_path(&path).expect("old identity");
-
-        std::thread::sleep(std::time::Duration::from_millis(2));
-        {
-            let mut file = std::fs::File::create(&path).expect("rewrite identity test file");
-            file.write_all(b"newer").expect("write new identity bytes");
-        }
-        let new_identity = executable_identity_for_path(&path).expect("new identity");
-        let _ = std::fs::remove_file(&path);
-
-        assert_ne!(old_identity, new_identity);
-    }
-
-    #[test]
-    fn bundled_main_app_resolves_named_service_app_executable() {
-        let exe = PathBuf::from("/Applications/Vmux.app/Contents/MacOS/Vmux");
-
-        assert_eq!(
-            daemon_binary_path_for_exe(&exe),
-            PathBuf::from(
-                "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service"
-            )
-        );
-    }
-
-    #[test]
-    fn bundled_service_app_resolves_to_self() {
-        let exe = PathBuf::from(
-            "/Applications/Vmux.app/Contents/Library/LoginItems/Vmux Service.app/Contents/MacOS/Vmux Service",
-        );
-
-        assert_eq!(daemon_binary_path_for_exe(&exe), exe);
-    }
-
-    #[test]
-    fn unbundled_debug_app_resolves_legacy_service_binary() {
-        let exe = PathBuf::from("/Users/x/repo/target/debug/vmux_desktop");
-
-        assert_eq!(
-            daemon_binary_path_for_exe(&exe),
-            PathBuf::from("/Users/x/repo/target/debug/vmux_service")
-        );
-    }
-
-    #[test]
-    fn service_identity_match_requires_exact_record() {
-        assert!(service_identity_matches("a\n1\n2\n", "a\n1\n2"));
-        assert!(!service_identity_matches("a\n1\n2", "a\n1\n3"));
-    }
 
     #[test]
     fn current_profile_is_compile_env() {
-        let p = current_profile();
+        let p = ServicePaths::build_profile();
         assert!(!p.is_empty());
         assert!(matches!(p, "release" | "local" | "dev"));
     }
 
     #[test]
     fn launchd_label_includes_profile() {
-        assert_eq!(launchd_label("dev"), "ai.vmux.service.dev");
-        assert_eq!(launchd_label("release"), "ai.vmux.service");
-        let local = launchd_label("local");
+        assert_eq!(
+            LaunchAgent::for_profile("dev").label(),
+            "ai.vmux.service.dev"
+        );
+        assert_eq!(
+            LaunchAgent::for_profile("release").label(),
+            "ai.vmux.service"
+        );
+        let local = LaunchAgent::for_profile("local").label();
         assert!(
             local.starts_with("ai.vmux.service."),
             "expected local label to start with 'ai.vmux.service.', got {local}"
@@ -373,23 +303,23 @@ mod tests {
 
     #[test]
     fn socket_path_includes_profile_suffix() {
-        let s = socket_path();
+        let s = ServicePaths::current().socket();
         let name = s.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.starts_with("vmux-"));
         assert!(name.ends_with(".sock"));
-        assert!(name.contains(current_profile()));
+        assert!(name.contains(ServicePaths::build_profile()));
     }
 
     #[test]
     fn remote_port_is_stable_and_non_privileged() {
-        let port = remote_port();
+        let port = RemotePaths::current().loopback_port();
         assert!((54_821..=55_821).contains(&port));
-        assert_eq!(port, remote_port());
+        assert_eq!(port, RemotePaths::current().loopback_port());
     }
 
     #[test]
     fn remote_token_uses_profile_file_name() {
-        let path = remote_token_path();
+        let path = RemotePaths::current().token();
         assert_eq!(
             path.extension().and_then(|value| value.to_str()),
             Some("remote-token")
@@ -398,24 +328,29 @@ mod tests {
 
     #[test]
     fn profile_file_name_suffixes_only_non_personal() {
-        assert_eq!(
-            profile_file_name("dev", "personal", "sock"),
-            "vmux-dev.sock"
-        );
-        assert_eq!(
-            profile_file_name("dev", "test", "sock"),
-            "vmux-dev-test.sock"
-        );
-        assert_eq!(
-            profile_file_name("release", "test", "log"),
-            "vmux-release-test.log"
-        );
+        let personal = ServicePaths {
+            build: "dev",
+            profile: "personal".to_string(),
+        };
+        let test_dev = ServicePaths {
+            build: "dev",
+            profile: "test".to_string(),
+        };
+        let test_release = ServicePaths {
+            build: "release",
+            profile: "test".to_string(),
+        };
+
+        assert_eq!(personal.file_name("sock"), "vmux-dev.sock");
+        assert_eq!(test_dev.file_name("sock"), "vmux-dev-test.sock");
+        assert_eq!(test_release.file_name("log"), "vmux-release-test.log");
     }
 
     #[test]
     fn pid_log_identity_paths_share_profile_suffix() {
-        let suffix = format!("vmux-{}", current_profile());
-        for p in [pid_path(), identity_path(), log_path()] {
+        let paths = ServicePaths::current();
+        let suffix = format!("vmux-{}", ServicePaths::build_profile());
+        for p in [paths.pid(), paths.identity(), paths.log()] {
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
             assert!(
                 name.starts_with(&suffix),
@@ -427,61 +362,44 @@ mod tests {
     #[test]
     fn service_and_log_dirs_nest_under_profile_data_dir() {
         let base = shared_data_dir();
-        assert_eq!(service_dir(), base.join("services"));
-        assert_eq!(log_dir(), base.join("logs"));
+        assert_eq!(ServicePaths::dir(), base.join("services"));
+        assert_eq!(ServicePaths::log_dir(), base.join("logs"));
     }
 
     #[test]
     fn log_path_lives_in_log_dir_not_service_dir() {
-        let p = log_path();
-        assert_eq!(p.parent().unwrap(), log_dir());
-        assert_ne!(p.parent().unwrap(), service_dir());
+        let paths = ServicePaths::current();
+        let p = paths.log();
+        assert_eq!(p.parent().unwrap(), ServicePaths::log_dir());
+        assert_ne!(p.parent().unwrap(), ServicePaths::dir());
         assert_eq!(
             p.file_name().unwrap().to_string_lossy(),
-            profile_file_name(current_profile(), &active_profile_name(), "log")
+            paths.file_name("log")
         );
     }
 
     #[test]
     fn current_log_file_lives_in_log_dir_with_profile_and_date() {
-        let p = current_log_file();
+        let p = ServicePaths::current().current_log();
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
         assert!(
-            name.starts_with(&format!("vmux-{}.", current_profile())),
+            name.starts_with(&format!("vmux-{}.", ServicePaths::build_profile())),
             "got {name}"
         );
         assert!(name.ends_with(".log"), "got {name}");
-        assert_eq!(p.parent().unwrap(), log_dir());
-        assert!(log_dir().ends_with("logs"), "got {}", log_dir().display());
+        assert_eq!(p.parent().unwrap(), ServicePaths::log_dir());
+        assert!(
+            ServicePaths::log_dir().ends_with("logs"),
+            "got {}",
+            ServicePaths::log_dir().display()
+        );
     }
 
     #[test]
     fn plist_path_lives_in_user_launchagents() {
-        let p = plist_path("dev");
+        let p = LaunchAgent::for_profile("dev").plist_path();
         let s = p.to_string_lossy();
         assert!(s.contains("Library/LaunchAgents"));
         assert!(s.ends_with("ai.vmux.service.dev.plist"));
-    }
-
-    /// There is no way to ask for no relay: a desktop behind NAT is unreachable without one, so
-    /// a blank setting falls back to the hosted relay rather than disabling pairing.
-    #[test]
-    fn a_blank_relay_setting_falls_back_to_the_hosted_one() {
-        for (from_env, expected) in [
-            (None, DEFAULT_RELAY_URL),
-            (Some(""), DEFAULT_RELAY_URL),
-            (Some("   "), DEFAULT_RELAY_URL),
-            (
-                Some("https://relay.example.com/"),
-                "https://relay.example.com",
-            ),
-            (Some("  https://localhost:8788  "), "https://localhost:8788"),
-        ] {
-            assert_eq!(
-                resolve_relay_url(from_env),
-                expected,
-                "from_env = {from_env:?}"
-            );
-        }
     }
 }

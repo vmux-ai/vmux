@@ -1024,8 +1024,8 @@ fn ensure_service_started() {
         tracing::info!("service already running");
         return;
     }
-    let binary = match vmux_service::daemon_binary_path() {
-        Ok(b) => b,
+    let binary = match vmux_service::DaemonBinary::current() {
+        Ok(b) => b.into_path(),
         Err(e) => {
             tracing::error!(error = %e, "could not locate vmux_service binary");
             return;
@@ -1033,7 +1033,7 @@ fn ensure_service_started() {
     };
     match vmux_service::registry::start_mode_for(&binary) {
         vmux_service::registry::StartMode::Register => {
-            let profile = vmux_service::current_profile();
+            let profile = vmux_service::ServicePaths::build_profile();
             if let Err(e) = vmux_service::registry::ensure_running(profile, &binary) {
                 tracing::error!(error = ?e, "service registration failed");
             }
@@ -1048,9 +1048,9 @@ fn ensure_service_started() {
 #[cfg(unix)]
 fn spawn_detached_service(binary: &std::path::Path) {
     use std::os::unix::process::CommandExt;
-    let log_dir = vmux_service::log_dir();
+    let log_dir = vmux_service::ServicePaths::log_dir();
     let _ = std::fs::create_dir_all(&log_dir);
-    let stderr_cfg = match std::fs::File::create(vmux_service::log_path()) {
+    let stderr_cfg = match std::fs::File::create(vmux_service::ServicePaths::current().log()) {
         Ok(f) => std::process::Stdio::from(f),
         Err(e) => {
             tracing::warn!(error = %e, "could not create service log; stderr will be discarded");
@@ -1106,7 +1106,7 @@ fn try_connect_service(
 
     retry.remaining_attempts = retry.remaining_attempts.saturating_sub(1);
 
-    let sock = vmux_service::socket_path();
+    let sock = vmux_service::ServicePaths::current().socket();
     if !sock.exists() {
         if retry.remaining_attempts == 0 {
             tracing::warn!("service socket never appeared — giving up");
@@ -1143,7 +1143,7 @@ fn try_connect_service(
         None => {
             if retry.remaining_attempts == 0 {
                 tracing::error!("failed to connect to service after all retries");
-                let log_path = vmux_service::log_path();
+                let log_path = vmux_service::ServicePaths::current().log();
                 if let Ok(log) = std::fs::read_to_string(&log_path)
                     && !log.is_empty()
                 {

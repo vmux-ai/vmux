@@ -14,6 +14,7 @@ use vmux_command::snapshot::{
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
+use vmux_ui::i18n::Locale;
 
 use crate::cef::Browser;
 use crate::command_bar::handler::{
@@ -348,7 +349,7 @@ fn sync_live_start_pages(
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
-        .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
+        .unwrap_or_else(Locale::preferred);
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
@@ -518,7 +519,7 @@ fn on_start_spare_revealed(
         let locale = locale
             .as_deref()
             .map(|locale| locale.0.clone())
-            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
+            .unwrap_or_else(Locale::preferred);
         let payload = build_start_payload(
             &tab_gather,
             &spaces_snapshot,
@@ -575,7 +576,7 @@ fn on_start_data_request(
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
-            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None)),
+            .unwrap_or_else(Locale::preferred),
     );
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
@@ -601,7 +602,7 @@ fn build_start_payload(
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
-    locale: &str,
+    locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = spaces_snapshot.active_space_name.clone();
