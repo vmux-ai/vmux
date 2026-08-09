@@ -15,7 +15,7 @@ use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
-use vmux_chat::transcript::{AssistantTurn, ChatItemRow, WorkingIndicator};
+use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_start::results::CommandBarResultItem;
 use vmux_start::row::ResultRow;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
@@ -972,6 +972,8 @@ fn AppBody() -> Element {
     rsx! {
         div {
             class: "flex h-dvh min-h-0 flex-col bg-background text-foreground",
+            style: "--agent-accent:rgb({accent.rain_rgb});",
+            style { dangerous_inner_html: MD_CSS }
             header { class: "flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl sm:px-5",
                 button {
                     class: "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-lg text-accent-foreground active:bg-accent/70",
