@@ -1468,6 +1468,7 @@ async fn create_terminal(
     // Resolve the child's exit code once, off the process broadcast, for wait_for_exit / output.
     let (exit_tx, exit_rx) = watch::channel(AcpTerminalExit::Pending);
     if let Some(mut exit_stream) = exit_stream {
+        let manager = shared.manager.clone();
         tokio::spawn(async move {
             loop {
                 match exit_stream.recv().await {
@@ -1476,7 +1477,18 @@ async fn create_terminal(
                         break;
                     }
                     Ok(_) => {}
-                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        let recorded = manager
+                            .lock()
+                            .await
+                            .processes
+                            .get(&id)
+                            .map(crate::process::Process::process_exit);
+                        if let Some(exit) = exit_after_lag(recorded) {
+                            let _ = exit_tx.send(exit);
+                            break;
+                        }
+                    }
                     Err(broadcast::error::RecvError::Closed) => {
                         let _ = exit_tx.send(AcpTerminalExit::Removed);
                         break;
@@ -1558,6 +1570,22 @@ async fn terminal_output(
 }
 
 /// `terminal/wait_for_exit`: block until the backing child exits, then report its status.
+/// What to publish after the process broadcast dropped messages.
+///
+/// `recorded` is the manager's view: `None` if it no longer holds the process at all, otherwise
+/// its exit code so far. `ProcessExited` is broadcast exactly once, so if it was among the dropped
+/// messages nothing will resend it and a waiter would block forever. The manager keeps the code
+/// for `terminal/output`, which makes it the authority here too.
+///
+/// Returning `None` means keep waiting — the child is still running, so its exit is still coming.
+fn exit_after_lag(recorded: Option<Option<i32>>) -> Option<AcpTerminalExit> {
+    match recorded {
+        None => Some(AcpTerminalExit::Removed),
+        Some(None) => None,
+        Some(code) => Some(AcpTerminalExit::Exited(code)),
+    }
+}
+
 async fn wait_for_terminal_exit(
     shared: &AcpShared,
     req: WaitForTerminalExitRequest,
@@ -2880,6 +2908,26 @@ mod tests {
         );
 
         assert_eq!(shared.cwd(), worktree);
+    }
+
+    /// A lagged broadcast drops messages, and ProcessExited is only ever sent once. Treating a lag
+    /// as "keep waiting" leaves terminal/wait_for_exit blocked forever on a command that already
+    /// finished, so the manager's recorded code has to win.
+    #[test]
+    fn a_dropped_exit_is_recovered_from_the_manager() {
+        assert!(matches!(
+            exit_after_lag(Some(Some(7))),
+            Some(AcpTerminalExit::Exited(Some(7)))
+        ));
+        assert!(matches!(
+            exit_after_lag(None),
+            Some(AcpTerminalExit::Removed)
+        ));
+
+        assert!(
+            exit_after_lag(Some(None)).is_none(),
+            "a child that is still running has an exit still to come, so waiting is correct"
+        );
     }
 
     /// End-to-end of the daemon terminal path: `terminal/create` spawns a real PTY + emits
