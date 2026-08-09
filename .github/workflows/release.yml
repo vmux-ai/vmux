@@ -57,6 +57,43 @@ jobs:
             echo "tag=v$VERSION"
           } >> "$GITHUB_OUTPUT"
 
+  testflight:
+    name: Upload iOS to TestFlight
+    needs: detect-version
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ios-release
+
+      - name: Install dioxus CLI
+        run: ./scripts/install-dioxus-cli.sh
+
+      - name: Build, sign and upload
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_IOS_SIGNING_IDENTITY: ${{ secrets.APPLE_IOS_SIGNING_IDENTITY }}
+          APPLE_IOS_CERTIFICATE: ${{ secrets.APPLE_IOS_CERTIFICATE }}
+          APPLE_IOS_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_IOS_CERTIFICATE_PASSWORD }}
+          APPLE_IOS_PROVISIONING_PROFILE: ${{ secrets.APPLE_IOS_PROVISIONING_PROFILE }}
+          # App Store Connect refuses a CFBundleVersion it has already seen, and the marketing
+          # version alone cannot carry a resubmission. run_number is monotonic and needs no
+          # committed state, which would otherwise trip update-release-metadata.sh --check.
+          VMUX_IOS_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/build-ios-release.sh
+
+      - name: Verify bundle layout
+        run: ./scripts/test-ios-bundle-layout.sh --signed
+
   publish:
     name: Publish Release
     needs: detect-version

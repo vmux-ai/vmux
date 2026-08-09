@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	App Store distribution entitlements. {{TEAM_ID}} is substituted by
+	scripts/build-ios-release.sh from APPLE_TEAM_ID, the same placeholder convention
+	packaging/macos/ai.vmux.service.plist uses for {{PROFILE}}.
+
+	Nothing here beyond identity: the app talks to a relay over QUIC and to a paired Mac, which
+	needs no entitlement. get-task-allow must be false or App Store Connect rejects the upload.
+-->
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>{{TEAM_ID}}.ai.vmux.mobile</string>
+	<key>com.apple.developer.team-identifier</key>
+	<string>{{TEAM_ID}}</string>
+	<key>get-task-allow</key>
+	<false/>
+</dict>
+</plist>
