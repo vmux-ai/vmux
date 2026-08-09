@@ -1002,7 +1002,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
             div { class: "flex items-center gap-2",
                 div {
                     class: if remote.enabled {
-                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-emerald-400/15 text-emerald-400"
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                     } else {
                         "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/5 text-muted-foreground"
                     },
@@ -1016,8 +1016,8 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     div { class: "flex items-center gap-1.5",
                         span { class: "text-ui font-semibold", "Remote" }
                         if active {
-                            span { class: "inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-400",
-                                span { class: "size-1.5 rounded-full bg-emerald-400" }
+                            span { class: "inline-flex items-center gap-1 rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400",
+                                span { class: "size-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400" }
                                 "Live"
                             }
                         }
@@ -1026,7 +1026,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         class: if remote.phase == RemotePhase::Error {
                             "mt-0.5 truncate text-[10px] text-destructive"
                         } else if remote.enabled {
-                            "mt-0.5 text-[10px] text-emerald-400/80"
+                            "mt-0.5 text-[10px] text-emerald-700/90 dark:text-emerald-400/80"
                         } else {
                             "mt-0.5 text-[10px] text-muted-foreground"
                         },
@@ -1093,7 +1093,12 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                         }
                     }
                     div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
-                        div { class: "overflow-hidden rounded-sm", dangerous_inner_html: "{svg}" }
+                        // The renderer sizes the QR in whole modules, so a long pairing link comes
+                        // out wider than the panel. Scale it to the card instead of cropping it.
+                        div {
+                            class: "w-full max-w-[220px] rounded-sm [&>svg]:block [&>svg]:h-auto [&>svg]:w-full",
+                            dangerous_inner_html: "{svg}",
+                        }
                         div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
                         div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux Remote and pairs automatically" }
                     }
@@ -1118,8 +1123,8 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                     }
                 } else {
                     div { class: "mt-2 flex items-center gap-2",
-                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-400" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
-                            span { class: if remote.paired { "size-1.5 rounded-full bg-emerald-400" } else { "size-1.5 rounded-full bg-foreground/25" } }
+                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
+                            span { class: if remote.paired { "size-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400" } else { "size-1.5 rounded-full bg-foreground/25" } }
                             if remote.paired { "Phone paired" } else { "No phone paired" }
                         }
                         button {
