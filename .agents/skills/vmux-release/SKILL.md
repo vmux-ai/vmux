@@ -12,6 +12,7 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
 - All recent CI runs green.
 - Apple signing secrets configured in repo Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`.
 - iOS App Store secrets configured: `APPLE_IOS_SIGNING_IDENTITY`, `APPLE_IOS_CERTIFICATE`, `APPLE_IOS_CERTIFICATE_PASSWORD`, `APPLE_IOS_PROVISIONING_PROFILE`. Distinct from the macOS pair above — `APPLE_CERTIFICATE` is a Developer ID certificate and cannot sign for the App Store, so this needs an Apple Distribution certificate and a provisioning profile for `ai.vmux.mobile`. `APPLE_ID`, `APPLE_APP_PASSWORD` and `APPLE_TEAM_ID` are shared with macOS.
+- App Store Connect API key configured for automated submission: `APPLE_ASC_KEY_ID`, `APPLE_ASC_ISSUER_ID`, `APPLE_ASC_PRIVATE_KEY`. Optional — without them the build still reaches TestFlight and only the submit-for-review step is skipped.
 - Update signing secrets configured: `VMUX_UPDATE_PUBLIC_KEY`, `VMUX_UPDATE_PRIVATE_KEY`, `VMUX_UPDATE_PRIVATE_KEY_PASSWORD`.
 
 ## Steps
@@ -103,6 +104,33 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
     Confirm app launches and `About` shows the new version.
 
 14. **(Optional) Test auto-update.** Install previous version, launch, wait for poll interval (default 1h). App should download + replace itself with the new version on next launch.
+
+## iOS
+
+The same version bump releases the iOS app. Two jobs in `release.yml` run off `detect-version`, alongside `publish`:
+
+- **`Upload iOS to TestFlight`** — builds `aarch64-apple-ios`, injects the icon, launch screen and privacy manifest, signs with the Apple Distribution certificate, packages an `.ipa` and uploads it. `CFBundleVersion` is the workflow run number, so re-uploads never collide.
+- **`Submit iOS for review`** — waits for Apple to finish processing, attaches the build to the `X.Y.Z` App Store version, and submits it. Skips with a notice when the App Store Connect API key secrets are absent, so the build still reaches TestFlight either way.
+
+**Neither blocks the desktop release.** `publish` needs only `detect-version`, so a broken signing certificate cannot hold back a DMG that already built and notarized. The flip side is that a red iOS job is easy to miss, so check it explicitly:
+
+```bash
+gh run view $(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId') \
+  --json jobs --jq '.jobs[] | select(.name | test("iOS")) | "\(.name): \(.conclusion)"'
+```
+
+15. **Confirm the build reached TestFlight.** App Store Connect → TestFlight → iOS builds. The new build is `X.Y.Z (<run number>)`. Processing usually takes 5–15 minutes; the submit job waits up to 30.
+
+16. **Confirm the submission.** The `X.Y.Z` version should read *Waiting for Review*. If the submit job skipped, submit it there by hand.
+
+17. **Watch for the review outcome.** Typically 24–48h. A rejection arrives in App Store Connect, not in CI — nothing in this repo will tell you.
+
+### iOS gotchas
+
+- **`CFBundleShortVersionString` is the workspace version**, shared with the desktop. Bumping for a desktop-only fix still moves the iOS marketing version and, once the API key is configured, submits a new build for review. Consider whether the mobile app actually changed before bumping.
+- **Submission fails until the App Store listing is complete.** Screenshots, description, age rating and the privacy questionnaire have to exist for that version first.
+- **One version in review at a time.** Bumping again while `X.Y.Z` is *Waiting for Review* fails the submit job; cancel the earlier submission first.
+- **Export compliance is already answered.** `ITSAppUsesNonExemptEncryption = false` ships in the bundle, so there is no per-upload prompt.
 
 ## If something goes wrong
 
