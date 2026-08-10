@@ -1006,10 +1006,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 return;
             }
         }
-        let go_down = (e.key() == Key::ArrowDown && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-        let go_up = (e.key() == Key::ArrowUp && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+        let direction = MenuDirection::of(&e);
+        let go_down = direction == Some(MenuDirection::Next);
+        let go_up = direction == Some(MenuDirection::Previous);
 
         if target_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
             e.prevent_default();

@@ -37,6 +37,4 @@ pub use crate::host::cef::decode_bin_host_emit_js;
 #[cfg(web)]
 pub use crate::key_stroke::WebKey;
 
-pub use crate::list_nav::{
-    ListKey, MenuDirection, choice_number_index, list_key, menu_direction, move_selection,
-};
+pub use crate::list_nav::{MenuDirection, choice_number_index, move_selection};

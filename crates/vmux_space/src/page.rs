@@ -2,7 +2,7 @@
 
 use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{send, use_listener, use_theme};
+use vmux_ui::hooks::{MenuDirection, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -43,18 +43,12 @@ pub fn Page() -> Element {
                 let _ = e.set_focus(true).await;
             },
             onkeydown: move |e| {
-                let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-                let down = (!ctrl && (e.code() == Code::KeyJ || e.key() == Key::ArrowDown))
-                    || (ctrl && e.code() == Code::KeyN);
-                let up = (!ctrl && (e.code() == Code::KeyK || e.key() == Key::ArrowUp))
-                    || (ctrl && e.code() == Code::KeyP);
-                if down {
+                if let Some(direction) = MenuDirection::of(&e) {
                     e.prevent_default();
-                    let max = count.saturating_sub(1);
-                    selected.set((sel + 1).min(max));
-                } else if up {
-                    e.prevent_default();
-                    selected.set(sel.saturating_sub(1));
+                    selected.set(match direction {
+                        MenuDirection::Next => (sel + 1).min(count.saturating_sub(1)),
+                        MenuDirection::Previous => sel.saturating_sub(1),
+                    });
                 } else if e.key() == Key::Enter {
                     e.prevent_default();
                     if let Some(id) = selected_space_id.clone() {

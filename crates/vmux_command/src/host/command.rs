@@ -125,10 +125,12 @@ pub enum ChatKeyCommand {
     #[menu(id = "chat_list_next", label = "Next Option", hidden)]
     #[shortcut(direct = "ArrowDown", when = "chat.list")]
     #[shortcut(direct = "Ctrl+n", when = "chat.list")]
+    #[shortcut(direct = "Ctrl+j", when = "chat.list")]
     ListNext,
     #[menu(id = "chat_list_previous", label = "Previous Option", hidden)]
     #[shortcut(direct = "ArrowUp", when = "chat.list")]
     #[shortcut(direct = "Ctrl+p", when = "chat.list")]
+    #[shortcut(direct = "Ctrl+k", when = "chat.list")]
     ListPrevious,
     #[menu(id = "chat_list_choose", label = "Choose Option", hidden)]
     #[shortcut(direct = "Enter", when = "chat.list")]
@@ -738,6 +740,65 @@ mod tests {
         );
         assert_eq!(resolved(&["terminal"], KeyCode::Enter), None);
         assert_eq!(resolved(&["terminal"], KeyCode::ArrowUp), None);
+    }
+
+    /// One navigation convention, checked as the whole chord set on every surface that has a list.
+    ///
+    /// Arrows, the emacs pair, and the vim pair — the same table `vmux_ui`'s `MenuDirection::of`
+    /// resolves for the surfaces that have no page context to publish and so never reach this
+    /// keymap. Four surfaces had drifted into three different rules once already; a chord added to
+    /// one of these and forgotten on the other shows up here rather than as a key that works in the
+    /// command bar and does nothing in chat.
+    #[test]
+    fn every_list_surface_navigates_on_the_same_chords() {
+        let keymap = crate::shortcut::Keymap::defaults();
+        let ctrl = |key| KeyCombo {
+            key,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        };
+        let bare = |key| KeyCombo {
+            key,
+            modifiers: Modifiers::default(),
+        };
+        let forward = [
+            bare(KeyCode::ArrowDown),
+            ctrl(KeyCode::KeyN),
+            ctrl(KeyCode::KeyJ),
+        ];
+        let backward = [
+            bare(KeyCode::ArrowUp),
+            ctrl(KeyCode::KeyP),
+            ctrl(KeyCode::KeyK),
+        ];
+        let surfaces = [
+            (
+                ["command-bar"].as_slice(),
+                AppCommand::CommandBar(CommandBarKeyCommand::Next),
+                AppCommand::CommandBar(CommandBarKeyCommand::Previous),
+            ),
+            (
+                ["chat", "chat.list"].as_slice(),
+                AppCommand::Chat(ChatKeyCommand::ListNext),
+                AppCommand::Chat(ChatKeyCommand::ListPrevious),
+            ),
+        ];
+
+        for (keys, next, previous) in surfaces {
+            let context: crate::shortcut::KeyContext =
+                keys.iter().map(|key| (*key).to_string()).collect();
+            for (combos, expected) in [(&forward, &next), (&backward, &previous)] {
+                for combo in combos {
+                    assert_eq!(
+                        keymap.in_context(&context).scoped(combo).as_ref(),
+                        Some(expected),
+                        "{keys:?} should navigate on {combo:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

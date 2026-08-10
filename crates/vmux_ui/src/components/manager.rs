@@ -226,28 +226,19 @@ pub fn ManagerSelect(
     let key_items = items.clone();
     let key_select = onselect;
     let onkeydown = move |event: KeyboardEvent| {
-        let control = event.modifiers().contains(Modifiers::CONTROL);
-        let down = event.key() == Key::ArrowDown
-            || (control && matches!(event.code(), Code::KeyN | Code::KeyJ));
-        let up = event.key() == Key::ArrowUp
-            || (control && matches!(event.code(), Code::KeyP | Code::KeyK));
-        if (down || up) && !key_items.is_empty() {
+        if let Some(direction) = MenuDirection::of(&event)
+            && !key_items.is_empty()
+        {
             event.prevent_default();
             event.stop_propagation();
             if open() {
                 let current = highlighted().min(key_items.len() - 1);
-                let direction = if down {
-                    MenuDirection::Next
-                } else {
-                    MenuDirection::Previous
-                };
                 highlighted.set(move_selection(current, key_items.len(), direction));
             } else {
                 open.set(true);
-                highlighted.set(if down {
-                    selected_index.unwrap_or(0)
-                } else {
-                    selected_index.unwrap_or(key_items.len() - 1)
+                highlighted.set(match direction {
+                    MenuDirection::Next => selected_index.unwrap_or(0),
+                    MenuDirection::Previous => selected_index.unwrap_or(key_items.len() - 1),
                 });
             }
             return;

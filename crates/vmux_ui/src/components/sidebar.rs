@@ -10,13 +10,11 @@ use dioxus_primitives::dioxus_attributes::attributes;
 use dioxus_primitives::icon;
 use dioxus_primitives::merge_attributes;
 use dioxus_primitives::use_controlled;
-use wasm_bindgen::JsCast;
 
 // constants
 const SIDEBAR_WIDTH: &str = "16rem";
 const SIDEBAR_WIDTH_MOBILE: &str = "18rem";
 const SIDEBAR_WIDTH_ICON: &str = "3rem";
-const SIDEBAR_KEYBOARD_SHORTCUT: &str = "b";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum SidebarState {
@@ -130,6 +128,20 @@ pub fn use_sidebar() -> SidebarCtx {
     use_context::<SidebarCtx>()
 }
 
+/// Holds the open/collapsed state for everything under it, and deliberately holds no keyboard.
+///
+/// A sidebar toggle is a rebindable app shortcut, so it belongs in the keymap — and a keymap
+/// binding needs a `when` context, which needs a page. This is a shared component: it does not know
+/// which page mounted it, and it cannot publish a [`vmux_core::input::PageKeyContext`] to find out,
+/// because that message carries a webview's *whole* context set. A second publisher inside one page
+/// would race the page's own and leave whichever wrote last, silently unbinding the page's real
+/// keys. So the page owns the key and this owns the verb: mount `use_key_claim`, and call
+/// [`SidebarCtx::toggle`] when the command comes back.
+///
+/// The file page is the worked example — `file_toggle_explorer`, `Super+b` / `Ctrl+b`, scoped
+/// `when = "files"`. What used to be here instead was a `window` keydown listener for the same
+/// chord, registered with `forget()` so every mount added another live copy, firing while a text
+/// field had focus and answering to nothing in `settings.json`.
 #[component]
 pub fn SidebarProvider(
     #[props(default = true)] default_open: bool,
@@ -162,23 +174,6 @@ pub fn SidebarProvider(
     };
 
     use_context_provider(|| ctx);
-
-    use_effect(move || {
-        let closure =
-            wasm_bindgen::closure::Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
-                if e.key() == SIDEBAR_KEYBOARD_SHORTCUT && (e.meta_key() || e.ctrl_key()) {
-                    e.prevent_default();
-                    ctx.toggle();
-                }
-            })
-                as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-
-        if let Some(win) = web_sys::window() {
-            let _ =
-                win.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref());
-        }
-        closure.forget();
-    });
 
     let sidebar_style = format!(
         r#"
