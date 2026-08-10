@@ -1531,7 +1531,10 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
 fn AppHead() -> Element {
     rsx! {
         document::Title { "Vmux" }
-        document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" }
+        // This replaces the shell's own viewport tag, so it has to carry that tag's zoom lock
+        // forward as well as viewport-fit. Dropping maximum-scale is what let focusing an input
+        // zoom the page, which no font size on the input can prevent.
+        document::Meta { name: "viewport", content: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" }
         document::Meta { name: "color-scheme", content: "light dark" }
         document::Stylesheet { href: TAILWIND_CSS }
     }
