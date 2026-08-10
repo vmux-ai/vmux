@@ -9,10 +9,12 @@
 //! [`CommandIssued::caller`], which is the only way a command can act back on the surface that
 //! asked for it.
 
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_cef::prelude::BinReceive;
 use vmux_core::input::KeyStroke;
 
+use crate::command::AppCommand;
 use crate::issued::CommandIssuer;
 use crate::shortcut::{KeyCombo, KeyContext, Keymap};
 
@@ -30,24 +32,46 @@ impl Plugin for PageKeyPlugin {
 
 fn resolve_page_key(
     trigger: On<BinReceive<KeyStroke>>,
-    keymap: Option<Res<Keymap>>,
-    contexts: Query<&KeyContext>,
+    keys: ScopedKeys,
     mut issuer: CommandIssuer,
 ) {
-    let Some(keymap) = keymap else {
-        return;
-    };
     let page = trigger.event_target();
-    let Ok(context) = contexts.get(page) else {
-        return;
-    };
-    let Some(pressed) = KeyCombo::of(&trigger.payload) else {
-        return;
-    };
-    let Some(command) = keymap.in_context(context).scoped(&pressed) else {
+    let Some(command) = keys.command(page, &trigger.payload) else {
         return;
     };
     issuer.issue(page, command);
+}
+
+/// What a stroke a page handed over means *because of* where it was pressed.
+///
+/// A `SystemParam` rather than a private lookup because a page can have a second reader of the
+/// same stroke — the file page forwards to a modal text keymap on the host, which resolves the
+/// same press into an editing command. Both observers see one `BinReceive`, in no defined order,
+/// so the second one asks this before acting and stands down when a scoped binding already spoke
+/// for the key. Reading the answer from here rather than repeating the lookup is what keeps the
+/// two from drifting into disagreeing about who owns `Escape`.
+#[derive(SystemParam)]
+pub struct ScopedKeys<'w, 's> {
+    keymap: Option<Res<'w, Keymap>>,
+    contexts: Query<'w, 's, &'static KeyContext>,
+}
+
+impl ScopedKeys<'_, '_> {
+    /// The command this page's stroke resolves to, considering context-scoped bindings only.
+    ///
+    /// Unconditional bindings are deliberately not answered: the native keyboard has already
+    /// resolved those for every surface at once, and answering again would run the command twice.
+    pub fn command(&self, page: Entity, stroke: &KeyStroke) -> Option<AppCommand> {
+        let keymap = self.keymap.as_ref()?;
+        let context = self.contexts.get(page).ok()?;
+        let pressed = KeyCombo::of(stroke)?;
+        keymap.in_context(context).scoped(&pressed)
+    }
+
+    /// Whether this stroke is already spoken for, and so is not the asking surface's to act on.
+    pub fn answered(&self, page: Entity, stroke: &KeyStroke) -> bool {
+        self.command(page, stroke).is_some()
+    }
 }
 
 #[cfg(test)]
@@ -157,5 +181,43 @@ mod tests {
         let bar = Seam::page(&mut app, &["command-bar"]);
 
         assert_eq!(Seam::press(&mut app, bar, "KeyX"), vec![]);
+    }
+
+    /// What every second reader of a page's keystroke asks before acting.
+    #[derive(Resource, Default)]
+    struct Answered(Vec<bool>);
+
+    impl Answered {
+        fn record(
+            trigger: On<BinReceive<KeyStroke>>,
+            keys: ScopedKeys,
+            mut answered: ResMut<Self>,
+        ) {
+            answered
+                .0
+                .push(keys.answered(trigger.event_target(), &trigger.payload));
+        }
+    }
+
+    /// The arbitration rule, and the reason a page can have two keyboards reading it. A surface
+    /// that forwards to a keymap of its own — the file page's modal text keymap — stands down for a
+    /// key a context-scoped binding spoke for, and keeps every other key. Getting this backwards
+    /// makes one `Escape` close a panel *and* leave insert mode.
+    #[test]
+    fn only_a_scoped_binding_takes_a_key_from_the_surfaces_own_keymap() {
+        let mut app = Seam::app();
+        app.init_resource::<Answered>()
+            .add_observer(Answered::record);
+        let bar = Seam::page(&mut app, &["command-bar"]);
+        let plain = Seam::page(&mut app, &["terminal"]);
+
+        Seam::press(&mut app, bar, "KeyN");
+        Seam::press(&mut app, plain, "KeyN");
+        Seam::press(&mut app, bar, "KeyX");
+
+        assert_eq!(
+            app.world().resource::<Answered>().0,
+            vec![true, false, false]
+        );
     }
 }

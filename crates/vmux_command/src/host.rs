@@ -20,5 +20,5 @@ pub use bundle::COMMAND_BAR_PAGE_URL;
 pub use command::*;
 pub use issued::{CommandIssued, CommandIssuer};
 pub use open::*;
-pub use page_key::PageKeyPlugin;
+pub use page_key::{PageKeyPlugin, ScopedKeys};
 pub use snapshot::*;

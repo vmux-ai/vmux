@@ -42,6 +42,65 @@ pub enum AppCommand {
     #[menu(label = "Chat")]
     #[mcp(skip)]
     Chat(ChatKeyCommand),
+
+    #[menu(label = "Editor")]
+    #[mcp(skip)]
+    File(FileKeyCommand),
+}
+
+/// What a key press means while the file page has the keyboard.
+///
+/// Hidden leaves for the same reason the chat page's are: the explorer toggle has a button beside
+/// it and the panel verbs only exist while a panel is open, but every one of them is worth
+/// rebinding, and a command is the only thing `settings.json` can name.
+///
+/// The two contexts a file page publishes are `files` — always, while the page is up — and
+/// `files.panel`, when the completion popup or the references list is showing. One key for both
+/// panels: which of them a verb lands in is the page's own precedence, decided in the tick the key
+/// arrives, and the keymap has no reason to know there are two.
+///
+/// Nothing here is a text-editing key. The modal keymap in `vmux_editor` owns those, resolves the
+/// same keystroke on the host, and answers first — see [`crate::page_key::ScopedKeys`] for how the
+/// two compose. Keeping the families disjoint is what stops `Escape` leaving insert mode *and*
+/// closing a panel on one press.
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileKeyCommand {
+    #[default]
+    #[menu(id = "file_toggle_explorer", label = "Toggle Explorer", hidden)]
+    #[shortcut(direct = "Super+b", when = "files")]
+    #[shortcut(direct = "Ctrl+b", when = "files")]
+    ToggleExplorer,
+    #[menu(id = "file_reveal_in_explorer", label = "Reveal In Explorer", hidden)]
+    #[shortcut(direct = "Super+Shift+e", when = "files")]
+    #[shortcut(direct = "Ctrl+Shift+e", when = "files")]
+    RevealInExplorer,
+    #[menu(id = "file_panel_next", label = "Next Panel Row", hidden)]
+    #[shortcut(direct = "ArrowDown", when = "files.panel")]
+    PanelNext,
+    #[menu(id = "file_panel_previous", label = "Previous Panel Row", hidden)]
+    #[shortcut(direct = "ArrowUp", when = "files.panel")]
+    PanelPrevious,
+    #[menu(id = "file_panel_choose", label = "Choose Panel Row", hidden)]
+    #[shortcut(direct = "Enter", when = "files.panel")]
+    #[shortcut(direct = "Tab", when = "files.panel")]
+    PanelChoose,
+    #[menu(id = "file_panel_dismiss", label = "Close Panel", hidden)]
+    #[shortcut(direct = "Escape", when = "files.panel")]
+    PanelDismiss,
+}
+
+impl From<FileKeyCommand> for vmux_core::event::FileKey {
+    fn from(command: FileKeyCommand) -> Self {
+        match command {
+            FileKeyCommand::ToggleExplorer => Self::ToggleExplorer,
+            FileKeyCommand::RevealInExplorer => Self::RevealInExplorer,
+            FileKeyCommand::PanelNext => Self::PanelNext,
+            FileKeyCommand::PanelPrevious => Self::PanelPrevious,
+            FileKeyCommand::PanelChoose => Self::PanelChoose,
+            FileKeyCommand::PanelDismiss => Self::PanelDismiss,
+        }
+    }
 }
 
 /// What a key press means while a chat page has the keyboard.

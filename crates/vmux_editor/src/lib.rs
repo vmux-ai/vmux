@@ -7,6 +7,8 @@ pub mod viewport;
 pub mod highlight;
 
 #[cfg(not(web))]
+mod app_key;
+#[cfg(not(web))]
 pub mod edit;
 #[cfg(not(web))]
 pub mod fold;
@@ -52,3 +54,5 @@ pub mod lsp_page;
 mod note;
 #[cfg(web)]
 pub mod page;
+#[cfg(web)]
+pub mod page_key;

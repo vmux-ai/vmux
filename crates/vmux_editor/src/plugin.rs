@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::*;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use vmux_command::ScopedKeys;
 use vmux_core::PageMetadata;
 use vmux_core::event::*;
 use vmux_core::input::KeyStroke;
@@ -67,6 +68,7 @@ impl Plugin for EditorPlugin {
             .add_message::<GlobalSearchRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
             .add_plugins(crate::lsp::LspPlugin)
+            .add_plugins(crate::app_key::FileKeyPlugin)
             .add_plugins(BinEventEmitterPlugin::<(
                 FileResizeEvent,
                 FileScrollEvent,
@@ -2382,6 +2384,16 @@ fn run_commands(
     text_changed
 }
 
+/// Runs a keystroke the page handed over through the modal text keymap.
+///
+/// One of two readers of the same `BinReceive`. The other is [`vmux_command::PageKeyPlugin`],
+/// which resolves the app keymap, and the two observers run in no defined order — so this one asks
+/// [`ScopedKeys`] whether a context-scoped binding already spoke for the press and stands down when
+/// one has. Without that, a key bound in `settings.json` for an open panel would also reach the
+/// buffer, and `Escape` would close the panel *and* leave insert mode on one press.
+///
+/// Only *scoped* bindings win here. An unconditional one is the native keyboard's to resolve and
+/// says nothing about what the buffer should do with the key, which is why `Cmd+S` still saves.
 #[allow(clippy::too_many_arguments)]
 fn on_file_key(
     trigger: On<BinReceive<KeyStroke>>,
@@ -2391,6 +2403,7 @@ fn on_file_key(
         &mut FileViewport,
         &mut vmux_git::GitDiffSource,
     )>,
+    app_keys: ScopedKeys,
     view_mode: Res<SharedFileViewMode>,
     mut clipboard: NonSendMut<ClipboardHandle>,
     mut self_writes: NonSendMut<SelfWrites>,
@@ -2400,6 +2413,9 @@ fn on_file_key(
 ) {
     let entity = trigger.event().webview;
     let evt = &trigger.event().payload;
+    if app_keys.answered(entity, evt) {
+        return;
+    }
     let Ok((mut edit, mut keymap, mut vp, mut diff_source)) = q.get_mut(entity) else {
         return;
     };

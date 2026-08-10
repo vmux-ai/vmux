@@ -41,6 +41,7 @@ pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
+/// Host → file page: the event id [`FileKey`] is pushed under.
 pub const FILE_KEY_EVENT: &str = "file_key";
 pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
@@ -1959,6 +1960,41 @@ pub struct FileKeymapEvent {
 )]
 pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
+}
+
+/// What the app keymap made of a key the file page handed over, sent back to the page that sent it.
+///
+/// The page keeps the doing; only the deciding moved. Which completion row `Accept` commits, and
+/// where in the buffer it lands, is derived from the caret and from a list filtered by the prefix
+/// under it — state that changes on a keystroke the host has not seen yet. So the verb travels, in
+/// the direction that already holds the state.
+///
+/// Nothing here is a text-editing verb. Those belong to the modal keymap the page also forwards to,
+/// which resolves the same keystroke into an `EditCommand` on the host and never comes back.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileKey {
+    /// Show or hide the explorer sidebar.
+    ToggleExplorer,
+    /// Open the explorer on the file being edited.
+    RevealInExplorer,
+    /// Highlight the next row of whichever panel is open.
+    PanelNext,
+    PanelPrevious,
+    /// Commit the highlighted row: insert the completion, or jump to the reference.
+    PanelChoose,
+    /// Close the open panel, leaving the buffer as it was.
+    PanelDismiss,
 }
 
 /// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.

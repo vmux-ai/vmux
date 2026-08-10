@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
 use crate::note::MdBlockView;
+use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
     NoteCaretVisibilityQueue, NoteCaretVisibilityRequest, NoteCursorActivation, NoteInlineKind,
     NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started,
@@ -110,6 +111,32 @@ pub fn Page() -> Element {
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
+
+    let completions = Completions {
+        open: comp_open,
+        anchor: comp_anchor,
+        items: comps,
+        lines,
+        cursor,
+    };
+    let comp_filtered = use_memo(move || completions.matching());
+    let file_page = FilePage {
+        mode,
+        explorer_visible,
+        explorer_preferred_visible,
+        explorer_width,
+        explorer_client_id,
+        explorer_request_id,
+        completion_open: comp_open,
+        completion_selection: comp_sel,
+        completion_anchor: comp_anchor,
+        completions: comp_filtered,
+        references_open: refs_open,
+        reference_selection: refs_sel,
+        references: refs,
+    };
+    let keys = use_file_keys(file_page);
+    use_context_provider(|| keys);
 
     let _chrome = use_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
         if should_apply_explorer_chrome(
@@ -624,31 +651,8 @@ pub fn Page() -> Element {
         if g.is_empty() { path() } else { g }
     };
 
-    let comp_filtered: Vec<CompletionItem> = if comp_open() {
-        let (cline, cfrom) = comp_anchor();
-        let lt: String = lines()
-            .iter()
-            .find(|l| l.line_no == cline)
-            .map(|l| l.spans.iter().map(|s| s.text.as_str()).collect())
-            .unwrap_or_default();
-        let chars: Vec<char> = lt.chars().collect();
-        let caret = cursor().col as usize;
-        let from = cfrom as usize;
-        let prefix: String = if from <= caret && from <= chars.len() {
-            chars[from..caret.min(chars.len())].iter().collect()
-        } else {
-            String::new()
-        };
-        let pl = prefix.to_lowercase();
-        comps()
-            .into_iter()
-            .filter(|c| c.label.to_lowercase().starts_with(&pl))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
-    let comp_keys = comp_filtered.clone();
 
     rsx! {
         div {
@@ -672,12 +676,8 @@ pub fn Page() -> Element {
 
             ExplorerSidebar {
                 visible: explorer_visible,
-                preferred_visible: explorer_preferred_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
-                client_id: explorer_client_id,
-                request_id: explorer_request_id,
-                mode,
             }
 
         div {
@@ -711,15 +711,7 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
-                if handle_explorer_shortcut(
-                    &e,
-                    explorer_visible,
-                    explorer_preferred_visible,
-                    explorer_width,
-                    explorer_client_id,
-                    explorer_request_id,
-                    mode,
-                ) {
+                if keys.offer(&e) {
                     return;
                 }
                 let data = e.data();
@@ -1136,7 +1128,6 @@ pub fn Page() -> Element {
                         {
                             let active = note_active();
                             let block_count = note_blocks.read().len();
-                            let note_input_comp_keys = comp_keys.clone();
                             rsx! {
                                 div {
                                     id: "file-scroll",
@@ -1258,41 +1249,10 @@ pub fn Page() -> Element {
                                                 if raw.is_composing() {
                                                     return;
                                                 }
-                                                let key = raw.key();
-                                                if comp_open() && !note_input_comp_keys.is_empty() {
-                                                    match key.as_str() {
-                                                        "ArrowDown" => {
-                                                            event.prevent_default();
-                                                            comp_sel.set((comp_sel_clamped + 1).min(note_input_comp_keys.len() - 1));
-                                                            return;
-                                                        }
-                                                        "ArrowUp" => {
-                                                            event.prevent_default();
-                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
-                                                            return;
-                                                        }
-                                                        "Enter" | "Tab" => {
-                                                            event.prevent_default();
-                                                            if let Some(item) = note_input_comp_keys.get(comp_sel_clamped) {
-                                                                let (line, replace_from_col) = comp_anchor();
-                                                                let _ = send(&FileCompletionCommit {
-                                                                    line,
-                                                                    replace_from_col,
-                                                                    text: item.insert_text.clone(),
-                                                                });
-                                                            }
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        "Escape" => {
-                                                            event.prevent_default();
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        _ => {}
-                                                    }
+                                                if keys.offer(&event) {
+                                                    return;
                                                 }
-                                                if key == "Escape" {
+                                                if raw.key() == "Escape" {
                                                     event.prevent_default();
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
@@ -1752,39 +1712,8 @@ pub fn Page() -> Element {
                                                 if raw.is_composing() {
                                                     return;
                                                 }
-                                                let key = raw.key();
-                                                if comp_open() && !comp_keys.is_empty() {
-                                                    match key.as_str() {
-                                                        "ArrowDown" => {
-                                                            e.prevent_default();
-                                                            comp_sel.set((comp_sel_clamped + 1).min(comp_keys.len() - 1));
-                                                            return;
-                                                        }
-                                                        "ArrowUp" => {
-                                                            e.prevent_default();
-                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
-                                                            return;
-                                                        }
-                                                        "Enter" | "Tab" => {
-                                                            e.prevent_default();
-                                                            if let Some(it) = comp_keys.get(comp_sel_clamped) {
-                                                                let (cline, cfrom) = comp_anchor();
-                                                                let _ = send(&FileCompletionCommit {
-                                                                    line: cline,
-                                                                    replace_from_col: cfrom,
-                                                                    text: it.insert_text.clone(),
-                                                                });
-                                                            }
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        "Escape" => {
-                                                            e.prevent_default();
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        _ => {}
-                                                    }
+                                                if keys.offer(&e) {
+                                                    return;
                                                 }
                                                 let _ = forward_file_key(&e, raw, ed_mode());
                                             },
@@ -1960,6 +1889,10 @@ pub fn Page() -> Element {
                             tabindex: "0",
                             class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
+                                e.stop_propagation();
+                                if keys.offer(&e) {
+                                    return;
+                                }
                                 let key = e
                                     .data()
                                     .downcast::<web_sys::KeyboardEvent>()
@@ -1967,32 +1900,15 @@ pub fn Page() -> Element {
                                     .unwrap_or_default();
                                 let len = refs.read().len();
                                 match key.as_str() {
-                                    "ArrowDown" | "j" => {
+                                    "j" => {
                                         e.prevent_default();
                                         if len > 0 {
                                             refs_sel.set((refs_sel() + 1).min(len - 1));
                                         }
                                     }
-                                    "ArrowUp" | "k" => {
+                                    "k" => {
                                         e.prevent_default();
                                         refs_sel.set(refs_sel().saturating_sub(1));
-                                    }
-                                    "Enter" => {
-                                        e.prevent_default();
-                                        if let Some(it) = refs.read().get(refs_sel()) {
-                                            let _ = send(&FileGotoRequest {
-                                                path: it.path.clone(),
-                                                line: it.line,
-                                                col: it.col,
-                                            });
-                                        }
-                                        refs_open.set(false);
-                                        focus_file_input();
-                                    }
-                                    "Escape" => {
-                                        e.prevent_default();
-                                        refs_open.set(false);
-                                        focus_file_input();
                                     }
                                     _ => {}
                                 }
@@ -2708,13 +2624,10 @@ fn NoteCaret(width_class: String) -> Element {
 #[component]
 fn ExplorerSidebar(
     visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
 ) -> Element {
+    let keys = use_context::<FileKeys>();
     let open = visible();
     let panel_width = width();
     let wrapper_style = if open {
@@ -2733,15 +2646,7 @@ fn ExplorerSidebar(
             class: "relative z-[2] h-full shrink-0",
             style: "{wrapper_style}",
             onkeydown: move |event| {
-                handle_explorer_shortcut(
-                    &event,
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                );
+                keys.offer(&event);
             },
             div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
         }
@@ -3401,7 +3306,7 @@ fn NoteBlockView(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub enum Mode {
     Dir,
     Text,
     Media(MediaKind),
@@ -3843,7 +3748,7 @@ fn schedule_lsp_notice_clear(
     clear.forget();
 }
 
-fn toggle_explorer(
+pub(crate) fn toggle_explorer(
     visible: Signal<bool>,
     preferred_visible: Signal<bool>,
     width: Signal<u32>,
@@ -3862,7 +3767,7 @@ fn toggle_explorer(
     );
 }
 
-fn reveal_current_in_explorer(
+pub(crate) fn reveal_current_in_explorer(
     visible: Signal<bool>,
     preferred_visible: Signal<bool>,
     width: Signal<u32>,
@@ -3883,47 +3788,6 @@ fn reveal_current_in_explorer(
             mode,
         );
     }
-}
-
-fn handle_explorer_shortcut(
-    event: &Event<KeyboardData>,
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> bool {
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-        return false;
-    };
-    let key = raw.key();
-    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
-        event.prevent_default();
-        reveal_current_in_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
-        event.prevent_default();
-        toggle_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    false
 }
 
 #[component]
@@ -4115,7 +3979,7 @@ fn focus_container() {
     }
 }
 
-fn focus_file_input() {
+pub(crate) fn focus_file_input() {
     focus_by_id(INPUT_ID);
 }
 

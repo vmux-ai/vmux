@@ -50,10 +50,7 @@ fn page_mounts_panel_and_wires_toggle() {
     assert!(s.contains("width:0px;contain:layout style;"));
     assert!(s.contains("relative z-[2] h-full shrink-0"));
     assert!(s.contains("ExplorerRevealCurrent"));
-    assert!(s.contains("handle_explorer_shortcut"));
     assert!(s.contains("Mode::Text => focus_file_input()"));
-    assert!(s.contains("raw.shift_key()"));
-    assert!(s.contains("key.eq_ignore_ascii_case(\"e\")"));
 }
 
 #[test]
