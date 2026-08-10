@@ -11,6 +11,7 @@ mod scroll;
 mod state;
 mod tab;
 
+use self::keys::{ChatKeys, use_chat_keys};
 use self::state::{Chat, use_chat};
 use crate::clipboard::copy_to_clipboard;
 use crate::event::{
@@ -39,6 +40,8 @@ pub fn Page(
     #[props(default)] transition_attachments: Option<Vec<ChatAttachment>>,
 ) -> Element {
     let chat = use_chat(agent_override, transition_prompt, transition_attachments);
+    let keys = use_chat_keys(chat);
+    use_context_provider(|| keys);
     let accent = chat.accent();
 
     rsx! {
@@ -49,7 +52,7 @@ pub fn Page(
             // which would put keystrokes out of reach of the handler below. Deliberately not
             // autofocused: `focus_prompt_end` already claims focus for the prompt on mount.
             tabindex: "-1",
-            onkeydown: move |event| chat.root_keydown(event),
+            onkeydown: move |event| keys.on_root_keydown(event),
             style { dangerous_inner_html: MD_CSS }
             if chat.installing_splash() {
                 InstallBackdrop { accent_rgb: accent.rgb, title: chat.header_name().to_uppercase() }
@@ -781,6 +784,7 @@ fn QueuedPrompts(chat: Chat) -> Element {
 #[component]
 fn ChatComposer(chat: Chat) -> Element {
     let accent = agent_accent(&chat.agent());
+    let keys = use_context::<ChatKeys>();
     rsx! {
         PromptComposer {
             value: chat.draft(),
@@ -798,7 +802,7 @@ fn ChatComposer(chat: Chat) -> Element {
             action_title: chat.prompt_action_title(),
             action_enabled: chat.prompt_action_enabled(),
             on_input: move |value| chat.edit_draft(value),
-            on_keydown: move |event| chat.prompt_keydown(event),
+            on_keydown: move |event| keys.on_prompt_keydown(event),
             on_paste: move |_| {
                 let _ = send(&ChatPasteMedia);
             },

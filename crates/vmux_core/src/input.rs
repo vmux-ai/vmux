@@ -31,7 +31,17 @@ pub struct KeyStrokePlugin;
 #[cfg(not(web))]
 impl KeyStrokePlugin {
     /// The page hosts permitted to send a [`KeyStroke`] or publish a [`PageKeyContext`].
-    pub const SENDERS: &'static [&'static str] = &["terminal", "files", "command-bar", "layout"];
+    /// `start` is here because it is the same webview as `agent`: the launcher swaps itself for a
+    /// chat page in place rather than navigating, so a prompt typed there is answered by a page
+    /// whose host name never changed.
+    pub const SENDERS: &'static [&'static str] = &[
+        "terminal",
+        "files",
+        "command-bar",
+        "layout",
+        "agent",
+        "start",
+    ];
 }
 
 #[cfg(not(web))]

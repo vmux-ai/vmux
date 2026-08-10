@@ -1,81 +1,249 @@
-//! What a keystroke means to the chat page.
+//! The chat page's keyboard, on the far side of the keymap.
 //!
-//! Two entry points, because a key can arrive with the prompt focused or with it not: the composer
-//! stops propagation while it has focus, so anything reaching the page root was aimed somewhere
-//! else. The root handler decides whether the key still belongs to the prompt and forwards it, so
-//! the rules live in one place rather than being restated for the unfocused case.
+//! Nothing here names a key. The page says what is true of it — `chat`, plus `chat.list` and
+//! `chat.selector` when one is showing — hands over whatever the core claimed, and performs the
+//! verb that comes back. That is the only reason `Enter` can mean four things: the four bindings
+//! carry mutually exclusive `when` clauses, and `settings.json` can move any of them without this
+//! file agreeing.
+//!
+//! Three things stay on this side, because the keymap cannot answer them in time or at all.
+//!
+//! The highlighted row stays a page signal. Which list `Enter` lands in is derived from the draft
+//! text, and the draft lives in the browser's own `<textarea>` so that typing, selection, undo and
+//! IME keep working — so the list kind and its length change on a keystroke the host has not seen
+//! yet, and an index resolved there would select the wrong row.
+//!
+//! The caret answers for itself, through `wanted_locally`. `ArrowUp` recalls an earlier prompt
+//! only from the first line of the draft, and `Ctrl+C` interrupts only when nothing is selected.
+//! Both are continuous DOM state with no context transition to publish on, so neither could ever
+//! be a pushed claim.
+//!
+//! A bare digit picks an option locally, and cannot do otherwise: the core deliberately never
+//! claims a printable key pressed alone, because a claim set that is one context behind would
+//! swallow a character. So `1`-`3` on an approval is the one chat shortcut that is not rebindable.
+//!
+//! The split at the bottom of this file is between hosts, not between features. Deciding needs a
+//! webview to hand a stroke to; doing needs neither, so [`ChatKeys::apply`] and everything under
+//! it is shared, and a host with no keymap to ask still answers what it can answer alone.
 
 use super::state::Chat;
-use crate::event::{ChatCancel, ChatEscape, ChatItem};
+use crate::event::{CHAT_KEY_EVENT, ChatItem, ChatKey};
 use crate::format::composer::{
-    PromptEdit, PromptHistoryDirection, SelectorMode, approval_decision_for_index, edit_prompt,
-    move_prompt_history, prompt_history_direction, selector_mode, should_clear_draft_on_escape,
+    PromptEdit, PromptHistoryDirection, approval_decision_for_index, edit_prompt,
+    move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
-#[cfg(web)]
-use vmux_ui::components::prompt_composer::prompt_textarea;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
-use vmux_ui::hooks::{choice_number_index, menu_direction, move_selection, send};
-use vmux_wire::prompt_media::inline_media_query;
+use vmux_ui::hooks::{MenuDirection, choice_number_index, move_selection, use_listener};
+#[cfg(web)]
+use {
+    vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed},
+    vmux_ui::components::prompt_composer::prompt_textarea,
+    vmux_ui::hooks::{KeyClaim, send, use_key_claim},
+};
 
 /// Allow, allow always, deny.
 const APPROVAL_OPTION_COUNT: usize = 3;
 
-impl Chat {
-    /// A key with the prompt focused. Pending approvals and choices claim it first, then whichever
-    /// selector the draft has opened, then prompt-history recall, then the composer itself.
-    pub fn prompt_keydown(&self, event: KeyboardEvent) {
-        // The page root also listens, to catch typing aimed elsewhere. Stopping here is what
-        // tells it this keystroke already had a home — and it is why composition can never
-        // reach the root, since an IME only ever composes into a focused field.
+/// One chat page's keyboard: what the core claimed from it, and what it does with the answer.
+///
+/// `Copy`, and reached through a context rather than a prop, because the composer is several
+/// components below the page root and [`KeyClaim`] is not comparable — a prop would have to be.
+#[cfg(web)]
+#[derive(Clone, Copy)]
+pub struct ChatKeys {
+    chat: Chat,
+    claim: KeyClaim,
+}
+
+/// Subscribe the page to the keyboard seam and start listening for what its keys turned out to
+/// mean.
+#[cfg(web)]
+pub fn use_chat_keys(chat: Chat) -> ChatKeys {
+    let keys = ChatKeys {
+        chat,
+        claim: use_key_claim(Unclaimed::Types, move || chat.key_context()),
+    };
+    keys.listen();
+    use_drop(move || {
+        let _ = send(&PageKeyContext { keys: Vec::new() });
+    });
+    keys
+}
+
+#[cfg(web)]
+impl ChatKeys {
+    /// A key with the prompt focused.
+    ///
+    /// Stopping here is what tells the page root this keystroke already had a home — and it is why
+    /// composition can never reach the root, since an IME only ever composes into a focused field.
+    pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
         event.stop_propagation();
-        if self.approval_keydown(&event) || self.choice_keydown(&event) {
+        if self.answered_by_number(&event) {
             return;
         }
-        if self.selector_keydown(&event) {
-            return;
-        }
-        if self.history_keydown(&event) {
-            return;
-        }
-        self.composer_keydown(&event);
+        self.claim
+            .on_keydown(&event, |stroke| self.wanted_locally(stroke));
     }
 
-    /// Keys that arrive with the prompt unfocused. Navigation, approvals and choices mean exactly
-    /// what they mean with it focused, so they are handed to that handler rather than restated;
-    /// anything else that is a plain edit is typed into the draft, which is what puts a keystroke
-    /// aimed at the transcript into the prompt.
-    pub fn root_keydown(&self, event: KeyboardEvent) {
-        let key = event.key().to_string();
-        let modifiers = event.modifiers();
-        let selector_open = self.selector_open();
-        let approval_open = self.run.approval.peek().is_some();
-        let choice_len = self.run.choice_options.peek().len();
-        let unmodified = !modifiers.meta() && !modifiers.ctrl() && !modifiers.alt();
-        let direction = if modifiers.meta() || modifiers.alt() {
-            None
-        } else {
-            menu_direction(&key, modifiers.ctrl())
-        };
-        let choice_key = direction.is_some()
-            || (unmodified && (key == "Enter" || choice_number_index(&key, choice_len).is_some()));
-        let approval_key = direction.is_some()
-            || (unmodified
-                && (key == "Enter" || choice_number_index(&key, APPROVAL_OPTION_COUNT).is_some()));
-        let selector_key =
-            direction.is_some() || (unmodified && matches!(key.as_str(), "Enter" | "Escape"));
+    /// A key that arrived with the prompt unfocused, so it was aimed at the transcript.
+    ///
+    /// Anything the keymap did not want and the browser would only have thrown away is typed into
+    /// the draft instead, which is what puts a keystroke aimed at the transcript into the prompt.
+    pub fn on_root_keydown(&self, event: KeyboardEvent) {
+        if self.answered_by_number(&event) {
+            return;
+        }
+        self.claim
+            .on_keydown(&event, |stroke| self.wanted_locally(stroke));
+        if event.default_action_enabled() {
+            self.type_into_draft(&event);
+        }
+    }
 
-        if (approval_open && approval_key)
-            || (choice_len > 0 && choice_key)
-            || direction.is_some()
-            || (selector_open && selector_key)
-        {
-            self.prompt_keydown(event);
+    /// The page's own answer about one stroke, asked in the same tick so it never disagrees with
+    /// what the user can see.
+    ///
+    /// Only the strokes the `<textarea>` has a meaning of its own for are ever kept. A key the user
+    /// bound deliberately is not shielded, even if it happens to be one of these: the shield exists
+    /// because `ArrowUp` doubles as caret movement, not because prompt recall is optional.
+    fn wanted_locally(&self, stroke: &KeyStroke) -> bool {
+        if Self::copies(stroke) {
+            return has_text_selection();
+        }
+        if !Self::moves_the_caret(stroke) {
+            return false;
+        }
+        if ChatList::of(self.chat).is_some() {
+            return false;
+        }
+        self.recall_direction(&stroke.key, stroke.mods.ctrl)
+            .is_none()
+    }
+
+    /// True when the browser would copy a selection rather than let this mean "interrupt".
+    fn copies(stroke: &KeyStroke) -> bool {
+        stroke.mods.ctrl && !stroke.mods.alt && !stroke.mods.super_key && stroke.code == "KeyC"
+    }
+
+    /// The strokes a multi-line `<textarea>` already moves the caret with, which is what makes
+    /// them the page's to answer.
+    fn moves_the_caret(stroke: &KeyStroke) -> bool {
+        if stroke.mods.super_key || stroke.mods.alt {
+            return false;
+        }
+        match stroke.code.as_str() {
+            "ArrowUp" | "ArrowDown" => !stroke.mods.ctrl,
+            "KeyN" | "KeyP" => stroke.mods.ctrl,
+            _ => false,
+        }
+    }
+}
+
+/// Everything the page does once something has decided what a key meant.
+///
+/// Shared, because none of it needs a webview: a host with no keymap reaches the same verbs
+/// through the ones it can resolve alone.
+impl ChatKeys {
+    /// Take the host's answers about keys this page handed over.
+    fn listen(&self) {
+        let keys = *self;
+        let _resolved = use_listener::<ChatKey, _>(CHAT_KEY_EVENT, move |key| keys.apply(key));
+    }
+
+    fn apply(&self, key: ChatKey) {
+        match key {
+            ChatKey::ListNext => self.move_list(MenuDirection::Next),
+            ChatKey::ListPrevious => self.move_list(MenuDirection::Previous),
+            ChatKey::ListChoose => self.choose(),
+            ChatKey::HistoryOlder => self.recall(PromptHistoryDirection::Older),
+            ChatKey::HistoryNewer => self.recall(PromptHistoryDirection::Newer),
+            ChatKey::Submit => self.chat.submit(),
+            ChatKey::DismissSelector => self.chat.dismiss_selector(),
+            ChatKey::Interrupt => self.chat.interrupt(),
+            ChatKey::Cancel => self.chat.cancel(),
+        }
+    }
+
+    fn move_list(&self, direction: MenuDirection) {
+        let Some(list) = ChatList::of(self.chat) else {
+            return;
+        };
+        list.move_by(self.chat, direction);
+    }
+
+    fn choose(&self) {
+        let Some(list) = ChatList::of(self.chat) else {
+            return;
+        };
+        let index = *list.selection(self.chat).peek();
+        list.choose(self.chat, index);
+    }
+
+    /// Which way prompt recall would go for this key, or `None` when the caret has somewhere else
+    /// to be or there is nothing left to recall.
+    fn recall_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
+        let (start, end) = prompt_caret()?;
+        let draft = self.chat.draft();
+        let direction = prompt_history_direction(key, ctrl, &draft, start, end)?;
+        let usable = match direction {
+            PromptHistoryDirection::Older => !self.chat.prompt_history().is_empty(),
+            PromptHistoryDirection::Newer => self.chat.composer.history_cursor.peek().is_some(),
+        };
+        usable.then_some(direction)
+    }
+
+    /// Walk the prompt history, setting aside the half-written draft on the way out.
+    fn recall(&self, direction: PromptHistoryDirection) {
+        let mut draft = self.chat.composer.draft;
+        let mut history_cursor = self.chat.composer.history_cursor;
+        let mut history_scratch = self.chat.composer.history_scratch;
+        let scratch = history_scratch.peek().clone();
+        let (value, next_cursor, scratch) = move_prompt_history(
+            &self.chat.prompt_history(),
+            *history_cursor.peek(),
+            &scratch,
+            &self.chat.draft(),
+            direction,
+        );
+        draft.set(value);
+        history_cursor.set(next_cursor);
+        history_scratch.set(scratch);
+        focus_prompt_end(PROMPT_INPUT_ID);
+    }
+
+    /// A bare number key naming one of an approval's or a question's options.
+    ///
+    /// Handled here rather than through the keymap because the core never claims a printable key
+    /// pressed alone — see the module docs.
+    fn answered_by_number(&self, event: &KeyboardEvent) -> bool {
+        let modifiers = event.modifiers();
+        if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
+            return false;
+        }
+        let list = match ChatList::of(self.chat) {
+            Some(list @ (ChatList::Approval | ChatList::Choice)) => list,
+            _ => return false,
+        };
+        let key = event.key().to_string();
+        let Some(index) = choice_number_index(&key, list.len(self.chat)) else {
+            return false;
+        };
+        event.prevent_default();
+        list.choose(self.chat, index);
+        true
+    }
+
+    /// Type a key nobody wanted into the draft, and put the caret after it.
+    ///
+    /// The draft signal is the source of truth, so editing it is enough — the textarea is rendered
+    /// from it. Appending at the end matches where `focus_prompt_end` puts the caret.
+    fn type_into_draft(&self, event: &KeyboardEvent) {
+        let modifiers = event.modifiers();
+        if modifiers.meta() || modifiers.ctrl() || modifiers.alt() {
             return;
         }
-        if !unmodified {
-            return;
-        }
+        let key = event.key().to_string();
         let edit = match key.as_str() {
             "Backspace" => PromptEdit::Backspace,
             "Delete" => PromptEdit::Delete,
@@ -83,246 +251,147 @@ impl Chat {
             _ => return,
         };
         event.prevent_default();
-        // The draft signal is the source of truth, so editing it is enough — the textarea is
-        // rendered from it. Appending at the end matches where focus_prompt_end puts the caret.
-        let mut draft = self.composer.draft;
+        let mut draft = self.chat.composer.draft;
         let current = draft.peek().clone();
         let end = current.encode_utf16().count() as u32;
         let (value, _caret) = edit_prompt(&current, end, end, edit);
         draft.set(value);
         focus_prompt_end(PROMPT_INPUT_ID);
     }
+}
 
-    /// A pending tool approval takes arrows, `1`-`3` and Enter until it is answered.
-    fn approval_keydown(&self, event: &KeyboardEvent) -> bool {
-        let Some((call_id, _, _)) = self.run.approval.peek().clone() else {
-            return false;
-        };
-        let mut approval_sel = self.run.approval_sel;
-        let key = event.key().to_string();
-        if !event.modifiers().meta()
-            && !event.modifiers().alt()
-            && let Some(direction) = menu_direction(&key, event.modifiers().ctrl())
-        {
-            event.prevent_default();
-            approval_sel.set(move_selection(
-                approval_sel(),
-                APPROVAL_OPTION_COUNT,
-                direction,
-            ));
-            return true;
+/// Which of the page's lists a list verb lands in.
+///
+/// One type rather than a branch per key, because the four pickers differ only in where their rows
+/// come from — and because "which list is showing" is the one thing about the chat keyboard that
+/// genuinely belongs to the page. The order [`ChatList::of`] tries them in is the page's own
+/// precedence: what the agent is blocked on outranks what the draft has opened.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChatList {
+    Approval,
+    Choice,
+    Media,
+    Session,
+    Model,
+    Command,
+}
+
+impl ChatList {
+    fn of(chat: Chat) -> Option<Self> {
+        if chat.run.approval.read().is_some() {
+            return Some(Self::Approval);
         }
-        if !Self::picks_option(event, APPROVAL_OPTION_COUNT) {
-            return false;
+        if !chat.run.choice_options.read().is_empty() {
+            return Some(Self::Choice);
         }
-        event.prevent_default();
-        let index = choice_number_index(&key, APPROVAL_OPTION_COUNT).unwrap_or(approval_sel());
-        if let Some(decision) = approval_decision_for_index(index) {
-            self.answer_approval(call_id, decision);
+        if chat.media_menu_open() {
+            return Some(Self::Media);
         }
-        true
+        if chat.resume_menu_open() {
+            return Some(Self::Session);
+        }
+        if chat.model_menu_open() {
+            return Some(Self::Model);
+        }
+        if chat.command_menu_open() {
+            return Some(Self::Command);
+        }
+        None
     }
 
-    /// A pending multiple-choice question takes the same keys, over its own options.
-    fn choice_keydown(&self, event: &KeyboardEvent) -> bool {
-        let options = self.run.choice_options.peek().clone();
-        if options.is_empty() {
-            return false;
-        }
-        let mut menu_sel = self.slash.menu_sel;
-        let key = event.key().to_string();
-        if !event.modifiers().meta()
-            && !event.modifiers().alt()
-            && let Some(direction) = menu_direction(&key, event.modifiers().ctrl())
-        {
-            event.prevent_default();
-            let selected = *menu_sel.peek();
-            menu_sel.set(move_selection(selected, options.len(), direction));
-            return true;
-        }
-        if !Self::picks_option(event, options.len()) {
-            return false;
-        }
-        event.prevent_default();
-        let selected = *menu_sel.peek();
-        self.answer_choice(choice_number_index(&key, options.len()).unwrap_or(selected));
-        true
+    /// Whether this list is one the draft opened, which is what makes `Escape` close it rather
+    /// than interrupt the turn. Only a host with a keymap asks, since the answer is a context key.
+    #[cfg(web)]
+    fn is_selector(self) -> bool {
+        !matches!(self, Self::Approval | Self::Choice)
     }
 
-    /// A number key or a bare Enter, either of which commits the highlighted option.
-    fn picks_option(event: &KeyboardEvent, count: usize) -> bool {
-        let key = event.key().to_string();
-        let numbered = !event.modifiers().meta()
-            && !event.modifiers().ctrl()
-            && !event.modifiers().alt()
-            && choice_number_index(&key, count).is_some();
-        let entered = event.key() == Key::Enter
-            && !event.modifiers().shift()
-            && !event.modifiers().meta()
-            && !event.modifiers().ctrl()
-            && !event.modifiers().alt();
-        numbered || entered
+    fn len(self, chat: Chat) -> usize {
+        match self {
+            Self::Approval => APPROVAL_OPTION_COUNT,
+            Self::Choice => chat.run.choice_options.read().len(),
+            Self::Media => chat.media.entries.read().len(),
+            Self::Session => chat.filtered_sessions().len(),
+            Self::Model => chat.filtered_models().len(),
+            Self::Command => chat.filtered_commands().len(),
+        }
     }
 
-    /// Arrows, Enter and Escape belong to whichever picker the draft has opened.
-    fn selector_keydown(&self, event: &KeyboardEvent) -> bool {
-        let draft = self.draft();
-        let media_open = inline_media_query(&draft).is_some();
-        let (session_open, model_open) = match selector_mode(&draft) {
-            SelectorMode::Resume(_) => (true, false),
-            SelectorMode::Models(_) => (false, true),
-            _ => (false, false),
-        };
-        let commands = self.filtered_commands();
-        if !(media_open || session_open || model_open || !commands.is_empty()) {
-            return false;
+    /// The signal holding this list's highlighted row. An approval keeps its own, because it can
+    /// be showing over a draft that has already opened a picker.
+    fn selection(self, chat: Chat) -> Signal<usize> {
+        match self {
+            Self::Approval => chat.run.approval_sel,
+            _ => chat.slash.menu_sel,
         }
-        let mut menu_sel = self.slash.menu_sel;
-        let key = event.key().to_string();
-        let command_modifier =
-            event.modifiers().meta() || event.modifiers().ctrl() || event.modifiers().alt();
-        let direction = if event.modifiers().meta() || event.modifiers().alt() {
-            None
-        } else {
-            menu_direction(&key, event.modifiers().ctrl())
-        };
-        let media_items = if media_open {
-            self.media.entries.peek().clone()
-        } else {
-            Vec::new()
-        };
-        let sessions = self.filtered_sessions();
-        let models = self.filtered_models();
-        if let Some(direction) = direction {
-            event.prevent_default();
-            let len = if media_open {
-                media_items.len()
-            } else if session_open {
-                sessions.len()
-            } else if model_open {
-                models.len()
-            } else {
-                commands.len()
-            };
-            let selected = *menu_sel.peek();
-            menu_sel.set(move_selection(selected, len, direction));
-            return true;
-        }
-        if event.key() == Key::Enter && !event.modifiers().shift() && !command_modifier {
-            event.prevent_default();
-            let selected = *menu_sel.peek();
-            if media_open {
-                if let Some(entry) = media_items.get(selected) {
-                    self.select_media_entry(entry);
-                }
-            } else if session_open {
-                if let Some(session) = sessions.get(selected) {
-                    self.select_resume_session(session);
-                }
-            } else if model_open {
-                if let Some(model) = models.get(selected) {
-                    self.select_model(model);
-                }
-            } else if let Some(command) = commands.get(selected) {
-                self.run_slash_command(&command.name);
+    }
+
+    fn move_by(self, chat: Chat, direction: MenuDirection) {
+        let mut selection = self.selection(chat);
+        let landed = move_selection(*selection.peek(), self.len(chat), direction);
+        selection.set(landed);
+    }
+
+    /// Commit a row. A row that is no longer there does nothing: the lists are filtered by the
+    /// draft, so a stored index can outlive what it pointed at.
+    fn choose(self, chat: Chat, index: usize) {
+        match self {
+            Self::Approval => {
+                let Some((call_id, _, _)) = chat.run.approval.peek().clone() else {
+                    return;
+                };
+                let Some(decision) = approval_decision_for_index(index) else {
+                    return;
+                };
+                chat.answer_approval(call_id, decision);
             }
-            return true;
-        }
-        if event.key() == Key::Escape && !command_modifier {
-            event.prevent_default();
-            self.dismiss_selector();
-            return true;
-        }
-        // Enter and Escape belong to an open picker even when a modifier stopped the branches
-        // above from acting on them, so they must not fall through to submit or interrupt.
-        (media_open || session_open || model_open)
-            && matches!(event.key(), Key::Enter | Key::Escape)
-    }
-
-    /// Up and Down walk earlier prompts, when the caret is somewhere that leaves them free to.
-    fn history_keydown(&self, event: &KeyboardEvent) -> bool {
-        if self.selector_open() || event.modifiers().meta() || event.modifiers().alt() {
-            return false;
-        }
-        let key = event.key().to_string();
-        let draft = self.draft();
-        let Some((start, end)) = prompt_caret() else {
-            return false;
-        };
-        let Some(direction) =
-            prompt_history_direction(&key, event.modifiers().ctrl(), &draft, start, end)
-        else {
-            return false;
-        };
-        let mut history_cursor = self.composer.history_cursor;
-        let mut history_scratch = self.composer.history_scratch;
-        let mut prompt = self.composer.draft;
-        let history = self.prompt_history();
-        let cursor = *history_cursor.peek();
-        let should_handle = match direction {
-            PromptHistoryDirection::Older => !history.is_empty(),
-            PromptHistoryDirection::Newer => cursor.is_some(),
-        };
-        if !should_handle {
-            return false;
-        }
-        event.prevent_default();
-        let (value, next_cursor, scratch) =
-            move_prompt_history(&history, cursor, &history_scratch.peek(), &draft, direction);
-        prompt.set(value);
-        history_cursor.set(next_cursor);
-        history_scratch.set(scratch);
-        focus_prompt_end(PROMPT_INPUT_ID);
-        true
-    }
-
-    /// Enter submits, Escape interrupts and may clear the draft, Ctrl+C cancels the turn.
-    fn composer_keydown(&self, event: &KeyboardEvent) {
-        if event.key() == Key::Enter && !event.modifiers().shift() {
-            event.prevent_default();
-            self.submit();
-            return;
-        }
-        if event.key() == Key::Escape {
-            event.prevent_default();
-            let _ = send(&ChatEscape);
-            let mut draft = self.composer.draft;
-            if should_clear_draft_on_escape(
-                self.streaming(),
-                self.queue.queued.peek().is_empty(),
-                draft.peek().is_empty(),
-            ) {
-                draft.set(String::new());
+            Self::Choice => {
+                if index < chat.run.choice_options.peek().len() {
+                    chat.answer_choice(index);
+                }
             }
-            return;
-        }
-        if event.modifiers().ctrl()
-            && matches!(event.key(), Key::Character(c) if c == "c")
-            && !has_text_selection()
-        {
-            event.prevent_default();
-            let _ = send(&ChatCancel);
+            Self::Media => {
+                let entry = chat.media.entries.peek().get(index).cloned();
+                if let Some(entry) = entry {
+                    chat.select_media_entry(&entry);
+                }
+            }
+            Self::Session => {
+                if let Some(session) = chat.filtered_sessions().get(index) {
+                    chat.select_resume_session(session);
+                }
+            }
+            Self::Model => {
+                if let Some(model) = chat.filtered_models().get(index) {
+                    chat.select_model(model);
+                }
+            }
+            Self::Command => {
+                if let Some(command) = chat.filtered_commands().get(index) {
+                    chat.run_slash_command(&command.name);
+                }
+            }
         }
     }
+}
 
-    /// Whether any picker is showing, which is what makes arrows and Enter mean navigation.
-    fn selector_open(&self) -> bool {
-        let draft = self.draft();
-        if inline_media_query(&draft).is_some() {
-            return true;
+impl Chat {
+    /// What is true of this page now, as the context keys a binding's `when` is resolved against.
+    ///
+    /// Read reactively — every signal touched here becomes a trigger to republish — so the page
+    /// says what it is rather than remembering to announce a change. There is nobody to say it to
+    /// without a webview.
+    #[cfg(web)]
+    fn key_context(&self) -> Vec<String> {
+        let mut keys = vec!["chat".to_string()];
+        let Some(list) = ChatList::of(*self) else {
+            return keys;
+        };
+        keys.push("chat.list".to_string());
+        if list.is_selector() {
+            keys.push("chat.selector".to_string());
         }
-        match selector_mode(&draft) {
-            SelectorMode::Resume(_) | SelectorMode::Models(_) => true,
-            SelectorMode::Commands(query) => {
-                let query = query.to_lowercase();
-                self.slash
-                    .commands
-                    .peek()
-                    .iter()
-                    .any(|command| command.name.starts_with(&query))
-            }
-            SelectorMode::None => false,
-        }
+        keys
     }
 
     /// Everything already asked in this conversation, oldest first, with the queue on the end.
@@ -369,15 +438,61 @@ fn prompt_caret() -> Option<(u32, u32)> {
 /// True when the page has a non-collapsed text selection — so Ctrl+C should copy, not interrupt.
 #[cfg(web)]
 fn has_text_selection() -> bool {
-    web_sys::window()
-        .and_then(|w| w.get_selection().ok().flatten())
-        .map(|s| !s.is_collapsed())
-        .unwrap_or(false)
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(Some(selection)) = window.get_selection() else {
+        return false;
+    };
+    !selection.is_collapsed()
 }
 
-/// A touch host has neither a caret nor a Ctrl+C, so the question never arises and the answer
-/// that leaves the shortcut meaning "interrupt" is the right one.
+/// A touch host has no keymap to ask, so the only keys its chat page resolves are the ones it can
+/// answer without one.
+///
+/// Not a lesser copy of the seam above: there is no second table of what a key means here, and
+/// there deliberately is not one. A key whose meaning lives in `settings.json` has to be looked up
+/// by whoever holds that file, and on a host with no webview nobody does.
 #[cfg(not(web))]
-fn has_text_selection() -> bool {
-    false
+#[derive(Clone, Copy)]
+pub struct ChatKeys {
+    chat: Chat,
+}
+
+#[cfg(not(web))]
+pub fn use_chat_keys(chat: Chat) -> ChatKeys {
+    let keys = ChatKeys { chat };
+    keys.listen();
+    keys
+}
+
+#[cfg(not(web))]
+impl ChatKeys {
+    pub fn on_prompt_keydown(&self, event: KeyboardEvent) {
+        event.stop_propagation();
+        self.resolve_without_a_keymap(&event);
+    }
+
+    pub fn on_root_keydown(&self, event: KeyboardEvent) {
+        self.resolve_without_a_keymap(&event);
+        if event.default_action_enabled() {
+            self.type_into_draft(&event);
+        }
+    }
+
+    fn resolve_without_a_keymap(&self, event: &KeyboardEvent) {
+        if self.answered_by_number(event) {
+            return;
+        }
+        let modifiers = event.modifiers();
+        if modifiers.meta() || modifiers.alt() {
+            return;
+        }
+        let key = event.key().to_string();
+        let Some(direction) = self.recall_direction(&key, modifiers.ctrl()) else {
+            return;
+        };
+        event.prevent_default();
+        self.recall(direction);
+    }
 }

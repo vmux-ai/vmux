@@ -11218,6 +11218,7 @@ dependencies = [
  "similar",
  "tokio",
  "unicode-segmentation",
+ "vmux_core",
  "vmux_terminal",
  "vmux_ui",
  "vmux_wire",

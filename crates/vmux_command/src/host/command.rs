@@ -38,6 +38,78 @@ pub enum AppCommand {
     #[menu(label = "Command Bar")]
     #[mcp(skip)]
     CommandBar(CommandBarKeyCommand),
+
+    #[menu(label = "Chat")]
+    #[mcp(skip)]
+    Chat(ChatKeyCommand),
+}
+
+/// What a key press means while a chat page has the keyboard.
+///
+/// Hidden leaves for the same reason the command bar's are: nothing here is worth picking out of a
+/// menu, but every one of it is worth rebinding, and a command is the only thing `settings.json`
+/// can name. Each carries a `when`, so `Enter` can submit a prompt in one place and answer a tool
+/// approval in another without either surface knowing the other exists.
+///
+/// The three contexts a chat page publishes are `chat`, `chat.list` — an approval, a
+/// multiple-choice question, or one of the four pickers is showing — and `chat.selector`, the
+/// pickers alone. The `when` clauses below are mutually exclusive rather than merely ordered, so
+/// which one answers a key is a property of the clauses a reader can check, not of the order the
+/// keymap happened to be assembled in.
+///
+/// The page performs them. It is the only side that knows which list the draft has opened and
+/// which row of it is highlighted, so the host resolves the key and hands the verb straight back.
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChatKeyCommand {
+    #[default]
+    #[menu(id = "chat_list_next", label = "Next Option", hidden)]
+    #[shortcut(direct = "ArrowDown", when = "chat.list")]
+    #[shortcut(direct = "Ctrl+n", when = "chat.list")]
+    ListNext,
+    #[menu(id = "chat_list_previous", label = "Previous Option", hidden)]
+    #[shortcut(direct = "ArrowUp", when = "chat.list")]
+    #[shortcut(direct = "Ctrl+p", when = "chat.list")]
+    ListPrevious,
+    #[menu(id = "chat_list_choose", label = "Choose Option", hidden)]
+    #[shortcut(direct = "Enter", when = "chat.list")]
+    ListChoose,
+    #[menu(id = "chat_history_older", label = "Previous Prompt", hidden)]
+    #[shortcut(direct = "ArrowUp", when = "chat && !chat.list")]
+    #[shortcut(direct = "Ctrl+p", when = "chat && !chat.list")]
+    HistoryOlder,
+    #[menu(id = "chat_history_newer", label = "Next Prompt", hidden)]
+    #[shortcut(direct = "ArrowDown", when = "chat && !chat.list")]
+    #[shortcut(direct = "Ctrl+n", when = "chat && !chat.list")]
+    HistoryNewer,
+    #[menu(id = "chat_submit", label = "Send Prompt", hidden)]
+    #[shortcut(direct = "Enter", when = "chat && !chat.list")]
+    Submit,
+    #[menu(id = "chat_dismiss_selector", label = "Close Picker", hidden)]
+    #[shortcut(direct = "Escape", when = "chat.selector")]
+    DismissSelector,
+    #[menu(id = "chat_interrupt", label = "Send Queued Now", hidden)]
+    #[shortcut(direct = "Escape", when = "chat && !chat.selector")]
+    Interrupt,
+    #[menu(id = "chat_cancel", label = "Stop Turn", hidden)]
+    #[shortcut(direct = "Ctrl+c", when = "chat")]
+    Cancel,
+}
+
+impl From<ChatKeyCommand> for vmux_wire::chat::ChatKey {
+    fn from(command: ChatKeyCommand) -> Self {
+        match command {
+            ChatKeyCommand::ListNext => Self::ListNext,
+            ChatKeyCommand::ListPrevious => Self::ListPrevious,
+            ChatKeyCommand::ListChoose => Self::ListChoose,
+            ChatKeyCommand::HistoryOlder => Self::HistoryOlder,
+            ChatKeyCommand::HistoryNewer => Self::HistoryNewer,
+            ChatKeyCommand::Submit => Self::Submit,
+            ChatKeyCommand::DismissSelector => Self::DismissSelector,
+            ChatKeyCommand::Interrupt => Self::Interrupt,
+            ChatKeyCommand::Cancel => Self::Cancel,
+        }
+    }
 }
 
 /// What a key press means while the command bar has the keyboard.
@@ -538,6 +610,75 @@ mod tests {
             keymap.in_context(&bar).scoped(&escape),
             Some(AppCommand::CommandBar(CommandBarKeyCommand::Dismiss))
         );
+    }
+
+    /// The whole reason a chat page publishes three context keys. `Enter` and `Escape` each mean
+    /// two things there and nothing at all anywhere else, and which one applies has to be decided
+    /// by the clauses rather than by the order the keymap happened to be assembled in — so every
+    /// pair below is mutually exclusive, and a dropped negation shows up here as two clauses
+    /// matching one context.
+    #[test]
+    fn enter_and_escape_mean_one_thing_per_chat_context() {
+        let keymap = crate::shortcut::Keymap::defaults();
+        let resolved = |keys: &[&str], key| {
+            let context: crate::shortcut::KeyContext =
+                keys.iter().map(|key| (*key).to_string()).collect();
+            keymap.in_context(&context).scoped(&KeyCombo {
+                key,
+                modifiers: Modifiers::default(),
+            })
+        };
+        let chat = |command| Some(AppCommand::Chat(command));
+
+        let quiet = ["chat"];
+        let listing = ["chat", "chat.list"];
+        let picking = ["chat", "chat.list", "chat.selector"];
+
+        assert_eq!(
+            resolved(&quiet, KeyCode::Enter),
+            chat(ChatKeyCommand::Submit)
+        );
+        assert_eq!(
+            resolved(&listing, KeyCode::Enter),
+            chat(ChatKeyCommand::ListChoose)
+        );
+        assert_eq!(
+            resolved(&picking, KeyCode::Enter),
+            chat(ChatKeyCommand::ListChoose)
+        );
+
+        assert_eq!(
+            resolved(&quiet, KeyCode::Escape),
+            chat(ChatKeyCommand::Interrupt)
+        );
+        assert_eq!(
+            resolved(&listing, KeyCode::Escape),
+            chat(ChatKeyCommand::Interrupt)
+        );
+        assert_eq!(
+            resolved(&picking, KeyCode::Escape),
+            chat(ChatKeyCommand::DismissSelector)
+        );
+
+        assert_eq!(
+            resolved(&quiet, KeyCode::ArrowUp),
+            chat(ChatKeyCommand::HistoryOlder)
+        );
+        assert_eq!(
+            resolved(&listing, KeyCode::ArrowUp),
+            chat(ChatKeyCommand::ListPrevious)
+        );
+
+        // Bare Enter and Escape belong to nobody until a page says it is a chat page.
+        assert_eq!(
+            keymap.direct(&KeyCombo {
+                key: KeyCode::Enter,
+                modifiers: Modifiers::default()
+            }),
+            None
+        );
+        assert_eq!(resolved(&["terminal"], KeyCode::Enter), None);
+        assert_eq!(resolved(&["terminal"], KeyCode::ArrowUp), None);
     }
 
     #[test]

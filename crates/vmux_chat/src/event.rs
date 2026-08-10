@@ -12,6 +12,7 @@ pub const COMPOSER_CONTEXT_EVENT: &str = "composer_context";
 pub const CHAT_INITIAL_ITEM_LIMIT: u32 = 48;
 pub const CHAT_HISTORY_PAGE_SIZE: u32 = 40;
 pub const CHAT_HISTORY_MAX_PAGE_SIZE: u32 = 80;
+pub use vmux_wire::chat::{CHAT_KEY_EVENT, ChatKey};
 pub use vmux_wire::prompt_media::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,

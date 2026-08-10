@@ -6,6 +6,7 @@
 //! reaches only through the payloads in `vmux_chat::event`; everything here that is about
 //! driving an agent — sessions, strategies, run state — stays on this side of that line.
 
+mod key;
 mod media;
 mod model;
 mod prompt;
@@ -24,6 +25,7 @@ impl Plugin for AgentChatPagePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(PAGE_MANIFEST);
         app.add_plugins((
+            key::ChatKeyPlugin,
             media::ChatMediaPlugin,
             model::ChatModelPlugin,
             prompt::ChatPromptPlugin,

@@ -224,3 +224,46 @@ pub const WORKING_VERB_IDS: &[&str] = &[
     "agent-working-mulling",
     "agent-working-spelunking",
 ];
+
+/// The event id [`ChatKey`] is pushed under.
+pub const CHAT_KEY_EVENT: &str = "chat-key";
+
+/// What the keymap made of a key the chat page handed over, sent back to the page that sent it.
+///
+/// The page keeps the doing; only the deciding moved. Which list a [`ChatKey::ListChoose`] lands
+/// in, and which row of it, is derived from the draft text — which lives in the browser's own
+/// `<textarea>` and changes on every keystroke. Shipping that to the host and back would make the
+/// answer one character stale, so the verb travels instead, in the direction that already holds
+/// the state.
+///
+/// This is why the page no longer names a key anywhere: `Enter` is four lines in the keymap, each
+/// carrying the context it applies in, rather than four branches in a `keydown`.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ChatKey {
+    /// Highlight the next row of whichever list is open.
+    ListNext,
+    ListPrevious,
+    /// Commit the highlighted row: answer the approval, answer the question, or take the match.
+    ListChoose,
+    /// Recall an earlier prompt into the draft.
+    HistoryOlder,
+    HistoryNewer,
+    Submit,
+    /// Close the open picker, dropping the `@`-mention or the draft that opened it.
+    DismissSelector,
+    /// Send everything queued, and clear a draft nothing is waiting on.
+    Interrupt,
+    /// Stop the running turn.
+    Cancel,
+}

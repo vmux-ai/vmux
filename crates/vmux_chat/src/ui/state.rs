@@ -24,7 +24,7 @@ use crate::event::{
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
-    resume_menu_state, selector_mode, should_fetch_resume,
+    resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
 };
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
@@ -652,6 +652,27 @@ impl Chat {
         } else {
             let _ = send(&ChatEscape);
         }
+    }
+
+    /// Send everything queued now, and drop a draft nothing is waiting on.
+    ///
+    /// The draft only goes when the page is idle: clearing it mid-turn would throw away what was
+    /// typed while waiting, which is the whole reason for typing it there.
+    pub fn interrupt(&self) {
+        let _ = send(&ChatEscape);
+        let mut draft = self.composer.draft;
+        if should_clear_draft_on_escape(
+            self.streaming(),
+            self.queue.queued.peek().is_empty(),
+            draft.peek().is_empty(),
+        ) {
+            draft.set(String::new());
+        }
+    }
+
+    /// Stop the running turn, leaving the queue behind it alone.
+    pub fn cancel(&self) {
+        let _ = send(&ChatCancel);
     }
 
     /// Run a selected vmux slash command. `resume` opens the session picker; `cli`/`acp` hand the

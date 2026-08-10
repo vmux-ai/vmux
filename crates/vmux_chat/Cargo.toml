@@ -31,10 +31,13 @@ vmux_wire = { path = "../vmux_wire" }
 tokio = { workspace = true, features = ["time"] }
 
 # MatrixRain is a canvas animation, so the install backdrop it paints exists only on the CEF host;
-# every other target renders nothing and does without the crate.
+# every other target renders nothing and does without the crate. The keyboard seam is the same
+# shape: only a webview has a host keymap to hand a stroke to, so `vmux_core`'s wire types for it
+# are needed here and nowhere else.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
+vmux_core = { path = "../vmux_core" }
 vmux_terminal = { path = "../vmux_terminal" }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
