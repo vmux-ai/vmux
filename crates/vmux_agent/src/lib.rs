@@ -6,7 +6,7 @@
 pub mod event;
 
 #[cfg(frontend)]
-pub mod agents_page;
+pub mod page;
 #[cfg(frontend)]
 pub mod ui;
 pub mod vibe;
