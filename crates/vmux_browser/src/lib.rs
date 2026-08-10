@@ -40,8 +40,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, BrowserNavigationCommand, BrowserViewCommand,
-    LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands, event::CommandBarActionEvent,
-    open::OpenCommand,
+    LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
 };
 use vmux_core::{
     CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenError,
@@ -128,10 +127,13 @@ impl Plugin for BrowserPlugin {
             extension_registrations,
         )
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
-        if crate::extensions::broker::extension_conformance_enabled() {
-            app.init_resource::<crate::extensions::broker::ConformanceWakeTimer>();
-        }
-        app.add_plugins(extensions::ExtensionsPlugin);
+        app.add_plugins((
+            extensions::ExtensionsPlugin,
+            extensions::bridge_page::ExtensionBridgePagePlugin,
+            extensions::broker::ExtensionBrokerPlugin,
+            extensions::project::ExtensionProjectPlugin,
+            extensions::windows::ExtensionWindowsPlugin,
+        ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
             manifests
@@ -146,59 +148,6 @@ impl Plugin for BrowserPlugin {
                 prepared_extensions,
             ))
             .insert_resource(extension_bridge)
-            .init_resource::<crate::extensions::bridge_page::ExtensionBridgeLifecycle>()
-            .init_resource::<crate::extensions::bridge_page::ExtensionInfrastructureEntities>()
-            .init_resource::<crate::extensions::broker::BridgeSubscriptions>()
-            .init_resource::<crate::extensions::broker::BridgeResponseCache>()
-            .init_resource::<crate::extensions::broker::PendingBridgeEvents>()
-            .init_resource::<crate::extensions::model::ChromeModel>()
-            .init_resource::<crate::extensions::model::ChromeStableIds>()
-            .init_resource::<crate::extensions::windows::ExtensionWindows>()
-            .add_message::<crate::extensions::model::ChromeModelEvent>()
-            .add_message::<crate::extensions::windows::CloseExtensionWindowRequest>()
-            .add_message::<crate::extensions::windows::UpdateHostWindowRequest>()
-            .add_systems(
-                Update,
-                (
-                    crate::extensions::bridge_page::stop_extension_bridge_pages,
-                    crate::extensions::bridge_page::spawn_extension_bridge_pages,
-                )
-                    .chain()
-                    .before(CefSystems::CreateAndResize),
-            )
-            .add_systems(
-                Update,
-                crate::extensions::broker::drain_bridge_requests
-                    .after(crate::extensions::windows::sync_extension_windows),
-            )
-            .add_systems(
-                Update,
-                crate::extensions::windows::sync_extension_windows
-                    .after(crate::extensions::project::rebuild_chrome_model),
-            )
-            .add_systems(
-                Update,
-                (
-                    crate::extensions::windows::route_close_extension_windows,
-                    crate::extensions::windows::apply_host_window_updates,
-                )
-                    .after(crate::extensions::broker::drain_bridge_requests),
-            )
-            .add_systems(
-                Update,
-                crate::extensions::project::rebuild_chrome_model
-                    .after(vmux_layout::apply_cef_state_from_webview)
-                    .after(vmux_layout::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                crate::extensions::broker::forward_chrome_model_events
-                    .after(crate::extensions::project::rebuild_chrome_model),
-            )
-            .add_systems(
-                Update,
-                crate::extensions::broker::fire_conformance_wake_timer,
-            )
             .add_message::<bevy_cef_core::prelude::WebviewCommittedNavigationEvent>()
             .add_message::<WebviewLoadCompleted>()
             .add_message::<PageOpenRequest>()
@@ -342,9 +291,7 @@ impl Plugin for BrowserPlugin {
                 )
                     .chain(),
             )
-            .init_resource::<HostFocusIntent>()
             .init_resource::<LayoutFrameRateBurst>()
-            .init_resource::<PendingNavSnapshots>()
             .init_resource::<RecentBrowserInteraction>()
             .init_resource::<HostSpawnRegistry>()
             .add_systems(
@@ -352,33 +299,11 @@ impl Plugin for BrowserPlugin {
                 log_command_bar_keyboard_input.after(bevy_cef::prelude::CefKeyboardInputSet),
             )
             .add_systems(Update, track_browser_interaction)
-            .add_systems(
-                PostUpdate,
-                (
-                    host_focus::compute_host_focus_intent,
-                    host_focus::apply_windowed_host_focus,
-                )
-                    .chain()
-                    // Must run after the active windowed page is shown + raised, otherwise
-                    // set_focus lands on a hidden/back view and never sticks.
-                    .after(sync_windowed_frames)
-                    .after(sync_windowed_command_bar),
-            );
-
-        app.add_systems(
-            Update,
-            (
-                snapshot::drive_pending_nav_snapshots,
-                scroll::run_scrolls,
-                snapshot::start_snapshots,
-                snapshot::shape_snapshot_results,
-            )
-                .chain()
-                .after(WriteAppCommands),
-        );
-
-        #[cfg(target_os = "macos")]
-        app.add_systems(Last, host_focus_native::apply_winit_host_focus);
+            .add_plugins((
+                host_focus::HostFocusPlugin,
+                snapshot::SnapshotPlugin,
+                scroll::ScrollPlugin,
+            ));
     }
 }
 

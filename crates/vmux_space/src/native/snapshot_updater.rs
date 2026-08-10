@@ -5,7 +5,19 @@ use vmux_layout::space::{ActiveSpaceId, Space, SpaceId};
 
 use crate::event::SPACES_PAGE_URL;
 
-pub fn update_spaces_snapshot(
+/// Publishes the space entries the command bar searches over.
+pub struct SpaceSnapshotPlugin;
+
+impl Plugin for SpaceSnapshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            update_spaces_snapshot.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+        );
+    }
+}
+
+fn update_spaces_snapshot(
     spaces: Query<(&SpaceId, &Name, Option<&Order>), With<Space>>,
     active_id: Res<ActiveSpaceId>,
     active_name: Query<&Name, (With<Space>, With<vmux_core::Active>)>,

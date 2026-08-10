@@ -12,6 +12,23 @@ use vmux_command::AppCommand;
 
 use crate::shortcut::{KeyCombo, Keymap, Modifiers};
 
+/// Installs the macOS NSEvent monitor that sees keys winit never delivers, and drains what it
+/// captured into app commands. Installation reads the keymap `init_shortcuts` builds.
+pub(crate) struct NativeKeyboardPlugin;
+
+impl Plugin for NativeKeyboardPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            install_native_key_monitor.after(crate::shortcut::init_shortcuts),
+        )
+        .add_systems(
+            Update,
+            process_monitored_keys.in_set(vmux_command::WriteAppCommands),
+        );
+    }
+}
+
 static SHORTCUT_MAP: LazyLock<Mutex<Option<Keymap>>> = LazyLock::new(|| Mutex::new(None));
 static PENDING_PREFIX: LazyLock<Mutex<Option<(KeyCombo, Instant)>>> =
     LazyLock::new(|| Mutex::new(None));
@@ -246,7 +263,7 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
     }
 }
 
-pub(crate) fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let Some(proxy) = proxy else {
         return;
     };
@@ -256,7 +273,7 @@ pub(crate) fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper
     });
 }
 
-pub(crate) fn process_monitored_keys(
+fn process_monitored_keys(
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
 ) {

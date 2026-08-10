@@ -14,6 +14,26 @@ use vmux_layout::scene::InteractionMode;
 use vmux_layout::{cef::LayoutCef, window::Modal};
 
 use super::RenderFrameDemand;
+
+/// The macOS half of [`super::RuntimePlugin`]: installs the AppKit monitors winit does not own, and gates rendering on demand.
+pub(super) struct RuntimePlatformPlugin;
+
+impl Plugin for RuntimePlatformPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, activate_app_during_boot)
+            .add_systems(Update, grab_key_window_on_pane_hover)
+            .add_systems(Last, sync_render_frame_demand)
+            .add_systems(
+                Startup,
+                (
+                    install_native_mouse_wake_monitor,
+                    install_live_resize_monitor,
+                    activate_primary_window_on_startup,
+                ),
+            );
+    }
+}
+
 use super::native::{
     NativeWindowFrame, NativeWindowResizeDrag, native_resize_edges, native_scroll_should_wake,
     render_frame_should_run, resized_native_window_frame, windowed_pointer_inside_after_event,
@@ -36,7 +56,7 @@ static LIVE_RESIZE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static HOVER_OVER_PANE: AtomicBool = AtomicBool::new(false);
 static NATIVE_WINDOWED_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 
-pub(super) fn activate_primary_window_on_startup(
+fn activate_primary_window_on_startup(
     primary_window: Query<(Entity, &Window), With<bevy::window::PrimaryWindow>>,
 ) {
     let Ok((window_entity, window)) = primary_window.single() else {
@@ -48,7 +68,7 @@ pub(super) fn activate_primary_window_on_startup(
     activate_native_window(window_entity);
 }
 
-pub(super) fn grab_key_window_on_pane_hover(
+fn grab_key_window_on_pane_hover(
     intent: Res<vmux_browser::HostFocusIntent>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     panes: Query<
@@ -179,7 +199,7 @@ fn activate_app() -> bool {
 /// our activation request. Start asking the moment boot begins so that latency overlaps the splash
 /// wait — by the time the window reveals the app is already active and becoming key is instant,
 /// instead of the user watching the UI for a second before keys register.
-pub(super) fn activate_app_during_boot(
+fn activate_app_during_boot(
     mut confirmed: Local<bool>,
     mut started_at: Local<Option<Instant>>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
@@ -330,7 +350,7 @@ fn update_native_window_resize(event: &objc2_app_kit::NSEvent, drag: NativeWindo
     );
 }
 
-pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 
     let Some(proxy) = proxy else {
@@ -582,7 +602,7 @@ pub(super) fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxy
 /// Track macOS live-resize so [`super::foreground_winit_settings`] can pace the loop at ~60Hz
 /// during the drag. `NSWindow` posts these notifications once per drag; the blocks set
 /// [`IN_LIVE_RESIZE`] and wake the loop so the reactive mode switches immediately.
-pub(super) fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_live_resize_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     use objc2_app_kit::{
         NSWindowDidEndLiveResizeNotification, NSWindowWillStartLiveResizeNotification,
     };
@@ -672,7 +692,7 @@ fn native_pointer_button(
     }
 }
 
-pub(super) fn sync_render_frame_demand(
+fn sync_render_frame_demand(
     mode: Res<InteractionMode>,
     transition: Option<Res<vmux_layout::scene::ModeTransition>>,
     pages: Query<

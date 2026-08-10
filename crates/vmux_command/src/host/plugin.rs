@@ -3,11 +3,7 @@ use bevy::prelude::*;
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
 use crate::page_key::PageKeyPlugin;
-use crate::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarContributions, CommandBarPagesSnapshot,
-    CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, CommandBarWorkSnapshot,
-    WriteCommandBarSnapshots, update_pages_snapshot,
-};
+use crate::snapshot::{CommandBarSnapshotPlugin, WriteCommandBarSnapshots};
 use vmux_core::team::{Profile, User};
 
 /// Wires the command protocol: the command messages, the command-bar snapshot resources,
@@ -20,20 +16,13 @@ pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PageKeyPlugin)
+        app.add_plugins((PageKeyPlugin, CommandBarSnapshotPlugin))
             .add_message::<AppCommand>()
             .add_message::<CommandIssued>()
-            .init_resource::<CommandBarAgentsSnapshot>()
-            .init_resource::<CommandBarContributions>()
-            .init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarTerminalsSnapshot>()
-            .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<CommandBarWorkSnapshot>()
             .configure_sets(
                 Update,
                 (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
             )
-            .add_systems(Startup, update_pages_snapshot)
             .add_systems(
                 Update,
                 log_app_commands

@@ -34,27 +34,17 @@ pub struct RuntimePlugin;
 
 impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<LifecycleEvent>()
+        app.add_plugins(platform::RuntimePlatformPlugin)
+            .add_message::<LifecycleEvent>()
             .init_resource::<RenderFrameDemand>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
-            .add_systems(Update, platform::activate_app_during_boot)
             .add_systems(Update, keep_awake_while_revealing)
             .add_systems(
                 Update,
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             )
-            .add_systems(Update, platform::grab_key_window_on_pane_hover)
-            .add_systems(Last, platform::sync_render_frame_demand)
-            .add_systems(Last, keep_awake_while_player_active)
-            .add_systems(
-                Startup,
-                (
-                    platform::install_native_mouse_wake_monitor,
-                    platform::install_live_resize_monitor,
-                    platform::activate_primary_window_on_startup,
-                ),
-            );
+            .add_systems(Last, keep_awake_while_player_active);
     }
 
     fn finish(&self, app: &mut App) {
@@ -601,17 +591,54 @@ mod tests {
         assert!(monitor.contains("vmux_browser::set_native_left_mouse_down(false)"));
     }
 
+    /// Every system the platform half of the runtime registers, by schedule. Asked of a real
+    /// `App` rather than read out of the source, so moving a system between plugins cannot
+    /// leave this passing while the system is no longer scheduled.
+    fn platform_systems(label: impl bevy::ecs::schedule::ScheduleLabel) -> Vec<String> {
+        use bevy::ecs::schedule::{NodeId, Schedules};
+
+        let mut app = App::new();
+        app.add_plugins(platform::RuntimePlatformPlugin);
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let Some(mut schedule) = schedules.remove(label) else {
+            return Vec::new();
+        };
+        schedule.initialize(app.world_mut()).unwrap();
+        let graph = schedule.graph();
+
+        let mut names = Vec::new();
+        for (parent, child) in graph.hierarchy().graph().all_edges() {
+            let (NodeId::Set(set), NodeId::System(_)) = (parent, child) else {
+                continue;
+            };
+            let Some(set) = graph.system_sets.get(set) else {
+                continue;
+            };
+            let rendered = format!("{set:?}");
+            if let Some(path) = rendered.strip_prefix("SystemTypeSet:")
+                && let Some(name) = path.rsplit("::").next()
+            {
+                names.push(name.to_string());
+            }
+        }
+        names
+    }
+
     #[test]
-    fn startup_activates_primary_window_on_macos() {
-        let plugin_build = include_str!("runtime.rs")
-            .split("impl Plugin for RuntimePlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
+    fn startup_installs_the_mouse_wake_monitor_and_activates_the_window() {
+        let startup = platform_systems(Startup);
+        assert!(
+            startup.contains(&"install_native_mouse_wake_monitor".to_string()),
+            "startup systems: {startup:?}"
+        );
+        assert!(
+            startup.contains(&"activate_primary_window_on_startup".to_string()),
+            "startup systems: {startup:?}"
+        );
+    }
 
-        assert!(plugin_build.contains("install_native_mouse_wake_monitor"));
-        assert!(plugin_build.contains("activate_primary_window_on_startup"));
-
+    #[test]
+    fn primary_window_activation_takes_the_key_window() {
         let native = include_str!("runtime/macos.rs");
         assert!(native.contains("activateIgnoringOtherApps"));
         assert!(native.contains("makeKeyAndOrderFront"));
@@ -644,12 +671,11 @@ mod tests {
 
     #[test]
     fn app_activation_starts_during_boot() {
-        let plugin_build = include_str!("runtime.rs")
-            .split("impl Plugin for RuntimePlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
-        assert!(plugin_build.contains("activate_app_during_boot"));
+        let update = platform_systems(Update);
+        assert!(
+            update.contains(&"activate_app_during_boot".to_string()),
+            "update systems: {update:?}"
+        );
 
         let boot = include_str!("runtime/macos.rs")
             .split("fn activate_app_during_boot")

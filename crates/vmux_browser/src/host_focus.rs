@@ -11,6 +11,27 @@ use vmux_terminal::Terminal;
 
 use crate::Browser;
 
+/// Decides which surface owns keyboard first-responder for the active page, and hands it over.
+///
+/// Applying the intent runs after the active windowed page has been shown and raised
+/// (`sync_windowed_frames`, `sync_windowed_command_bar`); otherwise `set_focus` lands on a
+/// hidden or back view and never sticks.
+pub(crate) struct HostFocusPlugin;
+
+impl Plugin for HostFocusPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<HostFocusIntent>().add_systems(
+            PostUpdate,
+            (compute_host_focus_intent, apply_windowed_host_focus)
+                .chain()
+                .after(crate::sync_windowed_frames)
+                .after(crate::sync_windowed_command_bar),
+        );
+        #[cfg(target_os = "macos")]
+        app.add_plugins(crate::host_focus_native::HostFocusNativePlugin);
+    }
+}
+
 /// Which surface should own keyboard first-responder for the active page in User (browse) mode.
 ///
 /// Windowed web pages need their native `NSView` to be first-responder to type. Terminals are OSR

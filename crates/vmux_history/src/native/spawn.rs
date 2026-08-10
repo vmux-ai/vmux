@@ -4,6 +4,17 @@ use vmux_core::{
     now_millis,
 };
 
+/// Records visits: browser navigations the webview commits, and `file://` opens other
+/// domains ask for.
+pub struct HistorySpawnPlugin;
+
+impl Plugin for HistorySpawnPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_message::<vmux_core::event::RecordVisitRequest>()
+            .add_systems(Update, (spawn_visits, record_requested_visits).chain());
+    }
+}
+
 pub fn find_or_create_url(world: &mut World, url: &str) -> Entity {
     let mut existing = None;
     let mut query = world.query::<(Entity, &PageMetadata)>();
@@ -79,7 +90,7 @@ mod tests {
         assert!(app.world().get::<Url>(e).is_some());
     }
 }
-pub fn spawn_visits(
+fn spawn_visits(
     mut events: bevy::ecs::message::MessageReader<
         bevy_cef_core::prelude::WebviewCommittedNavigationEvent,
     >,
@@ -144,7 +155,7 @@ pub(crate) fn record_visit(
 
 /// Record visits requested by other domains (the editor's `file://` opens) into the
 /// same history store, so file opens persist and rank like browser navigations.
-pub fn record_requested_visits(
+pub(crate) fn record_requested_visits(
     mut reader: bevy::ecs::message::MessageReader<vmux_core::event::RecordVisitRequest>,
     mut commands: Commands,
     mut urls: Query<(Entity, &PageMetadata, &mut VisitCount, &mut LastVisitedAt), With<Url>>,

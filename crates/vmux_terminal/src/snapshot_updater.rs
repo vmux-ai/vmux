@@ -4,7 +4,19 @@ use vmux_layout::event::TERMINAL_PAGE_URL;
 
 use crate::pid::PidToEntity;
 
-pub fn update_terminals_snapshot(
+/// Publishes the terminal entries the command bar searches over.
+pub struct TerminalSnapshotPlugin;
+
+impl Plugin for TerminalSnapshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            update_terminals_snapshot.in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
+        );
+    }
+}
+
+fn update_terminals_snapshot(
     pid_map: Option<Res<PidToEntity>>,
     mut snapshot: ResMut<CommandBarTerminalsSnapshot>,
 ) {

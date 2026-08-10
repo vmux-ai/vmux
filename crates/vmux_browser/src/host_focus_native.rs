@@ -3,7 +3,17 @@ use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-pub(crate) fn apply_winit_host_focus(
+/// The macOS half of [`crate::host_focus::HostFocusPlugin`]: hands first-responder back to the
+/// winit host window when the intent says the host should own the keyboard.
+pub(crate) struct HostFocusNativePlugin;
+
+impl Plugin for HostFocusNativePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Last, apply_winit_host_focus);
+    }
+}
+
+fn apply_winit_host_focus(
     _non_send: NonSendMarker,
     intent: Res<HostFocusIntent>,
     primary: Query<Entity, With<PrimaryWindow>>,

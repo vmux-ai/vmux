@@ -12,6 +12,34 @@ pub use vmux_layout::settings::{
     FocusRingSettings, PaneSettings, SideSheetSettings, WindowSettings,
 };
 
+/// Loads settings from disk before the window opens, then keeps the file and the in-memory
+/// [`AppSettings`] in step: debounced saves out, watcher-driven reloads back in.
+pub struct SettingsRuntimePlugin;
+
+impl Plugin for SettingsRuntimePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LastSelfWriteHash>()
+            .init_resource::<SettingsSaveDebounce>()
+            .add_message::<SettingsWriteRequest>()
+            .add_message::<SettingsSaveRequest>()
+            .configure_sets(
+                Startup,
+                SettingsLoadSet.before(vmux_layout::LayoutStartupSet::Window),
+            )
+            .add_systems(Startup, load_settings.in_set(SettingsLoadSet))
+            .add_systems(
+                Update,
+                (
+                    request_settings_save,
+                    flush_settings_save,
+                    persist_settings_to_disk,
+                    reload_settings_on_change,
+                )
+                    .chain(),
+            );
+    }
+}
+
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SettingsLoadSet;
 
@@ -880,7 +908,7 @@ pub fn load_settings(mut commands: Commands) {
     }
 }
 
-pub(crate) fn reload_settings_on_change(
+fn reload_settings_on_change(
     watcher: Option<Res<SettingsWatcher>>,
     mut settings: ResMut<AppSettings>,
     mut layout_settings: ResMut<LayoutSettings>,
@@ -1328,7 +1356,7 @@ pub(crate) struct SettingsSaveDebounce {
     pub due: Option<Instant>,
 }
 
-pub(crate) fn request_settings_save(
+fn request_settings_save(
     mut reader: MessageReader<SettingsSaveRequest>,
     mut debounce: ResMut<SettingsSaveDebounce>,
 ) {
@@ -1337,7 +1365,7 @@ pub(crate) fn request_settings_save(
     }
 }
 
-pub(crate) fn flush_settings_save(
+fn flush_settings_save(
     mut debounce: ResMut<SettingsSaveDebounce>,
     settings: Res<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
@@ -1357,7 +1385,7 @@ pub(crate) fn flush_settings_save(
     }
 }
 
-pub(crate) fn persist_settings_to_disk(
+fn persist_settings_to_disk(
     mut reader: MessageReader<SettingsWriteRequest>,
     watcher: Option<Res<SettingsWatcher>>,
     mut last_hash: ResMut<LastSelfWriteHash>,

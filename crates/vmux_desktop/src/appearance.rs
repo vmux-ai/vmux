@@ -1,6 +1,15 @@
 use bevy::prelude::*;
 use vmux_setting::{ResolvedScheme, SystemAppearance};
 
+/// Seeds the OS light/dark appearance once at startup, before anything resolves Device mode.
+pub(crate) struct DesktopAppearancePlugin;
+
+impl Plugin for DesktopAppearancePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, seed_system_appearance);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn read_system_appearance() -> Option<ResolvedScheme> {
     use objc2_app_kit::NSApp;
@@ -25,7 +34,7 @@ fn read_system_appearance() -> Option<ResolvedScheme> {
 ///
 /// Takes [`NonSendMarker`] so Bevy pins it to the main thread — `read_system_appearance`
 /// needs `MainThreadMarker`, which is `None` on a worker thread.
-pub(crate) fn seed_system_appearance(
+fn seed_system_appearance(
     _non_send: bevy::ecs::system::NonSendMarker,
     mut system: ResMut<SystemAppearance>,
 ) {

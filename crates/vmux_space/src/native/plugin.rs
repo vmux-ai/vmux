@@ -55,23 +55,19 @@ impl Plugin for SpacePlugin {
                 Update,
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
             )
-            .add_plugins(WarmPagePlugin::<Spaces>::default())
-            .add_plugins(super::key::SpaceKeyPlugin)
-            .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&[
-                "spaces", "layout",
-            ]))
+            .add_plugins((
+                WarmPagePlugin::<Spaces>::default(),
+                super::key::SpaceKeyPlugin,
+                crate::snapshot_updater::SpaceSnapshotPlugin,
+                BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&["spaces", "layout"]),
+            ))
             .add_observer(on_space_command)
             .add_observer(reset_spaces_sent_marker_on_page_ready)
             .add_systems(
                 Update,
                 handle_open_in_new_space.in_set(vmux_command::ReadAppCommands),
             )
-            .add_systems(Update, broadcast_spaces_to_views)
-            .add_systems(
-                Update,
-                crate::snapshot_updater::update_spaces_snapshot
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            );
+            .add_systems(Update, broadcast_spaces_to_views);
     }
 }
 

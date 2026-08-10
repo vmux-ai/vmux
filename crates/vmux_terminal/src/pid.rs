@@ -3,13 +3,23 @@ use std::collections::HashMap;
 
 pub use vmux_core::focus_pane_entity;
 
+/// Keeps [`PidToEntity`] in step with the [`Pid`] components on terminal entities.
+pub struct PidPlugin;
+
+impl Plugin for PidPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PidToEntity>()
+            .add_systems(Update, (track_pid_inserts, track_pid_removals).chain());
+    }
+}
+
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pid(pub u32);
 
 #[derive(Resource, Default, Debug)]
 pub struct PidToEntity(pub HashMap<u32, Entity>);
 
-pub fn track_pid_inserts(
+pub(crate) fn track_pid_inserts(
     mut map: ResMut<PidToEntity>,
     inserted: Query<(Entity, &Pid), Added<Pid>>,
 ) {
@@ -18,7 +28,7 @@ pub fn track_pid_inserts(
     }
 }
 
-pub fn track_pid_removals(
+fn track_pid_removals(
     mut map: ResMut<PidToEntity>,
     mut removed: RemovedComponents<Pid>,
     survivors: Query<&Pid>,
@@ -38,8 +48,7 @@ mod tests {
 
     fn make_app() -> App {
         let mut app = App::new();
-        app.init_resource::<PidToEntity>()
-            .add_systems(Update, (track_pid_inserts, track_pid_removals).chain());
+        app.add_plugins(PidPlugin);
         app
     }
 

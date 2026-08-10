@@ -13,10 +13,43 @@ use crate::event::{
     HistoryOpenRequest, HistoryQueryRequest, HistoryQueryResponse, HistorySuggestionsRequest,
     HistorySuggestionsResponse,
 };
-use bevy_cef::prelude::{BinHostEmitEvent, BinReceive};
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 use vmux_core::{CreatedAt, LastVisitedAt, PageMetadata, Url, Visit, VisitCount, VisitedUrl};
 
-pub fn on_history_query_request(
+/// Answers the history page's queries, deletions and opens, and pushes the command bar its
+/// suggestions.
+pub struct HistoryQueryPlugin;
+
+impl Plugin for HistoryQueryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            BinEventEmitterPlugin::<(
+                HistoryQueryRequest,
+                HistoryDeleteRequest,
+                HistoryClearAllRequest,
+                HistoryOpenRequest,
+                HistoryChangedEvent,
+            )>::for_hosts(&["history"]),
+            BinEventEmitterPlugin::<(HistorySuggestionsRequest,)>::for_hosts(&[
+                "command-bar",
+                "start",
+                "layout",
+            ]),
+        ))
+        .add_message::<HistoryOpenIntent>()
+        .add_observer(on_history_query_request)
+        .add_observer(on_history_delete_request)
+        .add_observer(on_history_clear_all_request)
+        .add_observer(on_history_open_request)
+        .add_observer(on_history_suggestions_request)
+        .add_systems(
+            Update,
+            broadcast_history_changed.after(crate::spawn::record_requested_visits),
+        );
+    }
+}
+
+fn on_history_query_request(
     trigger: On<BinReceive<HistoryQueryRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     visits: Query<(&CreatedAt, &VisitedUrl), With<Visit>>,
@@ -106,7 +139,7 @@ pub fn build_entries(
     }
 }
 
-pub fn on_history_delete_request(
+fn on_history_delete_request(
     trigger: On<BinReceive<HistoryDeleteRequest>>,
     mut commands: Commands,
     visits: Query<(Entity, &VisitedUrl), With<Visit>>,
@@ -122,7 +155,7 @@ pub fn on_history_delete_request(
     }
 }
 
-pub fn on_history_clear_all_request(
+fn on_history_clear_all_request(
     _trigger: On<BinReceive<HistoryClearAllRequest>>,
     mut commands: Commands,
     urls: Query<Entity, With<Url>>,
@@ -142,7 +175,7 @@ pub struct HistoryOpenIntent {
     pub in_new_stack: bool,
 }
 
-pub fn on_history_open_request(
+fn on_history_open_request(
     trigger: On<BinReceive<HistoryOpenRequest>>,
     mut messages: ResMut<Messages<HistoryOpenIntent>>,
 ) {
@@ -153,7 +186,7 @@ pub fn on_history_open_request(
     });
 }
 
-pub fn broadcast_history_changed(
+fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
     webviews: Query<(Entity, &bevy_cef::prelude::WebviewSource)>,
     browsers: NonSend<bevy_cef_core::prelude::Browsers>,
@@ -180,7 +213,7 @@ pub fn broadcast_history_changed(
     }
 }
 
-pub fn on_history_suggestions_request(
+fn on_history_suggestions_request(
     trigger: On<BinReceive<HistorySuggestionsRequest>>,
     urls: Query<(Entity, &PageMetadata, &VisitCount, &LastVisitedAt), With<Url>>,
     mut commands: Commands,

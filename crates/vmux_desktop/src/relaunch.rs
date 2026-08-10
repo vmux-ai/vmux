@@ -2,6 +2,25 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinReceive, Receive};
 use vmux_layout::event::RestartRequestEvent;
 
+/// Restarts the app on request, from the debug, extensions and layout pages as well as from
+/// an installed update.
+pub(crate) struct RelaunchPlugin;
+
+impl Plugin for RelaunchPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            bevy_cef::prelude::BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(&[
+                "debug",
+                "extensions",
+                "layout",
+            ]),
+            bevy_cef::prelude::JsEmitEventPlugin::<PageRelaunchRequest>::default(),
+        ))
+        .add_observer(on_restart_request)
+        .add_observer(on_page_relaunch);
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct PageRelaunchRequest {
     channel: String,
@@ -59,17 +78,14 @@ fn relaunch_now(exit: &mut MessageWriter<AppExit>) {
     exit.write(AppExit::Success);
 }
 
-pub(crate) fn on_restart_request(
+fn on_restart_request(
     _trigger: On<BinReceive<RestartRequestEvent>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     relaunch_now(&mut exit);
 }
 
-pub(crate) fn on_page_relaunch(
-    trigger: On<Receive<PageRelaunchRequest>>,
-    mut exit: MessageWriter<AppExit>,
-) {
+fn on_page_relaunch(trigger: On<Receive<PageRelaunchRequest>>, mut exit: MessageWriter<AppExit>) {
     if trigger.payload.channel == "vmux-relaunch" {
         relaunch_now(&mut exit);
     }

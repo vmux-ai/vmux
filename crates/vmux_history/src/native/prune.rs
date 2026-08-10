@@ -1,9 +1,23 @@
 use bevy::prelude::*;
 use vmux_core::{CreatedAt, LastVisitedAt, Url, Visit, VisitedUrl, now_millis};
 
+/// Drops visits and urls older than [`RETENTION_MS`], once at startup and hourly after.
+pub struct HistoryPrunePlugin;
+
+impl Plugin for HistoryPrunePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, prune_history).add_systems(
+            Update,
+            prune_history.run_if(bevy::time::common_conditions::on_timer(
+                std::time::Duration::from_secs(3600),
+            )),
+        );
+    }
+}
+
 pub const RETENTION_MS: i64 = 90 * 86_400_000;
 
-pub fn prune_history(
+fn prune_history(
     mut commands: Commands,
     visits: Query<(Entity, &CreatedAt, &VisitedUrl), With<Visit>>,
     urls: Query<(Entity, &LastVisitedAt), With<Url>>,

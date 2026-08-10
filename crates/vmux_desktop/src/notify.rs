@@ -1,8 +1,18 @@
 use bevy::prelude::*;
 use vmux_core::notify::OsNotify;
 
+/// Posts OS notifications, and asks the OS for permission to do so at startup.
+pub(crate) struct NotificationPlugin;
+
+impl Plugin for NotificationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, request_notification_auth)
+            .add_systems(Update, post_os_notifications);
+    }
+}
+
 #[cfg(target_os = "macos")]
-pub fn request_notification_auth() {
+fn request_notification_auth() {
     use block2::RcBlock;
     use objc2::runtime::Bool;
     use objc2_foundation::NSError;
@@ -29,7 +39,7 @@ fn current_center()
 }
 
 #[cfg(target_os = "macos")]
-pub fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
+fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
     let events: Vec<OsNotify> = reader.read().cloned().collect();
     if events.is_empty() {
         return;
@@ -92,9 +102,9 @@ fn osascript_notify(title: &str, body: &str) {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn request_notification_auth() {}
+fn request_notification_auth() {}
 
 #[cfg(not(target_os = "macos"))]
-pub fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
+fn post_os_notifications(mut reader: MessageReader<OsNotify>) {
     for _ in reader.read() {}
 }

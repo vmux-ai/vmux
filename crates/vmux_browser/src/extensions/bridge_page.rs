@@ -8,6 +8,23 @@ use std::collections::{HashMap, HashSet};
 use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
 use super::load::PreparedExtensions;
 
+/// Keeps one hidden transport webview alive per loaded extension, so an extension's
+/// background work has a page to run in. Spawns before CEF creates and resizes webviews.
+pub(crate) struct ExtensionBridgePagePlugin;
+
+impl Plugin for ExtensionBridgePagePlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ExtensionBridgeLifecycle>()
+            .init_resource::<ExtensionInfrastructureEntities>()
+            .add_systems(
+                Update,
+                (stop_extension_bridge_pages, spawn_extension_bridge_pages)
+                    .chain()
+                    .before(bevy_cef::prelude::CefSystems::CreateAndResize),
+            );
+    }
+}
+
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct ExtensionBridgeWebview {
     pub extension_id: String,

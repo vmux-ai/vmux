@@ -15,6 +15,24 @@ use super::model::{
 };
 use crate::extensions::bridge_page::ExtensionBridgeWebview;
 
+/// Projects the live layout into the [`ChromeModel`] extensions see, after the webview state
+/// and the focus set for the frame have both settled.
+pub(crate) struct ExtensionProjectPlugin;
+
+impl Plugin for ExtensionProjectPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ChromeModel>()
+            .init_resource::<ChromeStableIds>()
+            .add_message::<ChromeModelEvent>()
+            .add_systems(
+                Update,
+                rebuild_chrome_model
+                    .after(vmux_layout::apply_cef_state_from_webview)
+                    .after(vmux_layout::stack::ComputeFocusSet),
+            );
+    }
+}
+
 struct WindowCandidate {
     entity: Entity,
     primary: bool,

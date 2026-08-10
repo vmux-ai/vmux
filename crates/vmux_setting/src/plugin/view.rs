@@ -19,6 +19,41 @@ use crate::event::{
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
 
+/// Wires the settings webview: the warm page, the schema and value broadcasts it renders
+/// from, and the commands it sends back.
+pub struct SettingsViewPlugin;
+
+impl Plugin for SettingsViewPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<CurrentUpdateCheckStatus>()
+            .add_message::<CheckForUpdatesRequest>()
+            .add_plugins((
+                vmux_layout::warm_page::WarmPagePlugin::<Settings>::default(),
+                BinEventEmitterPlugin::<(SettingsCommandEvent, CheckForUpdatesEvent)>::for_hosts(
+                    &["settings"],
+                ),
+            ))
+            .add_observer(on_settings_command)
+            .add_observer(on_check_for_updates)
+            .add_observer(reset_sent_markers_on_page_ready)
+            .add_systems(
+                Update,
+                (
+                    localize_settings_metadata,
+                    broadcast_schema_to_views,
+                    broadcast_settings_to_views,
+                    broadcast_update_status_to_views,
+                ),
+            )
+            .add_systems(
+                Update,
+                handle_open_settings_command
+                    .in_set(vmux_command::ReadAppCommands)
+                    .after(vmux_command::WriteAppCommands),
+            );
+    }
+}
+
 #[derive(Component)]
 pub struct Settings;
 
@@ -78,7 +113,7 @@ impl WarmPage for Settings {
     }
 }
 
-pub(crate) fn reset_sent_markers_on_page_ready(
+fn reset_sent_markers_on_page_ready(
     trigger: On<BinReceive<PageReady>>,
     views: Query<Entity, With<Settings>>,
     mut commands: Commands,
@@ -103,7 +138,7 @@ pub(crate) struct SettingsSchemaSent;
 #[derive(Component)]
 pub(crate) struct UpdateCheckStatusSent;
 
-pub(crate) fn localize_settings_metadata(
+fn localize_settings_metadata(
     settings: Res<AppSettings>,
     mut views: Query<&mut PageMetadata, With<Settings>>,
 ) {
@@ -116,7 +151,7 @@ pub(crate) fn localize_settings_metadata(
     }
 }
 
-pub(crate) fn broadcast_settings_to_views(
+fn broadcast_settings_to_views(
     settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsListSent>)>,
     sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsListSent>)>,
@@ -151,7 +186,7 @@ pub(crate) fn broadcast_settings_to_views(
     }
 }
 
-pub(crate) fn broadcast_schema_to_views(
+fn broadcast_schema_to_views(
     settings: Res<AppSettings>,
     pending: Query<Entity, (With<Settings>, With<PageReady>, Without<SettingsSchemaSent>)>,
     sent: Query<Entity, (With<Settings>, With<PageReady>, With<SettingsSchemaSent>)>,
@@ -190,7 +225,7 @@ pub(crate) fn broadcast_schema_to_views(
     }
 }
 
-pub(crate) fn broadcast_update_status_to_views(
+fn broadcast_update_status_to_views(
     status: Res<CurrentUpdateCheckStatus>,
     pending: Query<
         Entity,
@@ -232,7 +267,7 @@ pub(crate) fn broadcast_update_status_to_views(
     }
 }
 
-pub(crate) fn on_settings_command(
+fn on_settings_command(
     trigger: On<BinReceive<SettingsCommandEvent>>,
     mut settings: ResMut<AppSettings>,
     mut writes: MessageWriter<SettingsWriteRequest>,
@@ -253,14 +288,14 @@ pub(crate) fn on_settings_command(
     }
 }
 
-pub(crate) fn on_check_for_updates(
+fn on_check_for_updates(
     _trigger: On<BinReceive<CheckForUpdatesEvent>>,
     mut requests: MessageWriter<CheckForUpdatesRequest>,
 ) {
     requests.write(CheckForUpdatesRequest);
 }
 
-pub(crate) fn handle_open_settings_command(
+fn handle_open_settings_command(
     mut reader: MessageReader<AppCommand>,
     focus: Option<Res<FocusedStack>>,
     panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,

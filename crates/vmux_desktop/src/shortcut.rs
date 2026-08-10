@@ -5,6 +5,10 @@ use vmux_command::WriteAppCommands;
 pub(crate) use vmux_command::shortcut::{ChordState, KeyCombo, Keymap, Modifiers};
 use vmux_setting::{AppSettings, load_settings};
 
+/// Turns key input into app commands: builds the keymap from settings, then matches
+/// combos and chords against it.
+pub struct ShortcutPlugin;
+
 impl Plugin for ShortcutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::key_claim::KeyClaimPlugin)
@@ -12,24 +16,14 @@ impl Plugin for ShortcutPlugin {
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
 
         #[cfg(target_os = "macos")]
-        app.add_systems(
-            Startup,
-            crate::native_keyboard::install_native_key_monitor.after(init_shortcuts),
-        )
-        .add_systems(
-            Startup,
-            crate::event_tap::install_event_tap.after(init_shortcuts),
-        )
-        .add_systems(
-            Update,
-            crate::native_keyboard::process_monitored_keys.in_set(WriteAppCommands),
-        );
+        app.add_plugins((
+            crate::native_keyboard::NativeKeyboardPlugin,
+            crate::event_tap::EventTapPlugin,
+        ));
     }
 }
 
-pub struct ShortcutPlugin;
-
-fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
+pub(crate) fn init_shortcuts(mut commands: Commands, settings: Option<Res<AppSettings>>) {
     let map = match settings {
         Some(settings) => settings.shortcuts.keymap(),
         None => Keymap::defaults(),

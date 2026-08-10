@@ -1,7 +1,50 @@
 use bevy::prelude::*;
 
+/// Stands in for [`crate::screenshot::ScreenshotPlugin`] when screenshots are compiled out,
+/// so requests are refused rather than silently dropped.
 #[cfg(not(feature = "screenshots"))]
-pub(crate) fn reject_screenshots(
+pub(crate) struct ScreenshotsDisabledPlugin;
+
+#[cfg(not(feature = "screenshots"))]
+impl Plugin for ScreenshotsDisabledPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            reject_screenshots.after(vmux_command::WriteAppCommands),
+        );
+    }
+}
+
+/// Stands in for [`crate::recording::RecordingPlugin`] when recording is compiled out, so
+/// start and stop requests are refused rather than silently dropped.
+#[cfg(not(feature = "recording"))]
+pub(crate) struct RecordingDisabledPlugin;
+
+#[cfg(not(feature = "recording"))]
+impl Plugin for RecordingDisabledPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (reject_recording_starts, reject_recording_stops).after(vmux_command::WriteAppCommands),
+        );
+    }
+}
+
+/// Stands in for the updater when it is compiled out: reports the check as unavailable
+/// instead of leaving it pending forever.
+#[cfg(not(feature = "updater"))]
+pub(crate) struct UpdaterDisabledPlugin;
+
+#[cfg(not(feature = "updater"))]
+impl Plugin for UpdaterDisabledPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, mark_updater_unavailable)
+            .add_systems(Update, reject_update_checks);
+    }
+}
+
+#[cfg(not(feature = "screenshots"))]
+fn reject_screenshots(
     mut requests: MessageReader<vmux_agent::ScreenshotRequest>,
     mut responses: MessageWriter<vmux_agent::ScreenshotResponse>,
 ) {
@@ -14,7 +57,7 @@ pub(crate) fn reject_screenshots(
 }
 
 #[cfg(not(feature = "recording"))]
-pub(crate) fn reject_recording_starts(
+fn reject_recording_starts(
     mut requests: MessageReader<vmux_agent::RecordStartRequest>,
     mut responses: MessageWriter<vmux_agent::RecordStartResponse>,
 ) {
@@ -27,7 +70,7 @@ pub(crate) fn reject_recording_starts(
 }
 
 #[cfg(not(feature = "recording"))]
-pub(crate) fn reject_recording_stops(
+fn reject_recording_stops(
     mut requests: MessageReader<vmux_agent::RecordStopRequest>,
     mut responses: MessageWriter<vmux_agent::RecordStopResponse>,
 ) {
@@ -40,14 +83,12 @@ pub(crate) fn reject_recording_stops(
 }
 
 #[cfg(not(feature = "updater"))]
-pub(crate) fn mark_updater_unavailable(
-    mut status: ResMut<vmux_setting::event::CurrentUpdateCheckStatus>,
-) {
+fn mark_updater_unavailable(mut status: ResMut<vmux_setting::event::CurrentUpdateCheckStatus>) {
     status.0 = vmux_setting::event::UpdateCheckStatus::Unavailable;
 }
 
 #[cfg(not(feature = "updater"))]
-pub(crate) fn reject_update_checks(
+fn reject_update_checks(
     mut requests: MessageReader<vmux_setting::event::CheckForUpdatesRequest>,
     mut status: ResMut<vmux_setting::event::CurrentUpdateCheckStatus>,
 ) {

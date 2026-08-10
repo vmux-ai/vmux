@@ -55,11 +55,7 @@ impl Plugin for TerminalPlugin {
             .add_message::<TerminalFontSizeCommand>()
             .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
             .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
-            .init_resource::<pid::PidToEntity>()
-            .add_systems(
-                Update,
-                (pid::track_pid_inserts, pid::track_pid_removals).chain(),
-            );
+            .add_plugins(crate::pid::PidPlugin);
         let service_wake = service_wake_callback(app);
         ensure_service_started();
         app.insert_resource(ServiceConnectRetry::new());
@@ -108,12 +104,10 @@ impl Plugin for TerminalPlugin {
             .add_observer(on_term_link_open)
             .add_observer(on_restart_pty)
             .add_observer(on_terminal_removed)
-            .add_plugins(crate::processes_monitor::ProcessesMonitorPlugin)
-            .add_systems(
-                Update,
-                crate::snapshot_updater::update_terminals_snapshot
-                    .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            )
+            .add_plugins((
+                crate::processes_monitor::ProcessesMonitorPlugin,
+                crate::snapshot_updater::TerminalSnapshotPlugin,
+            ))
             .add_systems(
                 Update,
                 (

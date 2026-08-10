@@ -4,6 +4,25 @@ use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
 use vmux_core::page::PageManifest;
 
+/// Owns what the command bar searches over: the snapshot resources every domain writes into,
+/// and the page list built once from the registered manifests.
+///
+/// Where [`WriteCommandBarSnapshots`] sits relative to the command bus is
+/// [`crate::CommandPlugin`]'s to say, since that orders it against reads and writes.
+pub struct CommandBarSnapshotPlugin;
+
+impl Plugin for CommandBarSnapshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarContributions>()
+            .init_resource::<CommandBarSpacesSnapshot>()
+            .init_resource::<CommandBarTerminalsSnapshot>()
+            .init_resource::<CommandBarPagesSnapshot>()
+            .init_resource::<CommandBarWorkSnapshot>()
+            .add_systems(Startup, update_pages_snapshot);
+    }
+}
+
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
 
@@ -206,7 +225,7 @@ pub struct CommandBarWorkSnapshot {
     pub search_engines: Vec<SearchEngine>,
 }
 
-pub fn update_pages_snapshot(
+fn update_pages_snapshot(
     manifests: Query<&PageManifest>,
     mut snapshot: ResMut<CommandBarPagesSnapshot>,
 ) {
