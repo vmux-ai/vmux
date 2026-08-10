@@ -246,7 +246,7 @@ pub(crate) fn acp_profile_name_for_id(
         .to_string()
 }
 
-pub(crate) fn acp_target_id_for_kind(
+fn acp_target_id_for_kind(
     kind: AgentKind,
     configs: &[vmux_setting::AcpAgentConfig],
     catalog: Option<&crate::client::acp::AcpCatalog>,

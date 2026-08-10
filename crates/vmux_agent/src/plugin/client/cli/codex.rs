@@ -140,7 +140,7 @@ impl CliAgentStrategy for CodexStrategy {
     }
 }
 
-pub(crate) fn quote_toml(s: &str) -> String {
+fn quote_toml(s: &str) -> String {
     let escaped: String = s
         .chars()
         .flat_map(|c| match c {
@@ -229,7 +229,7 @@ fn toml_inline_table(values: &std::collections::BTreeMap<String, String>) -> Str
     )
 }
 
-pub(crate) fn toml_array(items: &[String]) -> String {
+fn toml_array(items: &[String]) -> String {
     let inner: Vec<String> = items.iter().map(|s| quote_toml(s)).collect();
     format!("[{}]", inner.join(","))
 }
@@ -350,7 +350,7 @@ struct CodexHeadPayload {
     cwd: String,
 }
 
-pub(crate) fn discover_codex_session_id(
+fn discover_codex_session_id(
     sessions_root: &Path,
     cwd: &Path,
     spawn_time: SystemTime,
@@ -412,7 +412,7 @@ fn walk_jsonl(root: &Path, visit: &mut dyn FnMut(&Path)) {
     }
 }
 
-pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
+fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
     use std::io::{BufRead, BufReader};
 
     let mut out = Vec::new();
@@ -473,7 +473,7 @@ pub(crate) fn list_codex_sessions(root: &Path) -> Vec<ResumableSession> {
     out
 }
 
-pub(crate) fn load_codex_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
+fn load_codex_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
     use std::io::{BufRead, BufReader};
 
     let mut session_path = None;

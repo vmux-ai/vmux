@@ -266,7 +266,7 @@ fn normalize_cwd(path: &Path) -> String {
     canon.to_string_lossy().trim_end_matches('/').to_string()
 }
 
-pub(crate) fn discover_vibe_session_id(
+fn discover_vibe_session_id(
     sessions_root: &Path,
     cwd: &Path,
     spawn_time: SystemTime,
@@ -316,7 +316,7 @@ pub(crate) fn discover_vibe_session_id(
     best.map(|(_, id)| id)
 }
 
-pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
+fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
     use std::io::BufReader;
 
     let mut out = Vec::new();
@@ -383,7 +383,7 @@ pub(crate) fn list_vibe_sessions(root: &Path) -> Vec<ResumableSession> {
     out
 }
 
-pub(crate) fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
+fn load_vibe_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
     use std::io::BufReader;
 
     let entries = std::fs::read_dir(root)

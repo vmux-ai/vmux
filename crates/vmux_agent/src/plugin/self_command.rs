@@ -55,7 +55,7 @@ impl Plugin for SelfCommandPlugin {
     }
 }
 
-pub(crate) fn resolve_self_pane(
+fn resolve_self_pane(
     anchor: ProcessId,
     agent_terms: &Query<(Entity, &ProcessId, &ChildOf)>,
     child_of_q: &Query<&ChildOf>,
@@ -67,7 +67,7 @@ pub(crate) fn resolve_self_pane(
     Some((term, pane))
 }
 
-pub(crate) fn ancestor_self_tab(
+fn ancestor_self_tab(
     pane: Entity,
     tabs: &Query<&mut vmux_layout::tab::Tab>,
     child_of: &Query<&ChildOf>,
@@ -95,7 +95,7 @@ pub(crate) fn ancestor_acp_stack(
     }
 }
 
-pub(crate) fn ancestor_agent_session(
+fn ancestor_agent_session(
     entity: Entity,
     acp_sessions: &Query<&mut crate::client::acp::AcpSession>,
     page_sessions: &Query<&crate::components::AgentSession>,
@@ -134,7 +134,7 @@ pub(crate) fn rebind_acp_workspace(
     })
 }
 
-pub(crate) fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
+fn self_command_anchor(command: &ServiceAgentCommand) -> Option<ProcessId> {
     match command {
         ServiceAgentCommand::OpenBeside { anchor, .. }
         | ServiceAgentCommand::Run { anchor, .. }
@@ -153,7 +153,7 @@ pub(crate) fn self_command_anchor(command: &ServiceAgentCommand) -> Option<Proce
     }
 }
 
-pub(crate) fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
+fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
     if matches!(
         command,
         ServiceAgentCommand::CreateWorktree { .. }
@@ -173,7 +173,7 @@ pub(crate) fn self_command_priority(command: &ServiceAgentCommand) -> u8 {
     }
 }
 
-pub(crate) fn self_command_blocked_by_worktree_failure(
+fn self_command_blocked_by_worktree_failure(
     command: &ServiceAgentCommand,
     failed: &std::collections::HashSet<ProcessId>,
 ) -> bool {

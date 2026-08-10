@@ -48,9 +48,7 @@ fn agent_bell_to_attention(
 
 pub(crate) const DONE_DEDUP_WINDOW_SECS: f64 = 3.0;
 
-pub(crate) fn window_foreground(
-    windows: &Query<&Window, With<bevy::window::PrimaryWindow>>,
-) -> bool {
+fn window_foreground(windows: &Query<&Window, With<bevy::window::PrimaryWindow>>) -> bool {
     windows
         .iter()
         .next()
@@ -58,7 +56,7 @@ pub(crate) fn window_foreground(
         .unwrap_or(false)
 }
 
-pub(crate) fn agent_is_viewed(
+fn agent_is_viewed(
     entity: Entity,
     foreground: bool,
     focused: &vmux_layout::stack::FocusedStack,

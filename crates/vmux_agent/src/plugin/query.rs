@@ -285,7 +285,7 @@ fn forward_layout_snapshot_responses(
     }
 }
 
-pub(crate) fn screenshot_response_to_query_result(
+fn screenshot_response_to_query_result(
     result: &Result<ScreenshotImage, String>,
 ) -> AgentQueryResult {
     match result {
@@ -337,9 +337,7 @@ fn forward_snapshot_responses(
     }
 }
 
-pub(crate) fn record_start_response_to_query_result(
-    result: &Result<u32, String>,
-) -> AgentQueryResult {
+fn record_start_response_to_query_result(result: &Result<u32, String>) -> AgentQueryResult {
     match result {
         Ok(max_secs) => AgentQueryResult::Text(format!("recording started, max {max_secs}s")),
         Err(message) => AgentQueryResult::Error(message.clone()),
@@ -359,7 +357,7 @@ fn forward_record_start_responses(
     }
 }
 
-pub(crate) fn record_stop_response_to_query_result(
+fn record_stop_response_to_query_result(
     result: &Result<RecordingInfo, String>,
 ) -> AgentQueryResult {
     match result {

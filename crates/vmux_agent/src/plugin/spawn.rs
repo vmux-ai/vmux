@@ -427,7 +427,7 @@ fn respond_page_agent_attach_default(
     }
 }
 
-pub(crate) fn rebuilt_args_env_for_restart(
+fn rebuilt_args_env_for_restart(
     launch: &TerminalLaunch,
     strategy: &dyn crate::client::cli::strategy::CliAgentStrategy,
     session_id: Option<&str>,

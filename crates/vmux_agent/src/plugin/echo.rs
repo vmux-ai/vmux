@@ -1,5 +1,7 @@
 use crate::message::Message;
-use crate::stream::{StopReason, StreamEvent, ToolDef};
+#[cfg(test)]
+use crate::stream::StopReason;
+use crate::stream::{StreamEvent, ToolDef};
 
 pub const PROVIDER: &str = "echo";
 pub const ENDPOINT: &str = "stub://echo";
@@ -22,7 +24,8 @@ pub fn parse_sse(_payload: &str) -> Option<StreamEvent> {
     None
 }
 
-pub fn synthetic_echo_stream(text: &str) -> Vec<StreamEvent> {
+#[cfg(test)]
+fn synthetic_echo_stream(text: &str) -> Vec<StreamEvent> {
     vec![
         StreamEvent::TextDelta(format!("echo: {text}")),
         StreamEvent::StopTurn {

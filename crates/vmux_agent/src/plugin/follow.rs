@@ -471,7 +471,7 @@ fn handle_agent_file_search(
 /// by the CLI-terminal bell (`AgentAttention`), ACP idle, and native-chat idle triggers, which
 /// each resolve `agent_pane` first.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn tidy_follow_pane(
+fn tidy_follow_pane(
     agent_pane: Entity,
     settings: &AppSettings,
     resolve: &AgentFileResolve,

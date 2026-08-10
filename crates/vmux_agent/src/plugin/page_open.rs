@@ -48,7 +48,7 @@ pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
     space_ids: Query<'w, 's, &'static vmux_layout::space::SpaceId>,
 }
 
-pub(crate) fn agent_url_uses_local_workspace(url: &str) -> bool {
+fn agent_url_uses_local_workspace(url: &str) -> bool {
     if AgentKind::all()
         .into_iter()
         .any(|kind| url == kind.setup_url())
@@ -58,7 +58,7 @@ pub(crate) fn agent_url_uses_local_workspace(url: &str) -> bool {
     crate::AgentUrl::parse(url).is_some()
 }
 
-pub(crate) fn ancestor_tab_entity(
+fn ancestor_tab_entity(
     entity: Entity,
     child_of: &Query<&ChildOf>,
     tabs: &Query<(
@@ -79,7 +79,7 @@ pub(crate) fn ancestor_tab_entity(
     }
 }
 
-pub(crate) fn ancestor_agent_tab(
+fn ancestor_agent_tab(
     entity: Entity,
     child_of: &Query<&ChildOf>,
     tabs: &Query<&vmux_layout::tab::Tab>,
@@ -93,7 +93,7 @@ pub(crate) fn ancestor_agent_tab(
     }
 }
 
-pub(crate) fn resolved_space_startup_dir(
+fn resolved_space_startup_dir(
     entity: Entity,
     child_of: &Query<&ChildOf>,
     spaces: &Query<(), With<vmux_layout::space::Space>>,
@@ -509,7 +509,7 @@ fn handle_swap_stack_session(
     }
 }
 
-pub(crate) fn handle_agent_page_open_task(
+fn handle_agent_page_open_task(
     task: &PageOpenTask,
     initial_prompt: Option<String>,
     initial_attachments: Vec<AgentAttachment>,
@@ -686,7 +686,7 @@ pub(crate) fn handle_agent_page_open_task(
     }
 }
 
-pub(crate) fn insert_initial_prompt_queue(
+fn insert_initial_prompt_queue(
     stack: Entity,
     initial_prompt: Option<String>,
     initial_attachments: Vec<AgentAttachment>,
@@ -732,7 +732,7 @@ pub(crate) fn cli_initial_prompt(
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-pub(crate) fn stack_has_agent_of_kind(
+fn stack_has_agent_of_kind(
     stack: Entity,
     kind: AgentKind,
     children_q: &Query<&Children>,
@@ -823,7 +823,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     commands.entity(browser).insert(CefKeyboardTarget);
 }
 
-pub(crate) fn html_escape(value: &str) -> String {
+fn html_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -832,7 +832,7 @@ pub(crate) fn html_escape(value: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-pub(crate) fn data_url_for_html(html: &str) -> String {
+fn data_url_for_html(html: &str) -> String {
     let mut encoded = String::with_capacity(html.len() * 3);
     for byte in html.as_bytes() {
         match byte {

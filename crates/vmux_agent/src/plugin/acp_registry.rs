@@ -119,7 +119,7 @@ pub fn agents_dir() -> PathBuf {
 }
 
 /// Path of the cached registry document.
-pub fn cache_path() -> PathBuf {
+fn cache_path() -> PathBuf {
     agents_dir().join("registry.json")
 }
 

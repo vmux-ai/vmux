@@ -62,7 +62,7 @@ pub(crate) fn acp_agent_kind(agent_id: &str) -> Option<AgentKind> {
 }
 
 /// Sort newest-first and drop duplicate `(kind, sid)` keeping the newest.
-pub fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
+fn sort_sessions(mut sessions: Vec<ResumableSession>) -> Vec<ResumableSession> {
     sessions.sort_by_key(|s| std::cmp::Reverse(s.mtime));
     let mut seen = std::collections::HashSet::new();
     sessions.retain(|s| seen.insert((s.kind, s.sid.clone())));

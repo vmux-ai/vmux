@@ -96,7 +96,7 @@ pub(crate) fn resolve_pane_for_pid(
     Some(pane)
 }
 
-pub(crate) fn tab_of_run_pane(
+fn tab_of_run_pane(
     pane: Entity,
     child_of_q: &Query<&ChildOf>,
     tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
@@ -350,7 +350,7 @@ pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
 /// aborts the rest of a `;` line when an external command fails, so it needs a
 /// `try`/`catch` wrapper to always emit the escape and recover the exit code
 /// from the caught error.
-pub(crate) fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
+fn command_with_marker(shell: &str, command: &str, token: &str) -> String {
     let base = std::path::Path::new(shell)
         .file_name()
         .and_then(|s| s.to_str())
@@ -373,7 +373,7 @@ pub(crate) fn command_with_marker(shell: &str, command: &str, token: &str) -> St
 /// Shell-specific prelude that neutralizes pagers for a `run`, so an interactive command can't
 /// stall the completion marker waiting on `less` (`git log`, `man`, `git diff`, …). Set as
 /// session-exported env so follow-up runs in the same shell stay covered.
-pub(crate) fn pager_env_prefix(base: &str) -> &'static str {
+fn pager_env_prefix(base: &str) -> &'static str {
     match base {
         "nu" | "nushell" => "$env.GIT_PAGER = \"cat\"; $env.PAGER = \"cat\"; $env.LESS = \"FRX\"; ",
         "fish" => "set -gx GIT_PAGER cat; set -gx PAGER cat; set -gx LESS FRX; ",
@@ -381,7 +381,7 @@ pub(crate) fn pager_env_prefix(base: &str) -> &'static str {
     }
 }
 
-pub(crate) fn run_command_line(command: &str, token: Option<&str>, shell: &str) -> String {
+fn run_command_line(command: &str, token: Option<&str>, shell: &str) -> String {
     match token {
         Some(token) => command_with_marker(shell, command, token),
         None => command.to_string(),
@@ -402,13 +402,13 @@ pub(crate) fn validate_run_placement_policy(
     }
 }
 
-pub(crate) fn run_command_input(command: &str, token: Option<&str>, shell: &str) -> Vec<u8> {
+fn run_command_input(command: &str, token: Option<&str>, shell: &str) -> Vec<u8> {
     let mut data = run_command_line(command, token, shell).into_bytes();
     data.push(b'\r');
     data
 }
 
-pub(crate) fn terminal_run_command_input(
+fn terminal_run_command_input(
     command: &str,
     token: Option<&str>,
     launch: &TerminalLaunch,
@@ -496,17 +496,14 @@ pub(crate) fn run_terminal_cwd(
 }
 
 #[cfg(test)]
-pub(crate) fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
     let desired_cwd = desired_cwd
         .canonicalize()
         .unwrap_or_else(|_| desired_cwd.to_path_buf());
     run_terminal_launch_matches_canonical_cwd(launch_cwd, &desired_cwd)
 }
 
-pub(crate) fn run_terminal_launch_matches_canonical_cwd(
-    launch_cwd: &str,
-    desired_cwd: &Path,
-) -> bool {
+fn run_terminal_launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
     let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
         return false;
     };

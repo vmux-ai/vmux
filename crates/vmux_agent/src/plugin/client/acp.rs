@@ -404,7 +404,7 @@ pub(crate) fn apply_acp_model_info(
     }
 }
 
-pub(crate) fn apply_acp_model_selection_result(
+fn apply_acp_model_selection_result(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentModelSelectionResult>,
     mut sessions: Query<(&AcpSession, &mut AcpModelState)>,
 ) {

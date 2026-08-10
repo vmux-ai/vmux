@@ -93,7 +93,8 @@ fn context_segment(message: &Message) -> Option<String> {
     }
 }
 
-pub fn wire_prompt(context: &str, display_text: &str) -> String {
+#[cfg(test)]
+fn wire_prompt(context: &str, display_text: &str) -> String {
     vmux_service::protocol::compose_agent_prompt(display_text, Some(context))
 }
 
@@ -115,7 +116,8 @@ pub fn sanitize_replayed_messages(messages: &mut [Message], first_prompt: Option
     }
 }
 
-pub fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -> Vec<Message> {
+#[cfg(test)]
+fn visible_messages(imported: Option<&ImportedConversation>, live: &[Message]) -> Vec<Message> {
     let mut messages = imported
         .map(|imported| imported.messages.clone())
         .unwrap_or_default();

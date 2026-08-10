@@ -106,7 +106,7 @@ fn resolved_cmd_path(pkgdir: &Path, target: &BinaryTarget, file: &str) -> PathBu
 /// Ensure a `binary`-distribution agent is installed (download + extract + chmod + receipt),
 /// then return how to launch it. Re-installs when the receipt is missing, the executable is
 /// gone, or the registry version has moved.
-pub fn ensure_binary_installed(
+fn ensure_binary_installed(
     agent: &RegistryAgent,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
 ) -> Result<ResolvedAgent, String> {
@@ -191,7 +191,7 @@ fn ensure_node(
 
 /// Ensure an `npx`-distribution agent can run: install the managed Node, then return an
 /// `npx -y <package> <args>` launch spec that resolves `node` via the managed `bin/`.
-pub fn ensure_npx_installed(
+fn ensure_npx_installed(
     agent: &RegistryAgent,
     version: Option<&str>,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),
@@ -282,7 +282,7 @@ fn ensure_uv(
 
 /// Ensure a `uvx`-distribution agent can run: install the managed uv, then return a
 /// `uvx <package> <args>` launch spec that resolves `uv` via the managed dir.
-pub fn ensure_uvx_installed(
+fn ensure_uvx_installed(
     agent: &RegistryAgent,
     version: Option<&str>,
     mut emit: impl FnMut(InstallPhase, Option<u8>, &str),

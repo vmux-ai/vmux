@@ -174,11 +174,7 @@ pub(crate) fn workspace_path_task(
     })
 }
 
-pub(crate) fn bind_tab_workspace(
-    tab: &mut vmux_layout::tab::Tab,
-    project_dir: &Path,
-    execution_dir: &Path,
-) {
+fn bind_tab_workspace(tab: &mut vmux_layout::tab::Tab, project_dir: &Path, execution_dir: &Path) {
     tab.startup_dir = Some(execution_dir.to_string_lossy().into_owned());
     if vmux_layout::worktree::is_generated_tab_name(&tab.name)
         && let Some(name) = project_dir.file_name().and_then(|name| name.to_str())
@@ -188,41 +184,41 @@ pub(crate) fn bind_tab_workspace(
     }
 }
 
-pub(crate) fn git_workspace_ready_continuation(path: &Path) -> String {
+fn git_workspace_ready_continuation(path: &Path) -> String {
     format!(
         "VMUX PROJECT SELECTION COMPLETED: Git project {} is ready for reading and inspection. Continue the original user request in this same conversation. Immediately before the first edit, write, test, build, or other mutation, call create_worktree; if it reports multiple candidates, ask the user whether to create or choose an existing worktree.",
         path.display()
     )
 }
 
-pub(crate) fn new_git_workspace_ready_continuation(path: &Path) -> String {
+fn new_git_workspace_ready_continuation(path: &Path) -> String {
     format!(
         "VMUX NEW PROJECT READY: Git project {} is the dedicated project root. Continue the original user request immediately in this directory. Do not call create_worktree for this project.",
         path.display()
     )
 }
 
-pub(crate) fn plain_workspace_ready_continuation(path: &Path) -> String {
+fn plain_workspace_ready_continuation(path: &Path) -> String {
     format!(
         "VMUX PROJECT SELECTION COMPLETED: Project {} is ready without Git. Continue the original user request in this same conversation. Do not call create_worktree unless Git is initialized later.",
         path.display()
     )
 }
 
-pub(crate) fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
+fn git_initialization_failed_continuation(path: &Path, error: &str) -> String {
     format!(
         "VMUX GIT INITIALIZATION FAILED: {error}. Project {} remains selected and usable without Git. Continue the original user request in this same conversation. Do not call create_worktree.",
         path.display()
     )
 }
 
-pub(crate) fn failed_workspace_continuation(message: &str) -> String {
+fn failed_workspace_continuation(message: &str) -> String {
     format!(
         "VMUX PROJECT SELECTION DID NOT COMPLETE: {message}. Do not retry automatically. Wait for the user to request project selection again."
     )
 }
 
-pub(crate) fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
+fn chat_agent_continuation_message(sid: &str, context: &str) -> ClientMessage {
     ClientMessage::agent_input(
         sid.to_string(),
         String::new(),
@@ -311,7 +307,7 @@ pub(crate) fn activate_agent_directory(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn activate_selected_workspace(
+fn activate_selected_workspace(
     tab_entity: Entity,
     agent_entity: Entity,
     selected: &Path,

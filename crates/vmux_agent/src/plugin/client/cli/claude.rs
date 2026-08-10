@@ -111,7 +111,7 @@ impl CliAgentStrategy for ClaudeStrategy {
     }
 }
 
-pub(crate) fn project_dir_name(cwd: &Path) -> String {
+fn project_dir_name(cwd: &Path) -> String {
     let s = cwd.to_string_lossy();
     s.chars()
         .map(|c| {
@@ -185,7 +185,7 @@ fn anchor_from_mcp(mcp: &McpServerConfig) -> Option<&str> {
     mcp.args.get(i + 1).map(|s| s.as_str())
 }
 
-pub(crate) fn discover_claude_session_id(
+fn discover_claude_session_id(
     project_dir: &Path,
     spawn_time: SystemTime,
     claimed: &HashSet<String>,
@@ -221,7 +221,7 @@ pub(crate) fn discover_claude_session_id(
     best.map(|(_, id)| id)
 }
 
-pub(crate) fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
+fn list_claude_sessions(root: &Path) -> Vec<ResumableSession> {
     let mut out = Vec::new();
     let Ok(projects) = std::fs::read_dir(root) else {
         return out;
@@ -312,10 +312,7 @@ fn message_text(v: &Value) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-pub(crate) fn load_claude_transcript(
-    root: &Path,
-    session_id: &str,
-) -> Result<Vec<Message>, String> {
+fn load_claude_transcript(root: &Path, session_id: &str) -> Result<Vec<Message>, String> {
     use std::io::BufReader;
 
     let mut path = None;

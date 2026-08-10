@@ -254,7 +254,7 @@ pub struct Catalog {
 }
 
 /// Fetch the catalog, keep it in step with install results, and title the document.
-pub fn use_catalog() -> Catalog {
+fn use_catalog() -> Catalog {
     let locale = use_theme();
     let catalog = Catalog {
         agents: use_signal(Vec::new),
