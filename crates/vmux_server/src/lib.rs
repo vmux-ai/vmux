@@ -120,8 +120,8 @@ web_pages! {
     render_spaces: "spaces" => vmux_space::page::Page,
     render_team: "team" => vmux_team::page::Page,
     render_settings: "settings" => vmux_setting::page::Page,
-    render_agent: "agent" => vmux_agent::ui::chat::Page,
-    render_agents: "agents" => vmux_agent::ui::agents::Page,
+    render_agent: "agent" => vmux_chat::page::Page,
+    render_agents: "agents" => vmux_agent::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
     render_tools: "tools" => vmux_layout::tools_page::Page,
@@ -175,7 +175,7 @@ fn StartAgentPage() -> Element {
     let mut transition = use_signal(inline_transition);
     if let Some(active) = transition() {
         return rsx! {
-            vmux_agent::ui::chat::Page {
+            vmux_chat::page::Page {
                 agent_override: Some(inline_agent_id(&active.target_url)),
                 transition_prompt: Some(active.prompt),
                 transition_attachments: Some(active.attachments),

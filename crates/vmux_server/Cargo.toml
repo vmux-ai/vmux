@@ -12,6 +12,7 @@ build = ["dep:regex", "dep:sha2"]
 web = [
     "dep:dioxus",
     "dep:vmux_agent",
+    "dep:vmux_chat",
     "dep:vmux_editor",
     "dep:vmux_history",
     "dep:vmux_layout",
@@ -41,6 +42,7 @@ required-features = ["web"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, optional = true }
 vmux_agent = { path = "../vmux_agent", optional = true }
+vmux_chat = { path = "../vmux_chat", optional = true }
 vmux_editor = { path = "../vmux_editor", optional = true }
 vmux_history = { path = "../vmux_history", optional = true }
 vmux_layout = { path = "../vmux_layout", optional = true }

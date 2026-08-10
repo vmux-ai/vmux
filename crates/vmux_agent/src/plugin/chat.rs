@@ -2,7 +2,7 @@
 //! daemon and the webview.
 //!
 //! Gated as a whole rather than item by item — a hundred attributes down one file said nothing
-//! that one on the module does not. The rendered counterpart is `vmux_chat::ui`, which this
+//! that one on the module does not. The rendered counterpart is `vmux_chat::page`, which this
 //! reaches only through the payloads in `vmux_chat::event`; everything here that is about
 //! driving an agent — sessions, strategies, run state — stays on this side of that line.
 

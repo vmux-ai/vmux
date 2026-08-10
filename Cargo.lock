@@ -11604,6 +11604,7 @@ dependencies = [
  "regex",
  "sha2",
  "vmux_agent",
+ "vmux_chat",
  "vmux_core",
  "vmux_editor",
  "vmux_history",

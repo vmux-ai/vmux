@@ -5,10 +5,10 @@
 //! to the same components, so a turn looks the same everywhere.
 //!
 //! The page splits by build target. [`event`] is the vocabulary both halves speak and is
-//! ungated; [`format`] shapes that vocabulary for a reader and needs no webview; [`ui`] renders.
-//! The half that drives an agent is not here — it owns ECS state in `vmux_agent` and reaches the
-//! page through [`event`] alone, which is what lets a conversation belong to a room rather than
-//! to one agent.
+//! ungated; [`format`] shapes that vocabulary for a reader and needs no webview; [`page`]
+//! renders. The half that drives an agent is not here — it owns ECS state in `vmux_agent` and
+//! reaches the page through [`event`] alone, which is what lets a conversation belong to a room
+//! rather than to one agent.
 
 #![allow(non_snake_case)]
 
@@ -22,4 +22,4 @@ pub mod transcript;
 pub mod format;
 
 #[cfg(frontend)]
-pub mod ui;
+pub mod page;
