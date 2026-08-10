@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mae’r cysylltiad â’ch Mac wedi torri.
 mobile-error-connection-closed = Caeodd eich Mac y cysylltiad.
 mobile-error-address-invalid = Mae’r cyfeiriad pario hwnnw yn annilys.
 mobile-error-address-no-port = Nid oes porth yn y cyfeiriad pario hwnnw.
+mobile-qr-denied = Ni all Vmux ddefnyddio’r camera. Trowch ef ymlaen yn Gosodiadau i sganio’r cod QR, neu ewch yn ôl a gludo’r ddolen bario yn lle hynny.
+mobile-qr-open-settings = Agor Gosodiadau
+mobile-qr-session-error = Mae’r camera wedi stopio. Rhowch gynnig arall arni, neu gludwch y ddolen bario yn lle hynny.

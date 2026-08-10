@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Sambungan ka Mac anjeun pegat.
 mobile-error-connection-closed = Mac anjeun nutup sambungan.
 mobile-error-address-invalid = Alamat pasangan éta teu valid.
 mobile-error-address-no-port = Alamat pasangan éta teu boga port.
+mobile-qr-denied = Vmux teu bisa maké kaméra. Hurungkeun di Settings pikeun mindai kode QR, atawa balik deui terus témpélkeun tautan pasangan.
+mobile-qr-open-settings = Buka Settings
+mobile-qr-session-error = Kaméra eureun. Cobaan deui, atawa témpélkeun tautan pasangan.

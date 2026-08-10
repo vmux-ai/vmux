@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Таны Mac-тай холбоо тасарл�
 mobile-error-connection-closed = Таны Mac холбоог хаалаа.
 mobile-error-address-invalid = Тэр холболтын хаяг буруу байна.
 mobile-error-address-no-port = Тэр холболтын хаягт порт алга.
+mobile-qr-denied = Vmux камерыг ашиглаж чадахгүй байна. QR код уншуулахын тулд Тохиргоо хэсэгт үүнийг асаана уу, эсвэл буцаж очоод холбох линкийг буулгана уу.
+mobile-qr-open-settings = Тохиргоог нээх
+mobile-qr-session-error = Камер зогслоо. Дахин оролдоно уу, эсвэл холбох линкийг буулгана уу.

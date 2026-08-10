@@ -798,3 +798,6 @@ mobile-error-connection-dropped = آپ کے Mac سے کنکشن منقطع ہو 
 mobile-error-connection-closed = آپ کے Mac نے کنکشن بند کر دیا۔
 mobile-error-address-invalid = پیئرنگ کا پتہ غلط ہے۔
 mobile-error-address-no-port = پیئرنگ کے پتے میں پورٹ نہیں ہے۔
+mobile-qr-denied = Vmux کیمرہ استعمال نہیں کر سکتا۔ QR کوڈ اسکین کرنے کے لیے ترتیبات میں اسے آن کریں، یا واپس جا کر پیئرنگ لنک چسپاں کریں۔
+mobile-qr-open-settings = ترتیبات کھولیں
+mobile-qr-session-error = کیمرہ رک گیا۔ دوبارہ کوشش کریں، یا پیئرنگ لنک چسپاں کریں۔

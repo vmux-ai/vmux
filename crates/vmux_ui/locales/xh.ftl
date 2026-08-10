@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Uqhagamshelo kwi-Mac yakho luqhawukile.
 mobile-error-connection-closed = I-Mac yakho ivale uqhagamshelo.
 mobile-error-address-invalid = Idilesi yokudibanisa ayisebenzi.
 mobile-error-address-no-port = Idilesi yokudibanisa ayinaphothi.
+mobile-qr-denied = I-Vmux ayikwazi ukusebenzisa ikhamera. Yivule kwi-Settings ukuze uskene ikhowudi ye-QR, okanye ubuyele umva uze ucole ikhonkco lokudibanisa.
+mobile-qr-open-settings = Vula i-Settings
+mobile-qr-session-error = Ikhamera imisile. Zama kwakhona, okanye ucole ikhonkco lokudibanisa.

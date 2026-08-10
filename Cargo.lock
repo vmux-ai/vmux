@@ -11538,6 +11538,7 @@ dependencies = [
 name = "vmux_mobile"
 version = "0.0.30"
 dependencies = [
+ "block2 0.6.2",
  "dioxus",
  "dispatch2",
  "futures-util",

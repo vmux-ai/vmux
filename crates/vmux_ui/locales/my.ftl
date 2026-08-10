@@ -798,3 +798,6 @@ mobile-error-connection-dropped = သင့် Mac နှင့် ချိတ�
 mobile-error-connection-closed = သင့် Mac က ချိတ်ဆက်မှုကို ပိတ်လိုက်သည်။
 mobile-error-address-invalid = ထို ချိတ်ဆက် လိပ်စာ မမှန်ကန်ပါ။
 mobile-error-address-no-port = ထို ချိတ်ဆက် လိပ်စာတွင် port မပါပါ။
+mobile-qr-denied = Vmux သည် ကင်မရာကို အသုံးမပြုနိုင်ပါ။ QR ကုဒ်ကို စကင်ဖတ်ရန် ဆက်တင်များတွင် ၎င်းကို ဖွင့်ပါ၊ သို့မဟုတ် နောက်သို့ပြန်သွား၍ ချိတ်ဆက်လင့်ခ်ကို ကူးထည့်ပါ။
+mobile-qr-open-settings = ဆက်တင်များ ဖွင့်ရန်
+mobile-qr-session-error = ကင်မရာ ရပ်သွားပါပြီ။ ထပ်စမ်းကြည့်ပါ၊ သို့မဟုတ် ချိတ်ဆက်လင့်ခ်ကို ကူးထည့်ပါ။

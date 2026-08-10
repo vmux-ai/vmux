@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac-inizlə bağlantı kəsildi.
 mobile-error-connection-closed = Mac-iniz bağlantını bağladı.
 mobile-error-address-invalid = Həmin qoşulma ünvanı yanlışdır.
 mobile-error-address-no-port = Həmin qoşulma ünvanında port yoxdur.
+mobile-qr-denied = Vmux kameradan istifadə edə bilmir. QR kodu skan etmək üçün onu Ayarlar bölməsində aktivləşdirin, ya da geri qayıdıb qoşulma linkini yapışdırın.
+mobile-qr-open-settings = Ayarları aç
+mobile-qr-session-error = Kamera dayandı. Yenidən cəhd edin, ya da əvəzinə qoşulma linkini yapışdırın.
