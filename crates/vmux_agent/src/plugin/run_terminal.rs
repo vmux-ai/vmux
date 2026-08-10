@@ -517,7 +517,7 @@ pub(crate) fn run_terminal_launch_matches_canonical_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::root::test_support::{spawn_stack_in_pane, test_settings};
+    use crate::plugin::test_support::{spawn_stack_in_pane, test_settings};
     use vmux_terminal::Terminal;
 
     #[test]

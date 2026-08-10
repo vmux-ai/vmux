@@ -359,7 +359,7 @@ fn handle_resume_in_acp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::root::test_support::test_settings;
+    use crate::plugin::test_support::test_settings;
     use vmux_service::protocol::AgentRequestId;
     use vmux_terminal::Terminal;
 

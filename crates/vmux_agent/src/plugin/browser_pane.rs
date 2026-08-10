@@ -159,7 +159,7 @@ impl AgentBrowserResolve<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::root::test_support::spawn_stack_in_pane;
+    use crate::plugin::test_support::spawn_stack_in_pane;
     use vmux_layout::pane::PaneSplit;
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;

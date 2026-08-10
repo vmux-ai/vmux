@@ -582,8 +582,8 @@ pub(super) fn send_pending_agent_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::root::run_terminal::process_cwd;
-    use crate::plugin::root::test_support::init_worktree_test_repo;
+    use crate::plugin::run_terminal::process_cwd;
+    use crate::plugin::test_support::init_worktree_test_repo;
     use vmux_core::agent::AgentKind;
     use vmux_service::protocol::ProcessId;
     use vmux_service::protocol::SharedMessage;

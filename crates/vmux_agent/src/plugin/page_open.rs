@@ -849,9 +849,9 @@ pub(crate) fn data_url_for_html(html: &str) -> String {
 mod tests {
     use super::*;
     use crate::client::cli::vibe::VibeStrategy;
-    use crate::plugin::root::provider::AgentExecutableOverride;
-    use crate::plugin::root::spawn::handle_spawn_agent_requests;
-    use crate::plugin::root::test_support::{init_worktree_test_repo, test_settings};
+    use crate::plugin::provider::AgentExecutableOverride;
+    use crate::plugin::spawn::handle_spawn_agent_requests;
+    use crate::plugin::test_support::{init_worktree_test_repo, test_settings};
     use crate::session::{AgentSession, SessionId};
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;

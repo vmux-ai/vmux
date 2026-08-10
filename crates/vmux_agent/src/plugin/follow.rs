@@ -682,8 +682,8 @@ pub(crate) fn on_tidy_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::root::run_terminal::run_terminal_cwd;
-    use crate::plugin::root::test_support::{
+    use crate::plugin::run_terminal::run_terminal_cwd;
+    use crate::plugin::test_support::{
         close_stack_requests, spawn_file_preview_stack, test_settings,
     };
     use vmux_layout::pane::PaneSplit;
