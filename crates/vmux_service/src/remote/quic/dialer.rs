@@ -8,7 +8,8 @@
 //! endpoint below is what terminates it — same certificate, same `admit()`, same dispatch as a
 //! phone dialling us directly would have reached.
 
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use vmux_remote::quic::endpoint::SelfSignedIdentity;
@@ -27,9 +28,6 @@ const MIN_INNER_MTU: usize = 1200;
 /// Headroom for the inner endpoint's own framing inside an outer DATAGRAM frame.
 const TUNNEL_OVERHEAD: usize = 64;
 
-const FIRST_RETRY: Duration = Duration::from_secs(1);
-const MAX_RETRY: Duration = Duration::from_secs(30);
-
 /// Dial the relay, and keep dialling it.
 pub fn spawn(
     state: RemoteState,
@@ -37,67 +35,240 @@ pub fn spawn(
     liveness: watch::Receiver<bool>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut backoff = FIRST_RETRY;
+        AllocatedPort::release_stale();
+        let mut backoff = Backoff::new();
         loop {
-            match session(&state, &identity, &liveness).await {
-                Ok(()) => backoff = FIRST_RETRY,
-                Err(error) => {
-                    tracing::warn!(%error, "remote quic: relay session ended");
-                }
-            }
-            tokio::time::sleep(backoff).await;
-            // Doubling rather than a flat delay: a relay that is down stays down for minutes, and
-            // the old HTTP client's fixed two seconds meant a redeploy took a dial per instance
-            // per two seconds from every desktop at once.
-            backoff = (backoff * 2).min(MAX_RETRY);
+            let ended = Registration::hold(&state, &identity, &liveness).await;
+            ended.report();
+            tokio::time::sleep(backoff.after(&ended)).await;
         }
     })
 }
 
-/// One registration, held until the control connection drops.
-async fn session(
-    state: &RemoteState,
-    identity: &SelfSignedIdentity,
-    liveness: &watch::Receiver<bool>,
-) -> Result<(), String> {
-    let relay = Relay::configured();
-    let device_id = ensure_device_id().map_err(|error| error.to_string())?;
-    let address = resolve(relay.url()).await?;
+/// One registration with the relay: the control connection this desktop dialled out on, and the
+/// port the relay allocated behind it.
+struct Registration {
+    control: quinn::Connection,
+    port: AllocatedPort,
+    since: Instant,
+}
 
-    let server_name = host_of(relay.url())?;
-    let endpoint = vmux_remote::quic::endpoint::Trust::Relay {
-        host: server_name.clone(),
-    }
-    .endpoint(address)
-    .map_err(|error| format!("relay client endpoint: {error}"))?;
-    let control = endpoint
-        .connect(address, &server_name)
-        .map_err(|error| format!("relay dial: {error}"))?
-        .await
-        .map_err(|error| format!("relay connect: {error}"))?;
-
-    let port = register(&control, &device_id, &state.token).await?;
-    persist_port(port).map_err(|error| format!("persist relay port: {error}"))?;
-    tracing::info!(port, relay = %relay.url(), "remote quic: registered with the relay");
-
-    let socket = TunnelSocket::new(control.clone());
-    let budget = socket
-        .usable_mtu()
-        .ok_or_else(|| "the relay refused datagrams, so no packet can be tunnelled".to_string())?;
-    if budget < MIN_INNER_MTU + TUNNEL_OVERHEAD {
-        return Err(format!(
-            "the path to the relay carries {budget} bytes, below the {} a QUIC handshake needs",
-            MIN_INNER_MTU + TUNNEL_OVERHEAD
-        ));
+impl Registration {
+    /// Dial, register, serve every phone the relay tunnels back, and say how it ended.
+    async fn hold(
+        state: &RemoteState,
+        identity: &SelfSignedIdentity,
+        liveness: &watch::Receiver<bool>,
+    ) -> SessionEnd {
+        match Self::open(&state.token).await {
+            Ok(registration) => registration.serve(state, identity, liveness).await,
+            Err(reason) => SessionEnd::Unregistered(reason),
+        }
     }
 
-    let inner = super::inner_endpoint(socket, identity)?;
-    super::accept_loop(inner, state.clone(), liveness.clone(), control.clone()).await;
+    /// Dial the relay's control port and claim the port it hands back.
+    ///
+    /// Every failure here names the address that was tried. A relay URL left over from an older
+    /// build points at a port nothing listens on, and over UDP that is indistinguishable from a
+    /// slow network — without the address in the message the only symptom is a bare timeout.
+    async fn open(token: &str) -> Result<Self, String> {
+        let relay = Relay::configured();
+        let device_id = ensure_device_id().map_err(|error| error.to_string())?;
+        let address = resolve(relay.url()).await?;
+        let server_name = host_of(relay.url())?;
 
-    Err(format!(
-        "control connection closed: {:?}",
-        control.close_reason()
-    ))
+        let endpoint = vmux_remote::quic::endpoint::Trust::Relay {
+            host: server_name.clone(),
+        }
+        .endpoint(address)
+        .map_err(|error| format!("relay client endpoint: {error}"))?;
+        let control = endpoint
+            .connect(address, &server_name)
+            .map_err(|error| format!("relay dial {} at {address}: {error}", relay.url()))?
+            .await
+            .map_err(|error| format!("relay connect {} at {address}: {error}", relay.url()))?;
+
+        let allocated = register(&control, &device_id, token).await?;
+        let port = AllocatedPort::claim(allocated)
+            .map_err(|error| format!("persist relay port: {error}"))?;
+        tracing::info!(port = allocated, relay = %relay.url(), "remote quic: registered with the relay");
+
+        Ok(Self {
+            control,
+            port,
+            since: Instant::now(),
+        })
+    }
+
+    /// Serve tunnelled phones until the control connection drops.
+    async fn serve(
+        self,
+        state: &RemoteState,
+        identity: &SelfSignedIdentity,
+        liveness: &watch::Receiver<bool>,
+    ) -> SessionEnd {
+        let socket = TunnelSocket::new(self.control.clone());
+        let Some(budget) = socket.usable_mtu() else {
+            return self.ended("the relay refused datagrams, so no packet can be tunnelled");
+        };
+        if budget < MIN_INNER_MTU + TUNNEL_OVERHEAD {
+            return self.ended(format!(
+                "the path to the relay carries {budget} bytes, below the {} a QUIC handshake needs",
+                MIN_INNER_MTU + TUNNEL_OVERHEAD
+            ));
+        }
+        let inner = match super::inner_endpoint(socket, identity) {
+            Ok(inner) => inner,
+            Err(error) => return self.ended(error),
+        };
+
+        super::accept_loop(inner, state.clone(), liveness.clone(), self.control.clone()).await;
+
+        let reason = format!(
+            "control connection closed: {:?}",
+            self.control.close_reason()
+        );
+        self.ended(reason)
+    }
+
+    /// End the session, which gives up the allocated port along with it.
+    fn ended(self, reason: impl Into<String>) -> SessionEnd {
+        SessionEnd::Registered {
+            port: self.port.number(),
+            held: self.since.elapsed(),
+            reason: reason.into(),
+        }
+    }
+}
+
+/// How a relay session ended, and how far it got.
+///
+/// A session always ends in a failure — the control connection closing is the ordinary way out —
+/// so the useful distinction is not success against error but whether it ever registered.
+enum SessionEnd {
+    /// No registration was established: name resolution, the dial, the handshake or the hello
+    /// failed, so the relay is holding no port for this desktop.
+    Unregistered(String),
+    /// The relay allocated `port`, and the registration stood for `held` before it ended.
+    Registered {
+        port: u16,
+        held: Duration,
+        reason: String,
+    },
+}
+
+impl SessionEnd {
+    /// How long a registration has to stand before it counts as evidence the relay is healthy.
+    ///
+    /// Registering is not enough on its own: a relay being redeployed can accept a registration
+    /// and tear it down moments later, and treating that as success would put every desktop back
+    /// to a dial per second — the stampede [`Backoff`] exists to prevent.
+    const STABLE: Duration = Duration::from_secs(60);
+
+    /// Whether the next dial can go straight out rather than backing off further.
+    fn proves_the_relay_is_up(&self) -> bool {
+        match self {
+            Self::Unregistered(_) => false,
+            Self::Registered { held, .. } => *held >= Self::STABLE,
+        }
+    }
+
+    fn report(&self) {
+        match self {
+            Self::Unregistered(reason) => {
+                tracing::warn!(reason = %reason, "remote quic: could not register with the relay");
+            }
+            Self::Registered { port, held, reason } => tracing::warn!(
+                port,
+                held_secs = held.as_secs(),
+                reason = %reason,
+                "remote quic: relay session ended"
+            ),
+        }
+    }
+}
+
+/// How long to wait before dialling the relay again.
+///
+/// Doubling rather than a flat delay: a relay that is down stays down for minutes, and the old
+/// HTTP client's fixed two seconds meant a redeploy took a dial per instance per two seconds from
+/// every desktop at once.
+struct Backoff {
+    delay: Duration,
+}
+
+impl Backoff {
+    const FIRST: Duration = Duration::from_secs(1);
+    const MAX: Duration = Duration::from_secs(30);
+
+    fn new() -> Self {
+        Self { delay: Self::FIRST }
+    }
+
+    /// How long to wait after `ended`, folding it into the sequence.
+    ///
+    /// A session that stood long enough to prove the relay is up starts the sequence over, so a
+    /// desktop that was connected for hours reconnects in a second instead of inheriting the cap
+    /// from however many attempts it took to get connected in the first place.
+    fn after(&mut self, ended: &SessionEnd) -> Duration {
+        if ended.proves_the_relay_is_up() {
+            self.delay = Self::FIRST;
+        }
+        let waiting = self.delay;
+        self.delay = (self.delay * 2).min(Self::MAX);
+        waiting
+    }
+}
+
+/// The port the relay allocated this desktop, recorded for as long as the registration holds it.
+///
+/// The pairing link is built from this file and has no other way to learn the port. The relay
+/// frees the port the moment the registration ends, so a file that outlives its session points
+/// phones at nothing — which a phone can only discover by waiting out a timeout. Removing it on
+/// drop is also what stops the app offering a link with no session behind it: every reader
+/// already treats a missing port as "not registered yet".
+struct AllocatedPort {
+    number: u16,
+    path: PathBuf,
+}
+
+impl AllocatedPort {
+    /// Record `number` as this desktop's, replacing whatever the last session left behind.
+    fn claim(number: u16) -> std::io::Result<Self> {
+        let path = RemotePaths::current().relay_port();
+        super::super::write_private(&path, &number.to_string())?;
+        Ok(Self { number, path })
+    }
+
+    /// Forget a port recorded by a previous process.
+    ///
+    /// [`Drop`] covers a session this process owned; a daemon that was killed never got to run it,
+    /// so the file is cleared once at startup before anything can read it as live.
+    fn release_stale() {
+        Self::remove(&RemotePaths::current().relay_port());
+    }
+
+    fn number(&self) -> u16 {
+        self.number
+    }
+
+    fn remove(path: &Path) {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(
+                %error,
+                path = %path.display(),
+                "remote quic: the allocated relay port could not be cleared"
+            ),
+        }
+    }
+}
+
+impl Drop for AllocatedPort {
+    fn drop(&mut self) {
+        Self::remove(&self.path);
+    }
 }
 
 /// Send the hello and read back the port phones should dial.
@@ -162,6 +333,88 @@ fn ensure_device_id() -> std::io::Result<DeviceId> {
     Ok(DeviceId::new(minted))
 }
 
-fn persist_port(port: u16) -> std::io::Result<()> {
-    super::super::write_private(&RemotePaths::current().relay_port(), &port.to_string())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl SessionEnd {
+        fn never_connected() -> Self {
+            Self::Unregistered("relay connect https://localhost:8788 at [::1]:8788".to_string())
+        }
+
+        fn held_for(held: Duration) -> Self {
+            Self::Registered {
+                port: 41003,
+                held,
+                reason: "control connection closed".to_string(),
+            }
+        }
+    }
+
+    impl Backoff {
+        /// The delays a fresh backoff produces over `rounds` sessions that all end the same way.
+        fn delays(ended: impl Fn() -> SessionEnd, rounds: usize) -> Vec<u64> {
+            let mut backoff = Self::new();
+            let mut seconds = Vec::new();
+            for _ in 0..rounds {
+                seconds.push(backoff.after(&ended()).as_secs());
+            }
+            seconds
+        }
+    }
+
+    /// A relay that cannot be reached at all has to be dialled less and less often, or every
+    /// desktop in the fleet hammers it in lockstep while it is down.
+    #[test]
+    fn a_relay_that_is_never_reached_widens_up_to_the_cap() {
+        assert_eq!(
+            Backoff::delays(SessionEnd::never_connected, 8),
+            [1, 2, 4, 8, 16, 30, 30, 30]
+        );
+    }
+
+    /// The bug this guards: a session is only ever reported as an error, so nothing used to reset
+    /// the delay and a registration that stood for twelve minutes still came back capped.
+    #[test]
+    fn a_session_that_stood_restarts_the_sequence() {
+        let mut backoff = Backoff::new();
+        for _ in 0..6 {
+            backoff.after(&SessionEnd::never_connected());
+        }
+
+        assert_eq!(
+            backoff.after(&SessionEnd::held_for(Duration::from_secs(12 * 60))),
+            Duration::from_secs(1)
+        );
+    }
+
+    /// Registering is not proof on its own. A relay mid-redeploy accepts a registration and drops
+    /// it moments later, so resetting on that alone would restore the per-second stampede.
+    #[test]
+    fn a_registration_that_flaps_keeps_backing_off() {
+        let flapping = || SessionEnd::held_for(Duration::from_millis(200));
+
+        assert_eq!(Backoff::delays(flapping, 4), [1, 2, 4, 8]);
+    }
+
+    /// The relay frees the port when the registration ends, so the recorded one must not outlive
+    /// it — a pairing link built from a stale port sends the phone somewhere nothing answers.
+    #[test]
+    fn the_recorded_port_does_not_outlive_its_registration() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("remote-relay-port");
+        std::fs::write(&path, "41003").expect("write port");
+
+        let claimed = AllocatedPort {
+            number: 41003,
+            path: path.clone(),
+        };
+        assert!(path.exists());
+        drop(claimed);
+
+        assert!(
+            !path.exists(),
+            "the allocated port outlived the session that held it"
+        );
+    }
 }

@@ -105,3 +105,14 @@ The `.env` at the repository root feeds `make`, which exports it to the app. A p
 started from the Finder sees no `.env` and takes the default. The desktop writes the resolved URL
 into the profile's service directory, because the service manager starts the daemon with no
 inherited environment and that file is the daemon's only view of the setting.
+
+That file records the transport alongside the URL — `quic https://relay.vmux.ai`. Builds before
+the QUIC cutover wrote a bare URL naming the HTTP port, and dialling that port over UDP reaches
+nothing and reports only a timeout, so an untagged value is logged and ignored rather than
+inherited. The tag is what is checked and never the port number, so a relay deliberately stood up
+somewhere other than the default survives the upgrade. Enabling Remote rewrites the file tagged.
+
+The port the relay allocates is recorded beside it and lives exactly as long as the registration
+does: written when the daemon registers, removed when that session ends and again at daemon
+startup. Every reader treats a missing port as "not registered yet", so the app offers no pairing
+link during that window rather than one naming a port the relay has already freed.
