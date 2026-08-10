@@ -3,7 +3,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::host::Host;
+use crate::transport::Host;
 use dioxus::prelude::*;
 
 /// Keep the selected row on screen as the selection moves.

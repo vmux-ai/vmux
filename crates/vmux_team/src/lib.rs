@@ -2,10 +2,10 @@
 //! team members and renders the team webview.
 #![allow(clippy::too_many_arguments, clippy::type_complexity)]
 
-#[cfg(frontend)]
+#[cfg(ui)]
 pub mod page;
 
-#[cfg(native)]
+#[cfg(host)]
 mod native;
-#[cfg(native)]
+#[cfg(host)]
 pub use native::*;

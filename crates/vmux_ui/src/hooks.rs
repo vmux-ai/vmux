@@ -1,7 +1,7 @@
 //! Dioxus hooks connecting a page to whatever hosts it.
 //!
 //! One hook per module, named after it, and nothing else — the platform seam they are built on is
-//! [`crate::host`], the keystroke encoder is `crate::key_stroke` and the pure keyboard logic is
+//! [`crate::transport`], the keystroke encoder is `crate::key_stroke` and the pure keyboard logic is
 //! [`crate::list_nav`]. Pages call the same hooks whichever frontend they are compiled for.
 //!
 //! The re-exports below keep `vmux_ui::hooks::*` resolving for pages that import the seam through
@@ -25,14 +25,14 @@ pub use use_mobile::use_mobile;
 pub use use_selector::use_selector;
 pub use use_theme::use_theme;
 
+pub use crate::transport;
 #[allow(unused_imports)]
-pub use crate::host::event_listener::{
+pub use crate::transport::event_listener::{
     EventListenerError, send, try_cef_bin_listen, try_emit_page_ready,
 };
-pub use crate::host::transport;
 
 #[cfg(web)]
-pub use crate::host::cef::decode_bin_host_emit_js;
+pub use crate::transport::cef::decode_bin_host_emit_js;
 
 #[cfg(web)]
 pub use crate::key_stroke::WebKey;

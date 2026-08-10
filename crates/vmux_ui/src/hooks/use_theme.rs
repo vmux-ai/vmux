@@ -1,7 +1,7 @@
 use super::use_listener;
-use crate::host::Host;
 use crate::i18n::Locale;
 use crate::theme::{THEME_EVENT, ThemeEvent};
+use crate::transport::Host;
 use dioxus::prelude::*;
 
 /// Listens for [`ThemeEvent`] from the host and applies CSS custom properties.

@@ -1,9 +1,9 @@
 pub fn bootstrap_profile_name() -> String {
-    #[cfg(native)]
+    #[cfg(host)]
     {
         vmux_core::profile::display_name()
     }
-    #[cfg(frontend)]
+    #[cfg(ui)]
     {
         "Personal".to_string()
     }

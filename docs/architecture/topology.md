@@ -171,9 +171,11 @@ The recurring trap when adding to the first list used to be gating a desktop hal
 the gate names what it means instead:
 
 - `web` — wasm32, the browser bundle.
-- `frontend` — wasm32 *or* iOS: the pages, with no Bevy and no process access.
-- `native` — everything else: the desktop app and the daemon.
+- `ui` — wasm32 *or* iOS: the pages, with no Bevy and no process access.
+- `host` — everything else: the desktop app and the daemon.
 
-Write `#[cfg(native)]`, not a negation of two target predicates. Cargo's own
+iOS is native code but is not `host`: it runs the pages, so it is `ui`.
+
+Write `#[cfg(host)]`, not a negation of two target predicates. Cargo's own
 `[target.'cfg(...)'.dependencies]` still has to spell the targets out, because dependency
 resolution happens before any build script runs — so the split exists in `Cargo.toml` too.

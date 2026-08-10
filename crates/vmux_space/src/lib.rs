@@ -9,13 +9,13 @@
 pub mod model;
 /// The page resolves its keyboard through the keymap, which is a CEF seam: it publishes a
 /// `PageKeyContext` and is answered over binary IPC. A touch host has neither, so this is `web`
-/// rather than `frontend` — the narrower gate is the one that is true.
+/// rather than `ui` — the narrower gate is the one that is true.
 #[cfg(web)]
 pub mod page;
 
 pub use vmux_wire::space as event;
 
-#[cfg(native)]
+#[cfg(host)]
 mod native;
-#[cfg(native)]
+#[cfg(host)]
 pub use native::*;

@@ -1,18 +1,23 @@
-//! Where a page sends its messages, and where it hears back.
+//! The other side of a page: what is hosting it, and how bytes reach it.
 //!
-//! Pages emit typed rkyv payloads and subscribe by event id. *How* those bytes reach the host
-//! differs: the desktop UI is wasm inside a CEF browser and crosses a real process boundary via
-//! `window.cef`, while the mobile app runs Rust natively in the same process as its WebView and
-//! has no boundary to cross at all. This module is the seam between the two.
+//! Nothing here is a hook. Pages emit typed rkyv payloads and subscribe by event id; *how* those
+//! bytes travel differs. The desktop UI is wasm inside a CEF browser and crosses a real process
+//! boundary via `window.cef`, while the mobile app runs Rust natively in the same process as its
+//! WebView and has no boundary to cross at all. [`PageHost`] is that seam at runtime — an app
+//! installs one and every message travels over it — and [`Host`] is the same difference resolved
+//! at compile time rather than tested for at every call site. The hooks in [`crate::hooks`] are
+//! built on top of both and carry no target test of their own.
 //!
 //! Hosts install an implementation at startup. On wasm the CEF bridge is assumed when nothing is
 //! installed, so the desktop needs no wiring.
+//!
+//! [`event_listener`] types what a page sends and names every way sending can fail, and
+//! [`bin_ipc_envelope`] is the framing the CEF direction adds on the way out.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::host::Host;
-use crate::host::event_listener::EventListenerError;
+use crate::transport::event_listener::EventListenerError;
 
 /// A page's channel to whatever is hosting it.
 ///
@@ -37,6 +42,13 @@ pub type BytesListener = Box<dyn FnMut(&[u8])>;
 pub fn install_host(host: Rc<dyn PageHost>) {
     HOST.with(|slot| *slot.borrow_mut() = Some(host));
 }
+
+/// What the target hosting a page can do for it, decided at compile time.
+///
+/// Every capability is implemented once per target in a submodule — exactly one of which is
+/// compiled. Distinct from [`PageHost`], which an app installs at runtime and which two builds for
+/// the same target may answer differently; this one *is* the target.
+pub(crate) struct Host;
 
 impl Host {
     pub(crate) fn emit(id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
@@ -87,6 +99,13 @@ impl<'a> HostPayload<'a> {
 thread_local! {
     static HOST: RefCell<Option<Rc<dyn PageHost>>> = const { RefCell::new(None) };
 }
+
+pub mod bin_ipc_envelope;
+#[cfg(web)]
+pub mod cef;
+pub mod event_listener;
+#[cfg(not(web))]
+mod native;
 
 #[cfg(test)]
 mod tests {

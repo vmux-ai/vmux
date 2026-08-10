@@ -5,11 +5,11 @@
 
 pub mod event;
 
-#[cfg(frontend)]
+#[cfg(ui)]
 pub mod page;
 pub mod vibe;
 
-#[cfg(native)]
+#[cfg(host)]
 pub mod plugin;
-#[cfg(native)]
+#[cfg(host)]
 pub use plugin::*;

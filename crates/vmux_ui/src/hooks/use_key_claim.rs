@@ -14,8 +14,8 @@
 //! Nothing here knows what a key *means*. It tests membership and asks the page a yes/no question.
 
 use crate::hooks::use_event::use_event;
-use crate::host::event_listener::send;
 use crate::key_stroke::WebKey;
+use crate::transport::event_listener::send;
 use dioxus::prelude::*;
 use vmux_core::input::{
     KEY_CLAIMS_EVENT, KeyClaims, KeyStroke, KeyVerdict, PageKeyContext, Unclaimed,

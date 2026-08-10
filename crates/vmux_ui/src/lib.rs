@@ -1,5 +1,5 @@
-//! Dioxus WASM UI library: [`components`] and [`hooks`], over the [`host`] seam that carries CEF
-//! IPC.
+//! Dioxus WASM UI library: [`components`] and [`hooks`], over the [`transport`] seam that carries
+//! CEF IPC.
 //!
 //! Bevy-side hosting, embedded `dist/` serving, and GPU/UI tokens live in **`vmux_ui_native`**.
 
@@ -23,7 +23,7 @@ pub mod theme;
 
 mod listener_guard;
 
-pub mod host;
+pub mod transport;
 
 #[cfg(web)]
 pub mod key_stroke;

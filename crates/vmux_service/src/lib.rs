@@ -4,14 +4,14 @@
 pub mod chat;
 pub use vmux_wire::service as event;
 
-#[cfg(frontend)]
+#[cfg(ui)]
 pub mod page;
 
 pub mod message;
 pub mod protocol;
 pub mod remote;
 
-#[cfg(native)]
+#[cfg(host)]
 mod native;
-#[cfg(native)]
+#[cfg(host)]
 pub use native::*;

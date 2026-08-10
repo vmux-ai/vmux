@@ -18,8 +18,8 @@ pub mod event;
 pub mod platform;
 pub mod transcript;
 
-#[cfg(any(test, frontend))]
+#[cfg(any(test, ui))]
 pub mod format;
 
-#[cfg(frontend)]
+#[cfg(ui)]
 pub mod page;

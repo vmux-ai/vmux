@@ -8,9 +8,9 @@ pub mod event;
 #[cfg(web)]
 pub mod page;
 
-#[cfg(native)]
+#[cfg(host)]
 pub mod plugin;
-#[cfg(native)]
+#[cfg(host)]
 pub(crate) use plugin::AgentSetupNavigated;
-#[cfg(native)]
+#[cfg(host)]
 pub use plugin::AgentSetupPlugin;

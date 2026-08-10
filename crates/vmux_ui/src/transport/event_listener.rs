@@ -3,8 +3,8 @@
 
 use std::fmt;
 
-use crate::host::Host;
-use crate::host::transport::HostPayload;
+use crate::transport::Host;
+use crate::transport::HostPayload;
 
 const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 
@@ -18,7 +18,7 @@ pub enum EventListenerError {
     NoEmitMethod,
     EmitNotCallable,
     SerializePayload,
-    /// No [`crate::host::transport::PageHost`] installed on a target with no default.
+    /// No [`crate::transport::PageHost`] installed on a target with no default.
     NoHost,
     /// The installed host has no route for that event id. Unlike the other variants this is not a
     /// fault: a host that can only serve part of a page says so rather than silently succeeding.

@@ -14,10 +14,10 @@ use wasm_bindgen::JsValue;
 use wasm_bindgen::closure::Closure;
 use web_sys::window;
 
-use crate::host::Host;
-use crate::host::bin_ipc_envelope::BinIpcEnvelope;
-use crate::host::event_listener::EventListenerError;
-use crate::host::transport::{BytesListener, HostPayload, PageHost};
+use crate::transport::Host;
+use crate::transport::bin_ipc_envelope::BinIpcEnvelope;
+use crate::transport::event_listener::EventListenerError;
+use crate::transport::{BytesListener, HostPayload, PageHost};
 
 impl Host {
     /// The CEF bridge, assumed when no host installs one — which is every desktop page.
