@@ -798,3 +798,6 @@ mobile-error-connection-dropped = توهانجي Mac سان رابطو ٽٽي و
 mobile-error-connection-closed = توهانجي Mac رابطو بند ڪري ڇڏيو.
 mobile-error-address-invalid = ڳنڍڻ وارو پتو غلط آهي.
 mobile-error-address-no-port = ڳنڍڻ واري پتي ۾ پورٽ ناهي.
+mobile-qr-denied = Vmux ڪئميرا استعمال نٿو ڪري سگهي. QR ڪوڊ اسڪين ڪرڻ لاءِ سيٽنگون ۾ ان کي آن ڪريو، يا واپس وڃي ڳنڍڻ جو لنڪ پيسٽ ڪريو.
+mobile-qr-open-settings = سيٽنگون کوليو
+mobile-qr-session-error = ڪئميرا بند ٿي وئي. ٻيهر ڪوشش ڪريو، يا ڳنڍڻ جو لنڪ پيسٽ ڪريو.

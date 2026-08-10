@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Chaidh an ceangal ris a’ Mac agad a chall.
 mobile-error-connection-closed = Dhùin a’ Mac agad an ceangal.
 mobile-error-address-invalid = Chan eil an seòladh paidhreachaidh sin dligheach.
 mobile-error-address-no-port = Chan eil port anns an t-seòladh paidhreachaidh sin.
+mobile-qr-denied = Chan urrainn dha Vmux an camara a chleachdadh. Cuir air e ann an Roghainnean gus an còd QR a sganadh, no till air ais agus cuir a-steach an ceangal paidhreachaidh na àite.
+mobile-qr-open-settings = Fosgail Roghainnean
+mobile-qr-session-error = Sguir an camara. Feuch ris a-rithist, no cuir a-steach an ceangal paidhreachaidh na àite.

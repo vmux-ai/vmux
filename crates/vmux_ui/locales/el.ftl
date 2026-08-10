@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Η σύνδεση με το Mac σας δια�
 mobile-error-connection-closed = Το Mac σας έκλεισε τη σύνδεση.
 mobile-error-address-invalid = Αυτή η διεύθυνση σύζευξης δεν είναι έγκυρη.
 mobile-error-address-no-port = Αυτή η διεύθυνση σύζευξης δεν έχει θύρα.
+mobile-qr-denied = Το Vmux δεν μπορεί να χρησιμοποιήσει την κάμερα. Ενεργοποιήστε την στις Ρυθμίσεις για να σαρώσετε τον κωδικό QR ή επιστρέψτε και επικολλήστε τον σύνδεσμο σύζευξης.
+mobile-qr-open-settings = Άνοιγμα Ρυθμίσεων
+mobile-qr-session-error = Η κάμερα σταμάτησε. Δοκιμάστε ξανά ή επικολλήστε τον σύνδεσμο σύζευξης.

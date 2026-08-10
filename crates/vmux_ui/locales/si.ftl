@@ -798,3 +798,6 @@ mobile-error-connection-dropped = ඔබේ Mac වෙත වූ සම්බන
 mobile-error-connection-closed = ඔබේ Mac සම්බන්ධතාවය වසා දැමීය.
 mobile-error-address-invalid = යුගල කිරීමේ ලිපිනය වලංගු නැත.
 mobile-error-address-no-port = යුගල කිරීමේ ලිපිනයේ පෝට් එකක් නැත.
+mobile-qr-denied = Vmux හට කැමරාව භාවිත කළ නොහැක. QR කේතය පරිලෝකනය කිරීමට සැකසුම් තුළ එය සක්‍රිය කරන්න, නැතහොත් ආපසු ගොස් යුගල කිරීමේ සබැඳිය අලවන්න.
+mobile-qr-open-settings = සැකසුම් විවෘත කරන්න
+mobile-qr-session-error = කැමරාව නැවතුණි. නැවත උත්සාහ කරන්න, නැතහොත් යුගල කිරීමේ සබැඳිය අලවන්න.

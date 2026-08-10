@@ -798,3 +798,6 @@ mobile-error-connection-dropped = A ligação ao seu Mac caiu.
 mobile-error-connection-closed = O seu Mac encerrou a ligação.
 mobile-error-address-invalid = O endereço de emparelhamento é inválido.
 mobile-error-address-no-port = O endereço de emparelhamento não tem porta.
+mobile-qr-denied = O Vmux não consegue utilizar a câmara. Ative-a nas Definições para ler o código QR ou volte atrás e cole antes a ligação de emparelhamento.
+mobile-qr-open-settings = Abrir Definições
+mobile-qr-session-error = A câmara parou. Tente novamente ou cole antes a ligação de emparelhamento.

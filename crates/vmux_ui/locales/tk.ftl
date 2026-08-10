@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac-yňyz bilen birikme üzüldi.
 mobile-error-connection-closed = Mac-yňyz birikmäni ýapdy.
 mobile-error-address-invalid = Jübütleme salgysy nädogry.
 mobile-error-address-no-port = Jübütleme salgysynda port ýok.
+mobile-qr-denied = Vmux kamerany ulanyp bilmeýär. QR kody skanerlemek üçin ony Settings-de açyň ýa-da yzyna gaýdyp jübütleme salgysyny goýuň.
+mobile-qr-open-settings = Settings-i aç
+mobile-qr-session-error = Kamera durdy. Täzeden synanyşyň ýa-da jübütleme salgysyny goýuň.

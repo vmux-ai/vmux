@@ -798,3 +798,6 @@ mobile-error-connection-dropped = پەیوەندی بە Mac-ەکەتەوە پچ�
 mobile-error-connection-closed = Mac-ەکەت پەیوەندییەکەی داخست.
 mobile-error-address-invalid = ناونیشانی جووتکردن نادروستە.
 mobile-error-address-no-port = ناونیشانی جووتکردن پۆرتی تێدا نییە.
+mobile-qr-denied = Vmux ناتوانێت کامێرا بەکاربهێنێت. لە ڕێکخستنەکاندا بیکەرەوە بۆ سکانکردنی کۆدی QR، یان بگەڕێوە دواوە و لە جیاتی ئەوە بەستەری جووتکردن بلکێنە.
+mobile-qr-open-settings = ڕێکخستنەکان بکەرەوە
+mobile-qr-session-error = کامێرا وەستا. دووبارە هەوڵ بدەوە، یان لە جیاتی ئەوە بەستەری جووتکردن بلکێنە.

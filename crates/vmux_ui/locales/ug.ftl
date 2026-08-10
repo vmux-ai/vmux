@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac ئۈسكۈنىڭىز بىلەن ئۇلىن
 mobile-error-connection-closed = Mac ئۈسكۈنىڭىز ئۇلىنىشنى تاقىۋەتتى.
 mobile-error-address-invalid = جۈپلەش ئادرېسى ئىناۋەتسىز.
 mobile-error-address-no-port = جۈپلەش ئادرېسىدا پورت يوق.
+mobile-qr-denied = Vmux كامېرانى ئىشلىتەلمەيدۇ. QR كودىنى سىكانېرلاش ئۈچۈن Settings تىن كامېرانى قوزغىتىڭ ياكى قايتىپ بېرىپ جۈپلەش ئۇلانمىسىنى چاپلاڭ.
+mobile-qr-open-settings = Settings نى ئېچىش
+mobile-qr-session-error = كامېرا توختىدى. قايتا سىناڭ ياكى جۈپلەش ئۇلانمىسىنى چاپلاڭ.

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac과의 연결이 끊어졌습니다.
 mobile-error-connection-closed = Mac이 연결을 종료했습니다.
 mobile-error-address-invalid = 페어링 주소가 올바르지 않습니다.
 mobile-error-address-no-port = 페어링 주소에 포트가 없습니다.
+mobile-qr-denied = Vmux에서 카메라를 사용할 수 없습니다. QR 코드를 스캔하려면 설정에서 카메라를 켜거나, 뒤로 돌아가 페어링 링크를 붙여넣으세요.
+mobile-qr-open-settings = 설정 열기
+mobile-qr-session-error = 카메라가 중지되었습니다. 다시 시도하거나 대신 페어링 링크를 붙여넣으세요.

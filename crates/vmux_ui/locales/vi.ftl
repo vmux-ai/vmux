@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Kết nối tới máy Mac của bạn đã b�
 mobile-error-connection-closed = Máy Mac của bạn đã đóng kết nối.
 mobile-error-address-invalid = Địa chỉ ghép nối không hợp lệ.
 mobile-error-address-no-port = Địa chỉ ghép nối không có cổng.
+mobile-qr-denied = Vmux không thể dùng máy ảnh. Hãy bật trong Cài đặt để quét mã QR, hoặc quay lại và dán liên kết ghép nối.
+mobile-qr-open-settings = Mở Cài đặt
+mobile-qr-session-error = Máy ảnh đã dừng. Hãy thử lại, hoặc dán liên kết ghép nối.

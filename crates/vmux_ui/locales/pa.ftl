@@ -798,3 +798,6 @@ mobile-error-connection-dropped = ਤੁਹਾਡੇ Mac ਨਾਲ ਕਨੈਕ�
 mobile-error-connection-closed = ਤੁਹਾਡੇ Mac ਨੇ ਕਨੈਕਸ਼ਨ ਬੰਦ ਕਰ ਦਿੱਤਾ।
 mobile-error-address-invalid = ਉਹ ਪੇਅਰਿੰਗ ਪਤਾ ਗਲਤ ਹੈ।
 mobile-error-address-no-port = ਉਸ ਪੇਅਰਿੰਗ ਪਤੇ ਵਿੱਚ ਪੋਰਟ ਨਹੀਂ ਹੈ।
+mobile-qr-denied = Vmux ਕੈਮਰਾ ਨਹੀਂ ਵਰਤ ਸਕਦਾ। QR ਕੋਡ ਸਕੈਨ ਕਰਨ ਲਈ ਸੈਟਿੰਗਾਂ ਵਿੱਚ ਇਸਨੂੰ ਚਾਲੂ ਕਰੋ, ਜਾਂ ਵਾਪਸ ਜਾ ਕੇ ਪੇਅਰਿੰਗ ਲਿੰਕ ਪੇਸਟ ਕਰੋ।
+mobile-qr-open-settings = ਸੈਟਿੰਗਾਂ ਖੋਲ੍ਹੋ
+mobile-qr-session-error = ਕੈਮਰਾ ਰੁਕ ਗਿਆ। ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ, ਜਾਂ ਪੇਅਰਿੰਗ ਲਿੰਕ ਪੇਸਟ ਕਰੋ।

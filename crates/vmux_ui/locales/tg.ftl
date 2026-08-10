@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Пайваст бо Mac-и шумо қатъ �
 mobile-error-connection-closed = Mac-и шумо пайвастро баст.
 mobile-error-address-invalid = Он суроғаи ҷуфтшавӣ нодуруст аст.
 mobile-error-address-no-port = Он суроғаи ҷуфтшавӣ порт надорад.
+mobile-qr-denied = Vmux наметавонад камераро истифода барад. Барои скани QR-код онро дар Settings фаъол кунед ё бозгашта пайванди ҷуфтшавиро гузоред.
+mobile-qr-open-settings = Settings-ро кушоед
+mobile-qr-session-error = Камера қатъ шуд. Аз нав кӯшиш кунед ё пайванди ҷуфтшавиро гузоред.

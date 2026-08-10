@@ -798,3 +798,6 @@ mobile-error-connection-dropped = De ferbining mei jo Mac is ferlern gien.
 mobile-error-connection-closed = Jo Mac hat de ferbining sluten.
 mobile-error-address-invalid = Dat keppeladres is ûnjildich.
 mobile-error-address-no-port = Dat keppeladres hat gjin poarte.
+mobile-qr-denied = Vmux kin de kamera net brûke. Set him oan yn Ynstellings om de QR-koade te scannen, of gean werom en plak ynstee de keppellink.
+mobile-qr-open-settings = Ynstellings iepenje
+mobile-qr-session-error = De kamera is stoppe. Besykje it nochris, of plak ynstee de keppellink.

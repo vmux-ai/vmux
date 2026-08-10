@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Tapaka ny fifandraisana amin’ny Mac-nao.
 mobile-error-connection-closed = Nakaton’ny Mac-nao ny fifandraisana.
 mobile-error-address-invalid = Tsy mety ny adiresy fampifandraisana.
 mobile-error-address-no-port = Tsy misy port ny adiresy fampifandraisana.
+mobile-qr-denied = Tsy afaka mampiasa ny fakan-tsary i Vmux. Alefaso ao amin’ny Settings izy mba hahafahana mi-scan ny QR code, na miverena ka apetaho ny rohy fampifandraisana.
+mobile-qr-open-settings = Sokafy ny Settings
+mobile-qr-session-error = Nijanona ny fakan-tsary. Andramo indray, na apetaho ny rohy fampifandraisana.

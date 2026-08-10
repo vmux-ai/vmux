@@ -36,10 +36,13 @@ vmux_team = { path = "../../page/vmux_team" }
 vmux_ui = { path = "../../vmux_ui" }
 
 [target.'cfg(target_os = "ios")'.dependencies]
+block2 = "0.6"
 dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = [
     "std",
+    # requestAccessForMediaType takes a completion block.
+    "block2",
     "AVAnimation",
     "AVCaptureDevice",
     "AVCaptureInput",
@@ -61,9 +64,12 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-foundation = { version = "0.3", default-features = false, features = [
     "std",
     "NSArray",
+    "NSDictionary",
     "NSError",
+    "NSNotification",
     "NSObject",
     "NSString",
+    "NSURL",
 ] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "std",
@@ -77,6 +83,8 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "NSText",
     "objc2-core-foundation",
     "objc2-quartz-core",
+    # openSettingsURLString, so a denied camera can be re-granted without hunting through Settings.
+    "UIApplication",
     "UIButton",
     "UIColor",
     "UIControl",
