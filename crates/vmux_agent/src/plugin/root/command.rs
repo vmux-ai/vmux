@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use vmux_command::AppCommand;
+use vmux_command::{AppCommand, WriteAppCommands};
 use vmux_layout::{
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
@@ -19,12 +19,35 @@ use vmux_service::protocol::{
 };
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
-use vmux_terminal::TerminalStackSpawnRequest;
+use vmux_terminal::{ServiceMessageSet, TerminalStackSpawnRequest};
 
 use crate::events::{AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin};
 
 use super::browser_pane::AgentBrowserResolve;
 use super::valid_cwd;
+
+pub(super) struct CommandPlugin;
+
+impl Plugin for CommandPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                forward_history_open_intent,
+                handle_agent_tool_calls,
+                handle_agent_commands,
+            )
+                .chain()
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet),
+        )
+        .add_systems(
+            Update,
+            (handle_focus_pane_requests, handle_rename_profile_requests)
+                .after(handle_agent_commands),
+        );
+    }
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct SettingsParams<'w> {
@@ -47,7 +70,7 @@ pub(crate) struct FocusPaneRequest {
     pane: String,
 }
 
-pub(crate) fn handle_focus_pane_requests(
+fn handle_focus_pane_requests(
     mut reader: MessageReader<FocusPaneRequest>,
     child_of_q: Query<&ChildOf>,
     mut commands: Commands,
@@ -65,7 +88,7 @@ pub(crate) struct RenameProfileRequest {
     name: String,
 }
 
-pub(crate) fn handle_rename_profile_requests(
+fn handle_rename_profile_requests(
     mut reader: MessageReader<RenameProfileRequest>,
     active_space: Option<ResMut<ActiveSpace>>,
 ) {
@@ -157,7 +180,7 @@ pub(crate) struct AgentSpaceWriters<'w, 's> {
     open_beside: MessageWriter<'w, vmux_layout::OpenBesideRequest>,
 }
 
-pub(crate) fn handle_agent_tool_calls(
+pub(super) fn handle_agent_tool_calls(
     mut reader: MessageReader<AgentToolCallRequest>,
     mut command_writer: MessageWriter<AgentCommandRequest>,
     mut query_writer: MessageWriter<AgentQueryRequest>,
@@ -236,7 +259,7 @@ pub(crate) struct DesktopContext<'w> {
     contributions: Res<'w, vmux_command::snapshot::CommandBarContributions>,
 }
 
-pub(crate) fn handle_agent_commands(
+pub(super) fn handle_agent_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     mut app_commands: MessageWriter<AppCommand>,
     mut browser_nav_writer: MessageWriter<vmux_layout::BrowserNavigateRequest>,
@@ -639,7 +662,7 @@ pub(crate) fn handle_agent_commands(
     }
 }
 
-pub(crate) fn forward_history_open_intent(
+fn forward_history_open_intent(
     mut intents: MessageReader<vmux_history::query::HistoryOpenIntent>,
     mut requests: MessageWriter<AgentCommandRequest>,
 ) {

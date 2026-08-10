@@ -5,6 +5,7 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
+use vmux_command::WriteAppCommands;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
@@ -16,7 +17,9 @@ use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, ProcessId};
 use vmux_setting::AppSettings;
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{ProcessExited, TerminalGridSize, new_terminal_bundle_with_cwd};
+use vmux_terminal::{
+    ProcessExited, ServiceMessageSet, TerminalGridSize, new_terminal_bundle_with_cwd,
+};
 
 use crate::session::{AgentSession, AgentSessionExited, PendingAgentSession, SessionId};
 use crate::strategy::AgentStrategies;
@@ -29,7 +32,33 @@ use super::page_open::{
 };
 use super::provider::{AgentExecutableOverride, resolve_agent_executable};
 
-pub(crate) fn respond_process_stack_spawn(
+pub(super) struct SpawnPlugin;
+
+impl Plugin for SpawnPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            detect_agent_session_process_exit
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet)
+                .after(super::query::handle_agent_queries),
+        )
+        .add_systems(
+            Update,
+            (
+                handle_spawn_agent_requests,
+                respond_process_stack_spawn.after(super::command::handle_agent_commands),
+                handle_restart_agent_pty.before(ServiceMessageSet),
+                respond_page_agent_attach,
+                respond_page_agent_spawn_stack,
+                respond_page_agent_spawn_default,
+                respond_page_agent_attach_default,
+            ),
+        );
+    }
+}
+
+fn respond_process_stack_spawn(
     mut reader: MessageReader<ProcessStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut commands: Commands,
@@ -133,7 +162,7 @@ pub fn detect_agent_session_process_exit(
 
 pub(crate) type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-pub(crate) fn handle_spawn_agent_requests(
+pub(super) fn handle_spawn_agent_requests(
     mut reader: MessageReader<SpawnAgentInStackRequest>,
     settings: Res<AppSettings>,
     strategies: Option<Res<AgentStrategies>>,
@@ -246,7 +275,7 @@ pub(crate) fn handle_spawn_agent_requests(
     }
 }
 
-pub(crate) fn respond_page_agent_attach(
+fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -273,7 +302,7 @@ pub(crate) fn respond_page_agent_attach(
     }
 }
 
-pub(crate) fn respond_page_agent_spawn_stack(
+fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -307,7 +336,7 @@ pub(crate) fn respond_page_agent_spawn_stack(
     }
 }
 
-pub(crate) fn respond_page_agent_spawn_default(
+fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -356,7 +385,7 @@ pub(crate) fn respond_page_agent_spawn_default(
     }
 }
 
-pub(crate) fn respond_page_agent_attach_default(
+fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -423,7 +452,7 @@ pub(crate) fn rebuilt_args_env_for_restart(
     (args, env)
 }
 
-pub(crate) fn handle_restart_agent_pty(
+fn handle_restart_agent_pty(
     mut reader: MessageReader<RestartAgentPty>,
     mut q: Query<(
         &mut ProcessId,
@@ -489,6 +518,40 @@ pub(crate) fn handle_restart_agent_pty(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
+
+    /// Restarting rewrites the launch a terminal will be re-fed from. Run it after the terminal
+    /// crate has already flushed its service messages and the old anchor goes out on the wire, so
+    /// the schedule is asked directly rather than trusted to the order this plugin is added in.
+    #[test]
+    fn agent_restart_runs_before_terminal_service_messages() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, SpawnPlugin));
+
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut update = schedules.remove(Update).unwrap();
+        update.initialize(app.world_mut()).unwrap();
+        let graph = update.graph();
+
+        let restart = graph
+            .systems_in_set(handle_restart_agent_pty.into_system_set().intern())
+            .expect("handle_restart_agent_pty is registered")
+            .first()
+            .copied()
+            .expect("handle_restart_agent_pty is registered");
+        let service_messages = graph
+            .system_sets
+            .get_key(ServiceMessageSet.intern())
+            .expect("the ordering names ServiceMessageSet");
+
+        assert!(
+            graph
+                .dependency()
+                .graph()
+                .contains_edge(NodeId::System(restart), NodeId::Set(service_messages)),
+            "restart state commands must apply before terminal input flush"
+        );
+    }
 
     #[test]
     pub(crate) fn restart_rebuilds_args_with_new_anchor() {

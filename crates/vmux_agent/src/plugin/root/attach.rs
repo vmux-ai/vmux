@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy_cef::prelude::WebviewExtendStandardMaterial;
+use vmux_command::WriteAppCommands;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
 use vmux_service::client::ServiceClient;
@@ -15,12 +16,28 @@ use vmux_service::protocol::{
     AgentCommand as ServiceAgentCommand, AgentCommandResult, ClientMessage, ProcessId,
 };
 use vmux_setting::AppSettings;
+use vmux_terminal::ServiceMessageSet;
 use vmux_terminal::Terminal;
 use vmux_terminal::launch::TerminalLaunch;
 
 use crate::AgentVariant;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use crate::session::{AgentSession, SessionId};
+
+pub(super) struct AttachPlugin;
+
+impl Plugin for AttachPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            handle_resume_in_acp
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet)
+                .after(super::command::handle_agent_tool_calls)
+                .before(super::command::handle_agent_commands),
+        );
+    }
+}
 
 pub fn attach_page_agent_to_stack(
     stack: Entity,
@@ -263,7 +280,7 @@ pub fn page_agent_placeholder_url(provider: &str, model: &str, sid: &str) -> Str
     format!("data:text/html;charset=utf-8,{encoded}")
 }
 
-pub(crate) fn handle_resume_in_acp(
+fn handle_resume_in_acp(
     mut reader: MessageReader<AgentCommandRequest>,
     cli_sessions: Query<
         (

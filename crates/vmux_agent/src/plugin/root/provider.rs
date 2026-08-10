@@ -10,6 +10,21 @@ use bevy::prelude::*;
 use vmux_core::Ready;
 use vmux_core::agent::{AgentKind, AgentProviderTargetKind};
 
+pub(super) struct ProviderPlugin;
+
+impl Plugin for ProviderPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            (
+                spawn_builtin_agent_providers,
+                detect_agent_provider_availability,
+            )
+                .chain(),
+        );
+    }
+}
+
 pub(crate) const BUILTIN_AGENT_PROVIDERS: &[AgentKind] =
     &[AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex];
 
@@ -29,7 +44,7 @@ pub(crate) fn resolve_agent_executable(
     crate::exec::find_executable(kind.executable())
 }
 
-pub(crate) fn spawn_builtin_agent_providers(mut commands: Commands) {
+fn spawn_builtin_agent_providers(mut commands: Commands) {
     for kind in BUILTIN_AGENT_PROVIDERS {
         commands.spawn((
             AgentProviderTargetKind(*kind),
@@ -38,7 +53,7 @@ pub(crate) fn spawn_builtin_agent_providers(mut commands: Commands) {
     }
 }
 
-pub(crate) fn detect_agent_provider_availability(
+fn detect_agent_provider_availability(
     mut commands: Commands,
     q: Query<(Entity, &AgentProviderTargetKind), Without<Ready>>,
 ) {

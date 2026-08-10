@@ -7,13 +7,16 @@
 use std::path::Path;
 
 use bevy::prelude::*;
+use vmux_command::WriteAppCommands;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, ClientMessage, ProcessId};
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
 use vmux_terminal::launch::TerminalLaunch;
-use vmux_terminal::{AgentRunTerminal, ProcessExited, Terminal, TerminalStackSpawnRequest};
+use vmux_terminal::{
+    AgentRunTerminal, ProcessExited, ServiceMessageSet, Terminal, TerminalStackSpawnRequest,
+};
 
 use crate::events::AgentCommandRequest;
 use crate::session::AgentSession;
@@ -36,6 +39,21 @@ use super::workspace::{
     ambiguous_worktree_message, existing_worktree_candidates, resolve_requested_worktree,
     workspace_path_task, workspace_picker_task,
 };
+
+pub(super) struct SelfCommandPlugin;
+
+impl Plugin for SelfCommandPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            handle_agent_self_commands
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet)
+                .after(vmux_layout::worktree::TabDirectoryRebindSet)
+                .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
+        );
+    }
+}
 
 pub(crate) fn resolve_self_pane(
     anchor: ProcessId,
@@ -182,7 +200,7 @@ pub(crate) struct AgentSelfCommandWriters<'w> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn handle_agent_self_commands(
+pub(super) fn handle_agent_self_commands(
     mut reader: MessageReader<AgentCommandRequest>,
     agent_terms: Query<(Entity, &ProcessId, &ChildOf)>,
     term_pids: Query<(Entity, &ProcessId), With<Terminal>>,
@@ -1196,6 +1214,45 @@ pub(crate) fn handle_agent_self_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::schedule::{IntoSystemSet, NodeId, Schedules, SystemSet};
+
+    /// A `run` command writes a [`TerminalStackSpawnRequest`] that the terminal crate turns into a
+    /// pane in the same frame. Lose the edge and the spawn slips a frame behind the agent command
+    /// that asked for it, so the schedule is asked directly rather than trusted to the order this
+    /// plugin happens to be added in.
+    #[test]
+    fn agent_run_spawns_terminal_before_next_agent_command_frame() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, SelfCommandPlugin));
+
+        let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
+        let mut update = schedules.remove(Update).unwrap();
+        update.initialize(app.world_mut()).unwrap();
+        let graph = update.graph();
+
+        let self_commands = graph
+            .systems_in_set(handle_agent_self_commands.into_system_set().intern())
+            .expect("handle_agent_self_commands is registered")
+            .first()
+            .copied()
+            .expect("handle_agent_self_commands is registered");
+        let terminal_spawn = graph
+            .system_sets
+            .get_key(
+                vmux_terminal::plugin::respond_terminal_stack_spawn
+                    .into_system_set()
+                    .intern(),
+            )
+            .expect("the ordering names respond_terminal_stack_spawn");
+
+        assert!(
+            graph
+                .dependency()
+                .graph()
+                .contains_edge(NodeId::System(self_commands), NodeId::Set(terminal_spawn)),
+            "run terminal spawn requests must materialize before the next agent command frame"
+        );
+    }
 
     #[test]
     pub(crate) fn create_worktree_precedes_and_gates_sibling_self_commands() {

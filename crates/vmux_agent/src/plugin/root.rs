@@ -20,13 +20,11 @@ mod test_support;
 mod workspace;
 
 use bevy::prelude::*;
-use vmux_command::WriteAppCommands;
-use vmux_core::PageOpenSet;
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest, RestartAgentPty, SpawnAgentInStackRequest,
 };
-use vmux_terminal::{ServiceMessageSet, TerminalStackSpawnRequest};
+use vmux_terminal::TerminalStackSpawnRequest;
 
 use crate::client::cli::claude::ClaudeStrategy;
 use crate::client::cli::codex::CodexStrategy;
@@ -45,36 +43,7 @@ use vmux_core::browser::{
     BrowserScrollRequest, BrowserSnapshotRequest, BrowserSnapshotResponse, NavAwaitingSnapshot,
 };
 
-use self::attach::handle_resume_in_acp;
-use self::attention::{
-    agent_bell_to_attention, clear_agent_done, handle_agent_turn_ended, mark_agent_done,
-};
-use self::command::{
-    FocusPaneRequest, ProcessStackSpawnRequest, RenameProfileRequest, handle_agent_commands,
-    handle_agent_tool_calls, handle_focus_pane_requests, handle_rename_profile_requests,
-};
-use self::follow::{
-    handle_agent_file_search, handle_agent_file_touch, tidy_acp_on_idle, tidy_on_agent_attention,
-    tidy_page_on_idle,
-};
-use self::page_open::{
-    handle_agent_page_open, handle_swap_stack_session, prepare_agent_tab_worktrees,
-};
-use self::provider::{detect_agent_provider_availability, spawn_builtin_agent_providers};
-use self::query::{
-    forward_layout_apply_responses, forward_layout_snapshot_responses,
-    forward_record_start_responses, forward_record_stop_responses, forward_screenshot_responses,
-    forward_snapshot_responses, handle_agent_queries,
-};
-use self::self_command::handle_agent_self_commands;
-use self::spawn::{
-    handle_restart_agent_pty, handle_spawn_agent_requests, respond_page_agent_attach,
-    respond_page_agent_attach_default, respond_page_agent_spawn_default,
-    respond_page_agent_spawn_stack, respond_process_stack_spawn,
-};
-use self::workspace::{
-    drain_workspace_picker_tasks, handle_agent_choice_selected, send_pending_agent_continuations,
-};
+use self::command::{FocusPaneRequest, ProcessStackSpawnRequest, RenameProfileRequest};
 
 pub use self::attach::{
     attach_acp_agent_to_stack, attach_page_agent_to_stack, page_agent_placeholder_url,
@@ -85,7 +54,6 @@ pub use self::run_terminal::AgentTerminalRegions;
 pub use self::spawn::detect_agent_session_process_exit;
 pub use vmux_space::cwd::valid_cwd;
 
-pub(crate) use self::command::forward_history_open_intent;
 pub(crate) use self::follow::on_tidy_action;
 pub(crate) use self::run_terminal::agent_terminal_shell;
 pub(crate) use self::workspace::{
@@ -132,7 +100,20 @@ impl Plugin for AgentSessionPlugin {
         strategies.register_cli(Box::new(CodexStrategy));
 
         app.insert_resource(strategies)
-            .add_plugins((crate::room::RoomPlugin, crate::command_bar::CommandBarPlugin))
+            .add_plugins((
+                crate::room::RoomPlugin,
+                crate::command_bar::CommandBarPlugin,
+                self::attach::AttachPlugin,
+                self::attention::AttentionPlugin,
+                self::command::CommandPlugin,
+                self::follow::FollowPlugin,
+                self::page_open::PageOpenPlugin,
+                self::provider::ProviderPlugin,
+                self::query::QueryPlugin,
+                self::self_command::SelfCommandPlugin,
+                self::spawn::SpawnPlugin,
+                self::workspace::WorkspacePlugin,
+            ))
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
@@ -172,29 +153,12 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<vmux_core::notify::BellReceived>()
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
-            .add_observer(handle_agent_choice_selected)
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
             .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
             .init_resource::<
                 bevy::ecs::message::Messages<vmux_layout::worktree::TabDirectoryObserved>,
             >()
-            .add_systems(
-                Update,
-                (
-                    agent_bell_to_attention,
-                    handle_agent_turn_ended,
-                    tidy_on_agent_attention,
-                    mark_agent_done,
-                    clear_agent_done,
-                )
-                    .chain()
-                    .after(vmux_layout::stack::ComputeFocusSet),
-            )
-            .add_systems(
-                Update,
-                (tidy_acp_on_idle, tidy_page_on_idle).after(vmux_layout::stack::ComputeFocusSet),
-            )
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
@@ -230,79 +194,12 @@ impl Plugin for AgentSessionPlugin {
             .add_systems(
                 Update,
                 (
-                    forward_history_open_intent,
-                    handle_agent_tool_calls,
-                    handle_resume_in_acp,
-                    handle_agent_commands,
-                    handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
-                    handle_agent_file_search,
-                )
-                    .chain()
-                    .in_set(WriteAppCommands)
-                    .after(ServiceMessageSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    handle_agent_self_commands
-                        .after(vmux_layout::worktree::TabDirectoryRebindSet)
-                        .before(vmux_terminal::plugin::respond_terminal_stack_spawn),
-                    drain_workspace_picker_tasks,
-                    send_pending_agent_continuations,
-                    handle_agent_queries,
-                    detect_agent_session_process_exit,
-                )
-                    .chain()
-                    .in_set(WriteAppCommands)
-                    .after(ServiceMessageSet),
-            )
-            .add_systems(
-                Update,
-                (
-                    forward_layout_apply_responses,
-                    forward_layout_snapshot_responses,
-                    forward_screenshot_responses,
-                    forward_snapshot_responses,
-                    forward_record_start_responses,
-                    forward_record_stop_responses,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
-                    handle_spawn_agent_requests,
-                    handle_swap_stack_session.before(handle_spawn_agent_requests),
-                    handle_focus_pane_requests.after(handle_agent_commands),
-                    handle_rename_profile_requests.after(handle_agent_commands),
-                    respond_process_stack_spawn.after(handle_agent_commands),
-                    prepare_agent_tab_worktrees
-                        .in_set(PageOpenSet::HandleKnownPages)
-                        .before(handle_agent_page_open),
-                    handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    handle_restart_agent_pty.before(ServiceMessageSet),
-                    respond_page_agent_attach,
-                    respond_page_agent_spawn_stack,
-                    respond_page_agent_spawn_default,
-                    respond_page_agent_attach_default,
-                ),
-            )
-            .add_systems(
-                Update,
-                (
                     crate::snapshot_updater::update_agents_snapshot,
                     crate::snapshot_updater::update_recent_agents,
                     crate::snapshot_updater::update_agent_sessions_snapshot,
                 )
                     .chain()
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),
-            )
-            .add_systems(
-                Startup,
-                (
-                    spawn_builtin_agent_providers,
-                    detect_agent_provider_availability,
-                )
-                    .chain(),
             );
     }
 }
@@ -346,36 +243,5 @@ mod tests {
         assert!(strategies.get_cli(AgentKind::Vibe).is_some());
         assert!(strategies.get_cli(AgentKind::Claude).is_some());
         assert!(strategies.get_cli(AgentKind::Codex).is_some());
-    }
-
-    #[test]
-    fn agent_run_spawns_terminal_before_next_agent_command_frame() {
-        let source = include_str!("root.rs");
-        let non_test_source = source
-            .split("#[cfg(test)]\nmod tests {")
-            .next()
-            .expect("non-test source");
-        let start = non_test_source
-            .find("handle_agent_self_commands")
-            .expect("handle_agent_self_commands registered");
-        assert!(
-            non_test_source[start..]
-                .contains(".before(vmux_terminal::plugin::respond_terminal_stack_spawn)"),
-            "run terminal spawn requests must materialize before the next agent command frame"
-        );
-    }
-
-    #[test]
-    fn agent_restart_runs_before_terminal_service_messages() {
-        let source = include_str!("root.rs");
-        let non_test_source = source
-            .split("#[cfg(test)]\nmod tests {")
-            .next()
-            .expect("non-test source");
-
-        assert!(
-            non_test_source.contains("handle_restart_agent_pty.before(ServiceMessageSet)"),
-            "restart state commands must apply before terminal input flush"
-        );
     }
 }

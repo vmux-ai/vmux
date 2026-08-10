@@ -8,15 +8,45 @@ use std::path::{Path, PathBuf};
 
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
+use vmux_command::WriteAppCommands;
 use vmux_core::agent::AgentKind;
 use vmux_layout::pane::Pane;
 use vmux_service::protocol::AgentCommand as ServiceAgentCommand;
 use vmux_setting::AppSettings;
+use vmux_terminal::ServiceMessageSet;
 
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use crate::session::AgentSession;
 
 use super::command::origin_is_agent;
+
+pub(super) struct FollowPlugin;
+
+impl Plugin for FollowPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                handle_agent_file_search,
+            )
+                .chain()
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet)
+                .after(super::command::handle_agent_commands),
+        )
+        .add_systems(
+            Update,
+            tidy_on_agent_attention
+                .after(vmux_layout::stack::ComputeFocusSet)
+                .after(super::attention::handle_agent_turn_ended),
+        )
+        .add_systems(
+            Update,
+            (tidy_acp_on_idle, tidy_page_on_idle).after(vmux_layout::stack::ComputeFocusSet),
+        );
+    }
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentFileResolve<'w, 's> {
@@ -261,7 +291,7 @@ pub(crate) fn file_touch_url(
 /// file spirals a new pane; later reads replace a clean file preview while dirty
 /// previews keep their own stack. Re-reading the same dirty file preserves its
 /// unsaved buffer.
-pub(crate) fn handle_agent_file_touch(
+fn handle_agent_file_touch(
     mut reader: MessageReader<AgentCommandRequest>,
     mut resolve: AgentFileResolve,
     settings: Res<AppSettings>,
@@ -400,7 +430,7 @@ pub(crate) fn handle_agent_file_touch(
     }
 }
 
-pub(crate) fn handle_agent_file_search(
+fn handle_agent_file_search(
     mut reader: MessageReader<AgentCommandRequest>,
     mut writer: MessageWriter<vmux_editor::GlobalSearchRequest>,
 ) {
@@ -498,7 +528,7 @@ pub(crate) fn tidy_follow_pane(
 
 /// CLI agents: tidy on turn-end `AgentAttention` (the terminal bell), anchored by the
 /// agent terminal's `ProcessId`.
-pub(crate) fn tidy_on_agent_attention(
+pub(super) fn tidy_on_agent_attention(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     settings: Res<AppSettings>,
     agents: Query<&vmux_service::protocol::ProcessId, With<vmux_core::team::Agent>>,
@@ -533,7 +563,7 @@ pub(crate) fn tidy_on_agent_attention(
 
 /// ACP agents have no terminal bell; their turn-end is `AgentRunState` → `Idle`. Tidy the
 /// ACP follow-pane on that transition, anchored by the `AcpSession`.
-pub(crate) fn tidy_acp_on_idle(
+fn tidy_acp_on_idle(
     settings: Res<AppSettings>,
     sessions: Query<
         (&crate::client::acp::AcpSession, &crate::AgentRunState),
@@ -573,7 +603,7 @@ pub(crate) fn tidy_acp_on_idle(
 /// resolves through, so [`tidy_on_agent_attention`] can't see it. Tidy the follow-pane on the
 /// idle transition, resolving `agent_pane` as the session stack's parent pane. Mirrors
 /// [`tidy_acp_on_idle`] for non-ACP agents.
-pub(crate) fn tidy_page_on_idle(
+fn tidy_page_on_idle(
     settings: Res<AppSettings>,
     sessions: Query<
         (&ChildOf, &crate::AgentRunState),

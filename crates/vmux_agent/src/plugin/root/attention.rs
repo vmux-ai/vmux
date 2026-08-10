@@ -10,7 +10,27 @@ use vmux_service::protocol::AgentCommand as ServiceAgentCommand;
 use crate::events::AgentCommandRequest;
 use crate::session::SessionId;
 
-pub(crate) fn agent_bell_to_attention(
+pub(super) struct AttentionPlugin;
+
+impl Plugin for AttentionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (agent_bell_to_attention, handle_agent_turn_ended)
+                .chain()
+                .after(vmux_layout::stack::ComputeFocusSet),
+        )
+        .add_systems(
+            Update,
+            (mark_agent_done, clear_agent_done)
+                .chain()
+                .after(vmux_layout::stack::ComputeFocusSet)
+                .after(super::follow::tidy_on_agent_attention),
+        );
+    }
+}
+
+fn agent_bell_to_attention(
     mut reader: MessageReader<vmux_core::notify::BellReceived>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,
     agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
@@ -60,7 +80,7 @@ pub(crate) fn agent_stack(
         .or_else(|| child_of.get(entity).ok().map(|child| child.parent()))
 }
 
-pub(crate) fn mark_agent_done(
+fn mark_agent_done(
     mut reader: MessageReader<vmux_core::notify::AgentAttention>,
     mut notify: MessageWriter<vmux_core::notify::OsNotify>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
@@ -131,7 +151,7 @@ pub(crate) fn mark_agent_done(
     }
 }
 
-pub(crate) fn clear_agent_done(
+fn clear_agent_done(
     done: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     focused: Res<vmux_layout::stack::FocusedStack>,
@@ -162,7 +182,7 @@ pub(crate) fn clear_agent_done(
 /// `anchor` `ProcessId` and raise `AgentAttention`, which drives the follow-pane auto-tidy
 /// (`tidy_on_agent_attention`) and the done-dot. The terminal bell only fires on
 /// idle/permission, so it is not a reliable turn-end signal.
-pub(crate) fn handle_agent_turn_ended(
+pub(super) fn handle_agent_turn_ended(
     mut reader: MessageReader<AgentCommandRequest>,
     agents: Query<(Entity, &vmux_service::protocol::ProcessId), With<vmux_core::team::Agent>>,
     mut attention: MessageWriter<vmux_core::notify::AgentAttention>,

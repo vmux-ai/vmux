@@ -5,11 +5,13 @@
 //! waiting on it.
 
 use bevy::prelude::*;
+use vmux_command::WriteAppCommands;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{
     AgentCommandResult, AgentQuery, AgentQueryResult, AgentRequestId, ClientMessage,
 };
 use vmux_setting::AppSettings;
+use vmux_terminal::ServiceMessageSet;
 
 use crate::events::{
     AgentQueryRequest, RecordStartRequest, RecordStartResponse, RecordStopRequest,
@@ -22,7 +24,32 @@ use vmux_core::browser::{
 
 use super::browser_pane::AgentBrowserResolve;
 
-pub(crate) fn handle_agent_queries(
+pub(super) struct QueryPlugin;
+
+impl Plugin for QueryPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            handle_agent_queries
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet)
+                .after(super::workspace::send_pending_agent_continuations),
+        )
+        .add_systems(
+            Update,
+            (
+                forward_layout_apply_responses,
+                forward_layout_snapshot_responses,
+                forward_screenshot_responses,
+                forward_snapshot_responses,
+                forward_record_start_responses,
+                forward_record_stop_responses,
+            ),
+        );
+    }
+}
+
+pub(super) fn handle_agent_queries(
     mut reader: MessageReader<AgentQueryRequest>,
     service: Option<Res<ServiceClient>>,
     settings: Res<AppSettings>,
@@ -228,7 +255,7 @@ pub(crate) fn handle_agent_queries(
     }
 }
 
-pub(crate) fn forward_layout_apply_responses(
+fn forward_layout_apply_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutApplyResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -245,7 +272,7 @@ pub(crate) fn forward_layout_apply_responses(
     }
 }
 
-pub(crate) fn forward_layout_snapshot_responses(
+fn forward_layout_snapshot_responses(
     mut reader: MessageReader<vmux_layout::apply::LayoutSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -272,7 +299,7 @@ pub(crate) fn screenshot_response_to_query_result(
     }
 }
 
-pub(crate) fn forward_screenshot_responses(
+fn forward_screenshot_responses(
     mut reader: MessageReader<ScreenshotResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -285,7 +312,7 @@ pub(crate) fn forward_screenshot_responses(
     }
 }
 
-pub(crate) fn forward_snapshot_responses(
+fn forward_snapshot_responses(
     mut reader: MessageReader<BrowserSnapshotResponse>,
     service: Option<Res<ServiceClient>>,
     mut nav_awaiting: ResMut<NavAwaitingSnapshot>,
@@ -319,7 +346,7 @@ pub(crate) fn record_start_response_to_query_result(
     }
 }
 
-pub(crate) fn forward_record_start_responses(
+fn forward_record_start_responses(
     mut reader: MessageReader<RecordStartResponse>,
     service: Option<Res<ServiceClient>>,
 ) {
@@ -347,7 +374,7 @@ pub(crate) fn record_stop_response_to_query_result(
     }
 }
 
-pub(crate) fn forward_record_stop_responses(
+fn forward_record_stop_responses(
     mut reader: MessageReader<RecordStopResponse>,
     service: Option<Res<ServiceClient>>,
 ) {

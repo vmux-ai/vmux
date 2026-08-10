@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenTask};
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_service::protocol::AgentAttachment;
 use vmux_setting::AppSettings;
 use vmux_space::ActiveSpace;
@@ -22,6 +22,23 @@ use super::attach::{
 };
 use super::run_terminal::{process_cwd, stored_tab_cwd};
 use super::spawn::PendingPageOpen;
+
+pub(super) struct PageOpenPlugin;
+
+impl Plugin for PageOpenPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                handle_swap_stack_session.before(super::spawn::handle_spawn_agent_requests),
+                prepare_agent_tab_worktrees
+                    .in_set(PageOpenSet::HandleKnownPages)
+                    .before(handle_agent_page_open),
+                handle_agent_page_open.in_set(PageOpenSet::HandleKnownPages),
+            ),
+        );
+    }
+}
 
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentPageOpenWorkspace<'w, 's> {
@@ -89,7 +106,7 @@ pub(crate) fn resolved_space_startup_dir(
     vmux_setting::resolve_startup_dir_for_tab_with_source(settings, &space_id, None)
 }
 
-pub(crate) fn prepare_agent_tab_worktrees(
+fn prepare_agent_tab_worktrees(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     child_of: Query<&ChildOf>,
     spaces: Query<(), With<vmux_layout::space::Space>>,
@@ -261,7 +278,7 @@ pub(crate) fn prepare_agent_tab_worktrees(
     }
 }
 
-pub(crate) fn handle_agent_page_open(
+fn handle_agent_page_open(
     mut open_q: ParamSet<(
         Query<(Entity, &PageOpenTask), PendingPageOpen>,
         Query<(
@@ -371,7 +388,7 @@ pub(crate) fn handle_agent_page_open(
 /// target runtime with an explicit cwd — the shared path for `/resume` and the ACP↔CLI
 /// handoff. Unlike the page-open path this always re-attaches (no same-id no-op) and never
 /// falls back to `default_cwd`.
-pub(crate) fn handle_swap_stack_session(
+fn handle_swap_stack_session(
     mut reader: MessageReader<vmux_core::agent::SwapStackSession>,
     settings: Res<AppSettings>,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,

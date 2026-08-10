@@ -8,13 +8,32 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+use vmux_command::WriteAppCommands;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::ClientMessage;
+use vmux_terminal::ServiceMessageSet;
 
 use crate::events::AgentChoiceSelected;
 use crate::session::AgentSession;
 
 use super::self_command::{ancestor_acp_stack, rebind_acp_workspace};
+
+pub(super) struct WorkspacePlugin;
+
+impl Plugin for WorkspacePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_observer(handle_agent_choice_selected).add_systems(
+            Update,
+            (
+                drain_workspace_picker_tasks.after(super::self_command::handle_agent_self_commands),
+                send_pending_agent_continuations,
+            )
+                .chain()
+                .in_set(WriteAppCommands)
+                .after(ServiceMessageSet),
+        );
+    }
+}
 
 pub(crate) const WORKSPACE_SELECTION_REQUESTED: &str = "Project selection requested. Stop this turn and wait. vmux will resume this same conversation after the user chooses or cancels.";
 
@@ -72,7 +91,7 @@ pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
-pub(crate) fn handle_agent_choice_selected(
+fn handle_agent_choice_selected(
     trigger: On<AgentChoiceSelected>,
     choices: Query<&PendingAgentChoice>,
     tabs: Query<(), With<vmux_layout::tab::Tab>>,
@@ -421,7 +440,7 @@ pub(crate) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate
     )
 }
 
-pub(crate) fn drain_workspace_picker_tasks(
+fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
     chat_views: Query<(), With<crate::plugin::chat::AgentChatView>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
@@ -514,7 +533,7 @@ pub(crate) fn drain_workspace_picker_tasks(
     }
 }
 
-pub(crate) fn send_pending_agent_continuations(
+pub(super) fn send_pending_agent_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
