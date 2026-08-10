@@ -1510,7 +1510,7 @@ mod tests {
             shortcuts: ShortcutSettings::default(),
             terminal: None,
             auto_update: false,
-            agent: crate::plugin::runtime::AgentSettings::default(),
+            agent: crate::host::runtime::AgentSettings::default(),
             spaces: Default::default(),
             recording: Default::default(),
             editor: Default::default(),

@@ -16,6 +16,6 @@ pub mod page;
 pub use vmux_wire::space as event;
 
 #[cfg(host)]
-mod native;
+mod host;
 #[cfg(host)]
-pub use native::*;
+pub use host::*;

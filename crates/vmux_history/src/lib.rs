@@ -7,6 +7,6 @@ pub mod page;
 pub mod ranking;
 
 #[cfg(host)]
-mod native;
+mod host;
 #[cfg(host)]
-pub use native::*;
+pub use host::*;

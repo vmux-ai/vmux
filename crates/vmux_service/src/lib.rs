@@ -12,6 +12,6 @@ pub mod protocol;
 pub mod remote;
 
 #[cfg(host)]
-mod native;
+mod host;
 #[cfg(host)]
-pub use native::*;
+pub use host::*;

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::event::*;
-use crate::{parse, runner};
+use crate::host::{parse, runner};
 
 #[derive(Debug, Clone)]
 pub enum JobKind {
@@ -166,7 +166,7 @@ pub fn run_job(job: JobKind) -> Vec<Emit> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::test_repo;
+    use crate::host::runner::test_repo;
 
     fn dirty_repo() -> (tempfile::TempDir, PathBuf) {
         let repo = test_repo::init();

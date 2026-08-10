@@ -31,10 +31,7 @@ impl Plugin for OsMenuPlugin {
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
             .init_resource::<CloseMenuItemEnabled>()
-            .add_systems(
-                Startup,
-                setup.after(vmux_setting::plugin::runtime::SettingsLoadSet),
-            )
+            .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
             .add_systems(
                 Update,
                 (

@@ -1,5 +1,5 @@
 //! Git worktree operations for per-tab isolation: create/remove/list a worktree and report
-//! its dirty/ahead status. Root/path-based (unlike [`crate::runner`], which is file-centric),
+//! its dirty/ahead status. Root/path-based (unlike [`crate::host::runner`], which is file-centric),
 //! because a worktree is created at a path that does not exist yet.
 
 use std::{
@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::runner::{GitError, git, git_err, git_read};
+use crate::host::runner::{GitError, git, git_err, git_read};
 
 /// A vmux-managed worktree: its checkout path, branch, base ref, and owning repo root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -524,7 +524,7 @@ pub fn is_linked_worktree(dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::test_repo;
+    use crate::host::runner::test_repo;
 
     fn commit_initial(repo: &Path) {
         test_repo::write(repo, "seed.txt", "seed\n");

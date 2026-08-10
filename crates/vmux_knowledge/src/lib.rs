@@ -1,9 +1,8 @@
 //! Local-first Markdown knowledge tree and agent context.
 
-#[cfg(not(web))]
-mod plugin;
-#[cfg(not(web))]
+#[cfg(host)]
+mod host;
+#[cfg(host)]
 pub mod store;
-
-#[cfg(not(web))]
-pub use plugin::KnowledgePlugin;
+#[cfg(host)]
+pub use host::*;

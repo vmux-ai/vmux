@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use similar::{ChangeTag, TextDiff};
 
 use crate::event::*;
-use crate::parse;
+use crate::host::parse;
 
 #[derive(Debug, Clone)]
 pub struct GitError(pub String);
@@ -300,7 +300,7 @@ fn staged_only_lines(
         return Ok(Vec::new());
     }
     let content = std::fs::read_to_string(file).unwrap_or_default();
-    let spans = crate::highlight::highlight_file(&content, file);
+    let spans = crate::host::highlight::highlight_file(&content, file);
     let lines = content
         .lines()
         .enumerate()
@@ -333,7 +333,7 @@ pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLin
     let target = rel(&root, file);
     let baseline = index_text(&root, &target)?;
     let staged = staged_lineset(&root, &target);
-    let new_spans = crate::highlight::highlight_file(content, file);
+    let new_spans = crate::host::highlight::highlight_file(content, file);
     let mut old_no = 1u32;
     let mut new_no = 1u32;
     let mut lines = Vec::new();
@@ -354,7 +354,7 @@ pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLin
                     spans: new_spans
                         .get(new_no.saturating_sub(1) as usize)
                         .cloned()
-                        .unwrap_or_else(|| crate::highlight::highlight_line(text, file)),
+                        .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
                 });
                 old_no += 1;
                 new_no += 1;
@@ -365,7 +365,7 @@ pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLin
                     old_no: Some(old_no),
                     new_no: None,
                     hunk: None,
-                    spans: crate::highlight::highlight_line(text, file),
+                    spans: crate::host::highlight::highlight_line(text, file),
                 });
                 old_no += 1;
             }
@@ -378,7 +378,7 @@ pub fn diff_lines_with_content(file: &Path, content: &str) -> Result<Vec<DiffLin
                     spans: new_spans
                         .get(new_no.saturating_sub(1) as usize)
                         .cloned()
-                        .unwrap_or_else(|| crate::highlight::highlight_line(text, file)),
+                        .unwrap_or_else(|| crate::host::highlight::highlight_line(text, file)),
                 });
                 new_no += 1;
             }
@@ -399,7 +399,7 @@ pub fn diff_lines(file: &Path) -> Result<Vec<DiffLine>, GitError> {
     let ranges = parse::hunk_ranges(&diff_text(&root, &target, false, 0)?);
 
     let new_spans = std::fs::read_to_string(file)
-        .map(|c| crate::highlight::highlight_file(&c, file))
+        .map(|c| crate::host::highlight::highlight_file(&c, file))
         .unwrap_or_default();
 
     let lines = parse::parse_unified_diff(&unstaged)
@@ -413,8 +413,8 @@ pub fn diff_lines(file: &Path) -> Result<Vec<DiffLine>, GitError> {
                     .new_no
                     .and_then(|n| new_spans.get(n.saturating_sub(1) as usize))
                     .cloned()
-                    .unwrap_or_else(|| crate::highlight::highlight_line(&text, file)),
-                _ => crate::highlight::highlight_line(&text, file),
+                    .unwrap_or_else(|| crate::host::highlight::highlight_line(&text, file)),
+                _ => crate::host::highlight::highlight_line(&text, file),
             };
             if matches!(l.kind, DiffKind::Context) && l.old_no.is_some_and(|o| staged.contains(&o))
             {

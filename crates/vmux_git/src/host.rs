@@ -1,8 +1,18 @@
+//! The git engine on the desktop side: background jobs, diff parsing, syntax highlighting
+//! and worktrees, bridged to the `files://` editor page.
+
+pub mod highlight;
+pub mod job;
+pub mod parse;
+pub mod runner;
+pub mod worktree;
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
@@ -12,7 +22,7 @@ use crate::event::{
     GIT_CHANGED_EVENT, GitChangedEvent, GitCommitRequest, GitDiffRequest, GitDiscardRequest,
     GitHunkRequest, GitPushRequest, GitStageRequest, GitStatusRequest, GitUnstageRequest,
 };
-use crate::job::{Emit, JobKind, emit_event_name, run_job};
+use crate::host::job::{Emit, JobKind, emit_event_name, run_job};
 
 /// Wires the git bridge: runs each git request on a background thread and drains completed
 /// results back to the originating webview.
@@ -85,6 +95,12 @@ impl Plugin for GitPlugin {
                     .chain(),
             );
     }
+}
+
+#[derive(Component, Clone, Debug, Default)]
+pub struct GitDiffSource {
+    pub content: String,
+    pub dirty: bool,
 }
 
 pub enum GitOutboxItem {
@@ -175,11 +191,11 @@ struct GitWatch {
 }
 
 struct RepoInfoCacheEntry {
-    info: Option<crate::worktree::RepoInfo>,
+    info: Option<crate::host::worktree::RepoInfo>,
     loaded: bool,
     dirty: bool,
     watched: bool,
-    pending: Option<Task<Option<crate::worktree::RepoInfo>>>,
+    pending: Option<Task<Option<crate::host::worktree::RepoInfo>>>,
     ignore_events_until: Option<Instant>,
 }
 
@@ -190,7 +206,7 @@ pub struct RepoInfoCache {
 }
 
 impl RepoInfoCache {
-    pub fn get(&mut self, path: &Path) -> Option<crate::worktree::RepoInfo> {
+    pub fn get(&mut self, path: &Path) -> Option<crate::host::worktree::RepoInfo> {
         let path = canon(path);
         let wake = self.wake.clone();
         let entry = self
@@ -233,7 +249,7 @@ impl RepoInfoCache {
                 if !delay.is_zero() {
                     std::thread::sleep(delay);
                 }
-                let info = crate::worktree::repo_info(&path);
+                let info = crate::host::worktree::repo_info(&path);
                 if let Some(wake) = wake {
                     let _ = wake.send_event(WinitUserEvent::WakeUp);
                 }
@@ -279,24 +295,24 @@ fn resolve_git_path(root: &Path, value: &str) -> PathBuf {
 
 fn git_watch_targets(
     file: &Path,
-) -> Result<(PathBuf, Vec<GitWatchTarget>), crate::runner::GitError> {
-    let root = crate::runner::repo_root(file)?;
-    let (stdout, stderr, ok) = crate::runner::git(
+) -> Result<(PathBuf, Vec<GitWatchTarget>), crate::host::runner::GitError> {
+    let root = crate::host::runner::repo_root(file)?;
+    let (stdout, stderr, ok) = crate::host::runner::git(
         &root,
         &["rev-parse", "--absolute-git-dir", "--git-common-dir"],
     )?;
     if !ok {
-        return Err(crate::runner::git_err(&stdout, &stderr));
+        return Err(crate::host::runner::git_err(&stdout, &stderr));
     }
     let mut lines = stdout.lines();
     let git_dir = lines
         .next()
         .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| crate::runner::GitError("missing git directory".into()))?;
+        .ok_or_else(|| crate::host::runner::GitError("missing git directory".into()))?;
     let common_dir = lines
         .next()
         .map(|line| resolve_git_path(&root, line))
-        .ok_or_else(|| crate::runner::GitError("missing common git directory".into()))?;
+        .ok_or_else(|| crate::host::runner::GitError("missing common git directory".into()))?;
     let mut targets = vec![GitWatchTarget {
         path: git_dir.clone(),
         recursive: false,
@@ -348,7 +364,7 @@ fn target_matches(target: &GitWatchTarget, changed: &Path) -> bool {
 
 fn repo_info_watch_targets(
     path: &Path,
-    info: Option<&crate::worktree::RepoInfo>,
+    info: Option<&crate::host::worktree::RepoInfo>,
 ) -> Vec<GitWatchTarget> {
     let Some(info) = info else {
         return vec![GitWatchTarget {
@@ -402,7 +418,7 @@ impl GitWatch {
         &mut self,
         entity: Entity,
         path: &Path,
-    ) -> Result<PathBuf, crate::runner::GitError> {
+    ) -> Result<PathBuf, crate::host::runner::GitError> {
         let path = canon(path);
         if let Some(subscription) = self
             .subscriptions
@@ -445,7 +461,7 @@ impl GitWatch {
     fn subscribe_repo_info(
         &mut self,
         path: &Path,
-        info: Option<&crate::worktree::RepoInfo>,
+        info: Option<&crate::host::worktree::RepoInfo>,
     ) -> bool {
         let path = canon(path);
         let targets = repo_info_watch_targets(&path, info);
@@ -475,7 +491,6 @@ impl GitWatch {
     }
 }
 
-
 fn spawn_job(outbox: &GitOutbox, webview: Entity, job: JobKind) {
     let sink = outbox.0.clone();
     std::thread::spawn(move || {
@@ -486,15 +501,14 @@ fn spawn_job(outbox: &GitOutbox, webview: Entity, job: JobKind) {
     });
 }
 
-fn spawn_status_batch(
-    outbox: &GitOutbox,
-    repo_root: PathBuf,
-    requests: Vec<PendingStatusRequest>,
-) {
+fn spawn_status_batch(outbox: &GitOutbox, repo_root: PathBuf, requests: Vec<PendingStatusRequest>) {
     let sink = outbox.0.clone();
     std::thread::spawn(move || {
-        let paths: Vec<PathBuf> = requests.iter().map(|request| request.path.clone()).collect();
-        let results = match crate::runner::statuses(&repo_root, &paths) {
+        let paths: Vec<PathBuf> = requests
+            .iter()
+            .map(|request| request.path.clone())
+            .collect();
+        let results = match crate::host::runner::statuses(&repo_root, &paths) {
             Ok(events) => requests
                 .into_iter()
                 .zip(events)
@@ -538,21 +552,21 @@ fn on_status_request(
 ) {
     let webview = trigger.event().webview;
     let path: PathBuf = trigger.event().payload.path.clone().into();
-    if !crate::runner::has_repository(&path) {
+    if !crate::host::runner::has_repository(&path) {
         outbox
             .0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push(GitOutboxItem::Events {
                 webview,
-                emits: vec![Emit::Status(crate::runner::non_repository_status())],
+                emits: vec![Emit::Status(crate::host::runner::non_repository_status())],
             });
         return;
     }
     let repo_root = if let Some(mut watch) = watch {
         watch.subscribe(webview, &path)
     } else {
-        crate::runner::repo_root(&path)
+        crate::host::runner::repo_root(&path)
     };
     match repo_root {
         Ok(repo_root) => jobs.queue(
@@ -560,21 +574,21 @@ fn on_status_request(
             PendingStatusRequest {
                 webview,
                 path,
-                dirty: sources
-                    .get(webview)
-                    .is_ok_and(|source| source.dirty),
+                dirty: sources.get(webview).is_ok_and(|source| source.dirty),
             },
         ),
-        Err(error) => outbox
-            .0
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push(GitOutboxItem::Events {
-                webview,
-                emits: vec![Emit::Error(crate::event::GitErrorEvent {
-                    message: error.0,
-                })],
-            }),
+        Err(error) => {
+            outbox
+                .0
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(GitOutboxItem::Events {
+                    webview,
+                    emits: vec![Emit::Error(crate::event::GitErrorEvent {
+                        message: error.0,
+                    })],
+                })
+        }
     }
 }
 
@@ -672,57 +686,85 @@ fn on_diff_request(
     outbox: Res<GitOutbox>,
 ) {
     let p = &trigger.event().payload;
-    spawn_job(&outbox, trigger.event().webview, JobKind::Diff {
-        path: p.path.clone().into(),
-        top_line: p.top_line,
-        rows: p.rows,
-        content: sources
-            .get(trigger.event().webview)
-            .ok()
-            .filter(|source| source.dirty)
-            .map(|source| source.content.clone()),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Diff {
+            path: p.path.clone().into(),
+            top_line: p.top_line,
+            rows: p.rows,
+            content: sources
+                .get(trigger.event().webview)
+                .ok()
+                .filter(|source| source.dirty)
+                .map(|source| source.content.clone()),
+        },
+    );
 }
 
 fn on_stage_request(trigger: On<BinReceive<GitStageRequest>>, outbox: Res<GitOutbox>) {
-    spawn_job(&outbox, trigger.event().webview, JobKind::Stage {
-        path: trigger.event().payload.path.clone().into(),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Stage {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
 }
 
 fn on_unstage_request(trigger: On<BinReceive<GitUnstageRequest>>, outbox: Res<GitOutbox>) {
-    spawn_job(&outbox, trigger.event().webview, JobKind::Unstage {
-        path: trigger.event().payload.path.clone().into(),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Unstage {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
 }
 
 fn on_discard_request(trigger: On<BinReceive<GitDiscardRequest>>, outbox: Res<GitOutbox>) {
-    spawn_job(&outbox, trigger.event().webview, JobKind::Discard {
-        path: trigger.event().payload.path.clone().into(),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Discard {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
 }
 
 fn on_commit_request(trigger: On<BinReceive<GitCommitRequest>>, outbox: Res<GitOutbox>) {
     let p = &trigger.event().payload;
-    spawn_job(&outbox, trigger.event().webview, JobKind::Commit {
-        path: p.path.clone().into(),
-        message: p.message.clone(),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Commit {
+            path: p.path.clone().into(),
+            message: p.message.clone(),
+        },
+    );
 }
 
 fn on_push_request(trigger: On<BinReceive<GitPushRequest>>, outbox: Res<GitOutbox>) {
-    spawn_job(&outbox, trigger.event().webview, JobKind::Push {
-        path: trigger.event().payload.path.clone().into(),
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Push {
+            path: trigger.event().payload.path.clone().into(),
+        },
+    );
 }
 
 fn on_hunk_request(trigger: On<BinReceive<GitHunkRequest>>, outbox: Res<GitOutbox>) {
     let p = &trigger.event().payload;
-    spawn_job(&outbox, trigger.event().webview, JobKind::Hunk {
-        path: p.path.clone().into(),
-        hunk: p.hunk,
-        accept: p.accept,
-    });
+    spawn_job(
+        &outbox,
+        trigger.event().webview,
+        JobKind::Hunk {
+            path: p.path.clone().into(),
+            hunk: p.hunk,
+            accept: p.accept,
+        },
+    );
 }
 
 fn emit_events(commands: &mut Commands, webview: Entity, emits: Vec<Emit>) {
@@ -768,7 +810,7 @@ fn drain_git_outbox(
 mod tests {
     use super::*;
     use crate::event::GitErrorEvent;
-    use crate::runner::test_repo;
+    use crate::host::runner::test_repo;
 
     #[test]
     fn drain_empties_outbox() {
@@ -793,7 +835,14 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().resource::<GitOutbox>().0.lock().unwrap().is_empty());
+        assert!(
+            app.world()
+                .resource::<GitOutbox>()
+                .0
+                .lock()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -893,14 +942,10 @@ mod tests {
         let file = test_repo::write(repo.path(), "a.txt", "one\n");
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
-        let info = crate::worktree::repo_info(repo.path()).unwrap();
+        let info = crate::host::worktree::repo_info(repo.path()).unwrap();
         let targets = repo_info_watch_targets(repo.path(), Some(&info));
 
-        assert!(
-            targets
-                .iter()
-                .any(|target| target_matches(target, &file))
-        );
+        assert!(targets.iter().any(|target| target_matches(target, &file)));
         assert!(
             targets
                 .iter()
@@ -952,7 +997,7 @@ mod tests {
         test_repo::run(repo.path(), &["add", "a.txt"]);
         test_repo::run(repo.path(), &["commit", "-qm", "init"]);
         let path = canon(repo.path());
-        let stale = crate::worktree::repo_info(&path);
+        let stale = crate::host::worktree::repo_info(&path);
         test_repo::write(repo.path(), "a.txt", "two\n");
         let mut cache = RepoInfoCache {
             entries: HashMap::from([(
