@@ -7,6 +7,7 @@ use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::cef::LayoutCefPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
+use crate::command_bar::key::CommandBarKeyPlugin;
 use crate::command_bar::panel::CommandBarPanelPlugin;
 #[cfg(feature = "player-mode")]
 use crate::focus_ring::FocusRingPlugin;
@@ -99,6 +100,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 BookmarkPlugin,
                 CommandBarPanelPlugin,
+                CommandBarKeyPlugin,
                 LayoutCefPlugin,
             ));
         #[cfg(feature = "player-mode")]

@@ -11259,6 +11259,7 @@ name = "vmux_command"
 version = "0.0.30"
 dependencies = [
  "bevy",
+ "bevy_cef",
  "bevy_ecs",
  "muda 0.19.2",
  "rkyv",

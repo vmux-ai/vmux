@@ -343,6 +343,36 @@ pub struct CommandBarActionEvent {
 )]
 pub struct CommandBarReadyEvent;
 
+/// The event id [`CommandBarKey`] is pushed under.
+pub const COMMAND_BAR_KEY_EVENT: &str = "command-bar-key";
+
+/// What the keymap made of a key the command bar handed over, sent back to the page that sent it.
+///
+/// The page keeps the doing; only the deciding moved. It is the only side that knows what its
+/// result list holds right now, and a selection that moved on the host would have to be shipped
+/// back anyway — so what travels is the verb, once, in the direction that already has the state.
+///
+/// This is why the palette no longer names a key anywhere: `Ctrl+n` is a line in the keymap rather
+/// than a branch in a `keydown`, and rebinding it in `settings.json` needs no page to agree.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum CommandBarKey {
+    Next,
+    Previous,
+    Complete,
+    Dismiss,
+}
+
 #[derive(
     Clone,
     Copy,

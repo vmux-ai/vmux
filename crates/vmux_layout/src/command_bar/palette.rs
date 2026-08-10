@@ -6,7 +6,7 @@ use std::rc::Rc;
 
 use crate::command_bar::keyboard::{
     CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
-    ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
+    utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
@@ -20,8 +20,8 @@ use crate::command_bar::style::{
 use crate::start::event::StartSelectWorkspace;
 use dioxus::prelude::*;
 use vmux_command::event::{
-    CommandBarActionEvent, CommandBarOpenEvent, CommandBarQuery,
-    HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
+    COMMAND_BAR_KEY_EVENT, CommandBarActionEvent, CommandBarKey, CommandBarOpenEvent,
+    CommandBarQuery, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
     HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
     PathCompleteResponse, PathEntry, is_data_uri,
 };
@@ -32,6 +32,7 @@ use vmux_command::prompt_media::{
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query,
     merge_chat_attachments, replace_inline_media_query,
 };
+use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_start::row::ResultRow;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
@@ -40,7 +41,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::hooks::{send, use_listener};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -118,6 +119,214 @@ pub struct PaletteProps {
     pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
 }
 
+/// Everything a palette shows, derived from what the host sent and what the user has typed.
+///
+/// Held as a memo rather than rebuilt inline because the keyboard now reaches this list from two
+/// places: the render, and the host's answer to a key the page handed over. That answer arrives in
+/// a listener registered once, which can read a signal but cannot see a render's locals — so the
+/// list has to be somewhere both can look, or there would be two copies of it to disagree.
+#[derive(Clone, PartialEq)]
+struct PaletteRows {
+    items: Vec<ResultItem>,
+    prompt_targets: Vec<ResultItem>,
+    default_target: Option<ResultItem>,
+    /// The greyed-out remainder the first path completion would add to what has been typed.
+    ghost: String,
+}
+
+impl PaletteRows {
+    fn of(
+        state: &CommandBarOpenEvent,
+        query: &str,
+        completions: &[PathEntry],
+        history: &[HistoryEntry],
+        variant: PaletteVariant,
+        target_url: &str,
+    ) -> Self {
+        let is_start = matches!(variant, PaletteVariant::Start);
+        let prompt_targets = if is_start {
+            prompt_target_results(&state.pages, "")
+        } else {
+            Vec::new()
+        };
+        let default_target = prompt_targets
+            .iter()
+            .find(|item| prompt_target_url(item) == Some(target_url))
+            .cloned()
+            .or_else(|| prompt_targets.first().cloned());
+        let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
+
+        let mut items: Vec<ResultItem> = if state.space_switch {
+            space_switch_results(&state.spaces, &state.pages, query)
+        } else if is_start && query.trim().is_empty() {
+            open_session_results(&state.tabs, &state.pages)
+        } else if start_prompt_mode {
+            start_page_results(
+                &state.pages,
+                &state.work_dirs,
+                &state.recent_files,
+                &state.search_engines,
+                query,
+            )
+        } else {
+            let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
+            let matched = filter_results(
+                query,
+                &state.tabs,
+                &state.commands,
+                &state.spaces,
+                &state.pages,
+                is_new_tab,
+                history,
+                &state.work_dirs,
+                &state.recent_files,
+            );
+            let completions: &[PathEntry] = if completion_query(query).is_some() {
+                completions
+            } else {
+                &[]
+            };
+            let matched = if completions.is_empty() {
+                matched
+            } else {
+                let mut combined: Vec<ResultItem> = completions
+                    .iter()
+                    .take(8)
+                    .map(|entry| ResultItem::File {
+                        path: entry.full_path.clone(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect();
+                combined.extend(matched);
+                combined
+            };
+            if is_start {
+                matched
+                    .into_iter()
+                    .filter(|item| {
+                        !matches!(
+                            item,
+                            ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
+                                if url.trim_end_matches('/') == "vmux://start"
+                        )
+                    })
+                    .collect()
+            } else {
+                matched
+            }
+        };
+        if start_prompt_mode {
+            prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+        }
+
+        Self {
+            items,
+            prompt_targets,
+            default_target,
+            ghost: Self::ghost_of(query, completions),
+        }
+    }
+
+    fn ghost_of(query: &str, completions: &[PathEntry]) -> String {
+        if completion_query(query).is_none() {
+            return String::new();
+        }
+        let Some(first) = completions.first() else {
+            return String::new();
+        };
+        let typed = query.trim();
+        let full = &first.full_path;
+        if !full.to_lowercase().starts_with(&typed.to_lowercase())
+            || !full.is_char_boundary(typed.len())
+        {
+            return String::new();
+        }
+        full[typed.len()..].to_string()
+    }
+
+    /// What the input holds once the greyed-out remainder is accepted.
+    fn completed(&self, query: &str) -> String {
+        format!("{query}{}", self.ghost)
+    }
+
+    /// The highlighted row, clamped to what is actually on screen.
+    fn selected(&self, stored: usize) -> usize {
+        stored.min(self.items.len().saturating_sub(1))
+    }
+
+    /// Where a move of one row lands. Clamped at both ends rather than wrapping, which is what the
+    /// command bar has always done and what distinguishes it from a popup menu.
+    fn step(&self, from: usize, direction: MenuDirection) -> usize {
+        match direction {
+            MenuDirection::Next => (from + 1).min(self.items.len().saturating_sub(1)),
+            MenuDirection::Previous => from.saturating_sub(1),
+        }
+    }
+}
+
+/// The palette's keyboard, on the far side of the keymap.
+///
+/// Nothing here names a key. The page hands the stroke over, the core decides, and this performs
+/// the verb it came back as — which is the only reason `Ctrl+n` can be rebound in `settings.json`
+/// without the palette knowing it moved.
+///
+/// Every field is a signal or a handler rather than a value, because the answer arrives in a
+/// listener registered on first render: a captured result list would be one keystroke stale by the
+/// time the first key was pressed.
+#[derive(Clone, Copy)]
+struct PaletteKeys {
+    rows: Memo<PaletteRows>,
+    query: Signal<String>,
+    selected: Signal<usize>,
+    nav_mode: Signal<bool>,
+    on_dismiss: EventHandler<()>,
+}
+
+impl PaletteKeys {
+    fn apply(&mut self, key: CommandBarKey) {
+        match key {
+            CommandBarKey::Next => self.move_selection(MenuDirection::Next),
+            CommandBarKey::Previous => self.move_selection(MenuDirection::Previous),
+            CommandBarKey::Complete => self.accept_completion(),
+            CommandBarKey::Dismiss => self.on_dismiss.call(()),
+        }
+    }
+
+    fn move_selection(&mut self, direction: MenuDirection) {
+        let rows = self.rows.read();
+        let landed = rows.step(rows.selected(*self.selected.peek()), direction);
+        drop(rows);
+        self.selected.set(landed);
+        self.nav_mode.set(true);
+    }
+
+    /// Accept the greyed-out remainder, and put the caret after it.
+    ///
+    /// The input's value is written directly as well as through the signal: Chromium does not
+    /// scroll to a caret it did not move itself, so a long path would complete off-screen.
+    fn accept_completion(&mut self) {
+        let rows = self.rows.read();
+        if rows.ghost.is_empty() {
+            return;
+        }
+        let completed = rows.completed(&self.query.peek());
+        drop(rows);
+        self.query.set(completed.clone());
+        self.selected.set(0);
+        let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(COMMAND_BAR_INPUT_ID))
+        else {
+            return;
+        };
+        let input: web_sys::HtmlInputElement = element.unchecked_into();
+        input.set_value(&completed);
+        let caret = completed.len() as u32;
+        let _ = input.set_selection_range(caret, caret);
+        ensure_caret_visible(&input, completed.len());
+    }
+}
+
 /// The shared command-bar body: input, live-filtered results, file-path completion,
 /// history suggestions, keyboard navigation, and action dispatch. Rendered by both
 /// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
@@ -152,6 +361,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut media_selected = use_signal(|| 0usize);
     let mut start_target_url = use_signal(String::new);
     let mut target_menu_open = use_signal(|| false);
+
+    let keys = use_key_claim(Unclaimed::Types, move || match variant {
+        PaletteVariant::Modal => vec!["command-bar".to_string()],
+        PaletteVariant::Start => Vec::new(),
+    });
+    use_drop(move || {
+        let _ = send(&PageKeyContext { keys: Vec::new() });
+    });
 
     let path_search_effect_timer = path_search_timer.clone();
     use_effect(move || {
@@ -364,13 +581,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let state_val = state();
     let space_name = state_val.space_name.clone();
-    let spaces = state_val.spaces.clone();
-    let tabs = state_val.tabs.clone();
-    let commands = state_val.commands.clone();
-    let pages = state_val.pages.clone();
-    let work_dirs = state_val.work_dirs.clone();
-    let recent_files = state_val.recent_files.clone();
-    let search_engines = state_val.search_engines.clone();
     let prompt_context = state_val.prompt_context.clone();
     let open_target = state_val.target;
     let space_switch = state_val.space_switch;
@@ -393,72 +603,31 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_prompt_mode = is_start && CommandBarQuery(&q).is_start_prompt();
-    let prompt_targets = if is_start {
-        prompt_target_results(&pages, "")
-    } else {
-        Vec::new()
+    let rows = use_memo(move || {
+        PaletteRows::of(
+            &state(),
+            &query(),
+            &path_completions(),
+            &history_suggestions(),
+            variant,
+            &start_target_url(),
+        )
+    });
+    let mut palette_keys = PaletteKeys {
+        rows,
+        query,
+        selected,
+        nav_mode,
+        on_dismiss,
     };
-    let default_target = prompt_targets
-        .iter()
-        .find(|item| prompt_target_url(item) == Some(start_target_url().as_str()))
-        .cloned()
-        .or_else(|| prompt_targets.first().cloned());
-    let mut results: Vec<ResultItem> = if space_switch {
-        space_switch_results(&spaces, &pages, &q)
-    } else if is_start && q.trim().is_empty() {
-        open_session_results(&tabs, &pages)
-    } else if start_prompt_mode {
-        start_page_results(&pages, &work_dirs, &recent_files, &search_engines, &q)
-    } else {
-        let history = history_suggestions();
-        let r = filter_results(
-            &q,
-            &tabs,
-            &commands,
-            &spaces,
-            &pages,
-            is_new_tab,
-            &history,
-            &work_dirs,
-            &recent_files,
-        );
-        let completions = if completion_query(&q).is_some() {
-            path_completions()
-        } else {
-            Vec::new()
-        };
-        let r = if completions.is_empty() {
-            r
-        } else {
-            let mut combined: Vec<ResultItem> = completions
-                .iter()
-                .take(8)
-                .map(|e| ResultItem::File {
-                    path: e.full_path.clone(),
-                    is_dir: e.is_dir,
-                })
-                .collect();
-            combined.extend(r);
-            combined
-        };
-        if is_start {
-            r.into_iter()
-                .filter(|item| {
-                    !matches!(
-                        item,
-                        ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
-                            if url.trim_end_matches('/') == "vmux://start"
-                    )
-                })
-                .collect()
-        } else {
-            r
-        }
-    };
-    if start_prompt_mode {
-        prepend_prompt_targets(&mut results, default_target.as_ref(), &prompt_targets, &q);
-    }
-    let sel = selected().min(results.len().saturating_sub(1));
+    let _key_listener =
+        use_listener::<CommandBarKey, _>(COMMAND_BAR_KEY_EVENT, move |key| palette_keys.apply(key));
+
+    let current_rows = rows();
+    let prompt_targets = current_rows.prompt_targets.clone();
+    let default_target = current_rows.default_target.clone();
+    let results = current_rows.items.clone();
+    let sel = current_rows.selected(selected());
     let active_item = results.get(sel).cloned();
     let nav = nav_mode();
     let selected_agent_accent = default_target
@@ -511,26 +680,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         q.clone()
     };
 
-    let ghost_text = {
-        let q_trimmed = q.trim();
-        let completions = if completion_query(&q).is_some() {
-            path_completions()
-        } else {
-            Vec::new()
-        };
-        if let Some(first) = completions.first() {
-            let full = &first.full_path;
-            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase())
-                && full.is_char_boundary(q_trimmed.len())
-            {
-                full[q_trimmed.len()..].to_string()
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    };
+    let ghost_text = current_rows.ghost.clone();
 
     use_effect(move || {
         let s = selected();
@@ -971,34 +1121,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let modal_keydown_q = q.clone();
     let modal_keydown_results = results.clone();
-    let modal_keydown_ghost = ghost_text.clone();
     let modal_keydown = move |e: KeyboardEvent| {
-        if e.key() == Key::Tab {
-            e.prevent_default();
-            if !modal_keydown_ghost.is_empty() {
-                let new_value = format!("{}{}", modal_keydown_q, modal_keydown_ghost);
-                query.set(new_value.clone());
-                selected.set(0);
-                if let Some(element) = web_sys::window()
-                    .and_then(|window| window.document())
-                    .and_then(|document| document.get_element_by_id("command-bar-input"))
-                {
-                    let input: web_sys::HtmlInputElement = element.unchecked_into();
-                    input.set_value(&new_value);
-                    let len = new_value.len() as u32;
-                    let _ = input.set_selection_range(len, len);
-                    ensure_caret_visible(&input, new_value.len());
-                }
-            }
-            return;
-        }
-
         let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-        let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
-        if ctrl && ignore_physical_rerouted_ctrl_keydown(&e.code().to_string(), vmux_synthetic) {
-            e.prevent_default();
-            return;
-        }
         if space_switch
             && !ctrl
             && modal_keydown_q.trim().is_empty()
@@ -1020,22 +1144,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 return;
             }
         }
-        let go_down = (e.key() == Key::ArrowDown && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-        let go_up = (e.key() == Key::ArrowUp && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
-        if go_down {
-            e.prevent_default();
-            let max = modal_keydown_results.len().saturating_sub(1);
-            selected.set((sel + 1).min(max));
-            nav_mode.set(true);
-        } else if go_up {
-            e.prevent_default();
-            selected.set(sel.saturating_sub(1));
-            nav_mode.set(true);
-        } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-            on_dismiss.call(());
-        } else if e.key() == Key::Enter {
+        if e.key() == Key::Enter {
             if space_switch {
                 if let Some(item) = modal_keydown_results.get(sel) {
                     execute(item);
@@ -1059,7 +1168,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     emit_action_with_target("open", &modal_keydown_q, open_target);
                 }
             }
+            return;
         }
+        keys.on_keydown(&e, |_| false);
     };
 
     rsx! {
@@ -1793,13 +1904,6 @@ fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputEle
     let len = input.value().len() as u32;
     let _ = input.set_selection_range(0, len);
     true
-}
-
-fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
-    e.data()
-        .downcast::<web_sys::KeyboardEvent>()
-        .map(is_vmux_synthetic_keydown)
-        .unwrap_or(false)
 }
 
 fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {

@@ -10,6 +10,8 @@ pub mod size;
 #[cfg(not(web))]
 pub mod handler;
 #[cfg(not(web))]
+pub mod key;
+#[cfg(not(web))]
 pub mod panel;
 #[cfg(not(web))]
 pub mod state;

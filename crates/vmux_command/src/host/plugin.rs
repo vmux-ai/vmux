@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
+use crate::page_key::PageKeyPlugin;
 use crate::snapshot::{
     CommandBarAgentsSnapshot, CommandBarContributions, CommandBarPagesSnapshot,
     CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, CommandBarWorkSnapshot,
@@ -11,11 +12,16 @@ use vmux_core::team::{Profile, User};
 
 /// Wires the command protocol: the command messages, the command-bar snapshot resources,
 /// and the write -> snapshot -> read system ordering.
+///
+/// [`PageKeyPlugin`] rides here rather than with the keyboard, because what it produces is a
+/// command: a page hands a stroke over and a message goes on this bus, which is the same shape as
+/// every other way a command is issued.
 pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<AppCommand>()
+        app.add_plugins(PageKeyPlugin)
+            .add_message::<AppCommand>()
             .add_message::<CommandIssued>()
             .init_resource::<CommandBarAgentsSnapshot>()
             .init_resource::<CommandBarContributions>()

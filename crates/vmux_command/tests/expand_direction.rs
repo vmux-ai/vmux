@@ -46,7 +46,10 @@ fn expand_generates_four_menu_ids() {
 #[test]
 fn expand_generates_four_shortcuts() {
     let shortcuts = Sample::default_shortcuts();
-    let ids: Vec<_> = shortcuts.iter().map(|(_, id)| id.clone()).collect();
+    let ids: Vec<_> = shortcuts
+        .iter()
+        .map(|binding| binding.command.clone())
+        .collect();
     assert!(ids.contains(&"sample_in_pane_top".to_string()));
     assert!(ids.contains(&"sample_in_pane_right".to_string()));
     assert!(ids.contains(&"sample_in_pane_bottom".to_string()));

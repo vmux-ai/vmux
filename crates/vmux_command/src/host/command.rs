@@ -34,6 +34,53 @@ pub enum AppCommand {
     #[menu(label = "Bookmark")]
     #[mcp(skip)]
     Bookmark(BookmarkCommand),
+
+    #[menu(label = "Command Bar")]
+    #[mcp(skip)]
+    CommandBar(CommandBarKeyCommand),
+}
+
+/// What a key press means while the command bar has the keyboard.
+///
+/// Every leaf is hidden: these are not things to pick out of a menu — the command bar is already
+/// open when they apply — but they are things to rebind, which is why they are commands at all
+/// rather than key tests inside the page. Each carries a `when` so it exists only on that surface;
+/// without one, `Escape` would dismiss the command bar from everywhere.
+///
+/// The page performs them. It is the only place that knows what its result list currently holds,
+/// so the host resolves the key and hands the answer straight back to the page that sent it.
+#[allow(dead_code)]
+#[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandBarKeyCommand {
+    #[default]
+    #[menu(id = "command_bar_next", label = "Next Result", hidden)]
+    #[shortcut(direct = "ArrowDown", when = "command-bar")]
+    #[shortcut(direct = "Ctrl+n", when = "command-bar")]
+    #[shortcut(direct = "Ctrl+j", when = "command-bar")]
+    Next,
+    #[menu(id = "command_bar_previous", label = "Previous Result", hidden)]
+    #[shortcut(direct = "ArrowUp", when = "command-bar")]
+    #[shortcut(direct = "Ctrl+p", when = "command-bar")]
+    #[shortcut(direct = "Ctrl+k", when = "command-bar")]
+    Previous,
+    #[menu(id = "command_bar_complete", label = "Accept Completion", hidden)]
+    #[shortcut(direct = "Tab", when = "command-bar")]
+    Complete,
+    #[menu(id = "command_bar_dismiss", label = "Dismiss Command Bar", hidden)]
+    #[shortcut(direct = "Escape", when = "command-bar")]
+    #[shortcut(direct = "Ctrl+c", when = "command-bar")]
+    Dismiss,
+}
+
+impl From<CommandBarKeyCommand> for crate::event::CommandBarKey {
+    fn from(command: CommandBarKeyCommand) -> Self {
+        match command {
+            CommandBarKeyCommand::Next => Self::Next,
+            CommandBarKeyCommand::Previous => Self::Previous,
+            CommandBarKeyCommand::Complete => Self::Complete,
+            CommandBarKeyCommand::Dismiss => Self::Dismiss,
+        }
+    }
 }
 
 #[derive(OsSubMenuGroup, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq)]
@@ -435,8 +482,8 @@ mod tests {
     fn menu_accelerators_are_registered_as_global_shortcuts() {
         let shortcuts = AppCommand::default_shortcuts();
         let has_super = |k: KeyCode| {
-            shortcuts.iter().any(|(s, _)| {
-                matches!(s, Shortcut::Direct(c) if c.key == k && c.modifiers.super_key
+            shortcuts.iter().any(|binding| {
+                matches!(&binding.shortcut, Shortcut::Direct(c) if c.key == k && c.modifiers.super_key
                     && !c.modifiers.shift && !c.modifiers.ctrl && !c.modifiers.alt)
             })
         };
@@ -466,6 +513,33 @@ mod tests {
         );
     }
 
+    /// The command bar's keys are bare `Escape`, `Tab` and the arrows. Every one of them has to
+    /// reach the keymap carrying its surface, because a default that forgot its `when` would
+    /// dismiss the command bar — or eat Tab — from every surface in the app.
+    #[test]
+    fn every_command_bar_key_is_scoped_to_the_command_bar() {
+        let unscoped: Vec<String> = AppCommand::default_shortcuts()
+            .into_iter()
+            .filter(|binding| binding.command.starts_with("command_bar_") && binding.when.is_none())
+            .map(|binding| binding.command)
+            .collect();
+
+        assert_eq!(unscoped, Vec::<String>::new());
+
+        let keymap = crate::shortcut::Keymap::defaults();
+        let escape = KeyCombo {
+            key: KeyCode::Escape,
+            modifiers: Modifiers::default(),
+        };
+        let bar: crate::shortcut::KeyContext = std::iter::once("command-bar".to_string()).collect();
+
+        assert_eq!(keymap.direct(&escape), None);
+        assert_eq!(
+            keymap.in_context(&bar).scoped(&escape),
+            Some(AppCommand::CommandBar(CommandBarKeyCommand::Dismiss))
+        );
+    }
+
     #[test]
     fn hidden_commands_can_have_default_shortcuts() {
         assert_eq!(
@@ -475,8 +549,8 @@ mod tests {
 
         let copy_mode = AppCommand::default_shortcuts()
             .into_iter()
-            .find(|(_, id)| id == "terminal_copy_mode")
-            .map(|(shortcut, _)| shortcut);
+            .find(|binding| binding.command == "terminal_copy_mode")
+            .map(|binding| binding.shortcut);
 
         assert_eq!(
             copy_mode,
@@ -513,8 +587,8 @@ mod tests {
         );
         let ids: Vec<String> = AppCommand::default_shortcuts()
             .into_iter()
-            .filter(|(shortcut, _)| shortcut == &leader_x)
-            .map(|(_, id)| id)
+            .filter(|binding| binding.shortcut == leader_x)
+            .map(|binding| binding.command)
             .collect();
 
         assert_eq!(ids, vec!["stack_close".to_string()]);
@@ -622,12 +696,13 @@ mod tests {
         assert!(
             shortcuts
                 .iter()
-                .any(|(shortcut, id)| shortcut == &reload && id == "browser_reload")
+                .any(|binding| binding.shortcut == reload && binding.command == "browser_reload")
         );
         assert!(
             shortcuts
                 .iter()
-                .any(|(shortcut, id)| shortcut == &hard_reload && id == "browser_hard_reload")
+                .any(|binding| binding.shortcut == hard_reload
+                    && binding.command == "browser_hard_reload")
         );
     }
 
@@ -654,13 +729,13 @@ mod tests {
         assert!(
             shortcuts
                 .iter()
-                .any(|(shortcut, id)| shortcut == &next && id == "next_tab"),
+                .any(|binding| binding.shortcut == next && binding.command == "next_tab"),
             "cmd+shift+] must be a global shortcut so it fires under terminal/layout focus"
         );
         assert!(
             shortcuts
                 .iter()
-                .any(|(shortcut, id)| shortcut == &prev && id == "prev_tab"),
+                .any(|binding| binding.shortcut == prev && binding.command == "prev_tab"),
             "cmd+shift+[ must be a global shortcut so it fires under terminal/layout focus"
         );
     }

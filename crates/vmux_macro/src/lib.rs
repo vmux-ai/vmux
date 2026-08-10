@@ -655,7 +655,11 @@ fn impl_leaf_shortcuts(
                 let id_str = expand::format_id_template(id_tmpl, dir_variant_str);
                 let combo_tokens = parse_key_combo_tokens(key_spec, variant)?;
                 binding_entries.push(quote! {
-                    (crate::shortcut::Shortcut::Direct(#combo_tokens), ::std::string::String::from(#id_str))
+                    crate::shortcut::Binding {
+                        shortcut: crate::shortcut::Shortcut::Direct(#combo_tokens),
+                        command: ::std::string::String::from(#id_str),
+                        when: ::core::option::Option::None,
+                    }
                 });
             }
             continue;
@@ -669,11 +673,15 @@ fn impl_leaf_shortcuts(
             let has_explicit_direct = bind_props
                 .bindings
                 .iter()
-                .any(|b| matches!(b, Binding::Direct(_)));
+                .any(|b| matches!(b.binding, Binding::Direct(_)));
             if !has_explicit_direct && let Some(combo_tokens) = accel_to_combo_tokens(accel) {
                 let menu_id_str = menu_id.as_str();
                 binding_entries.push(quote! {
-                    (crate::shortcut::Shortcut::Direct(#combo_tokens), ::std::string::String::from(#menu_id_str))
+                    crate::shortcut::Binding {
+                        shortcut: crate::shortcut::Shortcut::Direct(#combo_tokens),
+                        command: ::std::string::String::from(#menu_id_str),
+                        when: ::core::option::Option::None,
+                    }
                 });
             }
         }
@@ -690,8 +698,8 @@ fn impl_leaf_shortcuts(
         };
         let menu_id_str = menu_id.as_str();
 
-        for binding in &bind_props.bindings {
-            let binding_tokens = match binding {
+        for scoped in &bind_props.bindings {
+            let binding_tokens = match &scoped.binding {
                 Binding::Chord(s) => {
                     let parts: Vec<&str> = s.split(',').collect();
                     if parts.len() != 2 {
@@ -713,16 +721,21 @@ fn impl_leaf_shortcuts(
                     }
                 }
             };
+            let when_tokens = ScopedBinding::when_tokens(scoped.when.as_ref());
 
             binding_entries.push(quote! {
-                (#binding_tokens, ::std::string::String::from(#menu_id_str))
+                crate::shortcut::Binding {
+                    shortcut: #binding_tokens,
+                    command: ::std::string::String::from(#menu_id_str),
+                    when: #when_tokens,
+                }
             });
         }
     }
 
     Ok(quote! {
         impl #ident {
-            pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
+            pub fn default_shortcuts() -> ::std::vec::Vec<crate::shortcut::Binding> {
                 ::std::vec![#(#binding_entries),*]
             }
 
@@ -769,7 +782,7 @@ fn impl_root_shortcuts(
 
     Ok(quote! {
         impl #ident {
-            pub fn default_shortcuts() -> ::std::vec::Vec<(crate::shortcut::Shortcut, ::std::string::String)> {
+            pub fn default_shortcuts() -> ::std::vec::Vec<crate::shortcut::Binding> {
                 let mut bindings = ::std::vec::Vec::new();
                 #(#extend_calls)*
                 bindings
@@ -949,8 +962,27 @@ enum Binding {
     Chord(String),
 }
 
+/// One `#[shortcut(...)]` binding together with the `when` clause declared beside it.
+///
+/// The clause is read per attribute rather than per variant, so one command can be reachable
+/// unconditionally by one key and only on a named surface by another.
+struct ScopedBinding {
+    binding: Binding,
+    when: Option<String>,
+}
+
+impl ScopedBinding {
+    /// A `when` clause as the tokens the generated binding carries.
+    fn when_tokens(when: Option<&String>) -> proc_macro2::TokenStream {
+        match when {
+            Some(clause) => quote! { crate::shortcut::When::parse(#clause) },
+            None => quote! { ::core::option::Option::None },
+        }
+    }
+}
+
 struct BindProps {
-    bindings: Vec<Binding>,
+    bindings: Vec<ScopedBinding>,
     extra_chords: Vec<(String, String)>,
     expand: Option<String>,
     direction_keys: Vec<(String, String)>,
@@ -966,18 +998,23 @@ impl BindProps {
             if !attr.path().is_ident("shortcut") {
                 continue;
             }
+            let mut direct_vals: Vec<String> = Vec::new();
             let mut chord_val: Option<String> = None;
             let mut variant_val: Option<String> = None;
+            let mut when_val: Option<String> = None;
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("direct") {
                     let v: LitStr = meta.value()?.parse()?;
-                    bindings.push(Binding::Direct(v.value()));
+                    direct_vals.push(v.value());
                 } else if meta.path.is_ident("chord") {
                     let v: LitStr = meta.value()?.parse()?;
                     chord_val = Some(v.value());
                 } else if meta.path.is_ident("variant") {
                     let v: LitStr = meta.value()?.parse()?;
                     variant_val = Some(v.value());
+                } else if meta.path.is_ident("when") {
+                    let v: LitStr = meta.value()?.parse()?;
+                    when_val = Some(v.value());
                 } else if meta.path.is_ident("expand") {
                     let v: LitStr = meta.value()?.parse()?;
                     expand = Some(v.value());
@@ -992,9 +1029,18 @@ impl BindProps {
                 }
                 Ok(())
             })?;
+            for direct in direct_vals {
+                bindings.push(ScopedBinding {
+                    binding: Binding::Direct(direct),
+                    when: when_val.clone(),
+                });
+            }
             match (chord_val, variant_val) {
                 (Some(c), Some(v)) => extra_chords.push((c, v)),
-                (Some(c), None) => bindings.push(Binding::Chord(c)),
+                (Some(c), None) => bindings.push(ScopedBinding {
+                    binding: Binding::Chord(c),
+                    when: when_val.clone(),
+                }),
                 (None, Some(_)) => {
                     return Err(syn::Error::new_spanned(
                         attr,

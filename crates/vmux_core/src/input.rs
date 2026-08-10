@@ -31,7 +31,7 @@ pub struct KeyStrokePlugin;
 #[cfg(not(web))]
 impl KeyStrokePlugin {
     /// The page hosts permitted to send a [`KeyStroke`] or publish a [`PageKeyContext`].
-    pub const SENDERS: &'static [&'static str] = &["terminal", "files"];
+    pub const SENDERS: &'static [&'static str] = &["terminal", "files", "command-bar", "layout"];
 }
 
 #[cfg(not(web))]

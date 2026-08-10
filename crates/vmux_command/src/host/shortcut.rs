@@ -45,16 +45,7 @@ impl Keymap {
             bindings: Vec::new(),
             chord_timeout_ms: DEFAULT_CHORD_TIMEOUT_MS,
         };
-        keymap.extend(
-            Source::Default,
-            AppCommand::default_shortcuts()
-                .into_iter()
-                .map(|(shortcut, command)| Binding {
-                    shortcut,
-                    command,
-                    when: None,
-                }),
-        );
+        keymap.extend(Source::Default, AppCommand::default_shortcuts());
         keymap
     }
 
@@ -132,6 +123,22 @@ impl KeymapView<'_> {
 
     pub fn direct(&self, pressed: &KeyCombo) -> Option<AppCommand> {
         self.applicable()
+            .find_map(|binding| match &binding.shortcut {
+                Shortcut::Direct(combo) if combo == pressed => {
+                    AppCommand::from_shortcut_id(&binding.command)
+                }
+                _ => None,
+            })
+    }
+
+    /// The command this key means *because of* where it was pressed.
+    ///
+    /// Only context-scoped bindings are considered, and that is the whole point: a key a page hands
+    /// over has already passed the native keyboard, which resolves the unconditional bindings for
+    /// every surface at once. Answering those a second time here would issue the command twice.
+    pub fn scoped(&self, pressed: &KeyCombo) -> Option<AppCommand> {
+        self.applicable()
+            .filter(|binding| binding.when.is_some())
             .find_map(|binding| match &binding.shortcut {
                 Shortcut::Direct(combo) if combo == pressed => {
                     AppCommand::from_shortcut_id(&binding.command)
@@ -329,6 +336,26 @@ pub struct KeyCombo {
 }
 
 impl KeyCombo {
+    /// The combo a page's keystroke names, or `None` for a bare modifier or a key with no
+    /// [`KeyCode`].
+    ///
+    /// Read from `code` rather than `key`, the same half of the event [`KeyCombo::web_code`]
+    /// writes, so a layout that renames the character cannot change which binding matches.
+    pub fn of(stroke: &vmux_core::input::KeyStroke) -> Option<Self> {
+        if stroke.is_modifier_key() {
+            return None;
+        }
+        Some(Self {
+            key: key_code_from_str(&stroke.code)?,
+            modifiers: Modifiers {
+                ctrl: stroke.mods.ctrl,
+                shift: stroke.mods.shift,
+                alt: stroke.mods.alt,
+                super_key: stroke.mods.super_key,
+            },
+        })
+    }
+
     /// This combo as a claim a page can test, or `None` when the page decides it without asking.
     ///
     /// The excluded case is exactly [`KeyCombo::is_text_input`]: a printable key held with nothing
