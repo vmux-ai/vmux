@@ -5,13 +5,18 @@
 //!
 //! - **The Remote kill switch.** Re-reading the state file per request meant turning Remote off
 //!   took effect immediately. A connection that authenticated once would outlive the switch, so a
-//!   single watcher closes every live peer instead.
+//!   single watcher closes every live peer instead. That same watcher is what [`Supervisor`] runs
+//!   the dialer from, so the switch decides whether this desktop is reachable at all rather than
+//!   only who is let in once it is.
 //! - **Request limits.** `receive_window` bounds what a peer can buffer before the dispatcher's own
 //!   size check runs — the job a request body limit used to do.
 
 pub mod dispatch;
 
 pub(crate) mod dialer;
+mod supervisor;
+
+pub(crate) use supervisor::Supervisor;
 
 use std::time::Duration;
 
@@ -136,10 +141,14 @@ pub struct AuthenticatedHello {
     pub token: String,
 }
 
-/// Watches the Remote kill switch and closes every live connection when it goes off.
+/// Watches the Remote kill switch, for everything whose lifetime it decides.
 ///
-/// One task and one file read per second for the whole daemon, against the HTTP path's read per
-/// request plus a per-stream ticker.
+/// [`Supervisor`] starts and stops the relay dialer from this, and every live connection closes
+/// itself when it goes off. One task and one file read per second for the whole daemon, against
+/// the HTTP path's read per request plus a per-stream ticker.
+///
+/// Polling also settles the order the daemon and the desktop start in: whichever writes the switch
+/// second, the next tick reconciles to it.
 pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
     let (tx, rx) = watch::channel(super::server::remote_enabled());
     tokio::spawn(async move {
@@ -393,18 +402,6 @@ async fn session_snapshot(
         ServiceMessage::Shared(event) => Some(event),
         _ => None,
     }
-}
-
-/// Register with the relay and serve the phones it tunnels back.
-///
-/// There is no listener any more. A desktop behind NAT cannot be dialled, so it dials out and the
-/// relay carries phone packets back over that connection; the endpoint those packets terminate on
-/// is built in [`inner_endpoint`], over a socket that is not a socket.
-pub(crate) fn spawn(
-    state: super::server::RemoteState,
-) -> std::io::Result<tokio::task::JoinHandle<()>> {
-    let liveness = spawn_liveness_watch();
-    Ok(dialer::spawn(state, ensure_identity()?, liveness))
 }
 
 /// An endpoint that terminates phone sessions arriving through the relay tunnel.

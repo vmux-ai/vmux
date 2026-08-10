@@ -28,17 +28,16 @@ const MIN_INNER_MTU: usize = 1200;
 /// Headroom for the inner endpoint's own framing inside an outer DATAGRAM frame.
 const TUNNEL_OVERHEAD: usize = 64;
 
-/// Dial the relay, and keep dialling it.
-pub fn spawn(
-    state: RemoteState,
-    identity: SelfSignedIdentity,
-    liveness: watch::Receiver<bool>,
-) -> tokio::task::JoinHandle<()> {
+/// Dial the relay, and keep dialling it for as long as this task is allowed to run.
+///
+/// Nothing here decides whether Remote should be reachable — [`super::Supervisor`] does, by
+/// running this task or not. Aborting it is the way out, which every guard below is written to
+/// survive.
+pub fn spawn(state: RemoteState, liveness: watch::Receiver<bool>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        AllocatedPort::release_stale();
         let mut backoff = Backoff::new();
         loop {
-            let ended = Registration::hold(&state, &identity, &liveness).await;
+            let ended = Registration::hold(&state, &liveness).await;
             ended.report();
             tokio::time::sleep(backoff.after(&ended)).await;
         }
@@ -55,13 +54,19 @@ struct Registration {
 
 impl Registration {
     /// Dial, register, serve every phone the relay tunnels back, and say how it ended.
-    async fn hold(
-        state: &RemoteState,
-        identity: &SelfSignedIdentity,
-        liveness: &watch::Receiver<bool>,
-    ) -> SessionEnd {
+    ///
+    /// The certificate is loaded per attempt rather than once for the process, so a desktop with
+    /// Remote off writes none at all, and a failure to write one is reported and retried through
+    /// the same backoff as every other reason a session never got started.
+    async fn hold(state: &RemoteState, liveness: &watch::Receiver<bool>) -> SessionEnd {
+        let identity = match super::ensure_identity() {
+            Ok(identity) => identity,
+            Err(error) => {
+                return SessionEnd::Unregistered(format!("desktop identity: {error}"));
+            }
+        };
         match Self::open(&state.token).await {
-            Ok(registration) => registration.serve(state, identity, liveness).await,
+            Ok(registration) => registration.serve(state, &identity, liveness).await,
             Err(reason) => SessionEnd::Unregistered(reason),
         }
     }
@@ -227,7 +232,10 @@ impl Backoff {
 /// phones at nothing — which a phone can only discover by waiting out a timeout. Removing it on
 /// drop is also what stops the app offering a link with no session behind it: every reader
 /// already treats a missing port as "not registered yet".
-struct AllocatedPort {
+///
+/// Turning Remote off aborts the dialer, which drops this along with everything else the task
+/// held, so the switch gives the port back without anything having to remember to.
+pub(super) struct AllocatedPort {
     number: u16,
     path: PathBuf,
 }
@@ -243,8 +251,9 @@ impl AllocatedPort {
     /// Forget a port recorded by a previous process.
     ///
     /// [`Drop`] covers a session this process owned; a daemon that was killed never got to run it,
-    /// so the file is cleared once at startup before anything can read it as live.
-    fn release_stale() {
+    /// so the file is cleared once at startup before anything can read it as live. That has to
+    /// happen whether or not Remote is on, since the stale port is readable either way.
+    pub(super) fn release_stale() {
         Self::remove(&RemotePaths::current().relay_port());
     }
 
@@ -397,24 +406,59 @@ mod tests {
         assert_eq!(Backoff::delays(flapping, 4), [1, 2, 4, 8]);
     }
 
+    impl AllocatedPort {
+        /// A recorded port under `path`, so a test never writes into the user's profile.
+        fn recorded_at(path: &Path) -> Self {
+            std::fs::write(path, "41003").expect("write port");
+            Self {
+                number: 41003,
+                path: path.to_path_buf(),
+            }
+        }
+    }
+
     /// The relay frees the port when the registration ends, so the recorded one must not outlive
     /// it — a pairing link built from a stale port sends the phone somewhere nothing answers.
     #[test]
     fn the_recorded_port_does_not_outlive_its_registration() {
         let directory = tempfile::tempdir().expect("temp dir");
         let path = directory.path().join("remote-relay-port");
-        std::fs::write(&path, "41003").expect("write port");
-
-        let claimed = AllocatedPort {
-            number: 41003,
-            path: path.clone(),
-        };
+        let claimed = AllocatedPort::recorded_at(&path);
         assert!(path.exists());
+
         drop(claimed);
 
         assert!(
             !path.exists(),
             "the allocated port outlived the session that held it"
+        );
+    }
+
+    /// Switching Remote off takes the dialer down by aborting it, which is not a path a guard runs
+    /// on by default anywhere — a future that is never polled again is simply dropped. If that
+    /// drop did not reach here, disabling Remote would leave the relay holding a port for a
+    /// desktop that no longer answers.
+    #[tokio::test]
+    async fn aborting_the_dialer_gives_the_port_back() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let path = directory.path().join("remote-relay-port");
+
+        let claimed = path.clone();
+        let (holding, held) = tokio::sync::oneshot::channel();
+        let dialer = tokio::spawn(async move {
+            let _port = AllocatedPort::recorded_at(&claimed);
+            let _ = holding.send(());
+            std::future::pending::<()>().await;
+        });
+        held.await.expect("the dialer claimed a port");
+        assert!(path.exists());
+
+        dialer.abort();
+        let _ = dialer.await;
+
+        assert!(
+            !path.exists(),
+            "an aborted dialer left the relay port recorded"
         );
     }
 }

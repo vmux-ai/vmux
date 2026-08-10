@@ -2,7 +2,7 @@
 //!
 //! There is no server here any more — the axum listener this file was named for is gone, and a
 //! desktop behind NAT could never have been reached by one. [`spawn`] mints the token, builds the
-//! state, and hands it to the QUIC dialer in `quic`, which is what a phone actually talks to.
+//! state, and hands it to `quic`, whose supervisor dials the relay whenever Remote is switched on.
 //!
 //! What remains is everything that is true regardless of transport: the shared [`RemoteState`],
 //! replay dedup, the limits on prompts and attachments, and the `$HOME`-confined media walk.
@@ -70,6 +70,11 @@ impl ClientOpDeduper {
     }
 }
 
+/// Mint the token, build the shared state, and hand it to the supervisor that watches the switch.
+///
+/// This runs with the daemon rather than with Remote: the token has to exist before the desktop
+/// can offer to pair, and the switch has to be watched before it can be flipped. Nothing dials
+/// out until it is on.
 pub fn spawn(
     agents: Arc<Mutex<AgentSessionManager>>,
     acp: Arc<Mutex<AcpSessionManager>>,
@@ -91,15 +96,8 @@ pub fn spawn(
             broker,
             client_ops: Arc::new(Mutex::new(ClientOpDeduper::default())),
         };
-        // The desktop is unreachable without the relay, so a failure here is not something to
-        // serve around — it is Remote being down, and it says so.
-        match super::quic::spawn(state) {
-            Ok(handle) => {
-                if let Err(error) = handle.await {
-                    tracing::error!(%error, "remote quic: relay task ended");
-                }
-            }
-            Err(error) => tracing::error!(%error, "remote quic: cannot reach the relay"),
+        if let Err(error) = super::quic::Supervisor::spawn(state).await {
+            tracing::error!(%error, "remote quic: the relay supervisor ended");
         }
     })
 }
