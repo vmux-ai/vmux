@@ -45,6 +45,52 @@ struct RemotePairingInfo {
     pairing_deep_link: String,
 }
 
+impl RemotePairingInfo {
+    /// How long the daemon is given to register with the relay before enabling is called a
+    /// failure. Matches what `vmux remote` waits, because it is the same registration.
+    const REGISTRATION_TIMEOUT: Duration = Duration::from_secs(20);
+
+    /// Block until the daemon has registered, then build the link a phone can follow.
+    ///
+    /// Registration is asynchronous — the daemon dials out and the relay allocates it a port — and
+    /// the port file is cleared on deregistration, so between a daemon starting and its first
+    /// registration neither the port nor the identity is on disk. Reporting that as an error made
+    /// a normal few seconds look like a broken setup.
+    fn wait(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Self, String> {
+        let deadline = Instant::now() + Self::REGISTRATION_TIMEOUT;
+        loop {
+            if let Some(pairing) = Self::ready(relay, token)? {
+                return Ok(pairing);
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "{} has not allocated a port for this desktop yet",
+                    relay.url()
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// The link, or `None` while the relay has yet to allocate a port or the identity to be written.
+    ///
+    /// There is no loopback fallback: a desktop behind NAT is only reachable through the relay, so
+    /// a link naming anything else would pair a phone that can never connect.
+    fn ready(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Option<Self>, String> {
+        let (Some(base_url), Some(fingerprint)) = (
+            relay.base_url()?,
+            vmux_service::remote::quic::identity_fingerprint(),
+        ) else {
+            return Ok(None);
+        };
+        let pairing = vmux_service::pairing::PairingInfo::new(&base_url, token, &fingerprint)?;
+        Ok(Some(Self {
+            pairing_url: pairing.url,
+            pairing_deep_link: pairing.deep_link,
+        }))
+    }
+}
+
 struct RemoteWorkerResult {
     enabled: bool,
     result: Result<Option<RemotePairingInfo>, String>,
@@ -211,31 +257,21 @@ fn remote_worker(command_rx: Receiver<bool>, result_tx: Sender<RemoteWorkerResul
 
 fn enable_remote() -> Result<RemotePairingInfo, String> {
     let token = wait_for_token().map_err(|error| error.to_string())?;
-    // There is no loopback fallback: a desktop behind NAT is only reachable through the relay, so
-    // a link naming anything else would pair a phone that can never connect.
-    let base_url = relay_pairing_base_url()?
-        .ok_or("waiting for the relay to allocate a port for this desktop")?;
-    let fingerprint = vmux_service::remote::quic::identity_fingerprint()
-        .ok_or("waiting for the QUIC identity to be written")?;
-    let pairing = vmux_service::pairing::PairingInfo::new(&base_url, &token, &fingerprint)?;
-    Ok(RemotePairingInfo {
-        pairing_url: pairing.url,
-        pairing_deep_link: pairing.deep_link,
-    })
+    let relay = configured_relay()?;
+    RemotePairingInfo::wait(&relay, &token)
 }
 
 fn disable_remote() -> Result<(), String> {
     Ok(())
 }
 
-/// Where the phone should dial, or `None` until the daemon has registered and recorded the port.
-fn relay_pairing_base_url() -> Result<Option<String>, String> {
+/// The relay this desktop pairs through, recorded so the daemon dials the same one.
+fn configured_relay() -> Result<vmux_service::pairing::Relay, String> {
     let relay = vmux_service::pairing::Relay::from_env();
     relay.persist().map_err(|error| error.to_string())?;
     // Minted here as well as in the daemon so both agree before the first registration.
     let _ = ensure_relay_device_id().map_err(|error| error.to_string())?;
-
-    relay.base_url()
+    Ok(relay)
 }
 
 fn ensure_relay_device_id() -> std::io::Result<String> {

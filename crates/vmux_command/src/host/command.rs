@@ -430,12 +430,56 @@ pub enum BookmarkCommand {
     NewFolder,
 }
 
+/// Opening the spaces page, and what a key press means once it has the keyboard.
+///
+/// `Open` is the one leaf that is not a key — it is how the page gets on screen. The rest are
+/// hidden for the same reason the chat page's are: the page is already showing when they apply, so
+/// they are not things to pick out of a menu, but they are things to rebind, and a command is the
+/// only thing `settings.json` can name.
+///
+/// Every key carries `when = "spaces"`, so it exists only while that page is up; without one,
+/// `Backspace` would delete a space from wherever it was pressed. The chords are the ones
+/// `vmux_ui`'s `MenuDirection::of` resolves locally, so a surface that answers its own navigation
+/// and one that comes through here cannot disagree about what `Ctrl+j` means.
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SpaceCommand {
     #[default]
     #[menu(id = "space_open", label = "Spaces\t<leader> s")]
     #[shortcut(chord = "Ctrl+g, s")]
     Open,
+    #[menu(id = "space_next", label = "Next Space", hidden)]
+    #[shortcut(direct = "ArrowDown", when = "spaces")]
+    #[shortcut(direct = "Ctrl+n", when = "spaces")]
+    #[shortcut(direct = "Ctrl+j", when = "spaces")]
+    Next,
+    #[menu(id = "space_previous", label = "Previous Space", hidden)]
+    #[shortcut(direct = "ArrowUp", when = "spaces")]
+    #[shortcut(direct = "Ctrl+p", when = "spaces")]
+    #[shortcut(direct = "Ctrl+k", when = "spaces")]
+    Previous,
+    #[menu(id = "space_attach", label = "Open Selected Space", hidden)]
+    #[shortcut(direct = "Enter", when = "spaces")]
+    Attach,
+    #[menu(id = "space_delete", label = "Delete Selected Space", hidden)]
+    #[shortcut(direct = "Delete", when = "spaces")]
+    #[shortcut(direct = "Backspace", when = "spaces")]
+    Delete,
+}
+
+impl SpaceCommand {
+    /// The verb to hand back to the page, or `None` for a command the page does not perform.
+    ///
+    /// `Open` is answered by the host — it spawns the webview — so it is the one leaf with nowhere
+    /// to be echoed to.
+    pub fn key(self) -> Option<vmux_wire::space::SpaceKey> {
+        match self {
+            Self::Open => None,
+            Self::Next => Some(vmux_wire::space::SpaceKey::Next),
+            Self::Previous => Some(vmux_wire::space::SpaceKey::Previous),
+            Self::Attach => Some(vmux_wire::space::SpaceKey::Attach),
+            Self::Delete => Some(vmux_wire::space::SpaceKey::Delete),
+        }
+    }
 }
 
 #[allow(dead_code)]

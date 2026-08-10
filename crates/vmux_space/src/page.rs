@@ -1,8 +1,11 @@
 #![allow(non_snake_case)]
 
-use crate::event::{SPACES_LIST_EVENT, SpaceCommandEvent, SpaceRow, SpacesListEvent};
+use crate::event::{
+    SPACE_KEY_EVENT, SPACES_LIST_EVENT, SpaceCommandEvent, SpaceKey, SpaceRow, SpacesListEvent,
+};
 use dioxus::prelude::*;
-use vmux_ui::hooks::{MenuDirection, send, use_listener, use_theme};
+use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -15,6 +18,12 @@ pub fn Page() -> Element {
     let _listener = use_listener::<SpacesListEvent, _>(SPACES_LIST_EVENT, move |data| {
         selected.set(0);
         state.set(data);
+    });
+
+    let keys = use_key_claim(Unclaimed::Types, || vec!["spaces".to_string()]);
+    SpaceKeys { state, selected }.listen();
+    use_drop(move || {
+        let _ = send(&PageKeyContext { keys: Vec::new() });
     });
 
     let spaces = state.read().spaces.clone();
@@ -30,8 +39,6 @@ pub fn Page() -> Element {
                 &[("number", TranslationValue::Number(1))],
             )
         });
-    let selected_space_id = spaces.get(sel).map(|space| space.id.clone());
-    let selected_space_deletable = count > 1 && spaces.get(sel).is_some();
 
     rsx! {
         document::Title { {translate("spaces-title")} }
@@ -42,27 +49,7 @@ pub fn Page() -> Element {
             onmounted: move |e| async move {
                 let _ = e.set_focus(true).await;
             },
-            onkeydown: move |e| {
-                if let Some(direction) = MenuDirection::of(&e) {
-                    e.prevent_default();
-                    selected.set(match direction {
-                        MenuDirection::Next => (sel + 1).min(count.saturating_sub(1)),
-                        MenuDirection::Previous => sel.saturating_sub(1),
-                    });
-                } else if e.key() == Key::Enter {
-                    e.prevent_default();
-                    if let Some(id) = selected_space_id.clone() {
-                        emit_command("attach", Some(id), None);
-                    }
-                } else if e.key() == Key::Delete || e.key() == Key::Backspace {
-                    e.prevent_default();
-                    if selected_space_deletable
-                        && let Some(id) = selected_space_id.clone()
-                    {
-                        emit_command("delete", Some(id), None);
-                    }
-                }
-            },
+            onkeydown: move |e| keys.on_keydown(&e, |_| false),
             div { class: "flex items-center justify-between border-b border-border px-5 py-4",
                 div { class: "min-w-0",
                     h1 { class: "text-lg font-semibold", {translate("spaces-title")} }
@@ -110,6 +97,79 @@ pub fn Page() -> Element {
                 }
             }
         }
+    }
+}
+
+/// The spaces page's keyboard, on the far side of the keymap.
+///
+/// Nothing here names a key. The page hands the stroke over, the core decides, and this performs
+/// the verb it came back as — which is the only reason `Ctrl+n` can be rebound in `settings.json`
+/// without this file agreeing.
+///
+/// Both fields are signals rather than values, because the answer arrives in a listener registered
+/// on first render: a captured list would be one keystroke stale by the time a key was pressed.
+#[derive(Clone, Copy)]
+struct SpaceKeys {
+    state: Signal<SpacesListEvent>,
+    selected: Signal<usize>,
+}
+
+impl SpaceKeys {
+    /// Take the host's answers about keys this page handed over.
+    fn listen(self) {
+        let mut keys = self;
+        let _resolved = use_listener::<SpaceKey, _>(SPACE_KEY_EVENT, move |key| keys.apply(key));
+    }
+
+    fn apply(&mut self, key: SpaceKey) {
+        match key {
+            SpaceKey::Next => self.move_selection(MenuDirection::Next),
+            SpaceKey::Previous => self.move_selection(MenuDirection::Previous),
+            SpaceKey::Attach => self.attach(),
+            SpaceKey::Delete => self.delete(),
+        }
+    }
+
+    /// Clamped at both ends rather than wrapping, which is what this list has always done.
+    fn move_selection(&mut self, direction: MenuDirection) {
+        let count = self.state.peek().spaces.len();
+        let from = self.row();
+        let landed = match direction {
+            MenuDirection::Next => (from + 1).min(count.saturating_sub(1)),
+            MenuDirection::Previous => from.saturating_sub(1),
+        };
+        self.selected.set(landed);
+    }
+
+    fn attach(&self) {
+        let Some(id) = self.selected_id() else {
+            return;
+        };
+        emit_command("attach", Some(id), None);
+    }
+
+    /// The last space is never deleted: the window it holds would have nowhere to put a tab.
+    fn delete(&self) {
+        if self.state.peek().spaces.len() <= 1 {
+            return;
+        }
+        let Some(id) = self.selected_id() else {
+            return;
+        };
+        emit_command("delete", Some(id), None);
+    }
+
+    /// The highlighted row, clamped to what the list holds now, so a selection survives a list that
+    /// shrank under it.
+    fn row(&self) -> usize {
+        let count = self.state.peek().spaces.len();
+        (*self.selected.peek()).min(count.saturating_sub(1))
+    }
+
+    fn selected_id(&self) -> Option<String> {
+        let row = self.row();
+        let state = self.state.peek();
+        state.spaces.get(row).map(|space| space.id.clone())
     }
 }
 

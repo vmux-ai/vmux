@@ -3,13 +3,14 @@
 //! Every surface with a highlighted row answers the same two questions: did that key move the
 //! selection, and where does the move land.
 //!
-//! Which surfaces ask *here* rather than through the keymap is decided by whether the surface is a
-//! page. The command-bar modal and the chat page publish a context and have their strokes resolved
-//! on the host, so their bindings live in `settings.json` and none of this runs for them. A shared
-//! component has no page identity to publish and would clobber its host page's context if it tried;
-//! the spaces page has no entry in `KeyStrokePlugin::SENDERS`, so its keys never reach the host at
-//! all. Those resolve the same chords locally — and the point of this module is that "the same
-//! chords" is one table rather than one per surface.
+//! Which surfaces ask *here* rather than through the keymap is decided by whether the surface has a
+//! context of its own to publish. The command-bar modal, the chat page and the spaces page each
+//! publish one and have their strokes resolved on the host, so their bindings live in
+//! `settings.json` and none of this runs for them. A shared component has no page identity to
+//! publish and would clobber its host page's context if it tried, and the start palette publishes
+//! nothing on purpose because it shares a webview with the chat page. Those resolve the same chords
+//! locally — and the point of this module is that "the same chords" is one table rather than one
+//! per surface.
 
 use dioxus::prelude::{Code, KeyboardData, ModifiersInteraction};
 

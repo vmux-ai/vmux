@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-web = []
 
 [lib]
 path = "src/lib.rs"

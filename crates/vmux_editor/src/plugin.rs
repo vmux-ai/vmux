@@ -19,8 +19,8 @@ use crate::edit::{EditCommand, EditCore, Motion, Selection};
 use crate::explorer_model::flatten_tree;
 use crate::keymap::{KeyInput, Keymap, KeymapKindExt, Mods};
 use crate::preview;
-use crate::viewport::{clamp_top_line, rows_from_viewport, window_range};
 use crate::wrap::WrapView;
+use vmux_core::scroll::{clamp_top_line, rows_from_viewport, window_range};
 
 /// Wires the file editor: buffer loading, filesystem watching, image and theme sends, LSP
 /// change flushing, and the file webview event bridge (adds [`LspPlugin`]).

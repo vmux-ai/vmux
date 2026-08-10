@@ -41,6 +41,7 @@ impl KeyStrokePlugin {
         "layout",
         "agent",
         "start",
+        "spaces",
     ];
 }
 

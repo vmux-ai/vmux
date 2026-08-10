@@ -56,6 +56,7 @@ impl Plugin for SpacePlugin {
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
             )
             .add_plugins(WarmPagePlugin::<Spaces>::default())
+            .add_plugins(super::key::SpaceKeyPlugin)
             .add_plugins(BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&[
                 "spaces", "layout",
             ]))

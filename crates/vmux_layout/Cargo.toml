@@ -17,7 +17,6 @@ player-mode = [
     "bevy/free_camera",
     "bevy_cef/pbr",
 ]
-web = []
 
 [lib]
 path = "src/lib.rs"

@@ -878,4 +878,67 @@ mod tests {
             ..Default::default()
         })));
     }
+
+    /// What the spaces page gets back for each chord it hands over, out of the compiled defaults.
+    ///
+    /// [`KeymapView::claims`] skips a binding whose command id no longer resolves, so a leaf that
+    /// stopped round-tripping would cost the page the key with no error anywhere: it would simply
+    /// stop navigating. `scoped` is what `PageKeyPlugin` calls on a stroke that arrived, so this is
+    /// the answer the page itself would receive.
+    #[test]
+    fn the_spaces_page_resolves_every_chord_it_hands_over() {
+        use crate::{LayoutCommand, SpaceCommand};
+
+        let keymap = Keymap::defaults();
+        let on_spaces = context(&["spaces"]);
+        let table = [
+            (combo(KeyCode::ArrowDown), SpaceCommand::Next),
+            (modified(KeyCode::KeyN, CTRL), SpaceCommand::Next),
+            (modified(KeyCode::KeyJ, CTRL), SpaceCommand::Next),
+            (combo(KeyCode::ArrowUp), SpaceCommand::Previous),
+            (modified(KeyCode::KeyP, CTRL), SpaceCommand::Previous),
+            (modified(KeyCode::KeyK, CTRL), SpaceCommand::Previous),
+            (combo(KeyCode::Enter), SpaceCommand::Attach),
+            (combo(KeyCode::Delete), SpaceCommand::Delete),
+            (combo(KeyCode::Backspace), SpaceCommand::Delete),
+        ];
+
+        for (pressed, expected) in table {
+            assert_eq!(
+                keymap.in_context(&on_spaces).scoped(&pressed),
+                Some(AppCommand::Layout(LayoutCommand::Space(expected))),
+                "{pressed:?}"
+            );
+            let claimed = pressed.claimed().expect("a bound chord is claimable");
+            assert!(
+                keymap
+                    .in_context(&on_spaces)
+                    .claims()
+                    .keys
+                    .contains(&claimed),
+                "{pressed:?} is bound but never claimed, so the page would never hand it over"
+            );
+        }
+    }
+
+    /// Every spaces key is scoped, so off that page it belongs to whoever is focused. One that
+    /// leaked would delete a space from a terminal.
+    #[test]
+    fn a_spaces_chord_means_nothing_off_the_spaces_page() {
+        let keymap = Keymap::defaults();
+
+        for pressed in [
+            combo(KeyCode::Backspace),
+            combo(KeyCode::Delete),
+            combo(KeyCode::Enter),
+            combo(KeyCode::ArrowDown),
+            modified(KeyCode::KeyJ, CTRL),
+        ] {
+            assert_eq!(
+                keymap.in_context(KeyContext::NONE).scoped(&pressed),
+                None,
+                "{pressed:?}"
+            );
+        }
+    }
 }

@@ -8,7 +8,6 @@ publish = false
 [features]
 default = []
 debug = []
-web = []
 
 [lib]
 path = "src/lib.rs"
