@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Lidhja me Mac-un tënd u ndërpre.
 mobile-error-connection-closed = Mac-u yt e mbylli lidhjen.
 mobile-error-address-invalid = Ajo adresë çiftimi nuk është e vlefshme.
 mobile-error-address-no-port = Ajo adresë çiftimi nuk ka portë.
+mobile-qr-denied = Vmux nuk mund ta përdorë kamerën. Aktivizoje te Settings për të skanuar kodin QR, ose kthehu pas dhe ngjit lidhjen e çiftimit.
+mobile-qr-open-settings = Hap Settings
+mobile-qr-session-error = Kamera u ndal. Provo sërish ose ngjit lidhjen e çiftimit.

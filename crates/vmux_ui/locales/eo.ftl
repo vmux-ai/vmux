@@ -798,3 +798,6 @@ mobile-error-connection-dropped = La konekto al via Mac rompiĝis.
 mobile-error-connection-closed = Via Mac fermis la konekton.
 mobile-error-address-invalid = Tiu pariga adreso estas nevalida.
 mobile-error-address-no-port = Tiu pariga adreso ne havas pordon.
+mobile-qr-denied = Vmux ne povas uzi la fotilon. Ŝaltu ĝin en Agordoj por skani la QR-kodon, aŭ reiru kaj anstataŭe algluu la parigan ligilon.
+mobile-qr-open-settings = Malfermi Agordojn
+mobile-qr-session-error = La fotilo haltis. Provu denove, aŭ anstataŭe algluu la parigan ligilon.

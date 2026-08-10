@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac kompyuteringiz bilan ulanish uzildi.
 mobile-error-connection-closed = Mac kompyuteringiz ulanishni yopdi.
 mobile-error-address-invalid = Juftlash manzili yaroqsiz.
 mobile-error-address-no-port = Juftlash manzilida port yo‘q.
+mobile-qr-denied = Vmux kameradan foydalana olmaydi. QR kodni skanerlash uchun uni Settings da yoqing yoki orqaga qaytib juftlash havolasini joylashtiring.
+mobile-qr-open-settings = Settings ni ochish
+mobile-qr-session-error = Kamera to‘xtadi. Qayta urinib ko‘ring yoki juftlash havolasini joylashtiring.

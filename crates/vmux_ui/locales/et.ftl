@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Ühendus sinu Maciga katkes.
 mobile-error-connection-closed = Sinu Mac sulges ühenduse.
 mobile-error-address-invalid = See sidumisaadress on vigane.
 mobile-error-address-no-port = Sellel sidumisaadressil puudub port.
+mobile-qr-denied = Vmux ei saa kaamerat kasutada. Lülita see rakenduses Seaded sisse, et QR-koodi skannida, või mine tagasi ja kleebi selle asemel sidumislink.
+mobile-qr-open-settings = Ava Seaded
+mobile-qr-session-error = Kaamera peatus. Proovi uuesti või kleebi selle asemel sidumislink.

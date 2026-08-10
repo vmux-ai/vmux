@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Kulumikizana ndi Mac yanu kwadulika.
 mobile-error-connection-closed = Mac yanu yatseka kulumikizana.
 mobile-error-address-invalid = Adilesi yolumikizira imeneyo si yolondola.
 mobile-error-address-no-port = Adilesi yolumikizira imeneyo ilibe port.
+mobile-qr-denied = Vmux singathe kugwiritsa ntchito kamera. Iyatseni mu Settings kuti muskane QR code, kapena bwererani ndi kumata ulalo wolumikizira m'malo mwake.
+mobile-qr-open-settings = Tsegulani Settings
+mobile-qr-session-error = Kamera yaima. Yesaninso, kapena matani ulalo wolumikizira m'malo mwake.

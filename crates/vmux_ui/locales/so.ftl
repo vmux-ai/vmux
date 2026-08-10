@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Xidhiidhka Mac-kaaga wuu go'ay.
 mobile-error-connection-closed = Mac-kaagu xidhiidhka wuu xidhay.
 mobile-error-address-invalid = Cinwaankaas isku xidhka waa khaldan yahay.
 mobile-error-address-no-port = Cinwaankaas isku xidhka ma laha port.
+mobile-qr-denied = Vmux ma isticmaali karo kamarada. Ka shid Settings si aad u iskaanto QR code-ka, ama dib u noqo oo ku dheji linkiga isku xidhka.
+mobile-qr-open-settings = Fur Settings
+mobile-qr-session-error = Kamaradu way joogsatay. Isku day mar kale, ama ku dheji linkiga isku xidhka.

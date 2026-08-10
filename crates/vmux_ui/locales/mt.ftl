@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Il-konnessjoni mal-Mac tiegħek inqatgħet.
 mobile-error-connection-closed = Il-Mac tiegħek għalaq il-konnessjoni.
 mobile-error-address-invalid = Dak l-indirizz tal-pairing mhuwiex validu.
 mobile-error-address-no-port = Dak l-indirizz tal-pairing m’għandux port.
+mobile-qr-denied = Vmux ma jistax juża l-kamera. Ixgħelha f’Settings biex tiskennja l-kodiċi QR, jew mur lura u paste il-link tal-pairing minflok.
+mobile-qr-open-settings = Iftaħ Settings
+mobile-qr-session-error = Il-kamera waqfet. Erġa’ pprova, jew paste il-link tal-pairing minflok.

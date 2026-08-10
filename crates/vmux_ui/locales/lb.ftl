@@ -798,3 +798,6 @@ mobile-error-connection-dropped = D'Verbindung mat dengem Mac ass ofgebrach.
 mobile-error-connection-closed = Däi Mac huet d'Verbindung zougemaach.
 mobile-error-address-invalid = D'Koppeladress ass ongëlteg.
 mobile-error-address-no-port = D'Koppeladress huet kee Port.
+mobile-qr-denied = Vmux kann d'Camera net benotzen. Schalt se an den Astellungen un, fir de QR-Code ze scannen, oder géi zréck a setz amplaz de Koppellink an.
+mobile-qr-open-settings = Astellungen opmaachen
+mobile-qr-session-error = D'Camera huet opgehalen. Probéier nach eng Kéier, oder setz amplaz de Koppellink an.

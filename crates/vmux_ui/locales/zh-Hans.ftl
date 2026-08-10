@@ -798,3 +798,6 @@ mobile-error-connection-dropped = 与你的 Mac 的连接已断开。
 mobile-error-connection-closed = 你的 Mac 关闭了连接。
 mobile-error-address-invalid = 此配对地址无效。
 mobile-error-address-no-port = 此配对地址中没有端口。
+mobile-qr-denied = Vmux 无法使用摄像头。请在设置中开启摄像头权限以扫描 QR 码，或者返回上一步粘贴配对链接。
+mobile-qr-open-settings = 打开设置
+mobile-qr-session-error = 摄像头已停止。请重试，或者改为粘贴配对链接。

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Kubatana neMac yako kwadambuka.
 mobile-error-connection-closed = Mac yako yavhara kubatana.
 mobile-error-address-invalid = Kero yekubatanidza iyoyo haina kururama.
 mobile-error-address-no-port = Kero yekubatanidza iyoyo haina poti.
+mobile-qr-denied = Vmux haigoni kushandisa kamera. Ivhurei muSettings kuti muskene QR code, kana kudzokera shure momunamira link yekubatanidza.
+mobile-qr-open-settings = Vhura Settings
+mobile-qr-session-error = Kamera yamira. Edzai zvakare, kana kunamira link yekubatanidza.

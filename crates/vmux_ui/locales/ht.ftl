@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Konesyon an ak Mac ou a koupe.
 mobile-error-connection-closed = Mac ou a fèmen konesyon an.
 mobile-error-address-invalid = Adrès konesyon sa a pa valab.
 mobile-error-address-no-port = Adrès konesyon sa a pa gen port.
+mobile-qr-denied = Vmux pa ka itilize kamera a. Aktive li nan Paramèt pou eskane kòd QR a, oswa retounen epi kole lyen konesyon an pito.
+mobile-qr-open-settings = Louvri Paramèt
+mobile-qr-session-error = Kamera a sispann. Eseye ankò, oswa kole lyen konesyon an pito.

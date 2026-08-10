@@ -798,3 +798,6 @@ mobile-error-connection-dropped = আপনার Mac-এর সাথে সং
 mobile-error-connection-closed = আপনার Mac সংযোগটি বন্ধ করে দিয়েছে।
 mobile-error-address-invalid = সেই পেয়ারিং ঠিকানা বৈধ নয়।
 mobile-error-address-no-port = সেই পেয়ারিং ঠিকানায় কোনো পোর্ট নেই।
+mobile-qr-denied = Vmux ক্যামেরা ব্যবহার করতে পারছে না। QR কোড স্ক্যান করতে সেটিংসে এটি চালু করুন, অথবা ফিরে গিয়ে পেয়ারিং লিঙ্ক পেস্ট করুন।
+mobile-qr-open-settings = সেটিংস খুলুন
+mobile-qr-session-error = ক্যামেরা বন্ধ হয়ে গেছে। আবার চেষ্টা করুন, অথবা বদলে পেয়ারিং লিঙ্ক পেস্ট করুন।

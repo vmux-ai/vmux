@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Haɗin da Mac ɗinka ya katse.
 mobile-error-connection-closed = Mac ɗinka ya rufe haɗin.
 mobile-error-address-invalid = Wannan adireshin haɗi ba shi da inganci.
 mobile-error-address-no-port = Wannan adireshin haɗi ba shi da port.
+mobile-qr-denied = Vmux ba zai iya amfani da kyamara ba. Kunna ta a Saituna don duba QR code, ko ka koma baya ka manna hanyar haɗi maimakon.
+mobile-qr-open-settings = Buɗe Saituna
+mobile-qr-session-error = Kyamara ta tsaya. Sake gwadawa, ko manna hanyar haɗi maimakon.

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = A cunnessione cù u to Mac s’hè interrotta.
 mobile-error-connection-closed = U to Mac hà chjusu a cunnessione.
 mobile-error-address-invalid = St’indirizzu d’appaghjamentu ùn hè micca validu.
 mobile-error-address-no-port = St’indirizzu d’appaghjamentu ùn hà nisun portu.
+mobile-qr-denied = Vmux ùn pò micca aduprà a camera. Attivala in Impostazioni per scannà u codice QR, o torna indietru è incolla piuttostu u ligame d’appaghjamentu.
+mobile-qr-open-settings = Apre Impostazioni
+mobile-qr-session-error = A camera s’hè firmata. Prova torna, o incolla piuttostu u ligame d’appaghjamentu.

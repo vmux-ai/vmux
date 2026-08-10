@@ -798,3 +798,6 @@ mobile-error-connection-dropped = तपाईंको Mac सँगको ज�
 mobile-error-connection-closed = तपाईंको Mac ले जडान बन्द गर्‍यो।
 mobile-error-address-invalid = त्यो पेयरिङ ठेगाना अवैध छ।
 mobile-error-address-no-port = त्यो पेयरिङ ठेगानामा पोर्ट छैन।
+mobile-qr-denied = Vmux ले क्यामेरा प्रयोग गर्न सक्दैन। QR कोड स्क्यान गर्न सेटिङमा यसलाई खोल्नुहोस्, वा पछाडि गएर पेयरिङ लिंक टाँस्नुहोस्।
+mobile-qr-open-settings = सेटिङ खोल्नुहोस्
+mobile-qr-session-error = क्यामेरा रोकियो। फेरि प्रयास गर्नुहोस्, वा पेयरिङ लिंक टाँस्नुहोस्।
