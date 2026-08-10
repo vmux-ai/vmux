@@ -132,7 +132,7 @@ impl Plugin for AgentSessionPlugin {
         strategies.register_cli(Box::new(CodexStrategy));
 
         app.insert_resource(strategies)
-            .add_plugins(crate::room::RoomPlugin)
+            .add_plugins((crate::room::RoomPlugin, crate::command_bar::CommandBarPlugin))
             .init_resource::<AgentSessionToEntity>()
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
@@ -284,7 +284,6 @@ impl Plugin for AgentSessionPlugin {
                     respond_page_agent_spawn_stack,
                     respond_page_agent_spawn_default,
                     respond_page_agent_attach_default,
-                    crate::command_bar::claim_chosen_command,
                 ),
             )
             .add_systems(
@@ -293,7 +292,6 @@ impl Plugin for AgentSessionPlugin {
                     crate::snapshot_updater::update_agents_snapshot,
                     crate::snapshot_updater::update_recent_agents,
                     crate::snapshot_updater::update_agent_sessions_snapshot,
-                    crate::command_bar::publish_contributions,
                 )
                     .chain()
                     .in_set(vmux_command::snapshot::WriteCommandBarSnapshots),

@@ -7,12 +7,27 @@
 
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarContributions, ContributedCommand,
+    CommandBarAgentsSnapshot, CommandBarContributions, ContributedCommand, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
     PageAgentSpawnStackRequest,
 };
+
+pub(crate) struct CommandBarPlugin;
+
+impl Plugin for CommandBarPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, claim_chosen_command).add_systems(
+            Update,
+            // Publishing reads the snapshots the updaters write, so it runs after them. Stated
+            // here rather than left to position in the set's chain, which is where it used to sit.
+            publish_contributions
+                .in_set(WriteCommandBarSnapshots)
+                .after(crate::snapshot_updater::update_agent_sessions_snapshot),
+        );
+    }
+}
 
 /// Urls that name "whichever agent is default" rather than a page that exists.
 ///
@@ -21,7 +36,7 @@ use vmux_core::agent::{
 const DEFAULT_AGENT_URLS: [&str; 2] = ["vmux://agent/", "vmux://agent"];
 
 /// Publish the agents to launch, and a row per model.
-pub(crate) fn publish_contributions(
+fn publish_contributions(
     agents: Res<CommandBarAgentsSnapshot>,
     mut contributions: ResMut<CommandBarContributions>,
 ) {
@@ -48,7 +63,7 @@ pub(crate) fn publish_contributions(
 }
 
 /// Act on a row or url the command bar handed back.
-pub(crate) fn claim_chosen_command(
+fn claim_chosen_command(
     mut reader: MessageReader<vmux_layout::ContributedCommandChosen>,
     mut attach: MessageWriter<PageAgentAttachRequest>,
     mut spawn: MessageWriter<PageAgentSpawnStackRequest>,
