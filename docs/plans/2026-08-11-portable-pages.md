@@ -72,9 +72,49 @@ how it is freed.
 
 **Tiers 1 and 2 are now complete.** palette is down from 55 DOM references to 42.
 
+### Step 3a — the readline edits, as arithmetic (`979af958`)
+
+First half of Tier 3, and non-behavioural apart from two bug fixes it exposed.
+
+`CtrlKeyCapture::RerouteToDioxus` turned out never to be constructed:
+`ctrl_key_capture_for_code` is its only possible producer and never returns it. So palette's
+reroute arm, `dispatch_ctrl_keydown`, `key_for_code` and the `_vmuxSyntheticKeydown` check were
+all unreachable, as was `ignore_physical_rerouted_ctrl_keydown` — whose test asserted `!false`
+six times and had no oracle. Deleted.
+
+The eight edit arms were arithmetic interleaved with element calls, so none of it could be
+tested. `CtrlEditAction::apply(value, caret, ghost) -> Edited` is the arithmetic;
+`apply_ctrl_edit` is the remainder that needs the element.
+
+**Two bugs the extraction made visible**, both in the case the plan already told the user to
+test — a non-ASCII query:
+
+- The caret arrives in UTF-16 code units. `Forward`/`Back` converted it; the four deletions used
+  it as a byte offset directly. On `"aé本b"` with the caret after `本`, Ctrl+D deleted `本`.
+- Writing back had the mirror problem: `set_selection_range` was handed byte offsets. Hence the
+  new `byte_offset_to_utf16`, tested against its inverse across surrogate pairs.
+
+palette: 42 → 33 DOM references, 161 lines shorter.
+
+### Step 3b — the caret seam (`ac4d6155`)
+
+`vmux_ui::caret::TextCaret`, shaped like `FocusClaim`. Byte offsets in and out, so UTF-16 stops
+at the boundary instead of leaking into callers. `place()` sets the caret *and* scrolls to it,
+because a programmatic move bypasses Chromium's caret-follow and every caller already did both;
+the canvas text measurement moves with it.
+
+`caret_scroll_left` and the UTF-16 conversions moved `vmux_start` → `vmux_ui` as predicted below,
+tests included. `vmux_start::keyboard` keeps the chord map and the edit arithmetic.
+
+One behavioural difference, deliberate: opening the bar rewinds the field to the start of the
+text so a long URL reads as an offer to overtype. Plain Cmd+A never did and still does not — that
+is why `select_all` did not absorb both callers.
+
+palette: 33 → 25 DOM references.
+
 ## Left
 
-Only Tier 3, plus consistency work of doubtful value (see Order).
+Only Tier 3's last step, plus consistency work of doubtful value (see Order).
 
 ### Tier 3 — not a porting problem
 
@@ -106,12 +146,32 @@ This matters because there is **no portable Dioxus API for caret or selection co
 title, scroll and focus, there is nothing to substitute in. So Tier 3 cannot be "use the portable
 API". It is two changes at once:
 
-1. A caret/selection seam in `vmux_ui`, in the shape of `FocusClaim` — inert off the browser.
-2. Ctrl-key editing performed in Rust against the query signal, instead of by synthesising a
-   `keydown` on the element and then a matching `input` event to tell Dioxus about it.
+1. ~~The edit arithmetic, lifted out of the DOM calls.~~ **Done in 3a.**
+2. ~~A caret/selection seam in `vmux_ui`, in the shape of `FocusClaim`.~~ **Done in 3b.**
+3. The value written through the query signal rather than to the element, which is what finally
+   removes `dispatch_input_event` and the capture-phase listener.
 
-(2) is the behavioural half and the reason a user has to sit with it: Ctrl+A/E/F/B/W/K/U in the
-command bar, on a long URL, with a non-ASCII query, plus Cmd+L select-all-on-open.
+All 25 DOM references left in palette are in five places, and only two kinds of thing:
+
+| what | dies how |
+|---|---|
+| `focus_and_install_ctrl_bindings` — capture-phase listener, `_ctrlBound` latch | (3) |
+| `apply_ctrl_edit`'s `set_value`, `dispatch_input_event` | (3) |
+| `accept_completion`'s element lookup and `set_value` | (3) |
+| `handle_plain_meta_a` — takes a `web_sys::KeyboardEvent` | (3), with the listener |
+| `install_start_menu_click_outside` | unrelated: popup dismissal, not input |
+
+**Why the listener is capture-phase, which (3) has to answer.** Chromium's own macOS readline
+emulation acts on Ctrl+A/E before a bubble-phase Dioxus `onkeydown` would see the key, so the
+handler has to run first to preempt it. Moving to `onkeydown` is not a like-for-like swap; it has
+to be shown that Dioxus's handler still wins.
+
+(3) is the behavioural half and the reason a user has to sit with it: Ctrl+A/E/F/B/W/K/U in the
+command bar, on a long URL, with a non-ASCII query, plus Cmd+L select-all-on-open. It also has an
+ordering problem that cannot be designed from reading alone — placing the caret after
+`query.set(..)` has to happen after Dioxus re-renders, or the render clobbers it.
+`TextCaret::select_all_from_start_next_frame` already carries a version of that constraint and is
+the place to grow whatever (3) needs.
 
 ## Order
 
