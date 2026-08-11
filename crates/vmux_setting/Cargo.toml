@@ -16,7 +16,7 @@ rkyv = { workspace = true }
 serde = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }

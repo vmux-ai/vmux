@@ -67,13 +67,13 @@ pub struct UpdateCheckStatusEvent {
     pub status: UpdateCheckStatus,
 }
 
-#[cfg(not(web))]
+#[cfg(host)]
 /// Native request consumed by the desktop updater.
 #[derive(bevy::prelude::Message, Clone, Copy, Debug, Default)]
 pub struct CheckForUpdatesRequest;
 
 /// Updater activity shared by the desktop updater and Settings host.
-#[cfg(not(web))]
+#[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub struct CurrentUpdateCheckStatus(pub UpdateCheckStatus);
 

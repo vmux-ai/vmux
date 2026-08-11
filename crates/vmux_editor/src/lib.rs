@@ -3,16 +3,18 @@
 
 pub mod page_model;
 
-#[cfg(ui)]
+// `web`, not `ui`: these reach the DOM directly and are only served into the CEF webview. They
+// were written when `ui` and `web` were the same thing, which stopped being true when iOS arrived.
+#[cfg(web)]
 pub mod explorer;
-#[cfg(ui)]
+#[cfg(web)]
 pub mod lsp_page;
-#[cfg(ui)]
+#[cfg(web)]
 pub mod page;
-#[cfg(ui)]
+#[cfg(web)]
 pub mod page_key;
 
-#[cfg(ui)]
+#[cfg(web)]
 mod note;
 
 #[cfg(host)]

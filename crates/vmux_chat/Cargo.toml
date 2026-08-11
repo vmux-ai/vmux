@@ -27,6 +27,7 @@ unicode-segmentation = "1"
 vmux_ui = { path = "../vmux_ui" }
 vmux_wire = { path = "../vmux_wire" }
 
+# Native, iOS included: deliberately not a host block, which would drop these from the phone.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["time"] }
 
