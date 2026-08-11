@@ -20,6 +20,7 @@ pub use vmux_wire::prompt_media::{
     ChatSubmitAttachment,
 };
 pub use vmux_wire::protocol::ApprovalDecision;
+pub use vmux_wire::room::ModelOptionEntry;
 
 #[derive(
     Clone,
@@ -356,23 +357,6 @@ pub struct SlashCommandEntry {
 )]
 pub struct SlashCommands {
     pub commands: Vec<SlashCommandEntry>,
-}
-
-/// One row in the `/model` picker.
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct ModelOptionEntry {
-    pub id: String,
-    pub name: String,
-    pub description: String,
 }
 
 /// Native → page ACP model state.

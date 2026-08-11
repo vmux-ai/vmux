@@ -17,7 +17,7 @@ use vmux_chat::event::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
-use vmux_wire::room::{RemoteModel, RemoteModelState};
+use vmux_wire::room::RemoteModelState;
 
 /// Model selection and effort, for the page and for a remote peer.
 pub(super) struct ChatModelPlugin;
@@ -140,9 +140,10 @@ fn remote_model_state(
     let (session, model_state) = sessions.iter().find(|(session, _)| session.sid == sid)?;
     let mut models = Vec::new();
     for option in &model_state.models {
-        models.push(RemoteModel {
+        models.push(ModelOptionEntry {
             id: option.id.clone(),
             name: option.name.clone(),
+            description: option.description.clone().unwrap_or_default(),
         });
     }
     let mut effort_levels = Vec::new();

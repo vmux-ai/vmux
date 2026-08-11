@@ -7,7 +7,7 @@
 //! screen has to decide what to keep.
 
 use self::menu::{CommandMenu, MediaMenu, ResumeMenu};
-use self::options::{AccessPill, EffortMenu, ModelMenu, ModelPill};
+use self::options::{AccessPill, ChatEffortMenu, ChatModelMenu, ChatModelPill};
 use self::workspace::WorkspacePills;
 use super::agent::StatusDot;
 use super::approval::ChoiceList;
@@ -38,7 +38,7 @@ pub(super) fn ChatDock(chat: Chat) -> Element {
                     ResumeMenu { chat }
                 }
                 if chat.model_menu_open() {
-                    ModelMenu { chat }
+                    ChatModelMenu { chat }
                 }
                 ChoiceList { chat }
                 QueuedPrompts { chat }
@@ -95,8 +95,8 @@ fn ComposerFooter(chat: Chat) -> Element {
     rsx! {
         div { class: "flex min-w-0 items-center justify-between gap-1",
             div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
-                ModelPill { chat }
-                EffortMenu { chat }
+                ChatModelPill { chat }
+                ChatEffortMenu { chat }
                 AccessPill { chat }
                 WorkspacePills { chat }
             }
@@ -166,5 +166,5 @@ pub fn ComposerStatus(
 }
 
 mod menu;
-mod options;
+pub mod options;
 mod workspace;

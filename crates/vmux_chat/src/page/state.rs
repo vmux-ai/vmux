@@ -984,7 +984,6 @@ pub struct EffortPicker {
     pub current: Signal<String>,
     /// Which agent the levels were fetched for, so a switch does not show the last one's.
     pub agent_key: Signal<String>,
-    pub menu_open: Signal<bool>,
 }
 
 pub fn use_effort_picker() -> EffortPicker {
@@ -992,7 +991,6 @@ pub fn use_effort_picker() -> EffortPicker {
         levels: use_signal(Vec::new),
         current: use_signal(String::new),
         agent_key: use_signal(String::new),
-        menu_open: use_signal(|| false),
     }
 }
 

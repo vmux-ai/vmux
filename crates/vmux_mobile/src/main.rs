@@ -15,9 +15,11 @@ use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_chat::format::composer::{SelectorMode, filter_models, selector_mode};
 use vmux_chat::page::agent::StatusDot;
 use vmux_chat::page::approval::ApprovalPanel;
 use vmux_chat::page::composer::ComposerStatus;
+use vmux_chat::page::composer::options::{EffortMenu, ModelMenu, ModelPill};
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_start::results::CommandBarResultItem;
 use vmux_start::row::ResultRow;
@@ -28,6 +30,7 @@ use vmux_ui::components::prompt_composer::{
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::favicon::Favicon;
+use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_wire::PageIcon;
 use vmux_wire::chat::{
     ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
@@ -35,9 +38,10 @@ use vmux_wire::chat::{
 use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
-    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, NewChatRequest,
-    PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry, RemoteModelState,
-    RemoteSession, RemoteStatus, RoomEvent, RoomId, inline_media_query, replace_inline_media_query,
+    AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, ModelOptionEntry,
+    NewChatRequest, PromptRequest, RemoteAgent, RemoteApproval, RemoteEvent, RemoteMediaEntry,
+    RemoteModelState, RemoteSession, RemoteStatus, RoomEvent, RoomId, inline_media_query,
+    replace_inline_media_query,
 };
 
 const TAILWIND_CSS: Asset = asset!("/assets/tailwind.out.css");
@@ -387,7 +391,56 @@ impl From<crate::quic_api::QuicError> for ApiError {
 /// Fetched per session rather than carried on [`RemoteSession`], because the list arrives from the
 /// agent after the session exists and a stale copy would offer models it has since dropped.
 #[component]
-fn ComposerOptions(sid: String, api: Signal<Option<Api>>) -> Element {
+fn ComposerOptions(
+    state: Signal<RemoteModelState>,
+    sid: String,
+    api: Signal<Option<Api>>,
+    mut draft: Signal<String>,
+) -> Element {
+    let current = state();
+    if current.models.is_empty() && current.effort_levels.is_empty() {
+        return rsx! {
+            div { class: "truncate text-[10px] text-muted-foreground/55", "Enter to send" }
+        };
+    }
+    let current_name = current
+        .models
+        .iter()
+        .find(|model| model.id == current.selected_id)
+        .map(|model| model.name.clone())
+        .unwrap_or_default();
+    rsx! {
+        div { class: "flex min-w-0 flex-1 items-center gap-1 overflow-x-auto",
+            ModelPill {
+                name: current_name,
+                // The software keyboard is up whenever the composer has focus, so `/model` filters
+                // here exactly as it does on the desktop.
+                on_open: move |_| draft.set("/model ".to_string()),
+            }
+            EffortMenu {
+                levels: current.effort_levels.clone(),
+                selected: current.effort.clone(),
+                on_select: {
+                    let sid = sid.clone();
+                    move |level: String| {
+                        let (sid, level) = (sid.clone(), level);
+                        let Some(client) = api.peek().clone() else { return };
+                        state.write().effort = level.clone();
+                        spawn(async move {
+                            let _ = client.set_effort(&sid, &level).await;
+                        });
+                    }
+                },
+            }
+        }
+    }
+}
+
+/// The session's models and effort, re-read whenever the session changes.
+///
+/// Fetched per session rather than carried on [`RemoteSession`], because the list arrives from the
+/// agent after the session exists and a stale copy would offer models it has since dropped.
+fn use_remote_model_state(sid: String, api: Signal<Option<Api>>) -> Signal<RemoteModelState> {
     let mut state = use_signal(RemoteModelState::default);
     use_effect(use_reactive!(|sid| {
         // Read reactively: pairing can finish after a session is selected, and a peek here would
@@ -405,69 +458,7 @@ fn ComposerOptions(sid: String, api: Signal<Option<Api>>) -> Element {
             }
         });
     }));
-
-    let current = state();
-    if current.models.is_empty() && current.effort_levels.is_empty() {
-        return rsx! {
-            div { class: "truncate text-[10px] text-muted-foreground/55", "Enter to send" }
-        };
-    }
-    let select_class = "min-w-0 max-w-[45%] truncate rounded-md bg-white/[0.05] px-2 py-1 text-[11px] text-foreground outline-none";
-    rsx! {
-        div { class: "flex min-w-0 flex-1 items-center gap-2",
-            if !current.models.is_empty() {
-                select {
-                    class: select_class,
-                    value: "{current.selected_id}",
-                    onchange: {
-                        let sid = sid.clone();
-                        move |event: FormEvent| {
-                            let (sid, model_id) = (sid.clone(), event.value());
-                            let Some(client) = api.peek().clone() else { return };
-                            state.write().selected_id = model_id.clone();
-                            spawn(async move {
-                                let _ = client.select_model(&sid, &model_id).await;
-                            });
-                        }
-                    },
-                    for model in current.models.iter() {
-                        option {
-                            key: "{model.id}",
-                            value: "{model.id}",
-                            selected: model.id == current.selected_id,
-                            "{model.name}"
-                        }
-                    }
-                }
-            }
-            if !current.effort_levels.is_empty() {
-                select {
-                    class: select_class,
-                    value: "{current.effort}",
-                    onchange: {
-                        let sid = sid.clone();
-                        move |event: FormEvent| {
-                            let (sid, level) = (sid.clone(), event.value());
-                            let Some(client) = api.peek().clone() else { return };
-                            state.write().effort = level.clone();
-                            spawn(async move {
-                                let _ = client.set_effort(&sid, &level).await;
-                            });
-                        }
-                    },
-                    option { value: "", selected: current.effort.is_empty(), "Default effort" }
-                    for level in current.effort_levels.iter() {
-                        option {
-                            key: "{level}",
-                            value: "{level}",
-                            selected: *level == current.effort,
-                            "{level}"
-                        }
-                    }
-                }
-            }
-        }
-    }
+    state
 }
 
 fn submit_remote_prompt(
@@ -1093,6 +1084,12 @@ fn AppBody() -> Element {
         })
         .collect::<Vec<_>>();
     let media_menu_open = inline_media_query(&draft_value).is_some();
+    let mut model_state = use_remote_model_state(selected_sid.clone(), api);
+    let mut model_selected = use_signal(|| 0usize);
+    let model_matches = match selector_mode(&draft_value) {
+        SelectorMode::Models(query) => Some(filter_models(&model_state().models, query)),
+        _ => None,
+    };
     let submit_sid = selected_sid.clone();
     let cancel_sid = selected_sid.clone();
     let approval_sid = selected_sid.clone();
@@ -1217,6 +1214,27 @@ fn AppBody() -> Element {
             div {
                 class: "shrink-0 border-t border-border bg-background/95 px-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-xl sm:px-4 md:px-6",
                 div { class: "relative mx-auto w-full max-w-none md:max-w-3xl",
+                    if let Some(models) = model_matches {
+                        PromptPopup {
+                            placement: PromptPopupPlacement::Upward,
+                            ModelMenu {
+                                models,
+                                current_model_id: model_state().selected_id.clone(),
+                                selected: model_selected(),
+                                on_hover: move |index| model_selected.set(index),
+                                on_select: move |model: ModelOptionEntry| {
+                                    let sid = selected_sid.clone();
+                                    let Some(client) = api.peek().clone() else { return };
+                                    model_state.write().selected_id = model.id.clone();
+                                    draft.set(String::new());
+                                    model_selected.set(0);
+                                    spawn(async move {
+                                        let _ = client.select_model(&sid, &model.id).await;
+                                    });
+                                },
+                            }
+                        }
+                    }
                     if media_menu_open {
                         PromptPopup {
                             placement: PromptPopupPlacement::Upward,
@@ -1243,7 +1261,12 @@ fn AppBody() -> Element {
                         attachments: prompt_attachments,
                         footer: rsx! {
                             div { class: "flex min-w-0 items-center justify-between gap-1",
-                                ComposerOptions { sid: submit_sid.clone(), api }
+                                ComposerOptions {
+                                    state: model_state,
+                                    sid: submit_sid.clone(),
+                                    api,
+                                    draft,
+                                }
                                 ComposerStatus {
                                     status: status_word.to_string(),
                                     active_subagents: activity.0,
@@ -1265,6 +1288,50 @@ fn AppBody() -> Element {
                             let sid = submit_sid.clone();
                             move |event: KeyboardEvent| {
                                 let value = draft.peek().clone();
+                                // The model picker is a draft-filtered popup like the media one, so
+                                // it has to claim the same keys before Enter reaches the submit
+                                // path below and sends "/model …" to the agent as a prompt.
+                                if let SelectorMode::Models(query) = selector_mode(&value) {
+                                    let matches = filter_models(&model_state.peek().models, query);
+                                    if let Some(direction) = MenuDirection::of(&event.data()) {
+                                        event.prevent_default();
+                                        model_selected.set(move_selection(
+                                            model_selected(),
+                                            matches.len(),
+                                            direction,
+                                        ));
+                                        return;
+                                    }
+                                    match event.key() {
+                                        Key::Enter if !event.modifiers().shift() => {
+                                            event.prevent_default();
+                                            if let Some(model) =
+                                                matches.get(model_selected()).cloned()
+                                            {
+                                                let sid = sid.clone();
+                                                if let Some(client) = api.peek().clone() {
+                                                    model_state.write().selected_id =
+                                                        model.id.clone();
+                                                    draft.set(String::new());
+                                                    model_selected.set(0);
+                                                    spawn(async move {
+                                                        let _ = client
+                                                            .select_model(&sid, &model.id)
+                                                            .await;
+                                                    });
+                                                }
+                                            }
+                                            return;
+                                        }
+                                        Key::Escape => {
+                                            event.prevent_default();
+                                            draft.set(String::new());
+                                            model_selected.set(0);
+                                            return;
+                                        }
+                                        _ => {}
+                                    }
+                                }
                                 let media_open = inline_media_query(&value).is_some();
                                 if media_open {
                                     match event.key() {

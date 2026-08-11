@@ -5,7 +5,7 @@
 //! opens `/model` over the prompt and the effort pill opens its own popover, but either way the
 //! reader is choosing one setting.
 
-use crate::event::SetAgentEffort;
+use crate::event::{ModelOptionEntry, SetAgentEffort};
 use crate::page::state::Chat;
 use dioxus::prelude::*;
 use vmux_ui::components::prompt_box::PromptPopup;
@@ -13,25 +13,39 @@ use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
-/// The model in use, which clicking swaps by opening `/model`.
+/// The model in use on this page.
 #[component]
-pub(super) fn ModelPill(chat: Chat) -> Element {
-    let name = (chat.models.current_model)();
+pub(super) fn ChatModelPill(chat: Chat) -> Element {
+    let mut draft = chat.composer.draft;
+    let mut menu_sel = chat.slash.menu_sel;
+    rsx! {
+        ModelPill {
+            name: (chat.models.current_model)(),
+            on_open: move |_| {
+                draft.set("/model ".to_string());
+                menu_sel.set(0);
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+        }
+    }
+}
+
+/// The model in use, which clicking swaps by opening `/model`.
+///
+/// Opening the picker is a draft edit, not a menu the button owns, so the caller decides what
+/// `/model ` means to it. Both clients type into a composer and filter a popup off the draft, so
+/// both get here the same way.
+#[component]
+pub fn ModelPill(name: String, on_open: EventHandler<()>) -> Element {
     if name.is_empty() {
         return rsx! {};
     }
-    let mut draft = chat.composer.draft;
-    let mut menu_sel = chat.slash.menu_sel;
     rsx! {
         button {
             class: "flex h-7 max-w-44 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-foreground/70 transition hover:bg-foreground/[0.08] hover:text-foreground",
             title: "Change model",
             onmousedown: move |event| event.prevent_default(),
-            onclick: move |_| {
-                draft.set("/model ".to_string());
-                menu_sel.set(0);
-                focus_prompt_end(PROMPT_INPUT_ID);
-            },
+            onclick: move |_| on_open.call(()),
             svg {
                 class: "h-3.5 w-3.5 shrink-0",
                 view_box: "0 0 24 24",
@@ -56,12 +70,33 @@ pub(super) fn ModelPill(chat: Chat) -> Element {
     }
 }
 
-/// The models this agent offers, narrowed by what follows `/model`.
+/// The models this page offers, narrowed by what follows `/model` in its draft.
 #[component]
-pub(super) fn ModelMenu(chat: Chat) -> Element {
+pub(super) fn ChatModelMenu(chat: Chat) -> Element {
     let mut menu_sel = chat.slash.menu_sel;
-    let current_model_id = (chat.models.current_model_id)();
-    let models = chat.filtered_models();
+    rsx! {
+        ModelMenu {
+            models: chat.filtered_models(),
+            current_model_id: (chat.models.current_model_id)(),
+            selected: menu_sel(),
+            on_hover: move |index| menu_sel.set(index),
+            on_select: move |model: ModelOptionEntry| chat.select_model(&model),
+        }
+    }
+}
+
+/// A filtered list of models to pick from, over the prompt.
+///
+/// Already-filtered rather than filtering here, because what narrows the list is the draft, and
+/// the draft belongs to whoever owns the composer.
+#[component]
+pub fn ModelMenu(
+    models: Vec<ModelOptionEntry>,
+    current_model_id: String,
+    selected: usize,
+    on_hover: EventHandler<usize>,
+    on_select: EventHandler<ModelOptionEntry>,
+) -> Element {
     rsx! {
         PromptPopup {
             if models.is_empty() {
@@ -71,11 +106,11 @@ pub(super) fn ModelMenu(chat: Chat) -> Element {
                     div {
                         key: "model{i}",
                         id: "agent-selector-item-{i}",
-                        class: if i == menu_sel() { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
-                        onmouseenter: move |_| menu_sel.set(i),
+                        class: if i == selected { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2 bg-foreground/10" } else { "flex cursor-pointer flex-col gap-0.5 px-3.5 py-2" },
+                        onmouseenter: move |_| on_hover.call(i),
                         onclick: {
                             let model = model.clone();
-                            move |_| chat.select_model(&model)
+                            move |_| on_select.call(model.clone())
                         },
                         div { class: "flex min-w-0 items-baseline gap-2",
                             span { class: "min-w-0 flex-1 truncate text-sm text-foreground", "{model.name}" }
@@ -93,16 +128,38 @@ pub(super) fn ModelMenu(chat: Chat) -> Element {
     }
 }
 
-/// How hard the agent is asked to think, for the agents that expose the choice.
+/// How hard this page's agent is asked to think.
 #[component]
-pub(super) fn EffortMenu(chat: Chat) -> Element {
-    let levels = (chat.effort.levels)();
+pub(super) fn ChatEffortMenu(chat: Chat) -> Element {
+    let mut current = chat.effort.current;
+    let agent_key = (chat.effort.agent_key)();
+    rsx! {
+        EffortMenu {
+            levels: (chat.effort.levels)(),
+            selected: current(),
+            on_select: move |level: String| {
+                current.set(level.clone());
+                let _ = send(&SetAgentEffort { agent_key: agent_key.clone(), level });
+                focus_prompt_end(PROMPT_INPUT_ID);
+            },
+        }
+    }
+}
+
+/// How hard the agent is asked to think, for the agents that expose the choice.
+///
+/// Owns whether its popover is open, which is nobody else's business — the caller only says what
+/// the levels are and what picking one means.
+#[component]
+pub fn EffortMenu(
+    levels: Vec<String>,
+    selected: String,
+    on_select: EventHandler<String>,
+) -> Element {
     if levels.is_empty() {
         return rsx! {};
     }
-    let mut menu_open = chat.effort.menu_open;
-    let agent_key = (chat.effort.agent_key)();
-    let selected = (chat.effort.current)();
+    let mut menu_open = use_signal(|| false);
     rsx! {
         div { class: "relative shrink-0",
             button {
@@ -143,17 +200,21 @@ pub(super) fn EffortMenu(chat: Chat) -> Element {
                     div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", {translate("agent-effort")} }
                     EffortOption {
                         level: None,
-                        agent_key: agent_key.clone(),
                         selected: selected.is_empty(),
-                        chat,
+                        on_pick: move |level| {
+                            menu_open.set(false);
+                            on_select.call(level);
+                        },
                     }
                     for level in levels.into_iter() {
                         EffortOption {
                             key: "effort-{level}",
                             level: Some(level.clone()),
-                            agent_key: agent_key.clone(),
                             selected: level == selected,
-                            chat,
+                            on_pick: move |level| {
+                                menu_open.set(false);
+                                on_select.call(level);
+                            },
                         }
                     }
                 }
@@ -162,12 +223,9 @@ pub(super) fn EffortMenu(chat: Chat) -> Element {
     }
 }
 
-/// One effort level, or `None` for letting the agent decide. Picking one applies it at once and
-/// remembers it for this agent.
+/// One effort level, or `None` for letting the agent decide.
 #[component]
-fn EffortOption(level: Option<String>, agent_key: String, selected: bool, chat: Chat) -> Element {
-    let mut current = chat.effort.current;
-    let mut menu_open = chat.effort.menu_open;
+fn EffortOption(level: Option<String>, selected: bool, on_pick: EventHandler<String>) -> Element {
     // A level is a lowercase id from the agent, so it is title-cased for display; the default
     // label is already prose in whichever locale it was translated into.
     let (label, label_class) = match &level {
@@ -179,12 +237,7 @@ fn EffortOption(level: Option<String>, agent_key: String, selected: bool, chat: 
         button {
             class: if selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-1.5 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
             onmousedown: move |event| event.prevent_default(),
-            onclick: move |_| {
-                current.set(level.clone());
-                menu_open.set(false);
-                let _ = send(&SetAgentEffort { agent_key: agent_key.clone(), level: level.clone() });
-                focus_prompt_end(PROMPT_INPUT_ID);
-            },
+            onclick: move |_| on_pick.call(level.clone()),
             span { class: "{label_class}", "{label}" }
             if selected {
                 svg { class: "h-3.5 w-3.5 shrink-0 text-success", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.2", stroke_linecap: "round", stroke_linejoin: "round",

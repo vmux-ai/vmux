@@ -508,11 +508,26 @@ pub enum RemoteEvent {
     },
 }
 
-/// One model a session can be switched to.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RemoteModel {
+/// One row in the `/model` picker, and one model a session can be switched to.
+///
+/// The page and the phone pick from the same list through the same component, so they read the
+/// same type; splitting it was what let the remote view quietly drop `description`.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    PartialEq,
+    Serialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ModelOptionEntry {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 /// The models a session can run and how hard its agent is asked to think.
@@ -522,7 +537,7 @@ pub struct RemoteModel {
 /// response.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct RemoteModelState {
-    pub models: Vec<RemoteModel>,
+    pub models: Vec<ModelOptionEntry>,
     /// The model in effect, including one selected but not yet acknowledged by the agent.
     pub selected_id: String,
     /// Empty for agents that have no effort setting, which is most of them.

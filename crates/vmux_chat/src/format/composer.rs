@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 const CHAT_PAGE_TITLE_MAX_GRAPHEMES: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SelectorMode<'a> {
+pub enum SelectorMode<'a> {
     None,
     Commands(&'a str),
     Resume(&'a str),
@@ -31,7 +31,7 @@ pub(crate) enum ResumeMenuState {
     Results,
 }
 
-pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
+pub fn selector_mode(draft: &str) -> SelectorMode<'_> {
     let Some(token) = draft.strip_prefix('/') else {
         return SelectorMode::None;
     };
@@ -70,7 +70,7 @@ pub(crate) fn should_fetch_resume(draft: &str, commands: &[SlashCommandEntry]) -
     }
 }
 
-pub(crate) fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {
+pub fn filter_models(models: &[ModelOptionEntry], query: &str) -> Vec<ModelOptionEntry> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
         return models.to_vec();
