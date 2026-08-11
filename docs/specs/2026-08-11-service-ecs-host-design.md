@@ -8,11 +8,19 @@ Make `vmux_service` a headless Bevy app that owns session state *and* workspace 
 
 [Topology](../architecture/topology.md) already states the thesis: one service that owns the work, and clients that render it. The code does not honour it yet.
 
-The service owns sessions. The local client owns the workspace shape — installed agents, the active roster — in a different process. So `ListAgents` and `ListTeam` are not reads of service state; they are commands brokered into the GUI and relayed back, and they answer `NoDesktop` when no window is open (`crates/vmux_wire/src/protocol/shared.rs:215`, `crates/vmux_service/src/remote/quic/dispatch.rs:192`).
+The service owns sessions. The local client owns the workspace shape — the installed-agent registry, the active roster, a session's model list — in a different process. So those are not reads of service state; they are commands brokered into the GUI and relayed back, answering `NoDesktop` when no window is open (`protocol/shared.rs:215`, `remote/quic/dispatch.rs:192`).
+
+It is not two commands. `dispatch.rs:27` routes the whole of `SharedAgentCommand` through the broker, so the split is exactly:
+
+| Works with no window | Needs a window |
+| --- | --- |
+| `Attach`, `Input`, `Cancel`, `Approve`, `ListMedia` | `NewAgentChat`, `ListAgents`, `ListTeam`, `ListModels`, `SelectModel`, `SetEffort` |
+
+A phone can drive a session that already exists and cannot start one.
 
 That costs two things:
 
-- A paired phone is half-served whenever the Mac's window is closed. Sessions work; the workspace does not.
+- A paired phone is half-served whenever the Mac's window is closed. Sessions continue; the workspace is unreachable.
 - A cloud host is impossible. There is never a desktop, so `NoDesktop` is the permanent answer.
 
 The second is the forcing function, but the first is a bug on its own.
@@ -96,7 +104,7 @@ Decomposition surfacing that is the argument that this is not tidying.
 
 ### Requests in flight
 
-`pending_commands`, `pending_queries` and `pending_tool_calls` are three `HashMap<AgentRequestId, oneshot::Sender<…>>` (`host/agent_broker.rs:13`). Each in-flight request becomes an entity carrying `RequestId`, `Responder` and `Deadline`, related to the session that issued it.
+`pending_commands`, `pending_queries` and `pending_tool_calls` are three `HashMap<AgentRequestId, oneshot::Sender<…>>` (`host/agent_broker.rs:12`). Each in-flight request becomes an entity carrying `RequestId`, `Responder` and `Deadline`, related to the session that issued it.
 
 Timeouts stop being a per-request `tokio::time::timeout` and become one system querying `Deadline`. Despawning a session takes its in-flight requests with it.
 
@@ -119,6 +127,31 @@ A `Resource` is for a process-wide singleton with no per-entity identity: the To
 
 `RemoteState` (`remote/server.rs:38`) dissolves the same way. `token` and `paired` are process-wide and stay; `agents`, `acp` and `client_ops` become queries.
 
+## What survives a restart
+
+The spec would be incomplete without this, because the answer differs by platform and only one of them is written down.
+
+Today: nothing. Every registry is in memory, PTY children die with the process, and a provider stream cannot be resumed. On the Mac that is acceptable — launchd restarts the daemon, the user is sitting there, and it happens rarely. In a container, suspend, stop and redeploy are normal operations, so the same behaviour reads as data loss.
+
+The decomposition draws the line for free:
+
+- **Durable** — descriptor components. `AgentSession`, `AgentMessages`, `AcpSession`, `ChatRoom` and the roster. What the user would call the state of their work.
+- **Transient** — handle components. `SessionTask`, `SessionInbox`, `SessionFanout`, `Pty`, `TerminalGrid`. Rebuilt on boot or not at all.
+
+`moonshine-save` and `bevy_world_serialization` are already the persistence stack here — `#[require(Save)]` as the marker, `vmux_desktop/src/persistence.rs` as the worked example, used by `vmux_core`, `vmux_layout`, `vmux_history` and `vmux_space`. Service state joins it rather than inventing a second mechanism. `AgentSession` already derives `Reflect`; `AgentMessages` derives `Serialize`/`Deserialize` but not `Reflect`, so it needs one added.
+
+**A restart is visible, not transparent.** Restoring a transcript is possible; resuming a half-finished provider turn is not, and a dead PTY child is gone. Sessions come back with their history and a status saying the run was interrupted. ACP already carries `resume`, so ACP sessions can go further than page agents — but that is a per-provider capability, not a guarantee the model makes.
+
+A suspended microVM sidesteps all of this by preserving memory. Persistence is what covers stop and redeploy, which is when it is needed most.
+
+## One profile, one process
+
+Single tenancy is a property of the current design and should be stated before someone assumes otherwise.
+
+`ServicePaths::current()` (`vmux_client/src/paths.rs:18`) reads the build and profile from the environment — "the profile is a property of the process" — and every runtime file hangs off it: socket, pid, identity, and the Remote token and certificate. One service process serves exactly one profile.
+
+So a cloud host is **one container per user profile**, not a shared process with many tenants. Making it otherwise means threading a tenant id through every `::current()` call and re-keying the socket, the token and the certificate — a different design, not a configuration.
+
 ## The headless runner
 
 Bevy is frame-driven and there is no vsync in a container. `ScheduleRunnerPlugin::run_loop(tick)` is the obvious choice and is wrong at both ends: a fast tick burns CPU on a box billed by the second, and a slow one adds latency to every streamed frame.
@@ -128,6 +161,16 @@ Use a custom runner via `set_runner` that parks on a wake channel with a timeout
 This mirrors the desktop rule. `UpdateMode::Continuous` is banned there for 100-200% idle CPU; in a cloud host the same mistake is a bill, and it defeats the idle detection that suspend and scale-to-zero depend on.
 
 **Idle CPU is an acceptance number, not an afterthought.** Measure a host with paired sessions and no traffic.
+
+### Schedules
+
+One pass per wake, in three phases:
+
+- `PreUpdate` — drain the Tokio channels into components. The only place the outside world is read.
+- `Update` — decide. Dispatch queued prompts, answer requests, reap exited processes.
+- `PostUpdate` — fan out. Broadcast patches and session frames to subscribers.
+
+**Do not put the deadline sweep in `FixedUpdate`.** `Time<Fixed>` accumulates against the wall clock, so after an idle gap a wake-driven app runs a burst of catch-up steps to make up ticks that had no work in them. Sweep in `Update` against an `Instant` instead; the runner's timeout floor is what guarantees the sweep happens at all.
 
 ## What does not move
 
@@ -144,10 +187,20 @@ Each stage keeps macOS working and CI green.
 3. **Spawn entities alongside the maps.** Descriptor components only, written when a session or process is created. The maps stay authoritative and nothing reads the components yet. This proves the model and the `Send + Sync + 'static` bounds at zero risk; `portable_pty`'s master is the one to check first.
 4. **Move the handles, delete the managers.** Channels, tasks and grids move onto the entities; readers switch to queries; the three registries and their `Arc<Mutex<…>>` go. In-flight requests become entities with a `Deadline` system.
 5. **Split viewport onto subscriptions.** The one behaviour change in the sequence, and the one to flag in review: per-client viewport instead of one window shared by every attached client.
-6. **Move workspace shape off the client.** `ListAgents` and `ListTeam` become reads of service state. `AgentBroker` and `SharedFailure::NoDesktop` are deleted. The local client subscribes to what it used to own.
+6. **Move workspace shape off the client.** The whole brokered surface, not two commands. `AgentBroker` and `SharedFailure::NoDesktop` are deleted; the local client subscribes to what it used to own. See below — this is the stage that carries real scope.
 7. **Compose `vmux_host`.** Minimal plugins, session plugins, QUIC remote. No new logic, plus the Linux build job.
 
 Stages 1–4 are reversible refactors. Stage 5 changes behaviour and stage 6 inverts ownership; either is worth landing alone if the diff argues for it.
+
+### What stage 6 actually costs
+
+Three things the one-line summary hides.
+
+**Six commands, not two.** Every `SharedAgentCommand` variant is brokered. The query variants (`ListAgents`, `ListTeam`, `ListModels`) become plain service reads; the mutations (`NewAgentChat`, `SelectModel`, `SetEffort`) become service-owned operations. `shared_agent_command_variants_are_the_whole_remote_surface` (`protocol.rs:1057`) is the frozen-variant test that turns red, which is the intended signal.
+
+**New socket messages.** The desktop stops owning the roster, so it needs to read and follow it: a `ClientMessage` per query with its `ServiceMessage` reply, plus a subscription so the client's ECS updates when the registry changes rather than polling. The registry discovery itself — whatever scans for installed agents — moves into the service with the state it produces.
+
+**Three consumers, not one.** `vmux_cli` and `vmux_mcp` connect to the same socket alongside the desktop. Moving the roster changes what the MCP surface can answer — for the better, since workspace-as-an-API stops requiring an open window — but it is a change to a public surface and needs its own pass rather than falling out of the refactor.
 
 ## Cloud pairing is unresolved
 
