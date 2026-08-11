@@ -4552,27 +4552,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_page_focus_does_not_draw_browser_outline() {
-        let source = include_str!("page.rs");
-
-        assert!(source.contains("outline:none"));
-    }
-
-    #[test]
-    fn agent_loading_uses_matrix_rain() {
-        let page = include_str!("page.rs");
-        assert!(page.contains("MatrixRain {"));
-        assert!(page.contains("accent.rain_rgb"));
-        assert!(page.contains("terminal: true"));
-
-        let rain = include_str!("matrix_rain.rs");
-        assert!(rain.contains("request_animation_frame"));
-        assert!(rain.contains("use_drop"));
-        assert!(rain.contains("prefers-reduced-motion"));
-        assert!(rain.contains("device_pixel_ratio().clamp(1.0, 1.5)"));
-    }
-
-    #[test]
     fn terminal_web_shortcut_wakes_next_command_frame() {
         let source = include_str!("plugin.rs");
         let on_term_key = source

@@ -7,50 +7,14 @@
 )]
 
 pub mod event;
-#[cfg(web)]
-pub mod matrix_rain;
-#[cfg(web)]
-pub mod page;
 pub mod render_model;
 
-#[cfg(not(web))]
-pub mod clipboard;
-#[cfg(not(web))]
-pub mod component;
-#[cfg(not(web))]
-pub mod contract;
-#[cfg(not(web))]
-pub mod launch;
-#[cfg(not(web))]
-mod link;
-#[cfg(not(web))]
-pub mod pid;
+#[cfg(ui)]
+pub mod matrix_rain;
+#[cfg(ui)]
+pub mod page;
 
-#[cfg(not(web))]
-pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
-#[cfg(not(web))]
-pub use contract::TerminalContractPlugin;
-#[cfg(not(web))]
-pub mod plugin;
-#[cfg(not(web))]
-pub mod processes_monitor;
-#[cfg(not(web))]
-pub mod shell_env;
-#[cfg(not(web))]
-pub mod shell_input;
-#[cfg(not(web))]
-pub mod snapshot_updater;
-#[cfg(not(web))]
-pub mod target;
-
-#[cfg(not(web))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "terminal",
-    title: "Terminal",
-    keywords: &["shell", "console"],
-    icon: Some(vmux_core::BuiltinIcon::Terminal),
-    command_bar: true,
-};
-
-#[cfg(not(web))]
-pub use plugin::*;
+#[cfg(host)]
+pub mod host;
+#[cfg(host)]
+pub use host::*;
