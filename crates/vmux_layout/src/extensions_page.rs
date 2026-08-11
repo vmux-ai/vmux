@@ -53,9 +53,6 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title(&translate("extensions-title"));
-        }
         let _ = send(&ExtListRequest);
     });
 
@@ -75,6 +72,7 @@ pub fn Page() -> Element {
     let installing: Vec<ExtInstallProgress> = progress().values().cloned().collect();
 
     rsx! {
+        document::Title { {translate("extensions-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("extensions-title"),

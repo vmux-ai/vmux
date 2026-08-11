@@ -10,7 +10,7 @@ pub mod event;
 pub mod schema;
 pub mod themes;
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
 
 #[cfg(host)]

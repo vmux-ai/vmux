@@ -12,12 +12,10 @@ const BTN: &str = "cursor-pointer rounded-md border border-border bg-card px-3 p
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("debug-title"));
-    }
     let mut version = use_signal(|| "v99.0.0".to_string());
 
     rsx! {
+        document::Title { {translate("debug-title")} }
         div { class: "flex h-full min-h-0 flex-col gap-4 bg-background p-6 text-foreground",
             h1 { class: "text-lg font-semibold", {translate("debug-title")} }
             section { class: "flex flex-col gap-2",

@@ -111,6 +111,7 @@ pub fn Page() -> Element {
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
+    let mut doc_title = use_signal(String::new);
 
     let completions = Completions {
         open: comp_open,
@@ -167,10 +168,7 @@ pub fn Page() -> Element {
         media.set(None);
         reset_file_scroll();
         last_scroll_req.set(0);
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
-            doc.set_title(&name);
-        }
+        doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
         diagnostics.set(Vec::new());
         hover_diag.set(None);
@@ -368,9 +366,7 @@ pub fn Page() -> Element {
         } else {
             title
         };
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title(&title);
-        }
+        doc_title.set(title.clone());
         let activation = note_cursor_activation(
             reveal_line,
             keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
@@ -508,15 +504,13 @@ pub fn Page() -> Element {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let name = d
-                .path
+        doc_title.set(
+            d.path
                 .rsplit('/')
                 .find(|s| !s.is_empty())
                 .unwrap_or(&d.path)
-                .to_string();
-            doc.set_title(&name);
-        }
+                .to_string(),
+        );
         parent_path.set(d.parent_path);
         if git_path() != d.abs_path {
             git_has_diff.set(false);
@@ -655,6 +649,9 @@ pub fn Page() -> Element {
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
 
     rsx! {
+        if !doc_title().is_empty() {
+            document::Title { "{doc_title}" }
+        }
         div {
             id: PAGE_ID,
             class: "flex h-full w-full flex-row overflow-hidden bg-background",

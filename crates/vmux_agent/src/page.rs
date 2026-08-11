@@ -19,6 +19,7 @@ pub fn Page() -> Element {
     let filtered = catalog.matching();
 
     rsx! {
+        document::Title { {translate("agents-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("agents-title"),
@@ -253,7 +254,7 @@ pub struct Catalog {
     pub loaded: Signal<bool>,
 }
 
-/// Fetch the catalog, keep it in step with install results, and title the document.
+/// Fetch the catalog and keep it in step with install results.
 fn use_catalog() -> Catalog {
     let locale = use_theme();
     let catalog = Catalog {
@@ -283,7 +284,6 @@ fn use_catalog() -> Catalog {
 
     use_effect(move || {
         locale();
-        set_document_title(&translate("agents-title"));
         Catalog::request();
     });
 
@@ -329,14 +329,3 @@ impl Catalog {
         });
     }
 }
-
-/// The browser tab's title. A phone has no tab, so this is where that difference stops.
-#[cfg(web)]
-fn set_document_title(title: &str) {
-    if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-        doc.set_title(title);
-    }
-}
-
-#[cfg(not(web))]
-fn set_document_title(_title: &str) {}

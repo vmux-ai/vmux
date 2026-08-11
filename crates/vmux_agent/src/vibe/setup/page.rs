@@ -36,13 +36,6 @@ pub fn Page() -> Element {
     let brew_command = vmux_core::agent_setup::homebrew_install_command();
     let tagline = tagline(&segment);
     let accent = agent_accent(&segment);
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate_with(
-            "setup-install-title",
-            &[("name", TranslationValue::String(name))],
-        ));
-    }
-
     let mut installing = use_signal(|| false);
     let mut needs_homebrew = use_signal(|| false);
     let mut failed = use_signal(|| false);
@@ -77,6 +70,9 @@ pub fn Page() -> Element {
 
     let emit_segment = segment.clone();
     rsx! {
+        document::Title {
+            {translate_with("setup-install-title", &[("name", TranslationValue::String(name))])}
+        }
         main { class: "relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-10 text-foreground",
             div { class: "{accent.glow_top}" }
             div { class: "{accent.glow_bottom}" }

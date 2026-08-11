@@ -11678,8 +11678,6 @@ dependencies = [
  "vmux_history",
  "vmux_layout",
  "vmux_ui",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

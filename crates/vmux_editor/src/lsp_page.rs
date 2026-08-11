@@ -58,14 +58,12 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title(&translate("lsp-title"));
-        }
         let _ = send(&LspCatalogRequest::for_query("", false));
     });
 
     let visible = packages();
     rsx! {
+        document::Title { {translate("lsp-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("lsp-title"),

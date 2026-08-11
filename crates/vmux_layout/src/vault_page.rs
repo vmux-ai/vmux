@@ -209,14 +209,12 @@ pub fn Page() -> Element {
             let _ = location.replace(&format!("https://vault.vmux.ai/{search}"));
             return;
         }
-        if let Some(document) = window.document() {
-            document.set_title(&translate("vault-title"));
-        }
         request_snapshot(false);
     });
 
     let current = snapshot();
     rsx! {
+        document::Title { {translate("vault-title")} }
         ManagerPage {
             header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
                 div { class: "flex items-center gap-3",

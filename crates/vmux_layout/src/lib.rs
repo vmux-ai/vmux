@@ -12,20 +12,21 @@ pub mod protocol;
 pub mod reconcile;
 pub mod start;
 
-// `web`, not `ui`: each of these reaches the DOM directly and is only ever served into the CEF
-// webview. They were written when `ui` and `web` were the same thing, which stopped being true
-// when iOS arrived — saying `web` records what they are instead of implying a phone can render
-// them. [`start`] is the exception and stays portable.
-#[cfg(web)]
+#[cfg(ui)]
 pub mod debug_page;
+#[cfg(ui)]
+pub mod tools_page;
+
+// `web`, not `ui`: each of these still reaches the DOM directly and is only ever served into the
+// CEF webview. They were written when `ui` and `web` were the same thing, which stopped being
+// true when iOS arrived — saying `web` records what they are instead of implying a phone can
+// render them.
 #[cfg(web)]
 pub mod error_page;
 #[cfg(web)]
 pub mod extensions_page;
 #[cfg(web)]
 pub mod page;
-#[cfg(web)]
-pub mod tools_page;
 #[cfg(web)]
 pub mod vault_page;
 

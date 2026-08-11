@@ -48,7 +48,7 @@ fn localized_terminal_title(title: &str) -> String {
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
+    use_theme();
     let mut rows = use_signal(std::collections::BTreeMap::<u32, Signal<TerminalRowState>>::new);
     let mut first_row = use_signal(|| 0u32);
     let mut raw_title = use_signal(String::new);
@@ -211,16 +211,6 @@ pub fn Page() -> Element {
         raw_title.set(evt.title);
     });
 
-    use_effect(move || {
-        locale();
-        let title = localized_terminal_title(&raw_title());
-        if !title.is_empty()
-            && let Some(document) = web_sys::window().and_then(|window| window.document())
-        {
-            document.set_title(&title);
-        }
-    });
-
     let _loading_listener = use_listener::<TermLoadingEvent, _>(TERM_LOADING_EVENT, move |evt| {
         loading.set(if evt.loading {
             Some((evt.label, evt.segment))
@@ -302,8 +292,12 @@ pub fn Page() -> Element {
         0.0
     };
     let spacer_h = content_h + bottom_pad;
+    let title = localized_terminal_title(&raw_title());
 
     rsx! {
+        if !title.is_empty() {
+            document::Title { "{title}" }
+        }
         div {
             id: CONTAINER_ID,
             tabindex: "0",

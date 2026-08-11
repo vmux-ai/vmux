@@ -39,9 +39,6 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title(&translate("tools-title"));
-        }
         request_snapshot(false);
     });
 
@@ -54,6 +51,7 @@ pub fn Page() -> Element {
         .filter(|item| item_matches(item, &search))
         .count();
     rsx! {
+        document::Title { {translate("tools-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("tools-title"),
