@@ -707,15 +707,15 @@ mod tests {
 
     pub(crate) fn file_touch_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_editor::FileViewModeRequest>()
-            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
-            .insert_resource(test_settings())
-            .add_systems(Update, handle_agent_file_touch);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::EditorContractPlugin,
+        ))
+        .add_message::<AgentCommandRequest>()
+        .add_message::<vmux_core::PageOpenRequest>()
+        .insert_resource(test_settings())
+        .add_systems(Update, handle_agent_file_touch);
         app
     }
 
@@ -883,9 +883,8 @@ mod tests {
     #[test]
     pub(crate) fn file_search_forwards_results_to_editor() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_editor::EditorContractPlugin))
             .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_editor::GlobalSearchRequest>()
             .add_systems(Update, handle_agent_file_search);
         let anchor = ProcessId::new();
         app.world_mut()
@@ -1036,15 +1035,15 @@ mod tests {
     #[test]
     pub(crate) fn skill_file_read_does_not_open_follow_pane() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_editor::FileViewModeRequest>()
-            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
-            .insert_resource(test_settings())
-            .add_systems(Update, handle_agent_file_touch);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::EditorContractPlugin,
+        ))
+        .add_message::<AgentCommandRequest>()
+        .add_message::<vmux_core::PageOpenRequest>()
+        .insert_resource(test_settings())
+        .add_systems(Update, handle_agent_file_touch);
 
         let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1092,15 +1091,15 @@ mod tests {
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_editor::FileViewModeRequest>()
-            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
-            .insert_resource(settings)
-            .add_systems(Update, handle_agent_file_touch);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::EditorContractPlugin,
+        ))
+        .add_message::<AgentCommandRequest>()
+        .add_message::<vmux_core::PageOpenRequest>()
+        .insert_resource(settings)
+        .add_systems(Update, handle_agent_file_touch);
 
         let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1161,15 +1160,15 @@ mod tests {
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_editor::FileViewModeRequest>()
-            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
-            .insert_resource(settings)
-            .add_systems(Update, handle_agent_file_touch);
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::EditorContractPlugin,
+        ))
+        .add_message::<AgentCommandRequest>()
+        .add_message::<vmux_core::PageOpenRequest>()
+        .insert_resource(settings)
+        .add_systems(Update, handle_agent_file_touch);
 
         let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
         let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
@@ -1290,21 +1289,23 @@ mod tests {
         let mut settings = test_settings();
         settings.agent.follow_files = false;
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, vmux_layout::worktree::WorktreePlugin))
-            .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_editor::FileViewModeRequest>()
-            .init_resource::<CapturedRunCwd>()
-            .insert_resource(settings)
-            .add_systems(
-                Update,
-                (
-                    handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
-                    capture_run_cwd.after(vmux_layout::worktree::TabDirectoryRebindSet),
-                ),
-            );
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::worktree::WorktreePlugin,
+            vmux_layout::LayoutContractPlugin,
+            vmux_editor::EditorContractPlugin,
+        ))
+        .add_message::<AgentCommandRequest>()
+        .add_message::<vmux_core::PageOpenRequest>()
+        .init_resource::<CapturedRunCwd>()
+        .insert_resource(settings)
+        .add_systems(
+            Update,
+            (
+                handle_agent_file_touch.before(vmux_layout::worktree::TabDirectoryRebindSet),
+                capture_run_cwd.after(vmux_layout::worktree::TabDirectoryRebindSet),
+            ),
+        );
         let tab = app
             .world_mut()
             .spawn(vmux_layout::tab::Tab {
@@ -1383,12 +1384,8 @@ mod tests {
         settings.agent.tidy_files_auto = true;
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_layout::CloseStackRequest>()
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<vmux_core::PageOpenRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_layout::worktree::TabDirectoryObserved>()
             .insert_resource(settings)
             .add_systems(Update, tidy_page_on_idle);
 

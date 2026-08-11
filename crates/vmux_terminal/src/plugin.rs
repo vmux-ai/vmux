@@ -45,14 +45,12 @@ impl Plugin for TerminalPlugin {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "terminal");
         vmux_core::register_host_spawn(app, "services");
-        app.register_type::<crate::launch::TerminalLaunch>()
+        app.add_plugins(crate::contract::TerminalContractPlugin)
+            .register_type::<crate::launch::TerminalLaunch>()
             .register_type::<crate::launch::TerminalKind>()
-            .add_message::<TerminalSendRequest>()
-            .add_message::<RunShellRequest>()
             .add_message::<TerminalStackSpawnRequest>()
             .add_message::<TerminalSpawnRequest>()
             .add_message::<ProcessesMonitorSpawnRequest>()
-            .add_message::<TerminalFontSizeCommand>()
             .add_message::<vmux_service::agent_events::AgentCommandResultEvent>()
             .add_message::<vmux_service::agent_events::AgentQueryResultEvent>()
             .add_plugins(crate::pid::PidPlugin);
@@ -128,9 +126,9 @@ struct TerminalUpdatePlugin;
 
 impl Plugin for TerminalUpdatePlugin {
     fn build(&self, app: &mut App) {
-        app.add_message::<ProcessExitedEvent>()
+        app.add_plugins(crate::contract::TerminalContractPlugin)
+            .add_message::<ProcessExitedEvent>()
             .add_message::<CommandLifecycleEvent>()
-            .add_message::<TerminalReinputRequest>()
             .add_message::<OscTitleChanged>()
             .add_message::<vmux_core::notify::BellReceived>()
             .add_systems(

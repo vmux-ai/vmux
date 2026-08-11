@@ -152,7 +152,7 @@ impl Plugin for BrowserPlugin {
             .add_message::<WebviewLoadCompleted>()
             .add_message::<PageOpenRequest>()
             .add_message::<CefPageAttachRequest>()
-            .add_message::<vmux_layout::OpenBesideRequest>()
+            .add_plugins(vmux_layout::LayoutContractPlugin)
             .configure_sets(Update, CefSystems::CreateAndResize.after(ReadAppCommands))
             .configure_sets(
                 Update,
@@ -5734,8 +5734,7 @@ mod tests {
     #[test]
     fn layout_shell_osr_renders_above_player_page_osr() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<vmux_layout::NewStackContext>()
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_systems(Update, sync_children_to_ui);
 
         let glass = app
@@ -5851,8 +5850,8 @@ mod tests {
     #[test]
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
-        app.insert_resource(vmux_layout::scene::InteractionMode::User)
-            .init_resource::<vmux_layout::stack::FocusedStack>()
+        app.add_plugins(vmux_layout::LayoutContractPlugin)
+            .insert_resource(vmux_layout::scene::InteractionMode::User)
             .insert_resource(CefSuppressKeyboardInput(true))
             .add_systems(Update, sync_keyboard_target);
         let page = app.world_mut().spawn((Browser, CefKeyboardTarget)).id();
@@ -7291,49 +7290,40 @@ mod tests {
 
         impl Plugin for ConsumerPlugin {
             fn build(&self, app: &mut App) {
-                app.add_message::<vmux_layout::BrowserNavigateRequest>()
-                    .add_message::<vmux_layout::BrowserGoBackRequest>()
-                    .add_message::<vmux_layout::BrowserGoForwardRequest>()
-                    .add_message::<vmux_layout::OpenInNewStackRequest>()
-                    .add_message::<vmux_layout::ExtensionInstallRequest>()
-                    .add_message::<PageOpenRequest>()
-                    .add_message::<CefPageAttachRequest>()
-                    .add_message::<vmux_layout::apply::LayoutApplyRequest>()
-                    .add_message::<vmux_layout::apply::LayoutApplyResponse>()
-                    .add_message::<vmux_layout::apply::LayoutSnapshotRequest>()
-                    .add_message::<vmux_layout::apply::LayoutSnapshotResponse>()
-                    .add_message::<vmux_terminal::TerminalSendRequest>()
-                    .add_message::<vmux_terminal::RunShellRequest>()
-                    .add_message::<vmux_setting::SettingsWriteRequest>()
-                    .add_message::<vmux_space::SpaceCommandRequest>()
-                    .add_message::<vmux_history::query::HistoryOpenIntent>()
-                    .add_message::<vmux_layout::active_panes::ActivatePane>()
-                    .init_resource::<crate::PendingNavSnapshots>()
-                    .init_resource::<crate::RecentBrowserInteraction>()
-                    .configure_sets(
-                        Update,
-                        (
-                            PageOpenSet::ResolveTarget,
-                            PageOpenSet::HandleKnownPages,
-                            PageOpenSet::Fallback,
-                            PageOpenSet::Respond,
-                        )
-                            .chain(),
+                app.add_plugins((
+                    vmux_layout::LayoutContractPlugin,
+                    vmux_terminal::TerminalContractPlugin,
+                ))
+                .add_message::<PageOpenRequest>()
+                .add_message::<CefPageAttachRequest>()
+                .add_message::<vmux_setting::SettingsWriteRequest>()
+                .add_message::<vmux_space::SpaceCommandRequest>()
+                .add_message::<vmux_history::query::HistoryOpenIntent>()
+                .init_resource::<crate::PendingNavSnapshots>()
+                .init_resource::<crate::RecentBrowserInteraction>()
+                .configure_sets(
+                    Update,
+                    (
+                        PageOpenSet::ResolveTarget,
+                        PageOpenSet::HandleKnownPages,
+                        PageOpenSet::Fallback,
+                        PageOpenSet::Respond,
                     )
-                    .add_systems(
-                        Update,
-                        (
-                            crate::handle_browser_navigate_requests
-                                .before(PageOpenSet::ResolveTarget),
-                            crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
-                            handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                            crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                            crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                            crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
-                            vmux_terminal::handle_terminal_send_requests,
-                            vmux_terminal::handle_run_shell_requests,
-                        ),
-                    );
+                        .chain(),
+                )
+                .add_systems(
+                    Update,
+                    (
+                        crate::handle_browser_navigate_requests.before(PageOpenSet::ResolveTarget),
+                        crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
+                        handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
+                        crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
+                        crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
+                        crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
+                        vmux_terminal::handle_terminal_send_requests,
+                        vmux_terminal::handle_run_shell_requests,
+                    ),
+                );
             }
         }
 
@@ -7952,25 +7942,28 @@ mod tests {
 
         fn build_app() -> App {
             let mut app = App::new();
-            app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin))
-                .add_message::<PageOpenRequest>()
-                .add_message::<vmux_terminal::TerminalFontSizeCommand>()
-                .add_systems(
-                    Update,
-                    (
-                        super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
-                        capture_page_open_requests.after(vmux_command::ReadAppCommands),
-                    ),
-                )
-                .init_resource::<Assets<Mesh>>()
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-                .init_resource::<CapturedNavigateUrls>()
-                .init_resource::<CapturedPageOpenRequests>()
-                .add_observer(
-                    |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
-                        captured.0.push(trigger.url.clone());
-                    },
-                );
+            app.add_plugins((
+                MinimalPlugins,
+                vmux_command::CommandPlugin,
+                vmux_terminal::TerminalContractPlugin,
+            ))
+            .add_message::<PageOpenRequest>()
+            .add_systems(
+                Update,
+                (
+                    super::super::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
+                    capture_page_open_requests.after(vmux_command::ReadAppCommands),
+                ),
+            )
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
+            .init_resource::<CapturedNavigateUrls>()
+            .init_resource::<CapturedPageOpenRequests>()
+            .add_observer(
+                |trigger: On<RequestNavigate>, mut captured: ResMut<CapturedNavigateUrls>| {
+                    captured.0.push(trigger.url.clone());
+                },
+            );
             for host in [
                 "terminal", "agent", "services", "settings", "team", "spaces",
             ] {

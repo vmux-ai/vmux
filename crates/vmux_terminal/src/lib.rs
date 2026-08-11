@@ -18,6 +18,8 @@ pub mod clipboard;
 #[cfg(not(web))]
 pub mod component;
 #[cfg(not(web))]
+pub mod contract;
+#[cfg(not(web))]
 pub mod launch;
 #[cfg(not(web))]
 mod link;
@@ -26,6 +28,8 @@ pub mod pid;
 
 #[cfg(not(web))]
 pub use component::{AgentRunTerminal, ProcessExited, PtyExited, RetainOnProcessExit, Terminal};
+#[cfg(not(web))]
+pub use contract::TerminalContractPlugin;
 #[cfg(not(web))]
 pub mod plugin;
 #[cfg(not(web))]

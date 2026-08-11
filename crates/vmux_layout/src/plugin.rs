@@ -9,6 +9,7 @@ use crate::cef::LayoutCefPlugin;
 use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::command_bar::key::CommandBarKeyPlugin;
 use crate::command_bar::panel::CommandBarPanelPlugin;
+use crate::contract::LayoutContractPlugin;
 #[cfg(feature = "player-mode")]
 use crate::focus_ring::FocusRingPlugin;
 use crate::header::HeaderLayoutPlugin;
@@ -24,11 +25,7 @@ use crate::warm_page::PrewarmPagesPlugin;
 use crate::webview_reveal::WebviewRevealPlugin;
 use crate::window::WindowLayoutPlugin;
 use crate::worktree::WorktreePlugin;
-use crate::{
-    BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest, ExtensionInstallRequest,
-    LayoutSpawnRequest, LayoutStartupSet, NewStackContext, NewTabRequest, Open,
-    OpenInNewStackRequest, TabLayoutSpawnRequest, apply, settings,
-};
+use crate::{LayoutSpawnRequest, LayoutStartupSet, Open, TabLayoutSpawnRequest, apply, settings};
 
 /// Wires the layout shell: spaces, tabs, panes, stacks, focus ring, header/side-sheet,
 /// command-bar input, and layout apply/snapshot, aggregating the per-area sub-plugins.
@@ -36,26 +33,16 @@ pub struct LayoutPlugin;
 
 impl Plugin for LayoutPlugin {
     fn build(&self, app: &mut App) {
-        app.register_type::<Open>()
-            .init_resource::<NewStackContext>()
+        app.add_plugins(LayoutContractPlugin)
+            .register_type::<Open>()
             .init_resource::<settings::ConfirmCloseSettings>()
             .init_resource::<settings::ResolvedLocale>()
             .init_resource::<crate::UpdateState>()
             .add_message::<LayoutSpawnRequest>()
             .add_message::<TabLayoutSpawnRequest>()
-            .add_message::<NewTabRequest>()
             .add_message::<vmux_core::PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<vmux_core::agent::RestartAgentPty>()
-            .add_message::<BrowserNavigateRequest>()
-            .add_message::<BrowserGoBackRequest>()
-            .add_message::<BrowserGoForwardRequest>()
-            .add_message::<OpenInNewStackRequest>()
-            .add_message::<ExtensionInstallRequest>()
-            .add_message::<apply::LayoutApplyRequest>()
-            .add_message::<apply::LayoutApplyResponse>()
-            .add_message::<apply::LayoutSnapshotRequest>()
-            .add_message::<apply::LayoutSnapshotResponse>()
             .configure_sets(
                 Startup,
                 (

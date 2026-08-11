@@ -21,8 +21,8 @@ impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
         vmux_core::register_host_spawn(app, "spaces");
-        app.init_resource::<ActiveSpace>()
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
+        app.add_plugins(vmux_layout::LayoutContractPlugin)
+            .init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
             .add_message::<SpaceCommandRequest>()
             .add_systems(Update, relay_space_command_requests)
@@ -716,9 +716,8 @@ mod tests {
         );
 
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
             .insert_resource(ActiveSpace {
                 record: work_space_record(),
             })
@@ -813,9 +812,8 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .add_systems(Update, update_effective_startup_dir);
         app.world_mut().spawn((
             vmux_layout::space::Space,
@@ -928,9 +926,8 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .init_resource::<ChangeCount>()
             .add_systems(
                 Update,
@@ -969,9 +966,8 @@ mod tests {
             },
         );
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .insert_resource(settings)
-            .init_resource::<vmux_layout::settings::EffectiveStartupDir>()
             .add_systems(Update, update_effective_startup_dir);
         let space = app
             .world_mut()
@@ -1004,9 +1000,8 @@ mod tests {
     #[test]
     fn rename_reslugs_space_id_and_retags_tabs() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<TabLayoutSpawnRequest>()
-            .init_resource::<vmux_layout::space::ActiveSpaceId>()
             .add_observer(on_space_command);
         app.world_mut().spawn(bevy::window::PrimaryWindow);
         let space = app

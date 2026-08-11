@@ -64,9 +64,8 @@ impl Plugin for EditorPlugin {
             .init_resource::<PendingGlobalSearch>()
             .init_resource::<SharedFileViewMode>()
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .add_message::<FileViewModeRequest>()
-            .add_message::<GlobalSearchRequest>()
             .add_message::<vmux_setting::SettingsWriteRequest>()
+            .add_plugins(crate::contract::EditorContractPlugin)
             .add_plugins(crate::lsp::LspPlugin)
             .add_plugins(crate::app_key::FileKeyPlugin)
             .add_plugins(BinEventEmitterPlugin::<(

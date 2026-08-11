@@ -748,8 +748,7 @@ mod tests {
 
         let process_id = ProcessId::new();
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_terminal::TerminalReinputRequest>()
+        app.add_plugins((MinimalPlugins, vmux_terminal::TerminalContractPlugin))
             .insert_resource(Input {
                 process_id,
                 launch: TerminalLaunch {
@@ -1160,8 +1159,7 @@ mod tests {
     #[test]
     pub(crate) fn reusable_run_pane_touch_refreshes_spawn_seq() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<vmux_layout::pane::SpawnCounter>()
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_systems(Update, touch_reused_run_pane_spawn_seq_test_system);
 
         let reused = app
@@ -1218,8 +1216,7 @@ mod tests {
     #[test]
     pub(crate) fn split_run_pane_becomes_newest_for_followup_placement() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<vmux_layout::pane::SpawnCounter>()
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .init_resource::<SplitRunPaneOutput>()
             .add_systems(Update, split_run_pane_test_system);
 

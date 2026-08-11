@@ -36,9 +36,9 @@ impl Plugin for SettingsPlugin {
             runtime::SettingsRuntimePlugin,
             view::SettingsViewPlugin,
             appearance::AppearancePlugin,
+            vmux_layout::LayoutContractPlugin,
         ))
         .init_resource::<SearchEngineSetting>()
-        .init_resource::<vmux_layout::settings::EffectiveStartupUrl>()
         .add_systems(Update, sync_search_engine)
         .add_message::<vmux_core::page::SettingsPageSpawnRequest>()
         .add_systems(Update, respond_settings_spawn.in_set(ReadAppCommands));

@@ -184,9 +184,7 @@ mod tests {
 
     pub(crate) fn browser_claim_app() -> (App, ProcessId, Entity) {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .init_resource::<vmux_layout::active_panes::ActivePanes>()
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .init_resource::<BrowserPaneClaimOutput>()
             .add_systems(Update, claim_browser_pane_test_system);
         let split = app

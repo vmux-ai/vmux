@@ -306,10 +306,9 @@ mod tests {
 
     pub(crate) fn done_test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
-            .init_resource::<vmux_layout::stack::FocusedStack>()
             .add_systems(Update, (mark_agent_done, clear_agent_done));
         app
     }

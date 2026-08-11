@@ -33,6 +33,8 @@ pub mod active_panes;
 #[cfg(not(web))]
 pub mod cef;
 #[cfg(not(web))]
+pub mod contract;
+#[cfg(not(web))]
 pub mod debug;
 #[cfg(all(not(web), feature = "player-mode"))]
 mod focus_ring;
@@ -96,6 +98,8 @@ pub use cef::{
 };
 #[cfg(not(web))]
 pub use command_bar::handler::PendingCommandBarReveal;
+#[cfg(not(web))]
+pub use contract::LayoutContractPlugin;
 #[cfg(not(web))]
 pub use header::Header;
 #[cfg(not(web))]

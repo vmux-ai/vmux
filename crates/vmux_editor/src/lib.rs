@@ -37,6 +37,11 @@ pub use plugin::{
 };
 
 #[cfg(not(web))]
+pub mod contract;
+#[cfg(not(web))]
+pub use contract::EditorContractPlugin;
+
+#[cfg(not(web))]
 pub mod lsp;
 #[cfg(not(web))]
 pub use lsp::LspPlugin;

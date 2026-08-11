@@ -81,6 +81,11 @@ impl Plugin for AgentSessionPlugin {
 
         app.insert_resource(strategies)
             .add_plugins((
+                vmux_layout::LayoutContractPlugin,
+                vmux_editor::EditorContractPlugin,
+                vmux_terminal::TerminalContractPlugin,
+            ))
+            .add_plugins((
                 crate::room::RoomPlugin,
                 crate::command_bar::CommandBarPlugin,
                 self::attach::AttachPlugin,
@@ -98,15 +103,7 @@ impl Plugin for AgentSessionPlugin {
             .init_resource::<AgentTerminalRegions>()
             .init_resource::<AgentSessionDirty>()
             .init_resource::<NavAwaitingSnapshot>()
-            .init_resource::<vmux_layout::active_panes::ActivePanes>()
-            .init_resource::<vmux_layout::pane::SpawnCounter>()
             .add_message::<AgentCommandRequest>()
-            .add_message::<vmux_layout::bookmark::BookmarkOp>()
-            .add_message::<vmux_layout::NewTabRequest>()
-            .add_message::<vmux_layout::ContributedCommandChosen>()
-            .add_message::<vmux_editor::GlobalSearchRequest>()
-            .add_message::<vmux_layout::active_panes::ActivatePane>()
-            .add_message::<vmux_terminal::TerminalReinputRequest>()
             .add_message::<FocusPaneRequest>()
             .add_message::<RenameProfileRequest>()
             .add_message::<AgentQueryRequest>()
@@ -134,11 +131,6 @@ impl Plugin for AgentSessionPlugin {
             .add_message::<vmux_core::notify::AgentAttention>()
             .add_message::<vmux_core::notify::OsNotify>()
             .init_resource::<bevy::ecs::message::Messages<vmux_core::PageOpenRequest>>()
-            .init_resource::<bevy::ecs::message::Messages<vmux_layout::OpenBesideRequest>>()
-            .init_resource::<bevy::ecs::message::Messages<vmux_layout::CloseStackRequest>>()
-            .init_resource::<
-                bevy::ecs::message::Messages<vmux_layout::worktree::TabDirectoryObserved>,
-            >()
             .add_systems(Startup, session::start_agent_session_watchers)
             .add_systems(
                 Update,
