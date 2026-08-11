@@ -202,12 +202,22 @@ pub fn ipc_allowed_browser(url: &str) -> bool {
     is_trusted_embedded_page(url) || is_bridge_allowed_origin(url)
 }
 
+/// Which page a URL belongs to, as the browser process sees it.
+///
+/// This has to agree with `vmux_server::PageHost::of`, which is the page's own answer to the same
+/// question and the key its component is looked up by. Two pages are not served from the embedded
+/// scheme and so cannot be recognised by stripping it: the vault, from a real origin, and the
+/// editor, from `file://`. A page whose name is unknown here comes through as the empty string,
+/// which matches no entry in an IPC owner-host allowlist — so the disagreement does not show up as
+/// an error, it shows up as that page's messages silently never arriving.
 pub fn embedded_page_host_of(url: &str) -> Option<String> {
     if is_vault_passkey_page(url) {
-        Some("vault".to_string())
-    } else {
-        embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
+        return Some("vault".to_string());
     }
+    if url.starts_with("file://") {
+        return Some("files".to_string());
+    }
+    embedded_page_host(url, resolved_cef_embedded_page_config().scheme_prefix())
 }
 
 pub fn webview_debug_log_enabled() -> bool {
