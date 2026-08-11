@@ -32,16 +32,22 @@ A portable Dioxus API already exists. These are not seams waiting to be written.
 | `el.scroll_into_view_with_*` | `MountedData::scroll_to` (`mounted` is on workspace-wide; `onmounted` already used at `vmux_editor/src/page.rs:3560`) | palette ×2, editor, chat |
 | `window.set_timeout` debounce | `spawn` + portable sleep | palette (`HostSearchTimer`) |
 
-The sleep wants to be `vmux_ui::platform::sleep_ms`, moved from `vmux_chat::platform` so
-`vmux_layout` can reach it without depending on `vmux_chat`. It is already the right shape:
-`gloo_timers` on web, `tokio` off it.
+The sleep is `vmux_ui::platform::sleep_ms` — **done**, moved there in step 1 along with
+`random_index`, which had a third private copy in `prompt_ghost`.
 
 ### Tier 2 — genuine host compensation, needs a seam
 
+**Done in step 1**, as `vmux_ui::focus::FocusClaim`.
+
 CEF takes keyboard focus a frame or more after mount, so the caret has to be re-asserted. That is
-a fact about the host. There are currently **three** independent copies of the retry loop —
-`start/focus.rs`, `palette.rs:1602`, and `prompt_composer.rs:239`. They should be one thing in
-`vmux_ui`, inert off the browser.
+a fact about the host. This said **three** copies of the retry loop; there were **two**,
+`start/focus.rs` and `palette.rs:1602`. `prompt_composer.rs:239` is a one-shot, not a retry, and
+is used in 28 places — it was already the shared thing and needed no change.
+`command_bar/page.rs:302` looks like a third but retries an event *send*, not a focus.
+
+The two disagreed on scheduling (rAF vs a 16ms timer) and the launcher's copy placed the caret
+with a byte count where `set_selection_range` wants UTF-16 code units. Unified on the timer,
+because rAF is least reliable exactly when the claim is most needed.
 
 ### Tier 3 — not a porting problem
 
@@ -58,7 +64,8 @@ the user at a keyboard to accept it.
 
 Bottom-up, so each step lands green and nothing waits on a later one.
 
-1. `vmux_ui`: `platform::sleep_ms`, and one focus-retry helper replacing the three copies.
+1. ~~`vmux_ui`: `platform::sleep_ms`, and one focus-retry helper replacing the copies.~~ **Done**
+   (`8ed87d3a`, `bace6c8d`).
 2. Tier 1 substitutions everywhere. Mechanical, no behaviour change.
 3. `command_bar::palette` Tiers 1–2; then flip `palette` and `start::page` to `cfg(ui)`.
    **The launcher renders on the phone at this point** — verified by experiment: flipping
