@@ -31,7 +31,6 @@ pub fn Page(
 
     use_effect(move || {
         locale();
-        set_document_title(&translate("start-title"));
         let _ = send(&StartDataRequest);
         StartFocus::claim_on_mount();
         mounted.set(true);
@@ -40,6 +39,7 @@ pub fn Page(
     use_effect(|| StartFocus::install());
 
     rsx! {
+        document::Title { {translate("start-title")} }
         main {
             class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,
@@ -64,13 +64,3 @@ pub fn Page(
 pub fn begin_agent_transition() {
     StartFocus::release_for_agent_transition();
 }
-
-#[cfg(web)]
-fn set_document_title(title: &str) {
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(title);
-    }
-}
-
-#[cfg(not(web))]
-fn set_document_title(_title: &str) {}
