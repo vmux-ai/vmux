@@ -16,6 +16,15 @@ The load-bearing check is that a page's module gate can move from `cfg(web)` to 
 iOS build stays green. Compiling the crate proves nothing on its own, because a `cfg(web)` module
 is simply absent.
 
+**A second trap, and this one shipped a broken app: `cargo check` does not link.** Moving `format!`
+calls between crates shifted codegen-unit placement enough that `wasm-ld` dropped an internal
+`alloc::fmt::format`, wasm-bindgen emitted `import ... from "env"` for the dangling symbol, and
+every page failed at load — while all three target checks stayed green, because the wasm target
+check links under the plain `dev` profile and the bundle is built by `dx` under `wasm-dev`. Fixed
+in the profile section of `Cargo.toml`. **Build the bundle (`cargo build -p vmux_server`, ~40s)
+before claiming a UI change is verified**, and confirm the generated
+`crates/vmux_server/dist/wasm/vmux_server.js` imports nothing but relative `./snippets/...`.
+
 **The trap, found the hard way in step 2:** `cargo check -p vmux_mobile --target aarch64-apple-ios`
 does not exercise `vmux_layout`, `vmux_editor` or `vmux_setting` — `vmux_mobile` does not depend on
 them. It went green while `vmux_editor` for iOS was broken. **Check each crate against the iOS
