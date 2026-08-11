@@ -4360,19 +4360,6 @@ mod tests {
     }
 
     #[test]
-    fn side_sheet_close_stack_routes_through_stack_command() {
-        let source = include_str!("lib.rs");
-        let branch = source
-            .split("\"close_stack\" => {")
-            .nth(1)
-            .and_then(|rest| rest.split("\"new_stack\" => {").next())
-            .expect("close_stack branch");
-
-        assert!(branch.contains("StackCommand::Close"));
-        assert!(!branch.contains("window.visible = false"));
-    }
-
-    #[test]
     fn cef_pointer_hit_rect_contains_edges() {
         let rect = CefPointerHitRect {
             center: Vec2::new(50.0, 20.0),
@@ -4629,75 +4616,6 @@ mod tests {
     }
 
     #[test]
-    fn windowed_layout_sync_raises_layout_above_bevy_view() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_layout")
-            .nth(1)
-            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
-        assert!(!sync_fn.contains("browsers.lower_windowed_to_back"));
-    }
-
-    #[test]
-    fn native_layout_sync_runs_before_native_page_sync() {
-        let source = include_str!("lib.rs");
-        let post_update = source
-            .split("PostUpdate,")
-            .nth(1)
-            .and_then(|tail| tail.split(".chain()").next())
-            .unwrap_or_default();
-        let layout_idx = post_update
-            .find("sync_windowed_layout")
-            .expect("windowed layout sync");
-        let page_idx = post_update
-            .find("sync_windowed_frames")
-            .expect("windowed page sync");
-
-        assert!(layout_idx < page_idx);
-    }
-
-    #[test]
-    fn windowed_page_sync_sends_pages_above_layout() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.raise_windowed_to_front"));
-    }
-
-    #[test]
-    fn windowed_page_sync_raises_visible_pages_and_hides_inactive() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity)"));
-        assert!(sync_fn.contains("windowed_pages_to_hide("));
-    }
-
-    #[test]
-    fn webview_tab_visibility_uses_active_marker_not_global_recency() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_children_to_ui")
-            .nth(1)
-            .and_then(|tail| tail.split("fn webview_should_use_windowed").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("active_tab_q.contains(tab)"));
-        assert!(!sync_fn.contains("max_by_key"));
-    }
-
-    #[test]
     fn windowed_pages_hide_on_deactivate_and_first_show() {
         let just_deactivated = Entity::from_bits(1);
         let still_inactive = Entity::from_bits(2);
@@ -4882,19 +4800,6 @@ mod tests {
     }
 
     #[test]
-    fn windowed_page_sync_keeps_pages_visible_while_command_bar_is_open() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(!sync_fn.contains("is_command_bar_open"));
-        assert!(!sync_fn.contains("return;"));
-    }
-
-    #[test]
     fn windowed_hover_refresh_position_maps_physical_cursor_to_webview_space() {
         let frame = WindowedHoverRefreshFrame {
             left_px: 100.0,
@@ -4927,33 +4832,6 @@ mod tests {
     }
 
     #[test]
-    fn windowed_page_sync_applies_settings_radius_to_native_page() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings: Res<AppSettings>"));
-        assert!(sync_fn.contains("settings.layout.radius"));
-        assert!(sync_fn.contains("browsers.set_windowed_corner_radius"));
-    }
-
-    #[test]
-    fn windowed_page_sync_uses_native_corner_policy() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("visible_pane_count_for_windowed_sync"));
-        assert!(sync_fn.contains("windowed_page_all_corners(layout_hidden.0, visible_pane_count)"));
-    }
-
-    #[test]
     fn windowed_page_keeps_single_pane_top_edge_flat_under_header() {
         assert!(!windowed_page_all_corners(false, 1));
     }
@@ -4962,19 +4840,6 @@ mod tests {
     fn windowed_page_rounds_when_layout_hidden_or_split() {
         assert!(windowed_page_all_corners(true, 1));
         assert!(windowed_page_all_corners(false, 2));
-    }
-
-    #[test]
-    fn windowed_page_sync_aligns_single_pane_frame_to_header() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn visible_pane_count_for_windowed_sync").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("header_rect"));
-        assert!(sync_fn.contains("windowed_page_frame_rect("));
     }
 
     #[test]
@@ -5046,114 +4911,6 @@ mod tests {
         assert!(windowed_frame_contains(frame, Vec2::new(500.0, 350.0)));
         assert!(!windowed_frame_contains(frame, Vec2::new(99.0, 200.0)));
         assert!(!windowed_frame_contains(frame, Vec2::new(300.0, 351.0)));
-    }
-
-    #[test]
-    fn windowed_page_sync_sets_focus_ring_on_active_split_page() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        let ring_fn = source
-            .split("fn windowed_ring_for")
-            .nth(1)
-            .and_then(|tail| tail.split("fn agent_ring_rgb").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("focus: Res<vmux_layout::stack::FocusedStack>"));
-        assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
-        assert!(ring_fn.contains("focus.stack == Some(stack)"));
-        assert!(ring_fn.contains("visible_pane_count > 1"));
-    }
-
-    #[test]
-    fn windowed_page_sync_covers_corners_over_remote_content() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.set_windowed_corner_cover"));
-        assert!(sync_fn.contains("clear_color.0.to_srgba()"));
-    }
-
-    #[test]
-    fn windowed_page_sync_uses_native_focus_ring_for_terminals() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(!sync_fn.contains("!is_terminal"));
-        assert!(sync_fn.contains("browsers.set_windowed_focus_ring"));
-    }
-
-    #[test]
-    fn windowed_page_sync_scales_native_radius_and_focus_ring_to_physical_pixels() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_frames")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        let ring_fn = source
-            .split("fn windowed_ring_for")
-            .nth(1)
-            .and_then(|tail| tail.split("fn agent_ring_rgb").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("settings.layout.radius * scale"));
-        assert!(ring_fn.contains("settings.layout.focus_ring.width * scale"));
-    }
-
-    #[test]
-    fn windowed_command_bar_sync_keeps_modal_above_pages() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_command_bar")
-            .nth(1)
-            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.raise_windowed_to_front(&entity);"));
-        assert!(!sync_fn.contains("if !*was_open {\n        browsers.raise_windowed_to_front"));
-    }
-
-    #[test]
-    fn browser_mode_keeps_layout_and_command_bar_osr_for_native_overlays() {
-        let source = include_str!("lib.rs");
-        let backend_fn = source
-            .split("fn sync_cef_backend_for_interaction_mode")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_frames").next())
-            .unwrap_or_default();
-
-        assert!(backend_fn.contains("Has<LayoutCef>"));
-        assert!(backend_fn.contains("Has<Modal>"));
-        assert!(backend_fn.contains("!is_layout && !is_modal"));
-        assert!(backend_fn.contains("WebviewNativeOverlay"));
-        assert!(backend_fn.contains("target_native_direct_overlay"));
-    }
-
-    #[test]
-    fn layout_overlay_mode_change_recreates_browser() {
-        let source = include_str!("lib.rs");
-        let backend_fn = source
-            .split("fn sync_cef_backend_for_interaction_mode")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_frames").next())
-            .unwrap_or_default();
-
-        assert!(backend_fn.contains("actual_native_overlay != want_native_overlay"));
-        assert!(backend_fn.contains("browsers.has_browser(entity)"));
     }
 
     #[test]
@@ -5421,20 +5178,6 @@ mod tests {
         assert!(app.world().get::<WebviewWindowed>(page).is_none());
     }
 
-    #[test]
-    fn backend_sync_runs_after_page_spawners_before_cef_create() {
-        let source = include_str!("lib.rs");
-        let backend_sync = source
-            .split("fn configure_cef_backend_sync")
-            .nth(1)
-            .and_then(|tail| tail.split("impl Plugin for BrowserPlugin").next())
-            .unwrap_or_default();
-
-        assert!(backend_sync.contains(".after(PageOpenSet::Fallback)"));
-        assert!(backend_sync.contains(".after(spawn_popup_stacks)"));
-        assert!(backend_sync.contains(".before(CefSystems::CreateAndResize)"));
-    }
-
     #[derive(Resource, Default)]
     struct ObservedBackendMode(Option<vmux_layout::scene::InteractionMode>);
 
@@ -5560,62 +5303,6 @@ mod tests {
     }
 
     #[test]
-    fn browser_plugin_wires_command_bar_outside_click_dismiss() {
-        let source = include_str!("lib.rs");
-        let plugin_build = source
-            .split("impl Plugin for BrowserPlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
-            .unwrap_or_default();
-
-        assert!(plugin_build.contains("dismiss_command_bar_from_native_monitor"));
-        assert!(plugin_build.contains("dismiss_windowed_command_bar_on_outside_click"));
-        assert!(plugin_build.contains("run_if(on_message::<MouseButtonInput>)"));
-    }
-
-    #[test]
-    fn browser_plugin_wires_active_windowed_hover_refresh() {
-        let source = include_str!("lib.rs");
-        let plugin_build = source
-            .split("impl Plugin for BrowserPlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("fn on_webview_ready_send_theme").next())
-            .unwrap_or_default();
-        let refresh_fn = source
-            .split("fn refresh_active_windowed_hover")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(plugin_build.contains("refresh_layout_cef_hover"));
-        assert!(plugin_build.contains("refresh_active_windowed_hover"));
-        assert!(refresh_fn.contains("With<CefKeyboardTarget>"));
-        assert!(refresh_fn.contains("With<WebviewWindowed>"));
-        assert!(refresh_fn.contains("vmux_layout::pane::pane_hover_cursor_position"));
-        assert!(refresh_fn.contains("browsers.send_mouse_move"));
-        assert!(refresh_fn.contains("state.position == Some(position)"));
-    }
-
-    #[test]
-    fn browser_plugin_refreshes_layout_hover_from_native_cursor() {
-        let source = include_str!("lib.rs");
-        let refresh_fn = source
-            .split("fn refresh_layout_cef_hover")
-            .nth(1)
-            .and_then(|tail| tail.split("fn refresh_active_windowed_hover").next())
-            .unwrap_or_default();
-
-        assert!(refresh_fn.contains("vmux_layout::native_pointer::snapshot()"));
-        assert!(refresh_fn.contains("NativeLayout::set_pointer_regions"));
-        assert!(refresh_fn.contains(".physical(scale)"));
-        assert!(refresh_fn.contains("browsers.native_mouse_move_presenter"));
-        assert!(refresh_fn.contains("NativeLayout::queue_pointer_move"));
-        assert!(refresh_fn.contains("NativeLayout::flush_pointer_move"));
-        assert!(refresh_fn.contains("window.resolution.scale_factor()"));
-        assert!(refresh_fn.matches("reset_layout_cef_hover").count() >= 5);
-    }
-
-    #[test]
     fn native_layout_pointer_queue_retains_only_latest_sample() {
         let source = include_str!("native_layout/macos.rs");
         let queue = source
@@ -5642,40 +5329,6 @@ mod tests {
         assert!(queue.contains("state.queue_sample("));
         assert!(flush.contains("state.pending = false"));
         assert!(flush.contains("presenter.send(position_px / state.scale"));
-    }
-
-    #[test]
-    fn macos_layout_mouse_move_has_one_forwarding_path() {
-        let source = include_str!("lib.rs");
-        let raw_forward = source
-            .split("#[cfg(target_os = \"macos\")]\nfn forward_layout_cef_cursor_move")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(not(target_os = \"macos\"))]").next())
-            .unwrap_or_default();
-
-        assert!(!raw_forward.contains("browsers.send_mouse_move"));
-        assert!(raw_forward.contains("events.read()"));
-    }
-
-    #[test]
-    fn macos_layout_click_uses_native_pointer_position() {
-        let source = include_str!("lib.rs");
-        let click_forward = source
-            .split("fn forward_layout_cef_mouse_button")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("fn dismiss_windowed_command_bar_on_outside_click")
-                    .next()
-            })
-            .unwrap_or_default();
-        let target_sync = source
-            .split("fn sync_layout_cef_pointer_target")
-            .nth(1)
-            .and_then(|tail| tail.split("fn forward_layout_cef_cursor_move").next())
-            .unwrap_or_default();
-
-        assert!(click_forward.contains("vmux_layout::native_pointer::snapshot()"));
-        assert!(target_sync.contains("vmux_layout::native_pointer::snapshot()"));
     }
 
     #[test]
@@ -5776,19 +5429,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn active_windowed_hover_refresh_skips_native_left_drag() {
-        let source = include_str!("lib.rs");
-        let refresh_fn = source
-            .split("fn refresh_active_windowed_hover")
-            .nth(1)
-            .and_then(|tail| tail.split("fn sync_windowed_layout").next())
-            .unwrap_or_default();
-
-        assert!(refresh_fn.contains("native_left_mouse_down()"));
-        assert!(refresh_fn.contains("return;"));
-    }
-
     /// One test, because every case here mutates the process-wide published route and the test
     /// runner is multi-threaded.
     #[test]
@@ -5862,53 +5502,11 @@ mod tests {
     }
 
     #[test]
-    fn generic_webview_resize_excludes_command_bar_modal() {
-        let source = include_str!("lib.rs");
-        let resize_fn = source
-            .split("fn sync_cef_webview_resize_after_ui")
-            .nth(1)
-            .and_then(|tail| tail.split("fn pane_count_for_browser").next())
-            .unwrap_or_default();
-
-        assert!(resize_fn.contains("Without<Modal>"));
-    }
-
-    #[test]
     fn windowed_reconcile_wakes_until_native_pages_are_sized() {
         assert!(windowed_reconcile_should_wake(true, false, false));
         assert!(windowed_reconcile_should_wake(false, true, true));
         assert!(!windowed_reconcile_should_wake(false, true, false));
         assert!(!windowed_reconcile_should_wake(false, false, true));
-    }
-
-    #[test]
-    fn command_bar_windowed_sync_resizes_cef_to_native_frame() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_command_bar")
-            .nth(1)
-            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.resize"));
-        assert!(sync_fn.contains("native_size_changed.contains(entity)"));
-        assert!(sync_fn.contains("browsers.nudge_windowed_repaint(&entity)"));
-    }
-
-    /// The command bar is the one windowed browser that hosts a real DOM text field, so it takes
-    /// AppKit first responder and lets Chromium handle typing natively. `send_key_event` forwarding
-    /// is a windowless API and does not produce DOM key events for a windowed browser.
-    #[test]
-    fn command_bar_windowed_sync_takes_native_focus() {
-        let source = include_str!("lib.rs");
-        let sync_fn = source
-            .split("fn sync_windowed_command_bar")
-            .nth(1)
-            .and_then(|tail| tail.split("fn apply_repaint_nudge").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, true)"));
-        assert!(sync_fn.contains("browsers.set_windowed_focus(&entity, false)"));
     }
 
     #[test]
