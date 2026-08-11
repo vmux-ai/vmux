@@ -10,8 +10,6 @@ mod host_focus;
 mod input;
 mod page_life;
 
-#[cfg(target_os = "macos")]
-mod host_focus_native;
 mod native_layout;
 mod navigation;
 mod present;

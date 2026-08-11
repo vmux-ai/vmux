@@ -11,6 +11,13 @@ use vmux_terminal::Terminal;
 
 use crate::Browser;
 
+#[cfg(target_os = "macos")]
+#[path = "host_focus/macos.rs"]
+mod platform;
+#[cfg(not(target_os = "macos"))]
+#[path = "host_focus/other.rs"]
+mod platform;
+
 /// Decides which surface owns keyboard first-responder for the active page, and hands it over.
 ///
 /// Applying the intent runs after the active windowed page has been shown and raised
@@ -20,15 +27,15 @@ pub(crate) struct HostFocusPlugin;
 
 impl Plugin for HostFocusPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<HostFocusIntent>().add_systems(
-            PostUpdate,
-            (compute_host_focus_intent, apply_windowed_host_focus)
-                .chain()
-                .after(crate::present::sync_windowed_frames)
-                .after(crate::present::sync_windowed_command_bar),
-        );
-        #[cfg(target_os = "macos")]
-        app.add_plugins(crate::host_focus_native::HostFocusNativePlugin);
+        app.init_resource::<HostFocusIntent>()
+            .add_systems(
+                PostUpdate,
+                (compute_host_focus_intent, apply_windowed_host_focus)
+                    .chain()
+                    .after(crate::present::sync_windowed_frames)
+                    .after(crate::present::sync_windowed_command_bar),
+            )
+            .add_plugins(platform::HostFocusPlatformPlugin);
     }
 }
 

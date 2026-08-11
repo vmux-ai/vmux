@@ -5,9 +5,9 @@ use bevy::window::PrimaryWindow;
 
 /// The macOS half of [`crate::host_focus::HostFocusPlugin`]: hands first-responder back to the
 /// winit host window when the intent says the host should own the keyboard.
-pub(crate) struct HostFocusNativePlugin;
+pub(crate) struct HostFocusPlatformPlugin;
 
-impl Plugin for HostFocusNativePlugin {
+impl Plugin for HostFocusPlatformPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Last, apply_winit_host_focus);
     }
