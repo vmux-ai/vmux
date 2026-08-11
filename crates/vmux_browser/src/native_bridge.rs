@@ -7,14 +7,16 @@
 
 use bevy::prelude::*;
 
+#[cfg(any(target_os = "macos", test))]
 use crate::present::WindowedFrameRect;
 
 /// The windowed views the platform draws outside the Bevy window, as its event monitors see them.
 pub struct NativeBridge;
 
 impl NativeBridge {
-    /// Whether `point` falls inside `frame`. Pure geometry, so it is the same everywhere and is
-    /// testable without a native view to publish first.
+    /// Whether `point` falls inside `frame`. Pure geometry, so it lives here rather than in a
+    /// platform half — but only AppKit hit-tests, so off macOS nothing but the tests call it.
+    #[cfg(any(target_os = "macos", test))]
     pub(crate) fn frame_contains(frame: WindowedFrameRect, point: Vec2) -> bool {
         point.x >= frame.left
             && point.x <= frame.right()
@@ -23,6 +25,7 @@ impl NativeBridge {
     }
 
     /// The smallest frame covering all of `frames`, or `None` when there are none.
+    #[cfg(target_os = "macos")]
     pub(crate) fn frames_union(frames: &[WindowedFrameRect]) -> Option<WindowedFrameRect> {
         let first = *frames.first()?;
         let mut left = first.left;
