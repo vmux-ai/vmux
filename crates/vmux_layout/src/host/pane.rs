@@ -1,11 +1,11 @@
 use crate::{
     CloseRequiresConfirmation, NewStackContext,
+    host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
         ActiveTabParam, CloseConfirmed, PendingStackClose, Stack, active_among, active_pane_in_tab,
         active_stack_in_pane, focused_stack, stack_bundle,
     },
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     tab::Tab,
 };
 #[cfg(feature = "player-mode")]

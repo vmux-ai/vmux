@@ -1,7 +1,7 @@
 use crate::event::TabsCommandEvent;
 use crate::{
     TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
+    host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
 };
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},

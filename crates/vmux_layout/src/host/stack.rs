@@ -1,8 +1,8 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
     NewStackContext,
+    host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
-    swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     tab::{CloseTabRequest, Tab},
 };
 use bevy::{
