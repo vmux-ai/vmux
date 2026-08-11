@@ -9,6 +9,8 @@ pub mod favicon;
 
 pub mod file_icon;
 
+pub mod focus;
+
 pub mod icon;
 
 mod i18n_catalogs {

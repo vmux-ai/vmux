@@ -1,10 +1,10 @@
-//! Keeping the caret in the launcher input, against a host that keeps taking it away.
+//! Keeping the caret in the launcher input.
 //!
-//! None of this is launcher behaviour. CEF grants an off-screen browser keyboard focus a frame or
-//! more after the page mounts — by which time the `autofocus` attribute has already been ignored,
-//! because the document was not focused when it was parsed — so the caret never lands without
-//! being asked for repeatedly. That is a fact about the host, not about the page, and it lived
-//! inside the page component only because the page had nowhere else to put it.
+//! Re-asserting the claim against a host that grants focus late is
+//! [`vmux_ui::focus::FocusClaim`]'s job, not this module's. What is left here is the part that
+//! genuinely is about the launcher: it is a page with nothing to interact with but one input and
+//! a list of results, so a click anywhere else should not blur it, and the claim has to stop the
+//! moment an agent page takes over the document.
 //!
 //! Split out so [`super::page::Page`] is just a page. Everything here is inert off the browser,
 //! which is what lets the launcher render somewhere with no `window` to argue with.
@@ -15,28 +15,26 @@ pub struct StartFocus;
 #[cfg(web)]
 mod imp {
     use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, prompt_textarea};
+    use vmux_ui::focus::FocusClaim;
     use wasm_bindgen::JsCast;
     use wasm_bindgen::prelude::*;
 
     use super::StartFocus;
 
-    const START_FOCUS_PENDING: &str = "_startFocusPending";
     const START_TRANSITIONED: &str = "_startTransitioned";
     const FOCUS_BOUND: &str = "_startFocusBound";
     const CLICK_BOUND: &str = "_startClickBound";
 
     impl StartFocus {
-        /// Take the caret, re-asserting once per animation frame until the document actually holds
-        /// focus. Concurrent requests share one bounded retry.
+        /// Take the caret, unless an agent page has already claimed this document.
         pub fn request() {
             let Some(window) = web_sys::window() else {
                 return;
             };
-            if flag(&window, START_TRANSITIONED) || flag(&window, START_FOCUS_PENDING) {
+            if flag(&window, START_TRANSITIONED) {
                 return;
             }
-            set_flag(&window, START_FOCUS_PENDING, true);
-            retry(window, 90);
+            FocusClaim::new(PROMPT_INPUT_ID).caret_at_end().request();
         }
 
         /// Bind the two listeners that re-assert the claim: one for when the window regains native
@@ -139,41 +137,6 @@ mod imp {
             );
             closure.forget();
         }
-    }
-
-    fn retry(window: web_sys::Window, frames_left: u32) {
-        let retry_window = window.clone();
-        let callback = Closure::once(move || {
-            if !focus_once() && frames_left > 1 {
-                retry(retry_window, frames_left - 1);
-            } else {
-                set_flag(&retry_window, START_FOCUS_PENDING, false);
-            }
-        });
-        match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
-            Ok(_) => callback.forget(),
-            Err(_) => set_flag(&window, START_FOCUS_PENDING, false),
-        }
-    }
-
-    /// True once the document holds focus and the input is active, so the retry loop can stop.
-    fn focus_once() -> bool {
-        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-            return true;
-        };
-        let Some(input) = prompt_textarea(PROMPT_INPUT_ID) else {
-            return false;
-        };
-        let active_is_input = document
-            .active_element()
-            .map(|active| active.id() == PROMPT_INPUT_ID)
-            .unwrap_or(false);
-        if !active_is_input {
-            let _ = input.focus();
-            let end = input.value().len() as u32;
-            let _ = input.set_selection_range(end, end);
-        }
-        document.has_focus().unwrap_or(false) && active_is_input
     }
 
     /// Latches live on `window` rather than in Rust statics because the listeners outlive any one
