@@ -13,7 +13,7 @@ use crate::apply::{
     LayoutApplyRequest, LayoutApplyResponse, LayoutSnapshotRequest, LayoutSnapshotResponse,
 };
 use crate::bookmark::{BookmarkOp, ShowBookmarkMenuRequest};
-use crate::pane::{OpenBesideRequest, PaneOpenedForProfile, SpawnCounter};
+use crate::pane::{OpenBesideRequest, SpawnCounter};
 use crate::settings::{EffectiveStartupDir, EffectiveStartupUrl};
 use crate::space::ActiveSpaceId;
 use crate::stack::{CloseStackRequest, FocusedStack};
@@ -60,7 +60,6 @@ impl Plugin for LayoutContractPlugin {
             .add_message::<LayoutSnapshotResponse>()
             .add_message::<NewTabRequest>()
             .add_message::<OpenBesideRequest>()
-            .add_message::<PaneOpenedForProfile>()
             .add_message::<OpenInNewStackRequest>()
             .add_message::<ShowBookmarkMenuRequest>()
             .add_message::<TabDirectoryObserved>();

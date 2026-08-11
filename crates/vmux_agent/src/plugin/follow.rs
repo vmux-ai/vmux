@@ -407,7 +407,6 @@ fn handle_agent_file_touch(
                     url: preview.url,
                     request_id: preview.request_id,
                     focus: preview.user_origin && existing.is_some(),
-                    profile: Some(super::browser_pane::profile_key(preview.anchor)),
                 });
             }
             if let Some(pane) = target
@@ -418,9 +417,7 @@ fn handle_agent_file_touch(
                 resolve
                     .activate
                     .write(vmux_layout::active_panes::ActivatePane {
-                        profile: vmux_layout::active_panes::ProfileId::Agent(
-                            super::browser_pane::profile_key(anchor),
-                        ),
+                        profile: vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}")),
                         active: vmux_layout::active_panes::ActiveStack {
                             tab: None,
                             pane: Some(pane),

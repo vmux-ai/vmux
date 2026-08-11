@@ -280,7 +280,6 @@ pub(super) fn handle_agent_self_commands(
                         url: url.clone(),
                         request_id: request.request_id.0,
                         focus,
-                        profile: Some(super::browser_pane::profile_key(*anchor)),
                     });
                     AgentCommandResult::Ok
                 }
@@ -739,7 +738,6 @@ pub(super) fn handle_agent_self_commands(
                                 url: file_touch_url(&path.to_string_lossy(), None, None, None),
                                 request_id: request.request_id.0,
                                 focus: false,
-                                profile: Some(super::browser_pane::profile_key(*anchor)),
                             });
                             AgentCommandResult::Text(format!("Knowledge saved: {}", path.display()))
                         }

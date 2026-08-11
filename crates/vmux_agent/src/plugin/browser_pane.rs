@@ -1,118 +1,88 @@
 //! The browser pane an agent opened beside itself.
 //!
-//! Recorded when layout reports the pane it created, not rediscovered afterwards. A sibling
-//! search cannot tell a pane the agent opened from one the user happened to put next to it, and
-//! it has to re-walk the tree for every question; the answer only changes when a pane is opened,
-//! so that is where it is written down.
+//! Resolved from the layout tree rather than the user's `FocusedStack`, so an agent browsing in
+//! the background never redirects the pane the user is looking at.
 
 use bevy::prelude::*;
 use vmux_core::agent::AgentKind;
-use vmux_service::protocol::ProcessId;
+use vmux_layout::pane::Pane;
 
 use crate::events::CommandOrigin;
 use crate::session::AgentSession;
 
-/// Wires the record-keeping. Resolution itself is [`AgentBrowserResolve`], a system param.
-pub(crate) struct AgentBrowserPanePlugin;
-
-impl Plugin for AgentBrowserPanePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, record_opened_browser_pane);
-    }
-}
-
-/// The browser pane this agent opened beside itself, and the stack inside it.
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct AgentBrowserPane {
-    pane: Entity,
-    stack: Entity,
-}
-
-/// How an agent names itself to layout, which echoes it back untouched. The same key
-/// `ActivePanes` is indexed by.
-pub(crate) fn profile_key(anchor: ProcessId) -> String {
-    format!("{anchor:?}")
-}
-
-/// Records the pane layout just opened on some agent's behalf.
-fn record_opened_browser_pane(
-    mut opened: MessageReader<vmux_layout::PaneOpenedForProfile>,
-    anchors: Query<(Entity, &ProcessId)>,
-    mut commands: Commands,
-) {
-    for event in opened.read() {
-        let Some((entity, _)) = anchors
-            .iter()
-            .find(|(_, anchor)| profile_key(**anchor) == event.profile)
-        else {
-            continue;
-        };
-        commands.entity(entity).try_insert(AgentBrowserPane {
-            pane: event.pane,
-            stack: event.stack,
-        });
-    }
-}
-
 #[derive(bevy::ecs::system::SystemParam)]
 pub(crate) struct AgentBrowserResolve<'w, 's> {
     activate: MessageWriter<'w, vmux_layout::active_panes::ActivatePane>,
-    /// Matches any anchored content (CLI terminal or ACP chat webview) by its unique ProcessId.
+    // Matches any anchored content (CLI terminal or ACP chat webview) by its unique ProcessId.
     agent_terms: Query<
         'w,
         's,
         (
             Entity,
-            &'static ProcessId,
+            &'static vmux_service::protocol::ProcessId,
             &'static ChildOf,
-            Option<&'static AgentBrowserPane>,
         ),
     >,
     kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    /// Leaves only. Splitting a pane keeps `Pane` on the node it split and adds `PaneSplit`,
-    /// so a recorded entity can still exist while no longer being a pane anything lives in.
-    leaf_panes: Query<
-        'w,
-        's,
-        (),
-        (
-            With<vmux_layout::pane::Pane>,
-            Without<vmux_layout::pane::PaneSplit>,
-        ),
-    >,
+    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
+    stack_q: Query<'w, 's, Entity, With<vmux_layout::stack::Stack>>,
+    browser_stacks: Query<'w, 's, &'static ChildOf, With<vmux_layout::Browser>>,
+    active: Res<'w, vmux_layout::active_panes::ActivePanes>,
 }
 
 impl AgentBrowserResolve<'_, '_> {
-    /// The agent's own pane (its stack's parent pane), from its anchor.
-    pub(crate) fn agent_pane(&self, anchor: ProcessId) -> Option<Entity> {
+    /// The browser pane the agent opened beside itself: a sibling leaf pane
+    /// (same parent split) that hosts a browser. Resolved from the layout tree,
+    /// never from the user's `FocusedStack`.
+    fn browser_pane_for(&self, agent_pane: Entity) -> Option<Entity> {
         use bevy::ecs::relationship::Relationship;
-        let (_, _, term_co, _) = self
-            .agent_terms
-            .iter()
-            .find(|(_, pid, ..)| **pid == anchor)?;
-        self.child_of.get(term_co.get()).ok().map(|co| co.get())
+        let agent_parent = self.child_of.get(agent_pane).ok()?.get();
+        for stack_co in self.browser_stacks.iter() {
+            let pane = stack_co.get();
+            if pane == agent_pane {
+                continue;
+            }
+            if let Ok(parent_co) = self.child_of.get(pane)
+                && parent_co.get() == agent_parent
+                && self.pane_has_only_browser_stacks(pane)
+            {
+                return Some(pane);
+            }
+        }
+        None
     }
 
-    /// The browser pane recorded for this agent, if it is still one. The component outlives
-    /// both closing the pane and splitting it, so the entity is checked rather than trusted.
-    fn browser_pane_for(&self, anchor: ProcessId) -> Option<AgentBrowserPane> {
-        let (_, _, _, recorded) = self
+    fn pane_has_only_browser_stacks(&self, pane: Entity) -> bool {
+        self.pane_children
+            .get(pane)
+            .ok()
+            .map(|children| {
+                children
+                    .iter()
+                    .filter(|&child| self.stack_q.contains(child))
+                    .all(|child| self.browser_stacks.contains(child))
+            })
+            .unwrap_or(false)
+    }
+
+    /// The agent's own pane (its stack's parent pane), from its anchor.
+    pub(crate) fn agent_pane(&self, anchor: vmux_service::protocol::ProcessId) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (_, _, term_co) = self
             .agent_terms
             .iter()
-            .find(|(_, pid, ..)| **pid == anchor)?;
-        recorded
-            .copied()
-            .filter(|it| self.leaf_panes.contains(it.pane))
+            .find(|(_, pid, _)| **pid == anchor)?;
+        self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
     /// `None` for ACP sessions (no `AgentKind`).
-    fn agent_kind(&self, anchor: ProcessId) -> Option<AgentKind> {
-        let (entity, ..) = self
+    fn agent_kind(&self, anchor: vmux_service::protocol::ProcessId) -> Option<AgentKind> {
+        let (entity, _, _) = self
             .agent_terms
             .iter()
-            .find(|(_, pid, ..)| **pid == anchor)?;
+            .find(|(_, pid, _)| **pid == anchor)?;
         self.kinds.get(entity).ok().map(|session| session.kind)
     }
 
@@ -121,21 +91,27 @@ impl AgentBrowserResolve<'_, '_> {
     /// `None` if the agent has no browser pane yet (caller keeps the default).
     pub(crate) fn claim_browser_pane(
         &mut self,
-        anchor: ProcessId,
+        anchor: vmux_service::protocol::ProcessId,
     ) -> Option<(Entity, Option<Entity>)> {
-        let recorded = self.browser_pane_for(anchor)?;
+        let pane = self.browser_pane_for(self.agent_pane(anchor)?)?;
         let kind = self.agent_kind(anchor);
+        let profile = vmux_layout::active_panes::ProfileId::Agent(format!("{anchor:?}"));
+        let stack = self
+            .active
+            .get(&profile)
+            .filter(|active| active.pane == Some(pane))
+            .and_then(|active| active.stack);
         self.activate
             .write(vmux_layout::active_panes::ActivatePane {
-                profile: vmux_layout::active_panes::ProfileId::Agent(profile_key(anchor)),
+                profile,
                 active: vmux_layout::active_panes::ActiveStack {
                     tab: None,
-                    pane: Some(recorded.pane),
-                    stack: Some(recorded.stack),
+                    pane: Some(pane),
+                    stack,
                     kind,
                 },
             });
-        Some((recorded.pane, Some(recorded.stack)))
+        Some((pane, stack))
     }
 
     /// Returns the explicit pane if given, else the agent's resolved browser
@@ -145,7 +121,7 @@ impl AgentBrowserResolve<'_, '_> {
     pub(crate) fn resolve_pane(
         &mut self,
         pane: &Option<String>,
-        anchor: &Option<ProcessId>,
+        anchor: &Option<vmux_service::protocol::ProcessId>,
     ) -> Option<String> {
         if pane.is_some() {
             return pane.clone();
@@ -183,138 +159,96 @@ impl AgentBrowserResolve<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::pane::Pane;
-
-    #[derive(Resource, Default)]
-    struct Claimed(Option<Entity>);
-
-    fn claim(input: Res<Anchor>, mut resolve: AgentBrowserResolve, mut out: ResMut<Claimed>) {
-        out.0 = resolve.claim_browser_pane(input.0).map(|(pane, _)| pane);
-    }
+    use crate::plugin::test_support::spawn_stack_in_pane;
+    use vmux_layout::pane::PaneSplit;
+    use vmux_service::protocol::ProcessId;
+    use vmux_terminal::Terminal;
 
     #[derive(Resource)]
-    struct Anchor(ProcessId);
-
-    /// Layout spawns the pane a frame after it is asked for, so the only thing tying the two
-    /// together is the profile key travelling out on the request and back on the report.
-    #[test]
-    fn a_pane_layout_reports_for_this_agent_is_the_one_it_claims() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_layout::LayoutContractPlugin,
-            AgentBrowserPanePlugin,
-        ))
-        .init_resource::<Claimed>()
-        .add_systems(Update, claim.after(record_opened_browser_pane));
-
-        let anchor = ProcessId::new();
-        app.insert_resource(Anchor(anchor));
-        let pane = app.world_mut().spawn(Pane).id();
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
-        // An agent always lives in a stack; the resolver reaches its own pane through that.
-        let agent_stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
-        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
-
-        app.world_mut()
-            .resource_mut::<Messages<vmux_layout::PaneOpenedForProfile>>()
-            .write(vmux_layout::PaneOpenedForProfile {
-                profile: profile_key(anchor),
-                pane,
-                stack,
-            });
-        app.update();
-
-        assert_eq!(app.world().resource::<Claimed>().0, Some(pane));
+    pub(crate) struct BrowserPaneClaimInput {
+        anchor: ProcessId,
     }
 
-    /// Splitting the recorded pane leaves `Pane` on it and adds `PaneSplit`, so it still exists
-    /// but is no longer somewhere a stack lives. Handing it back would target a split node.
-    #[test]
-    fn a_recorded_pane_that_has_since_been_split_is_not_claimed() {
-        let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_layout::LayoutContractPlugin,
-            AgentBrowserPanePlugin,
-        ))
-        .init_resource::<Claimed>()
-        .add_systems(Update, claim.after(record_opened_browser_pane));
+    #[derive(Resource, Default)]
+    pub(crate) struct BrowserPaneClaimOutput(Option<Entity>);
 
-        let anchor = ProcessId::new();
-        app.insert_resource(Anchor(anchor));
-        let pane = app.world_mut().spawn(Pane).id();
-        let stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
-        let agent_stack = app
-            .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
-            .id();
-        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
-
-        app.world_mut()
-            .resource_mut::<Messages<vmux_layout::PaneOpenedForProfile>>()
-            .write(vmux_layout::PaneOpenedForProfile {
-                profile: profile_key(anchor),
-                pane,
-                stack,
-            });
-        app.update();
-        assert_eq!(app.world().resource::<Claimed>().0, Some(pane));
-
-        app.world_mut()
-            .entity_mut(pane)
-            .insert(vmux_layout::pane::PaneSplit {
-                direction: vmux_layout::pane::PaneSplitDirection::Row,
-            });
-        app.update();
-
-        assert_eq!(app.world().resource::<Claimed>().0, None);
+    pub(crate) fn claim_browser_pane_test_system(
+        input: Res<BrowserPaneClaimInput>,
+        mut resolve: AgentBrowserResolve,
+        mut out: ResMut<BrowserPaneClaimOutput>,
+    ) {
+        out.0 = resolve
+            .claim_browser_pane(input.anchor)
+            .map(|(pane, _)| pane);
     }
 
-    /// A report for somebody else must not become this agent's pane.
-    #[test]
-    fn a_pane_reported_for_another_profile_is_not_claimed() {
+    pub(crate) fn browser_claim_app() -> (App, ProcessId, Entity) {
         let mut app = App::new();
-        app.add_plugins((
-            MinimalPlugins,
-            vmux_layout::LayoutContractPlugin,
-            AgentBrowserPanePlugin,
-        ))
-        .init_resource::<Claimed>()
-        .add_systems(Update, claim.after(record_opened_browser_pane));
-
-        let anchor = ProcessId::new();
-        app.insert_resource(Anchor(anchor));
-        let pane = app.world_mut().spawn(Pane).id();
-        let stack = app
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+            .init_resource::<BrowserPaneClaimOutput>()
+            .add_systems(Update, claim_browser_pane_test_system);
+        let split = app
             .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
+            .spawn((
+                Pane,
+                PaneSplit {
+                    direction: vmux_layout::pane::PaneSplitDirection::Row,
+                },
+            ))
             .id();
-        // An agent always lives in a stack; the resolver reaches its own pane through that.
+        let agent_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
         let agent_stack = app
             .world_mut()
-            .spawn(vmux_layout::stack::stack_bundle())
+            .spawn((vmux_layout::stack::stack_bundle(), ChildOf(agent_pane)))
             .id();
-        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
+        let anchor = ProcessId::new();
+        app.world_mut().spawn((
+            Terminal,
+            anchor,
+            AgentSession {
+                kind: AgentKind::Codex,
+            },
+            ChildOf(agent_stack),
+        ));
+        app.insert_resource(BrowserPaneClaimInput { anchor });
+        (app, anchor, split)
+    }
 
+    #[test]
+    pub(crate) fn browser_pane_claim_ignores_mixed_file_browser_pane() {
+        let (mut app, _anchor, split) = browser_claim_app();
+        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
+        let browser_stack = spawn_stack_in_pane(&mut app, mixed_pane, "https://example.com");
         app.world_mut()
-            .resource_mut::<Messages<vmux_layout::PaneOpenedForProfile>>()
-            .write(vmux_layout::PaneOpenedForProfile {
-                profile: profile_key(ProcessId::new()),
-                pane,
-                stack,
-            });
+            .entity_mut(browser_stack)
+            .insert(vmux_layout::Browser);
+
         app.update();
 
-        assert_eq!(app.world().resource::<Claimed>().0, None);
+        assert_eq!(app.world().resource::<BrowserPaneClaimOutput>().0, None);
+    }
+
+    #[test]
+    pub(crate) fn browser_pane_claim_prefers_pure_browser_pane_over_mixed_pane() {
+        let (mut app, _anchor, split) = browser_claim_app();
+        let mixed_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        spawn_stack_in_pane(&mut app, mixed_pane, "file:///repo/src/main.rs");
+        let mixed_browser = spawn_stack_in_pane(&mut app, mixed_pane, "https://mixed.example");
+        app.world_mut()
+            .entity_mut(mixed_browser)
+            .insert(vmux_layout::Browser);
+        let pure_pane = app.world_mut().spawn((Pane, ChildOf(split))).id();
+        let pure_browser = spawn_stack_in_pane(&mut app, pure_pane, "https://pure.example");
+        app.world_mut()
+            .entity_mut(pure_browser)
+            .insert(vmux_layout::Browser);
+
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<BrowserPaneClaimOutput>().0,
+            Some(pure_pane)
+        );
     }
 }
