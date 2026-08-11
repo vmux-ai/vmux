@@ -14,8 +14,8 @@ use crate::event::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
     CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
     ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
-    ChatBlock, ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage, ChatHistoryRequest,
-    ChatItem, ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPickFiles, ChatSnapshot,
+    ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
+    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPickFiles, ChatSnapshot,
     ChatSubmit, ChatSubmitAttachment, ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry,
     ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
     ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
@@ -87,7 +87,7 @@ pub fn use_chat(
         effort: use_effort_picker(),
         slash: use_slash_commands(),
         resume: use_resume(),
-        activity_counts: use_memo(move || composer_activity_counts(&items.read())),
+        activity_counts: use_memo(move || vmux_wire::chat::activity_counts(&items.read())),
         latest_tool: use_memo(move || latest_tool_location(&items.read())),
     };
     chat.listen();
@@ -1057,30 +1057,6 @@ fn merge_transcript_page(
 }
 
 /// Running subagents and unfinished plan steps across the transcript.
-fn composer_activity_counts(items: &[ChatItem]) -> (usize, usize) {
-    let mut subagents = 0usize;
-    let mut tasks = 0usize;
-    for item in items {
-        let ChatItem::Turn(turn) = item else {
-            continue;
-        };
-        for block in &turn.blocks {
-            match block {
-                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
-                    subagents += 1;
-                }
-                ChatBlock::Plan { steps } => {
-                    tasks += steps
-                        .iter()
-                        .filter(|step| step.status != "completed")
-                        .count();
-                }
-                _ => {}
-            }
-        }
-    }
-    (subagents, tasks)
-}
 
 /// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
 /// across agents and only the id differs.

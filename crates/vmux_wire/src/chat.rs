@@ -187,6 +187,35 @@ impl ChatTurn {
     }
 }
 
+/// How much the agent still has in flight: sub-agents running, and plan steps not yet done.
+///
+/// Derived from the transcript rather than reported, so any surface holding the transcript can
+/// show it without the host sending a count.
+pub fn activity_counts(items: &[ChatItem]) -> (usize, usize) {
+    let mut subagents = 0usize;
+    let mut tasks = 0usize;
+    for item in items {
+        let ChatItem::Turn(turn) = item else {
+            continue;
+        };
+        for block in &turn.blocks {
+            match block {
+                ChatBlock::Subagent(subagent) if subagent.status == "in_progress" => {
+                    subagents += 1;
+                }
+                ChatBlock::Plan { steps } => {
+                    tasks += steps
+                        .iter()
+                        .filter(|step| step.status != "completed")
+                        .count();
+                }
+                _ => {}
+            }
+        }
+    }
+    (subagents, tasks)
+}
+
 pub fn latest_tool_location(items: &[ChatItem]) -> Option<(usize, usize)> {
     items
         .iter()
@@ -266,4 +295,78 @@ pub enum ChatKey {
     Interrupt,
     /// Stop the running turn.
     Cancel,
+}
+
+#[cfg(test)]
+mod activity_counts_tests {
+    use super::*;
+
+    fn subagent(status: &str) -> ChatBlock {
+        ChatBlock::Subagent(Box::new(ChatSubagent {
+            call_id: String::new(),
+            provider: String::new(),
+            title: String::new(),
+            status: status.to_string(),
+            action: String::new(),
+            agent_name: None,
+            thread_id: None,
+            parent_thread_id: None,
+            child_thread_ids: Vec::new(),
+            parent_call_id: None,
+            prompt: None,
+            model: None,
+            reasoning_effort: None,
+            raw_input: String::new(),
+        }))
+    }
+
+    fn turn(blocks: Vec<ChatBlock>) -> ChatItem {
+        ChatItem::Turn(ChatTurn {
+            blocks,
+            running: false,
+            duration_secs: None,
+            step_count: 0,
+        })
+    }
+
+    /// The composer shows these as "still working" counts, so anything already finished has to
+    /// drop out — a completed sub-agent or plan step reads as outstanding work otherwise.
+    #[test]
+    fn only_unfinished_work_counts() {
+        let items = vec![
+            turn(vec![
+                subagent("in_progress"),
+                subagent("completed"),
+                ChatBlock::Plan {
+                    steps: vec![
+                        ChatPlanStep {
+                            content: "a".into(),
+                            status: "completed".into(),
+                        },
+                        ChatPlanStep {
+                            content: "b".into(),
+                            status: "in_progress".into(),
+                        },
+                        ChatPlanStep {
+                            content: "c".into(),
+                            status: "pending".into(),
+                        },
+                    ],
+                },
+            ]),
+            turn(vec![subagent("in_progress")]),
+            ChatItem::User {
+                text: "ignored".into(),
+                context: None,
+                attachments: Vec::new(),
+            },
+        ];
+
+        assert_eq!(activity_counts(&items), (2, 2));
+    }
+
+    #[test]
+    fn an_empty_transcript_has_nothing_outstanding() {
+        assert_eq!(activity_counts(&[]), (0, 0));
+    }
 }
