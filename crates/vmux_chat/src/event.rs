@@ -19,6 +19,7 @@ pub use vmux_wire::prompt_media::{
     ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPasteMedia, ChatPickFiles,
     ChatSubmitAttachment,
 };
+pub use vmux_wire::protocol::ApprovalDecision;
 
 #[derive(
     Clone,
@@ -171,8 +172,7 @@ pub struct ChatChoiceSelected {
     pub index: u32,
 }
 
-/// Page → native: the user answered a permission prompt. `decision`: 0 = deny, 1 = allow,
-/// 2 = allow-always.
+/// Page → native: the user answered a permission prompt.
 #[derive(
     Clone,
     Debug,
@@ -185,7 +185,7 @@ pub struct ChatChoiceSelected {
 )]
 pub struct ChatApproval {
     pub call_id: String,
-    pub decision: u8,
+    pub decision: ApprovalDecision,
 }
 
 /// Page → native: interrupt the in-flight turn from Ctrl+C or Stop.

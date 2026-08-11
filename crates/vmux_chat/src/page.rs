@@ -7,7 +7,7 @@
 #![allow(non_snake_case)]
 
 use self::agent::ChatHeader;
-use self::approval::ChatApprovalPanel;
+use self::approval::ChatApprovalDock;
 use self::composer::ChatDock;
 use self::keys::use_chat_keys;
 use self::state::use_chat;
@@ -45,7 +45,7 @@ pub fn Page(
             }
             ChatHeader { chat }
             ChatTranscript { chat }
-            ChatApprovalPanel { chat }
+            ChatApprovalDock { chat }
             ChatDock { chat }
         }
     }
@@ -74,7 +74,7 @@ fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
 }
 
 pub mod agent;
-mod approval;
+pub mod approval;
 pub mod composer;
 mod error;
 mod keys;

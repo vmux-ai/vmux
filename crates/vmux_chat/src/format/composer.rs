@@ -31,15 +31,6 @@ pub(crate) enum ResumeMenuState {
     Results,
 }
 
-pub(crate) fn approval_decision_for_index(index: usize) -> Option<u8> {
-    match index {
-        0 => Some(1),
-        1 => Some(2),
-        2 => Some(0),
-        _ => None,
-    }
-}
-
 pub(crate) fn selector_mode(draft: &str) -> SelectorMode<'_> {
     let Some(token) = draft.strip_prefix('/') else {
         return SelectorMode::None;
@@ -349,14 +340,6 @@ mod tests {
             SelectorMode::Resume("SID-9")
         );
         assert_eq!(selector_mode("/unknown arg"), SelectorMode::None);
-    }
-
-    #[test]
-    fn approval_selector_maps_allow_always_and_deny() {
-        assert_eq!(approval_decision_for_index(0), Some(1));
-        assert_eq!(approval_decision_for_index(1), Some(2));
-        assert_eq!(approval_decision_for_index(2), Some(0));
-        assert_eq!(approval_decision_for_index(3), None);
     }
 
     #[test]

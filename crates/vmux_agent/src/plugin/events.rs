@@ -4,6 +4,7 @@ use serde_json::Value;
 pub use vmux_service::agent_events::{
     AgentCommandRequest, AgentQueryRequest, AgentToolCallRequest, CommandOrigin,
 };
+pub use vmux_service::protocol::ApprovalDecision;
 
 #[derive(Event, Clone, Copy)]
 pub struct AgentChoiceSelected {
@@ -50,13 +51,6 @@ pub struct AgentApprovalReply {
     pub session: Entity,
     pub call_id: String,
     pub decision: ApprovalDecision,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApprovalDecision {
-    Allow,
-    AllowAlways,
-    Deny,
 }
 
 #[derive(Message, Clone)]

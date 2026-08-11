@@ -27,10 +27,9 @@
 //! it is shared, and a host with no keymap to ask still answers what it can answer alone.
 
 use super::state::Chat;
-use crate::event::{CHAT_KEY_EVENT, ChatItem, ChatKey};
+use crate::event::{ApprovalDecision, CHAT_KEY_EVENT, ChatItem, ChatKey};
 use crate::format::composer::{
-    PromptEdit, PromptHistoryDirection, approval_decision_for_index, edit_prompt,
-    move_prompt_history, prompt_history_direction,
+    PromptEdit, PromptHistoryDirection, edit_prompt, move_prompt_history, prompt_history_direction,
 };
 use dioxus::prelude::*;
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
@@ -340,7 +339,7 @@ impl ChatList {
                 let Some((call_id, _, _)) = chat.run.approval.peek().clone() else {
                     return;
                 };
-                let Some(decision) = approval_decision_for_index(index) else {
+                let Some(decision) = ApprovalDecision::for_index(index) else {
                     return;
                 };
                 chat.answer_approval(call_id, decision);

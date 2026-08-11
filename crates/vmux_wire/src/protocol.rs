@@ -399,11 +399,40 @@ pub enum AgentQueryResult {
     Error(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum ApprovalDecision {
     Allow,
+    /// The default, so that a payload that arrives malformed or half-built refuses the tool
+    /// rather than running it.
+    #[default]
     Deny,
     AllowAlways,
+}
+
+impl ApprovalDecision {
+    /// The answers a client offers, in the order it lists and numbers them.
+    ///
+    /// Declaration order is not that order — `Deny` is declared second but offered last — so the
+    /// buttons and the number keys that pick between them both read the sequence from here rather
+    /// than each spelling it out and risking disagreement about what `2` means.
+    pub const OFFERED: [Self; 3] = [Self::Allow, Self::AllowAlways, Self::Deny];
+
+    /// The answer at a zero-based position in [`Self::OFFERED`], or `None` past the end.
+    pub fn for_index(index: usize) -> Option<Self> {
+        Self::OFFERED.get(index).copied()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
@@ -1005,6 +1034,21 @@ pub struct ProcessInfo {
 mod tests {
     use super::*;
     use crate::room::ClientOpId;
+
+    /// Reordering the variants would silently repoint the number keys — pressing `3` would stop
+    /// meaning deny — so the offered sequence is pinned independently of declaration order.
+    #[test]
+    fn deny_is_the_last_answer_offered_though_it_is_declared_second() {
+        assert_eq!(
+            ApprovalDecision::OFFERED,
+            [
+                ApprovalDecision::Allow,
+                ApprovalDecision::AllowAlways,
+                ApprovalDecision::Deny,
+            ],
+        );
+        assert_eq!(ApprovalDecision::for_index(3), None);
+    }
 
     #[test]
     fn composed_agent_prompt_preserves_marker_literals_in_display_text() {

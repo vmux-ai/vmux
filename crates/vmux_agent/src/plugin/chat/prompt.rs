@@ -12,7 +12,7 @@ use crate::client::acp::AcpSession;
 use crate::components::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
 };
-use crate::events::{AgentApprovalReply, AgentChoiceSelected, ApprovalDecision};
+use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_chat::event::{
     ChatApproval, ChatCancel, ChatCancelQueuedPrompt, ChatChoiceSelected, ChatClearQueue,
@@ -230,15 +230,10 @@ fn on_chat_approval(
     let Ok(parent) = child_of.get(webview) else {
         return;
     };
-    let decision = match payload.decision {
-        1 => ApprovalDecision::Allow,
-        2 => ApprovalDecision::AllowAlways,
-        _ => ApprovalDecision::Deny,
-    };
     commands.trigger(AgentApprovalReply {
         session: parent.parent(),
         call_id: payload.call_id.clone(),
-        decision,
+        decision: payload.decision,
     });
 }
 

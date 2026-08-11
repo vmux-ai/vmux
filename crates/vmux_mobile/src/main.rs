@@ -16,6 +16,7 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
 use vmux_chat::page::agent::StatusDot;
+use vmux_chat::page::approval::ApprovalPanel;
 use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_start::results::CommandBarResultItem;
@@ -252,11 +253,7 @@ impl Api {
             sid,
             AgentAction::Approve {
                 call_id: request.call_id.clone(),
-                decision: if request.allow {
-                    vmux_wire::protocol::ApprovalDecision::Allow
-                } else {
-                    vmux_wire::protocol::ApprovalDecision::Deny
-                },
+                decision: request.decision,
             },
         );
         self.applied(self.quic.request(message).await)
@@ -1198,50 +1195,21 @@ fn AppBody() -> Element {
             }
 
             if let Some(pending) = approval_value {
-                div { class: "shrink-0 border-t border-amber-300/10 bg-amber-300/[0.04] px-3 py-3 sm:px-4 md:px-6",
-                    div { class: "mx-auto max-w-none rounded-2xl border border-amber-300/20 bg-amber-300/[0.04] p-3 md:max-w-3xl",
-                        div { class: "text-sm font-semibold text-foreground", "Allow {pending.name}?" }
-                        pre { class: "mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-muted-foreground", "{pending.args_json}" }
-                        div { class: "mt-3 flex gap-2",
-                            button {
-                                class: "h-10 flex-1 rounded-xl bg-primary font-semibold text-primary-foreground active:scale-[0.99]",
-                                onclick: {
-                                    let call_id = pending.call_id.clone();
-                                    let sid = approval_sid.clone();
-                                    move |_| {
-                                        let Some(client) = api() else { return };
-                                        approval.set(None);
-                                        let call_id = call_id.clone();
-                                        let sid = sid.clone();
-                                        spawn(async move {
-                                            let _ = client
-                                                .approve(&sid, &ApprovalRequest { call_id, allow: true })
-                                                .await;
-                                        });
-                                    }
-                                },
-                                "Allow"
-                            }
-                            button {
-                                class: "h-10 flex-1 rounded-xl bg-secondary font-semibold text-secondary-foreground active:scale-[0.99]",
-                                onclick: {
-                                    let call_id = pending.call_id.clone();
-                                    let sid = approval_sid.clone();
-                                    move |_| {
-                                        let Some(client) = api() else { return };
-                                        approval.set(None);
-                                        let call_id = call_id.clone();
-                                        let sid = sid.clone();
-                                        spawn(async move {
-                                            let _ = client
-                                                .approve(&sid, &ApprovalRequest { call_id, allow: false })
-                                                .await;
-                                        });
-                                    }
-                                },
-                                "Deny"
-                            }
-                        }
+                div { class: "shrink-0",
+                    ApprovalPanel {
+                        tool: pending.name.clone(),
+                        args_json: pending.args_json.clone(),
+                        on_answer: move |decision| {
+                            let Some(client) = api() else { return };
+                            approval.set(None);
+                            let call_id = pending.call_id.clone();
+                            let sid = approval_sid.clone();
+                            spawn(async move {
+                                let _ = client
+                                    .approve(&sid, &ApprovalRequest { call_id, decision })
+                                    .await;
+                            });
+                        },
                     }
                 }
             }

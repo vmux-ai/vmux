@@ -11,16 +11,16 @@ use std::collections::{HashMap, HashSet};
 use super::scroll;
 use super::tab::{Accent, TabIdentity};
 use crate::event::{
-    CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_HISTORY_PAGE_EVENT,
-    CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT, COMPOSER_CONTEXT_EVENT,
-    ChatApproval, ChatAttachPaths, ChatAttachment, ChatAttachmentPreviewRequest, ChatAttachments,
-    ChatCancel, ChatChoiceSelected, ChatEscape, ChatHistoryPage, ChatHistoryRequest, ChatItem,
-    ChatMediaEntries, ChatMediaEntry, ChatMediaListRequest, ChatPickFiles, ChatSnapshot,
-    ChatSubmit, ChatSubmitAttachment, ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry,
-    ModelState, QueuedPromptSnapshot, RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry,
-    ResumableSessions, ResumeListRequest, ResumeSession, RuntimeSwitchRequest,
-    SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry, SlashCommands as SlashCommandsEvent,
-    latest_tool_location,
+    ApprovalDecision, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
+    CHAT_HISTORY_PAGE_EVENT, CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT,
+    COMPOSER_CONTEXT_EVENT, ChatApproval, ChatAttachPaths, ChatAttachment,
+    ChatAttachmentPreviewRequest, ChatAttachments, ChatCancel, ChatChoiceSelected, ChatEscape,
+    ChatHistoryPage, ChatHistoryRequest, ChatItem, ChatMediaEntries, ChatMediaEntry,
+    ChatMediaListRequest, ChatPickFiles, ChatSnapshot, ChatSubmit, ChatSubmitAttachment,
+    ComposerContext, MODEL_STATE_EVENT, ModelOptionEntry, ModelState, QueuedPromptSnapshot,
+    RESUMABLE_SESSIONS_EVENT, ResumableSessionEntry, ResumableSessions, ResumeListRequest,
+    ResumeSession, RuntimeSwitchRequest, SLASH_COMMANDS_EVENT, SelectModel, SlashCommandEntry,
+    SlashCommands as SlashCommandsEvent, latest_tool_location,
 };
 use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
@@ -767,7 +767,7 @@ impl Chat {
     }
 
     /// Answer a tool approval, clearing the prompt only once the reply is away.
-    pub fn answer_approval(&self, call_id: String, decision: u8) {
+    pub fn answer_approval(&self, call_id: String, decision: ApprovalDecision) {
         let mut approval = self.run.approval;
         let mut approval_sel = self.run.approval_sel;
         if send(&ChatApproval { call_id, decision }).is_ok() {

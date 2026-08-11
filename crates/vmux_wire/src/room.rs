@@ -570,7 +570,7 @@ pub struct RemoteAgent {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ApprovalRequest {
     pub call_id: String,
-    pub allow: bool,
+    pub decision: crate::protocol::ApprovalDecision,
 }
 
 #[cfg(test)]

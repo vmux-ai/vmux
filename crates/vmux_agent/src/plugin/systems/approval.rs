@@ -8,7 +8,7 @@ use crate::components::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
-use vmux_service::protocol::{ApprovalDecision as ProtoDecision, ClientMessage, SharedMessage};
+use vmux_service::protocol::{ClientMessage, SharedMessage};
 
 #[derive(Default, Deserialize, Serialize)]
 struct SavedApprovalGrants {
@@ -104,14 +104,6 @@ pub(crate) fn sync_persisted_acp_approval_policy(
     }
 }
 
-fn protocol_decision(decision: ApprovalDecision) -> ProtoDecision {
-    match decision {
-        ApprovalDecision::Allow => ProtoDecision::Allow,
-        ApprovalDecision::AllowAlways => ProtoDecision::AllowAlways,
-        ApprovalDecision::Deny => ProtoDecision::Deny,
-    }
-}
-
 #[allow(clippy::type_complexity)]
 pub(crate) fn handle_approval_reply(
     trigger: On<AgentApprovalReply>,
@@ -151,13 +143,12 @@ pub(crate) fn handle_approval_reply(
             store.remember(&acp.agent_id, &acp.cwd, name);
         }
     }
-    let decision = protocol_decision(reply.decision);
     if let Some(service) = service.as_ref() {
         service.0.send(ClientMessage::Shared(SharedMessage::agent(
             sid,
             vmux_wire::protocol::AgentAction::Approve {
                 call_id: reply.call_id.clone(),
-                decision,
+                decision: reply.decision,
             },
         )));
     }
@@ -271,10 +262,6 @@ mod tests {
         app.update();
         let policy = app.world().get::<AgentApprovalPolicy>(entity).unwrap();
         assert!(policy.allows("run_shell"));
-        assert_eq!(
-            protocol_decision(ApprovalDecision::AllowAlways),
-            ProtoDecision::AllowAlways
-        );
     }
 
     #[test]

@@ -5,21 +5,44 @@
 //! styling and the keyboard help line that says how to pick from it.
 
 use super::state::Chat;
+use crate::event::ApprovalDecision;
 use crate::format::approval::ApprovalDetail;
-use crate::format::composer::approval_decision_for_index;
 use dioxus::prelude::*;
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-/// The tool the agent is asking permission to run, and the three answers to it.
+/// The pending approval on this page, docked under the transcript.
 #[component]
-pub(super) fn ChatApprovalPanel(chat: Chat) -> Element {
+pub(super) fn ChatApprovalDock(chat: Chat) -> Element {
     if chat.installing() {
         return rsx! {};
     }
     let Some((call_id, name, args_json)) = (chat.run.approval)() else {
         return rsx! {};
     };
-    let approval_sel = chat.run.approval_sel;
+    rsx! {
+        ApprovalPanel {
+            tool: name,
+            args_json,
+            selected: Some((chat.run.approval_sel)()),
+            on_answer: move |decision| chat.answer_approval(call_id.clone(), decision),
+        }
+    }
+}
+
+/// The tool the agent is asking permission to run, and the three answers to it.
+///
+/// Takes the request rather than the [`Chat`] holding it, so the phone — which learns of the same
+/// approval over QUIC and answers it the same three ways — renders this instead of its own.
+#[component]
+pub fn ApprovalPanel(
+    tool: String,
+    args_json: String,
+    /// Which answer the keyboard is on, or `None` where there is no keyboard to be on one. Also
+    /// drops the "press 1–3" line, which is noise on a device that can only tap.
+    #[props(default)]
+    selected: Option<usize>,
+    on_answer: EventHandler<ApprovalDecision>,
+) -> Element {
     let details = ApprovalDetail::rows(&args_json);
     rsx! {
         div { class: "border-t border-foreground/10 bg-foreground/[0.04] px-4 py-3",
@@ -28,7 +51,7 @@ pub(super) fn ChatApprovalPanel(chat: Chat) -> Element {
                     div { class: "text-sm text-foreground",
                         {translate_with(
                             "agent-allow-tool",
-                            &[("tool", TranslationValue::String(&name))],
+                            &[("tool", TranslationValue::String(&tool))],
                         )}
                     }
                     if !details.is_empty() {
@@ -45,26 +68,29 @@ pub(super) fn ChatApprovalPanel(chat: Chat) -> Element {
                     }
                 }
                 div { class: "flex flex-col gap-1.5",
-                    for (index , label) in [translate("agent-allow"), translate("agent-allow-always"), translate("agent-deny")].into_iter().enumerate() {
+                    for (index , decision) in ApprovalDecision::OFFERED.into_iter().enumerate() {
                         button {
                             key: "approval-option-{index}",
-                            class: if approval_sel() == index { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
-                            onclick: {
-                                let call_id = call_id.clone();
-                                move |_| {
-                                    if let Some(decision) = approval_decision_for_index(index) {
-                                        chat.answer_approval(call_id.clone(), decision);
-                                    }
-                                }
-                            },
+                            class: if selected == Some(index) { "flex items-center gap-3 rounded-xl bg-foreground px-3 py-2 text-left text-sm text-background" } else { "flex items-center gap-3 rounded-xl bg-foreground/[0.045] px-3 py-2 text-left text-sm text-foreground hover:bg-foreground/[0.08]" },
+                            onclick: move |_| on_answer.call(decision),
                             span { class: "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-current/20 font-mono text-[10px]", "{index + 1}" }
-                            span { class: "min-w-0 flex-1", "{label}" }
+                            span { class: "min-w-0 flex-1", {approval_answer_label(decision)} }
                         }
                     }
-                    div { class: "mt-1 text-[11px] text-muted-foreground", {translate("agent-choice-help").replace("1–9", "1–3")} }
+                    if selected.is_some() {
+                        div { class: "mt-1 text-[11px] text-muted-foreground", {translate("agent-choice-help").replace("1–9", "1–3")} }
+                    }
                 }
             }
         }
+    }
+}
+
+fn approval_answer_label(decision: ApprovalDecision) -> String {
+    match decision {
+        ApprovalDecision::Allow => translate("agent-allow"),
+        ApprovalDecision::AllowAlways => translate("agent-allow-always"),
+        ApprovalDecision::Deny => translate("agent-deny"),
     }
 }
 
