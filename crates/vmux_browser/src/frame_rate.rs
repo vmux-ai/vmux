@@ -25,12 +25,17 @@ use vmux_layout::{
     window::Modal,
 };
 
+#[cfg(not(target_os = "macos"))]
+use crate::cef_pointer_regions_contains;
+/// The two paths hit-test differently: AppKit walks individual rects as its monitor reports
+/// them, everything else tests the whole region set against one cursor position.
+#[cfg(target_os = "macos")]
+use crate::{CefPointerHitRect, cef_pointer_hit_rect};
 use crate::{
-    CefPointerHitRect, CefPointerRegionQuery, LAYOUT_INPUT_BURST, LayoutFrameRateState,
-    LayoutHoverRefreshState, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout,
-    WindowedHoverRefreshState, cef_pointer_hit_rect, native_layout_activity_active,
-    native_left_mouse_down, reset_layout_cef_hover, set_native_layout_activity,
-    windowed_hover_refresh_frame, windowed_hover_refresh_position,
+    CefPointerRegionQuery, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutHoverRefreshState,
+    LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout, WindowedHoverRefreshState,
+    native_layout_activity_active, native_left_mouse_down, reset_layout_cef_hover,
+    set_native_layout_activity, windowed_hover_refresh_frame, windowed_hover_refresh_position,
 };
 pub(crate) struct FrameRatePlugin;
 

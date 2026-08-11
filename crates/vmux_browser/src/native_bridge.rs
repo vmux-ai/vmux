@@ -5,7 +5,8 @@
 //! they capture are queued for the next frame to drain. Every operation is implemented once per
 //! platform in a sibling module — exactly one of which is compiled.
 
-use bevy::prelude::*;
+#[cfg(any(target_os = "macos", test))]
+use bevy::math::Vec2;
 
 #[cfg(any(target_os = "macos", test))]
 use crate::present::WindowedFrameRect;
