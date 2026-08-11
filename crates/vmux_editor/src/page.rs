@@ -25,6 +25,7 @@ use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -3935,15 +3936,7 @@ fn RenderedNoteBlock(
 }
 
 fn scroll_dir_row_into_view(idx: usize) {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(&format!("dir-row-{idx}")))
-    else {
-        return;
-    };
-    let opts = web_sys::ScrollIntoViewOptions::new();
-    opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    el.scroll_into_view_with_scroll_into_view_options(&opts);
+    ScrollIntoView::nearest(&format!("dir-row-{idx}"));
 }
 
 fn toggle_preview_video() {

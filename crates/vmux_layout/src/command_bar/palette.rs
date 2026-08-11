@@ -44,47 +44,35 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
+use vmux_ui::platform::sleep_ms;
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-const HOST_SEARCH_DEBOUNCE_MS: i32 = 300;
+const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
 
-type HostSearchTimer = Rc<RefCell<Option<(i32, js_sys::Function, Rc<Cell<bool>>)>>>;
+/// Whether the search currently waiting to fire has been superseded.
+type HostSearchTimer = Rc<RefCell<Option<Rc<Cell<bool>>>>>;
 
 fn cancel_host_search(timer: &HostSearchTimer) {
-    let Some((id, callback, cancelled)) = timer.borrow_mut().take() else {
-        return;
-    };
-    cancelled.set(true);
-    if let Some(window) = web_sys::window() {
-        window.clear_timeout_with_handle(id);
+    if let Some(cancelled) = timer.borrow_mut().take() {
+        cancelled.set(true);
     }
-    let _ = callback.call0(&JsValue::NULL);
 }
 
+/// Ask the host for results once the user stops typing, replacing whatever was already waiting.
 fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
     cancel_host_search(&timer);
-    let Some(window) = web_sys::window() else {
-        return;
-    };
     let cancelled = Rc::new(Cell::new(false));
-    let callback_timer = timer.clone();
-    let callback_cancelled = cancelled.clone();
-    let callback = Closure::once_into_js(move || {
-        callback_timer.borrow_mut().take();
-        if !callback_cancelled.get() {
-            callback();
+    *timer.borrow_mut() = Some(cancelled.clone());
+    spawn(async move {
+        sleep_ms(HOST_SEARCH_DEBOUNCE_MS).await;
+        if cancelled.get() {
+            return;
         }
-    })
-    .unchecked_into::<js_sys::Function>();
-    match window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, HOST_SEARCH_DEBOUNCE_MS)
-    {
-        Ok(id) => *timer.borrow_mut() = Some((id, callback, cancelled)),
-        Err(_) => {
-            let _ = callback.call0(&JsValue::NULL);
-        }
-    }
+        timer.borrow_mut().take();
+        callback();
+    });
 }
 
 /// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
@@ -684,30 +672,12 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let ghost_text = current_rows.ghost.clone();
 
     use_effect(move || {
-        let s = selected();
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id(&format!("command-bar-item-{s}")))
-        {
-            let opts = web_sys::ScrollIntoViewOptions::new();
-            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            el.scroll_into_view_with_scroll_into_view_options(&opts);
-        }
+        ScrollIntoView::nearest(&format!("command-bar-item-{}", selected()));
     });
 
     use_effect(move || {
-        let selected = media_selected();
         let _ = media_entries.read().len();
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| {
-                document.get_element_by_id(&format!("prompt-media-item-{selected}"))
-            })
-        {
-            let options = web_sys::ScrollIntoViewOptions::new();
-            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            element.scroll_into_view_with_scroll_into_view_options(&options);
-        }
+        ScrollIntoView::nearest(&format!("prompt-media-item-{}", media_selected()));
     });
 
     let execute = move |item: &ResultItem| {

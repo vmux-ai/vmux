@@ -39,6 +39,7 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, PageIconView};
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
@@ -233,13 +234,7 @@ pub fn Page() -> Element {
         if last_scrolled_stack() == Some((pane_id, stack_index)) {
             return;
         }
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id(&format!("sidesheet-stack-{pane_id}-{stack_index}")))
-        {
-            let opts = web_sys::ScrollIntoViewOptions::new();
-            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            el.scroll_into_view_with_scroll_into_view_options(&opts);
+        if ScrollIntoView::nearest(&format!("sidesheet-stack-{pane_id}-{stack_index}")) {
             last_scrolled_stack.set(Some((pane_id, stack_index)));
         }
     });

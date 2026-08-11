@@ -20,8 +20,10 @@ impl Host {
     pub(crate) fn schedule_listener_retry(_retry_tick: Signal<u32>, _current: u32) {}
 
     /// Scrolling needs the DOM, and the affordance follows keyboard navigation, which a touch host
-    /// does not have.
-    pub(crate) fn scroll_item_into_view(_item_id: &str) {}
+    /// does not have. True because there is nothing here for a caller to wait on.
+    pub(crate) fn scroll_item_into_view(_item_id: &str) -> bool {
+        true
+    }
 
     /// `ThemeEvent` is only ever sent by the CEF host (`vmux_browser`), so the radius never changes
     /// here.

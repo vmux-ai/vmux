@@ -38,6 +38,8 @@ pub mod components;
 
 pub mod platform;
 
+pub mod scroll;
+
 pub mod util;
 
 pub mod dioxus_ext {
