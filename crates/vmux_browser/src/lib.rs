@@ -10,21 +10,23 @@ mod host_focus;
 mod input;
 mod page_life;
 
+mod native_bridge;
 mod native_layout;
 mod navigation;
 mod present;
 
 use crate::page_life::spawn_popup_stacks;
-use present::{
-    CommandBarWindowedFrame, NATIVE_COMMAND_BAR_POINTER_EVENTS, NativeCommandBarPointerEvent,
-    WindowedFrameRect,
-};
+use present::CommandBarWindowedFrame;
 mod page_open;
 mod page_state;
 mod scroll;
 mod snapshot;
 pub use host_focus::HostFocusIntent;
 
+pub use native_bridge::NativeBridge;
+/// Entry points for the AppKit monitors. Nothing in Rust calls them.
+#[cfg(target_os = "macos")]
+pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
 #[cfg(target_os = "macos")]
 pub use native_layout::NativeLayoutPointerMoveResult;
@@ -39,8 +41,6 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-#[cfg(target_os = "macos")]
-use bevy_cef_core::prelude::NativeMouseButtons;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig, webview_debug_log};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -677,34 +677,6 @@ fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
     Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
 }
 
-#[cfg(target_os = "macos")]
-static NATIVE_WINDOWED_PAGE_FRAMES: LazyLock<Mutex<Vec<WindowedFrameRect>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
-
-#[cfg(any(target_os = "macos", test))]
-fn windowed_frame_contains(frame: WindowedFrameRect, point: Vec2) -> bool {
-    point.x >= frame.left
-        && point.x <= frame.right()
-        && point.y >= frame.top
-        && point.y <= frame.bottom()
-}
-
-#[cfg(target_os = "macos")]
-pub fn native_windowed_page_contains_point(x_px: f32, y_px: f32) -> bool {
-    let point = Vec2::new(x_px, y_px);
-    NATIVE_WINDOWED_PAGE_FRAMES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .iter()
-        .copied()
-        .any(|frame| windowed_frame_contains(frame, point))
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn native_windowed_page_contains_point(_: f32, _: f32) -> bool {
-    false
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct WindowedHoverRefreshFrame {
     left_px: f32,
@@ -837,101 +809,12 @@ pub fn native_command_bar_is_open() -> bool {
     native_command_bar_route().owns_input
 }
 
-#[cfg(target_os = "macos")]
-pub fn native_command_bar_contains_point(x_px: f32, y_px: f32) -> bool {
-    native_command_bar_local_position(x_px, y_px).is_some()
-}
-
-#[cfg(not(target_os = "macos"))]
-pub fn native_command_bar_contains_point(_: f32, _: f32) -> bool {
-    false
-}
-
 pub fn set_native_left_mouse_down(down: bool) {
     NATIVE_LEFT_MOUSE_DOWN.store(down, Ordering::Relaxed);
 }
 
 pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
-}
-
-#[cfg(target_os = "macos")]
-fn native_command_bar_local_position(x_px: f32, y_px: f32) -> Option<Vec2> {
-    let route = native_command_bar_route();
-    if !route.owns_input {
-        return None;
-    }
-    let frame = route
-        .frame
-        .filter(|frame| command_bar_windowed_frame_contains(*frame, Vec2::new(x_px, y_px)))?;
-    let scale = route.scale.max(1.0e-6);
-    Some(Vec2::new(
-        (x_px - frame.left_px) / scale,
-        (y_px - frame.top_px) / scale,
-    ))
-}
-
-#[cfg(target_os = "macos")]
-pub fn queue_native_command_bar_pointer_move(
-    x_px: f32,
-    y_px: f32,
-    buttons: NativeMouseButtons,
-) -> bool {
-    let Some(position) = native_command_bar_local_position(x_px, y_px) else {
-        return false;
-    };
-    NATIVE_COMMAND_BAR_POINTER_EVENTS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(NativeCommandBarPointerEvent::Move { position, buttons });
-    true
-}
-
-#[cfg(target_os = "macos")]
-pub fn queue_native_command_bar_pointer_button(
-    x_px: f32,
-    y_px: f32,
-    button: u8,
-    released: bool,
-) -> bool {
-    let Some(position) = native_command_bar_local_position(x_px, y_px) else {
-        return false;
-    };
-    let button = match button {
-        1 => PointerButton::Secondary,
-        2 => PointerButton::Middle,
-        _ => PointerButton::Primary,
-    };
-    NATIVE_COMMAND_BAR_POINTER_EVENTS
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(NativeCommandBarPointerEvent::Button {
-            position,
-            button,
-            released,
-        });
-    true
-}
-
-#[cfg(target_os = "macos")]
-fn windowed_frames_union(frames: &[WindowedFrameRect]) -> Option<WindowedFrameRect> {
-    let first = *frames.first()?;
-    let mut left = first.left;
-    let mut top = first.top;
-    let mut right = first.right();
-    let mut bottom = first.bottom();
-    for frame in &frames[1..] {
-        left = left.min(frame.left);
-        top = top.min(frame.top);
-        right = right.max(frame.right());
-        bottom = bottom.max(frame.bottom());
-    }
-    Some(WindowedFrameRect {
-        left,
-        top,
-        width: right - left,
-        height: bottom - top,
-    })
 }
 
 fn command_bar_windowed_click_should_dismiss(

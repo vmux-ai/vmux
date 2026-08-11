@@ -447,8 +447,8 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         let location = event_location_in_window_physical_px(ev);
         let pointer_position_changed = motion || button_event;
         let was_over_windowed_page = NATIVE_WINDOWED_POINTER_INSIDE.load(Ordering::Relaxed);
-        let sampled_over_windowed_page =
-            location.is_some_and(|(x, y)| vmux_browser::native_windowed_page_contains_point(x, y));
+        let sampled_over_windowed_page = location
+            .is_some_and(|(x, y)| vmux_browser::NativeBridge::windowed_page_contains_point(x, y));
         let over_windowed_page = windowed_pointer_inside_after_event(
             pointer_position_changed,
             was_over_windowed_page,

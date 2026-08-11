@@ -7,18 +7,14 @@
 use bevy::{
     ecs::relationship::Relationship,
     material::AlphaMode,
-    picking::pointer::PointerButton,
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
     window::{PrimaryWindow, WindowResized},
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-#[cfg(target_os = "macos")]
-use bevy_cef_core::prelude::NativeMouseButtons;
 use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use std::sync::atomic::Ordering;
-use std::sync::{LazyLock, Mutex};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -41,9 +37,13 @@ use vmux_setting::AppSettings;
 
 use crate::{
     CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap,
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED, NATIVE_COMMAND_BAR_ROUTE, NATIVE_WINDOWED_PAGE_FRAMES,
-    VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb, windowed_frames_union,
+    NATIVE_COMMAND_BAR_DISMISS_REQUESTED, NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb,
+    decode_premultiplied, hex_to_rgb,
 };
+
+#[cfg(target_os = "macos")]
+use crate::native_bridge::CommandBarPointerEvent;
+use crate::native_bridge::NativeBridge;
 
 pub(crate) struct PresentPlugin;
 
@@ -590,7 +590,7 @@ pub(crate) fn sync_windowed_frames(
     }
     *last_visible_pages = visible;
     *last_windowed_pages = current_windowed;
-    *visible_frames = set_native_windowed_page_frames(std::mem::take(&mut *visible_frames));
+    *visible_frames = NativeBridge::set_windowed_page_frames(std::mem::take(&mut *visible_frames));
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WindowedFrameRect {
@@ -607,20 +607,6 @@ impl WindowedFrameRect {
     pub(crate) fn bottom(self) -> f32 {
         self.top + self.height
     }
-}
-#[cfg(target_os = "macos")]
-fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
-    let mut published = NATIVE_WINDOWED_PAGE_FRAMES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    std::mem::swap(&mut *published, &mut frames);
-    frames.clear();
-    frames
-}
-#[cfg(not(target_os = "macos"))]
-fn set_native_windowed_page_frames(mut frames: Vec<WindowedFrameRect>) -> Vec<WindowedFrameRect> {
-    frames.clear();
-    frames
 }
 fn windowed_frame_rect_from_computed(
     computed: &ComputedNode,
@@ -742,10 +728,6 @@ pub(crate) struct CommandBarWindowedFrame {
     pub(crate) height_px: f32,
 }
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-#[cfg(target_os = "macos")]
-pub(crate) static NATIVE_COMMAND_BAR_POINTER_EVENTS: LazyLock<
-    Mutex<Vec<NativeCommandBarPointerEvent>>,
-> = LazyLock::new(|| Mutex::new(Vec::new()));
 pub(crate) fn publish_native_command_bar_route(
     owns_input: bool,
     frame: Option<CommandBarWindowedFrame>,
@@ -764,19 +746,6 @@ pub(crate) fn publish_native_command_bar_route(
     if !owns_input {
         NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
     }
-}
-#[cfg(target_os = "macos")]
-#[derive(Clone, Copy)]
-pub(crate) enum NativeCommandBarPointerEvent {
-    Move {
-        position: Vec2,
-        buttons: NativeMouseButtons,
-    },
-    Button {
-        position: Vec2,
-        button: PointerButton,
-        released: bool,
-    },
 }
 pub(crate) fn command_bar_windowed_frame(
     window_width_px: f32,
@@ -831,17 +800,6 @@ pub(crate) fn command_bar_windowed_frame(
         width_px: box_w * scale,
         height_px: box_h * scale,
     })
-}
-#[cfg(target_os = "macos")]
-fn native_windowed_page_bounds() -> Option<WindowedFrameRect> {
-    let frames = NATIVE_WINDOWED_PAGE_FRAMES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    windowed_frames_union(&frames)
-}
-#[cfg(not(target_os = "macos"))]
-fn native_windowed_page_bounds() -> Option<WindowedFrameRect> {
-    None
 }
 fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
     browsers.set_windowed_hidden(&entity, true);
@@ -939,7 +897,7 @@ pub(crate) fn sync_windowed_command_bar(
             window.resolution.physical_height() as f32,
             scale,
             native_size.map(|size| Vec2::new(size.shell_width, size.shell_height)),
-            native_windowed_page_bounds(),
+            NativeBridge::windowed_page_bounds(),
         ) else {
             hide_windowed_command_bar(&browsers, entity);
             return;
@@ -972,7 +930,7 @@ pub(crate) fn sync_windowed_command_bar(
         window.resolution.physical_height() as f32,
         scale,
         measured,
-        native_windowed_page_bounds(),
+        NativeBridge::windowed_page_bounds(),
     ) else {
         publish_native_command_bar_route(owns_input, None, scale);
         hide_windowed_command_bar(&browsers, entity);
@@ -1015,18 +973,12 @@ fn flush_native_command_bar_pointer_events(
     let Ok(entity) = modal_q.single() else {
         return;
     };
-    let events = {
-        let mut pending = NATIVE_COMMAND_BAR_POINTER_EVENTS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut *pending)
-    };
-    for event in events {
+    for event in NativeBridge::drain_command_bar_pointer_events() {
         match event {
-            NativeCommandBarPointerEvent::Move { position, buttons } => {
+            CommandBarPointerEvent::Move { position, buttons } => {
                 browsers.send_native_mouse_move(&entity, buttons, position, false);
             }
-            NativeCommandBarPointerEvent::Button {
+            CommandBarPointerEvent::Button {
                 position,
                 button,
                 released,
@@ -1482,7 +1434,7 @@ mod tests {
     use crate::{
         command_bar_windowed_click_should_dismiss, native_command_bar_route,
         request_native_command_bar_dismiss, request_native_command_bar_dismiss_for_mouse_down,
-        take_native_command_bar_dismiss_requested, windowed_frame_contains,
+        take_native_command_bar_dismiss_requested,
     };
     use bevy::input::ButtonState;
 
@@ -1904,10 +1856,13 @@ mod tests {
             height: 300.0,
         };
 
-        assert!(windowed_frame_contains(frame, Vec2::new(100.0, 50.0)));
-        assert!(windowed_frame_contains(frame, Vec2::new(500.0, 350.0)));
-        assert!(!windowed_frame_contains(frame, Vec2::new(99.0, 200.0)));
-        assert!(!windowed_frame_contains(frame, Vec2::new(300.0, 351.0)));
+        assert!(NativeBridge::frame_contains(frame, Vec2::new(100.0, 50.0)));
+        assert!(NativeBridge::frame_contains(frame, Vec2::new(500.0, 350.0)));
+        assert!(!NativeBridge::frame_contains(frame, Vec2::new(99.0, 200.0)));
+        assert!(!NativeBridge::frame_contains(
+            frame,
+            Vec2::new(300.0, 351.0)
+        ));
     }
     #[test]
     fn command_bar_windowed_frame_uses_measured_height() {
