@@ -70,7 +70,17 @@ pub(crate) struct AgentBrowserResolve<'w, 's> {
     >,
     kinds: Query<'w, 's, &'static AgentSession>,
     child_of: Query<'w, 's, &'static ChildOf>,
-    panes: Query<'w, 's, (), With<vmux_layout::pane::Pane>>,
+    /// Leaves only. Splitting a pane keeps `Pane` on the node it split and adds `PaneSplit`,
+    /// so a recorded entity can still exist while no longer being a pane anything lives in.
+    leaf_panes: Query<
+        'w,
+        's,
+        (),
+        (
+            With<vmux_layout::pane::Pane>,
+            Without<vmux_layout::pane::PaneSplit>,
+        ),
+    >,
 }
 
 impl AgentBrowserResolve<'_, '_> {
@@ -84,14 +94,16 @@ impl AgentBrowserResolve<'_, '_> {
         self.child_of.get(term_co.get()).ok().map(|co| co.get())
     }
 
-    /// The browser pane recorded for this agent, if it still exists. A pane the user has since
-    /// closed leaves the component behind, so the entity is checked rather than trusted.
+    /// The browser pane recorded for this agent, if it is still one. The component outlives
+    /// both closing the pane and splitting it, so the entity is checked rather than trusted.
     fn browser_pane_for(&self, anchor: ProcessId) -> Option<AgentBrowserPane> {
         let (_, _, _, recorded) = self
             .agent_terms
             .iter()
             .find(|(_, pid, ..)| **pid == anchor)?;
-        recorded.copied().filter(|it| self.panes.contains(it.pane))
+        recorded
+            .copied()
+            .filter(|it| self.leaf_panes.contains(it.pane))
     }
 
     /// The kind of the agent at `anchor` (Claude/Codex/Vibe), for its avatar badge.
@@ -220,6 +232,52 @@ mod tests {
         app.update();
 
         assert_eq!(app.world().resource::<Claimed>().0, Some(pane));
+    }
+
+    /// Splitting the recorded pane leaves `Pane` on it and adds `PaneSplit`, so it still exists
+    /// but is no longer somewhere a stack lives. Handing it back would target a split node.
+    #[test]
+    fn a_recorded_pane_that_has_since_been_split_is_not_claimed() {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            vmux_layout::LayoutContractPlugin,
+            AgentBrowserPanePlugin,
+        ))
+        .init_resource::<Claimed>()
+        .add_systems(Update, claim.after(record_opened_browser_pane));
+
+        let anchor = ProcessId::new();
+        app.insert_resource(Anchor(anchor));
+        let pane = app.world_mut().spawn(Pane).id();
+        let stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        let agent_stack = app
+            .world_mut()
+            .spawn(vmux_layout::stack::stack_bundle())
+            .id();
+        app.world_mut().spawn((anchor, ChildOf(agent_stack)));
+
+        app.world_mut()
+            .resource_mut::<Messages<vmux_layout::PaneOpenedForProfile>>()
+            .write(vmux_layout::PaneOpenedForProfile {
+                profile: profile_key(anchor),
+                pane,
+                stack,
+            });
+        app.update();
+        assert_eq!(app.world().resource::<Claimed>().0, Some(pane));
+
+        app.world_mut()
+            .entity_mut(pane)
+            .insert(vmux_layout::pane::PaneSplit {
+                direction: vmux_layout::pane::PaneSplitDirection::Row,
+            });
+        app.update();
+
+        assert_eq!(app.world().resource::<Claimed>().0, None);
     }
 
     /// A report for somebody else must not become this agent's pane.
