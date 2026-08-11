@@ -421,7 +421,7 @@ pub(super) fn handle_agent_commands(
                         ..
                     } = &request.origin
                 {
-                    profile = Some(format!("{anchor:?}"));
+                    profile = Some(super::browser_pane::profile_key(*anchor));
                     if let Some((browser_pane, _)) = writers.browse.claim_browser_pane(*anchor) {
                         pane = Some(browser_pane.to_bits().to_string());
                         new_stack = true;
@@ -432,6 +432,7 @@ pub(super) fn handle_agent_commands(
                             url: url.clone(),
                             request_id: request.request_id.0,
                             focus: false,
+                            profile: Some(super::browser_pane::profile_key(*anchor)),
                         });
                         continue;
                     } else {

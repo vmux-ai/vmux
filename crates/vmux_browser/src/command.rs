@@ -382,6 +382,7 @@ fn on_side_sheet_command_emit(
                 url,
                 request_id: [0; 16],
                 focus: true,
+                profile: None,
             });
         }
         "open_tools" => {

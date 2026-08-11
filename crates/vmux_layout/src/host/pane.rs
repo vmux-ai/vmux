@@ -54,6 +54,7 @@ impl Plugin for PanePlugin {
             .add_systems(Update, handle_pane_commands.in_set(ReadAppCommands))
             .add_systems(Update, handle_open_in_pane.in_set(ReadAppCommands))
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_systems(Update, handle_open_beside_requests)
             .add_systems(
                 Update,
@@ -988,6 +989,21 @@ pub struct OpenBesideRequest {
     pub url: String,
     pub request_id: [u8; 16],
     pub focus: bool,
+    /// Names whoever asked, so they can be told which pane they got. Layout never interprets it
+    /// — it is the same key [`ActivePanes`](crate::active_panes::ActivePanes) is indexed by.
+    pub profile: Option<String>,
+}
+
+/// A pane opened beside another on behalf of `profile`.
+///
+/// The requester cannot see the entity it asked for, because the pane is spawned later by
+/// whoever handles [`OpenBesideRequest`]. This is how it finds out, so it can record the
+/// relationship instead of searching the tree for it on every question.
+#[derive(Message, Clone, Debug)]
+pub struct PaneOpenedForProfile {
+    pub profile: String,
+    pub pane: Entity,
+    pub stack: Entity,
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -1011,6 +1027,7 @@ pub fn handle_open_beside_requests(
     rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
+    mut opened: MessageWriter<PaneOpenedForProfile>,
     mut new_stack_ctx: ResMut<NewStackContext>,
     mut spawn_counter: ResMut<SpawnCounter>,
 ) {
@@ -1137,6 +1154,7 @@ pub fn handle_open_beside_requests(
                 &mut pending_leaf_stacks,
                 pending_size,
                 refresh_spawn_seq,
+                &mut opened,
             );
             pending_open_stacks.push((req.url.clone(), stack));
             continue;
@@ -1156,6 +1174,7 @@ pub fn handle_open_beside_requests(
                 &mut pending_leaf_stacks,
                 pane_size(req.pane, &rc.node_q),
                 false,
+                &mut opened,
             );
             pending_open_stacks.push((req.url.clone(), stack));
             continue;
@@ -1199,6 +1218,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_stacks,
                     pane_size(pane, &rc.node_q),
                     refresh_spawn_seq,
+                    &mut opened,
                 );
                 pending_open_stacks.push((req.url.clone(), stack));
             }
@@ -1249,6 +1269,7 @@ pub fn handle_open_beside_requests(
                     &mut pending_leaf_stacks,
                     pending_size,
                     false,
+                    &mut opened,
                 );
                 pending_open_stacks.push((req.url.clone(), stack));
             }
@@ -1409,6 +1430,7 @@ fn spawn_beside_stack(
     pending_leaf_stacks: &mut std::collections::HashMap<Entity, Vec<Entity>>,
     pending_size: Vec2,
     refresh_spawn_seq: bool,
+    opened: &mut MessageWriter<PaneOpenedForProfile>,
 ) -> Entity {
     let spawn_seq = if refresh_spawn_seq {
         let seq = touch_pane_spawn_seq(target_pane, commands, spawn_counter, seq_q);
@@ -1448,6 +1470,13 @@ fn spawn_beside_stack(
         new_stack_ctx,
         page_open_requests,
     );
+    if let Some(profile) = req.profile.clone() {
+        opened.write(PaneOpenedForProfile {
+            profile,
+            pane: target_pane,
+            stack: new_stack,
+        });
+    }
     new_stack
 }
 
@@ -2805,6 +2834,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -2841,6 +2871,7 @@ mod tests {
                 url: "file:///x.rs".to_string(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -2868,6 +2899,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -2885,6 +2917,7 @@ mod tests {
                 url: "file:///x.rs".to_string(),
                 request_id: [0u8; 16],
                 focus: true,
+                profile: None,
             });
         app.update();
 
@@ -2964,6 +2997,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -2998,6 +3032,7 @@ mod tests {
                 url: "https://b.com".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3060,6 +3095,7 @@ mod tests {
                     url: url.into(),
                     request_id: [0u8; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();
@@ -3123,6 +3159,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();
@@ -3220,6 +3257,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();
@@ -3291,6 +3329,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();
@@ -3359,6 +3398,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
             app.update();
             materialize_page_metadata(&mut app);
@@ -3434,6 +3474,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
             app.update();
             materialize_page_metadata(&mut app);
@@ -3447,6 +3488,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [9; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3524,6 +3566,7 @@ mod tests {
                 url: "file:///repo/README.md".into(),
                 request_id: [9; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3591,6 +3634,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
             app.update();
             materialize_page_metadata(&mut app);
@@ -3668,6 +3712,7 @@ mod tests {
                     url: url.into(),
                     request_id: [i as u8; 16],
                     focus: false,
+                    profile: None,
                 });
             app.update();
             materialize_page_metadata(&mut app);
@@ -3733,6 +3778,7 @@ mod tests {
                     url: "https://github.com/vmux-ai/vmux/pull/221".into(),
                     request_id: [i; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();
@@ -3779,6 +3825,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux/pull/221".into(),
                 request_id: [0; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3808,6 +3855,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux/pull/221".into(),
                 request_id: [1; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3853,6 +3901,7 @@ mod tests {
                 url: "file:///repo/crates/vmux_agent/src/plugin.rs".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.world_mut()
             .resource_mut::<Messages<OpenBesideRequest>>()
@@ -3862,6 +3911,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [1u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3920,6 +3970,7 @@ mod tests {
                 url: "file:///x.rs".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -3966,6 +4017,7 @@ mod tests {
                 url: "https://a.com".into(),
                 request_id: [0u8; 16],
                 focus: true,
+                profile: None,
             });
         app.update();
 
@@ -4021,6 +4073,7 @@ mod tests {
                 url: "file:///repo/src/main.rs#L42".into(),
                 request_id: [0u8; 16],
                 focus: true,
+                profile: None,
             });
         app.update();
 
@@ -4068,6 +4121,7 @@ mod tests {
                 url: "file:///repo/src/main.rs#L42".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4123,6 +4177,7 @@ mod tests {
                 url: "file:///repo/src/main.rs#L42".into(),
                 request_id: [0u8; 16],
                 focus: true,
+                profile: None,
             });
         app.update();
 
@@ -4184,6 +4239,7 @@ mod tests {
                 url: "file:///repo/src/main.rs#L42".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4223,6 +4279,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4234,6 +4291,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [1u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4301,6 +4359,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.world_mut()
             .resource_mut::<Messages<OpenBesideRequest>>()
@@ -4310,6 +4369,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [1u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4377,6 +4437,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -4441,6 +4502,7 @@ mod tests {
                 url: "https://github.com/vmux-ai/vmux".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -6104,6 +6166,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -6124,6 +6187,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [0u8; 16],
                 focus: true,
+                profile: None,
             });
         app.update();
 
@@ -6138,6 +6202,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -6158,6 +6223,7 @@ mod tests {
                 url: "vmux://terminal/".into(),
                 request_id: [0u8; 16],
                 focus: false,
+                profile: None,
             });
         app.update();
 
@@ -6175,6 +6241,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
+            .add_message::<PaneOpenedForProfile>()
             .add_message::<PageOpenRequest>()
             .init_resource::<NewStackContext>()
             .init_resource::<SpawnCounter>()
@@ -6202,6 +6269,7 @@ mod tests {
                     url: "vmux://terminal/".into(),
                     request_id: [0u8; 16],
                     focus: false,
+                    profile: None,
                 });
         }
         app.update();

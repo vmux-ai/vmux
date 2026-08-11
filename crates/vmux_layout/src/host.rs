@@ -52,7 +52,7 @@ pub use cef::{
 };
 pub use contract::LayoutContractPlugin;
 pub use header::Header;
-pub use pane::{OpenBesideRequest, handle_open_beside_requests};
+pub use pane::{OpenBesideRequest, PaneOpenedForProfile, handle_open_beside_requests};
 pub use plugin::LayoutPlugin;
 pub use stack::CloseStackRequest;
 pub use webview_reveal::PendingWebviewReveal;

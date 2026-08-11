@@ -79,6 +79,7 @@ impl Plugin for AgentSessionPlugin {
                 crate::command_bar::CommandBarPlugin,
                 super::attach::AttachPlugin,
                 super::attention::AttentionPlugin,
+                super::browser_pane::AgentBrowserPanePlugin,
                 super::command::CommandPlugin,
                 super::follow::FollowPlugin,
                 super::page_open::PageOpenPlugin,
