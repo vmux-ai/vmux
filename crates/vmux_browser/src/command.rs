@@ -409,3 +409,50 @@ fn on_side_sheet_command_emit(
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vmux_layout::pane::Pane;
+    use vmux_layout::stack::stack_bundle;
+
+    /// Closing a stack from the side sheet has to go through the stack command, so that
+    /// whatever else closing entails happens too. Hiding the window here instead would look
+    /// right and skip all of it. A deleted source-scan test used to assert this by reading
+    /// the match arm; this drives the event and reads the command.
+    #[test]
+    fn side_sheet_close_routes_through_the_stack_command() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, vmux_layout::LayoutContractPlugin))
+            .add_message::<AppCommand>()
+            .add_message::<vmux_command::CommandIssued>()
+            .init_resource::<PaneHoverIntent>()
+            .add_observer(on_side_sheet_command_emit);
+
+        let pane = app.world_mut().spawn(Pane).id();
+        let stack = app.world_mut().spawn((stack_bundle(), ChildOf(pane))).id();
+
+        app.world_mut()
+            .trigger(BinReceive::<SideSheetCommandEvent> {
+                webview: Entity::PLACEHOLDER,
+                payload: SideSheetCommandEvent {
+                    command: "close_stack".to_string(),
+                    pane_id: pane.to_bits().to_string(),
+                    stack_index: 0,
+                    path: String::new(),
+                },
+            });
+        app.world_mut().flush();
+
+        let commands = app.world().resource::<Messages<AppCommand>>();
+        let mut cursor = commands.get_cursor();
+        let sent: Vec<&AppCommand> = cursor.read(commands).collect();
+        assert_eq!(
+            sent,
+            vec![&AppCommand::Layout(LayoutCommand::Stack(
+                StackCommand::Close
+            ))],
+        );
+        assert!(app.world().get::<LastActivatedAt>(stack).is_some());
+    }
+}
