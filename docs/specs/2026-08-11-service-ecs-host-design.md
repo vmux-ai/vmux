@@ -30,7 +30,7 @@ What is genuinely missing is that the daemon has no `World`, and the state it do
 
 ## Ownership after
 
-- `vmux_session` — session and room components. Bevy-free of everything but `bevy_ecs`. No CEF, no render.
+- `vmux_session` — the session and room components. Depends on `bevy_ecs` and nothing that renders.
 - `vmux_service` — headless Bevy app. Authority for sessions, ACP, processes, agent roster, team.
 - `vmux_agent` — page plumbing for the local client. Subscribes; no longer owns.
 - `vmux_host` — `vmux_service` composed for a machine that never has a local client.
@@ -52,19 +52,72 @@ cargo tree -p vmux_host    -i bevy_cef   # must find nothing
 
 A test cannot catch a link-level feature leak, so this has to be a job. It also has to be a *new* job: the Linux runs install the CEF framework before building, so nothing in CI currently proves any crate can be built without it. The lean-desktop-features steps (`ci.yml:122`, `:190`) are the precedent to copy.
 
-## Runtime model
+## Component model
+
+All host state is components on entities. The rule that drives the decomposition:
+
+**Every `Arc<Mutex<T>>` in the current handles exists to share one field between a spawned task and its readers.** The World is that sharing mechanism, so each field becomes a component and the wrapper disappears. `SessionHandle` alone carries four of them.
+
+### Agent session
+
+`SessionHandle` (`host/agent.rs:56`), ten fields, becomes one entity:
+
+| Component | From |
+| --- | --- |
+| `AgentSession { sid, provider, model, cwd, created_at }` | the descriptor fields; mirrors the component the client already has |
+| `AgentMessages(Vec<Message>)` | `messages: Arc<Mutex<Vec<Message>>>`, owned and unwrapped |
+| `AgentRunStatus` | `status: Arc<StdMutex<…>>` |
+| `PendingApproval(RemoteApproval)` | `approval: Arc<StdMutex<Option<…>>>` |
+| `SessionInbox(UnboundedSender<SessionInput>)` | `input_tx` |
+| `SessionFanout(broadcast::Sender<ServiceMessage>)` | `stream_tx` |
+| `SessionTask(JoinHandle<()>)` | `task` |
+
+`Option` fields become component presence. `PendingApproval` absent means nothing is waiting, and the system that answers approvals queries for it rather than testing a field on a struct it had to lock first.
+
+### ACP session
+
+`AcpHandle` (`host/acp.rs:24`) is the same shape around `Arc<AcpShared>`: `AcpSession`, `AcpInbox`, `AcpTask`, and a relationship to the anchor process in place of the `anchor: ProcessId` field. Component names take the `Inbox` suffix rather than `Input`, because `SessionInput` and `AcpInput` are already the message types they carry.
+
+### Process
+
+`Process` (`host/process.rs:195`) is the god-struct — twenty-five fields spanning five unrelated concerns:
+
+| Component | Fields |
+| --- | --- |
+| `Process { id, shell, cwd, pid, created_at }` | identity |
+| `Pty { master, child, writer, rx }` | the OS handles |
+| `TerminalGrid { term, processor, line_hashes, win_hashes }` | the parsed screen |
+| `ShellIntegration { osc133, run_marker, last_command_exit, … }` | OSC 133 and run markers |
+| `ProcessFanout(broadcast::Sender<ServiceMessage>)` | `patch_tx` |
+
+**Viewport does not belong on the process at all.** `view_top`, `following`, `last_win`, `last_cursor`, `last_passthrough` and `selection` are single-valued on `Process` while `patch_tx` fans out to every attached client, so `handle_scroll_window` (`host/process.rs:1163`) moves the window for all of them. That is latent today because only the desktop renders terminals; it goes live the moment a second client does. Those fields belong on a subscription entity, one per attached client.
+
+Decomposition surfacing that is the argument that this is not tidying.
+
+### Requests in flight
+
+`pending_commands`, `pending_queries` and `pending_tool_calls` are three `HashMap<AgentRequestId, oneshot::Sender<…>>` (`host/agent_broker.rs:13`). Each in-flight request becomes an entity carrying `RequestId`, `Responder` and `Deadline`, related to the session that issued it.
+
+Timeouts stop being a per-request `tokio::time::timeout` and become one system querying `Deadline`. Despawning a session takes its in-flight requests with it.
+
+### Composition over id fields
+
+`ChildOf`/`Children` is already the idiom here — over a thousand call sites. Prefer relationships to stored ids:
 
 ```text
-World (vmux_service)
-├── AgentSession        sid, provider, model  ── AgentSessionHandle (task, channels)
-├── AcpSession          agent_id, sid, cwd    ── AcpHandle
-├── Process             ProcessId             ── PtyHandle (master, child, grid)
-├── ChatRoom            RoomId                ── RoomProjection
-├── InstalledAgent      roster entry
-└── TeamMember
+ChatRoom ─── RoomMember
+AgentSession ─── Request        (in flight, despawned with the session)
+             └── Subscription   (one per attached client, owns the viewport)
+AcpSession ─── anchor Process
 ```
 
-The registries become archetypes. `RemoteState` stops holding `Arc<Mutex<…>>` and sends typed messages into the world, which is the integration pattern the repo already mandates.
+## Resources
+
+A `Resource` is for a process-wide singleton with no per-entity identity: the Tokio runtime handle, the wake sender, profile paths. Never a collection of domain state.
+
+`AgentSessionManager`, `AcpSessionManager` and `ProcessManager` therefore do not become resources. **The `HashMap` is the archetype.** What survives each is a thin index — `SessionIndex(HashMap<String, Entity>)`, `ProcessIndex(HashMap<ProcessId, Entity>)` — maintained by observers on spawn and despawn. An index holds entity ids and nothing else. The moment a field would be read off an index rather than looked up through it, that field belongs on a component.
+
+`RemoteState` (`remote/server.rs:38`) dissolves the same way. `token` and `paired` are process-wide and stay; `agents`, `acp` and `client_ops` become queries.
 
 ## The headless runner
 
@@ -87,12 +140,14 @@ The service gains the work and the shape. It does not gain a view.
 Each stage keeps macOS working and CI green.
 
 1. **Cut `vmux_session`.** Move the session and room components out of `vmux_agent`; re-export them so no caller changes. Add the `cargo tree` job. No behaviour change.
-2. **Give the daemon a `World`.** `vmux_service` becomes a Bevy app with `MinimalPlugins` and the wake-driven runner. The Tokio runtime becomes a resource; the accept loop stays where it is. Nothing moves into ECS yet. Record idle CPU here — it is the baseline every later stage is judged against.
-3. **Move handles onto entities.** Replace the three registries with archetypes. `Send + Sync + 'static` is the constraint to watch; `portable_pty`'s master is the one to check first.
-4. **Move workspace shape off the client.** `ListAgents` and `ListTeam` become reads of service state. `AgentBroker` and `SharedFailure::NoDesktop` are deleted. The local client subscribes to what it used to own.
-5. **Compose `vmux_host`.** Minimal plugins, session plugins, QUIC remote. No new logic, plus the Linux build job.
+2. **Give the daemon a `World`.** `vmux_service` becomes a Bevy app with `MinimalPlugins` and the wake-driven runner. The Tokio runtime becomes a resource; the accept loop stays where it is. No state moves yet. Record idle CPU here — it is the baseline every later stage is judged against.
+3. **Spawn entities alongside the maps.** Descriptor components only, written when a session or process is created. The maps stay authoritative and nothing reads the components yet. This proves the model and the `Send + Sync + 'static` bounds at zero risk; `portable_pty`'s master is the one to check first.
+4. **Move the handles, delete the managers.** Channels, tasks and grids move onto the entities; readers switch to queries; the three registries and their `Arc<Mutex<…>>` go. In-flight requests become entities with a `Deadline` system.
+5. **Split viewport onto subscriptions.** The one behaviour change in the sequence, and the one to flag in review: per-client viewport instead of one window shared by every attached client.
+6. **Move workspace shape off the client.** `ListAgents` and `ListTeam` become reads of service state. `AgentBroker` and `SharedFailure::NoDesktop` are deleted. The local client subscribes to what it used to own.
+7. **Compose `vmux_host`.** Minimal plugins, session plugins, QUIC remote. No new logic, plus the Linux build job.
 
-Stages 1–3 are reversible. Stage 4 inverts ownership and is the one to land alone if the diff argues for it.
+Stages 1–4 are reversible refactors. Stage 5 changes behaviour and stage 6 inverts ownership; either is worth landing alone if the diff argues for it.
 
 ## Cloud pairing is unresolved
 
