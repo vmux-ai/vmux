@@ -4,10 +4,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::command_bar::keyboard::{
-    CtrlEditAction, CtrlKeyCapture, byte_offset_to_utf16, caret_scroll_left,
-    ctrl_key_capture_for_code, floor_char_boundary, utf16_offset_to_byte,
-};
+use crate::command_bar::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
     prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
@@ -35,6 +32,7 @@ use vmux_command::prompt_media::{
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_start::row::ResultRow;
 use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::caret::TextCaret;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
@@ -310,9 +308,7 @@ impl PaletteKeys {
         };
         let input: web_sys::HtmlInputElement = element.unchecked_into();
         input.set_value(&completed);
-        let caret = completed.len() as u32;
-        let _ = input.set_selection_range(caret, caret);
-        ensure_caret_visible(&input, completed.len());
+        TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(completed.len());
     }
 }
 
@@ -1549,7 +1545,7 @@ fn focus_and_install_ctrl_bindings() {
     };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
     FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
-    select_all_on_open(&input);
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
 
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
         .map(|v| v.is_truthy())
@@ -1561,7 +1557,7 @@ fn focus_and_install_ctrl_bindings() {
 
     let input2 = input.clone();
     let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
-        if handle_plain_meta_a(&e, &input2) {
+        if handle_plain_meta_a(&e) {
             return;
         }
         if !e.ctrl_key() {
@@ -1591,33 +1587,29 @@ fn focus_and_install_ctrl_bindings() {
     closure.forget();
 }
 
-/// Run a readline edit against the input, then put the caret back and scroll it into view.
+/// Run a readline edit against the input, then put the caret where it landed.
 ///
-/// The arithmetic is [`CtrlEditAction::apply`]'s; what is left here is the part that needs the
-/// element. The caret crosses that boundary twice because the DOM counts UTF-16 code units and
-/// the edits count bytes, and the new value has to be written to the element directly and Dioxus
-/// told afterwards, since the input is uncontrolled and Dioxus does not see a change it did not
-/// make.
+/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. What is left
+/// here is writing the value to the element and telling Dioxus afterwards, which is only
+/// necessary because the input is uncontrolled: Dioxus does not see a change it did not make.
+/// Both of those lines go away when it becomes controlled.
 fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
+    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
     let value = input.value();
-    let caret_utf16 = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
-    let caret = utf16_offset_to_byte(&value, caret_utf16);
     let ghost = match action {
         CtrlEditAction::End => input.get_attribute("data-ghost").unwrap_or_default(),
         _ => String::new(),
     };
 
-    let edited = action.apply(&value, caret, &ghost);
+    let edited = action.apply(&value, caret.position(), &ghost);
     let changed = edited.value != value;
     if changed {
         input.set_value(&edited.value);
     }
-    let caret = byte_offset_to_utf16(&edited.value, edited.caret);
-    let _ = input.set_selection_range(caret, caret);
+    caret.place(edited.caret);
     if changed {
         dispatch_input_event(input);
     }
-    ensure_caret_visible(input, edited.caret);
 }
 
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
@@ -1664,87 +1656,14 @@ fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
     closure.forget();
 }
 
-/// Select the whole query one animation frame after open so Cmd+L reveals the current URL
-/// ready to overtype. The query signal is populated by a sibling effect that re-renders the
-/// input `value`; selecting synchronously here would catch the still-empty value and leave
-/// nothing highlighted.
-fn select_all_on_open(input: &web_sys::HtmlInputElement) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let input = input.clone();
-    let cb = Closure::once_into_js(move || {
-        input.focus().ok();
-        let len = input.value().len() as u32;
-        let _ = input.set_selection_range(0, len);
-        input.set_scroll_left(0);
-    });
-    let _ = window.request_animation_frame(cb.unchecked_ref());
-}
-
-/// Scroll the command-bar input so the caret at byte offset `caret` is visible. Programmatic
-/// caret moves (Ctrl+E/A/F/B, deletes, Tab-complete) bypass Chromium's native caret-follow,
-/// so on a long URL the caret would otherwise sit off-screen.
-fn ensure_caret_visible(input: &web_sys::HtmlInputElement, caret: usize) {
-    let value = input.value();
-    let caret = floor_char_boundary(&value, caret);
-    let Some((viewport, caret_px)) = caret_metrics(input, &value[..caret]) else {
-        return;
-    };
-    if let Some(scroll_left) =
-        caret_scroll_left(caret_px, viewport, input.scroll_left() as f64, 8.0)
-    {
-        input.set_scroll_left(scroll_left as i32);
-    }
-}
-
-/// The input's usable text viewport width and the pixel offset of `prefix` in the input's
-/// current font (measured on an offscreen canvas). `None` if the canvas/context or computed
-/// font is unavailable.
-fn caret_metrics(input: &web_sys::HtmlInputElement, prefix: &str) -> Option<(f64, f64)> {
-    let window = web_sys::window()?;
-    let document = window.document()?;
-    let style = window.get_computed_style(input).ok()??;
-    let font_size = style.get_property_value("font-size").unwrap_or_default();
-    let font_family = style.get_property_value("font-family").unwrap_or_default();
-    if font_size.is_empty() || font_family.is_empty() {
-        return None;
-    }
-    let font_weight = style.get_property_value("font-weight").unwrap_or_default();
-    let font_style = style.get_property_value("font-style").unwrap_or_default();
-    let canvas: web_sys::HtmlCanvasElement =
-        document.create_element("canvas").ok()?.unchecked_into();
-    let ctx: web_sys::CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
-    ctx.set_font(format!("{font_style} {font_weight} {font_size} {font_family}").trim());
-    let caret_px = ctx.measure_text(prefix).ok()?.width();
-    let pad_left = css_px(&style.get_property_value("padding-left").unwrap_or_default());
-    let pad_right = css_px(
-        &style
-            .get_property_value("padding-right")
-            .unwrap_or_default(),
-    );
-    let viewport = (input.client_width() as f64 - pad_left - pad_right).max(1.0);
-    caret_px.is_finite().then_some((viewport, caret_px))
-}
-
-/// Parse a computed `<n>px` length to `f64`, defaulting to `0.0`.
-fn css_px(value: &str) -> f64 {
-    value
-        .trim()
-        .strip_suffix("px")
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|v| v.is_finite())
-        .unwrap_or(0.0)
-}
-
-fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputElement) -> bool {
+/// Cmd+A with no other modifier selects the query rather than the page.
+fn handle_plain_meta_a(e: &web_sys::KeyboardEvent) -> bool {
     if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
         return false;
     }
     e.prevent_default();
     e.stop_immediate_propagation();
-    let len = input.value().len() as u32;
-    let _ = input.set_selection_range(0, len);
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
 }
 

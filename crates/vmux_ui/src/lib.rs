@@ -5,6 +5,8 @@
 
 pub mod agent_accent;
 
+pub mod caret;
+
 pub mod favicon;
 
 pub mod file_icon;
