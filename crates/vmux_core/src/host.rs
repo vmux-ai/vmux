@@ -1,6 +1,6 @@
 //! Everything that needs a host to run on, rather than the browser bundle.
 //!
-//! One `not(web)` gate for the lot, rather than an attribute on each declaration: these modules
+//! One `host` gate for the lot, rather than an attribute on each declaration: these modules
 //! are built on Bevy, which the wasm page bundle does not link. The crate's public paths are
 //! unchanged — `lib.rs` re-exports this module's contents, so `vmux_core::page` still resolves
 //! from outside and `crate::page` still resolves from within.

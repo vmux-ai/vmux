@@ -7,13 +7,13 @@ pub use vmux_start::{keyboard, results, style};
 
 pub mod size;
 
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod handler;
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod key;
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod panel;
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod state;
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod work_snapshot;

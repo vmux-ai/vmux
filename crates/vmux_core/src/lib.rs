@@ -19,7 +19,7 @@ pub use input::{KeyModifiers, KeyStroke};
 pub use page_metadata::PageMetadata;
 pub use process_id::ProcessId;
 
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod host;
-#[cfg(not(web))]
+#[cfg(host)]
 pub use host::*;

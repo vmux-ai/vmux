@@ -419,18 +419,18 @@ pub fn wiki_links(text: &str) -> Vec<WikiLink> {
     links
 }
 
-#[cfg(not(web))]
+#[cfg(host)]
 mod agent_config;
-#[cfg(not(web))]
+#[cfg(host)]
 mod index;
-#[cfg(not(web))]
+#[cfg(host)]
 mod store;
 
-#[cfg(not(web))]
+#[cfg(host)]
 pub use agent_config::sync_external_agent_configs;
-#[cfg(not(web))]
+#[cfg(host)]
 pub use index::{KnowledgeIndex, KnowledgeRenamePlan, KnowledgeResolvedLink, KnowledgeSearchHit};
-#[cfg(not(web))]
+#[cfg(host)]
 pub use store::{AgentPrompt, Frontmatter, KnowledgeVault, MemoriesDir, SkillsDir};
 
 #[cfg(test)]

@@ -32,7 +32,7 @@ vmux_wire = { path = "../vmux_wire" }
 [dev-dependencies]
 serde_json = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
 bevy_asset = "0.19.0"
 bevy_cef = { workspace = true }
@@ -61,13 +61,15 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSWindow",
 ] }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
-gloo-timers = { version = "0.3", features = ["futures"] }
-js-sys = "0.3"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 serde_json = { workspace = true }
 vmux_command = { path = "../vmux_command" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
 wasm-bindgen = "0.2.115"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
@@ -96,5 +98,5 @@ web-sys = { version = "0.3", features = [
     "Window",
 ] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dev-dependencies]
 tempfile = "3"

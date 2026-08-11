@@ -22,7 +22,7 @@ vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history", default-features = false }
 vmux_wire = { path = "../vmux_wire" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }

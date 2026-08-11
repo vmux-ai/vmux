@@ -3,12 +3,12 @@
 //! Portable, so the web bundle can render it; the `Component` and `Reflect` derives are the only
 //! part that needs a host.
 
-#[cfg(not(web))]
+#[cfg(host)]
 use bevy::prelude::*;
 
-#[cfg_attr(not(web), derive(Component, Reflect))]
-#[cfg_attr(not(web), reflect(Component, Default))]
-#[cfg_attr(not(web), type_path = "vmux_header::system")]
+#[cfg_attr(host, derive(Component, Reflect))]
+#[cfg_attr(host, reflect(Component, Default))]
+#[cfg_attr(host, type_path = "vmux_header::system")]
 #[derive(
     Clone,
     Debug,

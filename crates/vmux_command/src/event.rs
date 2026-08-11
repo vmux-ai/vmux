@@ -10,6 +10,6 @@ pub use vmux_wire::command_bar::*;
 ///
 /// [`SearchEngine`] itself is a portable wire type, so the `Resource` marker lives on this
 /// wrapper rather than on the enum.
-#[cfg(not(web))]
+#[cfg(host)]
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SearchEngineSetting(pub SearchEngine);

@@ -25,10 +25,10 @@ use serde::{Deserialize, Serialize};
 ///
 /// [`KeyStrokePlugin::SENDERS`] is the whole allowlist. A page missing from it has its keys dropped
 /// without an error, so a new page that sends keystrokes has to be added there.
-#[cfg(not(web))]
+#[cfg(host)]
 pub struct KeyStrokePlugin;
 
-#[cfg(not(web))]
+#[cfg(host)]
 impl KeyStrokePlugin {
     /// The page hosts permitted to send a [`KeyStroke`] or publish a [`PageKeyContext`].
     /// `start` is here because it is the same webview as `agent`: the launcher swaps itself for a
@@ -45,7 +45,7 @@ impl KeyStrokePlugin {
     ];
 }
 
-#[cfg(not(web))]
+#[cfg(host)]
 impl bevy::prelude::Plugin for KeyStrokePlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(bevy_cef::prelude::BinEventEmitterPlugin::<(

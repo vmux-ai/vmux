@@ -16,27 +16,27 @@ pub fn supports_inline_agent_transition(url: &str) -> bool {
 #[cfg(web)]
 pub mod page;
 
-#[cfg(not(web))]
+#[cfg(host)]
 mod plugin;
-#[cfg(not(web))]
+#[cfg(host)]
 pub use plugin::StartPlugin;
 
-#[cfg(not(web))]
+#[cfg(host)]
 #[derive(bevy::prelude::Component, Clone, Copy, Debug)]
 pub struct StartInlineTransition {
     pub webview: bevy::prelude::Entity,
 }
 
-#[cfg(not(web))]
+#[cfg(host)]
 #[derive(bevy::prelude::Component)]
 pub struct StartInlineTransitionView;
 
 /// Canonical URL of the start launcher page.
-#[cfg(not(web))]
+#[cfg(host)]
 pub const START_PAGE_URL: &str = "vmux://start/";
 
 /// Page manifest for the `vmux://start/` launcher (also reachable from the Cmd+K command bar).
-#[cfg(not(web))]
+#[cfg(host)]
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "start",
     title: "Start",

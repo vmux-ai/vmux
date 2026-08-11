@@ -2276,7 +2276,7 @@ pub struct FileCompletionCommit {
 /// persisted like any browser navigation; consumed by `vmux_history`. Native-only
 /// (Bevy message); `event` is also compiled for the wasm pages, where `bevy` is
 /// not linked.
-#[cfg(not(web))]
+#[cfg(host)]
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
 pub struct RecordVisitRequest {
     pub url: String,

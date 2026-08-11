@@ -5,7 +5,7 @@ pub mod event;
 pub use vmux_wire::open_target;
 pub use vmux_wire::prompt_media;
 
-#[cfg(not(web))]
+#[cfg(host)]
 pub mod host;
-#[cfg(not(web))]
+#[cfg(host)]
 pub use host::*;
