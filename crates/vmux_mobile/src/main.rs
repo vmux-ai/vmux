@@ -15,6 +15,7 @@ use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_chat::page::agent::StatusDot;
 use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_start::results::CommandBarResultItem;
@@ -1059,7 +1060,8 @@ fn AppBody() -> Element {
     let status_word = match status() {
         RemoteStatus::Streaming => "streaming",
         RemoteStatus::Errored(_) => "errored",
-        RemoteStatus::Idle | RemoteStatus::Interrupted => "idle",
+        RemoteStatus::Interrupted => "interrupted",
+        RemoteStatus::Idle => "idle",
     };
     let draft_value = draft();
     let can_send = current_value.is_some()
@@ -1146,7 +1148,10 @@ fn AppBody() -> Element {
                     if let Some(session) = current_value.as_ref() {
                         div { class: "truncate text-sm font-semibold", "{session.name}" }
                         div { class: "mt-1 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground",
-                            span { class: status_dot(&status()) }
+                            StatusDot {
+                                status: status_word.to_string(),
+                                size_class: "h-2 w-2 shrink-0".to_string(),
+                            }
                             span { "{session.runtime}" }
                             if let Some(model) = session.model.as_ref() {
                                 span { "· {model}" }
@@ -2045,17 +2050,6 @@ fn session_result_item(session: &RemoteSession) -> CommandBarResultItem {
         pane_id: 0,
         tab_index: 0,
         location,
-    }
-}
-
-fn status_dot(status: &RemoteStatus) -> &'static str {
-    match status {
-        RemoteStatus::Streaming => {
-            "h-2 w-2 shrink-0 animate-pulse rounded-full bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.8)]"
-        }
-        RemoteStatus::Errored(_) => "h-2 w-2 shrink-0 rounded-full bg-red-400",
-        RemoteStatus::Interrupted => "h-2 w-2 shrink-0 rounded-full bg-amber-400",
-        RemoteStatus::Idle => "h-2 w-2 shrink-0 rounded-full bg-success",
     }
 }
 

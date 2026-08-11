@@ -73,7 +73,7 @@ fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     rsx! {}
 }
 
-mod agent;
+pub mod agent;
 mod approval;
 pub mod composer;
 mod error;

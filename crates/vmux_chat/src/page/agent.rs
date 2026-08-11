@@ -74,6 +74,8 @@ pub fn StatusDot(status: String, size_class: String) -> Element {
         "streaming" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",
         "awaiting" => "bg-violet-400 shadow-[0_0_8px_rgba(167,139,250,0.65)]",
+        // A run the user stopped. Only remote clients surface it today.
+        "interrupted" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "errored" => "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.65)]",
         _ => "bg-success shadow-[0_0_8px_rgba(16,185,129,0.65)]",
     };
