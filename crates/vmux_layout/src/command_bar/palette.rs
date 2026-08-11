@@ -39,6 +39,7 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
+use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
@@ -549,11 +550,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     });
 
-    use_effect(move || {
-        if is_start {
-            install_start_menu_click_outside(target_menu_open);
-        }
-    });
+    // `Rc` because `use_hook` clones its value out on every render and a listener must have one
+    // owner — two would each try to remove it, and the second removal is the one that silently
+    // does nothing.
+    use_hook(|| Rc::new(is_start.then(|| start_menu_click_outside(target_menu_open))));
 
     use_effect(move || {
         let _ = query();
@@ -1614,29 +1614,18 @@ fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
 
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
 /// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
-/// on the trigger (`#start-agent-selector-trigger`) are left alone. Installed once per document.
-fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let flag = JsValue::from_str("_startMenuClickOutsideBound");
-    if js_sys::Reflect::get(&document, &flag)
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let _ = js_sys::Reflect::set(&document, &flag, &JsValue::TRUE);
-
-    let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+/// on the trigger (`#start-agent-selector-trigger`) are left alone.
+fn start_menu_click_outside(mut menu_open: Signal<bool>) -> Option<DocumentListener> {
+    DocumentListener::capture("mousedown", move |event| {
         if !menu_open() {
             return;
         }
-        let inside = e
+        let inside = event
             .target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .and_then(|el| {
-                el.closest("#start-agent-selector, #start-agent-selector-trigger")
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+            .and_then(|element| {
+                element
+                    .closest("#start-agent-selector, #start-agent-selector-trigger")
                     .ok()
                     .flatten()
             })
@@ -1644,16 +1633,7 @@ fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
         if !inside {
             menu_open.set(false);
         }
-    }) as Box<dyn FnMut(web_sys::Event)>);
-    let target: &web_sys::EventTarget = document.as_ref();
-    let opts = web_sys::AddEventListenerOptions::new();
-    opts.set_capture(true);
-    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
-        "mousedown",
-        closure.as_ref().unchecked_ref(),
-        &opts,
-    );
-    closure.forget();
+    })
 }
 
 /// Cmd+A with no other modifier selects the query rather than the page.

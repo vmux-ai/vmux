@@ -7,6 +7,8 @@ pub mod agent_accent;
 
 pub mod caret;
 
+pub mod dom_listener;
+
 pub mod favicon;
 
 pub mod file_icon;

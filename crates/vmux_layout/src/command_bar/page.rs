@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::command_bar::palette::{CommandPalette, PaletteVariant, emit_action};
 use crate::command_bar::size::CommandBarSizeEmissionState;
@@ -10,6 +11,7 @@ use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, OpenId,
 };
+use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -30,7 +32,6 @@ pub fn Page() -> Element {
     let mut render_ack_scheduled_open_id = use_signal(|| OpenId::NONE);
     let mut ready_sent = use_signal(|| false);
     let mut observed_size_open_id = use_signal(|| None::<OpenId>);
-    let mut outside_pointer_listener_installed = use_signal(|| false);
 
     let open_listener =
         use_listener::<CommandBarOpenEvent, _>(COMMAND_BAR_OPEN_EVENT, move |data| {
@@ -74,15 +75,12 @@ pub fn Page() -> Element {
         }
     });
 
-    use_effect(move || {
-        if outside_pointer_listener_installed() {
-            return;
-        }
-        if install_command_bar_outside_pointer_listener(is_open) {
-            outside_pointer_listener_installed.set(true);
-        }
-    });
+    // `Rc` because `use_hook` clones its value out on every render and a listener must have one
+    // owner — two would each try to remove it, and the second removal is the one that silently
+    // does nothing.
+    use_hook(|| Rc::new(command_bar_outside_pointer(is_open)));
 
+    let mut size_observer = use_signal(|| Option::<SizeObserver>::None);
     use_effect(move || {
         if !is_open() {
             return;
@@ -91,7 +89,8 @@ pub fn Page() -> Element {
         if observed_size_open_id() == Some(open_id) {
             return;
         }
-        if install_command_bar_size_observer(current_open_id) {
+        if let Some(observer) = SizeObserver::on_command_bar_shell(current_open_id) {
+            size_observer.set(Some(observer));
             observed_size_open_id.set(Some(open_id));
         }
     });
@@ -132,25 +131,13 @@ fn dismiss_command_bar(is_open: Signal<bool>) {
     emit_action("dismiss", "");
 }
 
-fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return false;
-    };
-    if js_sys::Reflect::get(
-        &document,
-        &JsValue::from_str("_commandBarOutsidePointerBound"),
-    )
-    .map(|v| v.is_truthy())
-    .unwrap_or(false)
-    {
-        return true;
-    }
-
-    let closure = Closure::wrap(Box::new(move |event: web_sys::Event| {
+/// Dismiss the command bar when a pointer goes down anywhere outside its shell.
+fn command_bar_outside_pointer(is_open: Signal<bool>) -> Option<DocumentListener> {
+    DocumentListener::capture("pointerdown", move |event| {
         if !is_open() {
             return;
         }
-        let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
             return;
         };
         let Some(shell) = document.get_element_by_id("command-bar-shell") else {
@@ -166,27 +153,7 @@ fn install_command_bar_outside_pointer_listener(is_open: Signal<bool>) -> bool {
             return;
         }
         dismiss_command_bar(is_open);
-    }) as Box<dyn FnMut(web_sys::Event)>);
-
-    let options = web_sys::AddEventListenerOptions::new();
-    options.set_capture(true);
-    if document
-        .add_event_listener_with_callback_and_add_event_listener_options(
-            "pointerdown",
-            closure.as_ref().unchecked_ref(),
-            &options,
-        )
-        .is_err()
-    {
-        return false;
-    }
-    let _ = js_sys::Reflect::set(
-        &document,
-        &JsValue::from_str("_commandBarOutsidePointerBound"),
-        &JsValue::TRUE,
-    );
-    closure.forget();
-    true
+    })
 }
 
 fn emit_command_bar_size(open_id: OpenId) {
@@ -333,22 +300,36 @@ fn schedule_command_bar_rendered_emit(
     }
 }
 
-fn install_command_bar_size_observer(current_open_id: Signal<OpenId>) -> bool {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return false;
-    };
-    let Some(el) = document.get_element_by_id("command-bar-shell") else {
-        return false;
-    };
-    schedule_command_bar_size_emit(current_open_id());
-    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+/// A `ResizeObserver` on the command-bar shell, disconnected when this value is dropped.
+///
+/// Leaking it is worse here than for a document listener: nothing latches the install, so every
+/// remount left another live observer behind, each one still holding the previous component's
+/// `current_open_id` and reading it on the next resize.
+struct SizeObserver {
+    observer: web_sys::ResizeObserver,
+    _callback: Closure<dyn FnMut(JsValue)>,
+}
+
+impl Drop for SizeObserver {
+    fn drop(&mut self) {
+        self.observer.disconnect();
+    }
+}
+
+impl SizeObserver {
+    /// `None` while the shell is not in the document yet, which is why the caller retries.
+    fn on_command_bar_shell(current_open_id: Signal<OpenId>) -> Option<Self> {
+        let document = web_sys::window()?.document()?;
+        let shell = document.get_element_by_id("command-bar-shell")?;
         schedule_command_bar_size_emit(current_open_id());
-    }) as Box<dyn FnMut(JsValue)>);
-    let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) else {
-        return false;
-    };
-    observer.observe(&el);
-    std::mem::forget(observer);
-    callback.forget();
-    true
+        let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
+            schedule_command_bar_size_emit(current_open_id());
+        }) as Box<dyn FnMut(JsValue)>);
+        let observer = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()).ok()?;
+        observer.observe(&shell);
+        Some(Self {
+            observer,
+            _callback: callback,
+        })
+    }
 }

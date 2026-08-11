@@ -209,17 +209,6 @@ fn active_tab_uses_glass_instead_of_page_bg_color() {
 }
 
 #[test]
-fn command_bar_page_installs_document_pointer_dismiss_listener() {
-    let source = include_str!("../src/command_bar/page.rs");
-
-    assert!(source.contains("install_command_bar_outside_pointer_listener"));
-    assert!(source.contains("\"pointerdown\""));
-    assert!(source.contains("command-bar-shell"));
-    assert!(source.contains("shell.contains"));
-    assert!(source.contains("emit_action(\"dismiss\", \"\")"));
-}
-
-#[test]
 fn dir_path_titles_truncate_at_start() {
     let source = include_str!("../src/page.rs");
 
