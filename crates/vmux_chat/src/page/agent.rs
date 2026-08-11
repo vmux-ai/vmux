@@ -69,7 +69,7 @@ fn AgentAvatar(chat: Chat, size_class: String) -> Element {
 
 /// The coloured dot that says at a glance what the agent is doing.
 #[component]
-pub(super) fn StatusDot(status: String, size_class: String) -> Element {
+pub fn StatusDot(status: String, size_class: String) -> Element {
     let tone = match status.as_str() {
         "streaming" => "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.65)]",
         "installing" => "bg-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.65)]",

@@ -75,7 +75,7 @@ fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
 
 mod agent;
 mod approval;
-mod composer;
+pub mod composer;
 mod error;
 mod keys;
 mod scroll;

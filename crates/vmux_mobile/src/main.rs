@@ -15,6 +15,7 @@ use dioxus::html::geometry::PixelsVector2D;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
 use vmux_start::results::CommandBarResultItem;
 use vmux_start::row::ResultRow;
@@ -1053,6 +1054,13 @@ fn AppBody() -> Element {
         .map(|session| session.sid.clone())
         .unwrap_or_default();
     let is_streaming = matches!(status(), RemoteStatus::Streaming);
+    // The words ComposerStatus matches on. Same component as the desktop, so the mapping has to
+    // land on the same strings rather than on RemoteStatus's own names.
+    let status_word = match status() {
+        RemoteStatus::Streaming => "streaming",
+        RemoteStatus::Errored(_) => "errored",
+        RemoteStatus::Idle | RemoteStatus::Interrupted => "idle",
+    };
     let draft_value = draft();
     let can_send = current_value.is_some()
         && (!draft_value.trim().is_empty() || !attachments.read().is_empty());
@@ -1094,6 +1102,7 @@ fn AppBody() -> Element {
     let room_value = room();
     let transcript_items = group_messages(room_value.events, &live_delta_value, is_streaming);
     let latest_tool = latest_tool_location(&transcript_items);
+    let activity = vmux_wire::chat::activity_counts(&transcript_items);
     let attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
 
     rsx! {
@@ -1259,7 +1268,16 @@ fn AppBody() -> Element {
                     PromptComposer {
                         value: draft_value.clone(),
                         attachments: prompt_attachments,
-                        footer: rsx! { ComposerOptions { sid: submit_sid.clone(), api } },
+                        footer: rsx! {
+                            div { class: "flex min-w-0 items-center justify-between gap-1",
+                                ComposerOptions { sid: submit_sid.clone(), api }
+                                ComposerStatus {
+                                    status: status_word.to_string(),
+                                    active_subagents: activity.0,
+                                    active_tasks: activity.1,
+                                }
+                            }
+                        },
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
                         accent_bg: accent.accent_bg.to_string(),
                         accent_color: accent_css.clone(),

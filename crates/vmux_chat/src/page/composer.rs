@@ -100,15 +100,30 @@ fn ComposerFooter(chat: Chat) -> Element {
                 AccessPill { chat }
                 WorkspacePills { chat }
             }
-            ComposerStatus { chat }
+            ComposerStatus {
+                status: chat.status(),
+                active_subagents: (chat.activity_counts)().0,
+                active_tasks: (chat.activity_counts)().1,
+                queued_count: chat.queue.queued.read().len(),
+            }
         }
     }
 }
 
 /// What the agent is doing right now, and how much is still outstanding.
+///
+/// Takes the numbers rather than the [`Chat`] holding them, because the phone reaches the same
+/// state over QUIC instead of bin events and would otherwise need its own copy of this — which
+/// is how the two clients drifted apart on tool names before [`crate::activity`] existed.
 #[component]
-fn ComposerStatus(chat: Chat) -> Element {
-    let status = chat.status();
+pub fn ComposerStatus(
+    status: String,
+    active_subagents: usize,
+    active_tasks: usize,
+    /// Prompts waiting behind the running one. Always zero where there is no queue.
+    #[props(default)]
+    queued_count: usize,
+) -> Element {
     let run_label = match status.as_str() {
         "streaming" => "Running",
         "awaiting" => "Approval",
@@ -116,8 +131,6 @@ fn ComposerStatus(chat: Chat) -> Element {
         "errored" => "Error",
         _ => "Ready",
     };
-    let (active_subagents, active_tasks) = (chat.activity_counts)();
-    let queued_count = chat.queue.queued.read().len();
     rsx! {
         div { class: "flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground",
             span { class: "flex h-7 items-center gap-1.5 rounded-lg px-2",
