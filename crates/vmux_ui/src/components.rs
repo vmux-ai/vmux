@@ -125,11 +125,10 @@ mod naming_policy {
             if trimmed.starts_with("//") {
                 continue;
             }
-            let Some(rest) = trimmed.strip_prefix("fn ").or_else(|| {
-                trimmed
-                    .strip_prefix("pub fn ")
-                    .or_else(|| trimmed.strip_prefix("pub(crate) fn "))
-            }) else {
+            let rest = ["fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn "]
+                .iter()
+                .find_map(|prefix| trimmed.strip_prefix(prefix));
+            let Some(rest) = rest else {
                 continue;
             };
             // The return type may sit on this line or after a wrapped parameter list.
