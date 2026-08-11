@@ -709,6 +709,95 @@ mod tests {
     };
     use vmux_setting::{AppSettings, BrowserSettings, ShortcutSettings};
 
+    /// A store names each component by type path, and [`space_has_unregistered_types`] deletes
+    /// the whole file when one of them no longer resolves. Type paths are derived from where a
+    /// type's file sits, so moving any of these between modules discards every saved space
+    /// unless `#[type_path = "..."]` pins it to the path already on disk. Several are already
+    /// pinned to `vmux_desktop::layout::*`, from before layout became its own crate.
+    ///
+    /// This table is that contract. Changing an entry is changing the on-disk format.
+    #[test]
+    fn saved_components_keep_the_type_paths_stores_name_them_by() {
+        use bevy::reflect::TypePath;
+
+        macro_rules! paths {
+            ($($ty:ty),+ $(,)?) => { vec![$(<$ty as TypePath>::type_path()),+] };
+        }
+
+        let actual = paths![
+            ChildOf,
+            Children,
+            Name,
+            Stack,
+            Tab,
+            TabWorkspace,
+            TabWorktree,
+            TabDirDecided,
+            Pane,
+            PaneSplit,
+            PaneSize,
+            Space,
+            SpaceId,
+            WindowGeometry,
+            Profile,
+            Open,
+            PageMetadata,
+            ArchivedPage,
+            ArchivedPagePosition,
+            ArchivedTabPage,
+            PaneId,
+            vmux_history::CreatedAt,
+            vmux_history::LastActivatedAt,
+            vmux_history::Visit,
+            vmux_core::Url,
+            vmux_core::VisitCount,
+            vmux_core::LastVisitedAt,
+            vmux_core::VisitedUrl,
+            vmux_core::TransitionType,
+            vmux_core::Order,
+            vmux_editor::StackExplorerVisibility,
+            vmux_terminal::launch::TerminalLaunch,
+        ];
+
+        assert_eq!(
+            actual,
+            [
+                "bevy_ecs::hierarchy::ChildOf",
+                "bevy_ecs::hierarchy::Children",
+                "bevy_ecs::name::Name",
+                "vmux_desktop::layout::stack::Stack",
+                "vmux_desktop::layout::tab::Tab",
+                "vmux_desktop::layout::tab::TabWorkspace",
+                "vmux_desktop::layout::tab::TabWorktree",
+                "vmux_desktop::layout::tab::TabDirDecided",
+                "vmux_desktop::layout::pane::Pane",
+                "vmux_desktop::layout::pane::PaneSplit",
+                "vmux_desktop::layout::pane::PaneSize",
+                "vmux_desktop::space::Space",
+                "vmux_desktop::space::SpaceId",
+                "vmux_desktop::layout::window::WindowGeometry",
+                "vmux_desktop::profile::Profile",
+                "vmux_desktop::layout::Open",
+                "vmux_header::system::PageMetadata",
+                "vmux_core::archive::ArchivedPage",
+                "vmux_core::archive::ArchivedPagePosition",
+                "vmux_core::archive::ArchivedTabPage",
+                "vmux_desktop::layout::pane::PaneId",
+                "vmux_history::CreatedAt",
+                "vmux_history::LastActivatedAt",
+                "vmux_history::Visit",
+                "vmux_history::Url",
+                "vmux_history::VisitCount",
+                "vmux_history::LastVisitedAt",
+                "vmux_history::VisitedUrl",
+                "vmux_history::TransitionType",
+                "vmux_core::Order",
+                "vmux_editor::plugin::StackExplorerVisibility",
+                "vmux_core::terminal::TerminalLaunch",
+            ]
+        );
+    }
+
     #[test]
     fn adding_archived_page_marks_store_dirty() {
         let mut app = App::new();
