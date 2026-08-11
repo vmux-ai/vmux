@@ -55,24 +55,26 @@ directly. `vmux_editor` and `vmux_setting` needed the manifest fix above.
 
 Deleted the `page_source.rs` assertion on `set_title`, as predicted.
 
+### Step 2b — scroll and debounce (`416a40f8`)
+
+Six identical `scroll_into_view` calls, all agreeing on `Nearest`, collapsed onto the seam that
+already existed as `Host::scroll_item_into_view`. It now returns whether the element was found,
+because `vmux_layout/page.rs` latches "already scrolled" only on success — collapsing that to an
+unconditional call looks like a simplification and silently breaks the retry.
+
+`MountedData::scroll_to` was the plan's answer and is the wrong one: it needs `onmounted` on the
+row being revealed, but every caller looks the row up by generated id *because* it is whichever
+row is selected.
+
+palette's debounce moved to `spawn` + `platform::sleep_ms`, which is what step 1 was for. The old
+`Closure::once_into_js` is why cancelling had to *call* the callback — invoking a once-closure is
+how it is freed.
+
+**Tiers 1 and 2 are now complete.** palette is down from 55 DOM references to 42.
+
 ## Left
 
-### Tier 1 — a portable API exists
-
-| pattern | replacement | sites |
-|---|---|---|
-| `window.set_timeout` debounce | `spawn` + `platform::sleep_ms` | palette (`HostSearchTimer`) |
-
-`el.scroll_into_view_with_*` (6 sites: palette ×2, editor ×2, `vmux_layout/page.rs`,
-`transport/cef.rs`) **was listed here and does not belong**. `MountedData::scroll_to` needs a
-`MountedData` handle, so it needs `onmounted` on the row being scrolled to — but every one of
-these looks the target up by generated id (`command-bar-item-{n}`) precisely because it is
-whichever row is selected. That is a restructure per call site, or one `vmux_ui` seam in the shape
-of `FocusClaim`. Decide which; it is not a substitution.
-
-### Tier 2 — genuine host compensation
-
-Done (`FocusClaim`). Nothing else has turned up.
+Only Tier 3, plus consistency work of doubtful value (see Order).
 
 ### Tier 3 — not a porting problem
 
@@ -92,9 +94,24 @@ remove none of them:
 
 `vmux_editor/src/page.rs` (93 references) is the same shape.
 
-Porting this is the wrong goal. Making the command-bar input a controlled Dioxus component —
-caret, selection and scroll as signals — is what makes it portable, as a consequence. The diff is
-behavioural and needs the user at a keyboard.
+Porting this is the wrong goal. Making the command-bar input a controlled Dioxus component is
+what makes it portable, as a consequence. The diff is behavioural and needs the user at a
+keyboard.
+
+**Refinement after finishing Tiers 1–2.** The input's `value` is *already* controlled
+(`palette.rs:1344`). What is imperative is everything around it: caret position, selection, and
+Ctrl-key editing, which is done by dispatching synthetic events rather than updating the signal.
+
+This matters because there is **no portable Dioxus API for caret or selection control** — unlike
+title, scroll and focus, there is nothing to substitute in. So Tier 3 cannot be "use the portable
+API". It is two changes at once:
+
+1. A caret/selection seam in `vmux_ui`, in the shape of `FocusClaim` — inert off the browser.
+2. Ctrl-key editing performed in Rust against the query signal, instead of by synthesising a
+   `keydown` on the element and then a matching `input` event to tell Dioxus about it.
+
+(2) is the behavioural half and the reason a user has to sit with it: Ctrl+A/E/F/B/W/K/U in the
+command bar, on a long URL, with a non-ASCII query, plus Cmd+L select-all-on-open.
 
 ## Order
 
@@ -103,12 +120,19 @@ behavioural and needs the user at a keyboard.
 3. ~~`palette` Tiers 1–2, then flip `palette` and `start::page` to `cfg(ui)`.~~ **Premise was
    wrong.** Tier 1–2 leaves 45 of palette's 55 references standing. The launcher reaches the phone
    only after Tier 3. Re-scope as: make the command-bar input controlled, then flip both.
-4. `vmux_layout`: `error_page`, `extensions_page`, `vault_page` — one DOM call each for the first
-   two, eight for vault. Error and vibe-setup read parameters out of the URL and extensions calls
-   `window.confirm()`; both want a seam, not a substitution.
-5. `vmux_terminal`: `page.rs` (18), `matrix_rain.rs` (11, canvas — may stay `web`; a terminal grid
-   and a canvas rain effect are not obviously phone features).
-6. Tier 3: palette's input, then `vmux_editor`.
+4. Tier 3: palette's input, then `vmux_editor`. **This is the only remaining step with a payoff.**
+5. ~~`vmux_layout`: `error_page`, `extensions_page`, `vault_page`.~~ **Probably not worth doing.**
+   Each is one or two DOM calls, but ask what the flip buys: the phone never navigates to
+   `vmux://error/` and has no extension manager, so making those two `cfg(ui)` would make them
+   compile somewhere they will never render. `vault_page` (8 calls) is the only one that plausibly
+   belongs on a phone. Do that one if a reason appears; leave the others marked `web`, which is
+   what they honestly are.
+6. ~~`vmux_terminal`.~~ Same question, more strongly: a terminal grid and a canvas rain effect are
+   not phone features.
+
+The original order had 4–6 as "consistency". Having finished Tiers 1–2, that consistency looks
+like busywork — `cfg(web)` on a page that only ever renders in CEF is not a defect, it is an
+accurate label. The defect was only ever pages that *could* be portable and were not.
 
 ## Watch for
 
