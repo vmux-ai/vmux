@@ -1423,6 +1423,67 @@ fn flush_pending_osr_textures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The precedence the doc comment states, and the reason it exists: a pane can be the
+    /// user's focus and an agent's active pane at once, and the user's ring has to win or they
+    /// cannot see where they are. Three focus-ring source-scan tests were dropped in 3b73c8ce
+    /// without leaving anything behind; this covers the decision they were circling.
+    #[test]
+    fn the_user_ring_outranks_an_agent_ring_on_the_same_pane() {
+        use vmux_layout::active_panes::{ActivePanes, ActiveStack, ProfileId};
+        use vmux_layout::stack::FocusedStack;
+
+        let mut world = World::new();
+        let pane = world.spawn_empty().id();
+        let stack = world.spawn_empty().id();
+        let settings = test_app_settings_with_radius(0.0);
+        let user = &settings.layout.focus_ring.color;
+
+        let mut agent_only = ActivePanes::default();
+        agent_only.0.insert(
+            ProfileId::Agent("claude".to_string()),
+            ActiveStack {
+                tab: None,
+                pane: Some(pane),
+                stack: Some(stack),
+                kind: Some(vmux_core::agent::AgentKind::Claude),
+            },
+        );
+        let unfocused = FocusedStack::default();
+
+        let (width, rgb, kind) =
+            windowed_ring_for(stack, pane, &unfocused, 2, &agent_only, &settings, 1.0);
+        assert!(width > 0.0, "an agent's active pane draws a ring");
+        assert_eq!(kind, Some(vmux_core::agent::AgentKind::Claude));
+        assert_ne!(
+            rgb,
+            [user.r, user.g, user.b],
+            "and it is not the user's colour"
+        );
+
+        // Same pane, now also the user's focus: the user's ring takes it over.
+        let focused = FocusedStack {
+            stack: Some(stack),
+            ..Default::default()
+        };
+        let (width, rgb, kind) =
+            windowed_ring_for(stack, pane, &focused, 2, &agent_only, &settings, 1.0);
+        assert!(width > 0.0);
+        assert_eq!(rgb, [user.r, user.g, user.b]);
+        assert_eq!(kind, None, "no agent badge on the user's own ring");
+
+        // A single visible pane has nothing to disambiguate, so no ring at all.
+        let (width, _, _) = windowed_ring_for(
+            stack,
+            pane,
+            &focused,
+            1,
+            &ActivePanes::default(),
+            &settings,
+            1.0,
+        );
+        assert_eq!(width, 0.0);
+    }
     use crate::tests::test_app_settings_with_radius;
     use crate::{
         command_bar_windowed_click_should_dismiss, native_command_bar_route,
