@@ -56,7 +56,7 @@ impl Plugin for ExtensionsPlugin {
                 (
                     run_agent_installs,
                     inject_on_cws_nav,
-                    inject_on_cws_load_complete.after(crate::drain_loading_state),
+                    inject_on_cws_load_complete.after(crate::page_life::drain_loading_state),
                     drain_outbox,
                 ),
             );
