@@ -41,7 +41,8 @@ What is genuinely missing is that the daemon has no `World`, and the state it do
 - `vmux_session` — the session and room components. Depends on `bevy_ecs` and nothing that renders.
 - `vmux_service` — headless Bevy app. Authority for sessions, ACP, processes, agent roster, team.
 - `vmux_agent` — page plumbing for the local client. Subscribes; no longer owns.
-- `vmux_host` — `vmux_service` composed for a machine that never has a local client.
+
+**There is no fourth crate for the cloud.** `vmux_service::host` is the host, on a Mac and in a container; a cloud deployment is that binary built for Linux with an image and provisioning around it, and those live in `vmux-cloud`. Naming a separate `vmux_host` would reintroduce as an artifact the fork this design exists to avoid.
 
 ## The seam is a crate, not a cfg alias
 
@@ -55,7 +56,7 @@ CI asserts the seam directly:
 
 ```text
 cargo tree -p vmux_session -i bevy_cef   # must find nothing
-cargo tree -p vmux_host    -i bevy_cef   # must find nothing
+cargo tree -p vmux_service -i bevy_cef   # must find nothing
 ```
 
 A test cannot catch a link-level feature leak, so this has to be a job. It also has to be a *new* job: the Linux runs install the CEF framework before building, so nothing in CI currently proves any crate can be built without it. The lean-desktop-features steps (`ci.yml:122`, `:190`) are the precedent to copy.
@@ -188,7 +189,7 @@ Each stage keeps macOS working and CI green.
 4. **Move the handles, delete the managers.** Channels, tasks and grids move onto the entities; readers switch to queries; the three registries and their `Arc<Mutex<…>>` go. In-flight requests become entities with a `Deadline` system.
 5. **Split viewport onto subscriptions.** The one behaviour change in the sequence, and the one to flag in review: per-client viewport instead of one window shared by every attached client.
 6. **Move workspace shape off the client.** The whole brokered surface, not two commands. `AgentBroker` and `SharedFailure::NoDesktop` are deleted; the local client subscribes to what it used to own. See below — this is the stage that carries real scope.
-7. **Compose `vmux_host`.** Minimal plugins, session plugins, QUIC remote. No new logic, plus the Linux build job.
+7. **Package the host for Linux.** No new crate and no new logic — a container image around the same binary, plus the CI job that proves it links no CEF.
 
 Stages 1–4 are reversible refactors. Stage 5 changes behaviour and stage 6 inverts ownership; either is worth landing alone if the diff argues for it.
 
