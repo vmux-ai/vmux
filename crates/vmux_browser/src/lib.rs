@@ -7,6 +7,7 @@ mod host_focus;
 #[cfg(target_os = "macos")]
 mod host_focus_native;
 mod native_layout;
+mod page_open;
 mod page_state;
 mod scroll;
 mod snapshot;
@@ -44,8 +45,8 @@ use vmux_command::{
     LayoutCommand, ReadAppCommands, StackCommand, event::CommandBarActionEvent, open::OpenCommand,
 };
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenError,
-    PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet, PageOpenTarget, PageOpenTask,
+    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenRequest, PageOpenSet,
+    PageOpenTarget,
     page::{PageManifest, PageReady},
 };
 use vmux_history::{CreatedAt, LastActivatedAt, Visit};
@@ -62,7 +63,7 @@ use vmux_layout::{
         LAYOUT_COMMAND_BAR_OPEN_EVENT, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackRow,
         TABS_EVENT,
     },
-    pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed, first_stack_in_pane},
+    pane::{Pane, PaneHoverIntent, PaneSplit, SideSheetCardCollapsed},
     side_sheet::{SideSheet, SideSheetPaneExpanded, SideSheetSectionsExpanded},
     stack::{
         ActiveTabParam, Stack, active_stack_in_pane, collect_leaf_panes, focused_stack,
@@ -220,10 +221,6 @@ impl Plugin for BrowserPlugin {
                     drain_loading_state,
                     drain_committed_navigation,
                     spawn_popup_stacks,
-                    handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
-                    attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                    handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                    respond_page_open_tasks.in_set(PageOpenSet::Respond),
                     handle_browser_navigate_requests.after(vmux_terminal::ServiceMessageSet),
                     handle_browser_go_back_requests,
                     handle_browser_go_forward_requests,
@@ -282,6 +279,7 @@ impl Plugin for BrowserPlugin {
             .add_systems(Update, track_browser_interaction)
             .add_plugins((
                 host_focus::HostFocusPlugin,
+                page_open::PageOpenPlugin,
                 page_state::PageStatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,
@@ -4119,52 +4117,6 @@ pub fn handle_browser_open_history(
     }
 }
 
-fn handle_page_open_requests(
-    mut reader: MessageReader<PageOpenRequest>,
-    focus: Res<vmux_layout::stack::FocusedStack>,
-    panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_filter: Query<Entity, With<Stack>>,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
-    time: Res<Time>,
-    mut commands: Commands,
-) {
-    for request in reader.read() {
-        let stack = match resolve_page_open_target(
-            &request.target,
-            &focus,
-            &panes,
-            &pane_children,
-            &stack_ts,
-            &stack_filter,
-            &mut commands,
-        ) {
-            Ok(stack) => stack,
-            Err(message) => {
-                send_page_open_response(&service, request.request_id, Err(message));
-                continue;
-            }
-        };
-        let task = PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: normalize_vmux_url(&request.url),
-            request_id: request.request_id,
-        };
-        if request.request_id.is_some() {
-            commands.spawn((
-                task,
-                PageOpenAwaitSnapshot {
-                    started: time.elapsed(),
-                },
-            ));
-        } else {
-            commands.spawn(task);
-        }
-    }
-}
-
 fn normalize_vmux_url(url: &str) -> String {
     let url = url.trim();
     if let Some(rest) = url.strip_prefix("vmux://")
@@ -4175,78 +4127,6 @@ fn normalize_vmux_url(url: &str) -> String {
         return format!("vmux://{rest}/");
     }
     url.to_string()
-}
-
-fn resolve_page_open_target(
-    target: &PageOpenTarget,
-    focus: &vmux_layout::stack::FocusedStack,
-    panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_filter: &Query<Entity, With<Stack>>,
-    commands: &mut Commands,
-) -> Result<Entity, String> {
-    match *target {
-        PageOpenTarget::ActiveStack => focus
-            .stack
-            .or_else(|| {
-                focus.pane.filter(|pane| panes.contains(*pane)).map(|pane| {
-                    commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id()
-                })
-            })
-            .ok_or_else(|| "page_open: no focused stack or pane".to_string()),
-        PageOpenTarget::Stack(stack) => {
-            if stack_filter.contains(stack) {
-                Ok(stack)
-            } else {
-                Err("page_open: target stack does not exist".to_string())
-            }
-        }
-        PageOpenTarget::ActiveStackInPane(pane) => {
-            if !panes.contains(pane) {
-                return Err("page_open: target pane does not exist".to_string());
-            }
-            Ok(active_stack_in_pane(pane, pane_children, stack_ts)
-                .or_else(|| first_stack_in_pane(pane, pane_children, stack_filter))
-                .unwrap_or_else(|| {
-                    commands
-                        .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                        .id()
-                }))
-        }
-        PageOpenTarget::NewStackInPane(pane) => {
-            if panes.contains(pane) {
-                Ok(commands
-                    .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
-                    .id())
-            } else {
-                Err("page_open: target pane does not exist".to_string())
-            }
-        }
-    }
-}
-
-fn attach_cef_page_requests(
-    mut reader: MessageReader<CefPageAttachRequest>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    for request in reader.read() {
-        attach_cef_page_to_stack(
-            request.stack,
-            &request.url,
-            &request.title,
-            request.bg_color.clone(),
-            &children_q,
-            &mut commands,
-            &mut meshes,
-            &mut webview_mt,
-        );
-    }
 }
 
 /// Marks a `PageOpenTask` the fallback has seen pending once. A `vmux://` scheme
@@ -4260,147 +4140,6 @@ struct PageOpenFallbackDeferred;
 #[derive(Component, Clone, Debug)]
 struct PageOpenAwaitSnapshot {
     started: std::time::Duration,
-}
-
-fn handle_unclaimed_page_open_tasks(
-    mut tasks: Query<
-        (
-            Entity,
-            &PageOpenTask,
-            Option<&PageOpenError>,
-            Option<&PageOpenFallbackDeferred>,
-        ),
-        Without<PageOpenHandled>,
-    >,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    for (entity, task, error, deferred_once) in &mut tasks {
-        if let Some(error) = error {
-            attach_error_page_to_stack(
-                task.stack,
-                &task.url,
-                "Page failed to load",
-                &error.message,
-                &children_q,
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
-        } else if task.url.starts_with("vmux://error/") {
-            attach_error_page_to_stack(
-                task.stack,
-                &task.url,
-                "Page failed to load",
-                &task.url,
-                &children_q,
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
-        } else if task.url.starts_with("vmux://") {
-            if deferred_once.is_none() {
-                commands.entity(entity).insert(PageOpenFallbackDeferred);
-                continue;
-            }
-            attach_error_page_to_stack(
-                task.stack,
-                &task.url,
-                "Page not found",
-                "",
-                &children_q,
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-            );
-            commands.entity(entity).insert((
-                PageOpenHandled,
-                PageOpenError {
-                    message: format!("unknown vmux URL '{}'", task.url),
-                },
-            ));
-        } else {
-            attach_cef_page_to_stack(
-                task.stack,
-                &task.url,
-                &task.url,
-                None,
-                &children_q,
-                &mut commands,
-                &mut meshes,
-                &mut webview_mt,
-            );
-            commands.entity(entity).insert(PageOpenHandled);
-        }
-    }
-}
-
-fn respond_page_open_tasks(
-    tasks: Query<
-        (
-            Entity,
-            &PageOpenTask,
-            Option<&PageOpenError>,
-            Option<&PageOpenAwaitSnapshot>,
-        ),
-        With<PageOpenHandled>,
-    >,
-    service: Option<Res<vmux_service::client::ServiceClient>>,
-    time: Res<Time>,
-    children: Query<&Children>,
-    browsers: Query<(), With<Browser>>,
-    child_of: Query<&ChildOf>,
-    mut pending_nav: ResMut<PendingNavSnapshots>,
-    mut commands: Commands,
-) {
-    for (entity, task, error, await_snapshot) in &tasks {
-        if let Some(error) = error {
-            send_page_open_response(&service, task.request_id, Err(error.message.clone()));
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let Some(await_snapshot) = await_snapshot else {
-            send_page_open_response(&service, task.request_id, Ok(()));
-            commands.entity(entity).despawn();
-            continue;
-        };
-        let webview = children
-            .get(task.stack)
-            .ok()
-            .and_then(|children| children.iter().find(|child| browsers.contains(*child)));
-        if let (Some(webview), Some(request_id)) = (webview, task.request_id) {
-            let pane = child_of
-                .get(task.stack)
-                .ok()
-                .map(|child_of| child_of.get().to_bits().to_string());
-            pending_nav.0.insert(
-                webview,
-                NavPending {
-                    request_id,
-                    started: await_snapshot.started,
-                    saw_loading: false,
-                    pane,
-                },
-            );
-            commands.entity(entity).despawn();
-        } else if time
-            .elapsed()
-            .saturating_sub(await_snapshot.started)
-            .as_secs_f32()
-            > 10.0
-        {
-            send_page_open_response(
-                &service,
-                task.request_id,
-                Err("page opened without a snapshot-capable webview".to_string()),
-            );
-            commands.entity(entity).despawn();
-        }
-    }
 }
 
 fn send_page_open_response(
@@ -6703,11 +6442,13 @@ mod tests {
                     Update,
                     (
                         crate::handle_browser_navigate_requests.before(PageOpenSet::ResolveTarget),
-                        crate::handle_page_open_requests.in_set(PageOpenSet::ResolveTarget),
+                        crate::page_open::handle_page_open_requests
+                            .in_set(PageOpenSet::ResolveTarget),
                         handle_test_known_page_open.in_set(PageOpenSet::HandleKnownPages),
-                        crate::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
-                        crate::handle_unclaimed_page_open_tasks.in_set(PageOpenSet::Fallback),
-                        crate::respond_page_open_tasks.in_set(PageOpenSet::Respond),
+                        crate::page_open::attach_cef_page_requests.in_set(PageOpenSet::Fallback),
+                        crate::page_open::handle_unclaimed_page_open_tasks
+                            .in_set(PageOpenSet::Fallback),
+                        crate::page_open::respond_page_open_tasks.in_set(PageOpenSet::Respond),
                         vmux_terminal::handle_terminal_send_requests,
                         vmux_terminal::handle_run_shell_requests,
                     ),
