@@ -1,61 +1,21 @@
 //! File viewer and editor page: loading, editing, syntax highlighting, file watching,
 //! image preview, and LSP integration in a CEF + Dioxus webview.
 
-#[cfg(not(web))]
-pub mod highlight;
-
-#[cfg(not(web))]
-mod app_key;
-#[cfg(not(web))]
-pub mod edit;
-#[cfg(not(web))]
-pub mod fold;
-#[cfg(not(web))]
-pub mod fold_store;
-#[cfg(not(web))]
-pub mod keymap;
-#[cfg(not(web))]
-pub mod markdown;
-#[cfg(not(web))]
-mod wrap;
-
-#[cfg(not(web))]
-mod dir;
-#[cfg(not(web))]
-mod explorer_fs;
-#[cfg(not(web))]
-pub mod explorer_model;
-#[cfg(not(web))]
-mod preview;
-
-#[cfg(not(web))]
-mod plugin;
-#[cfg(not(web))]
-pub use plugin::{
-    EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, StackExplorerVisibility,
-    restore_file_view_bundle,
-};
-
-#[cfg(not(web))]
-pub mod contract;
-#[cfg(not(web))]
-pub use contract::EditorContractPlugin;
-
-#[cfg(not(web))]
-pub mod lsp;
-#[cfg(not(web))]
-pub use lsp::LspPlugin;
-
-#[cfg(any(web, test))]
 pub mod page_model;
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod explorer;
-#[cfg(web)]
+#[cfg(ui)]
 pub mod lsp_page;
-#[cfg(web)]
-mod note;
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page_key;
+
+#[cfg(ui)]
+mod note;
+
+#[cfg(host)]
+pub mod host;
+#[cfg(host)]
+pub use host::*;

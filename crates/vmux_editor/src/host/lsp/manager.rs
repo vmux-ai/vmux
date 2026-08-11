@@ -560,7 +560,7 @@ fn ref_display(path: &Path, line: u32) -> String {
 #[derive(Component)]
 pub struct LspOpened;
 
-use crate::plugin::{EditState, FileView};
+use crate::host::plugin::{EditState, FileView};
 
 fn server_overrides(settings: &vmux_setting::AppSettings) -> ServerOverrides {
     settings
@@ -1024,8 +1024,8 @@ mod tests {
     fn diagnostics_map_through_editstate() {
         use crate::edit::highlight_cache::HighlightCache;
         use crate::edit::{EditCore, EditMode};
+        use crate::host::plugin::{EditState, FileView};
         use crate::lsp::LspOutbox;
-        use crate::plugin::{EditState, FileView};
         use std::path::PathBuf;
 
         let path = PathBuf::from("/tmp/vmux_lsp_editstate.rs");

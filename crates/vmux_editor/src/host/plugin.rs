@@ -364,6 +364,7 @@ struct ExplorerChromeSent;
 
 #[derive(Component, Reflect, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[reflect(Component)]
+#[type_path = "vmux_editor::plugin"]
 pub struct StackExplorerVisibility {
     pub visible: bool,
 }
@@ -4753,5 +4754,22 @@ mod url_tests {
     #[test]
     fn empty_path_is_root() {
         assert_eq!(path_from_files_url("file:///"), Some(PathBuf::from("/")));
+    }
+}
+
+#[cfg(test)]
+mod persisted_type_path_tests {
+    use super::StackExplorerVisibility;
+    use bevy::reflect::TypePath;
+
+    /// Saved stores name their components by type path, and one the registry cannot resolve
+    /// makes the desktop discard the entire store. This type outlived a move out of the crate
+    /// root, so its path is pinned rather than derived from where the file happens to sit.
+    #[test]
+    fn stack_explorer_visibility_keeps_the_path_saved_stores_name_it_by() {
+        assert_eq!(
+            StackExplorerVisibility::type_path(),
+            "vmux_editor::plugin::StackExplorerVisibility"
+        );
     }
 }

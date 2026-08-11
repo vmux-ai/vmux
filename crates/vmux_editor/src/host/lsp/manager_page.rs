@@ -286,7 +286,7 @@ fn on_uninstall_request(trigger: On<BinReceive<LspUninstallRequest>>, outbox: Re
     });
 }
 
-fn file_uses_package(view: &crate::plugin::FileView, package: &str) -> bool {
+fn file_uses_package(view: &crate::host::plugin::FileView, package: &str) -> bool {
     view.path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -297,7 +297,7 @@ fn file_uses_package(view: &crate::plugin::FileView, package: &str) -> bool {
 fn install_targets(
     source: Entity,
     package: &str,
-    views: &Query<(Entity, &crate::plugin::FileView)>,
+    views: &Query<(Entity, &crate::host::plugin::FileView)>,
 ) -> Vec<Entity> {
     let mut targets = vec![source];
     for (entity, view) in views {
@@ -311,7 +311,7 @@ fn install_targets(
 fn drain_manager_outbox(
     outbox: Res<ManagerOutbox>,
     browsers: NonSend<Browsers>,
-    views: Query<(Entity, &crate::plugin::FileView)>,
+    views: Query<(Entity, &crate::host::plugin::FileView)>,
     mut commands: Commands,
 ) {
     let drained: Vec<(Entity, ManagerMsg)> = {
