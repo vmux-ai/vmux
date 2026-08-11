@@ -1,18 +1,23 @@
-# Topology: one service, many clients
+# Topology: one server, many clients
 
-Vmux is not a desktop app that later grew a phone companion. It is **one service** that owns the
+Vmux is not a desktop app that later grew a phone companion. It is **one server** that owns the
 work, and **clients** that render it. Which operating system a client runs on, and whether it shares
-a machine with the service, changes the transport and nothing else.
+a machine with the server, changes the transport and nothing else.
 
 Naming the roles rather than the devices is deliberate. Every diagram here holds whether the client
 is a laptop, a phone, a tablet, or a watch.
 
+*Server*, not *service*. "Service" is a launchd and systemd word meaning a daemon on this machine,
+and that locality is the assumption being broken: the same server runs as a background process on
+someone's Mac or as a container in a datacentre. The crate is still named `vmux_service`; renaming
+it is pending.
+
 ## Three roles
 
-- **Service** — `vmux_service`. One per host machine. Owns the PTYs, the agent sessions, the ACP
+- **Server** — `vmux_service`. One per host machine. Owns the PTYs, the agent sessions, the ACP
   sessions. It outlives every client, so closing a window does not kill a running agent.
 - **Client** — anything that renders the workspace and sends intent back. A **local** client shares
-  the machine with the service; a **remote** client does not.
+  the machine with the server; a **remote** client does not.
 - **Relay** — a rendezvous point, and not optional. A host behind NAT cannot be dialled, so every
   remote pairing goes through one. Its internals live in the `vmux-cloud` repository; what matters
   here is that it forwards packets it cannot read.
@@ -37,7 +42,7 @@ flowchart LR
     style relay stroke-dasharray: 4 4
 ```
 
-Neither end of the relay listens for the other. The service dials out and holds one QUIC connection
+Neither end of the relay listens for the other. The server dials out and holds one QUIC connection
 open; the relay allocates it a UDP port and tells it which. The pairing link names that port, so a
 remote client reaches a host behind NAT without either side opening one.
 
@@ -50,7 +55,7 @@ Forwarding only works in that direction. The desktop's NAT mapping was opened to
 port, and a port-restricted NAT — most consumer routers — drops anything arriving from a different
 source port, so replies cannot be sent straight from the allocated port.
 
-Nothing is dialled until Remote is switched on. The service checks that before connecting and a
+Nothing is dialled until Remote is switched on. The server checks that before connecting and a
 single watcher closes every live connection the moment it goes off.
 
 ## Local and remote are the same client, differently plumbed
@@ -70,7 +75,7 @@ flowchart TB
     trait --> remotehost["MobileHost — native beside a webview<br/>QUIC, rkyv end to end"]
 
     cefhost -->|"crosses a process boundary"| ecs["local client ECS"]
-    remotehost -->|"QUIC streams"| service["service dispatcher"]
+    remotehost -->|"QUIC streams"| service["server dispatcher"]
     service -->|"broker round-trip"| ecs
 ```
 
@@ -88,9 +93,9 @@ Two consequences fall out of that, and both are current limits rather than desig
   arrives on a long-lived stream — but the team roster is the only other subscribed id and has no
   server-initiated route yet, so `MobileHost` re-reads it on an interval.
 
-The **broker round-trip** in the diagram is the other thing worth knowing. The service owns the
+The **broker round-trip** in the diagram is the other thing worth knowing. The server owns the
 sessions, but the workspace shape — installed agents, the active roster — lives in the local
-client's ECS, in a different process. So `ListAgents` and `ListTeam` are not reads of service
+client's ECS, in a different process. So `ListAgents` and `ListTeam` are not reads of server
 state; they are commands brokered into the local client and relayed back as-is. A remote client can
 drive sessions with no window open, but those two answer `NoDesktop` until one is there to ask —
 named that way precisely because it resolves on its own, unlike `NotFound`.
@@ -100,9 +105,9 @@ named that way precisely because it resolves on its own, unlike `NotFound`.
 | Link | Transport | Payload |
 | --- | --- | --- |
 | page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope, host→page bare |
-| local client ↔ service | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
-| remote client ↔ service | QUIC, one bidirectional stream per request | rkyv `SharedMessage` / `SharedResponse`, after a JSON hello |
-| service ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAllocation`, then opaque DATAGRAM frames |
+| local client ↔ server | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
+| remote client ↔ server | QUIC, one bidirectional stream per request | rkyv `SharedMessage` / `SharedResponse`, after a JSON hello |
+| server ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAllocation`, then opaque DATAGRAM frames |
 
 The last row is the one worth reading twice. Only the hello is the relay's business; everything
 after it is a remote client's own QUIC session in transit.
@@ -141,15 +146,15 @@ The shape above is OS-agnostic; the builds are not yet. Being honest about the d
 
 | Platform | Role | Status |
 | --- | --- | --- |
-| macOS | host — service + local client | Primary. Packaged, launchd-managed, shipped. |
+| macOS | host — server + local client | Primary. Packaged, launchd-managed, shipped. |
 | Linux | host | Builds and tests in CI. Not packaged. |
 | Windows | host | Not started — no platform code exists. |
 | iOS | remote client | Real and buildable via `dx`; no CI job. |
 | Android | remote client | Configured in `Dioxus.toml` and the `Makefile`; no platform code yet. |
 | iPadOS · watchOS · others | remote client | Nothing platform-specific stands in the way. |
 
-A remote client is strictly a client: the service's server half is compiled out for iOS and wasm
-entirely. Adding one is a rendering and input problem, not a protocol problem — the API, the pairing
+A remote client is strictly a client: the server half of `vmux_service` is compiled out for iOS
+and wasm entirely. Adding one is a rendering and input problem, not a protocol problem — the API, the pairing
 flow, and `PageHost` are already the whole contract.
 
 Discovery is manual by design: there is no mDNS or zeroconf. A client is paired by scanning a QR
