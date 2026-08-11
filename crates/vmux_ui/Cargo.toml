@@ -27,6 +27,7 @@ vmux_wire = { path = "../vmux_wire" }
 # Native, iOS included: deliberately not a host block, which would drop these from the phone.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sys-locale = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 
 [build-dependencies]
 regex = { workspace = true, optional = true }
@@ -41,6 +42,7 @@ path = "src/main.rs"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 vmux_core = { path = "../vmux_core" }
+gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",

@@ -27,16 +27,11 @@ unicode-segmentation = "1"
 vmux_ui = { path = "../vmux_ui" }
 vmux_wire = { path = "../vmux_wire" }
 
-# Native, iOS included: deliberately not a host block, which would drop these from the phone.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { workspace = true, features = ["time"] }
-
 # MatrixRain is a canvas animation, so the install backdrop it paints exists only on the CEF host;
 # every other target renders nothing and does without the crate. The keyboard seam is the same
 # shape: only a webview has a host keymap to hand a stroke to, so `vmux_core`'s wire types for it
 # are needed here and nowhere else.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 vmux_core = { path = "../vmux_core" }
 vmux_terminal = { path = "../vmux_terminal" }

@@ -15,7 +15,6 @@
 pub mod activity;
 pub mod clipboard;
 pub mod event;
-pub mod platform;
 pub mod transcript;
 
 #[cfg(any(test, ui))]

@@ -15,7 +15,7 @@ use crate::activity::{
     ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
 };
 use crate::clipboard::copy_to_clipboard;
-use crate::platform::{random_index, sleep_ms};
+use vmux_ui::platform::{random_index, sleep_ms};
 
 #[component]
 pub fn UserBubble(

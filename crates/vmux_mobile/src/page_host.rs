@@ -14,9 +14,9 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use vmux_chat::platform::sleep_ms;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::hooks::transport::{BytesListener, PageHost, install_host};
+use vmux_ui::platform::sleep_ms;
 use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 
 use crate::Api;

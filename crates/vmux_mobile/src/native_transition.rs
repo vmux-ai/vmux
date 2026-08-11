@@ -167,7 +167,7 @@ mod platform {
     /// Being early costs one frame of the session showing behind the descending snapshot. Being
     /// late costs nothing visible, so the value errs long.
     async fn wait_for_paint() {
-        vmux_chat::platform::sleep_ms(48).await;
+        vmux_ui::platform::sleep_ms(48).await;
     }
 }
 

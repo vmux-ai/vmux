@@ -139,6 +139,7 @@ mod component {
     use wasm_bindgen::{JsCast, closure::Closure};
 
     use super::{AGENT_PROMPT_EXAMPLES, PromptTypewriter, TERMINAL_PROMPT_EXAMPLES};
+    use crate::platform::random_index;
 
     const PROMPT_CARET_CSS: &str = ".vmux-prompt-caret{animation:vmux-prompt-caret-blink 1s step-end infinite}.vmux-prompt-caret-paused{animation-play-state:paused}@keyframes vmux-prompt-caret-blink{0%,49%{opacity:1}50%,100%{opacity:0}}";
     type PromptTimerCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
@@ -266,10 +267,6 @@ mod component {
                 span { class: "{caret_class}" }
             }
         }
-    }
-
-    fn random_index(len: usize) -> usize {
-        (js_sys::Math::random() * len as f64) as usize
     }
 
     fn document_visible() -> bool {
