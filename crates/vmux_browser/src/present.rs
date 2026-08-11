@@ -447,7 +447,7 @@ fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
 /// The agent's brand color (Claude clay / Codex green / Mistral purple), used as
 /// the badge circle fill behind its logo.
 fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
-    hex_to_rgb(&vmux_core::team::AvatarSpec::for_agent(kind).color).unwrap_or([0.5, 0.5, 0.5])
+    hex_to_rgb(&kind.avatar().color).unwrap_or([0.5, 0.5, 0.5])
 }
 /// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
 /// by `sync_children_to_ui` (visible active pane has a real scale; inactive panes ~1e-6) to pick

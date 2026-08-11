@@ -1,5 +1,6 @@
 //! Lightweight types serialized between vmux processes and pages.
 
+pub mod avatar;
 pub mod chat;
 pub mod command_bar;
 pub mod history;

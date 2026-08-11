@@ -1040,12 +1040,14 @@ fn AppBody() -> Element {
     // Derived rather than sent: agent_accent is a pure function of the agent id and already lives
     // in the shared crate, so the phone reaches the same colours the desktop does without the
     // wire carrying a theme.
-    let accent = vmux_ui::agent_accent::agent_accent(
-        matched_agent
-            .as_ref()
-            .map(|agent| agent.id.as_str())
-            .unwrap_or_default(),
-    );
+    let agent_segment = matched_agent
+        .as_ref()
+        .map(|agent| agent.id.as_str())
+        .unwrap_or_default();
+    let accent = vmux_ui::agent_accent::agent_accent(agent_segment);
+    // What the desktop paints --agent-accent with: the agent's avatar colour, which is a pure
+    // function of its URL segment. Deriving it rather than sending it keeps the two in step.
+    let accent_css = vmux_wire::avatar::agent_color(agent_segment);
     let selected_sid = current_value
         .as_ref()
         .map(|session| session.sid.clone())
@@ -1097,7 +1099,7 @@ fn AppBody() -> Element {
     rsx! {
         div {
             class: "flex h-dvh min-h-0 flex-col bg-background text-foreground",
-            style: "--agent-accent:rgb({accent.rain_rgb});",
+            style: "--agent-accent:{accent_css};",
             style { dangerous_inner_html: MD_CSS }
             header { class: "flex shrink-0 items-center gap-3 border-b border-border bg-background/95 px-3 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] backdrop-blur-xl sm:px-5",
                 button {
@@ -1260,7 +1262,7 @@ fn AppBody() -> Element {
                         footer: rsx! { ComposerOptions { sid: submit_sid.clone(), api } },
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
                         accent_bg: accent.accent_bg.to_string(),
-                        accent_color: format!("rgb({})", accent.rain_rgb),
+                        accent_color: accent_css.clone(),
                         accent_gradient: accent.grad.to_string(),
                         autofocus: true,
                         disabled: current_value.is_none(),
