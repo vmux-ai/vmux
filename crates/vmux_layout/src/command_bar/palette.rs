@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::command_bar::keyboard::{
-    CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
-    utf16_offset_to_byte,
+    CtrlEditAction, CtrlKeyCapture, byte_offset_to_utf16, caret_scroll_left,
+    ctrl_key_capture_for_code, floor_char_boundary, utf16_offset_to_byte,
 };
 use crate::command_bar::results::{
     CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
@@ -1567,117 +1567,17 @@ fn focus_and_install_ctrl_bindings() {
         if !e.ctrl_key() {
             return;
         }
-        if is_vmux_synthetic_keydown(&e) {
-            return;
-        }
-        let code = e.code();
-        let action = match ctrl_key_capture_for_code(&code) {
+        let action = match ctrl_key_capture_for_code(&e.code()) {
             CtrlKeyCapture::Ignore => return,
             CtrlKeyCapture::PassToDioxus => {
                 e.prevent_default();
-                return;
-            }
-            CtrlKeyCapture::RerouteToDioxus => {
-                e.prevent_default();
-                e.stop_immediate_propagation();
-                dispatch_ctrl_keydown(&input2, &code);
                 return;
             }
             CtrlKeyCapture::Edit(action) => action,
         };
         e.prevent_default();
         e.stop_immediate_propagation();
-
-        match action {
-            CtrlEditAction::Home => {
-                let _ = input2.set_selection_range(0, 0);
-                ensure_caret_visible(&input2, 0);
-            }
-            CtrlEditAction::End => {
-                let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
-                if !ghost.is_empty() {
-                    let new_val = format!("{}{}", input2.value(), ghost);
-                    input2.set_value(&new_val);
-                    let len = new_val.len() as u32;
-                    let _ = input2.set_selection_range(len, len);
-                    dispatch_input_event(&input2);
-                    ensure_caret_visible(&input2, new_val.len());
-                } else {
-                    let len = input2.value().len();
-                    let _ = input2.set_selection_range(len as u32, len as u32);
-                    ensure_caret_visible(&input2, len);
-                }
-            }
-            CtrlEditAction::Forward => {
-                let value = input2.value();
-                let max = value.encode_utf16().count() as u32;
-                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1).min(max);
-                let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
-            }
-            CtrlEditAction::Back => {
-                let value = input2.value();
-                let p = input2
-                    .selection_start()
-                    .unwrap_or(Some(0))
-                    .unwrap_or(0)
-                    .saturating_sub(1);
-                let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
-            }
-            CtrlEditAction::Delete => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                let end = v[s..].chars().next().map(|c| s + c.len_utf8()).unwrap_or(s);
-                let new_val = format!("{}{}", &v[..s], &v[end..]);
-                input2.set_value(&new_val);
-                let _ = input2.set_selection_range(s as u32, s as u32);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, s);
-            }
-            CtrlEditAction::Backspace => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                if s > 0 {
-                    let prev = v[..s]
-                        .chars()
-                        .next_back()
-                        .map(|c| s - c.len_utf8())
-                        .unwrap_or(0);
-                    let new_val = format!("{}{}", &v[..prev], &v[s..]);
-                    input2.set_value(&new_val);
-                    let _ = input2.set_selection_range(prev as u32, prev as u32);
-                    dispatch_input_event(&input2);
-                    ensure_caret_visible(&input2, prev);
-                }
-            }
-            CtrlEditAction::DeleteWord => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                let bytes = v.as_bytes();
-                let mut i = s.saturating_sub(1);
-                while i > 0 && bytes[i - 1] == b' ' {
-                    i -= 1;
-                }
-                while i > 0 && bytes[i - 1] != b' ' {
-                    i -= 1;
-                }
-                let i = floor_char_boundary(&v, i);
-                let new_val = format!("{}{}", &v[..i], &v[s..]);
-                input2.set_value(&new_val);
-                let _ = input2.set_selection_range(i as u32, i as u32);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, i);
-            }
-            CtrlEditAction::DeleteToBeginning => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                input2.set_value(&v[s..]);
-                let _ = input2.set_selection_range(0, 0);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, 0);
-            }
-        }
+        apply_ctrl_edit(&input2, action);
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
     let target: &web_sys::EventTarget = input.as_ref();
@@ -1689,6 +1589,35 @@ fn focus_and_install_ctrl_bindings() {
         &opts,
     );
     closure.forget();
+}
+
+/// Run a readline edit against the input, then put the caret back and scroll it into view.
+///
+/// The arithmetic is [`CtrlEditAction::apply`]'s; what is left here is the part that needs the
+/// element. The caret crosses that boundary twice because the DOM counts UTF-16 code units and
+/// the edits count bytes, and the new value has to be written to the element directly and Dioxus
+/// told afterwards, since the input is uncontrolled and Dioxus does not see a change it did not
+/// make.
+fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
+    let value = input.value();
+    let caret_utf16 = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
+    let caret = utf16_offset_to_byte(&value, caret_utf16);
+    let ghost = match action {
+        CtrlEditAction::End => input.get_attribute("data-ghost").unwrap_or_default(),
+        _ => String::new(),
+    };
+
+    let edited = action.apply(&value, caret, &ghost);
+    let changed = edited.value != value;
+    if changed {
+        input.set_value(&edited.value);
+    }
+    let caret = byte_offset_to_utf16(&edited.value, edited.caret);
+    let _ = input.set_selection_range(caret, caret);
+    if changed {
+        dispatch_input_event(input);
+    }
+    ensure_caret_visible(input, edited.caret);
 }
 
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
@@ -1817,63 +1746,6 @@ fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputEle
     let len = input.value().len() as u32;
     let _ = input.set_selection_range(0, len);
     true
-}
-
-fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {
-    js_sys::Reflect::get(e.as_ref(), &JsValue::from_str("_vmuxSyntheticKeydown"))
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-}
-
-fn key_for_code(code: &str) -> &str {
-    match code {
-        "KeyA" => "a",
-        "KeyB" => "b",
-        "KeyC" => "c",
-        "KeyD" => "d",
-        "KeyE" => "e",
-        "KeyF" => "f",
-        "KeyH" => "h",
-        "KeyJ" => "j",
-        "KeyK" => "k",
-        "KeyN" => "n",
-        "KeyP" => "p",
-        "KeyU" => "u",
-        "KeyW" => "w",
-        _ => "",
-    }
-}
-
-fn dispatch_ctrl_keydown(el: &web_sys::HtmlInputElement, code: &str) {
-    let init = web_sys::KeyboardEventInit::new();
-    init.set_bubbles(true);
-    init.set_ctrl_key(true);
-    init.set_code(code);
-    init.set_key(key_for_code(code));
-    if let Ok(evt) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
-        let _ = js_sys::Reflect::set(
-            evt.as_ref(),
-            &JsValue::from_str("_vmuxSyntheticKeydown"),
-            &JsValue::TRUE,
-        );
-        let _ = el.dispatch_event(&evt);
-    }
-}
-
-/// Largest char boundary of `s` at or before `i`, so DOM text offsets never slice a
-/// UTF-8 string mid-character (which would panic the WASM UI on non-ASCII input).
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    if i >= s.len() {
-        return s.len();
-    }
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn raw_selection_start(input: &web_sys::HtmlInputElement) -> usize {
-    input.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize
 }
 
 /// Dispatch a synthetic "input" event so Dioxus picks up value changes.
