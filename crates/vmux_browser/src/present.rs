@@ -81,7 +81,7 @@ pub(crate) type LayoutKeyboardCapture = Or<(
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
 )>;
-pub(crate) fn sync_keyboard_target(
+fn sync_keyboard_target(
     mode: Res<vmux_layout::scene::InteractionMode>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
@@ -174,7 +174,7 @@ fn tab_ancestor(
         }
     }
 }
-pub(crate) fn sync_children_to_ui(
+fn sync_children_to_ui(
     mut browser_q: Query<
         (
             &mut Transform,
@@ -336,7 +336,7 @@ pub(crate) fn sync_children_to_ui(
         }
     }
 }
-pub(crate) fn set_windowed_content_mesh_material(
+fn set_windowed_content_mesh_material(
     material: &mut WebviewExtendStandardMaterial,
     windowed: bool,
 ) {
@@ -624,7 +624,7 @@ fn windowed_frame_rect_from_computed(
         height: size.y,
     })
 }
-pub(crate) fn windowed_page_frame_rect(
+fn windowed_page_frame_rect(
     pane: WindowedFrameRect,
     header: Option<WindowedFrameRect>,
     layout_hidden: bool,
@@ -667,7 +667,7 @@ fn visible_pane_count_for_windowed_sync(
     }
     leaf_panes.iter().count().max(1)
 }
-pub(crate) fn windowed_pages_to_hide(
+fn windowed_pages_to_hide(
     hidden: &[Entity],
     prev_visible: &[Entity],
     ever_shown: &[Entity],
@@ -683,7 +683,7 @@ pub(crate) fn windowed_pages_to_hide(
         })
         .collect()
 }
-pub(crate) fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
+fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
     layout_hidden || visible_pane_count > 1
 }
 fn sync_windowed_layout(
@@ -728,7 +728,7 @@ pub(crate) struct CommandBarWindowedFrame {
     pub(crate) height_px: f32,
 }
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
-pub(crate) fn publish_native_command_bar_route(
+fn publish_native_command_bar_route(
     owns_input: bool,
     frame: Option<CommandBarWindowedFrame>,
     scale: f32,
@@ -747,7 +747,7 @@ pub(crate) fn publish_native_command_bar_route(
         NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
     }
 }
-pub(crate) fn command_bar_windowed_frame(
+fn command_bar_windowed_frame(
     window_width_px: f32,
     window_height_px: f32,
     scale: f32,
@@ -807,7 +807,7 @@ fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
 /// The surface exists but must stay off screen — either prewarmed before any open, or revealing
 /// while the page paints. Both keep the native view alive and parked outside the window so it can
 /// still hold first responder.
-pub(crate) fn command_bar_windowed_view_should_render_hidden(
+fn command_bar_windowed_view_should_render_hidden(
     display: Display,
     visibility: Visibility,
 ) -> bool {
@@ -1067,7 +1067,7 @@ fn sync_cef_webview_resize_after_ui(
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
-pub(crate) fn windowed_reconcile_should_wake(
+fn windowed_reconcile_should_wake(
     pushed_any: bool,
     awaiting_create: bool,
     within_startup_grace: bool,
@@ -1097,7 +1097,7 @@ fn pane_count_for_browser(
     collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
     Some(leaves.len())
 }
-pub(crate) fn sync_webview_pane_corner_clip(
+fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     mode: Res<vmux_layout::scene::InteractionMode>,
@@ -1335,15 +1335,12 @@ fn sync_osr_webview_focus(
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HiddenWebviewSizing {
+enum HiddenWebviewSizing {
     Render,
     HideKeepSize,
     Collapse,
 }
-pub(crate) fn hidden_webview_sizing(
-    renderable: bool,
-    under_inactive_tab: bool,
-) -> HiddenWebviewSizing {
+fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWebviewSizing {
     if renderable {
         HiddenWebviewSizing::Render
     } else if under_inactive_tab {
@@ -1352,7 +1349,7 @@ pub(crate) fn hidden_webview_sizing(
         HiddenWebviewSizing::Collapse
     }
 }
-pub(crate) fn webview_layout_is_renderable(
+fn webview_layout_is_renderable(
     size_px: Vec2,
     visibility: Option<&Visibility>,
     pending_reveal: bool,
@@ -1361,21 +1358,17 @@ pub(crate) fn webview_layout_is_renderable(
         && size_px.x > 0.0
         && size_px.y > 0.0
 }
-pub(crate) fn webview_osr_should_run(
+fn webview_osr_should_run(
     size_px: Vec2,
     visibility: Option<&Visibility>,
     pending_reveal: bool,
 ) -> bool {
     pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
 }
-pub(crate) fn keep_hidden_osr_webview_warm(
-    is_modal: bool,
-    is_windowed: bool,
-    window_visible: bool,
-) -> bool {
+fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visible: bool) -> bool {
     is_modal && !is_windowed && window_visible
 }
-pub(crate) fn choose_osr_active_webview(
+fn choose_osr_active_webview(
     modal_keyboard_target: Option<(Entity, bool)>,
     active_stack: Option<Entity>,
     fallback: Entity,
@@ -1389,7 +1382,7 @@ pub(crate) fn choose_osr_active_webview(
             .or(Some(fallback))
     }
 }
-pub(crate) fn osr_focus_targets(
+fn osr_focus_targets(
     ready: &[Entity],
     active: Option<Entity>,
     allow_layout_active: bool,
@@ -1403,7 +1396,7 @@ pub(crate) fn osr_focus_targets(
         .collect();
     (active, auxiliary)
 }
-pub(crate) fn should_show_osr_webview(
+fn should_show_osr_webview(
     window_visible: bool,
     parent_is_stack: bool,
     pane_is_leaf: bool,

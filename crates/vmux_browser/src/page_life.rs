@@ -7,7 +7,7 @@ use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_history::LastActivatedAt;
-pub use vmux_layout::{Browser, Loading};
+use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     NavigationState,
     pane::{Pane, PaneSplit},

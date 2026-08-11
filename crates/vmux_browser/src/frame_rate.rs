@@ -16,7 +16,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-pub use vmux_layout::Browser;
+use vmux_layout::Browser;
 use vmux_layout::command_bar::state::CommandBarStateQuery;
 use vmux_layout::{
     Header, LayoutCef,
@@ -229,13 +229,13 @@ fn refresh_active_windowed_hover(
     state.entity = Some(entity);
     state.position = Some(position);
 }
-pub(crate) const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
-pub(crate) const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
+const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
+const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 #[derive(Resource, Default)]
-pub(crate) struct LayoutFrameRateBurst {
+struct LayoutFrameRateBurst {
     pub(crate) last_emit: Option<std::time::Instant>,
 }
-pub(crate) fn request_layout_frame_burst(
+fn request_layout_frame_burst(
     trigger: On<BinHostEmitEvent>,
     mut layouts: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
     browsers: NonSend<Browsers>,
@@ -258,7 +258,7 @@ pub(crate) fn request_layout_frame_burst(
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
-pub(crate) fn layout_frame_rate(
+fn layout_frame_rate(
     now: std::time::Instant,
     last_input: Option<std::time::Instant>,
     native_activity: bool,

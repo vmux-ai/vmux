@@ -19,7 +19,7 @@ use vmux_core::{
     HostSpawnRegistry, PageMetadata, PageOpenRequest, PageOpenTarget, page::PageReady,
 };
 use vmux_history::LastActivatedAt;
-pub use vmux_layout::Browser;
+use vmux_layout::Browser;
 use vmux_layout::event::SideSheetCommandEvent;
 use vmux_layout::{
     Header, LayoutCef,
