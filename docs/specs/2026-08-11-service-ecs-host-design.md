@@ -213,4 +213,6 @@ Related: the certificate, key and token would live on the host's persistent volu
 
 ## Dependencies
 
-The relay in `vmux-cloud` still speaks the HTTP/SSE protocol this branch replaced. It has to reach QUIC parity before any host, cloud or desktop, can be served by the deployed relay.
+The deployed relay still speaks the HTTP/SSE protocol this branch replaced, and has to reach QUIC parity before any host — cloud or desktop — can be served by it. That work is tracked as **VMX-127**, with the replacement already written in `vmux-cloud#10` (`feat/quic-splicer`) and specified in `vmux-cloud`'s `docs/specs/2026-08-08-relay-packet-forwarding-design.md`. It is ordered behind `vmux#318`, so nothing here is blocked on starting it.
+
+Named separately because they are out of scope but load-bearing: **VMX-144** (pairing a cloud host with no QR to show) blocks cloud hosting outright, **VMX-142** (keeping client-only crates out of the server's dependency tree) is the enforcement mechanism this design leans on, and **VMX-145** covers observability for a host nobody is sitting in front of.
