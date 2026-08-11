@@ -187,6 +187,7 @@ pub(crate) fn handle_browser_commands(
         }
     }
 }
+
 fn on_header_command_emit(
     trigger: On<BinReceive<HeaderCommandEvent>>,
     mut messages: ResMut<Messages<AppCommand>>,
@@ -208,6 +209,7 @@ fn on_header_command_emit(
     });
     messages.write(cmd);
 }
+
 fn on_reload_notify_header(
     _trigger: On<RequestReload>,
     cef: Option<Single<Entity, (With<LayoutCef>, With<PageReady>)>>,
@@ -224,6 +226,7 @@ fn on_reload_notify_header(
         ));
     }
 }
+
 fn on_hard_reload_notify_header(
     _trigger: On<RequestReloadIgnoreCache>,
     cef: Option<Single<Entity, (With<LayoutCef>, With<PageReady>)>>,
@@ -240,6 +243,7 @@ fn on_hard_reload_notify_header(
         ));
     }
 }
+
 fn on_side_sheet_command_emit(
     trigger: On<BinReceive<SideSheetCommandEvent>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,

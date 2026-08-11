@@ -4460,6 +4460,7 @@ mod tests {
     struct SplitAnchorInput {
         anchor: Entity,
     }
+
     #[derive(Resource, Default)]
     struct SplitAnchorOut(Option<Entity>);
 
@@ -4476,6 +4477,7 @@ mod tests {
         anchor: Entity,
         url: String,
     }
+
     #[derive(Resource, Default)]
     struct SpiralOut(Option<Entity>);
 

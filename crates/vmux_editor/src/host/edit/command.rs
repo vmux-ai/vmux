@@ -289,9 +289,11 @@ impl Selection {
             head: at,
         }
     }
+
     pub fn is_empty(&self) -> bool {
         self.anchor == self.head
     }
+
     pub fn range(&self) -> std::ops::Range<usize> {
         if self.anchor <= self.head {
             self.anchor..self.head

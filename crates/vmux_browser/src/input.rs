@@ -68,6 +68,7 @@ fn log_command_bar_keyboard_input(
         }
     }
 }
+
 fn sync_layout_cef_pointer_target(
     windows: Query<&Window, With<PrimaryWindow>>,
     layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
@@ -112,10 +113,12 @@ fn sync_layout_cef_pointer_target(
         commands.entity(layout).remove::<CefPointerTarget>();
     }
 }
+
 #[cfg(target_os = "macos")]
 fn forward_layout_cef_cursor_move(mut events: MessageReader<CursorMoved>) {
     for _ in events.read() {}
 }
+
 #[cfg(not(target_os = "macos"))]
 fn forward_layout_cef_cursor_move(
     mut events: MessageReader<CursorMoved>,
@@ -149,6 +152,7 @@ fn forward_layout_cef_cursor_move(
         *was_in_region = in_region;
     }
 }
+
 fn forward_layout_cef_mouse_button(
     mut events: MessageReader<MouseButtonInput>,
     windows: Query<&Window>,
@@ -210,6 +214,7 @@ fn forward_layout_cef_mouse_button(
         }
     }
 }
+
 fn dismiss_windowed_command_bar_on_outside_click(
     mut events: MessageReader<MouseButtonInput>,
     windows: Query<&Window>,
@@ -263,6 +268,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
         }
     }
 }
+
 fn dismiss_command_bar_from_native_monitor(
     modal_q: Query<Entity, With<Modal>>,
     mut commands: Commands,
@@ -284,11 +290,13 @@ fn dismiss_command_bar_from_native_monitor(
         },
     });
 }
+
 #[derive(Resource, Default)]
 pub(crate) struct RecentBrowserInteraction {
     pub(crate) stack: Option<Entity>,
     pub(crate) at: Option<std::time::Instant>,
 }
+
 impl RecentBrowserInteraction {
     pub(crate) fn active(&self, stack: Entity) -> bool {
         self.stack == Some(stack)
@@ -297,6 +305,7 @@ impl RecentBrowserInteraction {
                 .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(2))
     }
 }
+
 fn track_browser_interaction(
     mut mouse_buttons: MessageReader<MouseButtonInput>,
     mut mouse_wheels: MessageReader<MouseWheel>,

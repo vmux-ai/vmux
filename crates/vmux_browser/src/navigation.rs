@@ -58,6 +58,7 @@ fn drain_committed_navigation(
         writer.write(ev);
     }
 }
+
 fn spawn_visit_on_navigation(
     changed_tabs: Query<(Entity, &PageMetadata), (With<Stack>, Changed<PageMetadata>)>,
     mut last_urls: Local<std::collections::HashMap<u64, String>>,
@@ -80,6 +81,7 @@ fn spawn_visit_on_navigation(
         }
     }
 }
+
 pub(crate) fn sync_page_metadata_to_tab(
     browser_q: Query<(&PageMetadata, &ChildOf), (With<Browser>, Changed<PageMetadata>)>,
     tab_q: Query<Option<&PageMetadata>, With<Stack>>,
@@ -116,6 +118,7 @@ pub(crate) fn sync_page_metadata_to_tab(
         }
     }
 }
+
 fn handle_browser_go_back_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoBackRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -148,6 +151,7 @@ fn handle_browser_go_back_requests(
         commands.trigger(bevy_cef::prelude::RequestGoBack { webview });
     }
 }
+
 fn handle_browser_go_forward_requests(
     mut reader: MessageReader<vmux_layout::BrowserGoForwardRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -180,6 +184,7 @@ fn handle_browser_go_forward_requests(
         commands.trigger(bevy_cef::prelude::RequestGoForward { webview });
     }
 }
+
 fn handle_browser_open_history(
     mut reader: MessageReader<AppCommand>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -201,6 +206,7 @@ fn handle_browser_open_history(
         }
     }
 }
+
 fn handle_open_in_new_stack_requests(
     mut reader: MessageReader<vmux_layout::OpenInNewStackRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,
@@ -218,6 +224,7 @@ fn handle_open_in_new_stack_requests(
         });
     }
 }
+
 pub(crate) fn handle_browser_navigate_requests(
     mut reader: MessageReader<vmux_layout::BrowserNavigateRequest>,
     focus: Res<vmux_layout::stack::FocusedStack>,

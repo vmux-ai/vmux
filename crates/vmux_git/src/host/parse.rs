@@ -351,6 +351,7 @@ mod diff_tests {
         assert!(parse_unified_diff("").is_empty());
     }
 }
+
 #[cfg(test)]
 mod porcelain_tests {
     use super::*;
@@ -430,6 +431,7 @@ u UU N... 100644 100644 100644 100644 ggg hhh iii conflict.rs\n\
         assert_eq!(set.len(), 5);
     }
 }
+
 #[cfg(test)]
 mod window_tests {
     use super::*;

@@ -161,6 +161,7 @@ fn refresh_layout_cef_hover(
         state.in_region = in_region;
     }
 }
+
 fn refresh_active_windowed_hover(
     browsers: NonSend<Browsers>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -234,12 +235,14 @@ fn refresh_active_windowed_hover(
     state.entity = Some(entity);
     state.position = Some(position);
 }
+
 const LAYOUT_IDLE_FRAME_RATE: i32 = 10;
 const LAYOUT_ACTIVE_FRAME_RATE: i32 = 60;
 #[derive(Resource, Default)]
 struct LayoutFrameRateBurst {
     pub(crate) last_emit: Option<std::time::Instant>,
 }
+
 fn request_layout_frame_burst(
     trigger: On<BinHostEmitEvent>,
     mut layouts: Query<&mut WebviewMaxFrameRate, With<LayoutCef>>,
@@ -263,6 +266,7 @@ fn request_layout_frame_burst(
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
+
 fn layout_frame_rate(
     now: std::time::Instant,
     last_input: Option<std::time::Instant>,
@@ -278,6 +282,7 @@ fn layout_frame_rate(
         LAYOUT_IDLE_FRAME_RATE
     }
 }
+
 fn sync_layout_cef_frame_rate(
     mut cursor_events: MessageReader<CursorMoved>,
     mut button_events: MessageReader<MouseButtonInput>,
@@ -370,6 +375,7 @@ mod tests {
             LAYOUT_ACTIVE_FRAME_RATE
         );
     }
+
     #[test]
     fn layout_host_emit_requests_frame_burst() {
         let mut app = App::new();

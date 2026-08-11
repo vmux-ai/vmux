@@ -53,6 +53,7 @@ pub(crate) fn drain_loading_state(
         });
     }
 }
+
 pub(crate) fn spawn_popup_stacks(
     popup_rx: Res<WebviewPopupReceiver>,
     child_of_q: Query<&ChildOf>,
@@ -89,6 +90,7 @@ pub(crate) fn spawn_popup_stacks(
         ));
     }
 }
+
 fn apply_page_icons(
     manifests: Query<&vmux_core::page::PageManifest>,
     mut metas: Query<&mut PageMetadata, Changed<PageMetadata>>,
@@ -125,6 +127,7 @@ fn apply_page_icons(
         }
     }
 }
+
 #[cfg(test)]
 mod apply_page_icons_tests {
     use super::*;

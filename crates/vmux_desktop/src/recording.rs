@@ -402,6 +402,7 @@ mod tests {
         assert_eq!(downscale_to(0, 0, 800), (1, 1));
     }
 }
+
 #[cfg(not(target_os = "macos"))]
 mod capture {
     use super::{CropRect, RecordOutcome, WakeFn};

@@ -707,6 +707,7 @@ mod live {
         }
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

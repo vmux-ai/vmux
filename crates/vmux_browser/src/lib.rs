@@ -285,6 +285,7 @@ mod accept_language_tests {
         assert_eq!(browser_accept_language_list("en-US"), "en-US,en;q=0.9");
     }
 }
+
 type CefPointerRegionQuery<'w, 's> = Query<
     'w,
     's,
@@ -1251,6 +1252,7 @@ mod debug_update_observer_tests {
         assert_eq!(*app.world().resource::<UpdateState>(), UpdateState::Idle);
     }
 }
+
 #[cfg(test)]
 mod error_page_source_tests {
     use super::{error_page_source, percent_encode};
@@ -1269,6 +1271,7 @@ mod error_page_source_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3060,6 +3063,7 @@ mod tests {
         }
     }
 }
+
 #[cfg(test)]
 mod update_notice_tests {
     use super::should_emit_update;

@@ -24,6 +24,7 @@ impl RegisterValue {
             kind: RegisterKind::Charwise,
         }
     }
+
     pub fn linewise(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),

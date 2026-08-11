@@ -143,6 +143,7 @@ mod tests {
     fn rope(text: &str) -> Rope {
         Rope::from_str(text)
     }
+
     fn sel() -> Vec<Selection> {
         vec![Selection::caret(0)]
     }
@@ -161,16 +162,20 @@ mod tests {
                 text: text.to_string(),
             }
         }
+
         fn edit(&mut self, next: &str) {
             self.tree.push(&rope(&self.text), &sel(), 0);
             self.text = next.to_string();
         }
+
         fn undo(&mut self) -> bool {
             self.apply(UndoTree::undo)
         }
+
         fn redo(&mut self) -> bool {
             self.apply(UndoTree::redo)
         }
+
         fn apply(
             &mut self,
             f: fn(&mut UndoTree, &Rope, &[Selection], u64) -> Option<Restored>,
@@ -183,6 +188,7 @@ mod tests {
                 None => false,
             }
         }
+
         fn time(&mut self, forward: bool, count: usize) -> bool {
             match self
                 .tree

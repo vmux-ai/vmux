@@ -230,6 +230,7 @@ mod page_ready_tests {
             rkyv::from_bytes::<PageReady, rkyv::rancor::Error>(&bytes).expect("self decode");
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

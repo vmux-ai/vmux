@@ -552,6 +552,7 @@ pub(crate) mod test_repo {
         path
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

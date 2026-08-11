@@ -158,6 +158,7 @@ fn sync_keyboard_target(
         }
     }
 }
+
 fn tab_ancestor(
     start: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -174,6 +175,7 @@ fn tab_ancestor(
         }
     }
 }
+
 fn sync_children_to_ui(
     mut browser_q: Query<
         (
@@ -336,6 +338,7 @@ fn sync_children_to_ui(
         }
     }
 }
+
 fn set_windowed_content_mesh_material(
     material: &mut WebviewExtendStandardMaterial,
     windowed: bool,
@@ -345,6 +348,7 @@ fn set_windowed_content_mesh_material(
     material.base.alpha_mode =
         webview_content_alpha_mode(alpha, material.extension.pane_corner_clip.x);
 }
+
 fn webview_content_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
     if alpha < 1.0 {
         AlphaMode::Blend
@@ -354,6 +358,7 @@ fn webview_content_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
         AlphaMode::Opaque
     }
 }
+
 fn sync_windowed_content_mesh_materials(
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     browsers: Query<
@@ -376,6 +381,7 @@ fn sync_windowed_content_mesh_materials(
         }
     }
 }
+
 fn sync_modal_mesh_visibility(
     modal_q: Query<
         (
@@ -392,6 +398,7 @@ fn sync_modal_mesh_visibility(
         }
     }
 }
+
 /// Pick the focus-ring width + color for a windowed browser pane. The local
 /// user's ring (their accent) draws on their focused stack; each agent's ring
 /// (a distinct per-agent hue) draws on the agent's own active pane. User takes
@@ -420,6 +427,7 @@ fn windowed_ring_for(
     }
     (0.0, [user.r, user.g, user.b], None)
 }
+
 /// The agent's logo bitmap, decoded once and cached for the process lifetime.
 fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> {
     use std::sync::OnceLock;
@@ -434,6 +442,7 @@ fn agent_logo(kind: vmux_core::agent::AgentKind) -> Option<&'static LogoBitmap> 
     };
     cell.get_or_init(|| decode_premultiplied(png)).as_ref()
 }
+
 /// Stable per-kind tag the native layer caches on, so the badge image is only
 /// rebuilt when the owning agent's kind changes.
 fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
@@ -444,11 +453,13 @@ fn agent_kind_tag(kind: vmux_core::agent::AgentKind) -> u8 {
         AgentKind::Vibe => 3,
     }
 }
+
 /// The agent's brand color (Claude clay / Codex green / Mistral purple), used as
 /// the badge circle fill behind its logo.
 fn agent_brand_rgb(kind: vmux_core::agent::AgentKind) -> [f32; 3] {
     hex_to_rgb(&kind.avatar().color).unwrap_or([0.5, 0.5, 0.5])
 }
+
 /// Position windowed (native) content webviews to match their pane rect. Reads the mesh scale set
 /// by `sync_children_to_ui` (visible active pane has a real scale; inactive panes ~1e-6) to pick
 /// which native view to show. No-op for OSR webviews / non-macOS (`set_windowed_*` are no-ops).
@@ -592,6 +603,7 @@ pub(crate) fn sync_windowed_frames(
     *last_windowed_pages = current_windowed;
     *visible_frames = NativeBridge::set_windowed_page_frames(std::mem::take(&mut *visible_frames));
 }
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct WindowedFrameRect {
     pub(crate) left: f32,
@@ -599,6 +611,7 @@ pub(crate) struct WindowedFrameRect {
     pub(crate) width: f32,
     pub(crate) height: f32,
 }
+
 impl WindowedFrameRect {
     pub(crate) fn right(self) -> f32 {
         self.left + self.width
@@ -608,6 +621,7 @@ impl WindowedFrameRect {
         self.top + self.height
     }
 }
+
 fn windowed_frame_rect_from_computed(
     computed: &ComputedNode,
     ui_gt: &UiGlobalTransform,
@@ -624,6 +638,7 @@ fn windowed_frame_rect_from_computed(
         height: size.y,
     })
 }
+
 fn windowed_page_frame_rect(
     pane: WindowedFrameRect,
     header: Option<WindowedFrameRect>,
@@ -653,6 +668,7 @@ fn windowed_page_frame_rect(
         height: bottom - top,
     }
 }
+
 fn visible_pane_count_for_windowed_sync(
     focused_tab: Option<Entity>,
     all_children: &Query<&Children>,
@@ -667,6 +683,7 @@ fn visible_pane_count_for_windowed_sync(
     }
     leaf_panes.iter().count().max(1)
 }
+
 fn windowed_pages_to_hide(
     hidden: &[Entity],
     prev_visible: &[Entity],
@@ -683,9 +700,11 @@ fn windowed_pages_to_hide(
         })
         .collect()
 }
+
 fn windowed_page_all_corners(layout_hidden: bool, visible_pane_count: usize) -> bool {
     layout_hidden || visible_pane_count > 1
 }
+
 fn sync_windowed_layout(
     browsers: NonSend<Browsers>,
     layout_q: Query<(Entity, Option<&HostWindow>), (With<LayoutCef>, With<WebviewWindowed>)>,
@@ -720,6 +739,7 @@ fn sync_windowed_layout(
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CommandBarWindowedFrame {
     pub(crate) left_px: f32,
@@ -727,6 +747,7 @@ pub(crate) struct CommandBarWindowedFrame {
     pub(crate) width_px: f32,
     pub(crate) height_px: f32,
 }
+
 const COMMAND_BAR_NATIVE_RADIUS_PX: f32 = 16.0;
 fn publish_native_command_bar_route(
     owns_input: bool,
@@ -747,6 +768,7 @@ fn publish_native_command_bar_route(
         NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
     }
 }
+
 fn command_bar_windowed_frame(
     window_width_px: f32,
     window_height_px: f32,
@@ -801,9 +823,11 @@ fn command_bar_windowed_frame(
         height_px: box_h * scale,
     })
 }
+
 fn hide_windowed_command_bar(browsers: &Browsers, entity: Entity) {
     browsers.set_windowed_hidden(&entity, true);
 }
+
 /// The surface exists but must stay off screen — either prewarmed before any open, or revealing
 /// while the page paints. Both keep the native view alive and parked outside the window so it can
 /// still hold first responder.
@@ -813,6 +837,7 @@ fn command_bar_windowed_view_should_render_hidden(
 ) -> bool {
     display != Display::None && visibility == Visibility::Hidden
 }
+
 pub(crate) fn sync_windowed_command_bar(
     browsers: NonSend<Browsers>,
     modal_q: Query<
@@ -965,6 +990,7 @@ pub(crate) fn sync_windowed_command_bar(
         *was_open = true;
     }
 }
+
 #[cfg(target_os = "macos")]
 fn flush_native_command_bar_pointer_events(
     browsers: NonSend<Browsers>,
@@ -995,6 +1021,7 @@ fn flush_native_command_bar_pointer_events(
         }
     }
 }
+
 #[cfg(not(target_os = "macos"))]
 fn flush_native_command_bar_pointer_events() {}
 fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed<PageReady>>) {
@@ -1002,6 +1029,7 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed
         browsers.nudge_windowed_repaint(&entity);
     }
 }
+
 fn sync_cef_webview_resize_after_ui(
     browsers: NonSend<Browsers>,
     webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<Modal>)>,
@@ -1067,6 +1095,7 @@ fn sync_cef_webview_resize_after_ui(
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
+
 fn windowed_reconcile_should_wake(
     pushed_any: bool,
     awaiting_create: bool,
@@ -1074,6 +1103,7 @@ fn windowed_reconcile_should_wake(
 ) -> bool {
     pushed_any || (awaiting_create && within_startup_grace)
 }
+
 /// Walks up from a browser entity to find its enclosing Tab, then counts
 /// leaf panes under that tab. Returns None if the parent chain doesn't
 /// reach a Tab.
@@ -1097,6 +1127,7 @@ fn pane_count_for_browser(
     collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
     Some(leaves.len())
 }
+
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
@@ -1173,6 +1204,7 @@ fn sync_webview_pane_corner_clip(
         }
     }
 }
+
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<
@@ -1334,12 +1366,14 @@ fn sync_osr_webview_focus(
         }
     }
 }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HiddenWebviewSizing {
     Render,
     HideKeepSize,
     Collapse,
 }
+
 fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWebviewSizing {
     if renderable {
         HiddenWebviewSizing::Render
@@ -1349,6 +1383,7 @@ fn hidden_webview_sizing(renderable: bool, under_inactive_tab: bool) -> HiddenWe
         HiddenWebviewSizing::Collapse
     }
 }
+
 fn webview_layout_is_renderable(
     size_px: Vec2,
     visibility: Option<&Visibility>,
@@ -1358,6 +1393,7 @@ fn webview_layout_is_renderable(
         && size_px.x > 0.0
         && size_px.y > 0.0
 }
+
 fn webview_osr_should_run(
     size_px: Vec2,
     visibility: Option<&Visibility>,
@@ -1365,9 +1401,11 @@ fn webview_osr_should_run(
 ) -> bool {
     pending_reveal || webview_layout_is_renderable(size_px, visibility, false)
 }
+
 fn keep_hidden_osr_webview_warm(is_modal: bool, is_windowed: bool, window_visible: bool) -> bool {
     is_modal && !is_windowed && window_visible
 }
+
 fn choose_osr_active_webview(
     modal_keyboard_target: Option<(Entity, bool)>,
     active_stack: Option<Entity>,
@@ -1382,6 +1420,7 @@ fn choose_osr_active_webview(
             .or(Some(fallback))
     }
 }
+
 fn osr_focus_targets(
     ready: &[Entity],
     active: Option<Entity>,
@@ -1396,6 +1435,7 @@ fn osr_focus_targets(
         .collect();
     (active, auxiliary)
 }
+
 fn should_show_osr_webview(
     window_visible: bool,
     parent_is_stack: bool,
@@ -1411,6 +1451,7 @@ fn should_show_osr_webview(
     }
     stack_is_active || stack_is_previous_new_stack
 }
+
 fn flush_pending_osr_textures(
     mut ew: MessageWriter<RenderTextureMessage>,
     browsers: NonSend<Browsers>,
@@ -1484,6 +1525,7 @@ mod tests {
         );
         assert_eq!(width, 0.0);
     }
+
     use crate::tests::test_app_settings_with_radius;
     use crate::{
         command_bar_windowed_click_should_dismiss, native_command_bar_route,
@@ -1499,12 +1541,14 @@ mod tests {
         assert!(!should_show_osr_webview(false, false, true, false, false));
         assert!(should_show_osr_webview(true, true, true, true, false));
     }
+
     #[test]
     fn auxiliary_osr_webviews_remain_visible_when_window_is_focused() {
         assert!(should_show_osr_webview(true, false, true, false, false));
         assert!(should_show_osr_webview(true, true, false, false, false));
         assert!(should_show_osr_webview(true, true, true, false, true));
     }
+
     #[test]
     fn hidden_or_collapsed_webviews_do_not_render() {
         assert!(!webview_layout_is_renderable(
@@ -1528,6 +1572,7 @@ mod tests {
             false
         ));
     }
+
     #[test]
     fn hidden_pending_reveal_webviews_resize_before_reveal() {
         assert!(webview_layout_is_renderable(
@@ -1536,6 +1581,7 @@ mod tests {
             true
         ));
     }
+
     #[test]
     fn inactive_tab_pages_keep_size_other_hidden_pages_collapse() {
         assert_eq!(
@@ -1555,6 +1601,7 @@ mod tests {
             HiddenWebviewSizing::Collapse
         );
     }
+
     #[test]
     fn layout_shell_osr_renders_above_player_page_osr() {
         let mut app = App::new();
@@ -1631,6 +1678,7 @@ mod tests {
 
         assert!(layout_z > page_z);
     }
+
     #[test]
     fn pending_reveal_webviews_keep_cef_running() {
         assert!(webview_osr_should_run(
@@ -1639,6 +1687,7 @@ mod tests {
             true
         ));
     }
+
     #[test]
     fn hidden_osr_command_bar_stays_warm_for_reopen() {
         assert!(keep_hidden_osr_webview_warm(true, false, true));
@@ -1646,6 +1695,7 @@ mod tests {
         assert!(!keep_hidden_osr_webview_warm(true, true, true));
         assert!(!keep_hidden_osr_webview_warm(true, false, false));
     }
+
     #[test]
     fn command_bar_modal_wins_osr_focus_for_keyboard_input() {
         let pane = Entity::from_bits(1);
@@ -1656,6 +1706,7 @@ mod tests {
             Some(modal)
         );
     }
+
     #[test]
     fn windowed_command_bar_modal_suppresses_osr_focus_targets() {
         let pane = Entity::from_bits(1);
@@ -1666,6 +1717,7 @@ mod tests {
             None
         );
     }
+
     #[test]
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
@@ -1693,6 +1745,7 @@ mod tests {
         assert!(app.world().get::<CefKeyboardTarget>(page).is_none());
         assert!(!app.world().resource::<CefSuppressKeyboardInput>().0);
     }
+
     #[test]
     fn layout_shell_is_auxiliary_osr_focus_target() {
         let active = Entity::from_bits(1);
@@ -1705,6 +1758,7 @@ mod tests {
             (Some(active), vec![layout, sidecar])
         );
     }
+
     #[test]
     fn layout_shell_is_not_active_osr_focus_target() {
         let layout = Entity::from_bits(1);
@@ -1715,6 +1769,7 @@ mod tests {
             (None, vec![layout, sidecar])
         );
     }
+
     #[test]
     fn bookmark_text_input_can_make_layout_shell_active_osr_target() {
         let layout = Entity::from_bits(1);
@@ -1725,6 +1780,7 @@ mod tests {
             (Some(layout), vec![sidecar])
         );
     }
+
     #[test]
     fn windowed_pages_hide_on_deactivate_and_first_show() {
         let just_deactivated = Entity::from_bits(1);
@@ -1740,6 +1796,7 @@ mod tests {
             vec![just_deactivated, never_shown]
         );
     }
+
     #[test]
     fn recreated_inactive_windowed_page_is_hidden() {
         let page = Entity::from_bits(1);
@@ -1749,6 +1806,7 @@ mod tests {
             vec![page]
         );
     }
+
     #[test]
     fn windowed_content_mesh_material_is_hidden() {
         let mut material = WebviewExtendStandardMaterial::default();
@@ -1763,6 +1821,7 @@ mod tests {
         assert_eq!(material.base.base_color.alpha(), 1.0);
         assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
     }
+
     #[test]
     fn player_osr_pane_clip_uses_alpha_to_coverage_for_rounded_corners() {
         let mut app = App::new();
@@ -1804,6 +1863,7 @@ mod tests {
         );
         assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
     }
+
     #[test]
     fn layout_cef_shell_keeps_blend_material() {
         let mut app = App::new();
@@ -1838,15 +1898,18 @@ mod tests {
         assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
         assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
+
     #[test]
     fn windowed_page_keeps_single_pane_top_edge_flat_under_header() {
         assert!(!windowed_page_all_corners(false, 1));
     }
+
     #[test]
     fn windowed_page_rounds_when_layout_hidden_or_split() {
         assert!(windowed_page_all_corners(true, 1));
         assert!(windowed_page_all_corners(false, 2));
     }
+
     #[test]
     fn single_pane_windowed_frame_matches_header_edges_without_side_gaps() {
         let pane = WindowedFrameRect {
@@ -1874,6 +1937,7 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn split_pane_windowed_frame_starts_below_header_without_changing_width() {
         let pane = WindowedFrameRect {
@@ -1901,6 +1965,7 @@ mod tests {
             }
         );
     }
+
     #[test]
     fn windowed_frame_hit_test_uses_physical_page_bounds() {
         let frame = WindowedFrameRect {
@@ -1918,6 +1983,7 @@ mod tests {
             Vec2::new(300.0, 351.0)
         ));
     }
+
     #[test]
     fn command_bar_windowed_frame_uses_measured_height() {
         let frame =
@@ -1929,6 +1995,7 @@ mod tests {
         assert!((frame.width_px - 1152.0).abs() < 0.01);
         assert!((frame.height_px - 440.0).abs() < 0.01);
     }
+
     #[test]
     fn command_bar_windowed_frame_clamps_height_to_window() {
         let frame =
@@ -1938,6 +2005,7 @@ mod tests {
         assert!((frame.top_px - 75.0).abs() < 0.01);
         assert!((frame.height_px - 409.0).abs() < 0.01);
     }
+
     #[test]
     fn command_bar_windowed_frame_centers_in_page_workspace() {
         let frame = command_bar_windowed_frame(
@@ -1959,6 +2027,7 @@ mod tests {
         assert!((frame.width_px - 1136.0).abs() < 0.01);
         assert!((frame.height_px - 440.0).abs() < 0.01);
     }
+
     #[test]
     fn windowed_command_bar_outside_click_dismisses() {
         let frame = CommandBarWindowedFrame {
@@ -1997,6 +2066,7 @@ mod tests {
             Some(frame),
         ));
     }
+
     /// One test, because every case here mutates the process-wide published route and the test
     /// runner is multi-threaded.
     #[test]
@@ -2044,6 +2114,7 @@ mod tests {
         publish_native_command_bar_route(false, None, 1.0);
         assert!(!take_native_command_bar_dismiss_requested());
     }
+
     #[test]
     fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
         let revealing = CommandBarState::from_modal(Display::Flex, Visibility::Hidden, true);
@@ -2055,6 +2126,7 @@ mod tests {
             Visibility::Hidden
         ));
     }
+
     #[test]
     fn collapsed_command_bar_view_is_never_render_hidden() {
         assert!(!command_bar_windowed_view_should_render_hidden(
@@ -2066,6 +2138,7 @@ mod tests {
             Visibility::Inherited
         ));
     }
+
     #[test]
     fn windowed_reconcile_wakes_until_native_pages_are_sized() {
         assert!(windowed_reconcile_should_wake(true, false, false));

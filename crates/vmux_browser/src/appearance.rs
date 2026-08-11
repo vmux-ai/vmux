@@ -52,6 +52,7 @@ fn on_webview_ready_send_theme(
         browsers.set_zoom_level(&entity, 0.0);
     }
 }
+
 fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefColorMode {
     match mode {
         vmux_setting::ColorScheme::Light => bevy_cef::prelude::CefColorMode::Light,
@@ -59,6 +60,7 @@ fn map_color_scheme(mode: vmux_setting::ColorScheme) -> bevy_cef::prelude::CefCo
         vmux_setting::ColorScheme::Device => bevy_cef::prelude::CefColorMode::System,
     }
 }
+
 pub(crate) fn sync_appearance_to_cef(
     settings: Res<AppSettings>,
     mut scheme: ResMut<bevy_cef::prelude::CefColorScheme>,
@@ -93,6 +95,7 @@ pub(crate) fn sync_appearance_to_cef(
         }
     }
 }
+
 #[cfg(test)]
 mod appearance_bridge_tests {
     use super::map_color_scheme;

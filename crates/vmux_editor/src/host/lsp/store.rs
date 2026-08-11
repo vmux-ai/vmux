@@ -11,12 +11,15 @@ pub fn default_root() -> PathBuf {
 pub fn bin_dir(root: &Path) -> PathBuf {
     root.join("bin")
 }
+
 pub fn packages_dir(root: &Path) -> PathBuf {
     root.join("packages")
 }
+
 pub fn staging_dir(root: &Path) -> PathBuf {
     root.join("staging")
 }
+
 pub fn registries_dir(root: &Path) -> PathBuf {
     root.join("registries")
 }

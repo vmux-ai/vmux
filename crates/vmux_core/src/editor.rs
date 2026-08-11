@@ -36,12 +36,14 @@ impl EditMode {
             EditMode::VisualBlock => "V-BLOCK",
         }
     }
+
     pub fn is_visual(self) -> bool {
         matches!(
             self,
             EditMode::Visual | EditMode::VisualLine | EditMode::VisualBlock
         )
     }
+
     pub fn accepts_text(self) -> bool {
         matches!(self, EditMode::Insert | EditMode::Replace)
     }

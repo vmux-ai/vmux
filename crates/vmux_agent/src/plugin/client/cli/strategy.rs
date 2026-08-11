@@ -45,6 +45,7 @@ pub trait CliAgentStrategy: AgentStrategy {
     fn effort_args(&self, _level: &str) -> Vec<String> {
         Vec::new()
     }
+
     fn build_env(&self, mcp: &McpServerConfig) -> Vec<(String, String)>;
     /// Launch-time side effects (e.g. writing a managed hooks config file).
     /// Runs once per spawn, after the MCP config is resolved. Default: nothing.
@@ -61,6 +62,7 @@ pub trait CliAgentStrategy: AgentStrategy {
     fn list_sessions(&self) -> Vec<ResumableSession> {
         Vec::new()
     }
+
     fn load_transcript(&self, session_id: &str) -> Result<Vec<Message>, String> {
         Err(format!("transcript loading unsupported for {session_id}"))
     }

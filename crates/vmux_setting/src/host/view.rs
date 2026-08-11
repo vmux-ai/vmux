@@ -802,6 +802,7 @@ mod agent_schema_tests {
         assert_eq!(field.label.as_deref(), Some("Allow run placement override"));
     }
 }
+
 #[cfg(test)]
 mod appearance_schema_tests {
     use super::*;
@@ -894,6 +895,7 @@ mod appearance_schema_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod browser_schema_tests {
     use super::*;
@@ -916,6 +918,7 @@ mod browser_schema_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod page_open_tests {
     use super::*;

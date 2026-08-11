@@ -250,6 +250,7 @@ mod tests {
         assert_eq!(&png[..4], &[137, 80, 78, 71]);
     }
 }
+
 #[cfg(target_os = "macos")]
 mod capture {
     use super::{

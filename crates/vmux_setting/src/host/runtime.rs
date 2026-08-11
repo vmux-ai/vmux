@@ -158,6 +158,7 @@ impl ExplorerSettings {
     pub fn visible(&self) -> bool {
         self.visible.unwrap_or(false)
     }
+
     pub fn width(&self) -> u32 {
         self.width
             .unwrap_or(EXPLORER_DEFAULT_WIDTH)

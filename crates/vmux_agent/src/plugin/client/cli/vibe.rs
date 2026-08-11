@@ -248,14 +248,17 @@ fn upsert_vmux_hook(
 struct MetaJson {
     environment: MetaEnvironment,
 }
+
 #[derive(serde::Deserialize)]
 struct MetaEnvironment {
     working_directory: String,
 }
+
 #[derive(serde::Deserialize)]
 struct MetaJsonHead {
     session_id: String,
 }
+
 #[derive(serde::Deserialize)]
 struct MetaJsonExit {
     end_time: Option<String>,

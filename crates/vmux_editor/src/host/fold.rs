@@ -19,6 +19,7 @@ impl FoldRegion {
     pub fn contains_body(self, line: u32) -> bool {
         line > self.start && line <= self.end
     }
+
     /// Whether `line` lies anywhere in the region, header included.
     pub fn contains(self, line: u32) -> bool {
         line >= self.start && line <= self.end
@@ -70,18 +71,21 @@ impl FoldState {
             self.collapsed.insert(r.start);
         }
     }
+
     /// Expand the fold enclosing `line`.
     pub fn open(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line) {
             self.collapsed.remove(&r.start);
         }
     }
+
     /// Collapse the fold enclosing `line`.
     pub fn close(&mut self, line: u32) {
         if let Some(r) = self.enclosing(line) {
             self.collapsed.insert(r.start);
         }
     }
+
     /// Toggle the enclosing fold and all regions nested within it.
     pub fn toggle_recursive(&mut self, line: u32) {
         let Some(top) = self.enclosing(line) else {
@@ -102,10 +106,12 @@ impl FoldState {
             }
         }
     }
+
     /// Collapse every region.
     pub fn fold_all(&mut self) {
         self.collapsed = self.regions.iter().map(|r| r.start).collect();
     }
+
     /// Expand every region.
     pub fn unfold_all(&mut self) {
         self.collapsed.clear();
@@ -195,6 +201,7 @@ impl FoldView {
     pub fn is_hidden(&self, line: u32) -> bool {
         self.hidden.iter().any(|(a, b)| line >= *a && line <= *b)
     }
+
     /// Count of hidden lines strictly before `line`.
     pub fn hidden_before(&self, line: u32) -> u32 {
         let mut n = 0;
@@ -207,15 +214,18 @@ impl FoldView {
         }
         n
     }
+
     /// Visual row for a (visible) buffer line.
     pub fn buffer_to_row(&self, line: u32) -> u32 {
         line - self.hidden_before(line)
     }
+
     /// Number of visible rows.
     pub fn visible_count(&self) -> u32 {
         let hidden: u32 = self.hidden.iter().map(|(a, b)| b - a + 1).sum();
         self.total.saturating_sub(hidden).max(1)
     }
+
     /// First visible line at or after `line`.
     pub fn next_visible(&self, line: u32) -> u32 {
         let mut l = line;
@@ -224,6 +234,7 @@ impl FoldView {
         }
         l
     }
+
     /// Move `delta` visible rows from `line`, skipping hidden lines.
     pub fn step_rows(&self, line: u32, delta: i64) -> u32 {
         if self.total == 0 {
@@ -246,6 +257,7 @@ impl FoldView {
         }
         (l.max(0) as u32).min(last)
     }
+
     /// Visible buffer lines for a window of `rows` rows starting at `first_row`.
     pub fn lines_for_window(&self, first_row: u32, rows: u32) -> Vec<u32> {
         let mut out = Vec::new();
@@ -340,6 +352,7 @@ mod indent_tests {
         assert!(regs.contains(&FoldRegion { start: 1, end: 2 }));
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

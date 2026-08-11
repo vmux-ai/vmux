@@ -122,6 +122,7 @@ fn push_layout_state_emit(
     ));
     *last = body;
 }
+
 fn push_stacks_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -207,6 +208,7 @@ fn push_stacks_host_emit(
     commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, STACKS_EVENT, &payload));
     *last = ron_body;
 }
+
 fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -324,6 +326,7 @@ fn push_pane_tree_emit(
     ));
     *last = ron_body;
 }
+
 /// Emit the active tab's working-directory boundary from the shared event-driven Git cache.
 #[allow(clippy::too_many_arguments)]
 fn push_tab_boundary_emit(
@@ -386,6 +389,7 @@ fn push_tab_boundary_emit(
     ));
     *last = ron_body;
 }
+
 #[allow(clippy::too_many_arguments)]
 fn push_bookmarks_host_emit(
     mut commands: Commands,
@@ -508,6 +512,7 @@ fn push_bookmarks_host_emit(
     ));
     *last = body;
 }
+
 fn push_tabs_host_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
@@ -590,6 +595,7 @@ fn push_tabs_host_emit(
     commands.trigger(BinHostEmitEvent::from_rkyv(cef_e, TABS_EVENT, &payload));
     *last = body;
 }
+
 fn push_update_notice_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,

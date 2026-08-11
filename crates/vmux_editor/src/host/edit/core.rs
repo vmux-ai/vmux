@@ -198,10 +198,12 @@ impl EditCore {
     pub fn primary(&self) -> Selection {
         self.selections[0]
     }
+
     pub fn set_caret(&mut self, at: usize) {
         self.preferred_vertical_col = None;
         self.place_caret(at);
     }
+
     fn place_caret(&mut self, at: usize) {
         let at = if self.mode == EditMode::Normal {
             self.normal_cursor_target(at)
@@ -210,6 +212,7 @@ impl EditCore {
         };
         self.selections = vec![Selection::caret(at)];
     }
+
     fn set_head(&mut self, head: usize) {
         let anchor = self.selections[0].anchor;
         self.selections = vec![Selection { anchor, head }];
@@ -316,6 +319,7 @@ impl EditCore {
     fn break_group(&mut self) {
         self.last_group = None;
     }
+
     fn snapshot(&mut self) {
         self.undo
             .push(&self.buffer.rope, &self.selections, self.rev);
@@ -332,6 +336,7 @@ impl EditCore {
             *mark = (*mark).min(len);
         }
     }
+
     fn checkpoint(&mut self, group: Group) {
         if self.last_group != Some(group) || group == Group::Other {
             self.snapshot();
@@ -622,6 +627,7 @@ impl EditCore {
         let target = self.fold_view.step_rows(l as u32, delta) as usize;
         self.buffer.coords_to_char(target, c)
     }
+
     fn line_left(&self, from: usize) -> usize {
         let (line, col) = self.buffer.char_to_coords(from);
         let start = self.buffer.line_to_char(line);
@@ -631,6 +637,7 @@ impl EditCore {
             self.buffer.prev_grapheme(from).max(start)
         }
     }
+
     fn line_right(&self, from: usize) -> usize {
         let (line, _) = self.buffer.char_to_coords(from);
         let start = self.buffer.line_to_char(line);
@@ -657,6 +664,7 @@ impl EditCore {
             at.clamp(start, self.buffer.prev_grapheme(end))
         }
     }
+
     fn paragraph_prev(&self, from: usize) -> usize {
         let (current, _) = self.buffer.char_to_coords(from);
         if current == 0 {
@@ -671,6 +679,7 @@ impl EditCore {
         }
         self.buffer.line_to_char(line)
     }
+
     fn paragraph_next(&self, from: usize) -> usize {
         let (current, _) = self.buffer.char_to_coords(from);
         let total = self.buffer.len_lines();
@@ -686,6 +695,7 @@ impl EditCore {
         }
         from
     }
+
     fn first_non_blank(&self, from: usize) -> usize {
         let (l, _) = self.buffer.char_to_coords(from);
         let base = self.buffer.line_to_char(l);
@@ -708,6 +718,7 @@ impl EditCore {
             char_class(c)
         }
     }
+
     fn word_next(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
         let mut i = from;
@@ -723,6 +734,7 @@ impl EditCore {
         }
         i
     }
+
     fn word_prev(&self, from: usize, big: bool) -> usize {
         let mut i = from;
         while i > 0 && self.cls(i - 1, big) == 0 {
@@ -737,6 +749,7 @@ impl EditCore {
         }
         i
     }
+
     fn word_end(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
         let mut i = (from + 1).min(len);
@@ -752,6 +765,7 @@ impl EditCore {
         }
         i
     }
+
     /// Vim's `ge`: the end of the word before the cursor.
     fn word_end_prev(&self, from: usize, big: bool) -> usize {
         let len = self.buffer.len_chars();
@@ -787,6 +801,7 @@ impl EditCore {
         self.set_caret(at + text.chars().count());
         true
     }
+
     fn delete_selection(&mut self) -> bool {
         let sel = self.primary();
         if sel.is_empty() {
@@ -1792,9 +1807,11 @@ mod tests {
             EditMode::Insert,
         )
     }
+
     fn text_of(c: &EditCore) -> String {
         c.buffer.text()
     }
+
     fn op(operator: Operator, target: Target) -> EditCommand {
         EditCommand::Op {
             operator,
@@ -1802,6 +1819,7 @@ mod tests {
             register: None,
         }
     }
+
     fn put(before: bool) -> EditCommand {
         EditCommand::Put {
             before,

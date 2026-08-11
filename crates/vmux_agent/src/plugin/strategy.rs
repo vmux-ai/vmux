@@ -83,23 +83,29 @@ mod tests {
         fn kind(&self) -> AgentKind {
             AgentKind::Claude
         }
+
         fn variant(&self) -> AgentVariant {
             AgentVariant::Cli
         }
     }
+
     impl CliAgentStrategy for StubStrategy {
         fn sessions_root(&self) -> PathBuf {
             PathBuf::from("/tmp/none")
         }
+
         fn build_args(&self, _: &McpServerConfig, _: Option<&str>) -> Vec<String> {
             vec![]
         }
+
         fn build_env(&self, _: &McpServerConfig) -> Vec<(String, String)> {
             vec![]
         }
+
         fn discover_session(&self, _: &Path, _: SystemTime, _: &HashSet<String>) -> Option<String> {
             None
         }
+
         fn detect_end_time(&self, _: &str) -> bool {
             false
         }

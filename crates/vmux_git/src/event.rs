@@ -36,6 +36,7 @@ wire! {
         pub hunk: Option<u32>,
         pub spans: Vec<StyledSpan>,
     }
+
     pub struct GitStatusEvent {
         pub branch: String,
         pub ahead: u32,
@@ -45,6 +46,7 @@ wire! {
         pub staged_count: u32,
         pub repo_root: String,
     }
+
     pub struct GitDiffMetaEvent { pub total_lines: u32 }
     pub struct GitDiffViewportEvent { pub first_line: u32, pub total_lines: u32, pub lines: Vec<DiffLine> }
     pub struct GitResultEvent { pub action: String, pub ok: bool, pub message: String }

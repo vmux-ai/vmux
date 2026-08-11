@@ -251,6 +251,7 @@ mod tests {
     fn outbox() -> LspOutbox {
         LspOutbox::default()
     }
+
     fn pending() -> PendingMap {
         PendingMap::default()
     }

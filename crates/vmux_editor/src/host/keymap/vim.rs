@@ -1085,11 +1085,13 @@ impl Keymap for VimKeymap {
     fn mode(&self) -> EditMode {
         self.mode
     }
+
     fn command_line(&self) -> Option<String> {
         self.ex
             .as_ref()
             .map(|(prompt, body)| format!("{prompt}{body}"))
     }
+
     fn record_text(&mut self, text: &str) {
         if self.replaying {
             return;
@@ -1103,6 +1105,7 @@ impl Keymap for VimKeymap {
         self.pending_change.push(Recorded::Text(text.to_string()));
         self.in_change = true;
     }
+
     fn handle(&mut self, k: &KeyInput) -> Vec<EditCommand> {
         if self.replaying {
             return self.dispatch(k);
@@ -1114,6 +1117,7 @@ impl Keymap for VimKeymap {
         }
         self.record_and_dispatch(k)
     }
+
     fn pointer_selection_mode(&mut self, extend: bool) -> Option<EditCommand> {
         match (extend, self.mode) {
             (true, EditMode::Normal) => {
@@ -1311,6 +1315,7 @@ mod tests {
             repeat: false,
         }
     }
+
     fn chord(key: &str, mods: Mods) -> KeyInput {
         KeyInput {
             key: key.into(),
@@ -1318,12 +1323,14 @@ mod tests {
             repeat: false,
         }
     }
+
     fn ctrl() -> Mods {
         Mods {
             ctrl: true,
             ..Default::default()
         }
     }
+
     fn run(km: &mut VimKeymap, seq: &[&str]) -> Vec<EditCommand> {
         let mut out = Vec::new();
         for s in seq {
@@ -1331,6 +1338,7 @@ mod tests {
         }
         out
     }
+
     fn op(operator: Operator, target: Target) -> EditCommand {
         EditCommand::Op {
             operator,

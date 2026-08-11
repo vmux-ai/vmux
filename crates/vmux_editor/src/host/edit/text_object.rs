@@ -41,6 +41,7 @@ impl TextObjectKind {
             _ => return None,
         })
     }
+
     fn quote(self) -> Option<char> {
         Some(match self {
             TextObjectKind::DoubleQuote => '"',
@@ -49,6 +50,7 @@ impl TextObjectKind {
             _ => return None,
         })
     }
+
     pub fn is_linewise(self) -> bool {
         matches!(self, TextObjectKind::Paragraph)
     }
@@ -342,6 +344,7 @@ mod tests {
     fn buf(text: &str) -> TextBuffer {
         TextBuffer::from_text(PathBuf::from("a.txt"), "Plain Text".into(), text)
     }
+
     fn slice(text: &str, head: usize, kind: TextObjectKind, around: bool) -> Option<String> {
         let b = buf(text);
         let r = resolve(

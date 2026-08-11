@@ -486,6 +486,7 @@ fn parse_definition(value: &serde_json::Value) -> Option<(PathBuf, u32, u32)> {
     if result.is_null() {
         return None;
     }
+
     use lsp_types::GotoDefinitionResponse::*;
     match serde_json::from_value::<lsp_types::GotoDefinitionResponse>(result.clone()).ok()? {
         Scalar(l) => loc_tuple(&l.uri, l.range.start),

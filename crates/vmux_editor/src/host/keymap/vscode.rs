@@ -26,6 +26,7 @@ impl Keymap for VscodeKeymap {
     fn mode(&self) -> EditMode {
         EditMode::Insert
     }
+
     fn mode_label(&self) -> String {
         String::new()
     }

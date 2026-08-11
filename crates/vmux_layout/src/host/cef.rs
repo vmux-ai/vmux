@@ -369,6 +369,7 @@ mod apply_cef_state_tests {
         assert_eq!(meta.icon, vmux_core::PageIcon::None);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +458,7 @@ mod tests {
         );
     }
 }
+
 #[cfg(test)]
 mod url_mirror_tests {
     use super::*;

@@ -18,6 +18,7 @@ impl Mods {
     pub fn cmd(&self) -> bool {
         self.meta || self.ctrl
     }
+
     pub fn word(&self) -> bool {
         self.alt || self.ctrl
     }
@@ -42,9 +43,11 @@ pub trait Keymap: Send + Sync {
     fn command_line(&self) -> Option<String> {
         None
     }
+
     fn pointer_selection_mode(&mut self, _extend: bool) -> Option<EditCommand> {
         None
     }
+
     fn mode_label(&self) -> String {
         self.mode().label().to_string()
     }
@@ -62,6 +65,7 @@ impl KeymapKindExt for KeymapKind {
             KeymapKind::Vim => Box::new(vim::VimKeymap::with_mappings(mappings, leader)),
         }
     }
+
     fn initial_mode(self) -> EditMode {
         match self {
             KeymapKind::Vscode => EditMode::Insert,

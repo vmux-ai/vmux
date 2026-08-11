@@ -183,9 +183,11 @@ impl Dimensions for PtyDimensions {
     fn total_lines(&self) -> usize {
         self.rows as usize
     }
+
     fn screen_lines(&self) -> usize {
         self.rows as usize
     }
+
     fn columns(&self) -> usize {
         self.cols as usize
     }

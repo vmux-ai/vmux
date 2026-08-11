@@ -84,6 +84,7 @@ pub(crate) fn handle_page_open_requests(
         }
     }
 }
+
 fn resolve_page_open_target(
     target: &PageOpenTarget,
     focus: &vmux_layout::stack::FocusedStack,
@@ -134,6 +135,7 @@ fn resolve_page_open_target(
         }
     }
 }
+
 pub(crate) fn attach_cef_page_requests(
     mut reader: MessageReader<CefPageAttachRequest>,
     children_q: Query<&Children>,
@@ -154,6 +156,7 @@ pub(crate) fn attach_cef_page_requests(
         );
     }
 }
+
 pub(crate) fn handle_unclaimed_page_open_tasks(
     mut tasks: Query<
         (
@@ -230,6 +233,7 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
         }
     }
 }
+
 pub(crate) fn respond_page_open_tasks(
     tasks: Query<
         (

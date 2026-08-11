@@ -454,6 +454,7 @@ pub(super) fn handle_agent_self_commands(
                         if let Err(error) = validate_agent_terminal_shell(&shell) {
                             break 'spawn AgentCommandResult::Error(error);
                         }
+
                         use vmux_service::protocol::PlacementMode;
                         let target_pane = match (beside_pane, *mode) {
                             (anchor_pane, PlacementMode::Split) => {

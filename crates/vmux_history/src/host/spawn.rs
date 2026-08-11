@@ -90,6 +90,7 @@ mod tests {
         assert!(app.world().get::<Url>(e).is_some());
     }
 }
+
 fn spawn_visits(
     mut events: bevy::ecs::message::MessageReader<
         bevy_cef_core::prelude::WebviewCommittedNavigationEvent,

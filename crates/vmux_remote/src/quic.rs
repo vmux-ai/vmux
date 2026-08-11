@@ -242,6 +242,7 @@ mod tests {
         assert_eq!(StreamKind::from_byte(200), None);
     }
 }
+
 /// Which end of a relayed pair a peer is.
 ///
 /// The HTTP relay told these apart by URL path (`/desktop/…` against `/r/…`). A QUIC connection

@@ -357,6 +357,7 @@ mod tests {
     fn assistant(blocks: Vec<AssistantBlock>) -> Message {
         Message::Assistant { blocks }
     }
+
     fn tool(id: &str) -> AssistantBlock {
         AssistantBlock::ToolUse {
             call_id: id.into(),

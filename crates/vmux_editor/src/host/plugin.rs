@@ -4161,6 +4161,7 @@ mod edit_flow_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod explorer_tests {
     use super::*;
@@ -4585,6 +4586,7 @@ mod explorer_tests {
         assert_eq!(got[0].path, PathBuf::from("/x.rs"));
     }
 }
+
 #[cfg(test)]
 mod fold_window_tests {
     use crate::fold::{FoldState, indent_regions};
@@ -4603,6 +4605,7 @@ mod fold_window_tests {
         assert!(visible.contains(&3));
     }
 }
+
 #[cfg(test)]
 mod page_open_tests {
     use super::*;
@@ -4726,6 +4729,7 @@ mod page_open_tests {
         assert!(!dir.entries.iter().any(|x| x.name == "f1"));
     }
 }
+
 #[cfg(test)]
 mod url_tests {
     use super::*;

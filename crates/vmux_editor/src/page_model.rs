@@ -615,6 +615,7 @@ mod dir_browser_tests {
         assert_eq!(dir_select_index(&parent, ""), 0);
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

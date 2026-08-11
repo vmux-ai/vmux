@@ -97,6 +97,7 @@ mod tests {
         assert_eq!(pending.cwd, PathBuf::from("/tmp/x"));
     }
 }
+
 #[cfg(test)]
 mod url_tests {
     use super::*;
@@ -268,6 +269,7 @@ mod url_tests {
         );
     }
 }
+
 pub fn mark_dirty_on_pending_added(
     added_pending: Query<(), Added<PendingAgentSession>>,
     added_session: Query<(), Added<SessionId>>,
@@ -386,6 +388,7 @@ mod tracking_tests {
         assert!(!map.0.contains_key(&(AgentKind::Vibe, "v1".into())));
     }
 }
+
 #[derive(Resource)]
 pub struct AgentSessionWatchers {
     receivers: Vec<Mutex<mpsc::Receiver<()>>>,
@@ -494,20 +497,25 @@ mod discovery_tests {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
+
             fn variant(&self) -> crate::AgentVariant {
                 crate::AgentVariant::Cli
             }
         }
+
         impl crate::CliAgentStrategy for NeverDiscovers {
             fn sessions_root(&self) -> PathBuf {
                 PathBuf::from("/tmp/none")
             }
+
             fn build_args(&self, _: &crate::McpServerConfig, _: Option<&str>) -> Vec<String> {
                 vec![]
             }
+
             fn build_env(&self, _: &crate::McpServerConfig) -> Vec<(String, String)> {
                 vec![]
             }
+
             fn discover_session(
                 &self,
                 _: &Path,
@@ -516,6 +524,7 @@ mod discovery_tests {
             ) -> Option<String> {
                 None
             }
+
             fn detect_end_time(&self, _: &str) -> bool {
                 false
             }
@@ -541,6 +550,7 @@ mod discovery_tests {
         );
     }
 }
+
 #[cfg(test)]
 mod exit_tests {
     use super::*;
@@ -553,20 +563,25 @@ mod exit_tests {
             fn kind(&self) -> AgentKind {
                 AgentKind::Vibe
             }
+
             fn variant(&self) -> crate::AgentVariant {
                 crate::AgentVariant::Cli
             }
         }
+
         impl crate::CliAgentStrategy for EndedStrategy {
             fn sessions_root(&self) -> PathBuf {
                 PathBuf::from("/tmp/none")
             }
+
             fn build_args(&self, _: &crate::McpServerConfig, _: Option<&str>) -> Vec<String> {
                 vec![]
             }
+
             fn build_env(&self, _: &crate::McpServerConfig) -> Vec<(String, String)> {
                 vec![]
             }
+
             fn discover_session(
                 &self,
                 _: &Path,
@@ -575,6 +590,7 @@ mod exit_tests {
             ) -> Option<String> {
                 None
             }
+
             fn detect_end_time(&self, _: &str) -> bool {
                 true
             }
