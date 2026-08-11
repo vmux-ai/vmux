@@ -138,6 +138,18 @@ opt-level = 3
 [profile.dev.package.vmux_service]
 codegen-units = 1
 
+# `dx build` compiles the web bundle under this profile, inventing its own if we do not
+# declare one. Same failure as bevy_cef and vmux_service above, one target further out:
+# `wasm-ld` drops an internal `alloc::fmt::format.llvm.*` defined in one CGU while a
+# reference from another survives, so wasm-bindgen emits `import * as import1 from "env"`
+# for the unresolved symbol and every page dies at load with `Failed to resolve module
+# specifier "env"` — no render, no window, splash times out. Nothing type-checks this:
+# `cargo check` does not link, and `cargo build --target wasm32-unknown-unknown` links
+# clean under the plain `dev` profile.
+[profile.wasm-dev]
+inherits = "dev"
+codegen-units = 1
+
 [profile.release]
 strip = true
 lto = "thin"
