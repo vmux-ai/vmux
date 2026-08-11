@@ -1260,7 +1260,7 @@ fn AppBody() -> Element {
                         footer: rsx! { ComposerOptions { sid: submit_sid.clone(), api } },
                         placeholder: if current_value.is_some() { "Message agent…".to_string() } else { "No active session".to_string() },
                         accent_bg: accent.accent_bg.to_string(),
-                        accent_color: accent.rain_rgb.to_string(),
+                        accent_color: format!("rgb({})", accent.rain_rgb),
                         accent_gradient: accent.grad.to_string(),
                         autofocus: true,
                         disabled: current_value.is_none(),
