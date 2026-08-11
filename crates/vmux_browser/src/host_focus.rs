@@ -24,8 +24,8 @@ impl Plugin for HostFocusPlugin {
             PostUpdate,
             (compute_host_focus_intent, apply_windowed_host_focus)
                 .chain()
-                .after(crate::sync_windowed_frames)
-                .after(crate::sync_windowed_command_bar),
+                .after(crate::present::sync_windowed_frames)
+                .after(crate::present::sync_windowed_command_bar),
         );
         #[cfg(target_os = "macos")]
         app.add_plugins(crate::host_focus_native::HostFocusNativePlugin);
@@ -75,7 +75,7 @@ pub(crate) fn compute_host_focus_intent(
         ),
         With<Modal>,
     >,
-    layout_keyboard_q: Query<(), (With<Browser>, crate::LayoutKeyboardCapture)>,
+    layout_keyboard_q: Query<(), (With<Browser>, crate::present::LayoutKeyboardCapture)>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed)) =
