@@ -13,6 +13,10 @@ pub fn supports_inline_agent_transition(url: &str) -> bool {
         .any(|segment| matches!(segment, "cli" | "setup"))
 }
 
+pub mod focus;
+// `web` only until `command_bar::palette` is portable. That is now the sole thing holding the
+// launcher to the browser: the page's own focus handling has moved to `focus`, which is inert
+// anywhere there is no host taking the caret away.
 #[cfg(web)]
 pub mod page;
 

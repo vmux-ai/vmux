@@ -711,22 +711,6 @@ mod tests {
     }
 
     #[test]
-    fn page_mount_does_not_start_focus_retry() {
-        let source = include_str!("page.rs");
-        let setup_effect = source
-            .split_once("use_effect(|| {")
-            .expect("start page setup effect")
-            .1
-            .split_once("});")
-            .expect("end of start page setup effect")
-            .0;
-
-        assert!(setup_effect.contains("install_window_focus_refocus();"));
-        assert!(setup_effect.contains("install_keep_input_focused_on_click();"));
-        assert!(!setup_effect.contains("focus_start_input();"));
-    }
-
-    #[test]
     fn cold_start_focuses_after_page_ready() {
         let mut app = start_ready_app();
         let webview = app.world_mut().spawn(CefKeyboardTarget).id();
