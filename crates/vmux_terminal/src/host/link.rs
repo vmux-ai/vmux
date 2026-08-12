@@ -66,6 +66,9 @@ pub fn annotate_links(line: &mut TermLine, cwd: Option<&Path>) {
 /// in char-index coordinates.
 pub fn detect_links_in_text(text: &str, cwd: Option<&Path>) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
+    if !may_hold_link(text) {
+        return out;
+    }
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
     while i < chars.len() {
@@ -93,6 +96,20 @@ pub fn detect_links_in_text(text: &str, cwd: Option<&Path>) -> Vec<(usize, usize
         }
     }
     out
+}
+
+/// Whether `text` is worth splitting into tokens.
+///
+/// Every link [`resolve_target`] accepts contains a `/` — `scheme://` and every shape
+/// `looks_like_path` recognises — or begins `data:`. Most terminal output has neither, and
+/// scanning twice for that is far cheaper than the char vector and per-token string the
+/// tokeniser allocates for every line of a scrolling screen.
+fn may_hold_link(text: &str) -> bool {
+    text.contains('/')
+        || text
+            .as_bytes()
+            .windows(5)
+            .any(|window| window.eq_ignore_ascii_case(b"data:"))
 }
 
 /// Resolve a token to a ready-to-open URL, or `None` if it is not a link.
@@ -160,6 +177,16 @@ mod tests {
         assert_eq!(l.links[0].url, "https://vmux.ai/docs");
         assert_eq!(l.links[0].start_col, 4);
         assert_eq!(l.links[0].end_col, 23);
+    }
+
+    /// The only link that carries no slash, and `is_data_uri` matches its scheme without regard
+    /// to case — so the cheap pre-scan that skips tokenising a line has to do the same.
+    #[test]
+    fn detects_a_slashless_data_uri_whatever_its_case() {
+        let mut l = line_of("payload Data:,hello here");
+        annotate_links(&mut l, None);
+        assert_eq!(l.links.len(), 1);
+        assert_eq!(l.links[0].url, "Data:,hello");
     }
 
     #[test]

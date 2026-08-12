@@ -38,6 +38,59 @@ impl PtyInputWriter {
             input_pending: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    /// Whether the output that just arrived is the answer to something the user typed.
+    ///
+    /// True once per keystroke, and only when output actually arrived: a keystroke with nothing
+    /// to show for it yet has to leave the flag set for the poll that does see the echo.
+    fn take_keystroke(&self, got_data: bool) -> bool {
+        got_data && self.input_pending.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// How often the viewport may be sent, and what is allowed to jump the queue.
+///
+/// Output that redraws most of the screen is paced at [`HEAVY_OUTPUT_FRAME_INTERVAL`], because a
+/// client cannot display frames faster than that and each one costs it a re-render of every
+/// visible row. Sparse output ignores the pacing, since holding back one changed line saves
+/// nothing.
+///
+/// A keystroke ignores it too, so the first thing typed against a busy screen still lands at once
+/// — but only the first. Key repeat arrives several times per interval and a held key in a pager
+/// scrolls the whole screen on every one of them, so honouring each repeat asks for full repaints
+/// faster than they can be shown. The escape re-arms only once the keys stop coming, which is
+/// what separates pressing a key from holding one down.
+#[derive(Default)]
+struct ViewportPace {
+    /// Whether the last send redrew at least half the screen.
+    heavy: bool,
+    sent_at: Option<Instant>,
+    keystroke_at: Option<Instant>,
+}
+
+impl ViewportPace {
+    /// Whether the viewport may be sent now. `flush` is the process ending, which always may.
+    ///
+    /// Records `keystroke` whether or not it is what let the send through, so that a key being
+    /// held cannot keep re-arming the escape it already used.
+    fn admits(&mut self, now: Instant, flush: bool, keystroke: bool) -> bool {
+        let escapes = keystroke && Self::interval_passed(self.keystroke_at, now);
+        if keystroke {
+            self.keystroke_at = Some(now);
+        }
+        flush || escapes || !self.heavy || Self::interval_passed(self.sent_at, now)
+    }
+
+    /// Record a send that redrew `changed_rows` of the screen's `rows`.
+    fn sent(&mut self, now: Instant, changed_rows: usize, rows: u16) {
+        self.sent_at = Some(now);
+        self.heavy = changed_rows.saturating_mul(2) >= rows as usize;
+    }
+
+    fn interval_passed(since: Option<Instant>, now: Instant) -> bool {
+        since
+            .is_none_or(|since| now.saturating_duration_since(since) >= HEAVY_OUTPUT_FRAME_INTERVAL)
+    }
 }
 
 #[cfg(unix)]
@@ -240,8 +293,7 @@ pub struct Process {
     /// Last copy-mode value emitted in a viewport patch.
     last_viewport_copy_mode: Option<bool>,
     output_viewport_dirty: bool,
-    last_output_viewport_at: Option<Instant>,
-    last_output_viewport_heavy: bool,
+    viewport_pace: ViewportPace,
     /// Last broadcast (mouse_capture, copy_mode, alt_screen) flags.
     last_terminal_mode: Option<(bool, bool, bool, bool)>,
     /// Active copy-mode state (cursor, anchor, visual state). None when not in copy mode.
@@ -597,8 +649,7 @@ impl Process {
             last_selection: None,
             last_viewport_copy_mode: None,
             output_viewport_dirty: false,
-            last_output_viewport_at: None,
-            last_output_viewport_heavy: false,
+            viewport_pace: ViewportPace::default(),
             last_terminal_mode: None,
             copy_mode: None,
             keep_after_exit: false,
@@ -1586,23 +1637,15 @@ impl Process {
         false
     }
 
-    fn maybe_sync_output_viewport(&mut self, force: bool, got_data: bool) {
+    fn maybe_sync_output_viewport(&mut self, flush: bool, got_data: bool) {
         let now = Instant::now();
-        let elapsed = self
-            .last_output_viewport_at
-            .map(|last| now.saturating_duration_since(last));
-        let input_pending = take_input_priority(&self.pty_writer.input_pending, got_data);
-        if !output_viewport_due(
-            self.last_output_viewport_heavy,
-            force || input_pending,
-            elapsed,
-        ) {
+        let keystroke = self.pty_writer.take_keystroke(got_data);
+        if !self.viewport_pace.admits(now, flush, keystroke) {
             return;
         }
         let changed_rows = self.sync_viewport();
         self.output_viewport_dirty = false;
-        self.last_output_viewport_at = Some(now);
-        self.last_output_viewport_heavy = changed_rows.saturating_mul(2) >= self.rows as usize;
+        self.viewport_pace.sent(now, changed_rows, self.rows);
     }
 
     fn sync_viewport(&mut self) -> usize {
@@ -2006,14 +2049,6 @@ impl ProcessManager {
 
 // --- Grid helpers ---
 
-fn output_viewport_due(heavy: bool, force: bool, elapsed: Option<Duration>) -> bool {
-    force || !heavy || elapsed.is_none_or(|elapsed| elapsed >= HEAVY_OUTPUT_FRAME_INTERVAL)
-}
-
-fn take_input_priority(input_pending: &AtomicBool, got_data: bool) -> bool {
-    got_data && input_pending.swap(false, Ordering::AcqRel)
-}
-
 fn mix_row_hash(hash: &mut u64, value: u64) {
     *hash ^= value;
     *hash = hash.wrapping_mul(0x100000001b3);
@@ -2196,28 +2231,67 @@ mod tests {
 
     #[test]
     fn heavy_output_waits_for_frame_interval_but_sparse_and_final_output_do_not() {
-        assert!(!output_viewport_due(
-            true,
+        let start = Instant::now();
+        let mut heavy = ViewportPace::default();
+        heavy.sent(start, 50, 50);
+
+        assert!(!heavy.admits(
+            start + HEAVY_OUTPUT_FRAME_INTERVAL - Duration::from_millis(1),
             false,
-            Some(HEAVY_OUTPUT_FRAME_INTERVAL - Duration::from_millis(1)),
-        ));
-        assert!(output_viewport_due(
-            true,
             false,
-            Some(HEAVY_OUTPUT_FRAME_INTERVAL),
         ));
-        assert!(output_viewport_due(true, true, Some(Duration::ZERO)));
-        assert!(output_viewport_due(false, false, Some(Duration::ZERO)));
+        assert!(heavy.admits(start + HEAVY_OUTPUT_FRAME_INTERVAL, false, false));
+        assert!(heavy.admits(start, true, false));
+
+        let mut sparse = ViewportPace::default();
+        sparse.sent(start, 1, 50);
+        assert!(sparse.admits(start, false, false));
+    }
+
+    #[test]
+    fn a_keystroke_against_a_screen_that_just_repainted_does_not_wait() {
+        let start = Instant::now();
+        let mut pace = ViewportPace::default();
+        pace.sent(start, 50, 50);
+        let now = start + Duration::from_millis(10);
+
+        assert!(!pace.admits(now, false, false));
+        assert!(pace.admits(now, false, true));
+    }
+
+    /// Key repeat arrives several times per frame interval and a held key in a pager scrolls the
+    /// whole screen on each one, so the escape that keeps a single keystroke responsive must not
+    /// buy every repeat a full-viewport send.
+    #[test]
+    fn holding_a_key_is_paced_by_the_frame_interval() {
+        let start = Instant::now();
+        let repeat = Duration::from_millis(33);
+        let mut pace = ViewportPace::default();
+
+        let mut sent = 0;
+        for beat in 0..30 {
+            let now = start + repeat * beat;
+            if pace.admits(now, false, true) {
+                sent += 1;
+                pace.sent(now, 50, 50);
+            }
+        }
+
+        assert!(
+            sent <= 10,
+            "a second of 30Hz key repeat sent {sent} viewports; the frame interval caps it near 10"
+        );
     }
 
     #[test]
     fn input_priority_waits_for_fresh_pty_output() {
-        let input_pending = AtomicBool::new(true);
+        let writer = PtyInputWriter::new(Box::new(std::io::sink()));
+        writer.input_pending.store(true, Ordering::Release);
 
-        assert!(!take_input_priority(&input_pending, false));
-        assert!(input_pending.load(Ordering::Acquire));
-        assert!(take_input_priority(&input_pending, true));
-        assert!(!input_pending.load(Ordering::Acquire));
+        assert!(!writer.take_keystroke(false));
+        assert!(writer.input_pending.load(Ordering::Acquire));
+        assert!(writer.take_keystroke(true));
+        assert!(!writer.input_pending.load(Ordering::Acquire));
     }
 
     #[test]
