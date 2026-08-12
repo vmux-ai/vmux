@@ -84,10 +84,10 @@ pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
     pub(crate) chat_views: Query<'w, 's, (), With<crate::plugin::chat::AgentChatView>>,
-    pub(crate) page_sessions: Query<'w, 's, &'static crate::components::AgentSession>,
+    pub(crate) page_sessions: Query<'w, 's, &'static vmux_session::AgentSession>,
     pub(crate) cli_sessions: Query<'w, 's, &'static AgentSession>,
     pub(crate) conversation_titles:
-        Query<'w, 's, &'static mut crate::components::AgentConversationTitle>,
+        Query<'w, 's, &'static mut vmux_session::AgentConversationTitle>,
     pub(crate) proxy: Option<Res<'w, bevy::winit::EventLoopProxyWrapper>>,
 }
 
@@ -534,7 +534,7 @@ pub(super) fn send_pending_agent_continuations(
         Entity,
         &PendingAgentContinuation,
         Option<&crate::client::acp::AcpSession>,
-        Option<&crate::components::AgentSession>,
+        Option<&vmux_session::AgentSession>,
         Option<&AgentSession>,
         Option<&mut crate::run_state::AgentRunState>,
     )>,

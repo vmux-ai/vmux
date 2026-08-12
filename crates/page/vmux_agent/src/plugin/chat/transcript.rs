@@ -12,7 +12,6 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 use super::model::{effort_current_for, emit_model_state};
 use super::{AgentChatView, ChatSynced};
 use crate::client::acp::{AcpModelState, AcpSession};
-use crate::components::{AgentConversationTitle, AgentMessages, PromptQueue};
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
@@ -23,6 +22,7 @@ use vmux_chat::event::{
 use vmux_core::PageMetadata;
 use vmux_core::team::Profile;
 use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};
+use vmux_session::{AgentConversationTitle, AgentMessages, PromptQueue};
 
 /// The transcript as the page sees it: the live snapshot, and the history behind it.
 pub(super) struct ChatTranscriptPlugin;

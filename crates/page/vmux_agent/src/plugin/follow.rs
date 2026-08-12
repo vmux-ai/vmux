@@ -598,7 +598,7 @@ fn tidy_acp_on_idle(
 }
 
 /// Native-chat agents (CLI + Page variants) have no terminal bell; their turn-end is
-/// `AgentRunState` → `Idle` on the sid-keyed [`AgentSession`](crate::components::AgentSession)
+/// `AgentRunState` → `Idle` on the sid-keyed [`AgentSession`](vmux_session::AgentSession)
 /// stack. That stack is a different entity from the `ProcessId`-anchored one `AgentAttention`
 /// resolves through, so [`tidy_on_agent_attention`] can't see it. Tidy the follow-pane on the
 /// idle transition, resolving `agent_pane` as the session stack's parent pane. Mirrors
@@ -608,7 +608,7 @@ fn tidy_page_on_idle(
     sessions: Query<
         (&ChildOf, &crate::AgentRunState),
         (
-            With<crate::components::AgentSession>,
+            With<vmux_session::AgentSession>,
             Changed<crate::AgentRunState>,
         ),
     >,
@@ -1397,7 +1397,7 @@ mod tests {
             .world_mut()
             .spawn((
                 vmux_layout::stack::stack_bundle(),
-                crate::components::AgentSession {
+                vmux_session::AgentSession {
                     kind: vmux_core::agent::AgentKind::Claude,
                     variant: crate::AgentVariant::Cli,
                     sid: "sid-1".to_string(),

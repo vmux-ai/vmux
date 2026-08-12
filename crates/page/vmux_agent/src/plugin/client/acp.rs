@@ -15,10 +15,10 @@ use vmux_service::protocol::{ClientMessage, SharedMessage};
 use vmux_setting::AppSettings;
 use vmux_terminal::reattach_terminal_bundle;
 
-use crate::components::{AgentApprovalPolicy, PromptQueue};
 use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
+use vmux_session::{AgentApprovalPolicy, PromptQueue};
 
 pub struct AcpAgentPlugin;
 

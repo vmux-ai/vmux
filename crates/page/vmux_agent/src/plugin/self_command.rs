@@ -93,7 +93,7 @@ pub(crate) fn ancestor_acp_stack(
 fn ancestor_agent_session(
     entity: Entity,
     acp_sessions: &Query<&mut crate::client::acp::AcpSession>,
-    page_sessions: &Query<&crate::components::AgentSession>,
+    page_sessions: &Query<&vmux_session::AgentSession>,
     cli_sessions: &Query<&AgentSession>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
@@ -575,7 +575,7 @@ pub(super) fn handle_agent_self_commands(
                         } else {
                             commands
                                 .entity(session_entity)
-                                .insert(crate::components::AgentConversationTitle(title));
+                                .insert(vmux_session::AgentConversationTitle(title));
                             AgentCommandResult::Ok
                         }
                     }

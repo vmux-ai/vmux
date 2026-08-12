@@ -4,11 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::client::acp::AcpSession;
-use crate::components::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, SharedMessage};
+use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 
 #[derive(Default, Deserialize, Serialize)]
 struct SavedApprovalGrants {

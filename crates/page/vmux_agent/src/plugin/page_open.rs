@@ -458,7 +458,7 @@ fn handle_swap_stack_session(
             .entity(ev.stack)
             .remove::<crate::client::acp::AcpSession>()
             .remove::<crate::client::acp::AcpInstallStarted>()
-            .remove::<crate::components::AgentSession>()
+            .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
             .remove::<crate::AgentApprovalPolicy>()
             .remove::<crate::AgentRunState>()
@@ -698,12 +698,12 @@ fn insert_initial_prompt_queue(
     if prompt.trim().is_empty() && initial_attachments.is_empty() {
         return;
     }
-    if let Some(title) = crate::components::provisional_conversation_title(&prompt) {
+    if let Some(title) = vmux_session::provisional_conversation_title(&prompt) {
         commands
             .entity(stack)
-            .insert(crate::components::AgentConversationTitle(title));
+            .insert(vmux_session::AgentConversationTitle(title));
     }
-    let mut queue = crate::components::PromptQueue::default();
+    let mut queue = vmux_session::PromptQueue::default();
     queue.enqueue_with_attachments(prompt, initial_attachments);
     commands.entity(stack).insert(queue).remove::<(
         vmux_core::PendingPrompt,
@@ -1546,7 +1546,7 @@ mod tests {
         assert_eq!(session.cwd, AgentCwd::process());
         assert_eq!(
             app.world()
-                .get::<crate::components::PromptQueue>(stack)
+                .get::<vmux_session::PromptQueue>(stack)
                 .unwrap()
                 .items
                 .front()
@@ -1634,10 +1634,7 @@ mod tests {
             app.world().get::<PageMetadata>(webview).unwrap().url,
             "vmux://agent/claude"
         );
-        let queue = app
-            .world()
-            .get::<crate::components::PromptQueue>(stack)
-            .unwrap();
+        let queue = app.world().get::<vmux_session::PromptQueue>(stack).unwrap();
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),
             Some("keep this prompt")
@@ -1984,18 +1981,15 @@ mod tests {
 
         app.update();
 
-        let queue = app
-            .world()
-            .get::<crate::components::PromptQueue>(stack)
-            .unwrap();
+        let queue = app.world().get::<vmux_session::PromptQueue>(stack).unwrap();
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),
             Some("ship it")
         );
         assert_eq!(
             app.world()
-                .get::<crate::components::AgentConversationTitle>(stack),
-            Some(&crate::components::AgentConversationTitle("ship it".into()))
+                .get::<vmux_session::AgentConversationTitle>(stack),
+            Some(&vmux_session::AgentConversationTitle("ship it".into()))
         );
         assert!(app.world().get::<vmux_core::PendingPrompt>(stack).is_none());
     }
