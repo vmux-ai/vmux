@@ -769,11 +769,6 @@ mobile-chat-no-session = アクティブなセッションがありません
 mobile-chat-placeholder = エージェントにメッセージ…
 mobile-chat-send = 送信
 mobile-chat-stop = 停止
-mobile-chat-allow = 許可
-mobile-chat-deny = 拒否
-mobile-chat-allow-prompt = { $name }を許可しますか？
-mobile-chat-enter-to-send = Enter で送信
-mobile-chat-default-effort = デフォルトの推論強度
 
 mobile-qr-title = Vmux に表示された QRコードをスキャンしてください
 mobile-qr-cancel = キャンセル

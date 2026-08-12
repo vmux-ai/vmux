@@ -784,11 +784,6 @@ mobile-chat-no-session = Keng aktiv Sessioun
 mobile-chat-placeholder = Noriicht un den Agent…
 mobile-chat-send = Schécken
 mobile-chat-stop = Stoppen
-mobile-chat-allow = Erlaben
-mobile-chat-deny = Ofleenen
-mobile-chat-allow-prompt = { $name } erlaben?
-mobile-chat-enter-to-send = Enter fir ze schécken
-mobile-chat-default-effort = Standardopwand
 
 mobile-qr-title = Scan de QR-Code, deen Vmux weist
 mobile-qr-cancel = Ofbriechen

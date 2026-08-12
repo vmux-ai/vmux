@@ -784,11 +784,6 @@ mobile-chat-no-session = Walay aktibo nga session
 mobile-chat-placeholder = Mensahe sa agent…
 mobile-chat-send = Ipadala
 mobile-chat-stop = Hunong
-mobile-chat-allow = Tugotan
-mobile-chat-deny = Dili tugotan
-mobile-chat-allow-prompt = Tugotan ang { $name }?
-mobile-chat-enter-to-send = Enter aron ipadala
-mobile-chat-default-effort = Default nga effort
 
 mobile-qr-title = I-scan ang QR code nga gipakita sa Vmux
 mobile-qr-cancel = Kanselahon

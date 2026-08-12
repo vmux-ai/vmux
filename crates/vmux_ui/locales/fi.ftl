@@ -784,11 +784,6 @@ mobile-chat-no-session = Ei aktiivista istuntoa
 mobile-chat-placeholder = Viesti agentille…
 mobile-chat-send = Lähetä
 mobile-chat-stop = Pysäytä
-mobile-chat-allow = Salli
-mobile-chat-deny = Estä
-mobile-chat-allow-prompt = Sallitaanko { $name }?
-mobile-chat-enter-to-send = Enter lähettää
-mobile-chat-default-effort = Oletuspanostus
 
 mobile-qr-title = Skannaa Vmuxin näyttämä QR-koodi
 mobile-qr-cancel = Peruuta

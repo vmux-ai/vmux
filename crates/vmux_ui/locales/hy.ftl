@@ -784,11 +784,6 @@ mobile-chat-no-session = Ակտիվ նիստ չկա
 mobile-chat-placeholder = Հաղորդագրություն գործակալին…
 mobile-chat-send = Ուղարկել
 mobile-chat-stop = Կանգնեցնել
-mobile-chat-allow = Թույլատրել
-mobile-chat-deny = Մերժել
-mobile-chat-allow-prompt = Թույլատրե՞լ { $name }-ը
-mobile-chat-enter-to-send = Enter՝ ուղարկելու համար
-mobile-chat-default-effort = Կանխադրված ջանք
 
 mobile-qr-title = Սկանավորեք QR կոդը, որը ցույց է տալիս Vmux-ը
 mobile-qr-cancel = Չեղարկել

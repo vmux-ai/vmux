@@ -784,11 +784,6 @@ mobile-chat-no-session = აქტიური სესია არ არი�
 mobile-chat-placeholder = მიწერეთ აგენტს…
 mobile-chat-send = გაგზავნა
 mobile-chat-stop = შეჩერება
-mobile-chat-allow = დაშვება
-mobile-chat-deny = უარყოფა
-mobile-chat-allow-prompt = დავუშვათ { $name }?
-mobile-chat-enter-to-send = Enter გასაგზავნად
-mobile-chat-default-effort = ნაგულისხმევი ძალისხმევა
 
 mobile-qr-title = დაასკანირეთ Vmux-ის ნაჩვენები QR კოდი
 mobile-qr-cancel = გაუქმება

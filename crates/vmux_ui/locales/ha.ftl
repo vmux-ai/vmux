@@ -784,11 +784,6 @@ mobile-chat-no-session = Babu zaman aiki mai gudana
 mobile-chat-placeholder = Aika wa wakilin AI…
 mobile-chat-send = Aika
 mobile-chat-stop = Tsaya
-mobile-chat-allow = Ba izini
-mobile-chat-deny = Ƙi
-mobile-chat-allow-prompt = A ba { $name } izini?
-mobile-chat-enter-to-send = Enter don aikawa
-mobile-chat-default-effort = Matakin ƙoƙari na asali
 
 mobile-qr-title = Duba QR code ɗin da Vmux ke nunawa
 mobile-qr-cancel = Soke

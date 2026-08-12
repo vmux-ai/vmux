@@ -784,11 +784,6 @@ mobile-chat-no-session = نشست فعالی نیست
 mobile-chat-placeholder = پیام به عامل…
 mobile-chat-send = ارسال
 mobile-chat-stop = توقف
-mobile-chat-allow = اجازه بده
-mobile-chat-deny = رد
-mobile-chat-allow-prompt = به { $name } اجازه داده شود؟
-mobile-chat-enter-to-send = Enter برای ارسال
-mobile-chat-default-effort = تلاش پیش‌فرض
 
 mobile-qr-title = کد QR نمایش‌داده‌شده توسط Vmux را اسکن کنید
 mobile-qr-cancel = لغو

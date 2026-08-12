@@ -784,11 +784,6 @@ mobile-chat-no-session = Işjeň sessiýa ýok
 mobile-chat-placeholder = Agente habar…
 mobile-chat-send = Iber
 mobile-chat-stop = Duruz
-mobile-chat-allow = Rugsat ber
-mobile-chat-deny = Ret et
-mobile-chat-allow-prompt = { $name } rugsat berilsinmi?
-mobile-chat-enter-to-send = Ibermek üçin Enter
-mobile-chat-default-effort = Öňünden bellenen tagalla
 
 mobile-qr-title = Vmux görkezýän QR kody skanerläň
 mobile-qr-cancel = Ýatyr

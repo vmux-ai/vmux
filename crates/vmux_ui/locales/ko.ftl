@@ -784,11 +784,6 @@ mobile-chat-no-session = 활성 세션 없음
 mobile-chat-placeholder = 에이전트에게 메시지…
 mobile-chat-send = 보내기
 mobile-chat-stop = 중지
-mobile-chat-allow = 허용
-mobile-chat-deny = 거부
-mobile-chat-allow-prompt = { $name }을(를) 허용할까요?
-mobile-chat-enter-to-send = Enter로 보내기
-mobile-chat-default-effort = 기본 추론 강도
 
 mobile-qr-title = Vmux에 표시된 QR 코드를 스캔하세요
 mobile-qr-cancel = 취소

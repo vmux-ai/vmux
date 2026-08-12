@@ -784,11 +784,6 @@ mobile-chat-no-session = ئاكتىپ ئولتۇرۇم يوق
 mobile-chat-placeholder = ئاگېنتقا ئۇچۇر…
 mobile-chat-send = ئەۋەت
 mobile-chat-stop = توختات
-mobile-chat-allow = رۇخسەت قىل
-mobile-chat-deny = رەت قىل
-mobile-chat-allow-prompt = { $name } غا رۇخسەت قىلامسىز؟
-mobile-chat-enter-to-send = ئەۋەتىشكە Enter
-mobile-chat-default-effort = كۆڭۈلدىكى تىرىشچانلىق
 
 mobile-qr-title = Vmux كۆرسەتكەن QR كودىنى سىكانېرلاڭ
 mobile-qr-cancel = ۋاز كەچ

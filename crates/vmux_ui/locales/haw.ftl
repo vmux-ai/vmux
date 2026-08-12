@@ -784,11 +784,6 @@ mobile-chat-no-session = ʻAʻohe kau e holo nei
 mobile-chat-placeholder = Leka i ka ʻākena…
 mobile-chat-send = Hoʻouna
 mobile-chat-stop = Kū
-mobile-chat-allow = ʻAe
-mobile-chat-deny = Hōʻole
-mobile-chat-allow-prompt = ʻAe iā { $name }?
-mobile-chat-enter-to-send = Enter e hoʻouna
-mobile-chat-default-effort = Hoʻoikaika maʻamau
 
 mobile-qr-title = E kālai i ka QR code a Vmux e hōʻike nei
 mobile-qr-cancel = Hoʻopau

@@ -784,11 +784,6 @@ mobile-chat-no-session = Nincs aktív munkamenet
 mobile-chat-placeholder = Üzenet az agentnek…
 mobile-chat-send = Küldés
 mobile-chat-stop = Leállítás
-mobile-chat-allow = Engedélyezés
-mobile-chat-deny = Elutasítás
-mobile-chat-allow-prompt = Engedélyezi ezt: { $name }?
-mobile-chat-enter-to-send = Enter a küldéshez
-mobile-chat-default-effort = Alapértelmezett erőfeszítés
 
 mobile-qr-title = Olvassa be a Vmux által mutatott QR-kódot
 mobile-qr-cancel = Mégse

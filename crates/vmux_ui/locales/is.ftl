@@ -784,11 +784,6 @@ mobile-chat-no-session = Engin virk lota
 mobile-chat-placeholder = Skilaboð til AI-þjónsins…
 mobile-chat-send = Senda
 mobile-chat-stop = Stöðva
-mobile-chat-allow = Leyfa
-mobile-chat-deny = Hafna
-mobile-chat-allow-prompt = Leyfa { $name }?
-mobile-chat-enter-to-send = Enter til að senda
-mobile-chat-default-effort = Sjálfgefin áreynsla
 
 mobile-qr-title = Skannaðu QR-kóðann sem Vmux sýnir
 mobile-qr-cancel = Hætta við

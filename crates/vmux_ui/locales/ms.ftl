@@ -784,11 +784,6 @@ mobile-chat-no-session = Tiada sesi aktif
 mobile-chat-placeholder = Mesej kepada agen…
 mobile-chat-send = Hantar
 mobile-chat-stop = Henti
-mobile-chat-allow = Benarkan
-mobile-chat-deny = Tolak
-mobile-chat-allow-prompt = Benarkan { $name }?
-mobile-chat-enter-to-send = Enter untuk hantar
-mobile-chat-default-effort = Usaha lalai
 
 mobile-qr-title = Imbas kod QR yang dipaparkan oleh Vmux
 mobile-qr-cancel = Batal

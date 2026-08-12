@@ -784,11 +784,6 @@ mobile-chat-no-session = 沒有作用中的工作階段
 mobile-chat-placeholder = 傳訊息給 Agent…
 mobile-chat-send = 傳送
 mobile-chat-stop = 停止
-mobile-chat-allow = 允許
-mobile-chat-deny = 拒絕
-mobile-chat-allow-prompt = 允許 { $name }？
-mobile-chat-enter-to-send = 按 Enter 傳送
-mobile-chat-default-effort = 預設強度
 
 mobile-qr-title = 掃描 Vmux 顯示的 QR 碼
 mobile-qr-cancel = 取消

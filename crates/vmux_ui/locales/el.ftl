@@ -784,11 +784,6 @@ mobile-chat-no-session = Καμία ενεργή συνεδρία
 mobile-chat-placeholder = Μήνυμα στον agent…
 mobile-chat-send = Αποστολή
 mobile-chat-stop = Διακοπή
-mobile-chat-allow = Να επιτραπεί
-mobile-chat-deny = Απόρριψη
-mobile-chat-allow-prompt = Να επιτραπεί το { $name };
-mobile-chat-enter-to-send = Enter για αποστολή
-mobile-chat-default-effort = Προεπιλεγμένη προσπάθεια
 
 mobile-qr-title = Σαρώστε τον κωδικό QR που εμφανίζει το Vmux
 mobile-qr-cancel = Άκυρο

@@ -784,11 +784,6 @@ mobile-chat-no-session = ንቁ ክፍለ ጊዜ የለም
 mobile-chat-placeholder = ለኤጀንቱ መልእክት…
 mobile-chat-send = ላክ
 mobile-chat-stop = አቁም
-mobile-chat-allow = ፍቀድ
-mobile-chat-deny = ከልክል
-mobile-chat-allow-prompt = { $name } ይፈቀድ?
-mobile-chat-enter-to-send = ለመላክ Enter
-mobile-chat-default-effort = ነባሪ ጥረት
 
 mobile-qr-title = Vmux የሚያሳየውን QR ኮድ ይቃኙ
 mobile-qr-cancel = ሰርዝ

@@ -784,11 +784,6 @@ mobile-chat-no-session = L-ebda sessjoni attiva
 mobile-chat-placeholder = Messaġġ lill-aġent…
 mobile-chat-send = Ibgħat
 mobile-chat-stop = Waqqaf
-mobile-chat-allow = Ippermetti
-mobile-chat-deny = Irrifjuta
-mobile-chat-allow-prompt = Tippermetti { $name }?
-mobile-chat-enter-to-send = Enter biex tibgħat
-mobile-chat-default-effort = Sforz awtomatiku
 
 mobile-qr-title = Skennja l-kodiċi QR li juri Vmux
 mobile-qr-cancel = Ikkanċella

@@ -784,11 +784,6 @@ mobile-chat-no-session = कुनै सक्रिय सत्र छैन
 mobile-chat-placeholder = एजेन्टलाई सन्देश…
 mobile-chat-send = पठाउनुहोस्
 mobile-chat-stop = रोक्नुहोस्
-mobile-chat-allow = अनुमति
-mobile-chat-deny = अस्वीकार
-mobile-chat-allow-prompt = { $name } लाई अनुमति दिने?
-mobile-chat-enter-to-send = पठाउन Enter
-mobile-chat-default-effort = पूर्वनिर्धारित प्रयास
 
 mobile-qr-title = Vmux ले देखाएको QR कोड स्क्यान गर्नुहोस्
 mobile-qr-cancel = रद्द गर्नुहोस्

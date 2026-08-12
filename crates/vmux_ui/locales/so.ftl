@@ -784,11 +784,6 @@ mobile-chat-no-session = Fadhi firfircoon ma jiro
 mobile-chat-placeholder = Farriin u dir agent-ka…
 mobile-chat-send = Dir
 mobile-chat-stop = Jooji
-mobile-chat-allow = Oggolow
-mobile-chat-deny = Diid
-mobile-chat-allow-prompt = Ma oggolaanaysaa { $name }?
-mobile-chat-enter-to-send = Enter si aad u dirto
-mobile-chat-default-effort = Dadaal caadi ah
 
 mobile-qr-title = Iskaan QR code-ka uu Vmux muujinayo
 mobile-qr-cancel = Jooji

@@ -784,11 +784,6 @@ mobile-chat-no-session = Nėra aktyvios sesijos
 mobile-chat-placeholder = Rašykite agentui…
 mobile-chat-send = Siųsti
 mobile-chat-stop = Stabdyti
-mobile-chat-allow = Leisti
-mobile-chat-deny = Neleisti
-mobile-chat-allow-prompt = Leisti { $name }?
-mobile-chat-enter-to-send = Enter siųsti
-mobile-chat-default-effort = Numatytosios pastangos
 
 mobile-qr-title = Nuskaitykite Vmux rodomą QR kodą
 mobile-qr-cancel = Atšaukti

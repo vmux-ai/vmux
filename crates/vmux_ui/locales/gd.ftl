@@ -784,11 +784,6 @@ mobile-chat-no-session = Chan eil seisean gnìomhach ann
 mobile-chat-placeholder = Teachdaireachd dhan àidseant…
 mobile-chat-send = Cuir
 mobile-chat-stop = Stad
-mobile-chat-allow = Ceadaich
-mobile-chat-deny = Diùlt
-mobile-chat-allow-prompt = Ceadaich { $name }?
-mobile-chat-enter-to-send = Enter airson cur
-mobile-chat-default-effort = Oidhirp bhunaiteach
 
 mobile-qr-title = Sganaich an còd QR a tha Vmux a’ sealltainn
 mobile-qr-cancel = Sguir dheth

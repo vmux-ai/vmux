@@ -784,11 +784,6 @@ mobile-chat-no-session = קיין אַקטיווע סעסיע
 mobile-chat-placeholder = שרײַבט דעם אַגענט…
 mobile-chat-send = שיקן
 mobile-chat-stop = אָפּשטעלן
-mobile-chat-allow = דערלויבן
-mobile-chat-deny = אָפּזאָגן
-mobile-chat-allow-prompt = דערלויבן { $name }?
-mobile-chat-enter-to-send = Enter צו שיקן
-mobile-chat-default-effort = סטאַנדאַרט־אָנשטרענגונג
 
 mobile-qr-title = סקאַנירט דעם QR־קאָד וואָס Vmux ווײַזט
 mobile-qr-cancel = אַנולירן

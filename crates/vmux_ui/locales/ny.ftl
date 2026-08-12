@@ -784,11 +784,6 @@ mobile-chat-no-session = Palibe gawo logwira ntchito
 mobile-chat-placeholder = Uthenga kwa ajenti…
 mobile-chat-send = Tumizani
 mobile-chat-stop = Imitsani
-mobile-chat-allow = Lolani
-mobile-chat-deny = Kanani
-mobile-chat-allow-prompt = Lolani { $name }?
-mobile-chat-enter-to-send = Enter kuti mutumize
-mobile-chat-default-effort = Khama losasinthidwa
 
 mobile-qr-title = Skanani QR code imene Vmux ikuwonetsa
 mobile-qr-cancel = Letsani

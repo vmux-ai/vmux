@@ -784,11 +784,6 @@ mobile-chat-no-session = Nav aktīvas sesijas
 mobile-chat-placeholder = Ziņa aģentam…
 mobile-chat-send = Nosūtīt
 mobile-chat-stop = Apturēt
-mobile-chat-allow = Atļaut
-mobile-chat-deny = Noraidīt
-mobile-chat-allow-prompt = Atļaut { $name }?
-mobile-chat-enter-to-send = Enter, lai nosūtītu
-mobile-chat-default-effort = Noklusējuma piepūle
 
 mobile-qr-title = Skenējiet QR kodu, ko rāda Vmux
 mobile-qr-cancel = Atcelt

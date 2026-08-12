@@ -784,11 +784,6 @@ mobile-chat-no-session = E leai se session o galue
 mobile-chat-placeholder = Fe‘au i le agent…
 mobile-chat-send = Lafo
 mobile-chat-stop = Taofi
-mobile-chat-allow = Fa‘ataga
-mobile-chat-deny = Te‘ena
-mobile-chat-allow-prompt = Fa‘ataga { $name }?
-mobile-chat-enter-to-send = Oomi Enter e lafo ai
-mobile-chat-default-effort = Taumafaiga masani
 
 mobile-qr-title = Siaki le QR code o lo‘o fa‘aali e Vmux
 mobile-qr-cancel = Fa‘aleaogā

@@ -784,11 +784,6 @@ mobile-chat-no-session = Ha ho seshene se sebetsang
 mobile-chat-placeholder = Molaetsa ho agent…
 mobile-chat-send = Romela
 mobile-chat-stop = Emisa
-mobile-chat-allow = Dumella
-mobile-chat-deny = Hana
-mobile-chat-allow-prompt = Dumella { $name }?
-mobile-chat-enter-to-send = Enter ho romela
-mobile-chat-default-effort = Boiteko ba kamehla
 
 mobile-qr-title = Skena khoutu ya QR e bontshwang ke Vmux
 mobile-qr-cancel = Hlakola

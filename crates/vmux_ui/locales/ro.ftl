@@ -784,11 +784,6 @@ mobile-chat-no-session = Nicio sesiune activă
 mobile-chat-placeholder = Scrie agentului…
 mobile-chat-send = Trimite
 mobile-chat-stop = Oprește
-mobile-chat-allow = Permite
-mobile-chat-deny = Refuză
-mobile-chat-allow-prompt = Permiți { $name }?
-mobile-chat-enter-to-send = Enter pentru trimitere
-mobile-chat-default-effort = Efort implicit
 
 mobile-qr-title = Scanează codul QR afișat de Vmux
 mobile-qr-cancel = Anulează

@@ -784,11 +784,6 @@ mobile-chat-no-session = Asnjë sesion aktiv
 mobile-chat-placeholder = Shkruaji agjentit…
 mobile-chat-send = Dërgo
 mobile-chat-stop = Ndalo
-mobile-chat-allow = Lejo
-mobile-chat-deny = Refuzo
-mobile-chat-allow-prompt = Të lejohet { $name }?
-mobile-chat-enter-to-send = Enter për ta dërguar
-mobile-chat-default-effort = Përpjekje e parazgjedhur
 
 mobile-qr-title = Skano kodin QR që shfaq Vmux
 mobile-qr-cancel = Anulo

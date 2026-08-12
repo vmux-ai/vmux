@@ -784,11 +784,6 @@ mobile-chat-no-session = Faol sessiya yo‘q
 mobile-chat-placeholder = Agentga xabar…
 mobile-chat-send = Yuborish
 mobile-chat-stop = To‘xtatish
-mobile-chat-allow = Ruxsat berish
-mobile-chat-deny = Rad etish
-mobile-chat-allow-prompt = { $name } ga ruxsat berilsinmi?
-mobile-chat-enter-to-send = Yuborish uchun Enter
-mobile-chat-default-effort = Standart harakat
 
 mobile-qr-title = Vmux ko‘rsatgan QR kodni skanerlang
 mobile-qr-cancel = Bekor qilish

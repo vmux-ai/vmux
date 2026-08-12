@@ -784,11 +784,6 @@ mobile-chat-no-session = Aktiivset seanssi pole
 mobile-chat-placeholder = Kirjuta agendile…
 mobile-chat-send = Saada
 mobile-chat-stop = Peata
-mobile-chat-allow = Luba
-mobile-chat-deny = Keela
-mobile-chat-allow-prompt = Lubada { $name }?
-mobile-chat-enter-to-send = Enter saadab
-mobile-chat-default-effort = Vaikimisi pingutus
 
 mobile-qr-title = Skanni QR-kood, mida Vmux näitab
 mobile-qr-cancel = Loobu

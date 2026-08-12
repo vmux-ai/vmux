@@ -784,11 +784,6 @@ mobile-chat-no-session = Non hai sesión activa
 mobile-chat-placeholder = Mensaxe ao axente…
 mobile-chat-send = Enviar
 mobile-chat-stop = Deter
-mobile-chat-allow = Permitir
-mobile-chat-deny = Denegar
-mobile-chat-allow-prompt = Permitir { $name }?
-mobile-chat-enter-to-send = Intro para enviar
-mobile-chat-default-effort = Esforzo predeterminado
 
 mobile-qr-title = Escanea o código QR que amosa Vmux
 mobile-qr-cancel = Cancelar

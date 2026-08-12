@@ -784,11 +784,6 @@ mobile-chat-no-session = Ez dago saio aktiborik
 mobile-chat-placeholder = Idatzi agenteari…
 mobile-chat-send = Bidali
 mobile-chat-stop = Gelditu
-mobile-chat-allow = Baimendu
-mobile-chat-deny = Ukatu
-mobile-chat-allow-prompt = Baimendu { $name }?
-mobile-chat-enter-to-send = Enter bidaltzeko
-mobile-chat-default-effort = Ahalegin lehenetsia
 
 mobile-qr-title = Eskaneatu Vmux-ek erakusten duen QR kodea
 mobile-qr-cancel = Utzi

@@ -784,11 +784,6 @@ mobile-chat-no-session = אין סשן פעיל
 mobile-chat-placeholder = הודעה לסוכן…
 mobile-chat-send = שלח
 mobile-chat-stop = עצור
-mobile-chat-allow = אפשר
-mobile-chat-deny = דחה
-mobile-chat-allow-prompt = לאפשר את { $name }?
-mobile-chat-enter-to-send = Enter לשליחה
-mobile-chat-default-effort = מאמץ ברירת מחדל
 
 mobile-qr-title = סרוק את קוד ה-QR ש-Vmux מציג
 mobile-qr-cancel = ביטול

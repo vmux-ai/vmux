@@ -784,11 +784,6 @@ mobile-chat-no-session = Ora ana sesi aktif
 mobile-chat-placeholder = Kirim pesen menyang agen…
 mobile-chat-send = Kirim
 mobile-chat-stop = Mandheg
-mobile-chat-allow = Idini
-mobile-chat-deny = Tolak
-mobile-chat-allow-prompt = Idini { $name }?
-mobile-chat-enter-to-send = Enter kanggo ngirim
-mobile-chat-default-effort = Upaya gawan
 
 mobile-qr-title = Pindhai kode QR sing ditampilake Vmux
 mobile-qr-cancel = Batal

@@ -784,11 +784,6 @@ mobile-chat-no-session = Etkin oturum yok
 mobile-chat-placeholder = Ajana mesaj yaz…
 mobile-chat-send = Gönder
 mobile-chat-stop = Durdur
-mobile-chat-allow = İzin ver
-mobile-chat-deny = Reddet
-mobile-chat-allow-prompt = { $name } için izin verilsin mi?
-mobile-chat-enter-to-send = Göndermek için Enter
-mobile-chat-default-effort = Varsayılan çaba
 
 mobile-qr-title = Vmux’ın gösterdiği QR kodu tarayın
 mobile-qr-cancel = İptal

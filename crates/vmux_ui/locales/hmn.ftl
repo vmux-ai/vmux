@@ -784,11 +784,6 @@ mobile-chat-no-session = Tsis muaj session ua haujlwm
 mobile-chat-placeholder = Xa lus rau agent…
 mobile-chat-send = Xa
 mobile-chat-stop = Nres
-mobile-chat-allow = Pub
-mobile-chat-deny = Tsis pub
-mobile-chat-allow-prompt = Pub siv { $name }?
-mobile-chat-enter-to-send = Nias Enter xa
-mobile-chat-default-effort = Qib siv zog ib txwm
 
 mobile-qr-title = Luam QR code uas Vmux qhia
 mobile-qr-cancel = Tso tseg

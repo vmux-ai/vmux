@@ -784,11 +784,6 @@ mobile-chat-no-session = 没有活动会话
 mobile-chat-placeholder = 给 Agent 发消息…
 mobile-chat-send = 发送
 mobile-chat-stop = 停止
-mobile-chat-allow = 允许
-mobile-chat-deny = 拒绝
-mobile-chat-allow-prompt = 允许 { $name }？
-mobile-chat-enter-to-send = 回车发送
-mobile-chat-default-effort = 默认强度
 
 mobile-qr-title = 扫描 Vmux 显示的 QR 码
 mobile-qr-cancel = 取消

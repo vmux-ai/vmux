@@ -784,11 +784,6 @@ mobile-chat-no-session = Neniu aktiva sesio
 mobile-chat-placeholder = Mesaĝi al agento…
 mobile-chat-send = Sendi
 mobile-chat-stop = Halti
-mobile-chat-allow = Permesi
-mobile-chat-deny = Rifuzi
-mobile-chat-allow-prompt = Ĉu permesi { $name }?
-mobile-chat-enter-to-send = Enter por sendi
-mobile-chat-default-effort = Defaŭlta peno
 
 mobile-qr-title = Skanu la QR-kodon montritan de Vmux
 mobile-qr-cancel = Nuligi

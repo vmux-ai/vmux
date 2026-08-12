@@ -784,11 +784,6 @@ mobile-chat-no-session = هیچ دانیشتنێکی چالاک نییە
 mobile-chat-placeholder = نامە بۆ ئەیجەنت…
 mobile-chat-send = ناردن
 mobile-chat-stop = وەستاندن
-mobile-chat-allow = ڕێگەدان
-mobile-chat-deny = ڕەتکردنەوە
-mobile-chat-allow-prompt = ڕێگە بە { $name } بدەیت؟
-mobile-chat-enter-to-send = Enter بۆ ناردن
-mobile-chat-default-effort = هەوڵی بنەڕەت
 
 mobile-qr-title = ئەو کۆدی QR سکان بکە کە Vmux پیشانی دەدات
 mobile-qr-cancel = پاشگەزبوونەوە

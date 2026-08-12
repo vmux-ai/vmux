@@ -784,11 +784,6 @@ mobile-chat-no-session = လက်ရှိ session မရှိပါ
 mobile-chat-placeholder = Agent ကို မက်ဆေ့ဂျ်…
 mobile-chat-send = ပို့
 mobile-chat-stop = ရပ်
-mobile-chat-allow = ခွင့်ပြု
-mobile-chat-deny = ငြင်း
-mobile-chat-allow-prompt = { $name } ကို ခွင့်ပြုမလား။
-mobile-chat-enter-to-send = ပို့ရန် Enter
-mobile-chat-default-effort = မူလကြိုးပမ်းမှု
 
 mobile-qr-title = Vmux ပြသထားသော QR ကုဒ်ကို စကင်ဖတ်ပါ
 mobile-qr-cancel = မလုပ်တော့

@@ -784,11 +784,6 @@ mobile-chat-no-session = Белсенді сессия жоқ
 mobile-chat-placeholder = Агентке хабарлама…
 mobile-chat-send = Жіберу
 mobile-chat-stop = Тоқтату
-mobile-chat-allow = Рұқсат ету
-mobile-chat-deny = Бас тарту
-mobile-chat-allow-prompt = { $name } рұқсат етілсін бе?
-mobile-chat-enter-to-send = Жіберу үшін Enter
-mobile-chat-default-effort = Әдепкі күш
 
 mobile-qr-title = Vmux көрсеткен QR кодын сканерлеңіз
 mobile-qr-cancel = Бас тарту

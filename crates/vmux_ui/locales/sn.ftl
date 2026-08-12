@@ -784,11 +784,6 @@ mobile-chat-no-session = Hapana seshoni iri kushanda
 mobile-chat-placeholder = Nyorera agent…
 mobile-chat-send = Tumira
 mobile-chat-stop = Misa
-mobile-chat-allow = Bvumira
-mobile-chat-deny = Ramba
-mobile-chat-allow-prompt = Bvumira { $name }?
-mobile-chat-enter-to-send = Dzvanya Enter kutumira
-mobile-chat-default-effort = Kuedza kwakajairika
 
 mobile-qr-title = Skena QR code iri kuratidzwa neVmux
 mobile-qr-cancel = Kanzura

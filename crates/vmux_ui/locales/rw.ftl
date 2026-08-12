@@ -784,11 +784,6 @@ mobile-chat-no-session = Nta session ikora
 mobile-chat-placeholder = Ubutumwa kuri ajenti…
 mobile-chat-send = Kohereza
 mobile-chat-stop = Guhagarika
-mobile-chat-allow = Kwemera
-mobile-chat-deny = Kwanga
-mobile-chat-allow-prompt = Kwemerera { $name }?
-mobile-chat-enter-to-send = Enter kohereza
-mobile-chat-default-effort = Imbaraga zisanzwe
 
 mobile-qr-title = Sikana kode QR Vmux yerekana
 mobile-qr-cancel = Kureka

@@ -784,11 +784,6 @@ mobile-chat-no-session = Идэвхтэй сешн алга
 mobile-chat-placeholder = Агентад мессеж…
 mobile-chat-send = Илгээх
 mobile-chat-stop = Зогсоох
-mobile-chat-allow = Зөвшөөрөх
-mobile-chat-deny = Татгалзах
-mobile-chat-allow-prompt = { $name }-г зөвшөөрөх үү?
-mobile-chat-enter-to-send = Илгээхэд Enter
-mobile-chat-default-effort = Өгөгдмөл хүчин чармайлт
 
 mobile-qr-title = Vmux-ийн харуулж буй QR кодыг уншуулна уу
 mobile-qr-cancel = Цуцлах

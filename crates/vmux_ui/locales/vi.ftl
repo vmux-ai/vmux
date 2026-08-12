@@ -784,11 +784,6 @@ mobile-chat-no-session = Không có phiên hoạt động
 mobile-chat-placeholder = Nhắn cho tác nhân…
 mobile-chat-send = Gửi
 mobile-chat-stop = Dừng
-mobile-chat-allow = Cho phép
-mobile-chat-deny = Từ chối
-mobile-chat-allow-prompt = Cho phép { $name }?
-mobile-chat-enter-to-send = Enter để gửi
-mobile-chat-default-effort = Mức nỗ lực mặc định
 
 mobile-qr-title = Quét mã QR mà Vmux hiển thị
 mobile-qr-cancel = Hủy

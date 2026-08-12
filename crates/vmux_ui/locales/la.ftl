@@ -784,11 +784,6 @@ mobile-chat-no-session = Nulla sessio activa
 mobile-chat-placeholder = Scribe agenti…
 mobile-chat-send = Mitte
 mobile-chat-stop = Sistere
-mobile-chat-allow = Permittere
-mobile-chat-deny = Negare
-mobile-chat-allow-prompt = Permittere { $name }?
-mobile-chat-enter-to-send = Enter ad mittendum
-mobile-chat-default-effort = Conatus praedefinitus
 
 mobile-qr-title = Lege codicem QR quem Vmux ostendit
 mobile-qr-cancel = Abrogare

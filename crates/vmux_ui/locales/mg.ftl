@@ -784,11 +784,6 @@ mobile-chat-no-session = Tsy misy session mandeha
 mobile-chat-placeholder = Hafatra ho an’ny agent…
 mobile-chat-send = Alefaso
 mobile-chat-stop = Atsaharo
-mobile-chat-allow = Avelao
-mobile-chat-deny = Lavina
-mobile-chat-allow-prompt = Avelao ve ny { $name }?
-mobile-chat-enter-to-send = Enter handefa
-mobile-chat-default-effort = Ezaka mahazatra
 
 mobile-qr-title = Scanao ny QR code asehon’i Vmux
 mobile-qr-cancel = Hanafoana

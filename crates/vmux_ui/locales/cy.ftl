@@ -784,11 +784,6 @@ mobile-chat-no-session = Dim sesiwn weithredol
 mobile-chat-placeholder = Neges at yr asiant…
 mobile-chat-send = Anfon
 mobile-chat-stop = Stopio
-mobile-chat-allow = Caniatáu
-mobile-chat-deny = Gwrthod
-mobile-chat-allow-prompt = Caniatáu { $name }?
-mobile-chat-enter-to-send = Enter i anfon
-mobile-chat-default-effort = Ymdrech ddiofyn
 
 mobile-qr-title = Sganiwch y cod QR y mae Vmux yn ei ddangos
 mobile-qr-cancel = Canslo

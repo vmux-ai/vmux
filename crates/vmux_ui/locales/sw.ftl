@@ -784,11 +784,6 @@ mobile-chat-no-session = Hakuna kipindi kinachoendelea
 mobile-chat-placeholder = Andikia agent…
 mobile-chat-send = Tuma
 mobile-chat-stop = Sitisha
-mobile-chat-allow = Ruhusu
-mobile-chat-deny = Kataa
-mobile-chat-allow-prompt = Ruhusu { $name }?
-mobile-chat-enter-to-send = Enter kutuma
-mobile-chat-default-effort = Juhudi chaguo-msingi
 
 mobile-qr-title = Changanua msimbo wa QR unaoonyeshwa na Vmux
 mobile-qr-cancel = Ghairi

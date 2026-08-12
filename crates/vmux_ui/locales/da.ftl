@@ -784,11 +784,6 @@ mobile-chat-no-session = Ingen aktiv session
 mobile-chat-placeholder = Besked til agent…
 mobile-chat-send = Send
 mobile-chat-stop = Stop
-mobile-chat-allow = Tillad
-mobile-chat-deny = Afvis
-mobile-chat-allow-prompt = Tillad { $name }?
-mobile-chat-enter-to-send = Enter for at sende
-mobile-chat-default-effort = Standardindsats
 
 mobile-qr-title = Scan QR-koden, som Vmux viser
 mobile-qr-cancel = Annuller

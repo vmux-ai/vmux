@@ -784,11 +784,6 @@ mobile-chat-no-session = Aktiv sessiya yoxdur
 mobile-chat-placeholder = Agentə mesaj…
 mobile-chat-send = Göndər
 mobile-chat-stop = Dayandır
-mobile-chat-allow = İcazə ver
-mobile-chat-deny = Rədd et
-mobile-chat-allow-prompt = { $name } üçün icazə verilsin?
-mobile-chat-enter-to-send = Göndərmək üçün Enter
-mobile-chat-default-effort = Standart səy
 
 mobile-qr-title = Vmux-un göstərdiyi QR kodu skan edin
 mobile-qr-cancel = Ləğv et

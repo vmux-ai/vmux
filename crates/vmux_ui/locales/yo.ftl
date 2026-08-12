@@ -784,11 +784,6 @@ mobile-chat-no-session = Kò sí sẹ́ṣọ́n tí ń ṣiṣẹ́
 mobile-chat-placeholder = Fi ìfiránṣẹ́ ránṣẹ́ sí agent…
 mobile-chat-send = Fi ránṣẹ́
 mobile-chat-stop = Dáwọ́ dúró
-mobile-chat-allow = Gba láyè
-mobile-chat-deny = Kọ̀
-mobile-chat-allow-prompt = Gba { $name } láyè?
-mobile-chat-enter-to-send = Enter láti fi ránṣẹ́
-mobile-chat-default-effort = Ìsapá àiyédèrùn
 
 mobile-qr-title = Ṣàyẹ̀wò kóòdù QR tí Vmux fihàn
 mobile-qr-cancel = Fagilé

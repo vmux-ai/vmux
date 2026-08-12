@@ -784,11 +784,6 @@ mobile-chat-no-session = Pa gen sesyon aktif
 mobile-chat-placeholder = Mesaj pou ajan an…
 mobile-chat-send = Voye
 mobile-chat-stop = Sispann
-mobile-chat-allow = Pèmèt
-mobile-chat-deny = Refize
-mobile-chat-allow-prompt = Pèmèt { $name }?
-mobile-chat-enter-to-send = Enter pou voye
-mobile-chat-default-effort = Efò pa defo
 
 mobile-qr-title = Eskane kòd QR Vmux montre a
 mobile-qr-cancel = Anile

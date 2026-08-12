@@ -784,11 +784,6 @@ mobile-chat-no-session = Akukho seshoni isebenzayo
 mobile-chat-placeholder = Thumela umyalezo kwiarhente…
 mobile-chat-send = Thumela
 mobile-chat-stop = Misa
-mobile-chat-allow = Vumela
-mobile-chat-deny = Yala
-mobile-chat-allow-prompt = Vumela u-{ $name }?
-mobile-chat-enter-to-send = I-Enter ukuthumela
-mobile-chat-default-effort = Umgudu omiselweyo
 
 mobile-qr-title = Skena ikhowudi ye-QR eboniswa yi-Vmux
 mobile-qr-cancel = Rhoxisa

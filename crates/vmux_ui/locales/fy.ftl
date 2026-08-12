@@ -784,11 +784,6 @@ mobile-chat-no-session = Gjin aktive sesje
 mobile-chat-placeholder = Berjocht oan agent…
 mobile-chat-send = Ferstjoere
 mobile-chat-stop = Stopje
-mobile-chat-allow = Tastean
-mobile-chat-deny = Wegerje
-mobile-chat-allow-prompt = { $name } tastean?
-mobile-chat-enter-to-send = Enter om te ferstjoeren
-mobile-chat-default-effort = Standertynspanning
 
 mobile-qr-title = Scan de QR-koade dy’t Vmux sjen lit
 mobile-qr-cancel = Annulearje

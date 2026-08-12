@@ -784,11 +784,6 @@ mobile-chat-no-session = Níl aon seisiún gníomhach ann
 mobile-chat-placeholder = Teachtaireacht chuig an ngníomhaire…
 mobile-chat-send = Seol
 mobile-chat-stop = Stop
-mobile-chat-allow = Ceadaigh
-mobile-chat-deny = Diúltaigh
-mobile-chat-allow-prompt = Ceadaigh { $name }?
-mobile-chat-enter-to-send = Enter chun seoladh
-mobile-chat-default-effort = Iarracht réamhshocraithe
 
 mobile-qr-title = Scan an cód QR a thaispeánann Vmux
 mobile-qr-cancel = Cealaigh

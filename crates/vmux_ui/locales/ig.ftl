@@ -784,11 +784,6 @@ mobile-chat-no-session = Enweghị oge na-arụ ọrụ
 mobile-chat-placeholder = Zipụ ozi na agent…
 mobile-chat-send = Zipụ
 mobile-chat-stop = Kwụsị
-mobile-chat-allow = Kwe
-mobile-chat-deny = Jụ
-mobile-chat-allow-prompt = Kwe ka { $name }?
-mobile-chat-enter-to-send = Pịa Enter izipu
-mobile-chat-default-effort = Mgbalị ndabere
 
 mobile-qr-title = Nyochaa koodu QR nke Vmux na-egosi
 mobile-qr-cancel = Kagbuo

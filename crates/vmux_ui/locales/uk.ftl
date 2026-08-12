@@ -784,11 +784,6 @@ mobile-chat-no-session = Немає активного сеансу
 mobile-chat-placeholder = Написати агенту…
 mobile-chat-send = Надіслати
 mobile-chat-stop = Зупинити
-mobile-chat-allow = Дозволити
-mobile-chat-deny = Відхилити
-mobile-chat-allow-prompt = Дозволити { $name }?
-mobile-chat-enter-to-send = Enter — надіслати
-mobile-chat-default-effort = Типові зусилля
 
 mobile-qr-title = Відскануйте QR-код, який показує Vmux
 mobile-qr-cancel = Скасувати

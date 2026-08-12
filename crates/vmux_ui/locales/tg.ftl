@@ -784,11 +784,6 @@ mobile-chat-no-session = Сессияи фаъол нест
 mobile-chat-placeholder = Паём ба агент…
 mobile-chat-send = Фиристодан
 mobile-chat-stop = Қатъ
-mobile-chat-allow = Иҷозат додан
-mobile-chat-deny = Рад кардан
-mobile-chat-allow-prompt = Ба { $name } иҷозат дода шавад?
-mobile-chat-enter-to-send = Enter барои фиристодан
-mobile-chat-default-effort = Кӯшиши пешфарз
 
 mobile-qr-title = QR-кодеро, ки Vmux нишон медиҳад, скан кунед
 mobile-qr-cancel = Бекор

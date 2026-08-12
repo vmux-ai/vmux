@@ -784,11 +784,6 @@ mobile-chat-no-session = Žiadna aktívna relácia
 mobile-chat-placeholder = Napíšte agentovi…
 mobile-chat-send = Odoslať
 mobile-chat-stop = Zastaviť
-mobile-chat-allow = Povoliť
-mobile-chat-deny = Zamietnuť
-mobile-chat-allow-prompt = Povoliť { $name }?
-mobile-chat-enter-to-send = Enter odošle
-mobile-chat-default-effort = Predvolené úsilie
 
 mobile-qr-title = Naskenujte QR kód zobrazený vo Vmux
 mobile-qr-cancel = Zrušiť
