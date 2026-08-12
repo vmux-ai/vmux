@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-mobile-ios-release mobile-ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -88,10 +88,10 @@ mobile-ios: ensure-mobile-ios-deps
 	./scripts/inject-ios-resources.sh
 	./scripts/test-ios-bundle-layout.sh
 
-build-mobile-ios-release: ensure-ios-release-deps
+build-ios-release: ensure-ios-release-deps
 	./scripts/build-ios-release.sh
 
-mobile-ios-release: build-mobile-ios-release
+ios-release: build-ios-release
 	./scripts/test-ios-bundle-layout.sh --signed
 
 # The icon, launch screen and privacy manifest exist only in a bundle the injector has been over,
