@@ -1314,7 +1314,7 @@ fn session_meta_for_agent(
     effort: Option<&str>,
 ) -> Option<serde_json::Map<String, serde_json::Value>> {
     if let Err(error) = vmux_core::knowledge::sync_external_agent_configs() {
-        bevy::log::warn!("external agent Knowledge sync failed: {error}");
+        tracing::warn!("external agent Knowledge sync failed: {error}");
     }
     session_meta_for_agent_with_knowledge(
         agent_id,

@@ -46,7 +46,7 @@ fn to_acp_mcp_server(
     };
 
     if server.transport == ManagedMcpTransport::Stdio && server.cwd.is_some() {
-        bevy::log::warn!(
+        tracing::warn!(
             "managed MCP server {} skipped for ACP because ACP v1 does not support stdio cwd",
             server.name
         );
