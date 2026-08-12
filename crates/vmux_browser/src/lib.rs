@@ -2003,7 +2003,7 @@ mod tests {
         use bevy::prelude::*;
         use bevy_cef::prelude::WebviewExtendStandardMaterial;
         use vmux_agent::events::AgentCommandRequest;
-        use vmux_agent::plugin::AgentSessionPlugin;
+        use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
         use vmux_core::{
             CefPageAttachRequest, LastActivatedAt, PageMetadata, PageOpenError, PageOpenHandled,
@@ -2594,7 +2594,7 @@ mod tests {
                 ConsumerPlugin,
             ));
             app.init_resource::<AgentStrategies>()
-                .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
+                .insert_resource(vmux_agent::host::AgentExecutableOverride(
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Claude, true)]),
                 ))
                 .insert_resource(FocusedStack::default())
@@ -2642,7 +2642,7 @@ mod tests {
                 ConsumerPlugin,
             ));
             app.init_resource::<AgentStrategies>()
-                .insert_resource(vmux_agent::plugin::AgentExecutableOverride(
+                .insert_resource(vmux_agent::host::AgentExecutableOverride(
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Codex, true)]),
                 ))
                 .insert_resource(FocusedStack::default())

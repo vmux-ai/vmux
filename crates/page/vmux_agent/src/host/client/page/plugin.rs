@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::BinEventEmitterPlugin;
 
 use crate::AgentVariant;
-use crate::client::acp::AcpSession;
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::message::Message;
@@ -17,6 +16,7 @@ use vmux_service::agent_events::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
+use vmux_session::AcpSession;
 use vmux_session::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 
 impl Plugin for PageAgentPlugin {
@@ -37,7 +37,7 @@ impl Plugin for PageAgentPlugin {
             .add_plugins(BinEventEmitterPlugin::<(
                 vmux_core::event::FileTidyActionEvent,
             )>::default())
-            .add_observer(crate::plugin::on_tidy_action)
+            .add_observer(crate::host::on_tidy_action)
             .add_observer(approval::handle_approval_reply)
             .add_observer(close_page_session_on_remove)
             .add_systems(
@@ -377,11 +377,11 @@ mod tests {
 
     #[test]
     fn interrupted_status_pauses_queue_and_idles() {
-        use crate::client::acp::AcpSession;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 
         let mut app = App::new();
@@ -429,11 +429,11 @@ mod tests {
 
     #[test]
     fn flush_pending_interrupt_does_not_pause() {
-        use crate::client::acp::AcpSession;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 
         let mut app = App::new();
@@ -490,11 +490,11 @@ mod tests {
 
     #[test]
     fn flush_pending_error_rearms_queue() {
-        use crate::client::acp::AcpSession;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::AcpSession;
         use vmux_session::PromptQueue;
 
         let mut app = App::new();

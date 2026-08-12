@@ -11,7 +11,7 @@ use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Bro
 
 use super::model::{effort_current_for, emit_model_state};
 use super::{AgentChatView, ChatSynced};
-use crate::client::acp::{AcpModelState, AcpSession};
+use crate::client::acp::AcpModelState;
 use crate::handoff::ImportedConversation;
 use crate::run_state::{AgentRunState, AgentTurnMeta};
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
@@ -22,6 +22,7 @@ use vmux_chat::event::{
 use vmux_core::PageMetadata;
 use vmux_core::team::Profile;
 use vmux_service::chat::{group_turns_before, group_turns_tail, grouped_item_count};
+use vmux_session::AcpSession;
 use vmux_session::{AgentConversationTitle, AgentMessages, PromptQueue};
 
 /// The transcript as the page sees it: the live snapshot, and the history behind it.
@@ -96,7 +97,7 @@ fn push_chat_to_page(
     >,
     children: Query<&Children>,
     is_browser: Query<(), With<vmux_layout::Browser>>,
-    choices: Query<&crate::plugin::PendingAgentChoice>,
+    choices: Query<&crate::host::PendingAgentChoice>,
     browsers: NonSend<Browsers>,
     mut last_push: Local<std::collections::HashMap<Entity, std::time::Instant>>,
     mut removed_messages: RemovedComponents<AgentMessages>,
@@ -164,7 +165,7 @@ fn snapshot_of(
     queue: &PromptQueue,
     imported: Option<&ImportedConversation>,
     conversation_title: Option<&AgentConversationTitle>,
-    choice: Option<&crate::plugin::PendingAgentChoice>,
+    choice: Option<&crate::host::PendingAgentChoice>,
 ) -> ChatSnapshot {
     let durations: &[u32] = turn_meta.map(|m| m.durations.as_slice()).unwrap_or(&[]);
     let running = matches!(state, AgentRunState::Streaming);
@@ -279,7 +280,7 @@ fn sync_chat_to_ready_views(
         Option<&AgentConversationTitle>,
     )>,
     acp_sessions: Query<(&AcpSession, Option<&AcpModelState>)>,
-    choices: Query<&crate::plugin::PendingAgentChoice>,
+    choices: Query<&crate::host::PendingAgentChoice>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,

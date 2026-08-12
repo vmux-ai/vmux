@@ -1,9 +1,9 @@
 use bevy::prelude::*;
 
-use crate::client::acp::AcpSession;
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use crate::toast::{AgentToast, ToastLevel};
+use vmux_session::AcpSession;
 use vmux_session::AgentSession;
 
 /// On a transition into `Errored`, fire a toast. The chat page renders the errored run-state as a
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn acp_errored_transition_fires_toast() {
-        use crate::client::acp::AcpSession;
+        use vmux_session::AcpSession;
         let mut app = make_app();
         app.world_mut().spawn((
             AcpSession {

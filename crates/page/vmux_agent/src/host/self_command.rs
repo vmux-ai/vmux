@@ -78,7 +78,7 @@ fn ancestor_self_tab(
 
 pub(crate) fn ancestor_acp_stack(
     entity: Entity,
-    sessions: &Query<&mut crate::client::acp::AcpSession>,
+    sessions: &Query<&mut vmux_session::AcpSession>,
     child_of: &Query<&ChildOf>,
 ) -> Option<Entity> {
     let mut current = entity;
@@ -92,7 +92,7 @@ pub(crate) fn ancestor_acp_stack(
 
 fn ancestor_agent_session(
     entity: Entity,
-    acp_sessions: &Query<&mut crate::client::acp::AcpSession>,
+    acp_sessions: &Query<&mut vmux_session::AcpSession>,
     page_sessions: &Query<&vmux_session::AgentSession>,
     cli_sessions: &Query<&AgentSession>,
     child_of: &Query<&ChildOf>,
@@ -112,7 +112,7 @@ fn ancestor_agent_session(
 pub(crate) fn rebind_acp_workspace(
     stack: Entity,
     cwd: &Path,
-    sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    sessions: &mut Query<&mut vmux_session::AcpSession>,
     commands: &mut Commands,
 ) -> Option<ClientMessage> {
     let Ok(mut session) = sessions.get_mut(stack) else {
@@ -208,7 +208,7 @@ pub(super) fn handle_agent_self_commands(
         ),
     >,
     launch_q: Query<&TerminalLaunch>,
-    mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
+    mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     ctx: vmux_layout::pane::PlacementCtx,
     mut writers: AgentSelfCommandWriters,
     mut commands: Commands,
@@ -535,7 +535,7 @@ pub(super) fn handle_agent_self_commands(
                                 question: question.clone(),
                                 options: options.clone(),
                             })
-                            .remove::<crate::plugin::chat::ChatSynced>();
+                            .remove::<crate::host::chat::ChatSynced>();
                         AgentCommandResult::Text(USER_CHOICE_REQUESTED.to_string())
                     } else {
                         AgentCommandResult::Error(

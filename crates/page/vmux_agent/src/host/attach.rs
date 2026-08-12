@@ -99,7 +99,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
         commands
             .entity(webview)
             .insert((
-                crate::plugin::chat::AgentChatView,
+                crate::host::chat::AgentChatView,
                 PageMetadata {
                     url,
                     title: format!("{provider}/{model}"),
@@ -107,11 +107,11 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
                     ..default()
                 },
             ))
-            .remove::<crate::plugin::chat::ChatSynced>();
+            .remove::<crate::host::chat::ChatSynced>();
     } else {
         commands.spawn((
             vmux_layout::Browser::new(meshes, webview_mt, &url),
-            crate::plugin::chat::AgentChatView,
+            crate::host::chat::AgentChatView,
             ChildOf(stack),
         ));
     }
@@ -165,7 +165,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     });
     let anchor = vmux_service::protocol::ProcessId::new();
     commands.entity(stack).insert((
-        crate::client::acp::AcpSession {
+        vmux_session::AcpSession {
             agent_id: agent_id.to_string(),
             sid: sid.to_string(),
             cwd: cwd.to_path_buf(),
@@ -192,7 +192,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
         commands
             .entity(webview)
             .insert((
-                crate::plugin::chat::AgentChatView,
+                crate::host::chat::AgentChatView,
                 PageMetadata {
                     url,
                     title: name.to_string(),
@@ -201,11 +201,11 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
                 },
                 anchor,
             ))
-            .remove::<crate::plugin::chat::ChatSynced>();
+            .remove::<crate::host::chat::ChatSynced>();
     } else {
         commands.spawn((
             vmux_layout::Browser::new(meshes, webview_mt, &url),
-            crate::plugin::chat::AgentChatView,
+            crate::host::chat::AgentChatView,
             ChildOf(stack),
             anchor,
         ));
@@ -359,7 +359,7 @@ fn handle_resume_in_acp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::test_support::test_settings;
+    use crate::host::test_support::test_settings;
     use vmux_service::protocol::AgentRequestId;
     use vmux_terminal::Terminal;
 

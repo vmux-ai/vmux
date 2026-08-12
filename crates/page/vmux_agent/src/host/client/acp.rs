@@ -18,7 +18,7 @@ use vmux_terminal::reattach_terminal_bundle;
 use crate::events::AgentApprovalRequest;
 use crate::handoff::{ImportedConversation, PendingHandoff};
 use crate::run_state::AgentRunState;
-use vmux_session::{AgentApprovalPolicy, PromptQueue};
+use vmux_session::{AcpSession, AgentApprovalPolicy, PromptQueue};
 
 pub struct AcpAgentPlugin;
 
@@ -72,8 +72,8 @@ fn ancestor_acp_workspace_state(
     child_of: &Query<&ChildOf>,
     tabs: &Query<&vmux_layout::tab::Tab>,
     workspaces: &Query<(), With<vmux_layout::tab::TabWorkspace>>,
-    pending_projects: &Query<(), With<crate::plugin::PendingAgentProject>>,
-    repositories_needing_worktrees: &Query<(), With<crate::plugin::RepositoryNeedsWorktree>>,
+    pending_projects: &Query<(), With<crate::host::PendingAgentProject>>,
+    repositories_needing_worktrees: &Query<(), With<crate::host::RepositoryNeedsWorktree>>,
 ) -> Option<AcpWorkspaceState> {
     let mut current = entity;
     loop {
@@ -110,8 +110,6 @@ fn acp_prompt_context(
         (None, None) => None,
     }
 }
-
-pub use vmux_session::AcpSession;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct AcpModelState {
@@ -470,7 +468,7 @@ fn install_acp_session_when_focused(
     let Some(focused) = focused else {
         return;
     };
-    let shell = crate::plugin::agent_terminal_shell(&settings);
+    let shell = crate::host::agent_terminal_shell(&settings);
     for (entity, session, mut state) in &mut q {
         if focused.stack != Some(entity) {
             continue;
@@ -1043,8 +1041,8 @@ fn send_acp_input(
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
-    pending_projects: Query<(), With<crate::plugin::PendingAgentProject>>,
-    repositories_needing_worktrees: Query<(), With<crate::plugin::RepositoryNeedsWorktree>>,
+    pending_projects: Query<(), With<crate::host::PendingAgentProject>>,
+    repositories_needing_worktrees: Query<(), With<crate::host::RepositoryNeedsWorktree>>,
     service: Option<Res<ServiceClient>>,
 ) {
     let Some(service) = service else {
@@ -1249,10 +1247,10 @@ mod tests {
                     move |child_of: Query<&ChildOf>,
                           tabs: Query<&vmux_layout::tab::Tab>,
                           workspaces: Query<(), With<vmux_layout::tab::TabWorkspace>>,
-                          pending: Query<(), With<crate::plugin::PendingAgentProject>>,
+                          pending: Query<(), With<crate::host::PendingAgentProject>>,
                           needs_worktree: Query<
                         (),
-                        With<crate::plugin::RepositoryNeedsWorktree>,
+                        With<crate::host::RepositoryNeedsWorktree>,
                     >| {
                         ancestor_acp_workspace_state(
                             stack,
@@ -1270,7 +1268,7 @@ mod tests {
         assert_eq!(state(app.world_mut()), Some(AcpWorkspaceState::Unbound));
         app.world_mut()
             .entity_mut(tab)
-            .insert(crate::plugin::PendingAgentProject("/repo".into()));
+            .insert(crate::host::PendingAgentProject("/repo".into()));
         assert_eq!(
             state(app.world_mut()),
             Some(AcpWorkspaceState::PendingWorktree)
@@ -1280,7 +1278,7 @@ mod tests {
                 name: "Tab 1".into(),
                 startup_dir: Some("/repo".into()),
             },
-            crate::plugin::RepositoryNeedsWorktree,
+            crate::host::RepositoryNeedsWorktree,
         ));
         assert_eq!(
             state(app.world_mut()),
@@ -1291,7 +1289,7 @@ mod tests {
             .insert(vmux_layout::tab::TabWorkspace {
                 project_dir: "/repo".into(),
             })
-            .remove::<crate::plugin::RepositoryNeedsWorktree>();
+            .remove::<crate::host::RepositoryNeedsWorktree>();
         assert_eq!(state(app.world_mut()), Some(AcpWorkspaceState::Bound));
     }
 

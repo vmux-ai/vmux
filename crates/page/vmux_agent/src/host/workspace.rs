@@ -83,7 +83,7 @@ pub(crate) struct PendingWorkspacePicker {
 pub(crate) struct WorkspacePickerContext<'w, 's> {
     pub(crate) pickers: Query<'w, 's, &'static PendingWorkspacePicker>,
     pub(crate) choices: Query<'w, 's, &'static PendingAgentChoice>,
-    pub(crate) chat_views: Query<'w, 's, (), With<crate::plugin::chat::AgentChatView>>,
+    pub(crate) chat_views: Query<'w, 's, (), With<crate::host::chat::AgentChatView>>,
     pub(crate) page_sessions: Query<'w, 's, &'static vmux_session::AgentSession>,
     pub(crate) cli_sessions: Query<'w, 's, &'static AgentSession>,
     pub(crate) conversation_titles:
@@ -131,7 +131,7 @@ fn handle_agent_choice_selected(
     commands
         .entity(event.webview)
         .remove::<PendingAgentChoice>()
-        .remove::<crate::plugin::chat::ChatSynced>();
+        .remove::<crate::host::chat::ChatSynced>();
 }
 
 pub(crate) fn workspace_picker_task(
@@ -243,7 +243,7 @@ pub(crate) fn activate_agent_worktree(
     project_dir: &Path,
     activation: vmux_layout::worktree::TabWorktreeActivation,
     tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>), String> {
@@ -279,7 +279,7 @@ pub(crate) fn activate_agent_directory(
     project_dir: &Path,
     execution_dir: &Path,
     tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<Option<ClientMessage>, String> {
@@ -312,7 +312,7 @@ fn activate_selected_workspace(
     agent_entity: Entity,
     selected: &Path,
     tabs: &mut Query<&mut vmux_layout::tab::Tab>,
-    acp_sessions: &mut Query<&mut crate::client::acp::AcpSession>,
+    acp_sessions: &mut Query<&mut vmux_session::AcpSession>,
     child_of: &Query<&ChildOf>,
     commands: &mut Commands,
 ) -> Result<(PathBuf, Option<ClientMessage>, SelectedWorkspaceKind), String> {
@@ -438,9 +438,9 @@ pub(crate) fn ambiguous_worktree_message(candidates: &[ExistingWorktreeCandidate
 
 fn drain_workspace_picker_tasks(
     mut pickers: Query<(Entity, &mut PendingWorkspacePicker)>,
-    chat_views: Query<(), With<crate::plugin::chat::AgentChatView>>,
+    chat_views: Query<(), With<crate::host::chat::AgentChatView>>,
     mut tabs: Query<&mut vmux_layout::tab::Tab>,
-    mut acp_sessions: Query<&mut crate::client::acp::AcpSession>,
+    mut acp_sessions: Query<&mut vmux_session::AcpSession>,
     child_of: Query<&ChildOf>,
     mut commands: Commands,
     service: Option<Res<ServiceClient>>,
@@ -497,7 +497,7 @@ fn drain_workspace_picker_tasks(
                                                     .map(str::to_string)
                                                     .collect(),
                                             })
-                                            .remove::<crate::plugin::chat::ChatSynced>();
+                                            .remove::<crate::host::chat::ChatSynced>();
                                         None
                                     }
                                     SelectedWorkspaceKind::Plain => Some(format!(
@@ -533,7 +533,7 @@ pub(super) fn send_pending_agent_continuations(
     mut sessions: Query<(
         Entity,
         &PendingAgentContinuation,
-        Option<&crate::client::acp::AcpSession>,
+        Option<&vmux_session::AcpSession>,
         Option<&vmux_session::AgentSession>,
         Option<&AgentSession>,
         Option<&mut crate::run_state::AgentRunState>,
@@ -578,8 +578,8 @@ pub(super) fn send_pending_agent_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::run_terminal::AgentCwd;
-    use crate::plugin::test_support::init_worktree_test_repo;
+    use crate::host::run_terminal::AgentCwd;
+    use crate::host::test_support::init_worktree_test_repo;
     use vmux_core::agent::AgentKind;
     use vmux_service::protocol::ProcessId;
     use vmux_service::protocol::SharedMessage;
@@ -749,7 +749,7 @@ mod tests {
         let stack = app
             .world_mut()
             .spawn((
-                crate::client::acp::AcpSession {
+                vmux_session::AcpSession {
                     agent_id: "claude".into(),
                     sid: "routing-session".into(),
                     cwd: AgentCwd::process(),
@@ -762,7 +762,7 @@ mod tests {
             .id();
         let view = app
             .world_mut()
-            .spawn((crate::plugin::chat::AgentChatView, anchor, ChildOf(stack)))
+            .spawn((crate::host::chat::AgentChatView, anchor, ChildOf(stack)))
             .id();
 
         let project_for_system = project_dir.clone();
@@ -770,7 +770,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      mut sessions: Query<&mut vmux_session::AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_agent_worktree(
@@ -815,10 +815,7 @@ mod tests {
                 .is_some()
         );
         assert!(app.world().get::<PendingAgentProject>(tab).is_none());
-        let session = app
-            .world()
-            .get::<crate::client::acp::AcpSession>(stack)
-            .unwrap();
+        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.sid, "routing-session");
         assert_eq!(session.anchor, anchor);
         assert_eq!(session.cwd, execution_dir);
@@ -832,7 +829,7 @@ mod tests {
         assert_eq!(app.world().get::<ChildOf>(view).unwrap().parent(), stack);
         assert!(
             app.world()
-                .get::<crate::plugin::chat::AgentChatView>(view)
+                .get::<crate::host::chat::AgentChatView>(view)
                 .is_some()
         );
         assert!(matches!(
@@ -869,7 +866,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      mut sessions: Query<&mut vmux_session::AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
@@ -925,7 +922,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      mut sessions: Query<&mut vmux_session::AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
@@ -991,7 +988,7 @@ mod tests {
             .world_mut()
             .run_system_once(
                 move |mut tabs: Query<&mut vmux_layout::tab::Tab>,
-                      mut sessions: Query<&mut crate::client::acp::AcpSession>,
+                      mut sessions: Query<&mut vmux_session::AcpSession>,
                       child_of: Query<&ChildOf>,
                       mut commands: Commands| {
                     activate_selected_workspace(
