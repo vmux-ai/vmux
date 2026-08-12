@@ -5,8 +5,10 @@
 //! state whether or not a window exists. That seam is a crate boundary rather than a feature,
 //! because features unify per package across an invocation and would relink CEF into a headless
 //! build without failing anything.
+#![allow(clippy::type_complexity)]
 
 pub mod acp;
+pub mod room;
 pub mod session;
 pub mod variant;
 

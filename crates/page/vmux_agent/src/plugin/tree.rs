@@ -75,7 +75,7 @@ impl Plugin for AgentSessionPlugin {
                 vmux_terminal::TerminalContractPlugin,
             ))
             .add_plugins((
-                crate::room::RoomPlugin,
+                vmux_session::room::RoomPlugin,
                 crate::command_bar::CommandBarPlugin,
                 super::attach::AttachPlugin,
                 super::attention::AttentionPlugin,

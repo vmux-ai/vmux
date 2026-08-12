@@ -11664,6 +11664,7 @@ dependencies = [
 name = "vmux_session"
 version = "0.0.30"
 dependencies = [
+ "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
  "serde",
