@@ -1,5 +1,6 @@
 [package]
 name = "vmux_terminal"
+build = "../../build_cfg.rs"
 description = "Bevy + CEF + Dioxus terminal webview"
 version.workspace = true
 edition.workspace = true

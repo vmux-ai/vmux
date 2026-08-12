@@ -1,5 +1,6 @@
 [package]
 name = "vmux_team"
+build = "../../build_cfg.rs"
 description = "Team / profiles (user + agents)"
 version.workspace = true
 edition.workspace = true

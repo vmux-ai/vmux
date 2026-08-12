@@ -4,7 +4,7 @@ description = "Vmux profile names and filesystem paths"
 version.workspace = true
 edition.workspace = true
 publish = false
-build = "build.rs"
+build = "../build_cfg_git.rs"
 
 [dependencies]
 

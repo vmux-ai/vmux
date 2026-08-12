@@ -1,5 +1,6 @@
 [package]
 name = "vmux_git"
+build = "../build_cfg.rs"
 description = "Host-side git engine + bridge for the file:// editor page"
 version.workspace = true
 edition.workspace = true

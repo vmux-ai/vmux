@@ -1,5 +1,6 @@
 [package]
 name = "vmux_setting"
+build = "../../build_cfg.rs"
 description = "Settings webview app"
 version.workspace = true
 edition.workspace = true

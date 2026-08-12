@@ -1,5 +1,6 @@
 [package]
 name = "vmux_core"
+build = "../build_cfg_git.rs"
 description = "Shared component types for vmux"
 version.workspace = true
 edition.workspace = true

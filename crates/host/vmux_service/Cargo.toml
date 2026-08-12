@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 description = "Background service hosting persistent terminal processes (and its monitor webview)"
 publish = false
-build = "build.rs"
+build = "../../build_cfg_git.rs"
 
 [features]
 default = []
