@@ -1,0 +1,523 @@
+//! The desktop half of the agents page: reading the registry, installing, and pushing the
+//! catalog into the webview.
+//!
+//! Gated as a whole rather than item by item. The rendered counterpart is the sibling `page`.
+
+use bevy::prelude::*;
+use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
+use crossbeam_channel::{Receiver, Sender};
+use std::collections::{HashMap, HashSet};
+
+use crate::acp_registry::Runtime;
+use crate::client::acp::{AcpCatalog, AcpInstallGeneration};
+use crate::event::{
+    AGENTS_CATALOG_EVENT, AgentEntry, AgentsCatalog, AgentsCatalogRequest, AgentsInstall,
+    AgentsOpen, AgentsUninstall,
+};
+use vmux_core::agent::AgentKind;
+use vmux_core::page::PrewarmPage;
+
+pub struct AgentsManagerPlugin;
+
+impl Plugin for AgentsManagerPlugin {
+    fn build(&self, app: &mut App) {
+        app.world_mut().spawn((
+            PAGE_MANIFEST,
+            PrewarmPage {
+                host: "agents",
+                url: "vmux://agents/",
+                title: "Agents",
+                pool_size: 1,
+            },
+        ));
+        vmux_core::register_host_spawn(app, "agents");
+        app.init_resource::<AgentsPageWebviews>()
+            .init_resource::<AgentsStatus>()
+            .init_resource::<AgentsInstallChannel>()
+            .init_resource::<AgentVersions>()
+            .init_resource::<AgentVersionsChannel>()
+            .init_resource::<AcpInstallGeneration>()
+            .add_plugins(BinEventEmitterPlugin::<(
+                AgentsCatalogRequest,
+                AgentsInstall,
+                AgentsUninstall,
+                AgentsOpen,
+            )>::for_hosts(&["agents"]))
+            .add_observer(on_catalog_request)
+            .add_observer(on_install_request)
+            .add_observer(on_uninstall_request)
+            .add_observer(on_open_request)
+            .add_systems(
+                Update,
+                (
+                    kick_off_version_fetches,
+                    drain_version_fetches,
+                    push_agents,
+                    drain_agent_installs,
+                ),
+            );
+    }
+}
+
+pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
+    host: "agents",
+    title: "Agents",
+    keywords: &["acp", "agent", "install", "registry"],
+    icon: Some(vmux_core::BuiltinIcon::Sparkles),
+    command_bar: true,
+};
+
+#[derive(Resource, Default)]
+struct AgentsPageWebviews(HashSet<Entity>);
+
+/// Session install status per agent id (`status`, `detail`), overlaid on the disk-derived state.
+#[derive(Resource, Default)]
+struct AgentsStatus(HashMap<String, (String, String)>);
+
+/// Background install progress/result for the manager page.
+enum AgentMsg {
+    Progress {
+        id: String,
+        pct: Option<u8>,
+        message: String,
+    },
+    Done {
+        id: String,
+    },
+    Failed {
+        id: String,
+        message: String,
+    },
+}
+
+#[derive(Resource)]
+struct AgentsInstallChannel {
+    tx: Sender<AgentMsg>,
+    rx: Receiver<AgentMsg>,
+}
+
+impl Default for AgentsInstallChannel {
+    fn default() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Self { tx, rx }
+    }
+}
+
+/// Published-version lists per agent id, fetched lazily in the background so the version selector
+/// can offer a dropdown. `requested` guards against re-fetching an agent every catalog push.
+#[derive(Resource, Default)]
+struct AgentVersions {
+    fetched: HashMap<String, Vec<String>>,
+    requested: HashSet<String>,
+}
+
+#[derive(Resource)]
+struct AgentVersionsChannel {
+    tx: Sender<(String, Vec<String>)>,
+    rx: Receiver<(String, Vec<String>)>,
+}
+
+impl Default for AgentVersionsChannel {
+    fn default() -> Self {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        Self { tx, rx }
+    }
+}
+
+fn on_open_request(
+    trigger: On<BinReceive<AgentsOpen>>,
+    mut commands: MessageWriter<vmux_command::AppCommand>,
+) {
+    commands.write(vmux_command::AppCommand::Browser(
+        vmux_command::BrowserCommand::Open(vmux_command::open::OpenCommand::InNewStack {
+            url: Some(trigger.event().payload.url.clone()),
+        }),
+    ));
+}
+
+fn catalog_snapshot(
+    catalog: &AcpCatalog,
+    status: &AgentsStatus,
+    acp_configs: &[vmux_setting::AcpAgentConfig],
+    versions: &AgentVersions,
+) -> AgentsCatalog {
+    let mut agents: Vec<AgentEntry> = catalog
+        .agents
+        .iter()
+        .map(|a| {
+            let (st, detail) = status.0.get(&a.id).cloned().unwrap_or_else(|| {
+                if crate::acp_install::is_update_available(a) {
+                    ("update".to_string(), String::new())
+                } else if crate::acp_install::is_agent_installed(a) {
+                    ("installed".to_string(), String::new())
+                } else {
+                    ("available".to_string(), String::new())
+                }
+            });
+            let pinned_version = acp_configs
+                .iter()
+                .find(|c| crate::acp_install::agent_ids_match(&c.id, &a.id))
+                .and_then(|c| c.version.clone())
+                .unwrap_or_default();
+            AgentEntry {
+                id: a.id.clone(),
+                name: a.name.clone(),
+                icon: a.icon.clone().unwrap_or_default(),
+                description: a.description.clone().unwrap_or_default(),
+                source: "acp".to_string(),
+                launch_url: format!("vmux://agent/{}", a.id),
+                uninstallable: true,
+                runtime: match a.preferred_runtime() {
+                    Runtime::None => "native",
+                    Runtime::Node => "node",
+                    Runtime::Uv => "python",
+                }
+                .to_string(),
+                status: st,
+                detail,
+                installed_version: pinned_version.clone(),
+                pinned_version,
+                available_versions: versions.fetched.get(&a.id).cloned().unwrap_or_default(),
+            }
+        })
+        .collect();
+    agents.extend(cli_agent_entries(|kind| {
+        crate::exec::find_executable(kind.executable()).is_some()
+    }));
+    agents.sort_by_key(|a| a.name.to_lowercase());
+    AgentsCatalog { agents }
+}
+
+fn cli_agent_entries(mut is_installed: impl FnMut(AgentKind) -> bool) -> Vec<AgentEntry> {
+    AgentKind::all()
+        .into_iter()
+        .map(|kind| {
+            let segment = kind.as_url_segment();
+            AgentEntry {
+                id: format!("cli:{segment}"),
+                name: format!("{} CLI", kind.display_name()),
+                icon: String::new(),
+                description: "Terminal-based coding agent".to_string(),
+                source: "cli".to_string(),
+                launch_url: format!("{}cli", kind.cli_url_prefix()),
+                uninstallable: false,
+                runtime: "cli".to_string(),
+                status: if is_installed(kind) {
+                    "installed".to_string()
+                } else {
+                    "available".to_string()
+                },
+                detail: String::new(),
+                pinned_version: String::new(),
+                installed_version: String::new(),
+                available_versions: Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// Remember which webview asked for the catalog; the push system delivers it.
+fn on_catalog_request(
+    trigger: On<BinReceive<AgentsCatalogRequest>>,
+    mut webviews: ResMut<AgentsPageWebviews>,
+) {
+    webviews.0.insert(trigger.event().webview);
+}
+
+/// Upsert the per-agent version pin into the settings ACP list: update a matching entry, or append
+/// a version-only entry (empty command) for a registry agent the user has not otherwise configured.
+fn upsert_acp_version(
+    acp: &mut Vec<vmux_setting::AcpAgentConfig>,
+    catalog_id: &str,
+    name: &str,
+    version: Option<String>,
+) {
+    if let Some(cfg) = acp
+        .iter_mut()
+        .find(|c| crate::acp_install::agent_ids_match(&c.id, catalog_id))
+    {
+        cfg.version = version;
+    } else {
+        acp.push(vmux_setting::AcpAgentConfig {
+            id: crate::acp_install::agent_url_id(catalog_id).to_string(),
+            name: name.to_string(),
+            command: String::new(),
+            args: Vec::new(),
+            env: Vec::new(),
+            cwd: None,
+            version,
+        });
+    }
+}
+
+/// Kick a background install (or update) for the requested agent, persisting its version pin first.
+fn on_install_request(
+    trigger: On<BinReceive<AgentsInstall>>,
+    catalog: Res<AcpCatalog>,
+    installs: Res<AgentsInstallChannel>,
+    mut status: ResMut<AgentsStatus>,
+    mut settings: ResMut<vmux_setting::AppSettings>,
+    mut writes: MessageWriter<vmux_setting::SettingsWriteRequest>,
+) {
+    let payload = trigger.event().payload.clone();
+    let id = payload.id.clone();
+    let Some(agent) = catalog.agents.iter().find(|a| a.id == id).cloned() else {
+        return;
+    };
+    let version = {
+        let trimmed = payload.version.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
+    };
+
+    let mut acp = settings.agent.acp.clone();
+    upsert_acp_version(&mut acp, &agent.id, &agent.name, version.clone());
+    match serde_json::to_value(&acp) {
+        Ok(value) => {
+            match vmux_setting::apply_settings_update(settings.as_mut(), "agent.acp", value) {
+                Ok(ron_bytes) => {
+                    writes.write(vmux_setting::SettingsWriteRequest { ron_bytes });
+                }
+                Err(error) => bevy::log::warn!("agents: persist version for {id} failed: {error}"),
+            }
+        }
+        Err(error) => bevy::log::warn!("agents: serialize acp config failed: {error}"),
+    }
+
+    status.0.insert(
+        id.clone(),
+        ("installing".to_string(), "Preparing…".to_string()),
+    );
+    let tx = installs.tx.clone();
+    std::thread::spawn(move || {
+        let result =
+            crate::acp_install::ensure_installed(&agent, version.as_deref(), |_phase, pct, msg| {
+                let _ = tx.send(AgentMsg::Progress {
+                    id: id.clone(),
+                    pct,
+                    message: msg.to_string(),
+                });
+            });
+        let _ = match result {
+            Ok(_) => tx.send(AgentMsg::Done { id }),
+            Err(message) => tx.send(AgentMsg::Failed { id, message }),
+        };
+    });
+}
+
+/// Remove an installed agent, then let its status re-derive from disk.
+fn on_uninstall_request(
+    trigger: On<BinReceive<AgentsUninstall>>,
+    mut status: ResMut<AgentsStatus>,
+    mut install_generation: ResMut<AcpInstallGeneration>,
+) {
+    let id = trigger.event().payload.id.clone();
+    let _ = crate::acp_install::uninstall(&id);
+    status.0.remove(&id);
+    install_generation.bump();
+}
+
+/// Fold background-install updates into the session status map.
+fn drain_agent_installs(
+    installs: Res<AgentsInstallChannel>,
+    mut status: ResMut<AgentsStatus>,
+    mut install_generation: ResMut<AcpInstallGeneration>,
+) {
+    while let Ok(msg) = installs.rx.try_recv() {
+        match msg {
+            AgentMsg::Progress { id, pct, message } => {
+                let text = match pct {
+                    Some(p) => format!("{message} ({p}%)"),
+                    None => message,
+                };
+                status.0.insert(id, ("installing".to_string(), text));
+            }
+            AgentMsg::Done { id } => {
+                status.0.remove(&id);
+                install_generation.bump();
+            }
+            AgentMsg::Failed { id, message } => {
+                status.0.insert(id, ("error".to_string(), message));
+            }
+        }
+    }
+}
+
+/// For each npx registry agent not yet queried, spawn a background `npm view` to populate its
+/// version list. Runs when the catalog (re)loads; `requested` guards one fetch per agent.
+fn kick_off_version_fetches(
+    catalog: Res<AcpCatalog>,
+    channel: Res<AgentVersionsChannel>,
+    mut versions: ResMut<AgentVersions>,
+) {
+    if !catalog.is_changed() {
+        return;
+    }
+    for agent in &catalog.agents {
+        if !matches!(agent.preferred_runtime(), Runtime::Node) {
+            continue;
+        }
+        if !versions.requested.insert(agent.id.clone()) {
+            continue;
+        }
+        let agent = agent.clone();
+        let tx = channel.tx.clone();
+        std::thread::spawn(move || {
+            let list = crate::acp_install::fetch_package_versions(&agent);
+            let _ = tx.send((agent.id, list));
+        });
+    }
+}
+
+/// Fold completed version fetches into the cache; the resulting change re-pushes the catalog so
+/// the selector becomes a dropdown.
+fn drain_version_fetches(channel: Res<AgentVersionsChannel>, mut versions: ResMut<AgentVersions>) {
+    while let Ok((id, list)) = channel.rx.try_recv() {
+        versions.fetched.insert(id, list);
+    }
+}
+
+/// Push the catalog (with per-agent status) whenever it (re)loads, status changes, or a page
+/// requests it.
+fn push_agents(
+    catalog: Res<AcpCatalog>,
+    status: Res<AgentsStatus>,
+    webviews: Res<AgentsPageWebviews>,
+    versions: Res<AgentVersions>,
+    settings: Option<Res<vmux_setting::AppSettings>>,
+    browsers: NonSend<Browsers>,
+    mut commands: Commands,
+) {
+    let settings_changed = settings.as_ref().is_some_and(|s| s.is_changed());
+    if !catalog.is_changed()
+        && !status.is_changed()
+        && !webviews.is_changed()
+        && !versions.is_changed()
+        && !settings_changed
+    {
+        return;
+    }
+    let acp_configs = settings
+        .as_ref()
+        .map(|s| s.agent.acp.as_slice())
+        .unwrap_or(&[]);
+    let payload = catalog_snapshot(&catalog, &status, acp_configs, &versions);
+    for &webview in &webviews.0 {
+        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            webview,
+            AGENTS_CATALOG_EVENT,
+            &payload,
+        ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_tracks_multiple_webviews() {
+        let mut app = App::new();
+        app.init_resource::<AgentsPageWebviews>()
+            .add_observer(on_catalog_request);
+        let first = app.world_mut().spawn_empty().id();
+        let second = app.world_mut().spawn_empty().id();
+        for webview in [first, second] {
+            app.world_mut().trigger(BinReceive {
+                webview,
+                payload: AgentsCatalogRequest {},
+            });
+        }
+
+        let webviews = app.world().resource::<AgentsPageWebviews>();
+        assert_eq!(webviews.0, HashSet::from([first, second]));
+    }
+
+    #[test]
+    fn cli_catalog_rows_report_install_state() {
+        let rows = cli_agent_entries(|kind| kind == AgentKind::Codex);
+
+        assert_eq!(rows.len(), 3);
+        let codex = rows.iter().find(|row| row.id == "cli:codex").unwrap();
+        assert_eq!(codex.source, "cli");
+        assert_eq!(codex.launch_url, "vmux://agent/codex/cli");
+        assert_eq!(codex.status, "installed");
+        assert!(!codex.uninstallable);
+        assert!(
+            rows.iter()
+                .filter(|row| row.id != "cli:codex")
+                .all(|row| row.status == "available")
+        );
+    }
+
+    #[test]
+    fn upsert_acp_version_updates_match_or_appends() {
+        let mut acp = vec![vmux_setting::AcpAgentConfig {
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+            version: None,
+        }];
+        upsert_acp_version(&mut acp, "claude-acp", "Claude", Some("1.2.3".into()));
+        assert_eq!(acp.len(), 1);
+        assert_eq!(acp[0].version.as_deref(), Some("1.2.3"));
+
+        upsert_acp_version(&mut acp, "other-acp", "Other", Some("9.9.9".into()));
+        assert_eq!(acp.len(), 2);
+        let added = acp.iter().find(|c| c.id == "other").unwrap();
+        assert_eq!(added.command, "");
+        assert_eq!(added.version.as_deref(), Some("9.9.9"));
+
+        upsert_acp_version(&mut acp, "claude-acp", "Claude", None);
+        assert_eq!(acp[0].version, None);
+    }
+
+    #[test]
+    fn catalog_snapshot_carries_pinned_version() {
+        let catalog = AcpCatalog {
+            agents: vec![crate::acp_registry::RegistryAgent {
+                id: "claude-acp".into(),
+                name: "Claude".into(),
+                version: None,
+                description: None,
+                icon: None,
+                repository: None,
+                distribution: crate::acp_registry::Distribution {
+                    binary: None,
+                    npx: Some(crate::acp_registry::PackageDist {
+                        package: "@zed-industries/claude-code-acp".into(),
+                        args: vec![],
+                        env: Default::default(),
+                    }),
+                    uvx: None,
+                },
+            }],
+        };
+        let acp = vec![vmux_setting::AcpAgentConfig {
+            id: "claude".into(),
+            name: "Claude Code".into(),
+            command: "npx".into(),
+            args: vec![],
+            env: vec![],
+            cwd: None,
+            version: Some("0.11.0".into()),
+        }];
+        let snapshot = catalog_snapshot(
+            &catalog,
+            &AgentsStatus::default(),
+            &acp,
+            &AgentVersions::default(),
+        );
+        let row = snapshot
+            .agents
+            .iter()
+            .find(|a| a.id == "claude-acp")
+            .expect("claude row present");
+        assert_eq!(row.pinned_version, "0.11.0");
+    }
+}

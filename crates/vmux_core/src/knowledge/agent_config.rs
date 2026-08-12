@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::collections::HashSet;
 
-use super::{
-    configured_skill_dirs_from, knowledge_dir, memories_dir, migrate_external_memories, skills_dir,
-};
+use super::store::{KnowledgeVault, SkillsDir};
 
 const KNOWLEDGE_START: &str = "<!-- vmux-knowledge:start -->";
 const KNOWLEDGE_END: &str = "<!-- vmux-knowledge:end -->";
@@ -57,12 +55,13 @@ impl AgentConfigPaths {
 }
 
 pub fn sync_external_agent_configs() -> io::Result<()> {
-    migrate_external_memories()?;
-    let skills = skills_dir();
-    let memories = memories_dir();
+    let vault = KnowledgeVault::user();
+    vault.memories().import_external()?;
+    let skills = vault.skills().into_path();
+    let memories = vault.memories().into_path();
     std::fs::create_dir_all(&skills)?;
     std::fs::create_dir_all(&memories)?;
-    let canonical = knowledge_dir().join("AGENTS.md");
+    let canonical = vault.root().join("AGENTS.md");
     sync_external_agent_configs_from(
         &AgentConfigPaths::from_env(),
         &skills,
@@ -77,7 +76,7 @@ fn sync_external_agent_configs_from(
     memories_root: &Path,
     canonical: &Path,
 ) -> io::Result<()> {
-    let skills = configured_skill_dirs_from(skills_root);
+    let skills = SkillsDir::at(skills_root).skills();
     let mut error = None;
     keep_first_error(
         &mut error,

@@ -19,7 +19,7 @@ use vmux_command::{
     build_native_root_menu, open::OpenCommand,
 };
 use vmux_layout::scene::InteractionMode;
-use vmux_ui::i18n::{requested_locale, translate_for};
+use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 /// Wires the native application menu bar, including the bookmark context menu.
 pub struct OsMenuPlugin;
@@ -31,10 +31,7 @@ impl Plugin for OsMenuPlugin {
             .init_resource::<LastStackCloseAt>()
             .init_resource::<LastNativePageOpenAt>()
             .init_resource::<CloseMenuItemEnabled>()
-            .add_systems(
-                Startup,
-                setup.after(vmux_setting::plugin::runtime::SettingsLoadSet),
-            )
+            .add_systems(Startup, setup.after(vmux_setting::SettingsLoadSet))
             .add_systems(
                 Update,
                 (
@@ -86,7 +83,7 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
 
 struct OsMenuResource {
     menu: Menu,
-    locale: String,
+    locale: Locale,
     interactive_mode: Option<InteractiveModeMenuItems>,
     close_window: Option<MenuItem>,
     /// Native `NSMenuItem`s for the Edit menu's standard editing actions
@@ -117,9 +114,9 @@ fn setup(world: &mut World) {
     append_standard_edit_menu(&menu);
     let locale = world
         .get_resource::<vmux_setting::AppSettings>()
-        .map(|settings| requested_locale(Some(&settings.appearance.locale)))
-        .unwrap_or_else(vmux_ui::i18n::preferred_locale);
-    localize_root_menu(&menu, "en-US", &locale);
+        .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
+        .unwrap_or_else(Locale::preferred);
+    localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale);
     let interactive_mode = interactive_mode_menu_items(&menu);
     let close_window = find_menu_item(menu.items(), "app_quit");
 
@@ -159,7 +156,7 @@ fn sync_menu_locale(
     let (Some(settings), Some(mut menu)) = (settings, menu) else {
         return;
     };
-    let locale = requested_locale(Some(&settings.appearance.locale));
+    let locale = Locale::requested(Some(&settings.appearance.locale));
     if menu.locale == locale {
         return;
     }
@@ -167,24 +164,27 @@ fn sync_menu_locale(
     menu.locale = locale;
 }
 
-fn localize_root_menu(menu: &Menu, previous_locale: &str, locale: &str) {
+fn localize_root_menu(menu: &Menu, previous_locale: &Locale, locale: &Locale) {
     localize_menu_items(menu.items(), previous_locale, locale);
 }
 
-fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &str, locale: &str) {
+fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, locale: &Locale) {
     for item in items {
         let id = item.id().0.clone();
         if let Some(menu_item) = item.as_menuitem() {
             if id == "app_quit" {
-                menu_item.set_text(translate_for(locale, "menu-close-vmux"));
+                menu_item.set_text(locale.translate("menu-close-vmux"));
             } else if AppCommand::from_menu_id(&id).is_some() {
                 let current = menu_item.text();
                 let suffix = current
                     .split_once('\t')
                     .map(|(_, suffix)| format!("\t{suffix}"))
                     .unwrap_or_default();
-                let localized =
-                    vmux_layout::command_bar::handler::localized_command_name(locale, &id, current);
+                let localized = vmux_layout::command_bar::handler::localized_command_name(
+                    locale.as_str(),
+                    &id,
+                    current,
+                );
                 let leaf = localized.rsplit(" > ").next().unwrap_or(&localized);
                 menu_item.set_text(format!("{leaf}{suffix}"));
             }
@@ -198,11 +198,16 @@ fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &str, locale: 
     }
 }
 
-fn localized_submenu_title(title: &str, previous_locale: &str, locale: &str) -> Option<String> {
-    submenu_message_id(title, previous_locale).map(|message_id| translate_for(locale, message_id))
+fn localized_submenu_title(
+    title: &str,
+    previous_locale: &Locale,
+    locale: &Locale,
+) -> Option<String> {
+    submenu_message_id(title, previous_locale).map(|message_id| locale.translate(message_id))
 }
 
-fn submenu_message_id(title: &str, locale: &str) -> Option<&'static str> {
+fn submenu_message_id(title: &str, locale: &Locale) -> Option<&'static str> {
+    let english = Locale::from(DEFAULT_LOCALE);
     [
         "menu-scene",
         "menu-layout",
@@ -224,7 +229,7 @@ fn submenu_message_id(title: &str, locale: &str) -> Option<&'static str> {
     ]
     .into_iter()
     .find(|message_id| {
-        title == translate_for(locale, message_id) || title == translate_for("en-US", message_id)
+        title == locale.translate(message_id) || title == english.translate(message_id)
     })
 }
 
@@ -564,7 +569,9 @@ mod tests {
             "Scene", "Layout", "Terminal", "Browser", "Service", "Bookmark", "Edit",
         ]
         .into_iter()
-        .filter_map(|title| localized_submenu_title(title, "en-US", "ja"))
+        .filter_map(|title| {
+            localized_submenu_title(title, &Locale::from("en-US"), &Locale::from("ja"))
+        })
         .collect::<Vec<_>>();
         assert_eq!(
             titles,
@@ -654,9 +661,9 @@ mod tests {
 
         assert!(source.contains("LastTabCloseAt"));
         assert!(source.contains("from_tab_close"));
-        assert!(
-            source.contains("from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open")
-        );
+        assert!(source.contains(
+        "from_menu_key_equivalent || from_stack_close || from_tab_close || from_native_page_open"
+    ));
     }
 
     #[test]

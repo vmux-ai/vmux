@@ -1,7 +1,7 @@
 //! Favicon URL resolution with multi-tier fallback.
 //!
-//! Pure helpers ([`favicon_src_for_url`] and friends) work on any target. The
-//! [`Favicon`] and [`GlobeIcon`] components are wasm-only.
+//! Pure helpers ([`favicon_src_for_url`] and friends) and the [`Favicon`] and [`GlobeIcon`]
+//! components all work on any target.
 
 pub fn host_for_favicon_fallback(page_url: &str) -> Option<&str> {
     let s = page_url.trim();
@@ -49,10 +49,8 @@ pub fn favicon_src_for_url(favicon_url: &str, url: &str) -> Option<String> {
         .map(|h| format!("https://www.google.com/s2/favicons?domain={h}&sz=64"))
 }
 
-#[cfg(target_arch = "wasm32")]
 pub use components::{Favicon, GlobeIcon};
 
-#[cfg(target_arch = "wasm32")]
 mod components {
     use super::favicon_src_for_url;
     use crate::components::icon::Icon;

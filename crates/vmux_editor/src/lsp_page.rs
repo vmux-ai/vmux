@@ -8,21 +8,11 @@ use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSpinner, ManagerTone,
 };
-use vmux_ui::file_icon::{FileIcon, file_icon_kind, type_icon};
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::file_icon::{FileIcon, TypeIcon, file_icon_kind};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::page_model::{PkgAction, pkg_action, pkg_status_class};
-
-fn request_catalog(query: String, refresh: bool) {
-    let _ = try_cef_bin_emit_rkyv(&LspCatalogRequest {
-        query,
-        language: String::new(),
-        category: String::new(),
-        installed_only: false,
-        refresh,
-    });
-}
 
 #[component]
 pub fn Page() -> Element {
@@ -32,12 +22,12 @@ pub fn Page() -> Element {
     let mut progress = use_signal(HashMap::<String, LspInstallProgress>::new);
     let mut loading = use_signal(|| true);
 
-    let _catalog = use_bin_event_listener::<LspCatalogEvent, _>(LSP_CATALOG_EVENT, move |event| {
+    let _catalog = use_listener::<LspCatalogEvent, _>(LSP_CATALOG_EVENT, move |event| {
         packages.set(event.packages);
         loading.set(false);
     });
     let _progress =
-        use_bin_event_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |item| {
+        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |item| {
             let name = item.name.clone();
             let phase = item.phase;
             progress.write().insert(name.clone(), item);
@@ -53,30 +43,27 @@ pub fn Page() -> Element {
                 };
             }
         });
-    let _status =
-        use_bin_event_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
-            let name = status.name.clone();
-            if let Some(package) = packages
-                .write()
-                .iter_mut()
-                .find(|package| package.name == name)
-            {
-                package.status = status.status;
-                package.version = status.version;
-            }
-            progress.write().remove(&name);
-        });
+    let _status = use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+        let name = status.name.clone();
+        if let Some(package) = packages
+            .write()
+            .iter_mut()
+            .find(|package| package.name == name)
+        {
+            package.status = status.status;
+            package.version = status.version;
+        }
+        progress.write().remove(&name);
+    });
 
     use_effect(move || {
         locale();
-        if let Some(doc) = web_sys::window().and_then(|window| window.document()) {
-            doc.set_title(&translate("lsp-title"));
-        }
-        request_catalog(String::new(), false);
+        let _ = send(&LspCatalogRequest::for_query("", false));
     });
 
     let visible = packages();
     rsx! {
+        document::Title { {translate("lsp-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("lsp-title"),
@@ -86,7 +73,7 @@ pub fn Page() -> Element {
                 onsearch: move |event: FormEvent| {
                     let value = event.value();
                     query.set(value.clone());
-                    request_catalog(value, false);
+                    let _ = send(&LspCatalogRequest::for_query(value, false));
                 },
                 onkeydown: None,
                 actions: rsx! {
@@ -94,7 +81,7 @@ pub fn Page() -> Element {
                         variant: ManagerButtonVariant::Secondary,
                         onclick: move |_| {
                             loading.set(true);
-                            request_catalog(query(), true);
+                            let _ = send(&LspCatalogRequest::for_query(query(), true));
                         },
                         {translate("common-refresh")}
                     }
@@ -110,15 +97,17 @@ pub fn Page() -> Element {
                     }
                 }
                 for package in visible.iter() {
-                    {render_package(package, progress)}
+                    PackageRow { package: package.clone(), progress }
                 }
             }
         }
     }
 }
 
-fn render_package(
-    package: &LspPackage,
+/// One language package row.
+#[component]
+fn PackageRow(
+    package: LspPackage,
     progress: Signal<HashMap<String, LspInstallProgress>>,
 ) -> Element {
     let item = package.clone();
@@ -144,7 +133,7 @@ fn render_package(
             show_icon,
             icon: rsx! {
                 if let Some(path) = icon_path.as_ref() {
-                    {type_icon(path, false, "h-6 w-6 text-foreground/80")}
+                    {rsx! { TypeIcon { path: path.to_string(), is_dir: false, class: "h-6 w-6 text-foreground/80" } }}
                 }
             },
             title: item.name.clone(),
@@ -159,7 +148,7 @@ fn render_package(
             },
             actions: rsx! {
                 span { class: "shrink-0 text-xs {pkg_status_class(item.status)}", "{status_label}" }
-                {render_action(action, &action_name, item.requires.as_deref())}
+                PackageAction { action, name: action_name.clone(), requires: item.requires.clone() }
             },
         }
     }
@@ -218,7 +207,11 @@ fn localized_status(status: LspPkgStatus) -> String {
     translate(id)
 }
 
-fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Element {
+/// The install or remove control for a language package.
+#[component]
+fn PackageAction(action: PkgAction, name: String, requires: Option<String>) -> Element {
+    let name = name.as_str();
+    let requires = requires.as_deref();
     let install_name = name.to_string();
     let update_name = name.to_string();
     let uninstall_name = name.to_string();
@@ -227,7 +220,7 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
             ManagerButton {
                 variant: ManagerButtonVariant::Primary,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: install_name.clone() });
+                    let _ = send(&LspInstallRequest { name: install_name.clone() });
                 },
                 {translate("common-install")}
             }
@@ -236,7 +229,7 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
             ManagerButton {
                 variant: ManagerButtonVariant::Secondary,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspUpdateRequest { name: update_name.clone() });
+                    let _ = send(&LspUpdateRequest { name: update_name.clone() });
                 },
                 {translate("common-update")}
             }
@@ -245,7 +238,7 @@ fn render_action(action: PkgAction, name: &str, requires: Option<&str>) -> Eleme
             ManagerButton {
                 variant: ManagerButtonVariant::Danger,
                 onclick: move |_| {
-                    let _ = try_cef_bin_emit_rkyv(&LspUninstallRequest { name: uninstall_name.clone() });
+                    let _ = send(&LspUninstallRequest { name: uninstall_name.clone() });
                 },
                 {translate("common-uninstall")}
             }

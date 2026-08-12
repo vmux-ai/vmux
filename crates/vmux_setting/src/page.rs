@@ -15,40 +15,32 @@ use vmux_ui::components::select::{
     Select, SelectGroup, SelectItemIndicator, SelectList, SelectOption, SelectTrigger, SelectValue,
 };
 use vmux_ui::dioxus_ext::attributes;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::focus::FocusClaim;
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::JsCast;
 
 #[component]
 pub fn Page() -> Element {
-    let locale = use_theme();
+    use_theme();
     let mut snapshot = use_signal(|| Value::Null);
     let mut schema = use_signal(SettingsSchema::default);
     let mut search = use_signal(String::new);
 
-    use_effect(move || {
-        locale();
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title(&translate("settings-title"));
-        }
+    let _values = use_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
+        let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
+        snapshot.set(parsed);
     });
 
-    let _values =
-        use_bin_event_listener::<SettingsListEvent, _>(SETTINGS_LIST_EVENT, move |data| {
-            let parsed: Value = serde_json::from_str(&data.json).unwrap_or(Value::Null);
-            snapshot.set(parsed);
-        });
-
-    let _schema =
-        use_bin_event_listener::<SettingsSchemaEvent, _>(SETTINGS_SCHEMA_EVENT, move |data| {
-            if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
-                schema.set(parsed);
-            }
-        });
+    let _schema = use_listener::<SettingsSchemaEvent, _>(SETTINGS_SCHEMA_EVENT, move |data| {
+        if let Ok(parsed) = serde_json::from_str::<SettingsSchema>(&data.json) {
+            schema.set(parsed);
+        }
+    });
 
     let s = snapshot.read().clone();
     if s.is_null() {
         return rsx! {
+            document::Title { {translate("settings-title")} }
             div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
                 {translate("settings-loading")}
             }
@@ -64,6 +56,7 @@ pub fn Page() -> Element {
     let search_placeholder = format!("{}…", translate("command-search"));
 
     rsx! {
+        document::Title { {translate("settings-title")} }
         div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
             aside { class: "hidden w-56 shrink-0 border-r border-border px-4 py-6 lg:block",
                 div { class: "mb-4 px-2",
@@ -193,7 +186,7 @@ fn text_matches(value: &str, query: &str) -> bool {
 }
 
 fn emit_update(path: &str, value: Value) {
-    let _ = try_cef_bin_emit_rkyv(&SettingsCommandEvent {
+    let _ = send(&SettingsCommandEvent {
         path: path.to_string(),
         value: value.to_string(),
     });
@@ -316,16 +309,14 @@ fn SectionView(
 fn GeneralSectionBody(value: Value, root_path: String, schema: SettingsSchema) -> Element {
     let mut status = use_signal(UpdateCheckStatus::default);
     let mut updater_unavailable = use_signal(|| false);
-    let _status_listener = use_bin_event_listener::<UpdateCheckStatusEvent, _>(
-        UPDATE_CHECK_STATUS_EVENT,
-        move |event| {
+    let _status_listener =
+        use_listener::<UpdateCheckStatusEvent, _>(UPDATE_CHECK_STATUS_EVENT, move |event| {
             let unavailable = matches!(&event.status, UpdateCheckStatus::Unavailable);
             if updater_unavailable() != unavailable {
                 updater_unavailable.set(unavailable);
             }
             status.set(event.status);
-        },
-    );
+        });
     let mut visible_value = value;
     if updater_unavailable()
         && let Some(object) = visible_value.as_object_mut()
@@ -433,7 +424,7 @@ fn UpdateCheckRow(mut status: Signal<UpdateCheckStatus>) -> Element {
                     disabled,
                     onclick: move |_| {
                         status.set(UpdateCheckStatus::Checking);
-                        let _ = try_cef_bin_emit_rkyv(&CheckForUpdatesEvent);
+                        let _ = send(&CheckForUpdatesEvent);
                     },
                     "{button_label}"
                 }
@@ -792,6 +783,9 @@ fn ArrayBody(
     }
 }
 
+/// The hidden button that swallows the next keystroke while a chord is being recorded.
+const KEY_CAPTURE_ID: &str = "vmux-settings-key-capture";
+
 #[component]
 fn ChordEditor(path: String, text: String) -> Element {
     let mut recording = use_signal(|| false);
@@ -799,15 +793,8 @@ fn ChordEditor(path: String, text: String) -> Element {
     let mut feedback = use_signal(|| None::<String>);
 
     use_effect(move || {
-        if !recording() {
-            return;
-        }
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id("vmux-settings-key-capture"))
-            && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
-        {
-            let _ = html.focus();
+        if recording() {
+            FocusClaim::new(KEY_CAPTURE_ID).request();
         }
     });
 
@@ -816,7 +803,7 @@ fn ChordEditor(path: String, text: String) -> Element {
         rsx! {
             button {
                 r#type: "button",
-                id: "vmux-settings-key-capture",
+                id: KEY_CAPTURE_ID,
                 tabindex: "0",
                 class: "inline-flex animate-pulse items-center gap-2 rounded-md border border-primary bg-primary/15 px-3 py-1 font-mono text-[11px] text-foreground outline-none",
                 onkeydown: move |e: KeyboardEvent| {

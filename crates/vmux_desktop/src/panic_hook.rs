@@ -32,11 +32,11 @@ fn crash_record_from(info: &PanicHookInfo<'_>) -> String {
 }
 
 fn write_crash(record: &str) {
-    let _ = std::fs::create_dir_all(vmux_service::log_dir());
+    let _ = std::fs::create_dir_all(vmux_service::ServicePaths::log_dir());
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(vmux_service::current_log_file())
+        .open(vmux_service::ServicePaths::current().current_log())
     {
         let _ = file.write_all(record.as_bytes());
     }

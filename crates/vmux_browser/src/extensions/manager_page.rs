@@ -7,7 +7,7 @@ use bevy_cef::prelude::{
     WebviewCommittedNavigationEvent,
 };
 use vmux_command::{AppCommand, BrowserCommand, open::OpenCommand};
-use vmux_core::event::extension::{
+use vmux_core::event::{
     EXT_INSTALL_PROGRESS_EVENT, EXT_STATUS_EVENT, EXTENSIONS_LIST_EVENT, EXTENSIONS_PAGE_URL,
     ExtActionRequest, ExtBrowseStoreRequest, ExtInstallPhase, ExtInstallProgress, ExtListRequest,
     ExtOpenManagerRequest, ExtRow, ExtStatus, ExtStatusEvent, ExtToggleRequest,
@@ -56,7 +56,7 @@ impl Plugin for ExtensionsPlugin {
                 (
                     run_agent_installs,
                     inject_on_cws_nav,
-                    inject_on_cws_load_complete.after(crate::drain_loading_state),
+                    inject_on_cws_load_complete.after(crate::page_life::drain_loading_state),
                     drain_outbox,
                 ),
             );

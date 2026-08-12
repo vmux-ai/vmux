@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 use crate::event::*;
@@ -122,7 +122,7 @@ pub fn GitBar(
     let mut file_status = use_signal(|| FileStatus::Clean);
     let mut confirming = use_signal(|| false);
 
-    let _status = use_bin_event_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
+    let _status = use_listener::<GitStatusEvent, _>(GIT_STATUS_EVENT, move |s| {
         message.set(String::new());
         branch.set(s.branch);
         ahead.set(s.ahead);
@@ -136,11 +136,11 @@ pub fn GitBar(
             repo_display_path(&path(), &s.repo_root)
         });
     });
-    let _result = use_bin_event_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
+    let _result = use_listener::<GitResultEvent, _>(GIT_RESULT_EVENT, move |r| {
         message.set(if r.ok { String::new() } else { r.message });
         nonce.set(nonce() + 1);
     });
-    let _error = use_bin_event_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
+    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |e| {
         message.set(e.message);
     });
 
@@ -148,7 +148,7 @@ pub fn GitBar(
         let p = path();
         let _ = nonce();
         if !p.is_empty() {
-            let _ = try_cef_bin_emit_rkyv(&GitStatusRequest { path: p });
+            let _ = send(&GitStatusRequest { path: p });
         }
     });
 
@@ -179,7 +179,7 @@ pub fn GitBar(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
                     onclick: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&GitStageRequest { path: path() });
+                        let _ = send(&GitStageRequest { path: path() });
                     },
                     {translate("git-accept-all")}
                 }
@@ -188,7 +188,7 @@ pub fn GitBar(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
                     onclick: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&GitUnstageRequest { path: path() });
+                        let _ = send(&GitUnstageRequest { path: path() });
                     },
                     {translate("git-unstage")}
                 }
@@ -198,7 +198,7 @@ pub fn GitBar(
                     button {
                         class: "shrink-0 rounded bg-ansi-1/20 px-2 py-0.5 text-ansi-1 hover:bg-ansi-1/30",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&GitDiscardRequest { path: path() });
+                            let _ = send(&GitDiscardRequest { path: path() });
                             confirming.set(false);
                         },
                         {translate("git-confirm-deny-all")}
@@ -279,7 +279,7 @@ pub fn GitFooter(
                         onclick: move |_| {
                             let m = commit_msg();
                             if !m.is_empty() {
-                                let _ = try_cef_bin_emit_rkyv(&GitCommitRequest { path: path(), message: m });
+                                let _ = send(&GitCommitRequest { path: path(), message: m });
                                 commit_msg.set(String::new());
                             }
                         },
@@ -302,7 +302,7 @@ pub fn GitFooter(
                 button {
                     class: "shrink-0 rounded px-2 py-0.5 hover:bg-white/10",
                     onclick: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&GitPushRequest { path: path() });
+                        let _ = send(&GitPushRequest { path: path() });
                     },
                     {translate("git-push")}
                 }
@@ -325,15 +325,14 @@ pub fn DiffView(
     let mut error = use_signal(String::new);
     let mut requested_path = use_signal(String::new);
 
-    let _vp =
-        use_bin_event_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
-            markers.set(editor_diff_markers(&p.lines));
-            lines.set(p.lines);
-            expanded.set(HashSet::new());
-            loading.set(false);
-            error.set(String::new());
-        });
-    let _error = use_bin_event_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
+    let _vp = use_listener::<GitDiffViewportEvent, _>(GIT_DIFF_VIEWPORT_EVENT, move |p| {
+        markers.set(editor_diff_markers(&p.lines));
+        lines.set(p.lines);
+        expanded.set(HashSet::new());
+        loading.set(false);
+        error.set(String::new());
+    });
+    let _error = use_listener::<GitErrorEvent, _>(GIT_ERROR_EVENT, move |event| {
         error.set(event.message);
         loading.set(false);
     });
@@ -352,7 +351,7 @@ pub fn DiffView(
                 lines.set(Vec::new());
                 expanded.set(HashSet::new());
             }
-            let _ = try_cef_bin_emit_rkyv(&GitDiffRequest {
+            let _ = send(&GitDiffRequest {
                 path: p,
                 top_line: 0,
                 rows: DIFF_WINDOW_ROWS,
@@ -426,14 +425,14 @@ pub fn DiffView(
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-2 hover:bg-ansi-2/15",
                                             onclick: move |_| {
-                                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: true });
+                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: true });
                                             },
                                             {translate("git-accept")}
                                         }
                                         button {
                                             class: "rounded px-1.5 py-0.5 text-ansi-1 hover:bg-ansi-1/15",
                                             onclick: move |_| {
-                                                let _ = try_cef_bin_emit_rkyv(&GitHunkRequest { path: path(), hunk: h, accept: false });
+                                                let _ = send(&GitHunkRequest { path: path(), hunk: h, accept: false });
                                             },
                                             {translate("git-deny")}
                                         }

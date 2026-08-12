@@ -22,7 +22,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   TAILWINDCSS_VERSION: "4.2.4"
-  DIOXUS_CLI_VERSION: "0.7.4"
+  DIOXUS_CLI_VERSION: "0.7.9"
   BINARYEN_VERSION: "127"
   DX_HOME: ${{ github.workspace }}/.dx
 

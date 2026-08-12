@@ -4,7 +4,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use crate::explorer::ExplorerPanel;
-use crate::note::{render_block, render_block_with_hidden_list_line};
+use crate::note::MdBlockView;
+use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
     NoteCaretVisibilityQueue, NoteCaretVisibilityRequest, NoteCursorActivation, NoteInlineKind,
     NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started,
@@ -21,9 +22,10 @@ use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
-use vmux_ui::file_icon::type_icon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -110,42 +112,64 @@ pub fn Page() -> Element {
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
+    let mut doc_title = use_signal(String::new);
 
-    let _chrome =
-        use_bin_event_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
-            if should_apply_explorer_chrome(
-                explorer_client_id(),
-                explorer_request_id(),
-                c.client_id,
-                c.request_id,
-            ) {
-                explorer_preferred_visible.set(c.visible);
-            }
-            if explorer_width() != c.width {
-                explorer_width.set(c.width);
-            }
-            schedule_explorer_visibility_sync(
-                explorer_visible,
-                explorer_preferred_visible,
-                explorer_width,
-            );
-        });
+    let completions = Completions {
+        open: comp_open,
+        anchor: comp_anchor,
+        items: comps,
+        lines,
+        cursor,
+    };
+    let comp_filtered = use_memo(move || completions.matching());
+    let file_page = FilePage {
+        mode,
+        explorer_visible,
+        explorer_preferred_visible,
+        explorer_width,
+        explorer_client_id,
+        explorer_request_id,
+        completion_open: comp_open,
+        completion_selection: comp_sel,
+        completion_anchor: comp_anchor,
+        completions: comp_filtered,
+        references_open: refs_open,
+        reference_selection: refs_sel,
+        references: refs,
+    };
+    let keys = use_file_keys(file_page);
+    use_context_provider(|| keys);
 
-    let _tidy =
-        use_bin_event_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
-            tidy_prompt.set(Some(e.count));
-        });
+    let _chrome = use_listener::<ExplorerChromeEvent, _>(EXPLORER_CHROME_EVENT, move |c| {
+        if should_apply_explorer_chrome(
+            explorer_client_id(),
+            explorer_request_id(),
+            c.client_id,
+            c.request_id,
+        ) {
+            explorer_preferred_visible.set(c.visible);
+        }
+        if explorer_width() != c.width {
+            explorer_width.set(c.width);
+        }
+        schedule_explorer_visibility_sync(
+            explorer_visible,
+            explorer_preferred_visible,
+            explorer_width,
+        );
+    });
 
-    let _meta = use_bin_event_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
+    let _tidy = use_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
+        tidy_prompt.set(Some(e.count));
+    });
+
+    let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
         reset_file_scroll();
         last_scroll_req.set(0);
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let name = m.path.rsplit('/').next().unwrap_or(&m.path).to_string();
-            doc.set_title(&name);
-        }
+        doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
         diagnostics.set(Vec::new());
         hover_diag.set(None);
@@ -181,7 +205,7 @@ pub fn Page() -> Element {
         git_nonce.set(git_nonce() + 1);
     });
 
-    let _vp = use_bin_event_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
+    let _vp = use_listener::<FileViewportPatch, _>(FILE_VIEWPORT_EVENT, move |p| {
         first_row.set(p.first_row);
         total_rows.set(p.total_rows);
         total_lines.set(p.total_lines);
@@ -191,7 +215,7 @@ pub fn Page() -> Element {
         lsp_hover.set(None);
     });
 
-    let _cur = use_bin_event_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
+    let _cur = use_listener::<FileCursorEvent, _>(FILE_CURSOR_EVENT, move |c| {
         let moved = cursor.peek().ne(&c.primary);
         if *ed_mode.peek() != c.mode {
             ed_mode.set(c.mode);
@@ -262,56 +286,54 @@ pub fn Page() -> Element {
         }
     });
 
-    let _scroll_by =
-        use_bin_event_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
-            let line_height = if file_view_mode() == FileViewMode::Note {
-                28.0
-            } else {
-                cell_dims().1
-            };
-            if line_height <= 0.0 {
-                return;
-            }
-            scroll_viewport_by(event.lines, line_height);
-        });
+    let _scroll_by = use_listener::<FileScrollByEvent, _>(FILE_SCROLL_BY_EVENT, move |event| {
+        let line_height = if file_view_mode() == FileViewMode::Note {
+            28.0
+        } else {
+            cell_dims().1
+        };
+        if line_height <= 0.0 {
+            return;
+        }
+        scroll_viewport_by(event.lines, line_height);
+    });
 
-    let _dirty = use_bin_event_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
+    let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
         dirty.set(d.dirty);
         schedule_git_refresh(git_refresh_generation, git_nonce);
     });
 
-    let _git_changed = use_bin_event_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
+    let _git_changed = use_listener::<GitChangedEvent, _>(GIT_CHANGED_EVENT, move |_| {
         schedule_git_refresh(git_refresh_generation, git_nonce);
     });
 
-    let _view_mode =
-        use_bin_event_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
-            if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
-                note_editing.set(false);
-            }
-            file_view_mode.set(event.mode);
-            match event.mode {
-                FileViewMode::Note if is_markdown_file(&git_path()) => {
-                    let line = source_cursor().line;
-                    if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
-                        activate_note_cursor_centered(
-                            index,
-                            line,
-                            note_active,
-                            note_editing,
-                            note_edit_line,
-                            note_edit_rect,
-                        );
-                    }
+    let _view_mode = use_listener::<FileViewModeEvent, _>(FILE_VIEW_MODE_EVENT, move |event| {
+        if file_view_mode() != event.mode && event.mode != FileViewMode::Note {
+            note_editing.set(false);
+        }
+        file_view_mode.set(event.mode);
+        match event.mode {
+            FileViewMode::Note if is_markdown_file(&git_path()) => {
+                let line = source_cursor().line;
+                if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
+                    activate_note_cursor_centered(
+                        index,
+                        line,
+                        note_active,
+                        note_editing,
+                        note_edit_line,
+                        note_edit_rect,
+                    );
                 }
-                FileViewMode::Editor => {
-                    schedule_line_center(cursor().row, cell_dims().1, true);
-                }
-                _ => {}
             }
-        });
+            FileViewMode::Editor => {
+                schedule_line_center(cursor().row, cell_dims().1, true);
+            }
+            _ => {}
+        }
+    });
 
-    let _keymap = use_bin_event_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
+    let _keymap = use_listener::<FileKeymapEvent, _>(FILE_KEYMAP_EVENT, move |event| {
         keymap.set(event.keymap);
         if event.keymap == vmux_core::KeymapKind::Vim
             && file_view_mode() == FileViewMode::Note
@@ -331,7 +353,7 @@ pub fn Page() -> Element {
         }
     });
 
-    let _note = use_bin_event_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
+    let _note = use_listener::<FileNoteEvent, _>(FILE_NOTE_EVENT, move |event| {
         let FileNoteEvent {
             title,
             properties,
@@ -345,9 +367,7 @@ pub fn Page() -> Element {
         } else {
             title
         };
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title(&title);
-        }
+        doc_title.set(title.clone());
         let activation = note_cursor_activation(
             reveal_line,
             keymap() == vmux_core::KeymapKind::Vim && file_view_mode() == FileViewMode::Note,
@@ -386,59 +406,56 @@ pub fn Page() -> Element {
         }
     });
 
-    let _hov = use_bin_event_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
+    let _hov = use_listener::<FileHoverEvent, _>(FILE_HOVER_EVENT, move |h| {
         lsp_hover.set(Some(h));
     });
 
-    let _refs = use_bin_event_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
+    let _refs = use_listener::<FileReferencesEvent, _>(FILE_REFERENCES_EVENT, move |e| {
         refs.set(e.items);
         refs_sel.set(0);
         refs_open.set(true);
         focus_by_id("refs-panel");
     });
 
-    let _comp = use_bin_event_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
+    let _comp = use_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
         comp_open.set(!e.items.is_empty());
         comps.set(e.items);
         comp_sel.set(0);
         comp_anchor.set((e.line, e.replace_from_col));
     });
 
-    let _diag =
-        use_bin_event_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
-            if d.path != git_path() {
-                return;
-            }
-            diagnostics.set(d.diagnostics);
-        });
+    let _diag = use_listener::<FileDiagnosticsEvent, _>(FILE_DIAGNOSTICS_EVENT, move |d| {
+        if d.path != git_path() {
+            return;
+        }
+        diagnostics.set(d.diagnostics);
+    });
 
-    let _lsp_status =
-        use_bin_event_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
-            if s.path != git_path() {
-                return;
+    let _lsp_status = use_listener::<FileLspStatusEvent, _>(FILE_LSP_STATUS_EVENT, move |s| {
+        if s.path != git_path() {
+            return;
+        }
+        if s.state == LspServerState::Missing
+            && let Some(package) = s.package.clone()
+        {
+            let request = (s.path.clone(), package.clone());
+            if lsp_install_request() != Some(request.clone()) {
+                lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
+                lsp_install_request.set(Some(request));
+                lsp_install_notice.set(Some(LspInstallProgress {
+                    name: package.clone(),
+                    phase: InstallPhase::Resolving,
+                    pct: None,
+                    message: translate("lsp-status-installing"),
+                }));
+                let _ = send(&LspInstallRequest { name: package });
             }
-            if s.state == LspServerState::Missing
-                && let Some(package) = s.package.clone()
-            {
-                let request = (s.path.clone(), package.clone());
-                if lsp_install_request() != Some(request.clone()) {
-                    lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-                    lsp_install_request.set(Some(request));
-                    lsp_install_notice.set(Some(LspInstallProgress {
-                        name: package.clone(),
-                        phase: InstallPhase::Resolving,
-                        pct: None,
-                        message: translate("lsp-status-installing"),
-                    }));
-                    let _ = try_cef_bin_emit_rkyv(&LspInstallRequest { name: package });
-                }
-            }
-            lsp_status.set(Some(s));
-        });
+        }
+        lsp_status.set(Some(s));
+    });
 
-    let _lsp_install_progress = use_bin_event_listener::<LspInstallProgress, _>(
-        LSP_INSTALL_PROGRESS_EVENT,
-        move |progress| {
+    let _lsp_install_progress =
+        use_listener::<LspInstallProgress, _>(LSP_INSTALL_PROGRESS_EVENT, move |progress| {
             let active = lsp_install_request().is_some_and(|(_, package)| package == progress.name);
             if !active {
                 return;
@@ -457,11 +474,10 @@ pub fn Page() -> Element {
                     delay,
                 );
             }
-        },
-    );
+        });
 
     let _lsp_package_status =
-        use_bin_event_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
+        use_listener::<LspPkgStatusEvent, _>(LSP_PKG_STATUS_EVENT, move |status| {
             if status.status != LspPkgStatus::Installed
                 || lsp_install_request().is_none_or(|(_, package)| package != status.name)
             {
@@ -481,23 +497,21 @@ pub fn Page() -> Element {
             );
         });
 
-    let _err = use_bin_event_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
+    let _err = use_listener::<FileErrorEvent, _>(FILE_ERROR_EVENT, move |e| {
         error.set(e.message);
     });
 
-    let _dir = use_bin_event_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
+    let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         media.set(None);
-        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-            let name = d
-                .path
+        doc_title.set(
+            d.path
                 .rsplit('/')
                 .find(|s| !s.is_empty())
                 .unwrap_or(&d.path)
-                .to_string();
-            doc.set_title(&name);
-        }
+                .to_string(),
+        );
         parent_path.set(d.parent_path);
         if git_path() != d.abs_path {
             git_has_diff.set(false);
@@ -526,7 +540,7 @@ pub fn Page() -> Element {
         );
     });
 
-    let _media = use_bin_event_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
+    let _media = use_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
         error.set(String::new());
         clear_blob_state(preview, thumbs);
         let kind = e.kind;
@@ -537,7 +551,7 @@ pub fn Page() -> Element {
         lsp_status.set(None);
     });
 
-    let _prev = use_bin_event_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
+    let _prev = use_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
         if ev.thumb {
             if let PreviewKind::Image { bytes, .. } = ev.kind
                 && let Some(url) = blob_url(&bytes)
@@ -579,7 +593,7 @@ pub fn Page() -> Element {
         preview.set(next);
     });
 
-    let _theme = use_bin_event_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
+    let _theme = use_listener::<FileThemeEvent, _>(FILE_THEME_EVENT, move |t| {
         let mut s = String::new();
         if !t.font_family.is_empty() {
             s.push_str(&format!(
@@ -632,33 +646,13 @@ pub fn Page() -> Element {
         if g.is_empty() { path() } else { g }
     };
 
-    let comp_filtered: Vec<CompletionItem> = if comp_open() {
-        let (cline, cfrom) = comp_anchor();
-        let lt: String = lines()
-            .iter()
-            .find(|l| l.line_no == cline)
-            .map(|l| l.spans.iter().map(|s| s.text.as_str()).collect())
-            .unwrap_or_default();
-        let chars: Vec<char> = lt.chars().collect();
-        let caret = cursor().col as usize;
-        let from = cfrom as usize;
-        let prefix: String = if from <= caret && from <= chars.len() {
-            chars[from..caret.min(chars.len())].iter().collect()
-        } else {
-            String::new()
-        };
-        let pl = prefix.to_lowercase();
-        comps()
-            .into_iter()
-            .filter(|c| c.label.to_lowercase().starts_with(&pl))
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
-    let comp_keys = comp_filtered.clone();
 
     rsx! {
+        if !doc_title().is_empty() {
+            document::Title { "{doc_title}" }
+        }
         div {
             id: PAGE_ID,
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
@@ -674,18 +668,14 @@ pub fn Page() -> Element {
                 editor_drag_origin.set(None);
                 if explorer_resizing() {
                     explorer_resizing.set(false);
-                    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelWidth { px: explorer_width() });
+                    let _ = send(&ExplorerPanelWidth { px: explorer_width() });
                 }
             },
 
             ExplorerSidebar {
                 visible: explorer_visible,
-                preferred_visible: explorer_preferred_visible,
                 width: explorer_width,
                 resizing: explorer_resizing,
-                client_id: explorer_client_id,
-                request_id: explorer_request_id,
-                mode,
             }
 
         div {
@@ -719,15 +709,7 @@ pub fn Page() -> Element {
             },
 
             onkeydown: move |e: Event<KeyboardData>| {
-                if handle_explorer_shortcut(
-                    &e,
-                    explorer_visible,
-                    explorer_preferred_visible,
-                    explorer_width,
-                    explorer_client_id,
-                    explorer_request_id,
-                    mode,
-                ) {
+                if keys.offer(&e) {
                     return;
                 }
                 let data = e.data();
@@ -866,7 +848,7 @@ pub fn Page() -> Element {
                     request_id: explorer_request_id,
                     mode,
                 }
-                {type_icon(&header_path, mode() == Mode::Dir, "h-4 w-4 shrink-0 text-foreground/80")}
+                {rsx! { TypeIcon { path: header_path.to_string(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
                     span { class: "h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300", title: translate("editor-unsaved") }
@@ -881,7 +863,7 @@ pub fn Page() -> Element {
                                     title: translate("editor-rendered-markdown"),
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Note);
-                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Note });
+                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Note });
                                         let line = source_cursor().line;
                                         if let Some(index) = note_block_index_for_line(&note_blocks.read(), line) {
                                             activate_note_cursor_centered(
@@ -908,7 +890,7 @@ pub fn Page() -> Element {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
                                     schedule_line_center(cursor().row, cell_dims().1, true);
-                                    let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Editor });
+                                    let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
                                 {translate("editor-editor")}
@@ -920,7 +902,7 @@ pub fn Page() -> Element {
                                     onclick: move |_| {
                                         file_view_mode.set(FileViewMode::Diff);
                                         git_nonce.set(git_nonce().wrapping_add(1));
-                                        let _ = try_cef_bin_emit_rkyv(&FileViewModeSet { mode: FileViewMode::Diff });
+                                        let _ = send(&FileViewModeSet { mode: FileViewMode::Diff });
                                     },
                                     {translate("editor-diff")}
                                 }
@@ -937,7 +919,7 @@ pub fn Page() -> Element {
                                 keymap.set(next);
                                 ed_mode.set(vmux_core::editor::EditMode::Insert);
                                 ed_label.set(String::new());
-                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
                                     && !note_editing()
@@ -957,7 +939,7 @@ pub fn Page() -> Element {
                                 let next_mode = vmux_core::editor::EditMode::Normal;
                                 ed_mode.set(next_mode);
                                 ed_label.set(next_mode.label().to_string());
-                                let _ = try_cef_bin_emit_rkyv(&FileKeymapSet { keymap: next });
+                                let _ = send(&FileKeymapSet { keymap: next });
                                 if file_view_mode() == FileViewMode::Note
                                     && is_markdown_file(&git_path())
                                     && !note_editing()
@@ -986,7 +968,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full bg-cyan-400/20 px-2 py-0.5 font-medium text-cyan-700 hover:bg-cyan-400/30 dark:text-cyan-100",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Tidy });
+                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Tidy });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-tidy")}
@@ -994,7 +976,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-2 py-0.5 text-foreground/60 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Always });
+                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Always });
                                         tidy_prompt.set(None);
                                     },
                                     {translate("editor-always")}
@@ -1002,7 +984,7 @@ pub fn Page() -> Element {
                                 button {
                                     class: "rounded-full px-1.5 py-0.5 text-foreground/40 hover:bg-foreground/10",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
+                                        let _ = send(&FileTidyActionEvent { choice: TidyChoice::Dismiss });
                                         tidy_prompt.set(None);
                                     },
                                     "\u{2715}"
@@ -1068,7 +1050,7 @@ pub fn Page() -> Element {
                                             button {
                                                 class: "rounded-lg bg-cyan-400/15 px-3 py-1.5 text-xs font-semibold text-cyan-200 hover:bg-cyan-400/25",
                                                 onclick: move |_| {
-                                                    let _ = try_cef_bin_emit_rkyv(&FileOpenExternalRequest { path: abs.clone() });
+                                                    let _ = send(&FileOpenExternalRequest { path: abs.clone() });
                                                 },
                                                 {translate("editor-open-externally")}
                                             }
@@ -1089,7 +1071,7 @@ pub fn Page() -> Element {
                                 div {
                                     key: "{e.path}",
                                     class: if e.name == cur_basename { "flex items-center gap-2 rounded-md bg-cyan-400/10 px-2 py-1 text-foreground shadow-[inset_2px_0_0_0_rgba(34,211,238,0.6)]" } else { "flex items-center gap-2 rounded-md px-2 py-1 text-foreground/45 transition-colors hover:bg-foreground/[0.04]" },
-                                    {entry_visual(&e, None)}
+                                    EntryVisual { entry: e.clone(), thumb: None }
                                     span { class: "truncate text-xs", "{e.name}" }
                                 }
                             }
@@ -1118,7 +1100,7 @@ pub fn Page() -> Element {
                                                 }
                                                 open_path(p_open.clone());
                                             },
-                                            {entry_visual(&e, thumb.as_ref())}
+                                            EntryVisual { entry: e.clone(), thumb: thumb.clone() }
                                             span { class: "truncate text-xs", "{e.name}" }
                                         }
                                     }
@@ -1127,7 +1109,7 @@ pub fn Page() -> Element {
                         }
 
                         div { class: "flex min-h-0 items-center justify-center overflow-auto rounded-2xl bg-foreground/[0.02] p-4 ring-1 ring-inset ring-cyan-400/10 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.6)]",
-                            {render_preview(&preview())}
+                            PreviewPane { preview: preview() }
                         }
                     }
                 },
@@ -1144,7 +1126,6 @@ pub fn Page() -> Element {
                         {
                             let active = note_active();
                             let block_count = note_blocks.read().len();
-                            let note_input_comp_keys = comp_keys.clone();
                             rsx! {
                                 div {
                                     id: "file-scroll",
@@ -1193,7 +1174,7 @@ pub fn Page() -> Element {
                                             pointer.client_y() as f64,
                                             &note_blocks.read(),
                                         ) {
-                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                            let _ = send(&FilePointerEvent {
                                                 line,
                                                 col,
                                                 extend: true,
@@ -1266,52 +1247,17 @@ pub fn Page() -> Element {
                                                 if raw.is_composing() {
                                                     return;
                                                 }
-                                                let key = raw.key();
-                                                let mods = key_mods(raw);
-                                                if comp_open() && !note_input_comp_keys.is_empty() {
-                                                    match key.as_str() {
-                                                        "ArrowDown" => {
-                                                            event.prevent_default();
-                                                            comp_sel.set((comp_sel_clamped + 1).min(note_input_comp_keys.len() - 1));
-                                                            return;
-                                                        }
-                                                        "ArrowUp" => {
-                                                            event.prevent_default();
-                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
-                                                            return;
-                                                        }
-                                                        "Enter" | "Tab" => {
-                                                            event.prevent_default();
-                                                            if let Some(item) = note_input_comp_keys.get(comp_sel_clamped) {
-                                                                let (line, replace_from_col) = comp_anchor();
-                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
-                                                                    line,
-                                                                    replace_from_col,
-                                                                    text: item.insert_text.clone(),
-                                                                });
-                                                            }
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        "Escape" => {
-                                                            event.prevent_default();
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        _ => {}
-                                                    }
+                                                if keys.offer(&event) {
+                                                    return;
                                                 }
-                                                if key == "Escape" {
+                                                if raw.key() == "Escape" {
                                                     event.prevent_default();
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
                                                     }
-                                                    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
-                                                        key,
-                                                        code: raw.code(),
-                                                        mods,
-                                                        repeat: raw.repeat(),
-                                                    });
+                                                    if let Some(stroke) = WebKey::new(raw).stroke() {
+                                                        let _ = send(&stroke);
+                                                    }
                                                     if keymap() == vmux_core::KeymapKind::Vim {
                                                         focus_file_input();
                                                     } else {
@@ -1338,7 +1284,7 @@ pub fn Page() -> Element {
                                                                     class: "rounded-lg px-3 py-2 text-left text-xs text-foreground/75 ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.05] hover:text-foreground",
                                                                     title: "{reference.path}",
                                                                     onclick: move |_| {
-                                                                        let _ = try_cef_bin_emit_rkyv(&KnowledgeLinkOpen {
+                                                                        let _ = send(&KnowledgeLinkOpen {
                                                                             path: open_path.clone(),
                                                                             title: open_title.clone(),
                                                                             line: Some(open_line),
@@ -1429,7 +1375,7 @@ pub fn Page() -> Element {
                                             false,
                                         ) {
                                             event.prevent_default();
-                                            let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                            let _ = send(&FilePointerEvent {
                                                 line,
                                                 col,
                                                 extend: true,
@@ -1466,7 +1412,7 @@ pub fn Page() -> Element {
                                             && last_scroll_req() != vis_first
                                         {
                                             last_scroll_req.set(vis_first);
-                                            let _ = try_cef_bin_emit_rkyv(&FileScrollEvent { top_row: vis_first });
+                                            let _ = send(&FileScrollEvent { top_row: vis_first });
                                         }
                                     },
                                     div { class: "relative", style: "height:{spacer}px;",
@@ -1525,7 +1471,7 @@ pub fn Page() -> Element {
                                                                 if raw.meta_key() {
                                                                     editor_dragging.set(false);
                                                                     editor_drag_origin.set(None);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest {
+                                                                    let _ = send(&FileDefinitionRequest {
                                                                         line,
                                                                         col,
                                                                     });
@@ -1536,7 +1482,7 @@ pub fn Page() -> Element {
                                                                         raw.client_y(),
                                                                     )));
                                                                     set_pointer_capture(&e, "file-scroll", true);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                                    let _ = send(&FilePointerEvent {
                                                                         line,
                                                                         col,
                                                                         extend: raw.shift_key(),
@@ -1604,7 +1550,7 @@ pub fn Page() -> Element {
                                                                 if hover_pos() != Some((ln, col)) {
                                                                     hover_pos.set(Some((ln, col)));
                                                                     lsp_hover.set(None);
-                                                                    let _ = try_cef_bin_emit_rkyv(&FileHoverRequest {
+                                                                    let _ = send(&FileHoverRequest {
                                                                         line: ln,
                                                                         col,
                                                                     });
@@ -1640,7 +1586,7 @@ pub fn Page() -> Element {
                                                                             onmousedown: move |e: Event<MouseData>| {
                                                                                 e.stop_propagation();
                                                                                 e.prevent_default();
-                                                                                let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                                let _ = send(&FileFoldToggle { line: ln });
                                                                             },
                                                                             "⌄"
                                                                         }
@@ -1652,7 +1598,7 @@ pub fn Page() -> Element {
                                                                         onmousedown: move |e: Event<MouseData>| {
                                                                             e.stop_propagation();
                                                                             e.prevent_default();
-                                                                            let _ = try_cef_bin_emit_rkyv(&FileFoldToggle { line: ln });
+                                                                            let _ = send(&FileFoldToggle { line: ln });
                                                                         },
                                                                         "›"
                                                                     }
@@ -1764,39 +1710,8 @@ pub fn Page() -> Element {
                                                 if raw.is_composing() {
                                                     return;
                                                 }
-                                                let key = raw.key();
-                                                if comp_open() && !comp_keys.is_empty() {
-                                                    match key.as_str() {
-                                                        "ArrowDown" => {
-                                                            e.prevent_default();
-                                                            comp_sel.set((comp_sel_clamped + 1).min(comp_keys.len() - 1));
-                                                            return;
-                                                        }
-                                                        "ArrowUp" => {
-                                                            e.prevent_default();
-                                                            comp_sel.set(comp_sel_clamped.saturating_sub(1));
-                                                            return;
-                                                        }
-                                                        "Enter" | "Tab" => {
-                                                            e.prevent_default();
-                                                            if let Some(it) = comp_keys.get(comp_sel_clamped) {
-                                                                let (cline, cfrom) = comp_anchor();
-                                                                let _ = try_cef_bin_emit_rkyv(&FileCompletionCommit {
-                                                                    line: cline,
-                                                                    replace_from_col: cfrom,
-                                                                    text: it.insert_text.clone(),
-                                                                });
-                                                            }
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        "Escape" => {
-                                                            e.prevent_default();
-                                                            comp_open.set(false);
-                                                            return;
-                                                        }
-                                                        _ => {}
-                                                    }
+                                                if keys.offer(&e) {
+                                                    return;
                                                 }
                                                 let _ = forward_file_key(&e, raw, ed_mode());
                                             },
@@ -1932,7 +1847,7 @@ pub fn Page() -> Element {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
                             onmousedown: move |e: Event<MouseData>| {
                                 e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&FileDefinitionRequest { line, col });
+                                let _ = send(&FileDefinitionRequest { line, col });
                                 ctx_menu.set(None);
                             },
                             {translate("editor-go-to-definition")}
@@ -1941,7 +1856,7 @@ pub fn Page() -> Element {
                             class: "cursor-default px-3 py-1.5 hover:bg-cyan-400/15",
                             onmousedown: move |e: Event<MouseData>| {
                                 e.prevent_default();
-                                let _ = try_cef_bin_emit_rkyv(&FileReferencesRequest { line, col });
+                                let _ = send(&FileReferencesRequest { line, col });
                                 ctx_menu.set(None);
                             },
                             {translate("editor-find-references")}
@@ -1972,6 +1887,10 @@ pub fn Page() -> Element {
                             tabindex: "0",
                             class: "absolute bottom-8 left-4 right-4 z-40 max-h-64 overflow-auto rounded-xl bg-foreground/[0.05] p-1 text-xs text-foreground/90 outline-none ring-1 ring-inset ring-cyan-400/20 backdrop-blur-2xl shadow-lg dark:shadow-[0_8px_40px_-12px_rgba(0,0,0,0.7)]",
                             onkeydown: move |e: Event<KeyboardData>| {
+                                e.stop_propagation();
+                                if keys.offer(&e) {
+                                    return;
+                                }
                                 let key = e
                                     .data()
                                     .downcast::<web_sys::KeyboardEvent>()
@@ -1979,32 +1898,15 @@ pub fn Page() -> Element {
                                     .unwrap_or_default();
                                 let len = refs.read().len();
                                 match key.as_str() {
-                                    "ArrowDown" | "j" => {
+                                    "j" => {
                                         e.prevent_default();
                                         if len > 0 {
                                             refs_sel.set((refs_sel() + 1).min(len - 1));
                                         }
                                     }
-                                    "ArrowUp" | "k" => {
+                                    "k" => {
                                         e.prevent_default();
                                         refs_sel.set(refs_sel().saturating_sub(1));
-                                    }
-                                    "Enter" => {
-                                        e.prevent_default();
-                                        if let Some(it) = refs.read().get(refs_sel()) {
-                                            let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
-                                                path: it.path.clone(),
-                                                line: it.line,
-                                                col: it.col,
-                                            });
-                                        }
-                                        refs_open.set(false);
-                                        focus_file_input();
-                                    }
-                                    "Escape" => {
-                                        e.prevent_default();
-                                        refs_open.set(false);
-                                        focus_file_input();
                                     }
                                     _ => {}
                                 }
@@ -2024,7 +1926,7 @@ pub fn Page() -> Element {
                                             class: if i == refs_sel() { "flex gap-2 rounded px-2 py-1 bg-cyan-400/15" } else { "flex gap-2 rounded px-2 py-1 hover:bg-foreground/[0.05]" },
                                             onmousedown: move |e: Event<MouseData>| {
                                                 e.prevent_default();
-                                                let _ = try_cef_bin_emit_rkyv(&FileGotoRequest {
+                                                let _ = send(&FileGotoRequest {
                                                     path: nav.0.clone(),
                                                     line: nav.1,
                                                     col: nav.2,
@@ -2540,7 +2442,7 @@ fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
         let rect = target.get_bounding_client_rect();
         let col =
             prefix + note_col_at_point(&target, client_x, rect.top() + rect.height() / 2.0, &text);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+        let _ = send(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -2572,7 +2474,7 @@ fn place_note_block_caret(
         };
         let offset = note_col_at_point(&target, client_x, client_y, &source);
         let (line, col) = note_source_position(&source, start_line, offset);
-        let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+        let _ = send(&FilePointerEvent {
             line,
             col,
             extend: false,
@@ -2705,7 +2607,9 @@ fn note_inline_class(kind: NoteInlineKind) -> &'static str {
     }
 }
 
-fn render_note_caret(width_class: &'static str) -> Element {
+/// The blinking caret overlaid on the rendered note.
+#[component]
+fn NoteCaret(width_class: String) -> Element {
     rsx! {
         span {
             id: NOTE_CARET_ID,
@@ -2718,13 +2622,10 @@ fn render_note_caret(width_class: &'static str) -> Element {
 #[component]
 fn ExplorerSidebar(
     visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
     width: Signal<u32>,
     mut resizing: Signal<bool>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
 ) -> Element {
+    let keys = use_context::<FileKeys>();
     let open = visible();
     let panel_width = width();
     let wrapper_style = if open {
@@ -2743,15 +2644,7 @@ fn ExplorerSidebar(
             class: "relative z-[2] h-full shrink-0",
             style: "{wrapper_style}",
             onkeydown: move |event| {
-                handle_explorer_shortcut(
-                    &event,
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                );
+                keys.offer(&event);
             },
             div { class: "{panel_class}", style: "{panel_style}", ExplorerPanel { visible } }
         }
@@ -2807,19 +2700,24 @@ fn ExplorerToggleButton(
     }
 }
 
-fn render_note_source_range(
-    source: &[char],
+/// A span of raw note source, split around the caret and any selection.
+#[component]
+fn NoteSourceRange(
+    source: Vec<char>,
     start: u32,
     end: u32,
     caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
+    selections: Vec<(u32, u32)>,
+    caret_width_class: String,
 ) -> Element {
+    let source = source.as_slice();
+    let selections = selections.as_slice();
+    let caret_width_class = caret_width_class.as_str();
     let chunks = note_source_chunks(source, start, end, caret, selections);
     rsx! {
         for (index, chunk) in chunks.iter().enumerate() {
             if chunk.caret_before {
-                {render_note_caret(caret_width_class)}
+                NoteCaret { width_class: caret_width_class.to_string() }
             }
             if !chunk.text.is_empty() {
                 span {
@@ -2832,45 +2730,75 @@ fn render_note_source_range(
     }
 }
 
-fn render_note_inline_nodes(
-    source: &[char],
-    nodes: &[NoteInlineNode],
+/// Inline note nodes, recursing so a wrapped node keeps its own source range visible.
+#[component]
+fn NoteInlineNodes(
+    source: Vec<char>,
+    nodes: Vec<NoteInlineNode>,
     caret: u32,
-    selections: &[(u32, u32)],
-    caret_width_class: &'static str,
+    selections: Vec<(u32, u32)>,
+    caret_width_class: String,
 ) -> Element {
+    let nodes = nodes.as_slice();
     rsx! {
-        for (index, node) in nodes.iter().enumerate() {
-            match node {
-                NoteInlineNode::Text { start, end } => rsx! {
-                    span { key: "text-{index}",
-                        {render_note_source_range(source, *start, *end, caret, selections, caret_width_class)}
-                    }
-                },
-                NoteInlineNode::Syntax {
-                    kind,
-                    start,
-                    prefix_end,
-                    suffix_start,
-                    end,
-                    children,
-                } => {
-                    let reveal = *start <= caret && caret <= *end;
-                    rsx! {
-                        span { key: "syntax-{index}", class: note_inline_class(*kind),
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *start, *prefix_end, caret, selections, caret_width_class)}
-                            }
-                            {render_note_inline_nodes(source, children, caret, selections, caret_width_class)}
-                            span { class: if reveal { "text-foreground/55" } else { "hidden" },
-                                {render_note_source_range(source, *suffix_start, *end, caret, selections, caret_width_class)}
+            for (index, node) in nodes.iter().enumerate() {
+                match node {
+                    NoteInlineNode::Text { start, end } => rsx! {
+                        span { key: "text-{index}",
+                            NoteSourceRange {
+        source: source.to_vec(),
+        start: *start,
+        end: *end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                        }
+                    },
+                    NoteInlineNode::Syntax {
+                        kind,
+                        start,
+                        prefix_end,
+                        suffix_start,
+                        end,
+                        children,
+                    } => {
+                        let reveal = *start <= caret && caret <= *end;
+                        rsx! {
+                            span { key: "syntax-{index}", class: note_inline_class(*kind),
+                                span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                    NoteSourceRange {
+        source: source.to_vec(),
+        start: *start,
+        end: *prefix_end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                }
+                                NoteInlineNodes {
+        source: source.to_vec(),
+        nodes: children.to_vec(),
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                span { class: if reveal { "text-foreground/55" } else { "hidden" },
+                                    NoteSourceRange {
+        source: source.to_vec(),
+        start: *suffix_start,
+        end: *end,
+        caret,
+        selections: selections.to_vec(),
+        caret_width_class: caret_width_class.to_string(),
+    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
 }
 
 fn note_selection_ranges(
@@ -2904,7 +2832,7 @@ fn emit_property_edit(
     values: Vec<String>,
     remove: bool,
 ) {
-    let _ = try_cef_bin_emit_rkyv(&FilePropertyEdit {
+    let _ = send(&FilePropertyEdit {
         original_key,
         key,
         kind,
@@ -3236,7 +3164,7 @@ fn NoteBlockView(
                                 );
                                 note_dragging.set(true);
                                 set_pointer_capture(&event, "file-scroll", true);
-                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                let _ = send(&FilePointerEvent {
                                     line,
                                     col,
                                     extend,
@@ -3250,15 +3178,15 @@ fn NoteBlockView(
                             span {
                                 "data-note-line-text": "true",
                                 class: "inline",
-                                {render_note_inline_nodes(
-                                    &live_source,
-                                    &live_nodes,
-                                    live_caret,
-                                    &live_selections,
-                                    caret_width_class,
-                                )}
+                                NoteInlineNodes {
+                                    source: live_source.clone(),
+                                    nodes: live_nodes.clone(),
+                                    caret: live_caret,
+                                    selections: live_selections.clone(),
+                                    caret_width_class: caret_width_class.to_string(),
+                                }
                                 if live_caret == live_source.len() as u32 {
-                                    {render_note_caret(caret_width_class)}
+                                    NoteCaret { width_class: caret_width_class.to_string() }
                                 }
                             }
                         }
@@ -3318,7 +3246,7 @@ fn NoteBlockView(
                                                     );
                                                 note_dragging.set(true);
                                                 set_pointer_capture(&event, "file-scroll", true);
-                                                let _ = try_cef_bin_emit_rkyv(&FilePointerEvent {
+                                                let _ = send(&FilePointerEvent {
                                                     line,
                                                     col,
                                                     extend,
@@ -3376,7 +3304,7 @@ fn NoteBlockView(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
+pub enum Mode {
     Dir,
     Text,
     Media(MediaKind),
@@ -3425,15 +3353,15 @@ fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<Str
 }
 
 fn request_preview(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: false });
+    let _ = send(&FilePreviewRequest { path, thumb: false });
 }
 
 fn request_thumb(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FilePreviewRequest { path, thumb: true });
+    let _ = send(&FilePreviewRequest { path, thumb: true });
 }
 
 fn open_path(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+    let _ = send(&FileOpenEvent { path });
 }
 
 fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
@@ -3595,16 +3523,23 @@ fn apply_dir(
     dir_entries.set(entries);
 }
 
-fn entry_visual(entry: &FileDirEntry, thumb: Option<&String>) -> Element {
+/// A directory entry's thumbnail, or its type icon when there is none.
+#[component]
+fn EntryVisual(entry: FileDirEntry, thumb: Option<String>) -> Element {
+    let entry = &entry;
+    let thumb = thumb.as_ref();
     if let Some(url) = thumb {
         return rsx! {
             img { src: "{url}", class: "h-5 w-5 shrink-0 rounded object-cover ring-1 ring-border" }
         };
     }
-    type_icon(&entry.path, entry.is_dir, "h-5 w-5 shrink-0 opacity-80")
+    rsx! { TypeIcon { path: entry.path.to_string(), is_dir: entry.is_dir, class: "h-5 w-5 shrink-0 opacity-80" } }
 }
 
-fn render_preview(preview: &Preview) -> Element {
+/// The right-hand preview pane for the selected entry.
+#[component]
+fn PreviewPane(preview: Preview) -> Element {
+    let preview = &preview;
     match preview {
         Preview::None => rsx! {
             div { class: "text-xs text-muted-foreground opacity-60", "" }
@@ -3650,7 +3585,7 @@ fn render_preview(preview: &Preview) -> Element {
             div { class: "h-full w-full overflow-auto",
                 for e in entries.iter() {
                     div { key: "{e.path}", class: "flex items-center gap-2 rounded px-2 py-1 text-foreground/90",
-                        {entry_visual(e, None)}
+                        EntryVisual { entry: e.clone(), thumb: None }
                         span { class: "truncate text-xs", "{e.name}" }
                     }
                 }
@@ -3700,7 +3635,7 @@ fn set_explorer_visible(
     request_id.set(next_request_id);
     preferred_visible.set(next);
     visible.set(next && explorer_has_room(width()));
-    let _ = try_cef_bin_emit_rkyv(&ExplorerPanelSetVisible {
+    let _ = send(&ExplorerPanelSetVisible {
         visible: next,
         client_id: client_id(),
         request_id: next_request_id,
@@ -3811,7 +3746,7 @@ fn schedule_lsp_notice_clear(
     clear.forget();
 }
 
-fn toggle_explorer(
+pub(crate) fn toggle_explorer(
     visible: Signal<bool>,
     preferred_visible: Signal<bool>,
     width: Signal<u32>,
@@ -3830,7 +3765,7 @@ fn toggle_explorer(
     );
 }
 
-fn reveal_current_in_explorer(
+pub(crate) fn reveal_current_in_explorer(
     visible: Signal<bool>,
     preferred_visible: Signal<bool>,
     width: Signal<u32>,
@@ -3839,7 +3774,7 @@ fn reveal_current_in_explorer(
     mode: Signal<Mode>,
 ) {
     if visible() {
-        let _ = try_cef_bin_emit_rkyv(&ExplorerRevealCurrent);
+        let _ = send(&ExplorerRevealCurrent);
     } else {
         set_explorer_visible(
             true,
@@ -3851,47 +3786,6 @@ fn reveal_current_in_explorer(
             mode,
         );
     }
-}
-
-fn handle_explorer_shortcut(
-    event: &Event<KeyboardData>,
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> bool {
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-        return false;
-    };
-    let key = raw.key();
-    if (raw.meta_key() || raw.ctrl_key()) && raw.shift_key() && key.eq_ignore_ascii_case("e") {
-        event.prevent_default();
-        reveal_current_in_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    if (raw.meta_key() || raw.ctrl_key()) && key.eq_ignore_ascii_case("b") {
-        event.prevent_default();
-        toggle_explorer(
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-        return true;
-    }
-    false
 }
 
 #[component]
@@ -4033,24 +3927,16 @@ fn RenderedNoteBlock(
     rsx! {
         div { class: if invisible { "invisible" } else { "" },
             if let Some(line) = hidden_list_line {
-                {render_block_with_hidden_list_line(&block, index, line)}
+                MdBlockView { block: block.clone(), block_key: index, hidden_list_line: Some(line) }
             } else {
-                {render_block(&block, index)}
+                MdBlockView { block: block.clone(), block_key: index }
             }
         }
     }
 }
 
 fn scroll_dir_row_into_view(idx: usize) {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(&format!("dir-row-{idx}")))
-    else {
-        return;
-    };
-    let opts = web_sys::ScrollIntoViewOptions::new();
-    opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-    el.scroll_into_view_with_scroll_into_view_options(&opts);
+    ScrollIntoView::nearest(&format!("dir-row-{idx}"));
 }
 
 fn toggle_preview_video() {
@@ -4083,7 +3969,7 @@ fn focus_container() {
     }
 }
 
-fn focus_file_input() {
+pub(crate) fn focus_file_input() {
     focus_by_id(INPUT_ID);
 }
 
@@ -4292,18 +4178,9 @@ fn send_committed_text() {
     {
         let v = el.value();
         if !v.is_empty() {
-            let _ = try_cef_bin_emit_rkyv(&FileTextInput { text: v });
+            let _ = send(&FileTextInput { text: v });
             el.set_value("");
         }
-    }
-}
-
-fn key_mods(raw: &web_sys::KeyboardEvent) -> KeyMods {
-    KeyMods {
-        ctrl: raw.ctrl_key(),
-        alt: raw.alt_key(),
-        shift: raw.shift_key(),
-        meta: raw.meta_key(),
     }
 }
 
@@ -4312,27 +4189,15 @@ fn forward_file_key(
     raw: &web_sys::KeyboardEvent,
     mode: vmux_core::editor::EditMode,
 ) -> bool {
-    if raw.is_composing() {
+    let Some(stroke) = WebKey::new(raw).stroke() else {
         return false;
-    }
-    let key = raw.key();
-    let mods = key_mods(raw);
-    let chord = mods.ctrl || mods.alt || mods.meta;
-    if mode.accepts_text() && !chord && is_text_key(&key) {
+    };
+    if mode.accepts_text() && stroke.is_text_input() {
         return false;
     }
     event.prevent_default();
-    let _ = try_cef_bin_emit_rkyv(&FileKeyEvent {
-        key,
-        code: raw.code(),
-        mods,
-        repeat: raw.repeat(),
-    });
+    let _ = send(&stroke);
     true
-}
-
-fn is_text_key(key: &str) -> bool {
-    key.chars().count() == 1
 }
 
 fn setup_measurement(
@@ -4399,7 +4264,7 @@ fn emit_video_rect(path: &str) {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&FileVideoRect {
+    let _ = send(&FileVideoRect {
         path: path.to_string(),
         x: rect.left() as f32,
         y: rect.top() as f32,
@@ -4502,5 +4367,5 @@ fn do_measure(
         return;
     }
     last_resize.set(next.clone());
-    let _ = try_cef_bin_emit_rkyv(&next);
+    let _ = send(&next);
 }

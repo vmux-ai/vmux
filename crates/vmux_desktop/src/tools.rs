@@ -1783,10 +1783,10 @@ mod tests {
     #[test]
     fn parses_scoped_npm_packages_and_outdated_state() {
         let inventory = parse_npm_inventory(
-            br#"{"dependencies":{"@scope/tool":{"version":"2.0.0"},"typescript":{"version":"5.9.0"}}}"#,
-            &BTreeSet::from(["@scope/tool".to_string()]),
-        )
-        .unwrap();
+        br#"{"dependencies":{"@scope/tool":{"version":"2.0.0"},"typescript":{"version":"5.9.0"}}}"#,
+        &BTreeSet::from(["@scope/tool".to_string()]),
+    )
+    .unwrap();
         assert_eq!(inventory.len(), 2);
         let scoped = inventory
             .iter()

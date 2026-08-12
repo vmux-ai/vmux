@@ -12,6 +12,28 @@ use vmux_layout::stack::{Stack, active_stack_in_pane};
 use vmux_layout::target::active_webview_for_tab;
 use vmux_layout::{Browser, Loading};
 
+/// Takes DOM snapshots of pages for agents: drives the ones a navigation is waiting on, then
+/// captures and shapes the rest. Capture runs after [`crate::scroll::run_scrolls`] so a scroll
+/// requested in the same frame lands before the page is captured.
+pub(crate) struct SnapshotPlugin;
+
+impl Plugin for SnapshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PendingNavSnapshots>()
+            .add_systems(
+                Update,
+                drive_pending_nav_snapshots.after(vmux_command::WriteAppCommands),
+            )
+            .add_systems(
+                Update,
+                (start_snapshots, shape_snapshot_results)
+                    .chain()
+                    .after(crate::scroll::run_scrolls)
+                    .after(vmux_command::WriteAppCommands),
+            );
+    }
+}
+
 fn hex(id: &[u8; 16]) -> String {
     let mut s = String::with_capacity(32);
     for b in id {

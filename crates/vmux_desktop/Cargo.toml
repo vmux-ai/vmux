@@ -21,7 +21,6 @@ full = [
 ]
 package = ["full", "web-bundle"]
 screen-capture-backend = [
-    "dep:crossbeam-channel",
     "dep:image",
     "dep:objc2-screen-capture-kit",
     "objc2-foundation/NSError",
@@ -76,6 +75,7 @@ bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 
+crossbeam-channel = { workspace = true }
 libc = "0.2"
 muda = "0.19"
 parking_lot = "0.12"
@@ -107,9 +107,9 @@ vmux_terminal = { path = "../vmux_terminal" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_server = { path = "../vmux_server", optional = true }
 url = { workspace = true }
+uuid = { workspace = true }
 
 semver = { version = "1", optional = true }
-crossbeam-channel = { version = "0.5", optional = true }
 cargo-packager-updater = { version = "0.2", optional = true }
 tray-icon = { version = "0.24", optional = true }
 
@@ -231,8 +231,8 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
+rkyv = { workspace = true }
 tempfile = "3"
-uuid = { workspace = true }
 
 [package.metadata.packager]
 product-name = "Vmux"

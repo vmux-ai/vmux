@@ -1,7 +1,7 @@
 use serde::Serialize;
 use serde_json::Value;
+use vmux_client::protocol::AgentCommand;
 use vmux_macro::McpTool;
-use vmux_service::protocol::AgentCommand;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -190,7 +190,7 @@ impl McpParamTool {
 #[derive(Debug)]
 pub enum DispatchTarget {
     Command(AgentCommand),
-    Query(vmux_service::protocol::AgentQuery),
+    Query(vmux_client::protocol::AgentQuery),
 }
 
 fn read_layout_definition() -> ToolDefinition {
@@ -890,9 +890,9 @@ pub fn dispatch_from_tool_call(name: &str, arguments: Value) -> Result<DispatchT
 pub fn dispatch_with_anchor(
     name: &str,
     arguments: Value,
-    anchor: Option<vmux_service::protocol::ProcessId>,
+    anchor: Option<vmux_client::protocol::ProcessId>,
 ) -> Result<DispatchTarget, String> {
-    use vmux_service::protocol::AgentPaneDirection;
+    use vmux_client::protocol::AgentPaneDirection;
     let name = name.strip_prefix("vmux_").unwrap_or(name);
     fn parse_direction(arguments: &Value) -> Result<Option<AgentPaneDirection>, String> {
         match arguments.get("direction").and_then(Value::as_str) {
@@ -983,14 +983,14 @@ pub fn dispatch_with_anchor(
             .unwrap_or(false);
         let terminal = match arguments.get("terminal").and_then(Value::as_str) {
             Some(s) if !s.is_empty() => Some(
-                s.parse::<vmux_service::protocol::ProcessId>()
+                s.parse::<vmux_client::protocol::ProcessId>()
                     .map_err(|_| format!("run.terminal is not a valid terminal id: {s}"))?,
             ),
             _ => None,
         };
         let beside = match arguments.get("beside").and_then(Value::as_str) {
             Some(s) if !s.is_empty() && s != "self" => Some(
-                s.parse::<vmux_service::protocol::ProcessId>()
+                s.parse::<vmux_client::protocol::ProcessId>()
                     .map_err(|_| format!("run.beside is not a valid page id: {s}"))?,
             ),
             _ => None,
@@ -1000,9 +1000,9 @@ pub fn dispatch_with_anchor(
             .and_then(Value::as_str)
             .unwrap_or("auto")
         {
-            "auto" => vmux_service::protocol::PlacementMode::Auto,
-            "split" => vmux_service::protocol::PlacementMode::Split,
-            "stack" => vmux_service::protocol::PlacementMode::Stack,
+            "auto" => vmux_client::protocol::PlacementMode::Auto,
+            "split" => vmux_client::protocol::PlacementMode::Split,
+            "stack" => vmux_client::protocol::PlacementMode::Stack,
             other => return Err(format!("unknown mode: {other}")),
         };
         let command = if placement_override {
@@ -1242,10 +1242,10 @@ pub fn dispatch_with_anchor(
             .get("terminal")
             .and_then(Value::as_str)
             .unwrap_or("")
-            .parse::<vmux_service::protocol::ProcessId>()
+            .parse::<vmux_client::protocol::ProcessId>()
             .map_err(|_| "read_terminal.terminal must be a valid terminal id".to_string())?;
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::ReadTerminal { process_id },
+            vmux_client::protocol::AgentQuery::ReadTerminal { process_id },
         ));
     }
     if name == "screenshot" {
@@ -1258,7 +1258,7 @@ pub fn dispatch_with_anchor(
             Some(_) => return Err("screenshot.pane must be a string".to_string()),
         };
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::Screenshot { pane },
+            vmux_client::protocol::AgentQuery::Screenshot { pane },
         ));
     }
     if name == "browser_snapshot" {
@@ -1271,7 +1271,7 @@ pub fn dispatch_with_anchor(
             Some(_) => return Err("browser_snapshot.target must be a string".to_string()),
         };
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::BrowserSnapshot { pane, anchor },
+            vmux_client::protocol::AgentQuery::BrowserSnapshot { pane, anchor },
         ));
     }
     if name == "browser_scroll" {
@@ -1307,7 +1307,7 @@ pub fn dispatch_with_anchor(
             return Err("browser_scroll requires exactly one of `to` or `delta`".to_string());
         }
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::BrowserScroll {
+            vmux_client::protocol::AgentQuery::BrowserScroll {
                 pane,
                 to,
                 delta,
@@ -1333,7 +1333,7 @@ pub fn dispatch_with_anchor(
             Some(_) => return Err("record_start.pane must be a string".to_string()),
         };
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::RecordStart {
+            vmux_client::protocol::AgentQuery::RecordStart {
                 gif,
                 max_secs,
                 pane,
@@ -1352,7 +1352,7 @@ pub fn dispatch_with_anchor(
         let dir = parse_opt("dir")?;
         let out_name = parse_opt("name")?;
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::RecordStop {
+            vmux_client::protocol::AgentQuery::RecordStop {
                 dir,
                 name: out_name,
             },
@@ -1360,11 +1360,11 @@ pub fn dispatch_with_anchor(
     }
     if name == "read_layout" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::ReadLayout { anchor },
+            vmux_client::protocol::AgentQuery::ReadLayout { anchor },
         ));
     }
     if name == "update_layout" {
-        let layout: vmux_service::protocol::layout::LayoutSnapshot =
+        let layout: vmux_client::protocol::layout::LayoutSnapshot =
             serde_json::from_value(arguments)
                 .map_err(|e| format!("update_layout: invalid layout payload: {e}"))?;
         return Ok(DispatchTarget::Command(AgentCommand::UpdateLayout {
@@ -1373,17 +1373,17 @@ pub fn dispatch_with_anchor(
     }
     if name == "get_settings" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::GetSettings,
+            vmux_client::protocol::AgentQuery::GetSettings,
         ));
     }
     if name == "list_spaces" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::ListSpaces,
+            vmux_client::protocol::AgentQuery::ListSpaces,
         ));
     }
     if name == "bookmark_list" {
         return Ok(DispatchTarget::Query(
-            vmux_service::protocol::AgentQuery::BookmarkList,
+            vmux_client::protocol::AgentQuery::BookmarkList,
         ));
     }
     {
@@ -1453,7 +1453,7 @@ pub fn dispatch_with_anchor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_service::protocol::{AgentCommand, AgentQuery};
+    use vmux_client::protocol::{AgentCommand, AgentQuery};
 
     fn tool_names() -> Vec<String> {
         tool_definitions()
@@ -1851,7 +1851,7 @@ mod tests {
 
     #[test]
     fn resume_in_acp_dispatches_with_anchor() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target =
             dispatch_with_anchor("resume_in_acp", serde_json::json!({}), Some(anchor)).unwrap();
         assert!(matches!(
@@ -1863,7 +1863,7 @@ mod tests {
 
     #[test]
     fn conversation_title_dispatches_model_summary_to_agent_session() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "set_conversation_title",
             serde_json::json!({"title": "  Refine model-generated summaries  "}),
@@ -1887,7 +1887,7 @@ mod tests {
 
     #[test]
     fn knowledge_write_dispatches_validated_note_to_host() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "write_knowledge",
             serde_json::json!({
@@ -1915,7 +1915,7 @@ mod tests {
 
     #[test]
     fn knowledge_read_tools_dispatch_with_bounds_and_anchor() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let search = dispatch_with_anchor(
             "search_knowledge",
             serde_json::json!({"query": "  Obsidian links  ", "limit": 12}),
@@ -1954,7 +1954,7 @@ mod tests {
 
     #[test]
     fn project_tools_dispatch_with_anchor_and_branch() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let worktree_definition = create_worktree_definition();
         let select_definition = select_project_definition();
         let choice_definition = request_user_choice_definition();
@@ -2174,7 +2174,7 @@ mod tests {
         let target = dispatch_from_tool_call("screenshot", serde_json::json!({})).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: None })
+            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
         ));
 
         let target =
@@ -2182,7 +2182,7 @@ mod tests {
                 .unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: Some(p) })
+            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: Some(p) })
                 if p == "stack:7"
         ));
 
@@ -2190,7 +2190,7 @@ mod tests {
             dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": "  " })).unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(vmux_service::protocol::AgentQuery::Screenshot { pane: None })
+            DispatchTarget::Query(vmux_client::protocol::AgentQuery::Screenshot { pane: None })
         ));
 
         assert!(dispatch_from_tool_call("screenshot", serde_json::json!({ "pane": 123 })).is_err());
@@ -2273,7 +2273,7 @@ mod tests {
 
     #[test]
     fn open_page_without_direction_is_auto() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_page",
             serde_json::json!({"url": "https://x.com"}),
@@ -2290,7 +2290,7 @@ mod tests {
 
     #[test]
     fn open_page_default_does_not_request_focus() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_page",
             serde_json::json!({"url": "https://x.com"}),
@@ -2307,7 +2307,7 @@ mod tests {
 
     #[test]
     fn open_file_default_does_not_request_focus() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_file",
             serde_json::json!({"path": "/tmp/example.rs"}),
@@ -2324,7 +2324,7 @@ mod tests {
 
     #[test]
     fn open_page_with_direction_is_explicit() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_page",
             serde_json::json!({"url": "https://x.com", "direction": "left"}),
@@ -2335,7 +2335,7 @@ mod tests {
             DispatchTarget::Command(AgentCommand::OpenBeside { direction, .. }) => {
                 assert_eq!(
                     direction,
-                    Some(vmux_service::protocol::AgentPaneDirection::Left)
+                    Some(vmux_client::protocol::AgentPaneDirection::Left)
                 );
             }
             other => panic!("expected OpenBeside, got {other:?}"),
@@ -2344,7 +2344,7 @@ mod tests {
 
     #[test]
     fn open_page_dispatch_uses_anchor() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_page",
             serde_json::json!({"direction": "right", "url": "vmux://terminal/"}),
@@ -2371,7 +2371,7 @@ mod tests {
 
     #[test]
     fn open_vault_dispatch_focuses_confirmed_provider() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "open_vault",
             serde_json::json!({"provider": "github"}),
@@ -2401,7 +2401,7 @@ mod tests {
 
     #[test]
     fn run_dispatch_uses_anchor() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "echo hi"}),
@@ -2425,7 +2425,7 @@ mod tests {
 
     #[test]
     fn run_dispatch_tracks_explicit_placement_override() {
-        let anchor = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
         let bare = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "echo hi"}),
@@ -2484,8 +2484,8 @@ mod tests {
 
     #[test]
     fn run_with_terminal_targets_existing() {
-        let anchor = vmux_service::protocol::ProcessId::new();
-        let term = vmux_service::protocol::ProcessId::new();
+        let anchor = vmux_client::protocol::ProcessId::new();
+        let term = vmux_client::protocol::ProcessId::new();
         let target = dispatch_with_anchor(
             "run",
             serde_json::json!({"command": "ls", "terminal": term.to_string()}),
@@ -2512,9 +2512,9 @@ mod tests {
 
     #[test]
     fn run_beside_and_mode_dispatch() {
-        use vmux_service::protocol::PlacementMode;
-        let anchor = vmux_service::protocol::ProcessId::new();
-        let beside = vmux_service::protocol::ProcessId::new();
+        use vmux_client::protocol::PlacementMode;
+        let anchor = vmux_client::protocol::ProcessId::new();
+        let beside = vmux_client::protocol::ProcessId::new();
 
         // beside=<id> + mode=stack carries through.
         let target = dispatch_with_anchor(
@@ -2578,7 +2578,7 @@ mod tests {
 
     #[test]
     fn read_terminal_dispatch_routes_to_query() {
-        let pid = vmux_service::protocol::ProcessId::new();
+        let pid = vmux_client::protocol::ProcessId::new();
         let target = dispatch_from_tool_call(
             "read_terminal",
             serde_json::json!({"terminal": pid.to_string()}),
@@ -2586,7 +2586,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             target,
-            DispatchTarget::Query(vmux_service::protocol::AgentQuery::ReadTerminal { .. })
+            DispatchTarget::Query(vmux_client::protocol::AgentQuery::ReadTerminal { .. })
         ));
         assert!(
             dispatch_from_tool_call("read_terminal", serde_json::json!({"terminal": "bad"}))

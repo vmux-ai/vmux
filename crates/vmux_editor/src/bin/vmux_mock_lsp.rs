@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(host)]
 fn main() {
     use std::io::{self, BufReader, Write};
 
@@ -62,5 +62,7 @@ fn main() {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+/// `ui` is the exhaustive complement of `host`; pairing the stub with `web` left iOS — which is
+/// neither — with no `main` at all.
+#[cfg(ui)]
 fn main() {}

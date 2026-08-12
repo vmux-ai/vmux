@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
 
+use crate::i18n::translate;
+
+/// One selectable Mac file or directory in the prompt media menu.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PromptMediaOption {
     pub key: String,
@@ -11,12 +14,13 @@ pub struct PromptMediaOption {
 }
 
 #[component]
+/// Shared media selector shown for an open `@` token.
 pub fn PromptMediaOptions(
     items: Vec<PromptMediaOption>,
     selected: usize,
     loading: bool,
-    #[props(default = "Loading media…".to_string())] loading_label: String,
-    #[props(default = "No matching media".to_string())] empty_label: String,
+    #[props(default = translate("agent-loading-media"))] loading_label: String,
+    #[props(default = translate("agent-no-matching-media"))] empty_label: String,
     on_select: EventHandler<usize>,
     on_hover: EventHandler<usize>,
 ) -> Element {
@@ -31,15 +35,20 @@ pub fn PromptMediaOptions(
         };
     }
 
+    let selected_class = "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2";
+    let item_class = "flex cursor-pointer items-center gap-3 px-3.5 py-2";
+    let preview_class = "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10";
+
     rsx! {
         for (index, item) in items.iter().cloned().enumerate() {
             div {
                 key: "{item.key}",
                 id: "prompt-media-item-{index}",
-                class: if index == selected { "flex cursor-pointer items-center gap-3 bg-foreground/10 px-3.5 py-2" } else { "flex cursor-pointer items-center gap-3 px-3.5 py-2" },
+                class: if index == selected { selected_class } else { item_class },
+                onmousedown: move |event| event.prevent_default(),
                 onmouseenter: move |_| on_hover.call(index),
                 onclick: move |_| on_select.call(index),
-                div { class: "flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-foreground/[0.06] text-muted-foreground ring-1 ring-inset ring-foreground/10",
+                div { class: preview_class,
                     if item.is_dir {
                         svg {
                             class: "h-4 w-4",

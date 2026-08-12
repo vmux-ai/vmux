@@ -7,11 +7,14 @@ use tracing_subscriber::Layer;
 /// are persisted regardless of whether the daemon socket is reachable. Bevy's
 /// default stdout layer is preserved (this is additive).
 pub fn file_log_layer(_app: &mut App) -> Option<BoxedLayer> {
-    let dir = vmux_service::log_dir();
+    let dir = vmux_service::ServicePaths::log_dir();
     std::fs::create_dir_all(&dir).ok()?;
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix(format!("vmux-{}", vmux_service::current_profile()))
+        .filename_prefix(format!(
+            "vmux-{}",
+            vmux_service::ServicePaths::build_profile()
+        ))
         .filename_suffix("log")
         .max_log_files(7)
         .build(&dir)

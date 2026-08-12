@@ -5,15 +5,16 @@ use bevy_cef::prelude::{
     BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
     WebviewExtendStandardMaterial, WebviewSource,
 };
-use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext};
+use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
+    CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
     CommandBarWorkSnapshot,
 };
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
 };
+use vmux_ui::i18n::Locale;
 
 use crate::cef::Browser;
 use crate::command_bar::handler::{
@@ -295,13 +296,13 @@ fn drain_start_workspace_pickers(
 /// Keep every live `vmux://start/` page's launcher payload current, so open-pane dirs,
 /// recent files, agent order, spaces, and pages auto-update without a reopen. Pushes to a ready
 /// start page when a launcher snapshot changed this frame, or when newly ready and not yet synced
-/// (covers panes that spawn before the start page's CEF is ready). Uses `open_id: 0`,
+/// (covers panes that spawn before the start page's CEF is ready). Uses [`OpenId::NONE`],
 /// which does not reset the palette's input/selection.
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -313,7 +314,7 @@ fn sync_live_start_pages(
             Has<StartWorkSynced>,
             Has<CefKeyboardTarget>,
         ),
-        Without<crate::start::StartAgentTransitionView>,
+        Without<crate::start::StartInlineTransitionView>,
     >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
     browsers: NonSend<Browsers>,
@@ -338,7 +339,7 @@ fn sync_live_start_pages(
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
-        agents_snapshot.is_changed(),
+        contributions.is_changed(),
         pages_snapshot.is_changed(),
         work_snapshot.is_changed(),
         focus_changed,
@@ -348,7 +349,7 @@ fn sync_live_start_pages(
     let locale = locale
         .as_deref()
         .map(|locale| locale.0.clone())
-        .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
+        .unwrap_or_else(Locale::preferred);
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
@@ -376,7 +377,7 @@ fn sync_live_start_pages(
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
-        &agents_snapshot,
+        &contributions,
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
@@ -405,12 +406,12 @@ fn sync_live_start_pages(
 
 fn should_refresh_start_payload(
     spaces_changed: bool,
-    agents_changed: bool,
+    contributions_changed: bool,
     pages_changed: bool,
     work_changed: bool,
     focus_changed: bool,
 ) -> bool {
-    spaces_changed || agents_changed || pages_changed || work_changed || focus_changed
+    spaces_changed || contributions_changed || pages_changed || work_changed || focus_changed
 }
 
 fn should_focus_start_sync(
@@ -508,7 +509,7 @@ fn on_start_spare_revealed(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -518,11 +519,11 @@ fn on_start_spare_revealed(
         let locale = locale
             .as_deref()
             .map(|locale| locale.0.clone())
-            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None));
+            .unwrap_or_else(Locale::preferred);
         let payload = build_start_payload(
             &tab_gather,
             &spaces_snapshot,
-            &agents_snapshot,
+            &contributions,
             &pages_snapshot,
             &work_snapshot,
             &prompt_context,
@@ -552,7 +553,7 @@ fn on_start_data_request(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    agents_snapshot: Res<CommandBarAgentsSnapshot>,
+    contributions: Res<CommandBarContributions>,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -566,7 +567,7 @@ fn on_start_data_request(
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
-        &agents_snapshot,
+        &contributions,
         &pages_snapshot,
         &work_snapshot,
         &prompt_context,
@@ -575,7 +576,7 @@ fn on_start_data_request(
         &locale
             .as_deref()
             .map(|locale| locale.0.clone())
-            .unwrap_or_else(|| vmux_ui::i18n::requested_locale(None)),
+            .unwrap_or_else(Locale::preferred),
     );
     commands.trigger(BinHostEmitEvent::from_rkyv(
         webview,
@@ -595,13 +596,13 @@ fn on_start_data_request(
 fn build_start_payload(
     tab_gather: &TabGatherParams,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    agents_snapshot: &CommandBarAgentsSnapshot,
+    contributions: &CommandBarContributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &CommandBarWorkSnapshot,
     prompt_context: &StartPromptContextParams,
     active_tab: Option<Entity>,
     git_info: Option<&vmux_git::worktree::RepoInfo>,
-    locale: &str,
+    locale: &Locale,
 ) -> CommandBarOpenEvent {
     let active_stack_count = tab_gather.stack_q.iter().count();
     let space_name = spaces_snapshot.active_space_name.clone();
@@ -619,12 +620,12 @@ fn build_start_payload(
         locale,
     );
     let mut payload = build_command_bar_open_payload(
-        0,
+        OpenId::NONE,
         false,
         space_name,
         String::new(),
         spaces_snapshot,
-        agents_snapshot,
+        contributions,
         pages_snapshot,
         work_snapshot,
         locale,
@@ -662,7 +663,7 @@ mod tests {
     fn start_ready_app() -> App {
         let mut app = App::new();
         app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
             .init_resource::<EmittedIds>()
@@ -707,22 +708,6 @@ mod tests {
         assert!(crate::start::supports_inline_agent_transition(
             "vmux://agent/setupwizard"
         ));
-    }
-
-    #[test]
-    fn page_mount_does_not_start_focus_retry() {
-        let source = include_str!("page.rs");
-        let setup_effect = source
-            .split_once("use_effect(|| {")
-            .expect("start page setup effect")
-            .1
-            .split_once("});")
-            .expect("end of start page setup effect")
-            .0;
-
-        assert!(setup_effect.contains("install_window_focus_refocus();"));
-        assert!(setup_effect.contains("install_keep_input_focused_on_click();"));
-        assert!(!setup_effect.contains("focus_start_input();"));
     }
 
     #[test]

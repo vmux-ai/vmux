@@ -67,7 +67,10 @@ fn from_menu_id_resolves_non_expanded_variants() {
 #[test]
 fn default_shortcuts_contains_expected_ids() {
     let shortcuts = OpenCommand::default_shortcuts();
-    let ids: Vec<_> = shortcuts.iter().map(|(_, id)| id.as_str()).collect();
+    let ids: Vec<_> = shortcuts
+        .iter()
+        .map(|binding| binding.command.as_str())
+        .collect();
     assert!(ids.contains(&"open_in_pane_top"));
     assert!(ids.contains(&"open_in_pane_right"));
     assert!(ids.contains(&"open_in_pane_bottom"));

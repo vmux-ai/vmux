@@ -115,13 +115,85 @@ pub fn lang_logo(ext: &str) -> Option<&'static str> {
     })
 }
 
+/// A path or file name as the UI receives it: a display string, not a [`std::path::Path`].
+///
+/// Everything the UI derives from a path — its glyph, its extension, the label an attachment
+/// pill falls back to — hangs off this rather than sitting loose in the module.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FilePath<'a>(pub &'a str);
+
+impl<'a> FilePath<'a> {
+    /// The final segment, after the last `/`.
+    pub fn name(self) -> &'a str {
+        match self.0.rsplit_once('/') {
+            Some((_, name)) => name,
+            None => self.0,
+        }
+    }
+
+    /// The lowercased extension, or `""` when there is none.
+    ///
+    /// A leading dot still starts an extension here, so `.bashrc` reports `bashrc`. That is what
+    /// keys the logo table, where dotfiles are named by their "extension".
+    pub fn extension(self) -> String {
+        let Some((_, extension)) = self.name().rsplit_once('.') else {
+            return String::new();
+        };
+        extension.to_ascii_lowercase()
+    }
+
+    /// The uppercased extension an attachment pill shows in place of a preview.
+    ///
+    /// Falls back to `FILE` when there is no extension. Unlike [`Self::extension`] this follows
+    /// [`std::path::Path`], so a dotfile such as `.bashrc` has no extension and yields `FILE`.
+    pub fn extension_label(self) -> String {
+        let Some(extension) = std::path::Path::new(self.0).extension() else {
+            return "FILE".to_string();
+        };
+        let Some(extension) = extension.to_str() else {
+            return "FILE".to_string();
+        };
+        if extension.is_empty() {
+            return "FILE".to_string();
+        }
+        extension.to_ascii_uppercase()
+    }
+
+    /// The glyph to draw for this path.
+    pub fn icon(self, is_dir: bool) -> FileIcon {
+        if is_dir {
+            return FileIcon::Folder;
+        }
+        let name = self.name();
+        let ext = self.extension();
+        if matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
+        ) {
+            return FileIcon::Image;
+        }
+        let key = match name {
+            "Dockerfile" => "dockerfile",
+            "CMakeLists.txt" => "cmake",
+            _ => ext.as_str(),
+        };
+        if let Some(d) = lang_logo(key) {
+            return FileIcon::Logo(d);
+        }
+        match ext.as_str() {
+            "ini" | "cfg" | "conf" | "lock" | "env" | "properties" | "editorconfig" => {
+                FileIcon::Config
+            }
+            "txt" | "log" | "csv" | "text" => FileIcon::Text,
+            "java" | "vala" | "d" | "ron" => FileIcon::Code,
+            _ if matches!(name, "Makefile" | "makefile" | "GNUmakefile") => FileIcon::Config,
+            _ => FileIcon::File,
+        }
+    }
+}
+
 pub fn ext_of(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .unwrap_or("")
-        .rsplit_once('.')
-        .map(|(_, e)| e.to_ascii_lowercase())
-        .unwrap_or_default()
+    FilePath(path).extension()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -136,116 +208,63 @@ pub enum FileIcon {
 }
 
 pub fn file_icon_kind(path: &str, is_dir: bool) -> FileIcon {
-    if is_dir {
-        return FileIcon::Folder;
-    }
-    let name = path.rsplit('/').next().unwrap_or("");
-    let ext = ext_of(path);
-    if matches!(
-        ext.as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico"
-    ) {
-        return FileIcon::Image;
-    }
-    let key = match name {
-        "Dockerfile" => "dockerfile",
-        "CMakeLists.txt" => "cmake",
-        _ => ext.as_str(),
-    };
-    if let Some(d) = lang_logo(key) {
-        return FileIcon::Logo(d);
-    }
-    match ext.as_str() {
-        "ini" | "cfg" | "conf" | "lock" | "env" | "properties" | "editorconfig" => FileIcon::Config,
-        "txt" | "log" | "csv" | "text" => FileIcon::Text,
-        "java" | "vala" | "d" | "ron" => FileIcon::Code,
-        _ if matches!(name, "Makefile" | "makefile" | "GNUmakefile") => FileIcon::Config,
-        _ => FileIcon::File,
-    }
+    FilePath(path).icon(is_dir)
 }
 
-#[cfg(target_arch = "wasm32")]
-pub use components::type_icon;
+pub use components::TypeIcon;
 
-#[cfg(target_arch = "wasm32")]
 mod components {
     use super::{FileIcon, file_icon_kind};
     use crate::components::icon::Icon;
     use dioxus::prelude::*;
 
-    pub fn type_icon(path: &str, is_dir: bool, class: &str) -> Element {
-        match file_icon_kind(path, is_dir) {
-            FileIcon::Folder => folder_glyph(class),
-            FileIcon::Image => image_glyph(class),
-            FileIcon::Logo(d) => logo_icon(d, class),
-            FileIcon::Config => config_glyph(class),
-            FileIcon::Text => text_glyph(class),
-            FileIcon::Code => code_glyph(class),
-            FileIcon::File => file_glyph(class),
-        }
-    }
-
-    fn folder_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-            }
-        }
-    }
-
-    fn file_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-            }
-        }
-    }
-
-    fn text_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                path { d: "M16 13H8" }
-                path { d: "M16 17H8" }
-                path { d: "M10 9H8" }
-            }
-        }
-    }
-
-    fn code_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "m16 18 6-6-6-6" }
-                path { d: "m8 6-6 6 6 6" }
-            }
-        }
-    }
-
-    fn config_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
-                path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
-            }
-        }
-    }
-
-    fn image_glyph(class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}",
-                path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
-                path { d: "m21 15-5-5L5 21" }
-            }
-        }
-    }
-
-    fn logo_icon(d: &str, class: &str) -> Element {
-        rsx! {
-            Icon { class: "{class}", fill: "currentColor", stroke: "none",
-                path { d: "{d}" }
-            }
+    /// The glyph for a path, chosen by extension.
+    #[component]
+    pub fn TypeIcon(path: String, is_dir: bool, class: String) -> Element {
+        match file_icon_kind(&path, is_dir) {
+            FileIcon::Folder => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
+                }
+            },
+            FileIcon::Image => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" }
+                    path { d: "m21 15-5-5L5 21" }
+                }
+            },
+            FileIcon::Logo(d) => rsx! {
+                Icon { class: "{class}", fill: "currentColor", stroke: "none",
+                    path { d: "{d}" }
+                }
+            },
+            FileIcon::Config => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }
+                    path { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }
+                }
+            },
+            FileIcon::Text => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                    path { d: "M16 13H8" }
+                    path { d: "M16 17H8" }
+                    path { d: "M10 9H8" }
+                }
+            },
+            FileIcon::Code => rsx! {
+                Icon { class: "{class}",
+                    path { d: "m16 18 6-6-6-6" }
+                    path { d: "m8 6-6 6 6 6" }
+                }
+            },
+            FileIcon::File => rsx! {
+                Icon { class: "{class}",
+                    path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
+                    path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
+                }
+            },
         }
     }
 }
@@ -259,6 +278,18 @@ mod tests {
         assert_eq!(ext_of("file:///a/b/main.rs"), "rs");
         assert_eq!(ext_of("/x/Photo.PNG"), "png");
         assert_eq!(ext_of("/x/noext"), "");
+    }
+
+    /// The pill label follows `Path::extension`, so a dotfile has none — where
+    /// [`FilePath::extension`], which keys the logo table, treats `bashrc` as the extension.
+    #[test]
+    fn extension_label_uppercases_and_falls_back_to_file() {
+        assert_eq!(FilePath("notes.md").extension_label(), "MD");
+        assert_eq!(FilePath("/a/b/archive.TAR.gz").extension_label(), "GZ");
+        assert_eq!(FilePath("Makefile").extension_label(), "FILE");
+        assert_eq!(FilePath("trailing.").extension_label(), "FILE");
+        assert_eq!(FilePath(".bashrc").extension_label(), "FILE");
+        assert_eq!(FilePath(".bashrc").extension(), "bashrc");
     }
 
     #[test]

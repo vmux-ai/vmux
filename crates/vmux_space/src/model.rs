@@ -1,9 +1,9 @@
 pub fn bootstrap_profile_name() -> String {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(host)]
     {
         vmux_core::profile::display_name()
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(ui)]
     {
         "Personal".to_string()
     }

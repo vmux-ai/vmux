@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+#[path = "../build_platform_cfg.rs"]
+mod build_platform_cfg;
 #[allow(dead_code)]
 #[path = "src/build.rs"]
 mod page_build;
@@ -7,6 +9,7 @@ mod page_build;
 use page_build::{CefEmbeddedPageFinalize, PageBuilder};
 
 fn main() {
+    build_platform_cfg::emit();
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[

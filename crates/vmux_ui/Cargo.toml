@@ -11,13 +11,23 @@ default = []
 gallery = ["dep:regex", "dep:sha2"]
 
 [dependencies]
+dioxus = { version = "=0.7.9", default-features = false, features = [
+    "minimal",
+    "document",
+    "asset",
+    "mounted",
+] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package = "dioxus-primitives", rev = "ccdb07f69383de008a0afadda0e5ab7ec14c1a9c", default-features = false }
 fluent-bundle = { workspace = true }
 rkyv = { workspace = true }
 serde = { workspace = true }
 unic-langid = { workspace = true }
+vmux_wire = { path = "../vmux_wire" }
 
+# Native, iOS included: deliberately not a host block, which would drop these from the phone.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sys-locale = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
 
 [build-dependencies]
 regex = { workspace = true, optional = true }
@@ -32,11 +42,14 @@ path = "src/main.rs"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 vmux_core = { path = "../vmux_core" }
+gloo-timers = { version = "0.3", features = ["futures"] }
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",
     "CssStyleDeclaration", "DomRect",
-    "EventTarget", "Event", "HtmlTextAreaElement", "KeyboardEvent",
+    "HtmlCanvasElement", "CanvasRenderingContext2d", "TextMetrics",
+    "EventTarget", "Event", "HtmlInputElement", "HtmlTextAreaElement", "KeyboardEvent",
+    "AddEventListenerOptions", "EventListenerOptions",
     "Navigator",
     "ScrollIntoViewOptions", "ScrollLogicalPosition",
 ] }

@@ -1,6 +1,5 @@
-pub mod extension;
-pub mod space;
-pub mod team;
+pub use vmux_wire::space;
+pub use vmux_wire::team;
 
 use serde::{Deserialize, Serialize};
 pub use vmux_wire::{
@@ -42,6 +41,7 @@ pub const FILE_VIDEO_RECT_EVENT: &str = "file_video_rect";
 pub const FILE_DIAGNOSTICS_EVENT: &str = "file_diagnostics";
 pub const FILE_LSP_STATUS_EVENT: &str = "file_lsp_status";
 pub const FILE_TEXT_INPUT_EVENT: &str = "file_text_input";
+/// Host → file page: the event id [`FileKey`] is pushed under.
 pub const FILE_KEY_EVENT: &str = "file_key";
 pub const FILE_POINTER_EVENT: &str = "file_pointer";
 pub const FILE_CURSOR_EVENT: &str = "file_cursor";
@@ -825,6 +825,22 @@ pub struct LspCatalogRequest {
     pub refresh: bool,
 }
 
+impl LspCatalogRequest {
+    /// Ask for the whole catalogue, narrowed by a search string.
+    ///
+    /// The page has no use for the language, category or installed-only filters, so it would
+    /// otherwise spell four empty defaults at every call.
+    pub fn for_query(query: impl Into<String>, refresh: bool) -> Self {
+        Self {
+            query: query.into(),
+            language: String::new(),
+            category: String::new(),
+            installed_only: false,
+            refresh,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -1539,7 +1555,6 @@ mod file_event_tests {
         assert_eq!(d.pct, Some(42));
     }
 }
-
 #[derive(
     Debug,
     Clone,
@@ -1705,26 +1720,6 @@ pub fn cursor_row_update(previous: Option<&TermCursor>, next: &TermCursor) -> Cu
     CursorRowUpdate { clear, set }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Serialize,
-    Deserialize,
-    Default,
-    PartialEq,
-    Eq,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct TermKeyEvent {
-    pub key: String,
-    #[serde(default)]
-    pub code: String,
-    pub modifiers: u8,
-    pub text: Option<String>,
-}
-
 pub const MOD_CTRL: u8 = 1;
 pub const MOD_ALT: u8 = 2;
 pub const MOD_SHIFT: u8 = 4;
@@ -1819,44 +1814,6 @@ pub struct TermTitleEvent {
 )]
 pub struct FileTextInput {
     pub text: String,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Default,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct KeyMods {
-    pub ctrl: bool,
-    pub alt: bool,
-    pub shift: bool,
-    pub meta: bool,
-}
-
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct FileKeyEvent {
-    pub key: String,
-    pub code: String,
-    pub mods: KeyMods,
-    pub repeat: bool,
 }
 
 #[derive(
@@ -2003,6 +1960,41 @@ pub struct FileKeymapEvent {
 )]
 pub struct FileKeymapSet {
     pub keymap: crate::editor::KeymapKind,
+}
+
+/// What the app keymap made of a key the file page handed over, sent back to the page that sent it.
+///
+/// The page keeps the doing; only the deciding moved. Which completion row `Accept` commits, and
+/// where in the buffer it lands, is derived from the caret and from a list filtered by the prefix
+/// under it — state that changes on a keystroke the host has not seen yet. So the verb travels, in
+/// the direction that already holds the state.
+///
+/// Nothing here is a text-editing verb. Those belong to the modal keymap the page also forwards to,
+/// which resolves the same keystroke into an `EditCommand` on the host and never comes back.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum FileKey {
+    /// Show or hide the explorer sidebar.
+    ToggleExplorer,
+    /// Open the explorer on the file being edited.
+    RevealInExplorer,
+    /// Highlight the next row of whichever panel is open.
+    PanelNext,
+    PanelPrevious,
+    /// Commit the highlighted row: insert the completion, or jump to the reference.
+    PanelChoose,
+    /// Close the open panel, leaving the buffer as it was.
+    PanelDismiss,
 }
 
 /// Host → file page: show the follow-pane auto-tidy prompt with `count` closable previews.
@@ -2284,7 +2276,7 @@ pub struct FileCompletionCommit {
 /// persisted like any browser navigation; consumed by `vmux_history`. Native-only
 /// (Bevy message); `event` is also compiled for the wasm pages, where `bevy` is
 /// not linked.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(host)]
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, Eq)]
 pub struct RecordVisitRequest {
     pub url: String,
@@ -2486,4 +2478,212 @@ mod tests {
             .expect("deserialize");
         assert_eq!(original, recovered);
     }
+}
+// Extension install and status events, shared by the manager page and the installer.
+pub const EXTENSIONS_LIST_EVENT: &str = "extensions_list";
+pub const EXT_INSTALL_PROGRESS_EVENT: &str = "ext_install_progress";
+pub const EXT_STATUS_EVENT: &str = "ext_status";
+pub const EXTENSIONS_PAGE_URL: &str = "vmux://extensions/";
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ExtStatus {
+    Installing,
+    Installed,
+    Disabled,
+    Failed,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum ExtInstallPhase {
+    Resolving,
+    Downloading,
+    Unpacking,
+    Done,
+    Failed,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtRow {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub icon: Option<String>,
+    pub popup: Option<String>,
+    pub enabled: bool,
+    pub needs_approval: bool,
+    pub required_permissions: Vec<String>,
+    pub required_host_permissions: Vec<String>,
+    pub status: ExtStatus,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtensionsEvent {
+    pub extensions: Vec<ExtRow>,
+    pub pending: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtInstallProgress {
+    pub key: String,
+    pub phase: ExtInstallPhase,
+    pub pct: Option<u8>,
+    pub message: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtStatusEvent {
+    pub id: String,
+    pub status: ExtStatus,
+    pub version: Option<String>,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtToggleRequest {
+    pub id: String,
+    pub enabled: bool,
+    pub approve_permissions: bool,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtUninstallRequest {
+    pub id: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtActionRequest {
+    pub id: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtOpenManagerRequest;
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtListRequest;
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ExtBrowseStoreRequest {
+    pub query: String,
 }

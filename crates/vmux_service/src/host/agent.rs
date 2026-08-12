@@ -1,0 +1,674 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use tokio::sync::{Mutex, broadcast, mpsc};
+
+use crate::agent_broker::AgentBroker;
+use crate::message::{AssistantBlock, Message};
+use crate::protocol::{
+    AgentAttachment, AgentRequestId, AgentRunStatus, ApprovalDecision, ServiceMessage, SharedEvent,
+};
+use crate::providers::{anthropic, mistral, openai};
+use crate::remote::{RemoteApproval, RemoteSession, RemoteStatus};
+use crate::stream::{BuildRequest, ParseSse, StreamEvent, ToolDef};
+
+pub struct PageProvider {
+    pub build_request: BuildRequest,
+    pub parse_sse: ParseSse,
+    pub env_var: &'static str,
+}
+
+pub fn resolve_provider(provider: &str) -> Option<PageProvider> {
+    match provider {
+        "anthropic" => Some(PageProvider {
+            build_request: anthropic::build_request,
+            parse_sse: anthropic::parse_sse,
+            env_var: "ANTHROPIC_API_KEY",
+        }),
+        "openai" => Some(PageProvider {
+            build_request: openai::build_request,
+            parse_sse: openai::parse_sse,
+            env_var: "OPENAI_API_KEY",
+        }),
+        "mistral" => Some(PageProvider {
+            build_request: mistral::build_request,
+            parse_sse: mistral::parse_sse,
+            env_var: "MISTRAL_API_KEY",
+        }),
+        _ => None,
+    }
+}
+
+pub enum SessionInput {
+    User {
+        text: String,
+        attachments: Vec<AgentAttachment>,
+    },
+    Approve {
+        call_id: String,
+        decision: ApprovalDecision,
+    },
+    Cancel,
+    Close,
+}
+
+pub struct SessionHandle {
+    pub input_tx: mpsc::UnboundedSender<SessionInput>,
+    pub stream_tx: broadcast::Sender<ServiceMessage>,
+    pub messages: Arc<Mutex<Vec<Message>>>,
+    pub task: tokio::task::JoinHandle<()>,
+    provider: String,
+    model: String,
+    cwd: String,
+    status: Arc<StdMutex<AgentRunStatus>>,
+    approval: Arc<StdMutex<Option<RemoteApproval>>>,
+    created_at_ms: u64,
+}
+
+#[derive(Default)]
+pub struct AgentSessionManager {
+    sessions: HashMap<String, SessionHandle>,
+}
+
+impl AgentSessionManager {
+    #[allow(clippy::too_many_arguments)]
+    pub fn spawn(
+        &mut self,
+        sid: String,
+        provider_name: &str,
+        model: String,
+        cwd: String,
+        tools: Vec<ToolDef>,
+        auto_tools: HashSet<String>,
+        broker: AgentBroker,
+    ) -> Result<(), String> {
+        if self.sessions.contains_key(&sid) {
+            return Ok(());
+        }
+        let provider = resolve_provider(provider_name)
+            .ok_or_else(|| format!("unknown page-agent provider: {provider_name}"))?;
+        let (input_tx, input_rx) = mpsc::unbounded_channel();
+        let (stream_tx, _) = broadcast::channel(256);
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let status = Arc::new(StdMutex::new(AgentRunStatus::Idle));
+        let approval = Arc::new(StdMutex::new(None));
+        let task = tokio::spawn(run_session(
+            sid.clone(),
+            provider,
+            model.clone(),
+            tools,
+            auto_tools,
+            input_rx,
+            stream_tx.clone(),
+            broker,
+            messages.clone(),
+            status.clone(),
+            approval.clone(),
+        ));
+        self.sessions.insert(
+            sid,
+            SessionHandle {
+                input_tx,
+                stream_tx,
+                messages,
+                task,
+                provider: provider_name.to_string(),
+                model,
+                cwd,
+                status,
+                approval,
+                created_at_ms: now_ms(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn input(&self, sid: &str, input: SessionInput) {
+        if let Some(handle) = self.sessions.get(sid) {
+            if let SessionInput::Approve { call_id, .. } = &input {
+                let mut approval = handle.approval.lock().unwrap();
+                if approval
+                    .as_ref()
+                    .is_some_and(|pending| pending.call_id == *call_id)
+                {
+                    *approval = None;
+                    let _ = handle.stream_tx.send(ServiceMessage::Shared(
+                        SharedEvent::AgentApprovalResolved {
+                            sid: sid.to_string(),
+                            call_id: call_id.clone(),
+                        },
+                    ));
+                }
+            }
+            let _ = handle.input_tx.send(input);
+        }
+    }
+
+    pub fn subscribe(&self, sid: &str) -> Option<broadcast::Receiver<ServiceMessage>> {
+        self.sessions.get(sid).map(|h| h.stream_tx.subscribe())
+    }
+
+    pub async fn snapshot(&self, sid: &str) -> Option<ServiceMessage> {
+        let handle = self.sessions.get(sid)?;
+        Some(snapshot_message(sid, &handle.messages).await)
+    }
+
+    pub async fn remote_messages(&self, sid: &str) -> Option<Vec<Message>> {
+        let handle = self.sessions.get(sid)?;
+        Some(handle.messages.lock().await.clone())
+    }
+
+    pub fn remote_sessions(&self) -> Vec<RemoteSession> {
+        self.sessions
+            .iter()
+            .map(|(sid, handle)| remote_session(sid, handle))
+            .collect()
+    }
+
+    pub fn remote_session(&self, sid: &str) -> Option<RemoteSession> {
+        self.sessions
+            .get(sid)
+            .map(|handle| remote_session(sid, handle))
+    }
+
+    pub fn close(&mut self, sid: &str) {
+        if let Some(handle) = self.sessions.remove(sid) {
+            let _ = handle.input_tx.send(SessionInput::Close);
+            handle.task.abort();
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn remote_session(sid: &str, handle: &SessionHandle) -> RemoteSession {
+    RemoteSession {
+        sid: sid.to_string(),
+        room_id: vmux_wire::room::RoomId::for_session(sid),
+        title: handle.provider.clone(),
+        name: handle.provider.clone(),
+        runtime: "page".to_string(),
+        model: Some(handle.model.clone()),
+        cwd: handle.cwd.clone(),
+        status: RemoteStatus::from(&*handle.status.lock().unwrap()),
+        approval: handle.approval.lock().unwrap().clone(),
+        created_at_ms: handle.created_at_ms,
+    }
+}
+
+async fn snapshot_message(sid: &str, messages: &Arc<Mutex<Vec<Message>>>) -> ServiceMessage {
+    let msgs = messages.lock().await;
+    let messages_json = serde_json::to_string(&*msgs).unwrap_or_else(|_| "[]".to_string());
+    ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
+        sid: sid.to_string(),
+        messages_json,
+    })
+}
+
+fn spawn_sse(
+    request: reqwest::Request,
+    parse: ParseSse,
+) -> (
+    mpsc::UnboundedReceiver<StreamEvent>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (cb_tx, cb_rx) = crossbeam_channel::unbounded::<StreamEvent>();
+    let (ev_tx, ev_rx) = mpsc::unbounded_channel::<StreamEvent>();
+    tokio::task::spawn_blocking(move || {
+        while let Ok(event) = cb_rx.recv() {
+            if ev_tx.send(event).is_err() {
+                break;
+            }
+        }
+    });
+    let http = tokio::spawn(async move {
+        crate::http::drive_sse(request, parse, cb_tx).await;
+    });
+    (ev_rx, http)
+}
+
+fn append_text(blocks: &mut Vec<AssistantBlock>, text: &str) {
+    if let Some(AssistantBlock::Text(buf)) = blocks.last_mut() {
+        buf.push_str(text);
+    } else {
+        blocks.push(AssistantBlock::Text(text.to_string()));
+    }
+}
+
+enum Decision {
+    Allow,
+    Deny,
+    Cancelled,
+    Closed,
+}
+
+async fn recv_user(
+    input_rx: &mut mpsc::UnboundedReceiver<SessionInput>,
+) -> Option<(String, Vec<AgentAttachment>)> {
+    loop {
+        match input_rx.recv().await {
+            Some(SessionInput::User { text, attachments }) => return Some((text, attachments)),
+            Some(SessionInput::Approve { .. }) | Some(SessionInput::Cancel) => continue,
+            Some(SessionInput::Close) | None => return None,
+        }
+    }
+}
+
+async fn await_decision(
+    input_rx: &mut mpsc::UnboundedReceiver<SessionInput>,
+    call_id: &str,
+) -> Decision {
+    loop {
+        match input_rx.recv().await {
+            Some(SessionInput::Approve {
+                call_id: cid,
+                decision,
+            }) if cid == call_id => {
+                return match decision {
+                    ApprovalDecision::Allow | ApprovalDecision::AllowAlways => Decision::Allow,
+                    ApprovalDecision::Deny => Decision::Deny,
+                };
+            }
+            Some(SessionInput::Cancel) => return Decision::Cancelled,
+            Some(SessionInput::Approve { .. }) | Some(SessionInput::User { .. }) => continue,
+            Some(SessionInput::Close) | None => return Decision::Closed,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_session(
+    sid: String,
+    provider: PageProvider,
+    model: String,
+    tools: Vec<ToolDef>,
+    auto_tools: HashSet<String>,
+    mut input_rx: mpsc::UnboundedReceiver<SessionInput>,
+    stream_tx: broadcast::Sender<ServiceMessage>,
+    broker: AgentBroker,
+    messages: Arc<Mutex<Vec<Message>>>,
+    status: Arc<StdMutex<AgentRunStatus>>,
+    approval: Arc<StdMutex<Option<RemoteApproval>>>,
+) {
+    let api_key: Option<String> = if provider.env_var.is_empty() {
+        Some(String::new())
+    } else {
+        std::env::var(provider.env_var).ok()
+    };
+
+    loop {
+        let Some((text, attachments)) = recv_user(&mut input_rx).await else {
+            return;
+        };
+        messages
+            .lock()
+            .await
+            .push(Message::user_with_attachments(text, attachments));
+
+        let Some(key) = api_key.as_deref() else {
+            emit_status(
+                &sid,
+                AgentRunStatus::Errored(format!("Missing {}", provider.env_var)),
+                &stream_tx,
+                &status,
+                &approval,
+            );
+            continue;
+        };
+
+        loop {
+            let request = {
+                let msgs = messages.lock().await;
+                (provider.build_request)(&model, msgs.as_slice(), &tools, key)
+            };
+            emit_status(
+                &sid,
+                AgentRunStatus::Streaming,
+                &stream_tx,
+                &status,
+                &approval,
+            );
+
+            let (mut ev_rx, http) = spawn_sse(request, provider.parse_sse);
+            let mut blocks: Vec<AssistantBlock> = Vec::new();
+            let mut partial: Option<(String, String, String)> = None;
+            let mut pending_tool: Option<(String, String, String)> = None;
+            let mut errored: Option<String> = None;
+            let mut cancelled = false;
+
+            loop {
+                tokio::select! {
+                    biased;
+                    signal = input_rx.recv() => {
+                        match signal {
+                            Some(SessionInput::Cancel) => {
+                                cancelled = true;
+                                break;
+                            }
+                            Some(SessionInput::Close) | None => {
+                                http.abort();
+                                return;
+                            }
+                            Some(SessionInput::User { .. }) | Some(SessionInput::Approve { .. }) => {}
+                        }
+                    }
+                    event = ev_rx.recv() => {
+                        let Some(event) = event else {
+                            break;
+                        };
+                        match event {
+                            StreamEvent::TextDelta(text) => {
+                                append_text(&mut blocks, &text);
+                                let _ = stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentDelta {
+                                    sid: sid.clone(),
+                                    text,
+                                }));
+                            }
+                            StreamEvent::ToolUseStart { call_id, name } => {
+                                partial = Some((call_id, name, String::new()));
+                            }
+                            StreamEvent::ToolUseArgsDelta {
+                                call_id,
+                                json_chunk,
+                            } => {
+                                if let Some(p) = &mut partial {
+                                    if p.0.is_empty() && !call_id.is_empty() {
+                                        p.0 = call_id;
+                                    }
+                                    p.2.push_str(&json_chunk);
+                                }
+                            }
+                            StreamEvent::ToolUseEnd { call_id } => {
+                                if let Some((mut cid, name, args)) = partial.take() {
+                                    if cid.is_empty() && !call_id.is_empty() {
+                                        cid = call_id;
+                                    }
+                                    blocks.push(AssistantBlock::ToolUse {
+                                        call_id: cid.clone(),
+                                        name: name.clone(),
+                                        args: args.clone(),
+                                        parent_call_id: None,
+                                    });
+                                    pending_tool = Some((cid, name, args));
+                                }
+                            }
+                            StreamEvent::StopTurn { .. } => {}
+                            StreamEvent::Error(msg) => errored = Some(msg),
+                        }
+                    }
+                }
+            }
+
+            if cancelled {
+                http.abort();
+            }
+            if !blocks.is_empty() {
+                messages.lock().await.push(Message::Assistant { blocks });
+            }
+            if cancelled {
+                let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
+                emit_status(
+                    &sid,
+                    AgentRunStatus::Interrupted,
+                    &stream_tx,
+                    &status,
+                    &approval,
+                );
+                break;
+            }
+
+            if let Some(msg) = errored {
+                emit_status(
+                    &sid,
+                    AgentRunStatus::Errored(msg),
+                    &stream_tx,
+                    &status,
+                    &approval,
+                );
+                break;
+            }
+
+            let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
+
+            let Some((call_id, name, args)) = pending_tool else {
+                emit_status(&sid, AgentRunStatus::Idle, &stream_tx, &status, &approval);
+                break;
+            };
+
+            let args_json = if args.trim().is_empty() {
+                "{}".to_string()
+            } else {
+                args
+            };
+
+            if !auto_tools.contains(&name) {
+                let next_approval = RemoteApproval {
+                    call_id: call_id.clone(),
+                    name: name.clone(),
+                    args_json: args_json.clone(),
+                };
+                *approval.lock().unwrap() = Some(next_approval.clone());
+                let _ =
+                    stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentAwaitingApproval {
+                        sid: sid.clone(),
+                        call_id: call_id.clone(),
+                        name: name.clone(),
+                        args_json: args_json.clone(),
+                    }));
+                match await_decision(&mut input_rx, &call_id).await {
+                    Decision::Closed => return,
+                    Decision::Cancelled => {
+                        emit_status(
+                            &sid,
+                            AgentRunStatus::Interrupted,
+                            &stream_tx,
+                            &status,
+                            &approval,
+                        );
+                        break;
+                    }
+                    Decision::Deny => {
+                        *approval.lock().unwrap() = None;
+                        messages.lock().await.push(Message::ToolResult {
+                            call_id,
+                            content: "Tool call denied by user.".to_string(),
+                            is_error: true,
+                        });
+                        continue;
+                    }
+                    Decision::Allow => *approval.lock().unwrap() = None,
+                }
+            }
+
+            let (content, is_error) = match broker
+                .tool_call(AgentRequestId::new(), sid.clone(), name, args_json)
+                .await
+            {
+                Ok(result) => result,
+                Err(e) => (e, true),
+            };
+            messages.lock().await.push(Message::ToolResult {
+                call_id,
+                content,
+                is_error,
+            });
+            let _ = stream_tx.send(snapshot_message(&sid, &messages).await);
+        }
+    }
+}
+
+fn emit_status(
+    sid: &str,
+    next: AgentRunStatus,
+    stream_tx: &broadcast::Sender<ServiceMessage>,
+    status: &StdMutex<AgentRunStatus>,
+    approval: &StdMutex<Option<RemoteApproval>>,
+) {
+    if !matches!(next, AgentRunStatus::Streaming) {
+        *approval.lock().unwrap() = None;
+    }
+    *status.lock().unwrap() = next.clone();
+    let _ = stream_tx.send(ServiceMessage::Shared(SharedEvent::AgentRunStatusChanged {
+        sid: sid.to_string(),
+        status: next,
+    }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_broker() -> AgentBroker {
+        let (agent_tx, _) = broadcast::channel::<ServiceMessage>(16);
+        AgentBroker::new(
+            agent_tx,
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+    }
+
+    #[test]
+    fn resolve_provider_known_and_unknown() {
+        assert!(resolve_provider("anthropic").is_some());
+        assert!(resolve_provider("openai").is_some());
+        assert!(resolve_provider("mistral").is_some());
+        assert!(resolve_provider("nope").is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_then_snapshot_empty_then_close() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".to_string(),
+            "anthropic",
+            "m".to_string(),
+            "/tmp/project".to_string(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+        match mgr.snapshot("s").await {
+            Some(ServiceMessage::Shared(SharedEvent::AgentMessagesSnapshot {
+                messages_json,
+                ..
+            })) => {
+                assert_eq!(messages_json, "[]");
+            }
+            other => panic!("expected snapshot, got {other:?}"),
+        }
+        mgr.close("s");
+        assert!(mgr.snapshot("s").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn spawn_is_idempotent_per_sid() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "m".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "m".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+        assert!(mgr.snapshot("s").await.is_some());
+        mgr.close("s");
+    }
+
+    #[tokio::test]
+    async fn unknown_provider_is_rejected() {
+        let mut mgr = AgentSessionManager::default();
+        let err = mgr
+            .spawn(
+                "s".into(),
+                "bogus",
+                "m".into(),
+                "/tmp/project".into(),
+                Vec::new(),
+                HashSet::new(),
+                test_broker(),
+            )
+            .unwrap_err();
+        assert!(err.contains("bogus"));
+    }
+
+    #[tokio::test]
+    async fn remote_summary_exposes_active_session() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "gpt-test".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+
+        let session = mgr.remote_session("s").unwrap();
+
+        assert_eq!(session.name, "openai");
+        assert_eq!(session.model.as_deref(), Some("gpt-test"));
+        assert_eq!(session.cwd, "/tmp/project");
+        mgr.close("s");
+    }
+
+    #[tokio::test]
+    async fn approval_resolution_is_broadcast_immediately() {
+        let mut mgr = AgentSessionManager::default();
+        mgr.spawn(
+            "s".into(),
+            "openai",
+            "gpt-test".into(),
+            "/tmp/project".into(),
+            Vec::new(),
+            HashSet::new(),
+            test_broker(),
+        )
+        .unwrap();
+        let handle = mgr.sessions.get("s").unwrap();
+        *handle.approval.lock().unwrap() = Some(RemoteApproval {
+            call_id: "call-1".into(),
+            name: "run".into(),
+            args_json: "{}".into(),
+        });
+        let mut receiver = mgr.subscribe("s").unwrap();
+
+        mgr.input(
+            "s",
+            SessionInput::Approve {
+                call_id: "call-1".into(),
+                decision: ApprovalDecision::Allow,
+            },
+        );
+
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(ServiceMessage::Shared(SharedEvent::AgentApprovalResolved { sid, call_id }))
+                if sid == "s" && call_id == "call-1"
+        ));
+        assert!(mgr.remote_session("s").unwrap().approval.is_none());
+        mgr.close("s");
+    }
+}

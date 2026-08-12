@@ -17,7 +17,7 @@ const MAX_ENTRIES: usize = 2_048;
 const MAX_METADATA_BYTES: u64 = 64 * 1024;
 
 pub fn vault_dir() -> PathBuf {
-    vmux_core::knowledge::knowledge_dir()
+    vmux_core::knowledge::KnowledgeVault::user().into_root()
 }
 
 pub fn ensure_vault(root: &Path) -> std::io::Result<()> {

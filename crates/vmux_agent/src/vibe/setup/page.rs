@@ -8,7 +8,7 @@ use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 fn current_agent_segment() -> String {
@@ -36,33 +36,24 @@ pub fn Page() -> Element {
     let brew_command = vmux_core::agent_setup::homebrew_install_command();
     let tagline = tagline(&segment);
     let accent = agent_accent(&segment);
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate_with(
-            "setup-install-title",
-            &[("name", TranslationValue::String(name))],
-        ));
-    }
-
     let mut installing = use_signal(|| false);
     let mut needs_homebrew = use_signal(|| false);
     let mut failed = use_signal(|| false);
 
-    let _prereq =
-        use_bin_event_listener::<AgentSetupPrereqStatus, _>(AGENT_SETUP_PREREQ_EVENT, move |s| {
-            needs_homebrew.set(s.needs_homebrew);
-        });
-    let _result =
-        use_bin_event_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |r| {
-            if !r.ok {
-                installing.set(false);
-                failed.set(true);
-            }
-        });
+    let _prereq = use_listener::<AgentSetupPrereqStatus, _>(AGENT_SETUP_PREREQ_EVENT, move |s| {
+        needs_homebrew.set(s.needs_homebrew);
+    });
+    let _result = use_listener::<AgentSetupResult, _>(AGENT_SETUP_RESULT_EVENT, move |r| {
+        if !r.ok {
+            installing.set(false);
+            failed.set(true);
+        }
+    });
 
     {
         let seg = segment.clone();
         use_effect(move || {
-            let _ = try_cef_bin_emit_rkyv(&AgentSetupPrereqRequest { agent: seg.clone() });
+            let _ = send(&AgentSetupPrereqRequest { agent: seg.clone() });
         });
     }
 
@@ -79,6 +70,9 @@ pub fn Page() -> Element {
 
     let emit_segment = segment.clone();
     rsx! {
+        document::Title {
+            {translate_with("setup-install-title", &[("name", TranslationValue::String(name))])}
+        }
         main { class: "relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-10 text-foreground",
             div { class: "{accent.glow_top}" }
             div { class: "{accent.glow_bottom}" }
@@ -151,7 +145,7 @@ pub fn Page() -> Element {
                     onclick: move |_| {
                         installing.set(true);
                         failed.set(false);
-                        let _ = try_cef_bin_emit_rkyv(&AgentInstallRunRequest { agent: emit_segment.clone() });
+                        let _ = send(&AgentInstallRunRequest { agent: emit_segment.clone() });
                     },
                     if installing() {
                         span { class: "h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-white/40 border-t-white" }

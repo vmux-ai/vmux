@@ -13,6 +13,8 @@ homepage = "https://vmux.ai"
 repository = "https://github.com/vmux-ai/vmux"
 
 [workspace.dependencies]
+bytes = "1"
+webpki-roots = "1"
 bevy = { version = "0.19.0", default-features = false, features = [
     "std",
     "multi_threaded",
@@ -74,7 +76,7 @@ polling = "3.11"
 tungstenite = "0.28"
 url = "2"
 notify = "6"
-dioxus = { version = "=0.7.4", default-features = false, features = [
+dioxus = { version = "=0.7.9", default-features = false, features = [
     "web",
     "minimal",
     "document",
@@ -93,6 +95,19 @@ portable-pty = "0.9"
 rfd = "0.15"
 rkyv = { version = "0.8", features = ["alloc"] }
 uuid = { version = "1", features = ["v4", "serde", "js"] }
+
+# ring, not the default aws-lc-rs: aws-lc-rs needs cmake and NASM and does not cross-compile to
+# aarch64-apple-ios, which is the one target that has no CI job to catch it.
+quinn = { version = "0.11", default-features = false, features = [
+    "runtime-tokio",
+    "rustls-ring",
+] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pemfile = "2"
+rcgen = "0.14"
+# Already in the tree via quinn/rcgen/rustls; a direct dep only so the fingerprint hash can
+# reach it without pulling in a second crypto library.
+ring = "0.17"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 
 # Dev builds of a Bevy + CEF app are unusably slow without optimizing dependencies.
@@ -121,6 +136,18 @@ opt-level = 3
 # across CGUs at link time (undefined `_anon.*.llvm.*` under --gc-sections /
 # -dead_strip — surfaces in Linux test-binary links and the dev dynamic-linking build).
 [profile.dev.package.vmux_service]
+codegen-units = 1
+
+# `dx build` compiles the web bundle under this profile, inventing its own if we do not
+# declare one. Same failure as bevy_cef and vmux_service above, one target further out:
+# `wasm-ld` drops an internal `alloc::fmt::format.llvm.*` defined in one CGU while a
+# reference from another survives, so wasm-bindgen emits `import * as import1 from "env"`
+# for the unresolved symbol and every page dies at load with `Failed to resolve module
+# specifier "env"` — no render, no window, splash times out. Nothing type-checks this:
+# `cargo check` does not link, and `cargo build --target wasm32-unknown-unknown` links
+# clean under the plain `dev` profile.
+[profile.wasm-dev]
+inherits = "dev"
 codegen-units = 1
 
 [profile.release]

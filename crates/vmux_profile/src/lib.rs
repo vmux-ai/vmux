@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod tools;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(web))]
 pub mod vault;
 
 pub const fn build_profile() -> &'static str {
@@ -632,6 +632,7 @@ mod tests {
         assert!(space_dir_path(&data, "personal", "keep").is_dir());
         let _ = std::fs::remove_dir_all(&home);
     }
+
     #[test]
     fn settings_live_in_dot_vmux_not_data_dir() {
         for candidate in settings_path_candidates() {

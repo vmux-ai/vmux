@@ -7,30 +7,15 @@
 )]
 
 pub mod model;
-#[cfg(target_arch = "wasm32")]
+/// The page resolves its keyboard through the keymap, which is a CEF seam: it publishes a
+/// `PageKeyContext` and is answered over binary IPC. A touch host has neither, so this is `web`
+/// rather than `ui` — the narrower gate is the one that is true.
+#[cfg(web)]
 pub mod page;
 
-pub use vmux_core::event::space as event;
+pub use vmux_wire::space as event;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cwd;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod snapshot_updater;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod spaces;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
-    host: "spaces",
-    title: "Spaces",
-    keywords: &["space"],
-    icon: Some(vmux_core::BuiltinIcon::Layers),
-    command_bar: true,
-};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub use plugin::{SaveSpaceRequest, SpaceCommandRequest, SpacePlugin};
-#[cfg(not(target_arch = "wasm32"))]
-pub use spaces::{ActiveSpace, Spaces};
+#[cfg(host)]
+mod host;
+#[cfg(host)]
+pub use host::*;

@@ -12,7 +12,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList, ManagerPage,
     ManagerRow, ManagerSpinner,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
@@ -24,13 +24,12 @@ pub fn Page() -> Element {
     let mut pending = use_signal(BTreeSet::<String>::new);
     let mut notice = use_signal(|| None::<ToolActionResult>);
 
-    let _snapshot_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
-            snapshot.set(event);
-            loaded.set(true);
-        });
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+        snapshot.set(event);
+        loaded.set(true);
+    });
     let _action_listener =
-        use_bin_event_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
+        use_listener::<ToolActionResult, _>(TOOL_ACTION_RESULT_EVENT, move |result| {
             pending
                 .write()
                 .remove(&action_key(result.provider, result.action, &result.id));
@@ -40,9 +39,6 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-            document.set_title(&translate("tools-title"));
-        }
         request_snapshot(false);
     });
 
@@ -55,6 +51,7 @@ pub fn Page() -> Element {
         .filter(|item| item_matches(item, &search))
         .count();
     rsx! {
+        document::Title { {translate("tools-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("tools-title"),
@@ -99,7 +96,7 @@ pub fn Page() -> Element {
                 if let Some(result) = notice() {
                     div {
                         class: if result.success {
-                            "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
+                            "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                         } else {
                             "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                         },
@@ -225,7 +222,7 @@ fn ToolRow(item: ToolItem, pending: Signal<BTreeSet<String>>) -> Element {
 }
 
 fn request_snapshot(refresh: bool) {
-    let _ = try_cef_bin_emit_rkyv(&ToolsRefreshRequest { refresh });
+    let _ = send(&ToolsRefreshRequest { refresh });
 }
 
 fn send_action(
@@ -236,7 +233,7 @@ fn send_action(
     value: String,
 ) {
     pending.write().insert(action_key(provider, action, &id));
-    let _ = try_cef_bin_emit_rkyv(&ToolActionRequest {
+    let _ = send(&ToolActionRequest {
         provider,
         action,
         id,
@@ -290,7 +287,7 @@ fn status_label(status: ToolStatus) -> String {
 
 fn status_dot_class(status: ToolStatus) -> &'static str {
     match status {
-        ToolStatus::Installed => "bg-emerald-500",
+        ToolStatus::Installed => "bg-success",
         ToolStatus::Outdated => "bg-amber-500",
         ToolStatus::Conflict | ToolStatus::Failed => "bg-rose-500",
         ToolStatus::Missing => "bg-muted-foreground/40",
@@ -348,5 +345,5 @@ fn action_key(provider: ToolProvider, action: ToolAction, id: &str) -> String {
 }
 
 fn open_tool_file(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ToolOpenRequest { path });
+    let _ = send(&ToolOpenRequest { path });
 }

@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-web = []
 
 [lib]
 path = "src/lib.rs"
@@ -15,26 +14,26 @@ path = "src/lib.rs"
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 notify = { workspace = true }
 ron = { workspace = true }
-serde_json = { workspace = true }
 tempfile = "3"
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
+# manifest cannot use it. The settings page reaches no further than Dioxus, so it renders wherever
+# Dioxus does.
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
-serde_json = { workspace = true }
-wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlElement"] }
 
 [dev-dependencies]
 tempfile = "3"

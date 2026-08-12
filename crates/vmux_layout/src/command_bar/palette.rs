@@ -4,89 +4,74 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::command_bar::keyboard::{
-    CtrlEditAction, CtrlKeyCapture, caret_scroll_left, ctrl_key_capture_for_code,
-    ignore_physical_rerouted_ctrl_keydown, utf16_offset_to_byte,
-};
+use crate::command_bar::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
 use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, agent_page_matches_query,
-    agent_page_results, agent_page_url, filter_results, prepend_prompt_agents,
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
     space_switch_results, start_page_results,
 };
 use crate::command_bar::style::{
     command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
-    result_leading_icon_class, result_list_class, result_location_class, result_primary_text_class,
-    result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
-    result_trailing_slot_class,
+    result_list_class,
 };
 use crate::start::event::StartSelectWorkspace;
 use dioxus::prelude::*;
 use vmux_command::event::{
-    CommandBarActionEvent, CommandBarOpenEvent, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry,
-    HistorySuggestionsRequest, HistorySuggestionsResponse, PATH_COMPLETE_RESPONSE,
-    PathCompleteRequest, PathCompleteResponse, PathEntry, command_bar_should_refocus, is_data_uri,
-    is_start_prompt_query, looks_like_url, should_open_typed_query_on_enter,
+    COMMAND_BAR_KEY_EVENT, CommandBarActionEvent, CommandBarKey, CommandBarOpenEvent,
+    CommandBarQuery, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
+    HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
+    PathCompleteResponse, PathEntry, is_data_uri,
 };
 use vmux_command::open_target::OpenTarget;
 use vmux_command::prompt_media::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
-    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query, media_display_path,
-    media_reference, merge_chat_attachments, replace_inline_media_query,
+    ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query,
+    merge_chat_attachments, replace_inline_media_query,
 };
+use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_start::row::ResultRow;
 use vmux_ui::agent_accent::agent_accent;
+use vmux_ui::caret::TextCaret;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::PageIconView;
+use vmux_ui::dom_listener::DocumentListener;
+use vmux_ui::focus::FocusClaim;
+use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
+use vmux_ui::i18n::translate;
+use vmux_ui::platform::sleep_ms;
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-const HOST_SEARCH_DEBOUNCE_MS: i32 = 300;
+const HOST_SEARCH_DEBOUNCE_MS: u32 = 300;
 
-type HostSearchTimer = Rc<RefCell<Option<(i32, js_sys::Function, Rc<Cell<bool>>)>>>;
+/// Whether the search currently waiting to fire has been superseded.
+type HostSearchTimer = Rc<RefCell<Option<Rc<Cell<bool>>>>>;
 
 fn cancel_host_search(timer: &HostSearchTimer) {
-    let Some((id, callback, cancelled)) = timer.borrow_mut().take() else {
-        return;
-    };
-    cancelled.set(true);
-    if let Some(window) = web_sys::window() {
-        window.clear_timeout_with_handle(id);
+    if let Some(cancelled) = timer.borrow_mut().take() {
+        cancelled.set(true);
     }
-    let _ = callback.call0(&JsValue::NULL);
 }
 
+/// Ask the host for results once the user stops typing, replacing whatever was already waiting.
 fn schedule_host_search(timer: HostSearchTimer, callback: impl FnOnce() + 'static) {
     cancel_host_search(&timer);
-    let Some(window) = web_sys::window() else {
-        return;
-    };
     let cancelled = Rc::new(Cell::new(false));
-    let callback_timer = timer.clone();
-    let callback_cancelled = cancelled.clone();
-    let callback = Closure::once_into_js(move || {
-        callback_timer.borrow_mut().take();
-        if !callback_cancelled.get() {
-            callback();
+    *timer.borrow_mut() = Some(cancelled.clone());
+    spawn(async move {
+        sleep_ms(HOST_SEARCH_DEBOUNCE_MS).await;
+        if cancelled.get() {
+            return;
         }
-    })
-    .unchecked_into::<js_sys::Function>();
-    match window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(&callback, HOST_SEARCH_DEBOUNCE_MS)
-    {
-        Ok(id) => *timer.borrow_mut() = Some((id, callback, cancelled)),
-        Err(_) => {
-            let _ = callback.call0(&JsValue::NULL);
-        }
-    }
+        timer.borrow_mut().take();
+        callback();
+    });
 }
 
 /// Where a [`CommandPalette`] is rendered: the Cmd+K modal or the `vmux://start/` page.
@@ -99,8 +84,8 @@ pub enum PaletteVariant {
 }
 
 #[derive(Clone, PartialEq)]
-pub struct StartAgentTransition {
-    pub agent_url: String,
+pub struct StartInlineTransition {
+    pub target_url: String,
     pub prompt: String,
     pub attachments: Vec<vmux_command::prompt_media::ChatAttachment>,
 }
@@ -119,7 +104,213 @@ pub struct PaletteProps {
     /// Called on query/selection change (the modal re-emits its size).
     pub on_activity: EventHandler<()>,
     #[props(default)]
-    pub on_start_agent_transition: Option<EventHandler<StartAgentTransition>>,
+    pub on_start_inline_transition: Option<EventHandler<StartInlineTransition>>,
+}
+
+/// Everything a palette shows, derived from what the host sent and what the user has typed.
+///
+/// Held as a memo rather than rebuilt inline because the keyboard now reaches this list from two
+/// places: the render, and the host's answer to a key the page handed over. That answer arrives in
+/// a listener registered once, which can read a signal but cannot see a render's locals — so the
+/// list has to be somewhere both can look, or there would be two copies of it to disagree.
+#[derive(Clone, PartialEq)]
+struct PaletteRows {
+    items: Vec<ResultItem>,
+    prompt_targets: Vec<ResultItem>,
+    default_target: Option<ResultItem>,
+    /// The greyed-out remainder the first path completion would add to what has been typed.
+    ghost: String,
+}
+
+impl PaletteRows {
+    fn of(
+        state: &CommandBarOpenEvent,
+        query: &str,
+        completions: &[PathEntry],
+        history: &[HistoryEntry],
+        variant: PaletteVariant,
+        target_url: &str,
+    ) -> Self {
+        let is_start = matches!(variant, PaletteVariant::Start);
+        let prompt_targets = if is_start {
+            prompt_target_results(&state.pages, "")
+        } else {
+            Vec::new()
+        };
+        let default_target = prompt_targets
+            .iter()
+            .find(|item| prompt_target_url(item) == Some(target_url))
+            .cloned()
+            .or_else(|| prompt_targets.first().cloned());
+        let start_prompt_mode = is_start && CommandBarQuery(query).is_start_prompt();
+
+        let mut items: Vec<ResultItem> = if state.space_switch {
+            space_switch_results(&state.spaces, &state.pages, query)
+        } else if is_start && query.trim().is_empty() {
+            open_session_results(&state.tabs, &state.pages)
+        } else if start_prompt_mode {
+            start_page_results(
+                &state.pages,
+                &state.work_dirs,
+                &state.recent_files,
+                &state.search_engines,
+                query,
+            )
+        } else {
+            let is_new_tab = matches!(state.target, Some(OpenTarget::InNewStack));
+            let matched = filter_results(
+                query,
+                &state.tabs,
+                &state.commands,
+                &state.spaces,
+                &state.pages,
+                is_new_tab,
+                history,
+                &state.work_dirs,
+                &state.recent_files,
+            );
+            let completions: &[PathEntry] = if completion_query(query).is_some() {
+                completions
+            } else {
+                &[]
+            };
+            let matched = if completions.is_empty() {
+                matched
+            } else {
+                let mut combined: Vec<ResultItem> = completions
+                    .iter()
+                    .take(8)
+                    .map(|entry| ResultItem::File {
+                        path: entry.full_path.clone(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect();
+                combined.extend(matched);
+                combined
+            };
+            if is_start {
+                matched
+                    .into_iter()
+                    .filter(|item| {
+                        !matches!(
+                            item,
+                            ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
+                                if url.trim_end_matches('/') == "vmux://start"
+                        )
+                    })
+                    .collect()
+            } else {
+                matched
+            }
+        };
+        if start_prompt_mode {
+            prepend_prompt_targets(&mut items, default_target.as_ref(), &prompt_targets, query);
+        }
+
+        Self {
+            items,
+            prompt_targets,
+            default_target,
+            ghost: Self::ghost_of(query, completions),
+        }
+    }
+
+    fn ghost_of(query: &str, completions: &[PathEntry]) -> String {
+        if completion_query(query).is_none() {
+            return String::new();
+        }
+        let Some(first) = completions.first() else {
+            return String::new();
+        };
+        let typed = query.trim();
+        let full = &first.full_path;
+        if !full.to_lowercase().starts_with(&typed.to_lowercase())
+            || !full.is_char_boundary(typed.len())
+        {
+            return String::new();
+        }
+        full[typed.len()..].to_string()
+    }
+
+    /// What the input holds once the greyed-out remainder is accepted.
+    fn completed(&self, query: &str) -> String {
+        format!("{query}{}", self.ghost)
+    }
+
+    /// The highlighted row, clamped to what is actually on screen.
+    fn selected(&self, stored: usize) -> usize {
+        stored.min(self.items.len().saturating_sub(1))
+    }
+
+    /// Where a move of one row lands. Clamped at both ends rather than wrapping, which is what the
+    /// command bar has always done and what distinguishes it from a popup menu.
+    fn step(&self, from: usize, direction: MenuDirection) -> usize {
+        match direction {
+            MenuDirection::Next => (from + 1).min(self.items.len().saturating_sub(1)),
+            MenuDirection::Previous => from.saturating_sub(1),
+        }
+    }
+}
+
+/// The palette's keyboard, on the far side of the keymap.
+///
+/// Nothing here names a key. The page hands the stroke over, the core decides, and this performs
+/// the verb it came back as — which is the only reason `Ctrl+n` can be rebound in `settings.json`
+/// without the palette knowing it moved.
+///
+/// Every field is a signal or a handler rather than a value, because the answer arrives in a
+/// listener registered on first render: a captured result list would be one keystroke stale by the
+/// time the first key was pressed.
+#[derive(Clone, Copy)]
+struct PaletteKeys {
+    rows: Memo<PaletteRows>,
+    query: Signal<String>,
+    selected: Signal<usize>,
+    nav_mode: Signal<bool>,
+    on_dismiss: EventHandler<()>,
+}
+
+impl PaletteKeys {
+    fn apply(&mut self, key: CommandBarKey) {
+        match key {
+            CommandBarKey::Next => self.move_selection(MenuDirection::Next),
+            CommandBarKey::Previous => self.move_selection(MenuDirection::Previous),
+            CommandBarKey::Complete => self.accept_completion(),
+            CommandBarKey::Dismiss => self.on_dismiss.call(()),
+        }
+    }
+
+    fn move_selection(&mut self, direction: MenuDirection) {
+        let rows = self.rows.read();
+        let landed = rows.step(rows.selected(*self.selected.peek()), direction);
+        drop(rows);
+        self.selected.set(landed);
+        self.nav_mode.set(true);
+    }
+
+    /// Accept the greyed-out remainder, and put the caret after it.
+    ///
+    /// The input's value is written directly as well as through the signal: Chromium does not
+    /// scroll to a caret it did not move itself, so a long path would complete off-screen.
+    fn accept_completion(&mut self) {
+        let rows = self.rows.read();
+        if rows.ghost.is_empty() {
+            return;
+        }
+        let completed = rows.completed(&self.query.peek());
+        drop(rows);
+        self.query.set(completed.clone());
+        self.selected.set(0);
+        let Some(element) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(COMMAND_BAR_INPUT_ID))
+        else {
+            return;
+        };
+        let input: web_sys::HtmlInputElement = element.unchecked_into();
+        input.set_value(&completed);
+        TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(completed.len());
+    }
 }
 
 /// The shared command-bar body: input, live-filtered results, file-path completion,
@@ -133,7 +324,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let on_close = props.on_close;
     let on_dismiss = props.on_dismiss;
     let on_activity = props.on_activity;
-    let on_start_agent_transition = props.on_start_agent_transition;
+    let on_start_inline_transition = props.on_start_inline_transition;
 
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
@@ -144,8 +335,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let mut history_suggestions = use_signal(Vec::<HistoryEntry>::new);
     let mut suggestions_request_id = use_signal(|| 0u64);
     let suggestions_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
-    let mut last_open_id = use_signal(|| u64::MAX);
-    let mut last_focus_open_id = use_signal(|| u64::MAX);
+    let mut last_open_id = use_signal(|| OpenId(u64::MAX));
+    let mut last_focus_open_id = use_signal(|| OpenId(u64::MAX));
     let mut attachments = use_signal(Vec::<ChatAttachment>::new);
     let mut attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
     let mut media_entries = use_signal(Vec::<ChatMediaEntry>::new);
@@ -154,8 +345,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let media_search_timer: HostSearchTimer = use_hook(|| Rc::new(RefCell::new(None)));
     let mut media_loading = use_signal(|| false);
     let mut media_selected = use_signal(|| 0usize);
-    let mut start_agent_url = use_signal(String::new);
-    let mut start_agent_menu_open = use_signal(|| false);
+    let mut start_target_url = use_signal(String::new);
+    let mut target_menu_open = use_signal(|| false);
+
+    let keys = use_key_claim(Unclaimed::Types, move || match variant {
+        PaletteVariant::Modal => vec!["command-bar".to_string()],
+        PaletteVariant::Start => Vec::new(),
+    });
+    use_drop(move || {
+        let _ = send(&PageKeyContext { keys: Vec::new() });
+    });
 
     let path_search_effect_timer = path_search_timer.clone();
     use_effect(move || {
@@ -182,7 +381,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     });
 
     let _path_listener =
-        use_bin_event_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
+        use_listener::<PathCompleteResponse, _>(PATH_COMPLETE_RESPONSE, move |data| {
             path_completions.set(data.completions);
         });
 
@@ -199,11 +398,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if *path_request_id.peek() != request_id {
                 return;
             }
-            let _ = try_cef_bin_emit_rkyv(&PathCompleteRequest { query: path_query });
+            let _ = send(&PathCompleteRequest { query: path_query });
         });
     });
 
-    let _history_listener = use_bin_event_listener::<HistorySuggestionsResponse, _>(
+    let _history_listener = use_listener::<HistorySuggestionsResponse, _>(
         HISTORY_SUGGESTIONS_RESPONSE_EVENT,
         move |resp| {
             if resp.request_id != *suggestions_request_id.read() {
@@ -214,7 +413,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     );
 
     let _attachments_listener =
-        use_bin_event_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENTS_EVENT, move |selected| {
             if !is_start {
                 return;
             }
@@ -223,9 +422,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             focus_prompt_end(PROMPT_INPUT_ID);
         });
 
-    let _attachment_previews_listener = use_bin_event_listener::<ChatAttachments, _>(
-        CHAT_ATTACHMENT_PREVIEWS_EVENT,
-        move |loaded| {
+    let _attachment_previews_listener =
+        use_listener::<ChatAttachments, _>(CHAT_ATTACHMENT_PREVIEWS_EVENT, move |loaded| {
             if !is_start {
                 return;
             }
@@ -244,11 +442,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             attachments.set(current);
-        },
-    );
+        });
 
     let _media_entries_listener =
-        use_bin_event_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
+        use_listener::<ChatMediaEntries, _>(CHAT_MEDIA_ENTRIES_EVENT, move |response| {
             if !is_start || response.request_id != media_request_id() {
                 return;
             }
@@ -284,7 +481,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if *suggestions_request_id.peek() != id {
                 return;
             }
-            let _ = try_cef_bin_emit_rkyv(&HistorySuggestionsRequest {
+            let _ = send(&HistorySuggestionsRequest {
                 query,
                 limit: 5,
                 request_id: id,
@@ -324,7 +521,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             {
                 return;
             }
-            if try_cef_bin_emit_rkyv(&ChatMediaListRequest {
+            if send(&ChatMediaListRequest {
                 request_id,
                 query: media_query,
             })
@@ -343,7 +540,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     use_effect(move || {
         let open_id = state().open_id;
-        if command_bar_should_refocus(last_focus_open_id(), open_id) {
+        if open_id.should_refocus(last_focus_open_id()) {
             last_focus_open_id.set(open_id);
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
@@ -353,11 +550,10 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         }
     });
 
-    use_effect(move || {
-        if is_start {
-            install_start_menu_click_outside(start_agent_menu_open);
-        }
-    });
+    // `Rc` because `use_hook` clones its value out on every render and a listener must have one
+    // owner — two would each try to remove it, and the second removal is the one that silently
+    // does nothing.
+    use_hook(|| Rc::new(is_start.then(|| start_menu_click_outside(target_menu_open))));
 
     use_effect(move || {
         let _ = query();
@@ -370,13 +566,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
 
     let state_val = state();
     let space_name = state_val.space_name.clone();
-    let spaces = state_val.spaces.clone();
-    let tabs = state_val.tabs.clone();
-    let commands = state_val.commands.clone();
-    let pages = state_val.pages.clone();
-    let work_dirs = state_val.work_dirs.clone();
-    let recent_files = state_val.recent_files.clone();
-    let search_engines = state_val.search_engines.clone();
     let prompt_context = state_val.prompt_context.clone();
     let open_target = state_val.target;
     let space_switch = state_val.space_switch;
@@ -392,89 +581,43 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         .map(|entry| PromptMediaOption {
             key: format!("media-{}", entry.path),
             name: entry.name.clone(),
-            display_path: media_display_path(entry),
+            display_path: entry.display_path(),
             preview_data_url: entry.preview_data_url.clone(),
             label: file_extension_label(&entry.name),
             is_dir: entry.is_dir,
         })
         .collect::<Vec<_>>();
-    let start_prompt_mode = is_start && is_start_prompt_query(&q);
-    let start_agent_items = if is_start {
-        agent_page_results(&pages, "")
-    } else {
-        Vec::new()
+    let start_prompt_mode = is_start && CommandBarQuery(&q).is_start_prompt();
+    let rows = use_memo(move || {
+        PaletteRows::of(
+            &state(),
+            &query(),
+            &path_completions(),
+            &history_suggestions(),
+            variant,
+            &start_target_url(),
+        )
+    });
+    let mut palette_keys = PaletteKeys {
+        rows,
+        query,
+        selected,
+        nav_mode,
+        on_dismiss,
     };
-    let default_agent_item = start_agent_items
-        .iter()
-        .find(|item| agent_page_url(item) == Some(start_agent_url().as_str()))
-        .cloned()
-        .or_else(|| start_agent_items.first().cloned());
-    let mut results: Vec<ResultItem> = if space_switch {
-        space_switch_results(&spaces, &pages, &q)
-    } else if is_start && q.trim().is_empty() {
-        Vec::new()
-    } else if start_prompt_mode {
-        start_page_results(&pages, &work_dirs, &recent_files, &search_engines, &q)
-    } else {
-        let history = history_suggestions();
-        let r = filter_results(
-            &q,
-            &tabs,
-            &commands,
-            &spaces,
-            &pages,
-            is_new_tab,
-            &history,
-            &work_dirs,
-            &recent_files,
-        );
-        let completions = if completion_query(&q).is_some() {
-            path_completions()
-        } else {
-            Vec::new()
-        };
-        let r = if completions.is_empty() {
-            r
-        } else {
-            let mut combined: Vec<ResultItem> = completions
-                .iter()
-                .take(8)
-                .map(|e| ResultItem::File {
-                    path: e.full_path.clone(),
-                    is_dir: e.is_dir,
-                })
-                .collect();
-            combined.extend(r);
-            combined
-        };
-        if is_start {
-            r.into_iter()
-                .filter(|item| {
-                    !matches!(
-                        item,
-                        ResultItem::Stack { url, .. } | ResultItem::Page { url, .. }
-                            if url.trim_end_matches('/') == "vmux://start"
-                    )
-                })
-                .collect()
-        } else {
-            r
-        }
-    };
-    if start_prompt_mode {
-        prepend_prompt_agents(
-            &mut results,
-            default_agent_item.as_ref(),
-            &start_agent_items,
-            &q,
-        );
-    }
-    let sel = selected().min(results.len().saturating_sub(1));
+    let _key_listener =
+        use_listener::<CommandBarKey, _>(COMMAND_BAR_KEY_EVENT, move |key| palette_keys.apply(key));
+
+    let current_rows = rows();
+    let prompt_targets = current_rows.prompt_targets.clone();
+    let default_target = current_rows.default_target.clone();
+    let results = current_rows.items.clone();
+    let sel = current_rows.selected(selected());
     let active_item = results.get(sel).cloned();
     let nav = nav_mode();
-    let selected_agent_accent = default_agent_item
+    let selected_agent_accent = default_target
         .as_ref()
-        .and_then(agent_page_url)
+        .and_then(prompt_target_url)
         .and_then(|url| url.strip_prefix("vmux://agent/"))
         .and_then(|path| path.split('/').next())
         .filter(|agent| !agent.is_empty())
@@ -482,9 +625,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     let active_agent_accent = if nav {
         active_item.as_ref()
     } else {
-        default_agent_item.as_ref()
+        default_target.as_ref()
     }
-    .and_then(agent_page_url)
+    .and_then(prompt_target_url)
     .and_then(|url| url.strip_prefix("vmux://agent/"))
     .and_then(|path| path.split('/').next())
     .filter(|agent| !agent.is_empty())
@@ -522,65 +665,28 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         q.clone()
     };
 
-    let ghost_text = {
-        let q_trimmed = q.trim();
-        let completions = if completion_query(&q).is_some() {
-            path_completions()
-        } else {
-            Vec::new()
-        };
-        if let Some(first) = completions.first() {
-            let full = &first.full_path;
-            if full.to_lowercase().starts_with(&q_trimmed.to_lowercase())
-                && full.is_char_boundary(q_trimmed.len())
-            {
-                full[q_trimmed.len()..].to_string()
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        }
-    };
+    let ghost_text = current_rows.ghost.clone();
 
     use_effect(move || {
-        let s = selected();
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id(&format!("command-bar-item-{s}")))
-        {
-            let opts = web_sys::ScrollIntoViewOptions::new();
-            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            el.scroll_into_view_with_scroll_into_view_options(&opts);
-        }
+        ScrollIntoView::nearest(&format!("command-bar-item-{}", selected()));
     });
 
     use_effect(move || {
-        let selected = media_selected();
         let _ = media_entries.read().len();
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| {
-                document.get_element_by_id(&format!("prompt-media-item-{selected}"))
-            })
-        {
-            let options = web_sys::ScrollIntoViewOptions::new();
-            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            element.scroll_into_view_with_scroll_into_view_options(&options);
-        }
+        ScrollIntoView::nearest(&format!("prompt-media-item-{}", media_selected()));
     });
 
     let execute = move |item: &ResultItem| {
         let prompt = query();
         let transition = if is_start
-            && let Some(agent_url) = agent_page_url(item)
-            && crate::start::supports_inline_agent_transition(agent_url)
-            && let Some(handler) = on_start_agent_transition
+            && let Some(target_url) = prompt_target_url(item)
+            && crate::start::supports_inline_agent_transition(target_url)
+            && let Some(handler) = on_start_inline_transition
         {
             Some((
                 handler,
-                StartAgentTransition {
-                    agent_url: agent_url.to_string(),
+                StartInlineTransition {
+                    target_url: target_url.to_string(),
                     prompt: prompt.trim().to_string(),
                     attachments: attachments.peek().clone(),
                 },
@@ -589,15 +695,20 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             None
         };
         if matches!(variant, PaletteVariant::Start)
-            && (is_start_prompt_query(&prompt) || !attachments.peek().is_empty())
-            && let Some(agent_url) = agent_page_url(item)
+            && (CommandBarQuery(&prompt).is_start_prompt() || !attachments.peek().is_empty())
+            && let Some(target_url) = prompt_target_url(item)
         {
             on_close.call(());
             let selected_attachments = attachments.peek().clone();
-            if agent_page_matches_query(item, &prompt) && selected_attachments.is_empty() {
-                emit_action_with_target("open", agent_url, open_target);
+            if prompt_target_matches_query(item, &prompt) && selected_attachments.is_empty() {
+                emit_action_with_target("open", target_url, open_target);
             } else {
-                emit_prompt_action(prompt.trim(), open_target, agent_url, &selected_attachments);
+                emit_prompt_action(
+                    prompt.trim(),
+                    open_target,
+                    target_url,
+                    &selected_attachments,
+                );
             }
             if let Some((handler, next)) = transition {
                 handler.call(next);
@@ -685,16 +796,16 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         })
         .collect::<Vec<_>>();
     let start_action_enabled = !q.trim().is_empty() || !attachments.read().is_empty();
-    let selected_agent_title = default_agent_item
+    let selected_target_title = default_target
         .as_ref()
         .and_then(|item| match item {
             ResultItem::Page { title, .. } => Some(title.clone()),
             _ => None,
         })
         .unwrap_or_else(|| "Agent".to_string());
-    let selected_agent_url_value = default_agent_item
+    let selected_target_url = default_target
         .as_ref()
-        .and_then(agent_page_url)
+        .and_then(prompt_target_url)
         .unwrap_or_default()
         .to_string();
     let workspace_label = if prompt_context.workspace_name.is_empty() {
@@ -721,7 +832,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     title: "Choose agent",
                     onmousedown: move |event| event.prevent_default(),
                     onclick: move |_| {
-                        start_agent_menu_open.set(!start_agent_menu_open());
+                        target_menu_open.set(!target_menu_open());
                         focus_prompt_end(PROMPT_INPUT_ID);
                     },
                     svg {
@@ -735,7 +846,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         path { d: "M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 16l-1.7-5L6 9.3l4.3-1.7L12 3Z" }
                         path { d: "M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" }
                     }
-                    span { class: "truncate", "{selected_agent_title}" }
+                    span { class: "truncate", "{selected_target_title}" }
                     svg {
                         class: "h-3 w-3 shrink-0 opacity-50",
                         view_box: "0 0 24 24",
@@ -766,7 +877,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         title: if prompt_context.cwd.is_empty() { "Choose project" } else { "{prompt_context.cwd}" },
                         onmousedown: move |event| event.prevent_default(),
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&StartSelectWorkspace {
+                            let _ = send(&StartSelectWorkspace {
                                 current_dir: prompt_context.cwd.clone(),
                             });
                             focus_prompt_end(PROMPT_INPUT_ID);
@@ -819,14 +930,14 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             span { class: "flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[10px] text-muted-foreground",
-                span { class: "h-1.5 w-1.5 rounded-full bg-emerald-500" }
+                span { class: "h-1.5 w-1.5 rounded-full bg-success" }
                 "Ready"
             }
         }
     };
     let start_keydown_q = q.clone();
     let start_keydown_results = results.clone();
-    let start_keydown_default_agent = default_agent_item.clone();
+    let start_keydown_default_agent = default_target.clone();
     let start_keydown_nav = nav;
     let start_keydown_ghost = ghost_text.clone();
     let start_keydown = move |e: KeyboardEvent| {
@@ -862,14 +973,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 return;
             }
         }
-        let go_down = (e.key() == Key::ArrowDown && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-        let go_up = (e.key() == Key::ArrowUp && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
+        let direction = MenuDirection::of(&e);
+        let go_down = direction == Some(MenuDirection::Next);
+        let go_up = direction == Some(MenuDirection::Previous);
 
-        if start_agent_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
+        if target_menu_open() && (e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC)) {
             e.prevent_default();
-            start_agent_menu_open.set(false);
+            target_menu_open.set(false);
             return;
         }
 
@@ -935,7 +1045,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             } else if start_prompt_mode {
                 if let Some(item) = start_keydown_results.get(sel).filter(|item| {
                     start_keydown_nav
-                        || agent_page_matches_query(item, &start_keydown_q)
+                        || prompt_target_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
                             && crate::command_bar::results::terminal_matches_query(
                                 &start_keydown_q,
@@ -962,7 +1072,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             && url.starts_with(start_keydown_q.trim())
                 );
                 if !prefer_page
-                    && should_open_typed_query_on_enter(open_target, nav_mode(), &start_keydown_q)
+                    && CommandBarQuery(&start_keydown_q)
+                        .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
                     emit_action_with_target("open", &start_keydown_q, open_target);
@@ -976,34 +1087,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let modal_keydown_q = q.clone();
     let modal_keydown_results = results.clone();
-    let modal_keydown_ghost = ghost_text.clone();
     let modal_keydown = move |e: KeyboardEvent| {
-        if e.key() == Key::Tab {
-            e.prevent_default();
-            if !modal_keydown_ghost.is_empty() {
-                let new_value = format!("{}{}", modal_keydown_q, modal_keydown_ghost);
-                query.set(new_value.clone());
-                selected.set(0);
-                if let Some(element) = web_sys::window()
-                    .and_then(|window| window.document())
-                    .and_then(|document| document.get_element_by_id("command-bar-input"))
-                {
-                    let input: web_sys::HtmlInputElement = element.unchecked_into();
-                    input.set_value(&new_value);
-                    let len = new_value.len() as u32;
-                    let _ = input.set_selection_range(len, len);
-                    ensure_caret_visible(&input, new_value.len());
-                }
-            }
-            return;
-        }
-
         let ctrl = e.modifiers().contains(Modifiers::CONTROL);
-        let vmux_synthetic = is_vmux_synthetic_dioxus_keydown(&e);
-        if ctrl && ignore_physical_rerouted_ctrl_keydown(&e.code().to_string(), vmux_synthetic) {
-            e.prevent_default();
-            return;
-        }
         if space_switch
             && !ctrl
             && modal_keydown_q.trim().is_empty()
@@ -1025,22 +1110,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 return;
             }
         }
-        let go_down = (e.key() == Key::ArrowDown && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyN | Code::KeyJ));
-        let go_up = (e.key() == Key::ArrowUp && !ctrl)
-            || (ctrl && matches!(e.code(), Code::KeyP | Code::KeyK));
-        if go_down {
-            e.prevent_default();
-            let max = modal_keydown_results.len().saturating_sub(1);
-            selected.set((sel + 1).min(max));
-            nav_mode.set(true);
-        } else if go_up {
-            e.prevent_default();
-            selected.set(sel.saturating_sub(1));
-            nav_mode.set(true);
-        } else if e.key() == Key::Escape || (ctrl && e.code() == Code::KeyC) {
-            on_dismiss.call(());
-        } else if e.key() == Key::Enter {
+        if e.key() == Key::Enter {
             if space_switch {
                 if let Some(item) = modal_keydown_results.get(sel) {
                     execute(item);
@@ -1053,7 +1123,8 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             && url.starts_with(modal_keydown_q.trim())
                 );
                 if !prefer_page
-                    && should_open_typed_query_on_enter(open_target, nav_mode(), &modal_keydown_q)
+                    && CommandBarQuery(&modal_keydown_q)
+                        .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
                     emit_action_with_target("open", &modal_keydown_q, open_target);
@@ -1063,7 +1134,9 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     emit_action_with_target("open", &modal_keydown_q, open_target);
                 }
             }
+            return;
         }
+        keys.on_keydown(&e, |_| false);
     };
 
     rsx! {
@@ -1075,25 +1148,25 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 }
             }
             if is_start {
-                if start_agent_menu_open() {
+                if target_menu_open() {
                     PromptPopup {
                         placement: PromptPopupPlacement::Downward,
                         id: "start-agent-selector",
                         div { class: "p-1.5",
                             div { class: "px-2 pb-1 pt-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/60", "Agent" }
-                            for item in start_agent_items.iter() {
+                            for item in prompt_targets.iter() {
                                 if let ResultItem::Page { url, title, .. } = item {
                                     {
                                         let option_url = url.clone();
-                                        let option_selected = url == &selected_agent_url_value;
+                                        let option_selected = url == &selected_target_url;
                                         rsx! {
                                             button {
                                                 key: "{url}",
                                                 class: if option_selected { "flex w-full items-center gap-2 rounded-xl bg-foreground/[0.08] px-2.5 py-2 text-left text-sm text-foreground" } else { "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm text-foreground/75 transition hover:bg-foreground/[0.06] hover:text-foreground" },
                                                 onmousedown: move |event| event.prevent_default(),
                                                 onclick: move |_| {
-                                                    start_agent_url.set(option_url.clone());
-                                                    start_agent_menu_open.set(false);
+                                                    start_target_url.set(option_url.clone());
+                                                    target_menu_open.set(false);
                                                     selected.set(0);
                                                     nav_mode.set(false);
                                                     focus_prompt_end(PROMPT_INPUT_ID);
@@ -1102,7 +1175,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                                 span { class: "min-w-0 flex-1 truncate", "{title}" }
                                                 if option_selected {
                                                     svg {
-                                                        class: "h-3.5 w-3.5 shrink-0 text-emerald-500",
+                                                        class: "h-3.5 w-3.5 shrink-0 text-success",
                                                         view_box: "0 0 24 24",
                                                         fill: "none",
                                                         stroke: "currentColor",
@@ -1133,17 +1206,17 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     action_title: translate("command-send"),
                     action_enabled: start_action_enabled,
                     on_input: move |value| {
-                        start_agent_menu_open.set(false);
+                        target_menu_open.set(false);
                         query.set(value);
                         selected.set(0);
                         nav_mode.set(false);
                     },
                     on_keydown: start_keydown,
                     on_paste: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&ChatPasteMedia);
+                        let _ = send(&ChatPasteMedia);
                     },
                     on_attach: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&ChatPickFiles);
+                        let _ = send(&ChatPickFiles);
                     },
                     on_remove_attachment: move |index| {
                         let mut next = attachments.peek().clone();
@@ -1155,13 +1228,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     on_action: {
                         let action_results = results.clone();
                         let action_query = q.clone();
-                        let action_default_agent = default_agent_item.clone();
+                        let action_default_agent = default_target.clone();
                         let action_nav = nav;
                         move |_| {
                             if let Some(item) = action_results.get(sel).filter(|item| {
                                 !start_prompt_mode
                                     || action_nav
-                                    || agent_page_matches_query(item, &action_query)
+                                    || prompt_target_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
                                         && crate::command_bar::results::terminal_matches_query(&action_query))
                             }) {
@@ -1286,7 +1359,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                             onclick: move |event| {
                                 event.prevent_default();
                                 event.stop_propagation();
-                                let _ = try_cef_bin_emit_rkyv(&crate::event::BookmarksCommandEvent {
+                                let _ = send(&crate::event::BookmarksCommandEvent {
                                     command: "toggle_active".into(),
                                     uuid: None,
                                     name: None,
@@ -1302,7 +1375,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !start_agent_menu_open() && media_menu_open {
+            if !target_menu_open() && media_menu_open {
                 PromptPopup {
                     placement: PromptPopupPlacement::Downward,
                     id: "command-bar-results",
@@ -1321,252 +1394,29 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     }
                 }
             }
-            if !start_agent_menu_open() && !media_menu_open && !results.is_empty() {
+            if !target_menu_open() && !media_menu_open && !results.is_empty() {
                 PromptPopup {
                     placement: if is_start { PromptPopupPlacement::Downward } else { PromptPopupPlacement::Inline },
                     id: "command-bar-results",
                     class: if is_start { "" } else { result_list_class() },
                 for (i, item) in results.iter().enumerate() {
-                    div {
+                    ResultRow {
                         key: "{i}",
-                        id: "command-bar-item-{i}",
-                        class: result_item_class(i == sel),
-                        onclick: {
+                        index: i,
+                        item: item.clone(),
+                        selected: i == sel,
+                        on_activate: {
                             let item = item.clone();
                             move |_| { execute(&item); }
                         },
-                        onmouseenter: move |_| {
+                        space_switch,
+                        start_prompt_mode,
+                        query: q.clone(),
+                        on_hover: move |_| {
                             if is_start {
                                 selected.set(i);
                             }
                         },
-                        match item {
-                            ResultItem::Terminal { path } => rsx! {
-                                div { class: result_content_row_class(),
-                                    span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
-                                    if path.is_empty() {
-                                        span { class: "text-sm text-foreground", {translate("command-terminal")} }
-                                    } else {
-                                        span { class: "shrink-0 text-sm text-foreground", {translate("command-open-terminal")} }
-                                        span { class: result_terminal_path_class(), "{path}" }
-                                    }
-                                }
-                                span { class: result_trailing_slot_class() }
-                            },
-                            ResultItem::Stack { title, url, icon, location, .. } => rsx! {
-                                div { class: result_content_row_class(),
-                                    PageIconView {
-                                        icon: icon.clone(),
-                                        url: url.clone(),
-                                        img_class: result_favicon_class().to_string(),
-                                        icon_class: result_leading_icon_class().to_string(),
-                                    }
-                                    div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        span { class: result_primary_text_class(), "{title}" }
-                                        span { class: result_secondary_text_class(), "{url}" }
-                                    }
-                                }
-                                span {
-                                    class: result_location_class(),
-                                    title: "{location}",
-                                    if location.is_empty() { {translate("command-stack")} } else { "{location}" }
-                                }
-                            },
-                            ResultItem::Space { name, profile, is_active, tab_count, .. } => rsx! {
-                                if space_switch {
-                                    span { class: "w-5 shrink-0 text-center font-mono text-xs text-muted-foreground", "{i}" }
-                                }
-                                div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                    div { class: "flex min-w-0 items-center gap-2",
-                                        span { class: result_primary_text_class(), "{name}" }
-                                        if *is_active {
-                                            span { class: "rounded-full bg-blue-500/15 px-2 py-0.5 text-xs text-blue-300", {translate("common-active")} }
-                                        }
-                                    }
-                                    span { class: result_secondary_text_class(), "{profile}" }
-                                }
-                                span { class: result_trailing_slot_class(), {translate_with("command-tabs", &[("count", TranslationValue::Number(*tab_count as i64))])} }
-                            },
-                            ResultItem::Command { name, shortcut, .. } => rsx! {
-                                div { class: result_content_row_class(),
-                                    span { class: "shrink-0 text-sm text-muted-foreground", ">_" }
-                                    span { class: result_primary_text_class(), "{name}" }
-                                }
-                                span { class: result_trailing_slot_class(),
-                                    if !shortcut.is_empty() {
-                                        span { class: result_shortcut_badge_class(), "{shortcut}" }
-                                    }
-                                }
-                            },
-                            ResultItem::History { url, title, favicon_url, .. } => rsx! {
-                                div { class: result_content_row_class(),
-                                    Favicon {
-                                        favicon_url: favicon_url.clone(),
-                                        url: url.clone(),
-                                        class: result_favicon_class().to_string(),
-                                        globe_class: result_leading_icon_class().to_string(),
-                                    }
-                                    span { class: "min-w-0 flex-1 truncate text-sm text-foreground",
-                                        if title.is_empty() { "{url}" } else { "{title}" }
-                                    }
-                                    span { class: result_history_url_class(), "{url}" }
-                                }
-                                span { class: result_trailing_slot_class() }
-                            },
-                            ResultItem::Page { url, title, icon, shortcut } => rsx! {
-                                div { class: result_content_row_class(),
-                                    PageIconView {
-                                        icon: icon.clone(),
-                                        url: url.clone(),
-                                        img_class: result_favicon_class().to_string(),
-                                        icon_class: result_leading_icon_class().to_string(),
-                                    }
-                                    div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                        if start_prompt_mode
-                                            && agent_page_url(item).is_some()
-                                            && !agent_page_matches_query(item, &q)
-                                        {
-                                            span { class: result_primary_text_class(), "Ask {title}" }
-                                        } else {
-                                            span { class: result_primary_text_class(), "{title}" }
-                                            span { class: result_secondary_text_class(), "{url}" }
-                                        }
-                                    }
-                                }
-                                span { class: result_trailing_slot_class(),
-                                    if start_prompt_mode
-                                        && agent_page_url(item).is_some()
-                                        && !agent_page_matches_query(item, &q)
-                                    {
-                                        {translate("command-prompt")}
-                                    } else if shortcut.is_empty() {
-                                        {translate("command-new-tab")}
-                                    } else {
-                                        span { class: result_shortcut_badge_class(), "{shortcut}" }
-                                    }
-                                }
-                            },
-                            ResultItem::Navigate { url } => rsx! {
-                                div { class: result_content_row_class(),
-                                    Icon { class: result_leading_icon_class(),
-                                        circle { cx: "11", cy: "11", r: "8" }
-                                        path { d: "m21 21-4.3-4.3" }
-                                    }
-                                    if url.is_empty() {
-                                        span { class: "text-sm text-foreground", {translate("command-search")} }
-                                    } else if looks_like_url(url) {
-                                        span { class: result_primary_text_class(), {translate_with("command-open-value", &[("value", TranslationValue::String(url))])} }
-                                    } else {
-                                        span { class: result_primary_text_class(), {translate_with("command-search-value", &[("value", TranslationValue::String(url))])} }
-                                    }
-                                }
-                                if !url.is_empty() {
-                                    span { class: result_trailing_slot_class(), "\u{21b5}" }
-                                } else {
-                                    span { class: result_trailing_slot_class() }
-                                }
-                            },
-                            ResultItem::Search { engine, query } => rsx! {
-                                div { class: result_content_row_class(),
-                                    Favicon {
-                                        favicon_url: String::new(),
-                                        url: engine.search_url(query),
-                                        class: result_favicon_class().to_string(),
-                                        globe_class: result_leading_icon_class().to_string(),
-                                    }
-                                    span { class: result_primary_text_class(), "Search with {engine.name()}" }
-                                }
-                                span { class: result_trailing_slot_class(), "\u{21b5}" }
-                            },
-                            ResultItem::File { path, is_dir } => {
-                                let name = path
-                                    .trim_end_matches('/')
-                                    .rsplit('/')
-                                    .next()
-                                    .unwrap_or(path.as_str())
-                                    .to_string();
-                                rsx! {
-                                    div { class: result_content_row_class(),
-                                        if *is_dir {
-                                            Icon { class: result_leading_icon_class(),
-                                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                            }
-                                        } else {
-                                            Icon { class: result_leading_icon_class(),
-                                                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                                                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                                            }
-                                        }
-                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: result_primary_text_class(), "{name}" }
-                                            span { class: result_secondary_text_class(), "{path}" }
-                                        }
-                                    }
-                                    if *is_dir {
-                                        span { class: result_trailing_slot_class() }
-                                    } else {
-                                        span { class: result_trailing_slot_class(), "\u{21b5}" }
-                                    }
-                                }
-                            },
-                            ResultItem::WorkDir { path, is_dir } => {
-                                let name = path
-                                    .trim_end_matches('/')
-                                    .rsplit('/')
-                                    .next()
-                                    .unwrap_or(path.as_str())
-                                    .to_string();
-                                rsx! {
-                                    div { class: result_content_row_class(),
-                                        if *is_dir {
-                                            Icon { class: result_leading_icon_class(),
-                                                path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
-                                            }
-                                        } else {
-                                            Icon { class: result_leading_icon_class(),
-                                                path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                                                path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                                            }
-                                        }
-                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: result_primary_text_class(), "{name}" }
-                                            span { class: result_secondary_text_class(), "{path}" }
-                                        }
-                                    }
-                                    if *is_dir {
-                                        span { class: result_trailing_slot_class() }
-                                    } else {
-                                        span { class: result_trailing_slot_class(), "\u{21b5}" }
-                                    }
-                                }
-                            },
-                            ResultItem::RecentFile { url, title } => {
-                                let display = url.strip_prefix("file://").unwrap_or(url.as_str()).to_string();
-                                let name = if title.is_empty() {
-                                    display
-                                        .trim_end_matches('/')
-                                        .rsplit('/')
-                                        .next()
-                                        .unwrap_or(display.as_str())
-                                        .to_string()
-                                } else {
-                                    title.clone()
-                                };
-                                rsx! {
-                                    div { class: result_content_row_class(),
-                                        Icon { class: result_leading_icon_class(),
-                                            path { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }
-                                            path { d: "M14 2v4a2 2 0 0 0 2 2h4" }
-                                        }
-                                        div { class: "flex min-w-0 flex-1 flex-col overflow-hidden",
-                                            span { class: result_primary_text_class(), "{name}" }
-                                            span { class: result_secondary_text_class(), "{display}" }
-                                        }
-                                    }
-                                    span { class: result_trailing_slot_class(), "\u{21b5}" }
-                                }
-                            },
-                        }
                     }
                 }
                 }
@@ -1618,11 +1468,11 @@ fn select_start_media_entry(
     let Some(media_query) = inline_media_query(&value) else {
         return;
     };
-    let reference = media_reference(entry);
+    let reference = entry.reference();
     let replacement = if entry.is_dir {
         format!("@{reference}/")
     } else {
-        if try_cef_bin_emit_rkyv(&ChatAttachPaths {
+        if send(&ChatAttachPaths {
             paths: vec![entry.path.clone()],
         })
         .is_err()
@@ -1647,11 +1497,11 @@ pub(crate) fn emit_action(action: &str, value: &str) {
 
 /// Emit a [`CommandBarActionEvent`] to the host (open / command / space / terminal / switch_tab).
 pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<OpenTarget>) {
-    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
+    let _ = send(&CommandBarActionEvent {
         action: action.to_string(),
         value: value.to_string(),
         target,
-        agent_url: None,
+        target_url: None,
         attachments: Vec::new(),
     });
 }
@@ -1659,14 +1509,14 @@ pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<
 fn emit_prompt_action(
     value: &str,
     target: Option<OpenTarget>,
-    agent_url: &str,
+    target_url: &str,
     attachments: &[ChatAttachment],
 ) {
-    let _ = try_cef_bin_emit_rkyv(&CommandBarActionEvent {
+    let _ = send(&CommandBarActionEvent {
         action: "prompt".to_string(),
         value: value.to_string(),
         target,
-        agent_url: (!agent_url.is_empty()).then(|| agent_url.to_string()),
+        target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
         attachments: attachments
             .iter()
             .map(
@@ -1682,56 +1532,6 @@ fn emit_prompt_action(
 }
 
 const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
-const COMMAND_BAR_FOCUS_PENDING: &str = "_commandBarFocusPending";
-
-fn set_command_bar_focus_pending(window: &web_sys::Window, pending: bool) {
-    let _ = js_sys::Reflect::set(
-        window,
-        &JsValue::from_str(COMMAND_BAR_FOCUS_PENDING),
-        &JsValue::from_bool(pending),
-    );
-}
-
-/// Whether the input genuinely holds focus now, re-asserting `focus()` when it does not.
-fn try_focus_command_bar_input_once() -> bool {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return true;
-    };
-    let Some(el) = document.get_element_by_id(COMMAND_BAR_INPUT_ID) else {
-        return false;
-    };
-    let active_is_input = document
-        .active_element()
-        .map(|a| a.id() == COMMAND_BAR_INPUT_ID)
-        .unwrap_or(false);
-    if !active_is_input {
-        let input: web_sys::HtmlInputElement = el.unchecked_into();
-        input.focus().ok();
-    }
-    document.has_focus().unwrap_or(false)
-        && document
-            .active_element()
-            .map(|active| active.id() == COMMAND_BAR_INPUT_ID)
-            .unwrap_or(false)
-}
-
-/// Keep asking for focus until the document actually holds it.
-fn focus_command_bar_input_retry(window: web_sys::Window, frames_left: u32) {
-    let retry_window = window.clone();
-    let cb = Closure::once(move || {
-        if !try_focus_command_bar_input_once() && frames_left > 1 {
-            focus_command_bar_input_retry(retry_window, frames_left - 1);
-        } else {
-            set_command_bar_focus_pending(&retry_window, false);
-        }
-    });
-    match window
-        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 16)
-    {
-        Ok(_) => cb.forget(),
-        Err(_) => set_command_bar_focus_pending(&window, false),
-    }
-}
 
 fn focus_and_install_ctrl_bindings() {
     let Some(window) = web_sys::window() else {
@@ -1744,15 +1544,8 @@ fn focus_and_install_ctrl_bindings() {
         return;
     };
     let input: web_sys::HtmlInputElement = el.unchecked_into();
-    input.focus().ok();
-    select_all_on_open(&input);
-    let pending = js_sys::Reflect::get(&window, &JsValue::from_str(COMMAND_BAR_FOCUS_PENDING))
-        .map(|v| v.is_truthy())
-        .unwrap_or(false);
-    if !pending {
-        set_command_bar_focus_pending(&window, true);
-        focus_command_bar_input_retry(window, 90);
-    }
+    FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
 
     if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
         .map(|v| v.is_truthy())
@@ -1764,123 +1557,23 @@ fn focus_and_install_ctrl_bindings() {
 
     let input2 = input.clone();
     let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
-        if handle_plain_meta_a(&e, &input2) {
+        if handle_plain_meta_a(&e) {
             return;
         }
         if !e.ctrl_key() {
             return;
         }
-        if is_vmux_synthetic_keydown(&e) {
-            return;
-        }
-        let code = e.code();
-        let action = match ctrl_key_capture_for_code(&code) {
+        let action = match ctrl_key_capture_for_code(&e.code()) {
             CtrlKeyCapture::Ignore => return,
             CtrlKeyCapture::PassToDioxus => {
                 e.prevent_default();
-                return;
-            }
-            CtrlKeyCapture::RerouteToDioxus => {
-                e.prevent_default();
-                e.stop_immediate_propagation();
-                dispatch_ctrl_keydown(&input2, &code);
                 return;
             }
             CtrlKeyCapture::Edit(action) => action,
         };
         e.prevent_default();
         e.stop_immediate_propagation();
-
-        match action {
-            CtrlEditAction::Home => {
-                let _ = input2.set_selection_range(0, 0);
-                ensure_caret_visible(&input2, 0);
-            }
-            CtrlEditAction::End => {
-                let ghost = input2.get_attribute("data-ghost").unwrap_or_default();
-                if !ghost.is_empty() {
-                    let new_val = format!("{}{}", input2.value(), ghost);
-                    input2.set_value(&new_val);
-                    let len = new_val.len() as u32;
-                    let _ = input2.set_selection_range(len, len);
-                    dispatch_input_event(&input2);
-                    ensure_caret_visible(&input2, new_val.len());
-                } else {
-                    let len = input2.value().len();
-                    let _ = input2.set_selection_range(len as u32, len as u32);
-                    ensure_caret_visible(&input2, len);
-                }
-            }
-            CtrlEditAction::Forward => {
-                let value = input2.value();
-                let max = value.encode_utf16().count() as u32;
-                let p = (input2.selection_start().unwrap_or(Some(0)).unwrap_or(0) + 1).min(max);
-                let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
-            }
-            CtrlEditAction::Back => {
-                let value = input2.value();
-                let p = input2
-                    .selection_start()
-                    .unwrap_or(Some(0))
-                    .unwrap_or(0)
-                    .saturating_sub(1);
-                let _ = input2.set_selection_range(p, p);
-                ensure_caret_visible(&input2, utf16_offset_to_byte(&value, p));
-            }
-            CtrlEditAction::Delete => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                let end = v[s..].chars().next().map(|c| s + c.len_utf8()).unwrap_or(s);
-                let new_val = format!("{}{}", &v[..s], &v[end..]);
-                input2.set_value(&new_val);
-                let _ = input2.set_selection_range(s as u32, s as u32);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, s);
-            }
-            CtrlEditAction::Backspace => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                if s > 0 {
-                    let prev = v[..s]
-                        .chars()
-                        .next_back()
-                        .map(|c| s - c.len_utf8())
-                        .unwrap_or(0);
-                    let new_val = format!("{}{}", &v[..prev], &v[s..]);
-                    input2.set_value(&new_val);
-                    let _ = input2.set_selection_range(prev as u32, prev as u32);
-                    dispatch_input_event(&input2);
-                    ensure_caret_visible(&input2, prev);
-                }
-            }
-            CtrlEditAction::DeleteWord => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                let bytes = v.as_bytes();
-                let mut i = s.saturating_sub(1);
-                while i > 0 && bytes[i - 1] == b' ' {
-                    i -= 1;
-                }
-                while i > 0 && bytes[i - 1] != b' ' {
-                    i -= 1;
-                }
-                let i = floor_char_boundary(&v, i);
-                let new_val = format!("{}{}", &v[..i], &v[s..]);
-                input2.set_value(&new_val);
-                let _ = input2.set_selection_range(i as u32, i as u32);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, i);
-            }
-            CtrlEditAction::DeleteToBeginning => {
-                let v = input2.value();
-                let s = floor_char_boundary(&v, raw_selection_start(&input2));
-                input2.set_value(&v[s..]);
-                let _ = input2.set_selection_range(0, 0);
-                dispatch_input_event(&input2);
-                ensure_caret_visible(&input2, 0);
-            }
-        }
+        apply_ctrl_edit(&input2, action);
     }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
 
     let target: &web_sys::EventTarget = input.as_ref();
@@ -1894,31 +1587,45 @@ fn focus_and_install_ctrl_bindings() {
     closure.forget();
 }
 
+/// Run a readline edit against the input, then put the caret where it landed.
+///
+/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. What is left
+/// here is writing the value to the element and telling Dioxus afterwards, which is only
+/// necessary because the input is uncontrolled: Dioxus does not see a change it did not make.
+/// Both of those lines go away when it becomes controlled.
+fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
+    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
+    let value = input.value();
+    let ghost = match action {
+        CtrlEditAction::End => input.get_attribute("data-ghost").unwrap_or_default(),
+        _ => String::new(),
+    };
+
+    let edited = action.apply(&value, caret.position(), &ghost);
+    let changed = edited.value != value;
+    if changed {
+        input.set_value(&edited.value);
+    }
+    caret.place(edited.caret);
+    if changed {
+        dispatch_input_event(input);
+    }
+}
+
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
 /// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
-/// on the trigger (`#start-agent-selector-trigger`) are left alone. Installed once per document.
-fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let flag = JsValue::from_str("_startMenuClickOutsideBound");
-    if js_sys::Reflect::get(&document, &flag)
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let _ = js_sys::Reflect::set(&document, &flag, &JsValue::TRUE);
-
-    let closure = Closure::wrap(Box::new(move |e: web_sys::Event| {
+/// on the trigger (`#start-agent-selector-trigger`) are left alone.
+fn start_menu_click_outside(mut menu_open: Signal<bool>) -> Option<DocumentListener> {
+    DocumentListener::capture("mousedown", move |event| {
         if !menu_open() {
             return;
         }
-        let inside = e
+        let inside = event
             .target()
-            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-            .and_then(|el| {
-                el.closest("#start-agent-selector, #start-agent-selector-trigger")
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+            .and_then(|element| {
+                element
+                    .closest("#start-agent-selector, #start-agent-selector-trigger")
                     .ok()
                     .flatten()
             })
@@ -1926,164 +1633,18 @@ fn install_start_menu_click_outside(mut menu_open: Signal<bool>) {
         if !inside {
             menu_open.set(false);
         }
-    }) as Box<dyn FnMut(web_sys::Event)>);
-    let target: &web_sys::EventTarget = document.as_ref();
-    let opts = web_sys::AddEventListenerOptions::new();
-    opts.set_capture(true);
-    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
-        "mousedown",
-        closure.as_ref().unchecked_ref(),
-        &opts,
-    );
-    closure.forget();
+    })
 }
 
-/// Select the whole query one animation frame after open so Cmd+L reveals the current URL
-/// ready to overtype. The query signal is populated by a sibling effect that re-renders the
-/// input `value`; selecting synchronously here would catch the still-empty value and leave
-/// nothing highlighted.
-fn select_all_on_open(input: &web_sys::HtmlInputElement) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let input = input.clone();
-    let cb = Closure::once_into_js(move || {
-        input.focus().ok();
-        let len = input.value().len() as u32;
-        let _ = input.set_selection_range(0, len);
-        input.set_scroll_left(0);
-    });
-    let _ = window.request_animation_frame(cb.unchecked_ref());
-}
-
-/// Scroll the command-bar input so the caret at byte offset `caret` is visible. Programmatic
-/// caret moves (Ctrl+E/A/F/B, deletes, Tab-complete) bypass Chromium's native caret-follow,
-/// so on a long URL the caret would otherwise sit off-screen.
-fn ensure_caret_visible(input: &web_sys::HtmlInputElement, caret: usize) {
-    let value = input.value();
-    let caret = floor_char_boundary(&value, caret);
-    let Some((viewport, caret_px)) = caret_metrics(input, &value[..caret]) else {
-        return;
-    };
-    if let Some(scroll_left) =
-        caret_scroll_left(caret_px, viewport, input.scroll_left() as f64, 8.0)
-    {
-        input.set_scroll_left(scroll_left as i32);
-    }
-}
-
-/// The input's usable text viewport width and the pixel offset of `prefix` in the input's
-/// current font (measured on an offscreen canvas). `None` if the canvas/context or computed
-/// font is unavailable.
-fn caret_metrics(input: &web_sys::HtmlInputElement, prefix: &str) -> Option<(f64, f64)> {
-    let window = web_sys::window()?;
-    let document = window.document()?;
-    let style = window.get_computed_style(input).ok()??;
-    let font_size = style.get_property_value("font-size").unwrap_or_default();
-    let font_family = style.get_property_value("font-family").unwrap_or_default();
-    if font_size.is_empty() || font_family.is_empty() {
-        return None;
-    }
-    let font_weight = style.get_property_value("font-weight").unwrap_or_default();
-    let font_style = style.get_property_value("font-style").unwrap_or_default();
-    let canvas: web_sys::HtmlCanvasElement =
-        document.create_element("canvas").ok()?.unchecked_into();
-    let ctx: web_sys::CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
-    ctx.set_font(format!("{font_style} {font_weight} {font_size} {font_family}").trim());
-    let caret_px = ctx.measure_text(prefix).ok()?.width();
-    let pad_left = css_px(&style.get_property_value("padding-left").unwrap_or_default());
-    let pad_right = css_px(
-        &style
-            .get_property_value("padding-right")
-            .unwrap_or_default(),
-    );
-    let viewport = (input.client_width() as f64 - pad_left - pad_right).max(1.0);
-    caret_px.is_finite().then_some((viewport, caret_px))
-}
-
-/// Parse a computed `<n>px` length to `f64`, defaulting to `0.0`.
-fn css_px(value: &str) -> f64 {
-    value
-        .trim()
-        .strip_suffix("px")
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|v| v.is_finite())
-        .unwrap_or(0.0)
-}
-
-fn handle_plain_meta_a(e: &web_sys::KeyboardEvent, input: &web_sys::HtmlInputElement) -> bool {
+/// Cmd+A with no other modifier selects the query rather than the page.
+fn handle_plain_meta_a(e: &web_sys::KeyboardEvent) -> bool {
     if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
         return false;
     }
     e.prevent_default();
     e.stop_immediate_propagation();
-    let len = input.value().len() as u32;
-    let _ = input.set_selection_range(0, len);
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
-}
-
-fn is_vmux_synthetic_dioxus_keydown(e: &KeyboardEvent) -> bool {
-    e.data()
-        .downcast::<web_sys::KeyboardEvent>()
-        .map(is_vmux_synthetic_keydown)
-        .unwrap_or(false)
-}
-
-fn is_vmux_synthetic_keydown(e: &web_sys::KeyboardEvent) -> bool {
-    js_sys::Reflect::get(e.as_ref(), &JsValue::from_str("_vmuxSyntheticKeydown"))
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-}
-
-fn key_for_code(code: &str) -> &str {
-    match code {
-        "KeyA" => "a",
-        "KeyB" => "b",
-        "KeyC" => "c",
-        "KeyD" => "d",
-        "KeyE" => "e",
-        "KeyF" => "f",
-        "KeyH" => "h",
-        "KeyJ" => "j",
-        "KeyK" => "k",
-        "KeyN" => "n",
-        "KeyP" => "p",
-        "KeyU" => "u",
-        "KeyW" => "w",
-        _ => "",
-    }
-}
-
-fn dispatch_ctrl_keydown(el: &web_sys::HtmlInputElement, code: &str) {
-    let init = web_sys::KeyboardEventInit::new();
-    init.set_bubbles(true);
-    init.set_ctrl_key(true);
-    init.set_code(code);
-    init.set_key(key_for_code(code));
-    if let Ok(evt) = web_sys::KeyboardEvent::new_with_keyboard_event_init_dict("keydown", &init) {
-        let _ = js_sys::Reflect::set(
-            evt.as_ref(),
-            &JsValue::from_str("_vmuxSyntheticKeydown"),
-            &JsValue::TRUE,
-        );
-        let _ = el.dispatch_event(&evt);
-    }
-}
-
-/// Largest char boundary of `s` at or before `i`, so DOM text offsets never slice a
-/// UTF-8 string mid-character (which would panic the WASM UI on non-ASCII input).
-fn floor_char_boundary(s: &str, mut i: usize) -> usize {
-    if i >= s.len() {
-        return s.len();
-    }
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-fn raw_selection_start(input: &web_sys::HtmlInputElement) -> usize {
-    input.selection_start().unwrap_or(Some(0)).unwrap_or(0) as usize
 }
 
 /// Dispatch a synthetic "input" event so Dioxus picks up value changes.

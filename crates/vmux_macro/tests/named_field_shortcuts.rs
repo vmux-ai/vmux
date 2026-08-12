@@ -19,6 +19,22 @@ mod shortcut {
         Direct(KeyCombo),
         Chord(KeyCombo, KeyCombo),
     }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct When(pub Vec<String>);
+
+    impl When {
+        pub fn parse(text: &str) -> Option<Self> {
+            (!text.is_empty()).then(|| Self(vec![text.to_string()]))
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Binding {
+        pub shortcut: Shortcut,
+        pub command: String,
+        pub when: Option<When>,
+    }
 }
 
 use vmux_macro::{DefaultShortcuts, OsSubMenu};

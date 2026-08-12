@@ -7,10 +7,9 @@ use crate::event::{
 };
 use dioxus::prelude::*;
 use vmux_ui::favicon::Favicon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
+use vmux_ui::platform::now_millis;
 
 fn emit_query(query: &str, offset: u32, request_id: u64) {
     let req = HistoryQueryRequest {
@@ -23,15 +22,12 @@ fn emit_query(query: &str, offset: u32, request_id: u64) {
         limit: 50,
         request_id,
     };
-    let _ = try_cef_bin_emit_rkyv(&req);
+    let _ = send(&req);
 }
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("history-title"));
-    }
     let mut entries: Signal<Vec<HistoryEntry>> = use_signal(Vec::new);
     let mut query: Signal<String> = use_signal(String::new);
     let mut offset: Signal<u32> = use_signal(|| 0);
@@ -39,7 +35,7 @@ pub fn Page() -> Element {
     let mut request_id: Signal<u64> = use_signal(|| 0);
     let mut last_reset_id: Signal<u64> = use_signal(|| 0);
 
-    let _listener = use_bin_event_listener::<HistoryQueryResponse, _>(
+    let _listener = use_listener::<HistoryQueryResponse, _>(
         HISTORY_QUERY_RESPONSE_EVENT,
         move |resp: HistoryQueryResponse| {
             if resp.request_id < *last_reset_id.read() {
@@ -60,7 +56,7 @@ pub fn Page() -> Element {
         emit_query("", 0, 1);
     });
 
-    let _changed_listener = use_bin_event_listener::<HistoryChangedEvent, _>(
+    let _changed_listener = use_listener::<HistoryChangedEvent, _>(
         HISTORY_CHANGED_EVENT,
         move |_: HistoryChangedEvent| {
             let new_id = *request_id.peek() + 1;
@@ -72,40 +68,19 @@ pub fn Page() -> Element {
         },
     );
 
-    use_effect(move || {
-        let load_more =
-            Closure::<dyn FnMut(js_sys::Array)>::new(move |entries_arr: js_sys::Array| {
-                if entries_arr.length() == 0 {
-                    return;
-                }
-                let entry: web_sys::IntersectionObserverEntry =
-                    entries_arr.get(0).dyn_into().unwrap();
-                if !entry.is_intersecting() {
-                    return;
-                }
-                if !*has_more.read() {
-                    return;
-                }
-                if entries.read().is_empty() {
-                    return;
-                }
-                let new_offset = *offset.read() + 50;
-                offset.set(new_offset);
-                let new_id = *request_id.read() + 1;
-                request_id.set(new_id);
-                emit_query(&query.read(), new_offset, new_id);
-            });
-
-        let window = web_sys::window().expect("window");
-        let document = window.document().expect("document");
-        if let Some(target) = document.get_element_by_id("infinite-scroll-sentinel") {
-            let cb: &js_sys::Function = load_more.as_ref().unchecked_ref();
-            if let Ok(observer) = web_sys::IntersectionObserver::new(cb) {
-                observer.observe(&target);
-                load_more.forget();
-            }
+    let load_more = move |e: Event<VisibleData>| {
+        if !e.is_intersecting().unwrap_or(false) {
+            return;
         }
-    });
+        if !*has_more.read() || entries.read().is_empty() {
+            return;
+        }
+        let new_offset = *offset.read() + 50;
+        offset.set(new_offset);
+        let new_id = *request_id.read() + 1;
+        request_id.set(new_id);
+        emit_query(&query.read(), new_offset, new_id);
+    };
 
     let mut confirm_open: Signal<bool> = use_signal(|| false);
 
@@ -118,9 +93,10 @@ pub fn Page() -> Element {
         emit_query(&query.read(), 0, new_id);
     };
 
-    let groups = group_by_day(&entries.read());
+    let groups = group_by_day(&entries.read(), now_millis());
 
     rsx! {
+        document::Title { {translate("history-title")} }
         div { class: "flex flex-col h-screen bg-background text-foreground",
             header { class: "p-3 border-b border-border flex gap-2 items-center",
                 input {
@@ -144,7 +120,7 @@ pub fn Page() -> Element {
                             onclick: {
                                 let url = entry.url.clone();
                                 move |_| {
-                                    let _ = try_cef_bin_emit_rkyv(&HistoryOpenRequest {
+                                    let _ = send(&HistoryOpenRequest {
                                         url: url.clone(),
                                         in_new_stack: true,
                                     });
@@ -166,7 +142,7 @@ pub fn Page() -> Element {
                                     let url_bits = entry.url_entity_bits;
                                     move |e: Event<MouseData>| {
                                         e.stop_propagation();
-                                        let _ = try_cef_bin_emit_rkyv(&HistoryDeleteRequest { url_entity_bits: url_bits });
+                                        let _ = send(&HistoryDeleteRequest { url_entity_bits: url_bits });
                                         entries.write().retain(|x| x.url_entity_bits != url_bits);
                                     }
                                 },
@@ -175,7 +151,7 @@ pub fn Page() -> Element {
                         }
                     }
                 }
-                div { id: "infinite-scroll-sentinel", class: "h-4" }
+                div { class: "h-4", onvisible: load_more }
             }
         }
         if *confirm_open.read() {
@@ -192,7 +168,7 @@ pub fn Page() -> Element {
                         button {
                             class: "px-3 py-1 text-sm bg-destructive text-destructive-foreground rounded",
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&HistoryClearAllRequest);
+                                let _ = send(&HistoryClearAllRequest);
                                 entries.write().clear();
                                 confirm_open.set(false);
                             },
@@ -205,10 +181,10 @@ pub fn Page() -> Element {
     }
 }
 
-fn group_by_day(entries: &[HistoryEntry]) -> Vec<(String, Vec<HistoryEntry>)> {
+fn group_by_day(entries: &[HistoryEntry], now_ms: i64) -> Vec<(String, Vec<HistoryEntry>)> {
     let mut out: Vec<(String, Vec<HistoryEntry>)> = Vec::new();
     let mut current_day: Option<i64> = None;
-    let now_day = now_millis_wasm() / 86_400_000;
+    let now_day = now_ms / 86_400_000;
     for e in entries {
         let day = e.visit_created_at / 86_400_000;
         if current_day != Some(day) {
@@ -230,10 +206,6 @@ fn group_by_day(entries: &[HistoryEntry]) -> Vec<(String, Vec<HistoryEntry>)> {
         out.last_mut().unwrap().1.push(e.clone());
     }
     out
-}
-
-fn now_millis_wasm() -> i64 {
-    js_sys::Date::now() as i64
 }
 
 fn format_time(ms: i64) -> String {

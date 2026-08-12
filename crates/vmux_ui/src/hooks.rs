@@ -1,12 +1,40 @@
-//! Dioxus hooks for CEF-embedded UIs (host emit, etc.).
+//! Dioxus hooks connecting a page to whatever hosts it.
+//!
+//! One hook per module, named after it, and nothing else — the platform seam they are built on is
+//! [`crate::transport`], the keystroke encoder is `crate::key_stroke` and the pure keyboard logic is
+//! [`crate::list_nav`]. Pages call the same hooks whichever frontend they are compiled for.
+//!
+//! The re-exports below keep `vmux_ui::hooks::*` resolving for pages that import the seam through
+//! here; new code should reach for the owning module.
 
-pub mod event_listener;
+mod use_event;
+#[cfg(web)]
+mod use_key_claim;
+mod use_listener;
+#[cfg(web)]
+mod use_mobile;
+mod use_selector;
 mod use_theme;
 
+pub use use_event::use_event;
+#[cfg(web)]
+pub use use_key_claim::{KeyClaim, use_key_claim};
+pub use use_listener::{BevyState, use_listener};
+#[cfg(web)]
+pub use use_mobile::use_mobile;
+pub use use_selector::use_selector;
+pub use use_theme::use_theme;
+
+pub use crate::transport;
 #[allow(unused_imports)]
-pub use event_listener::{
-    BevyState, EventListenerError, decode_bin_host_emit_js, try_cef_bin_emit_rkyv,
-    try_cef_bin_listen, try_emit_page_ready, use_bin_event_listener, use_event,
+pub use crate::transport::event_listener::{
+    EventListenerError, send, try_cef_bin_listen, try_emit_page_ready,
 };
 
-pub use use_theme::use_theme;
+#[cfg(web)]
+pub use crate::transport::cef::decode_bin_host_emit_js;
+
+#[cfg(web)]
+pub use crate::key_stroke::WebKey;
+
+pub use crate::list_nav::{MenuDirection, choice_number_index, move_selection};

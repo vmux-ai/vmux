@@ -12,9 +12,12 @@ bevy = ["dep:bevy_ecs", "dep:bevy_reflect"]
 [dependencies]
 rkyv = { workspace = true }
 serde = { workspace = true }
+unicode-segmentation = "1"
+vmux_macro = { path = "../vmux_macro" }
+url = { workspace = true }
 uuid = { workspace = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy_ecs = { workspace = true, optional = true }
 bevy_reflect = { workspace = true, optional = true }
 

@@ -11,6 +11,29 @@ use vmux_agent::{
 };
 use vmux_setting::AppSettings;
 
+/// Records the app for the agent: starts and stops captures, enforces the duration cap, and
+/// drains finished recordings back to the requester.
+pub(crate) struct RecordingPlugin;
+
+impl Plugin for RecordingPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<RecordingBridge>()
+            .init_resource::<RecordingStatus>()
+            .add_message::<RecordingControl>()
+            .add_systems(
+                Update,
+                (
+                    start_recording,
+                    handle_recording_control,
+                    auto_stop_recordings,
+                    drain_recordings,
+                )
+                    .chain()
+                    .after(vmux_command::WriteAppCommands),
+            );
+    }
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const GIF_FPS: u32 = 12;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -62,7 +85,7 @@ pub(crate) enum RecordingControl {
     Done,
 }
 
-pub(crate) fn handle_recording_control(
+fn handle_recording_control(
     _non_send: NonSendMarker,
     mut reader: MessageReader<RecordingControl>,
     mut status: ResMut<RecordingStatus>,
@@ -227,7 +250,7 @@ fn resolve_crop(
     None
 }
 
-pub(crate) fn start_recording(
+fn start_recording(
     _non_send: NonSendMarker,
     mut start_reader: MessageReader<RecordStartRequest>,
     mut stop_reader: MessageReader<RecordStopRequest>,
@@ -290,11 +313,11 @@ pub(crate) fn start_recording(
     }
 }
 
-pub(crate) fn auto_stop_recordings(_non_send: NonSendMarker) {
+fn auto_stop_recordings(_non_send: NonSendMarker) {
     capture::poll_auto_stop();
 }
 
-pub(crate) fn drain_recordings(
+fn drain_recordings(
     bridge: Res<RecordingBridge>,
     mut last_auto: Local<Option<RecordingInfo>>,
     mut status: ResMut<RecordingStatus>,

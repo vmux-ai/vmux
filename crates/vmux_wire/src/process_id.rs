@@ -1,10 +1,10 @@
-#[cfg(all(feature = "bevy", not(target_arch = "wasm32")))]
+#[cfg(bevy_linked)]
 use bevy_ecs::component::Component;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
-#[cfg_attr(all(feature = "bevy", not(target_arch = "wasm32")), derive(Component))]
+#[cfg_attr(bevy_linked, derive(Component))]
 pub struct ProcessId(pub [u8; 16]);
 
 impl Default for ProcessId {

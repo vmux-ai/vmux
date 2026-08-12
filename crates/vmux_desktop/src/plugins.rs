@@ -4,17 +4,13 @@
 //! `CefEmbeddedHosts` while it builds, so every group that registers a page — [`FeaturePlugins`]
 //! and `LayoutPlugin` — must be added before it.
 
-use bevy::app::PluginGroupBuilder;
-use bevy::prelude::*;
-use bevy_cef::prelude::{BinEventEmitterPlugin, JsEmitEventPlugin};
-use vmux_command::WriteAppCommands;
-use vmux_layout::event::RestartRequestEvent;
-
 use crate::{
     display::DisplayPlugin, os_menu::OsMenuPlugin, permission::PermissionsPlugin,
-    persistence::PersistencePlugin, runtime::RuntimePlugin, shortcut::ShortcutPlugin,
-    tools::ToolsPlugin, window_state::WindowStatePlugin,
+    persistence::PersistencePlugin, remote::RemotePlugin, runtime::RuntimePlugin,
+    shortcut::ShortcutPlugin, tools::ToolsPlugin, window_state::WindowStatePlugin,
 };
+use bevy::app::PluginGroupBuilder;
+use bevy::prelude::*;
 
 /// Foundation plugins: shared type registration, the page server, command routing, settings,
 /// and session persistence. Everything else assumes these are present.
@@ -32,7 +28,8 @@ impl PluginGroup for VmuxCorePlugins {
 }
 
 /// The OS-facing layer of the desktop app: window and display management, wake and render
-/// pacing, the native menu bar and tray, global shortcuts, permissions, and updates.
+/// pacing, the native menu bar and tray, global shortcuts, permissions, phone pairing, and
+/// updates.
 pub struct DesktopPlugins;
 
 impl PluginGroup for DesktopPlugins {
@@ -44,9 +41,14 @@ impl PluginGroup for DesktopPlugins {
             .add(PermissionsPlugin)
             .add(OsMenuPlugin)
             .add(ShortcutPlugin)
-            .add(NotificationPlugin)
             .add(MediaPlugin)
+            .add(RemotePlugin)
             .add(UpdaterPlugin);
+
+        #[cfg(feature = "native-notifications")]
+        {
+            builder = builder.add(crate::notify::NotificationPlugin);
+        }
 
         #[cfg(feature = "tray")]
         {
@@ -68,14 +70,12 @@ pub(crate) struct NativeWindowPlugin;
 
 impl Plugin for NativeWindowPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((WindowStatePlugin, DisplayPlugin))
-            .init_resource::<crate::boot_status::SplashStatus>()
-            .init_resource::<crate::boot_status::RestoreComplete>()
-            .add_systems(Startup, crate::appearance::seed_system_appearance)
-            .add_systems(
-                Update,
-                crate::boot_status::compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
-            );
+        app.add_plugins((
+            WindowStatePlugin,
+            DisplayPlugin,
+            crate::appearance::DesktopAppearancePlugin,
+            crate::boot_status::BootStatusPlugin,
+        ));
 
         #[cfg(all(target_os = "macos", feature = "native-glass"))]
         app.add_plugins((crate::glass::GlassPlugin, crate::splash::SplashPlugin));
@@ -89,48 +89,16 @@ struct MediaPlugin;
 impl Plugin for MediaPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "screenshots")]
-        app.init_resource::<crate::screenshot::ScreenshotBridge>()
-            .add_systems(
-                Update,
-                (
-                    crate::screenshot::start_screenshots,
-                    crate::screenshot::drain_screenshots,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            );
+        app.add_plugins(crate::screenshot::ScreenshotPlugin);
 
         #[cfg(not(feature = "screenshots"))]
-        app.add_systems(
-            Update,
-            crate::disabled_features::reject_screenshots.after(WriteAppCommands),
-        );
+        app.add_plugins(crate::disabled_features::ScreenshotsDisabledPlugin);
 
         #[cfg(feature = "recording")]
-        app.init_resource::<crate::recording::RecordingBridge>()
-            .init_resource::<crate::recording::RecordingStatus>()
-            .add_message::<crate::recording::RecordingControl>()
-            .add_systems(
-                Update,
-                (
-                    crate::recording::start_recording,
-                    crate::recording::handle_recording_control,
-                    crate::recording::auto_stop_recordings,
-                    crate::recording::drain_recordings,
-                )
-                    .chain()
-                    .after(WriteAppCommands),
-            );
+        app.add_plugins(crate::recording::RecordingPlugin);
 
         #[cfg(not(feature = "recording"))]
-        app.add_systems(
-            Update,
-            (
-                crate::disabled_features::reject_recording_starts,
-                crate::disabled_features::reject_recording_stops,
-            )
-                .after(WriteAppCommands),
-        );
+        app.add_plugins(crate::disabled_features::RecordingDisabledPlugin);
     }
 }
 
@@ -140,40 +108,28 @@ struct UpdaterPlugin;
 
 impl Plugin for UpdaterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(BinEventEmitterPlugin::<(RestartRequestEvent,)>::for_hosts(
-            &["debug", "extensions", "layout"],
-        ))
-        .add_plugins(JsEmitEventPlugin::<crate::relaunch::PageRelaunchRequest>::default())
-        .add_observer(crate::relaunch::on_restart_request)
-        .add_observer(crate::relaunch::on_page_relaunch);
+        app.add_plugins(crate::relaunch::RelaunchPlugin);
 
         #[cfg(feature = "updater")]
         app.add_plugins(crate::updater::VmuxUpdater::builder().build().plugin());
 
         #[cfg(not(feature = "updater"))]
-        app.add_systems(Startup, crate::disabled_features::mark_updater_unavailable)
-            .add_systems(Update, crate::disabled_features::reject_update_checks);
-    }
-}
-
-/// Posts OS notifications when the platform supports them. Authorization is requested by
-/// [`PermissionsPlugin`].
-struct NotificationPlugin;
-
-impl Plugin for NotificationPlugin {
-    fn build(&self, _app: &mut App) {
-        #[cfg(feature = "native-notifications")]
-        _app.add_systems(Update, crate::notify::post_os_notifications);
+        app.add_plugins(crate::disabled_features::UpdaterDisabledPlugin);
     }
 }
 
 /// The user-facing feature domains, each owned by its crate. Every plugin here may register
 /// pages, so the group must be added before `BrowserPlugin`.
+///
+/// `KeyStrokePlugin` comes first and is owned by no domain: keystrokes reach several of these
+/// crates, and registering the shared type once here is what stops two of them registering it and
+/// delivering every key twice.
 pub struct FeaturePlugins;
 
 impl PluginGroup for FeaturePlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(vmux_core::input::KeyStrokePlugin)
             .add(vmux_terminal::TerminalPlugin)
             .add(vmux_editor::EditorPlugin)
             .add(vmux_git::GitPlugin)

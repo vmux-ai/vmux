@@ -1,21 +1,9 @@
 use dioxus::prelude::*;
 use vmux_core::event::{MdBlock, MdInline, MdListItem, MdTableAlign};
-use vmux_ui::hooks::try_cef_bin_emit_rkyv;
+use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
 use crate::page_model::{heading_class, span_style, table_align_style};
-
-pub fn render_block(block: &MdBlock, key: usize) -> Element {
-    render_block_inner(block, key, false, None)
-}
-
-pub fn render_block_with_hidden_list_line(
-    block: &MdBlock,
-    key: usize,
-    hidden_line: u32,
-) -> Element {
-    render_block_inner(block, key, false, Some(hidden_line))
-}
 
 fn hidden_class(class: &'static str, hidden: bool) -> String {
     if hidden {
@@ -25,24 +13,40 @@ fn hidden_class(class: &'static str, hidden: bool) -> String {
     }
 }
 
-fn render_block_inner(
-    block: &MdBlock,
-    key: usize,
-    hidden: bool,
-    hidden_list_line: Option<u32>,
+/// One markdown block, recursing into the blocks and inlines it contains.
+///
+/// `hidden_list_line` blanks the source line the caret is editing, so the raw markdown shows
+/// through in its place without the rendered copy jumping.
+#[component]
+pub fn MdBlockView(
+    block: MdBlock,
+    block_key: usize,
+    #[props(default)] hidden: bool,
+    #[props(default)] hidden_list_line: Option<u32>,
 ) -> Element {
+    let key = block_key;
+    let block = &block;
     match block {
         MdBlock::Heading { level, inlines } => rsx! {
-            div { key: "{key}", class: hidden_class(heading_class(*level), hidden), {render_inlines(inlines)} }
+            div { key: "{key}", class: hidden_class(heading_class(*level), hidden), MdInlines { inlines: inlines.clone() } }
         },
         MdBlock::Paragraph { inlines } => rsx! {
-            p { key: "{key}", class: hidden_class("my-3", hidden), {render_inlines(inlines)} }
+            p { key: "{key}", class: hidden_class("my-3", hidden), MdInlines { inlines: inlines.clone() } }
         },
         MdBlock::List {
             ordered,
             start,
             items,
-        } => render_list(*ordered, *start, items, key, hidden, hidden_list_line),
+        } => rsx! {
+            MdList {
+                ordered: *ordered,
+                start: *start,
+                items: items.clone(),
+                list_key: key,
+                hidden,
+                hidden_list_line,
+            }
+        },
         MdBlock::CodeBlock { lines, .. } => rsx! {
             pre {
                 key: "{key}",
@@ -61,7 +65,7 @@ fn render_block_inner(
                 key: "{key}",
                 class: hidden_class("my-4 rounded-r-lg border-l-2 border-primary/50 bg-primary/[0.04] py-1 pl-4 pr-3 text-foreground/70", hidden),
                 for (index, block) in blocks.iter().enumerate() {
-                    {render_block_inner(block, index, hidden, hidden_list_line)}
+                    MdBlockView { block: block.clone(), block_key: index, hidden: hidden, hidden_list_line: hidden_list_line }
                 }
             }
         },
@@ -69,7 +73,15 @@ fn render_block_inner(
             aligns,
             header,
             rows,
-        } => render_table(aligns, header, rows, key, hidden),
+        } => rsx! {
+            MdTable {
+                aligns: aligns.clone(),
+                header: header.clone(),
+                rows: rows.clone(),
+                table_key: key,
+                hidden,
+            }
+        },
         MdBlock::ThematicBreak => rsx! {
             hr { key: "{key}", class: hidden_class("my-6 border-border", hidden) }
         },
@@ -79,14 +91,18 @@ fn render_block_inner(
     }
 }
 
-fn render_list(
+/// An ordered or bulleted list, whose items hold blocks of their own.
+#[component]
+fn MdList(
     ordered: bool,
     start: u64,
-    items: &[MdListItem],
-    key: usize,
+    items: Vec<MdListItem>,
+    list_key: usize,
     hidden: bool,
     hidden_list_line: Option<u32>,
 ) -> Element {
+    let key = list_key;
+    let items = items.as_slice();
     let inner = rsx! {
         for (index, item) in items.iter().enumerate() {
             {
@@ -105,7 +121,7 @@ fn render_list(
                     }
                 }
                 for (block_index, block) in item.blocks.iter().enumerate() {
-                    {render_block_inner(block, block_index, item_hidden, hidden_list_line)}
+                    MdBlockView { block: block.clone(), block_key: block_index, hidden: item_hidden, hidden_list_line: hidden_list_line }
                 }
             }
                 }
@@ -127,13 +143,19 @@ fn render_list(
     }
 }
 
-fn render_table(
-    aligns: &[MdTableAlign],
-    header: &[Vec<MdInline>],
-    rows: &[Vec<Vec<MdInline>>],
-    key: usize,
+/// A markdown table, with its per-column alignment.
+#[component]
+fn MdTable(
+    aligns: Vec<MdTableAlign>,
+    header: Vec<Vec<MdInline>>,
+    rows: Vec<Vec<Vec<MdInline>>>,
+    table_key: usize,
     hidden: bool,
 ) -> Element {
+    let key = table_key;
+    let aligns = aligns.as_slice();
+    let header = header.as_slice();
+    let rows = rows.as_slice();
     let col_style = |column: usize| {
         aligns
             .get(column)
@@ -151,7 +173,7 @@ fn render_table(
                                 key: "{column}",
                                 class: "border-b border-border px-3 py-2 font-semibold",
                                 style: col_style(column),
-                                {render_inlines(cell)}
+                                MdInlines { inlines: cell.clone() }
                             }
                         }
                     }
@@ -164,7 +186,7 @@ fn render_table(
                                     key: "{column}",
                                     class: "border-b border-border px-3 py-2",
                                     style: col_style(column),
-                                    {render_inlines(cell)}
+                                    MdInlines { inlines: cell.clone() }
                                 }
                             }
                         }
@@ -175,15 +197,21 @@ fn render_table(
     }
 }
 
-fn render_inlines(inlines: &[MdInline]) -> Element {
+/// A run of inline markdown nodes.
+#[component]
+fn MdInlines(inlines: Vec<MdInline>) -> Element {
     rsx! {
-        for (index, inline) in inlines.iter().enumerate() {
-            {render_inline(inline, index)}
+        for (index , inline) in inlines.iter().enumerate() {
+            MdInlineView { inline: inline.clone(), inline_key: index }
         }
     }
 }
 
-fn render_inline(inline: &MdInline, key: usize) -> Element {
+/// One inline markdown node, recursing into the nodes it wraps.
+#[component]
+fn MdInlineView(inline: MdInline, inline_key: usize) -> Element {
+    let key = inline_key;
+    let inline = &inline;
     match inline {
         MdInline::Text(text) => rsx! { span { key: "{key}", "{text}" } },
         MdInline::Code(text) => rsx! {
@@ -194,20 +222,20 @@ fn render_inline(inline: &MdInline, key: usize) -> Element {
             }
         },
         MdInline::Strong(inlines) => rsx! {
-            strong { key: "{key}", class: "font-semibold text-foreground", {render_inlines(inlines)} }
+            strong { key: "{key}", class: "font-semibold text-foreground", MdInlines { inlines: inlines.clone() } }
         },
         MdInline::Emph(inlines) => rsx! {
-            em { key: "{key}", class: "italic", {render_inlines(inlines)} }
+            em { key: "{key}", class: "italic", MdInlines { inlines: inlines.clone() } }
         },
         MdInline::Strike(inlines) => rsx! {
-            s { key: "{key}", class: "line-through opacity-70", {render_inlines(inlines)} }
+            s { key: "{key}", class: "line-through opacity-70", MdInlines { inlines: inlines.clone() } }
         },
         MdInline::Link { href, inlines } => rsx! {
             a {
                 key: "{key}",
                 href: "{href}",
                 class: "text-primary underline decoration-primary/40 hover:decoration-primary",
-                {render_inlines(inlines)}
+                MdInlines { inlines: inlines.clone() }
             }
         },
         MdInline::Image { src, alt } => rsx! {
@@ -244,7 +272,7 @@ fn render_inline(inline: &MdInline, key: usize) -> Element {
                     },
                     onclick: move |event: Event<MouseData>| {
                         event.stop_propagation();
-                        let _ = try_cef_bin_emit_rkyv(&vmux_core::event::KnowledgeLinkOpen {
+                        let _ = send(&vmux_core::event::KnowledgeLinkOpen {
                             path: open_path.clone(),
                             title: open_title.clone(),
                             line: open_line,

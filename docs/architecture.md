@@ -36,6 +36,10 @@ both humans and agents tile, persist, and reconcile in real time.
   agent spaces, and the workspace-as-an-API tool set.
 - **[Background Service](architecture/background-service.md)** — the launchd-supervised daemon
   that owns PTYs and agent sessions so work outlives the window.
+- **[Mobile Remote](architecture/mobile-remote.md)** — the native Dioxus Mobile app that
+  securely reconnects to agent sessions running on the Mac.
+- **[Topology](architecture/topology.md)** — one service and many clients, which transport carries
+  what, and how one page runs unchanged on any of them.
 - **[The layout model](architecture/layout-model.md)** — Space → Tab → Pane → Stack, the
   selection invariant, and structural persistence.
 - **[The render stack](architecture/render-stack.md)** — many CEF surfaces in one window,

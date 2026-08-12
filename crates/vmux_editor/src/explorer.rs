@@ -8,8 +8,8 @@ use std::path::Path;
 use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
-use vmux_ui::file_icon::type_icon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener};
+use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, closure::Closure};
 
@@ -54,34 +54,34 @@ struct ExplorerNotice {
 }
 
 fn open_file(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&FileOpenEvent { path });
+    let _ = send(&FileOpenEvent { path });
 }
 
 fn toggle_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreeToggle { path });
+    let _ = send(&ExplorerTreeToggle { path });
 }
 
 fn prefetch_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreePrefetch { path });
+    let _ = send(&ExplorerTreePrefetch { path });
 }
 
 fn refresh_dir(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerTreeRefresh { path });
+    let _ = send(&ExplorerTreeRefresh { path });
 }
 
 fn close_editor(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerCloseEditor { path });
+    let _ = send(&ExplorerCloseEditor { path });
 }
 
 fn goto_line(line: u32) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerGoto {
+    let _ = send(&ExplorerGoto {
         path: String::new(),
         line,
     });
 }
 
 fn open_search_match(result: ExplorerSearchMatch) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerSearchOpen {
+    let _ = send(&ExplorerSearchOpen {
         path: result.path,
         line: result.line,
         col: result.col,
@@ -98,7 +98,7 @@ fn search_result_path(root: &str, path: &str) -> String {
 }
 
 fn create_entry(parent: String, name: String, is_dir: bool) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerCreate {
+    let _ = send(&ExplorerCreate {
         parent,
         name,
         is_dir,
@@ -106,11 +106,11 @@ fn create_entry(parent: String, name: String, is_dir: bool) {
 }
 
 fn rename_entry(path: String, name: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerRename { path, name });
+    let _ = send(&ExplorerRename { path, name });
 }
 
 fn delete_entry(path: String) {
-    let _ = try_cef_bin_emit_rkyv(&ExplorerDelete { path });
+    let _ = send(&ExplorerDelete { path });
 }
 
 fn menu_position(x: f64, y: f64) -> (f64, f64) {
@@ -277,7 +277,9 @@ fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) 
     prompt.set(None);
 }
 
-fn chevron(expanded: bool, loading: bool) -> Element {
+/// The twisty on a tree row, replaced by a spinner while its children load.
+#[component]
+fn Chevron(expanded: bool, loading: bool) -> Element {
     if loading {
         return rsx! {
             span { class: "inline-block h-3 w-3 shrink-0 animate-spin rounded-full border border-foreground/25 border-t-foreground/70" }
@@ -293,12 +295,14 @@ fn chevron(expanded: bool, loading: bool) -> Element {
     }
 }
 
-fn section_header(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
+/// A collapsible section title in the explorer sidebar.
+#[component]
+fn SectionHeader(title: String, open: Signal<bool>, on_toggle: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "flex items-center gap-1 px-2 py-1 cursor-default text-[11px] font-bold uppercase tracking-wide text-foreground/70 transition-colors hover:text-foreground",
             onclick: move |_| on_toggle.call(()),
-            {chevron(open(), false)}
+            Chevron { expanded: open(), loading: false }
             span { class: "truncate", "{title}" }
         }
     }
@@ -355,7 +359,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
         }
     });
 
-    let _tree = use_bin_event_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
+    let _tree = use_listener::<ExplorerTreeEvent, _>(EXPLORER_TREE_EVENT, move |e| {
         root_name.set(e.root_name);
         root_path.set(e.root_path);
         current_path.set(e.current_path);
@@ -365,7 +369,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             schedule_tree_focus(e.focus_path, focus_generation);
         }
     });
-    let _focus = use_bin_event_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
+    let _focus = use_listener::<ExplorerFocusEvent, _>(EXPLORER_FOCUS_EVENT, move |e| {
         if current_path() != e.path {
             current_path.set(e.path.clone());
         }
@@ -373,36 +377,33 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             schedule_tree_focus(e.path, focus_generation);
         }
     });
-    let _open =
-        use_bin_event_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
-            open_editors.set(e.items);
-        });
-    let _outline = use_bin_event_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
+    let _open = use_listener::<OpenEditorsEvent, _>(EXPLORER_OPEN_EDITORS_EVENT, move |e| {
+        open_editors.set(e.items);
+    });
+    let _outline = use_listener::<OutlineEvent, _>(EXPLORER_OUTLINE_EVENT, move |e| {
         outline.set(e.items);
     });
-    let _search =
-        use_bin_event_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |e| {
-            search.set(Some(e));
-            show_search.set(true);
-        });
-    let _fs_result =
-        use_bin_event_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
-            if e.ok && !e.open_path.is_empty() {
-                open_file(e.open_path);
-            }
-            show_notice(
-                notice,
-                notice_generation,
-                ExplorerNotice {
-                    ok: e.ok,
-                    message: if e.ok {
-                        localize_notice(&e.message)
-                    } else {
-                        e.message
-                    },
+    let _search = use_listener::<ExplorerSearchEvent, _>(EXPLORER_SEARCH_EVENT, move |e| {
+        search.set(Some(e));
+        show_search.set(true);
+    });
+    let _fs_result = use_listener::<ExplorerFsResult, _>(EXPLORER_FS_RESULT_EVENT, move |e| {
+        if e.ok && !e.open_path.is_empty() {
+            open_file(e.open_path);
+        }
+        show_notice(
+            notice,
+            notice_generation,
+            ExplorerNotice {
+                ok: e.ok,
+                message: if e.ok {
+                    localize_notice(&e.message)
+                } else {
+                    e.message
                 },
-            );
-        });
+            },
+        );
+    });
 
     let open_body = if show_open() {
         "grid grid-rows-[1fr] opacity-100 transition-[grid-template-rows,opacity] duration-200 ease-out"
@@ -431,7 +432,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 {translate("editor-explorer")}
             }
             div { class: "min-h-0 flex-1 overflow-y-auto pb-4",
-                {section_header(translate("editor-open-editors"), show_open, EventHandler::new(move |_| show_open.set(!show_open())))}
+                SectionHeader { title: translate("editor-open-editors"), open: show_open, on_toggle: EventHandler::new(move |_| show_open.set(!show_open())) }
                 div { class: "{open_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for it in open_editors() {
@@ -458,7 +459,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                             },
                                             "\u{00D7}"
                                         }
-                                        {type_icon(&it.path, false, "h-4 w-4 shrink-0 opacity-80")}
+                                        {rsx! { TypeIcon { path: it.path.to_string(), is_dir: false, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                         span { class: "truncate", "{it.name}" }
                                         if dirty {
                                             span { class: "ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-300" }
@@ -471,7 +472,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 }
 
                 if let Some(results) = search() {
-                    {section_header("Search".to_string(), show_search, EventHandler::new(move |_| show_search.set(!show_search())))}
+                    SectionHeader { title: "Search".to_string(), open: show_search, on_toggle: EventHandler::new(move |_| show_search.set(!show_search())) }
                     div { class: "{search_body}",
                         div { class: "min-h-0 overflow-hidden pb-1",
                             div { class: "mx-2 mb-1 flex h-7 items-center gap-2 rounded-md bg-foreground/[0.06] px-2 text-foreground/85 ring-1 ring-inset ring-foreground/10",
@@ -529,7 +530,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                             y,
                         }));
                     },
-                    {section_header(root_name(), show_files, EventHandler::new(move |_| show_files.set(!show_files())))}
+                    SectionHeader { title: root_name(), open: show_files, on_toggle: EventHandler::new(move |_| show_files.set(!show_files())) }
                 }
                 div { class: "{files_body}",
                     div { class: "min-h-0 overflow-hidden",
@@ -594,11 +595,11 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                     }
                                                 },
                                                 if is_dir {
-                                                    {chevron(row.expanded, row.loading)}
+                                                    Chevron { expanded: row.expanded, loading: row.loading }
                                                 } else {
                                                     span { class: "inline-block w-4 shrink-0" }
                                                 }
-                                                {type_icon(&row.path, is_dir, "h-4 w-4 shrink-0 opacity-80")}
+                                                {rsx! { TypeIcon { path: row.path.to_string(), is_dir: is_dir, class: "h-4 w-4 shrink-0 opacity-80" } }}
                                                 span { class: "truncate", "{row.name}" }
                                             }
                                         }
@@ -609,7 +610,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     }
                 }
 
-                {section_header(translate("editor-outline"), show_outline, EventHandler::new(move |_| show_outline.set(!show_outline())))}
+                SectionHeader { title: translate("editor-outline"), open: show_outline, on_toggle: EventHandler::new(move |_| show_outline.set(!show_outline())) }
                 div { class: "{outline_body}",
                     div { class: "min-h-0 overflow-hidden",
                         for s in outline() {
@@ -622,7 +623,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                         class: "flex items-center gap-1 px-1 py-0.5 cursor-default text-foreground/75 transition-colors duration-100 hover:bg-foreground/[0.08]",
                                         style: "padding-left:{pad}px;",
                                         onclick: move |_| goto_line(line),
-                                        {outline_glyph(s.kind)}
+                                        OutlineGlyph { kind: s.kind }
                                         span { class: "truncate", "{s.name}" }
                                     }
                                 }
@@ -775,7 +776,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
             if let Some(current) = notice() {
                 button {
                     class: if current.ok {
-                        "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-emerald-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
+                        "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-success/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     } else {
                         "absolute bottom-3 left-3 right-3 z-[997] animate-[dx-fade-zoom-in_150ms_ease-out_forwards] rounded-lg bg-red-500/90 px-3 py-2 text-left text-xs text-white shadow-lg"
                     },
@@ -787,7 +788,9 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
     }
 }
 
-fn outline_glyph(kind: u8) -> Element {
+/// The symbol glyph for an outline entry's kind.
+#[component]
+fn OutlineGlyph(kind: u8) -> Element {
     let label = match kind {
         15 => "abc",
         12 => "fn",

@@ -1,0 +1,76 @@
+//! Where a pairing is kept between launches.
+//!
+//! A file in the app's own container, not the webview's local storage. The old version reached
+//! `window.localStorage` by building a JavaScript string and evaluating it — the token and the
+//! certificate fingerprint went out through a script interpolation, which is the wrong shape for
+//! a secret regardless of whose data it is.
+//!
+//! The keychain is where this really belongs, and would survive a reinstall and stay out of
+//! backups. That needs `objc2-security` and a `SecItem` dictionary; this is the same sandbox
+//! localStorage already lived in, minus the script.
+
+use std::path::PathBuf;
+
+use crate::Credentials;
+
+/// The pairing this device holds, if it has one.
+pub struct StoredCredentials;
+
+impl StoredCredentials {
+    pub fn load() -> Option<Credentials> {
+        let raw = std::fs::read_to_string(Self::path()?).ok()?;
+        serde_json::from_str(&raw).ok()
+    }
+
+    pub fn save(credentials: &Credentials) {
+        let (Some(path), Ok(body)) = (Self::path(), serde_json::to_string(credentials)) else {
+            return;
+        };
+        if let Some(parent) = path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            return;
+        }
+        let _ = write_private(&path, &body);
+    }
+
+    pub fn clear() {
+        let Some(path) = Self::path() else {
+            return;
+        };
+        let _ = std::fs::remove_file(path);
+    }
+
+    /// `$HOME` is the app's sandbox container on iOS, and an ordinary home directory elsewhere.
+    fn path() -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join("Library/Application Support/Vmux Remote")
+                .join("pairing.json"),
+        )
+    }
+}
+
+/// Written at `0600` from the start rather than narrowed afterwards.
+///
+/// `fs::write` creates with the process umask and only then gets chmod'd, which leaves a window.
+/// Recreated rather than truncated, because `mode` only applies when the file is created.
+fn write_private(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let _ = std::fs::remove_file(path);
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(contents.as_bytes())
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, contents)
+}

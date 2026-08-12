@@ -1,3 +1,5 @@
+use crate::hooks::use_selector;
+use crate::list_nav::{MenuDirection, move_selection};
 use dioxus::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,13 +15,23 @@ pub enum ManagerTone {
 }
 
 impl ManagerTone {
+    /// The badge colour for a runtime name, so every manager page tones them alike.
+    pub fn for_runtime(runtime: &str) -> Self {
+        match runtime {
+            "native" => Self::Green,
+            "node" => Self::Cyan,
+            "python" => Self::Amber,
+            _ => Self::Neutral,
+        }
+    }
+}
+
+impl ManagerTone {
     fn classes(self) -> &'static str {
         match self {
             Self::Neutral => "bg-foreground/[0.06] text-muted-foreground ring-foreground/10",
             Self::Cyan => "bg-cyan-400/10 text-cyan-700 dark:text-cyan-300 ring-cyan-400/20",
-            Self::Green => {
-                "bg-emerald-400/10 text-emerald-700 dark:text-emerald-300 ring-emerald-400/20"
-            }
+            Self::Green => "bg-success/10 text-success ring-success/20",
             Self::Amber => "bg-amber-400/10 text-amber-700 dark:text-amber-300 ring-amber-400/20",
         }
     }
@@ -203,47 +215,30 @@ pub fn ManagerSelect(
         .unwrap_or(&placeholder);
 
     let scroll_id = id.clone();
-    use_effect(move || {
-        if !open() {
-            return;
-        }
-        let option_id = format!("{scroll_id}-option-{}", highlighted());
-        if let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&option_id))
-        {
-            let options = web_sys::ScrollIntoViewOptions::new();
-            options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            element.scroll_into_view_with_scroll_into_view_options(&options);
+    use_selector(highlighted, move |index| {
+        if open() {
+            format!("{scroll_id}-option-{index}")
+        } else {
+            String::new()
         }
     });
 
     let key_items = items.clone();
     let key_select = onselect;
     let onkeydown = move |event: KeyboardEvent| {
-        let control = event.modifiers().contains(Modifiers::CONTROL);
-        let down = event.key() == Key::ArrowDown
-            || (control && matches!(event.code(), Code::KeyN | Code::KeyJ));
-        let up = event.key() == Key::ArrowUp
-            || (control && matches!(event.code(), Code::KeyP | Code::KeyK));
-        if (down || up) && !key_items.is_empty() {
+        if let Some(direction) = MenuDirection::of(&event)
+            && !key_items.is_empty()
+        {
             event.prevent_default();
             event.stop_propagation();
             if open() {
                 let current = highlighted().min(key_items.len() - 1);
-                highlighted.set(if down {
-                    (current + 1) % key_items.len()
-                } else if current == 0 {
-                    key_items.len() - 1
-                } else {
-                    current - 1
-                });
+                highlighted.set(move_selection(current, key_items.len(), direction));
             } else {
                 open.set(true);
-                highlighted.set(if down {
-                    selected_index.unwrap_or(0)
-                } else {
-                    selected_index.unwrap_or(key_items.len() - 1)
+                highlighted.set(match direction {
+                    MenuDirection::Next => selected_index.unwrap_or(0),
+                    MenuDirection::Previous => selected_index.unwrap_or(key_items.len() - 1),
                 });
             }
             return;

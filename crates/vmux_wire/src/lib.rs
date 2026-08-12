@@ -1,9 +1,19 @@
 //! Lightweight types serialized between vmux processes and pages.
 
+pub mod avatar;
+pub mod chat;
+pub mod command_bar;
+pub mod history;
 pub mod icon;
 pub mod layout;
+pub mod open_target;
 pub mod process_id;
+pub mod prompt_media;
 pub mod protocol;
+pub mod room;
+pub mod service;
+pub mod space;
+pub mod team;
 pub mod terminal;
 
 pub use icon::{BuiltinIcon, PageIcon};

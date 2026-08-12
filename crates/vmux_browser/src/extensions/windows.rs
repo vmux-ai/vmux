@@ -11,6 +11,27 @@ use vmux_layout::stack::{CloseStackRequest, Stack};
 use super::bridge::BridgeAuthorization;
 use super::model::{ChromeModel, ChromeModelEvent, ChromeStableIds, ChromeTab, ChromeWindow};
 
+/// Owns the extension-visible window list and the effects extensions ask of it. Rebuilds
+/// from the chrome model, then applies the close and update requests the broker drained.
+pub(crate) struct ExtensionWindowsPlugin;
+
+impl Plugin for ExtensionWindowsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ExtensionWindows>()
+            .add_message::<CloseExtensionWindowRequest>()
+            .add_message::<UpdateHostWindowRequest>()
+            .add_systems(
+                Update,
+                sync_extension_windows.after(super::project::rebuild_chrome_model),
+            )
+            .add_systems(
+                Update,
+                (route_close_extension_windows, apply_host_window_updates)
+                    .after(super::broker::drain_bridge_requests),
+            );
+    }
+}
+
 pub const WINDOW_ID_NONE: i32 = -1;
 pub const WINDOW_ID_CURRENT: i32 = -2;
 const FIRST_EXTENSION_WINDOW_ID: i32 = 1_000_000_000;

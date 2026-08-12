@@ -7,7 +7,6 @@ publish = false
 
 [features]
 default = []
-web = []
 
 [lib]
 path = "src/lib.rs"
@@ -19,7 +18,7 @@ rkyv = { workspace = true }
 vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
@@ -49,15 +48,20 @@ vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dev-dependencies]
 tempfile = "3"
 url = { workspace = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
+# manifest cannot use it. `lsp_page` reaches no further than Dioxus, so it renders wherever Dioxus
+# does; the editor proper still needs the DOM and stays in the wasm block below.
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
+vmux_ui = { path = "../vmux_ui", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 unicode-width = "0.2"
-vmux_ui = { path = "../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "DocumentFragment", "Element", "FocusOptions", "HtmlElement", "Node",

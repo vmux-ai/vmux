@@ -1,13 +1,15 @@
+use vmux_wire::command_bar::OpenId;
+
 #[derive(Debug, Default)]
 pub struct CommandBarSizeEmissionState {
-    last_emitted: Option<(u64, u32, u32, i32, i32, u32, u32)>,
+    last_emitted: Option<(OpenId, u32, u32, i32, i32, u32, u32)>,
     scheduled: bool,
 }
 
 impl CommandBarSizeEmissionState {
     pub fn should_emit(
         &self,
-        open_id: u64,
+        open_id: OpenId,
         width: u32,
         height: u32,
         shell_left: i32,
@@ -15,7 +17,7 @@ impl CommandBarSizeEmissionState {
         shell_width: u32,
         shell_height: u32,
     ) -> bool {
-        open_id != 0
+        open_id.is_open()
             && self.last_emitted
                 != Some((
                     open_id,
@@ -30,7 +32,7 @@ impl CommandBarSizeEmissionState {
 
     pub fn mark_emitted(
         &mut self,
-        open_id: u64,
+        open_id: OpenId,
         width: u32,
         height: u32,
         shell_left: i32,
@@ -71,12 +73,12 @@ mod tests {
     fn repeated_size_is_suppressed_until_the_next_open() {
         let mut state = CommandBarSizeEmissionState::default();
 
-        assert!(state.should_emit(1, 576, 320, 100, 80, 576, 320));
-        state.mark_emitted(1, 576, 320, 100, 80, 576, 320);
-        assert!(!state.should_emit(1, 576, 320, 100, 80, 576, 320));
-        assert!(state.should_emit(1, 576, 400, 100, 80, 576, 400));
-        assert!(state.should_emit(1, 576, 320, 110, 80, 576, 320));
-        assert!(state.should_emit(2, 576, 320, 100, 80, 576, 320));
+        assert!(state.should_emit(OpenId(1), 576, 320, 100, 80, 576, 320));
+        state.mark_emitted(OpenId(1), 576, 320, 100, 80, 576, 320);
+        assert!(!state.should_emit(OpenId(1), 576, 320, 100, 80, 576, 320));
+        assert!(state.should_emit(OpenId(1), 576, 400, 100, 80, 576, 400));
+        assert!(state.should_emit(OpenId(1), 576, 320, 110, 80, 576, 320));
+        assert!(state.should_emit(OpenId(2), 576, 320, 100, 80, 576, 320));
     }
 
     #[test]

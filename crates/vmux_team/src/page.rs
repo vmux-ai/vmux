@@ -1,17 +1,14 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use vmux_core::event::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 use vmux_ui::favicon::favicon_src_for_url;
 use vmux_ui::hooks::{use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_wire::team::{TEAM_EVENT, TeamEvent, TeamMemberRow};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("team-title"));
-    }
     let team = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
 
     let members = team().members;
@@ -28,6 +25,7 @@ pub fn Page() -> Element {
     };
 
     rsx! {
+        document::Title { {translate("team-title")} }
         div {
             class: "flex h-full min-h-0 flex-col bg-background text-foreground",
             header { class: "flex items-center justify-between border-b border-border px-5 py-4",
@@ -110,8 +108,8 @@ fn TeamRow(member: TeamMemberRow) -> Element {
                         "{member.name}"
                     }
                     if member.is_running {
-                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400",
-                            span { class: "size-1.5 rounded-full bg-emerald-400 animate-pulse" }
+                        span { class: "flex shrink-0 items-center gap-1.5 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success",
+                            span { class: "size-1.5 rounded-full bg-success animate-pulse" }
                             {translate("common-running")}
                         }
                     } else if member.is_done_unseen {
@@ -154,7 +152,7 @@ fn TeamAvatar(member: TeamMemberRow, size: u32) -> Element {
                 }
             }
             if member.is_running {
-                span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-emerald-400 ring-2 ring-background animate-pulse" }
+                span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-success ring-2 ring-background animate-pulse" }
             } else if member.is_done_unseen {
                 span { class: "absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-amber-400 ring-2 ring-background animate-pulse" }
             }

@@ -1,0 +1,62 @@
+//! The framing a page adds on the way out.
+//!
+//! Page→host is a single buffer — magic, id length, id, payload — because the CEF bridge carries
+//! one `ArrayBuffer` per call and the id has to ride along inside it. Host→page needs no envelope:
+//! that direction already has a string id of its own. The asymmetry is load-bearing, and the
+//! client handler in `bevy_cef_core` decodes exactly this shape.
+
+/// One page→host message, framed.
+pub struct BinIpcEnvelope(Vec<u8>);
+
+impl BinIpcEnvelope {
+    /// Marks a buffer as carrying its event id in front of the payload.
+    pub const MAGIC: &'static [u8] = b"vmux-bin-ipc-v1\0";
+
+    /// Frame `payload` under `id`.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is longer than `u32::MAX` bytes, which no type name ever is.
+    pub fn new(id: &str, payload: &[u8]) -> Self {
+        let id_bytes = id.as_bytes();
+        let id_len = u32::try_from(id_bytes.len()).expect("bin ipc id too long");
+        let mut encoded =
+            Vec::with_capacity(Self::MAGIC.len() + 4 + id_bytes.len() + payload.len());
+        encoded.extend_from_slice(Self::MAGIC);
+        encoded.extend_from_slice(&id_len.to_le_bytes());
+        encoded.extend_from_slice(id_bytes);
+        encoded.extend_from_slice(payload);
+        Self(encoded)
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bin_ipc_envelope_preserves_id_and_payload_in_single_buffer() {
+        let id = "vmux_command::event::CommandBarActionEvent";
+        let payload = [1, 2, 3, 4];
+
+        let envelope = BinIpcEnvelope::new(id, &payload);
+        let encoded = envelope.as_bytes();
+        let id_len_start = BinIpcEnvelope::MAGIC.len();
+        let id_start = id_len_start + 4;
+        let payload_start = id_start + id.len();
+        let id_len = u32::from_le_bytes(
+            encoded[id_len_start..id_start]
+                .try_into()
+                .expect("id len bytes"),
+        );
+
+        assert!(encoded.starts_with(BinIpcEnvelope::MAGIC));
+        assert_eq!(id_len, id.len() as u32);
+        assert_eq!(&encoded[id_start..payload_start], id.as_bytes());
+        assert_eq!(&encoded[payload_start..], payload);
+    }
+}

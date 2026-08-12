@@ -28,70 +28,41 @@ pub enum ServiceAction {
     Uninstall,
 }
 
-pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
-    match args.action {
-        ServiceAction::Status => vmux_service::cli::cmd_status(),
-        ServiceAction::Start => {
-            #[cfg(target_os = "macos")]
-            {
-                vmux_service::cli::cmd_start(&current_service_binary()?)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                not_supported()
-            }
+impl ServiceArgs {
+    #[cfg(target_os = "macos")]
+    fn run(self) -> std::io::Result<i32> {
+        use vmux_client::{DaemonBinary, cli};
+
+        match self.action {
+            ServiceAction::Status => cli::cmd_status(),
+            ServiceAction::Start => cli::cmd_start(DaemonBinary::current()?.path()),
+            ServiceAction::Stop => cli::cmd_stop(),
+            ServiceAction::Restart => cli::cmd_restart(DaemonBinary::current()?.path()),
+            ServiceAction::Logs { follow } => cli::cmd_logs(follow),
+            ServiceAction::Install => cli::cmd_install(DaemonBinary::current()?.path()),
+            ServiceAction::Uninstall => cli::cmd_uninstall(),
         }
-        ServiceAction::Stop => {
-            #[cfg(target_os = "macos")]
-            {
-                vmux_service::cli::cmd_stop()
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                not_supported()
-            }
-        }
-        ServiceAction::Restart => {
-            #[cfg(target_os = "macos")]
-            {
-                vmux_service::cli::cmd_restart(&current_service_binary()?)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                not_supported()
-            }
-        }
-        ServiceAction::Logs { follow } => vmux_service::cli::cmd_logs(follow),
-        ServiceAction::Install => {
-            #[cfg(target_os = "macos")]
-            {
-                vmux_service::cli::cmd_install(&current_service_binary()?)
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                not_supported()
-            }
-        }
-        ServiceAction::Uninstall => {
-            #[cfg(target_os = "macos")]
-            {
-                vmux_service::cli::cmd_uninstall()
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                not_supported()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn run(self) -> std::io::Result<i32> {
+        use vmux_client::cli;
+
+        match self.action {
+            ServiceAction::Status => cli::cmd_status(),
+            ServiceAction::Logs { follow } => cli::cmd_logs(follow),
+            ServiceAction::Start
+            | ServiceAction::Stop
+            | ServiceAction::Restart
+            | ServiceAction::Install
+            | ServiceAction::Uninstall => {
+                eprintln!("vmux service: launchd commands are macOS-only");
+                Ok(2)
             }
         }
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn not_supported() -> std::io::Result<i32> {
-    eprintln!("vmux service: launchd commands are macOS-only");
-    Ok(2)
-}
-
-#[cfg(target_os = "macos")]
-fn current_service_binary() -> std::io::Result<std::path::PathBuf> {
-    vmux_service::daemon_binary_path()
+pub fn run(args: ServiceArgs) -> std::io::Result<i32> {
+    args.run()
 }

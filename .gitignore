@@ -15,6 +15,7 @@ crates/vmux_header/target/
 # Tailwind output (run `npm run build:css` in crates/vmux_ui)
 crates/vmux_ui/assets/ui_library.css
 crates/vmux_ui/target/
+crates/vmux_mobile/assets/tailwind.out.css
 
 .superpowers/
 .worktrees/

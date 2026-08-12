@@ -6,6 +6,21 @@ use vmux_layout::cef::LayoutCef;
 use vmux_layout::space::Space;
 use vmux_layout::stack::Stack;
 
+/// Tracks how far the app has got through boot, for the splash to display. Reads the focus
+/// set for the frame, so it runs after that has settled.
+pub(crate) struct BootStatusPlugin;
+
+impl Plugin for BootStatusPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<SplashStatus>()
+            .init_resource::<RestoreComplete>()
+            .add_systems(
+                Update,
+                compute_boot_status.after(vmux_layout::stack::ComputeFocusSet),
+            );
+    }
+}
+
 fn stack_in_active_space(
     stack: Entity,
     child_of_q: &Query<&ChildOf>,
@@ -91,7 +106,7 @@ pub fn compute(i: BootInputs) -> (BootPhase, bool) {
     (phase, reveal_ready)
 }
 
-pub fn compute_boot_status(
+fn compute_boot_status(
     mut status: ResMut<SplashStatus>,
     space_present: Res<SpaceFilePresent>,
     restore: Res<RestoreComplete>,

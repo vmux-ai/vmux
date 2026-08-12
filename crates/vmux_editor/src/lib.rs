@@ -1,54 +1,24 @@
 //! File viewer and editor page: loading, editing, syntax highlighting, file watching,
 //! image preview, and LSP integration in a CEF + Dioxus webview.
 
-pub mod viewport;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod highlight;
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod edit;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod fold;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod fold_store;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod keymap;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod markdown;
-#[cfg(not(target_arch = "wasm32"))]
-mod wrap;
-
-#[cfg(not(target_arch = "wasm32"))]
-mod dir;
-#[cfg(not(target_arch = "wasm32"))]
-mod explorer_fs;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod explorer_model;
-#[cfg(not(target_arch = "wasm32"))]
-mod preview;
-
-#[cfg(not(target_arch = "wasm32"))]
-mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
-pub use plugin::{
-    EditorPlugin, FileView, FileViewModeRequest, GlobalSearchRequest, StackExplorerVisibility,
-    restore_file_view_bundle,
-};
-
-#[cfg(not(target_arch = "wasm32"))]
-pub mod lsp;
-#[cfg(not(target_arch = "wasm32"))]
-pub use lsp::LspPlugin;
-
-#[cfg(any(target_arch = "wasm32", test))]
 pub mod page_model;
 
-#[cfg(target_arch = "wasm32")]
-pub mod explorer;
-#[cfg(target_arch = "wasm32")]
+#[cfg(ui)]
 pub mod lsp_page;
-#[cfg(target_arch = "wasm32")]
-mod note;
-#[cfg(target_arch = "wasm32")]
+
+// `web`, not `ui`: these reach the DOM directly and are only served into the CEF webview. They
+// were written when `ui` and `web` were the same thing, which stopped being true when iOS arrived.
+#[cfg(web)]
+pub mod explorer;
+#[cfg(web)]
 pub mod page;
+#[cfg(web)]
+pub mod page_key;
+
+#[cfg(web)]
+mod note;
+
+#[cfg(host)]
+pub mod host;
+#[cfg(host)]
+pub use host::*;

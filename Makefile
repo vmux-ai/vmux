@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -15,7 +15,7 @@ EXPORT_CEF_BIN := $(or $(shell command -v export-cef-dir 2>/dev/null),$(HOME)/.c
 DX_BIN := $(or $(shell command -v dx 2>/dev/null),$(HOME)/.cargo/bin/dx)
 CARGO_PACKAGER_BIN := $(or $(shell command -v cargo-packager 2>/dev/null),$(HOME)/.cargo/bin/cargo-packager)
 BEVY_CEF_BUNDLE_APP_BIN := $(or $(shell command -v bevy_cef_bundle_app 2>/dev/null),$(HOME)/.cargo/bin/bevy_cef_bundle_app)
-DX_VERSION := 0.7.4
+DX_VERSION := 0.7.9
 CARGO_PACKAGER_VERSION := 0.11.9
 BEVY_CEF_BUNDLE_APP_VERSION := 0.8.1
 CEF_VERSION := $(shell awk -F'"' '/^name = "cef"$$/{getline; print $$2; exit}' Cargo.lock)
@@ -76,6 +76,31 @@ test-app:
 
 build: ensure-mac-deps
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_desktop -p vmux_cli -p vmux_service --release --features vmux_desktop/package
+
+ios: mobile-ios-run
+
+android: mobile-android-run
+
+mobile-ios: ensure-mobile-ios-deps
+	"$(DX_BIN)" build --ios -p vmux_mobile
+
+mobile-android: ensure-mobile-android-deps
+	"$(DX_BIN)" build --android -p vmux_mobile
+
+mobile-ios-run: ensure-mobile-ios-deps
+	@udid="$$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries | sort_by(.key) | reverse[] | .value[] | select(.isAvailable != false and (.name | startswith("iPhone")))] | first | .udid // empty')"; \
+	if [ -z "$$udid" ]; then \
+		echo "No available iPhone simulator. Install one in Xcode Settings > Components."; \
+		exit 1; \
+	fi; \
+	xcrun simctl shutdown booted >/dev/null 2>&1 || true; \
+	xcrun simctl boot "$$udid"; \
+	xcrun simctl bootstatus "$$udid" -b; \
+	open -a Simulator --args -CurrentDeviceUDID "$$udid"
+	"$(DX_BIN)" serve --ios -p vmux_mobile
+
+mobile-android-run: ensure-mobile-android-deps
+	"$(DX_BIN)" serve --android -p vmux_mobile
 
 -include .env
 export
@@ -244,16 +269,54 @@ ensure-native-deps:
 		exit 1; \
 	fi
 
-ensure-web-deps: ensure-native-deps
+ensure-web-deps: ensure-native-deps ensure-dioxus-deps
 	@if ! "$(RUSTUP_BIN)" target list --installed 2>/dev/null | grep -qx "wasm32-unknown-unknown"; then \
 		echo "Installing rust target wasm32-unknown-unknown..."; \
 		"$(RUSTUP_BIN)" target add wasm32-unknown-unknown; \
+	fi
+
+ensure-dioxus-deps:
+	@if [ ! -x "$(CARGO_BIN)" ]; then \
+		echo "cargo not found at $(CARGO_BIN). Install rustup first: https://rustup.rs/"; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(RUSTUP_BIN)" ]; then \
+		echo "rustup not found at $(RUSTUP_BIN). Install rustup first: https://rustup.rs/"; \
+		exit 1; \
 	fi
 	@dx_version="$$( ("$(DX_BIN)" --version 2>/dev/null || true) | awk '{print $$2}' )"; \
 	if [ "$$dx_version" != "$(DX_VERSION)" ]; then \
 		echo "Installing dioxus-cli $(DX_VERSION) (found: $${dx_version:-missing})..."; \
 		"$(CARGO_BIN)" install dioxus-cli --locked --version "$(DX_VERSION)"; \
 	fi
+
+ensure-mobile-ios-deps: ensure-dioxus-deps
+	@for target in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do \
+		if ! "$(RUSTUP_BIN)" target list --installed 2>/dev/null | grep -qx "$$target"; then \
+			echo "Installing rust target $$target..."; \
+			"$(RUSTUP_BIN)" target add "$$target"; \
+		fi; \
+	done
+
+ensure-mobile-android-deps: ensure-dioxus-deps
+	@if [ -z "$${ANDROID_HOME:-}" ]; then \
+		echo "ANDROID_HOME is not set. Install Android Studio and configure its SDK."; \
+		exit 1; \
+	fi
+	@if [ -z "$${ANDROID_NDK_HOME:-}" ]; then \
+		echo "ANDROID_NDK_HOME is not set. Install the Android NDK and export its path."; \
+		exit 1; \
+	fi
+	@if ! command -v java >/dev/null 2>&1; then \
+		echo "java not found. Install a JDK or Android Studio's bundled runtime."; \
+		exit 1; \
+	fi
+	@for target in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do \
+		if ! "$(RUSTUP_BIN)" target list --installed 2>/dev/null | grep -qx "$$target"; then \
+			echo "Installing rust target $$target..."; \
+			"$(RUSTUP_BIN)" target add "$$target"; \
+		fi; \
+	done
 
 ensure-package-deps:
 	@echo "Checking packaging dependencies..."

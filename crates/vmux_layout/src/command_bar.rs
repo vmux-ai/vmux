@@ -1,20 +1,19 @@
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod page;
-#[cfg(target_arch = "wasm32")]
+#[cfg(web)]
 pub mod palette;
 
-pub mod keyboard;
-pub mod results;
-pub mod size;
-pub mod style;
+pub use vmux_start::{keyboard, results, style};
 
-#[cfg(not(target_arch = "wasm32"))]
+pub mod size;
+
+#[cfg(host)]
 pub mod handler;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(host)]
+pub mod key;
+#[cfg(host)]
 pub mod panel;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod shortcut;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(host)]
 pub mod state;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(host)]
 pub mod work_snapshot;

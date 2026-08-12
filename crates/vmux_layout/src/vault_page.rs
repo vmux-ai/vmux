@@ -11,7 +11,7 @@ use vmux_ui::components::manager::{
     ManagerButton, ManagerButtonVariant, ManagerList, ManagerPage, ManagerSelect,
     ManagerSelectItem, ManagerSelectItemKind, ManagerSpinner,
 };
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_theme};
+use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -87,39 +87,37 @@ pub fn Page() -> Element {
     let mut cloud_root = use_signal(String::new);
     let private = use_signal(|| true);
 
-    let _snapshot_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
-            if pending() == Some(VaultAction::ConnectGithub)
-                && (event.vault.repositories_loaded || !event.vault.error.is_empty())
-            {
-                pending.set(None);
-            }
-            let needs_repositories = !event.vault.github_owner.is_empty()
-                && (!event.vault.initialized || event.vault.remote.is_empty())
-                && !event.vault.repositories_loaded;
-            if needs_repositories && !repositories_requested() {
-                repositories_requested.set(true);
-                request_snapshot(true);
-            } else if !needs_repositories {
-                repositories_requested.set(false);
-            }
-            if !event.vault.github_owner.is_empty()
-                && selected_owner()
-                    .as_ref()
-                    .is_none_or(|owner| !event.vault.github_owners.contains(owner))
-            {
-                selected_owner.set(Some(event.vault.github_owner.clone()));
-            }
-            if event.vault.repositories_loaded && repository() == "vmux-vault" {
-                let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
-                repository.set(suggested_repository_name(&owner, &event.vault.repositories));
-            }
-            snapshot.set(event);
-            loaded.set(true);
-        });
-    let _action_listener = use_bin_event_listener::<VaultActionResult, _>(
-        VAULT_ACTION_RESULT_EVENT,
-        move |mut result| {
+    let _snapshot_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |event| {
+        if pending() == Some(VaultAction::ConnectGithub)
+            && (event.vault.repositories_loaded || !event.vault.error.is_empty())
+        {
+            pending.set(None);
+        }
+        let needs_repositories = !event.vault.github_owner.is_empty()
+            && (!event.vault.initialized || event.vault.remote.is_empty())
+            && !event.vault.repositories_loaded;
+        if needs_repositories && !repositories_requested() {
+            repositories_requested.set(true);
+            request_snapshot(true);
+        } else if !needs_repositories {
+            repositories_requested.set(false);
+        }
+        if !event.vault.github_owner.is_empty()
+            && selected_owner()
+                .as_ref()
+                .is_none_or(|owner| !event.vault.github_owners.contains(owner))
+        {
+            selected_owner.set(Some(event.vault.github_owner.clone()));
+        }
+        if event.vault.repositories_loaded && repository() == "vmux-vault" {
+            let owner = selected_owner().unwrap_or_else(|| event.vault.github_owner.clone());
+            repository.set(suggested_repository_name(&owner, &event.vault.repositories));
+        }
+        snapshot.set(event);
+        loaded.set(true);
+    });
+    let _action_listener =
+        use_listener::<VaultActionResult, _>(VAULT_ACTION_RESULT_EVENT, move |mut result| {
             if result.action == VaultAction::ConnectGithub {
                 github_device_code.set(String::new());
                 github_device_code_copied.set(false);
@@ -193,15 +191,12 @@ pub fn Page() -> Element {
                 pending.set(None);
                 notice.set(Some(result));
             }
-        },
-    );
-    let _auth_progress_listener = use_bin_event_listener::<VaultAuthProgress, _>(
-        VAULT_AUTH_PROGRESS_EVENT,
-        move |progress| {
+        });
+    let _auth_progress_listener =
+        use_listener::<VaultAuthProgress, _>(VAULT_AUTH_PROGRESS_EVENT, move |progress| {
             github_device_code_copied.set(false);
             github_device_code.set(progress.code);
-        },
-    );
+        });
 
     use_effect(move || {
         locale();
@@ -214,14 +209,12 @@ pub fn Page() -> Element {
             let _ = location.replace(&format!("https://vault.vmux.ai/{search}"));
             return;
         }
-        if let Some(document) = window.document() {
-            document.set_title(&translate("vault-title"));
-        }
         request_snapshot(false);
     });
 
     let current = snapshot();
     rsx! {
+        document::Title { {translate("vault-title")} }
         ManagerPage {
             header { class: "shrink-0 border-b border-foreground/[0.07] px-5 py-3",
                 div { class: "flex items-center gap-3",
@@ -244,7 +237,7 @@ pub fn Page() -> Element {
                     if let Some(result) = notice().filter(|result| result.success || !result.message.is_empty()) {
                         div {
                             class: if result.success {
-                                "rounded-xl bg-emerald-400/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-inset ring-emerald-400/20 dark:text-emerald-300"
+                                "rounded-xl bg-success/10 px-4 py-3 text-xs text-success ring-1 ring-inset ring-success/20"
                             } else {
                                 "rounded-xl bg-ansi-1/10 px-4 py-3 text-xs text-ansi-1 ring-1 ring-inset ring-ansi-1/20"
                             },
@@ -499,7 +492,7 @@ fn VaultPanel(
                                     }
                                     div {
                                         class: if github_device_code_copied() {
-                                            "mt-2 text-[10px] font-medium text-emerald-700 dark:text-emerald-300"
+                                            "mt-2 text-[10px] font-medium text-success"
                                         } else {
                                             "mt-2 text-[10px] text-muted-foreground/60"
                                         },
@@ -522,8 +515,8 @@ fn VaultPanel(
                             div {
                                 key: "destination-{provider.name()}",
                                 class: "pt-5 transition-[opacity,transform] duration-300 ease-out starting:translate-y-2 starting:scale-[0.985] starting:opacity-0",
-                                div { class: "flex items-center justify-center gap-2 text-xs text-emerald-700 dark:text-emerald-300",
-                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-emerald-400/15 ring-1 ring-inset ring-emerald-400/25",
+                                div { class: "flex items-center justify-center gap-2 text-xs text-success",
+                                    span { class: "grid h-5 w-5 place-items-center rounded-full bg-success/15 ring-1 ring-inset ring-success/25",
                                         svg { class: "h-3 w-3", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2.5", stroke_linecap: "round", stroke_linejoin: "round",
                                             path { d: "m5 12 4 4L19 6" }
                                         }
@@ -807,7 +800,7 @@ fn RecoveryCard(
                         r#type: "button",
                         title: translate("vault-recovery-key-copy-hint"),
                         class: if recovery_key_copied() {
-                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-emerald-400/[0.08] px-3 py-3 text-left ring-1 ring-inset ring-emerald-400/25 transition-colors hover:bg-emerald-400/[0.12]"
+                            "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-success/[0.08] px-3 py-3 text-left ring-1 ring-inset ring-success/25 transition-colors hover:bg-success/[0.12]"
                         } else {
                             "flex w-full cursor-pointer items-center gap-3 rounded-xl bg-foreground/[0.04] px-3 py-3 text-left ring-1 ring-inset ring-foreground/10 transition-colors hover:bg-foreground/[0.07]"
                         },
@@ -823,7 +816,7 @@ fn RecoveryCard(
                             }
                         }
                         span { class: if recovery_key_copied() {
-                                "shrink-0 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                                "shrink-0 text-[11px] font-medium text-success"
                             } else {
                                 "shrink-0 text-[11px] text-muted-foreground/60"
                             },
@@ -898,7 +891,7 @@ fn RecoveryCard(
                     }
                 }
             } else if vault.recovery_enabled {
-                div { class: "mt-3 text-xs font-medium text-emerald-700 dark:text-emerald-300", {translate("vault-recovery-key-ready")} }
+                div { class: "mt-3 text-xs font-medium text-success", {translate("vault-recovery-key-ready")} }
                 if recovery_upload_pending() {
                     div { class: "mt-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300", {translate("vault-recovery-key-upload-pending")} }
                 }
@@ -965,7 +958,7 @@ fn send_recovery_action(
     recovery_key: String,
 ) {
     pending.set(Some(action));
-    if try_cef_bin_emit_rkyv(&VaultActionRequest {
+    if send(&VaultActionRequest {
         action,
         repository: String::new(),
         private: true,
@@ -1062,7 +1055,7 @@ fn start_passkey(
         };
         match result {
             Ok((credential_id, prf_output)) => {
-                if let Err(error) = try_cef_bin_emit_rkyv(&VaultActionRequest {
+                if let Err(error) = send(&VaultActionRequest {
                     action,
                     repository: String::new(),
                     private: true,
@@ -1356,7 +1349,7 @@ fn js_error(error: JsValue) -> String {
 }
 
 fn request_snapshot(load_repositories: bool) {
-    let _ = try_cef_bin_emit_rkyv(&VaultRefreshRequest { load_repositories });
+    let _ = send(&VaultRefreshRequest { load_repositories });
 }
 
 fn send_action(
@@ -1366,7 +1359,7 @@ fn send_action(
     private: bool,
 ) {
     pending.set(Some(action));
-    let _ = try_cef_bin_emit_rkyv(&VaultActionRequest {
+    let _ = send(&VaultActionRequest {
         action,
         repository,
         private,
@@ -1378,7 +1371,7 @@ fn send_action(
 
 fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name: &str) {
     pending.set(Some(VaultAction::CreateCloudFolder));
-    let _ = try_cef_bin_emit_rkyv(&VaultActionRequest {
+    let _ = send(&VaultActionRequest {
         action: VaultAction::CreateCloudFolder,
         repository: root.to_string(),
         private: true,

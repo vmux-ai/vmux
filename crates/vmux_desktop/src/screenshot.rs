@@ -9,6 +9,21 @@ use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
 use vmux_setting::AppSettings;
 
+/// Captures still screenshots for the agent, off the command flush so a screenshot request
+/// issued this frame is served this frame.
+pub(crate) struct ScreenshotPlugin;
+
+impl Plugin for ScreenshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ScreenshotBridge>().add_systems(
+            Update,
+            (start_screenshots, drain_screenshots)
+                .chain()
+                .after(vmux_command::WriteAppCommands),
+        );
+    }
+}
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) const MAX_INLINE_EDGE: u32 = 1568;
 
@@ -60,7 +75,7 @@ fn resolve_crop(
     None
 }
 
-pub(crate) fn start_screenshots(
+fn start_screenshots(
     _non_send: NonSendMarker,
     mut reader: MessageReader<ScreenshotRequest>,
     bridge: Res<ScreenshotBridge>,
@@ -115,10 +130,7 @@ pub(crate) fn start_screenshots(
     }
 }
 
-pub(crate) fn drain_screenshots(
-    bridge: Res<ScreenshotBridge>,
-    mut writer: MessageWriter<ScreenshotResponse>,
-) {
+fn drain_screenshots(bridge: Res<ScreenshotBridge>, mut writer: MessageWriter<ScreenshotResponse>) {
     while let Ok(response) = bridge.rx.try_recv() {
         writer.write(response);
     }

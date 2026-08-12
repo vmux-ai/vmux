@@ -18,6 +18,30 @@ use super::windows::{
     CloseExtensionWindowRequest, ExtensionWindows, UpdateHostWindowRequest, WindowEffect,
 };
 
+/// Serves the `chrome.*` API calls extensions make over the bridge, and pushes them the
+/// model events they subscribed to.
+pub(crate) struct ExtensionBrokerPlugin;
+
+impl Plugin for ExtensionBrokerPlugin {
+    fn build(&self, app: &mut App) {
+        if extension_conformance_enabled() {
+            app.init_resource::<ConformanceWakeTimer>();
+        }
+        app.init_resource::<BridgeSubscriptions>()
+            .init_resource::<BridgeResponseCache>()
+            .init_resource::<PendingBridgeEvents>()
+            .add_systems(
+                Update,
+                drain_bridge_requests.after(super::windows::sync_extension_windows),
+            )
+            .add_systems(
+                Update,
+                forward_chrome_model_events.after(super::project::rebuild_chrome_model),
+            )
+            .add_systems(Update, fire_conformance_wake_timer);
+    }
+}
+
 const CONFORMANCE_NAMESPACE: &str = "__vmux_conformance";
 const MODEL_CHANGED_EVENT: &str = "modelChanged";
 const MAX_BRIDGE_MESSAGES_PER_UPDATE: usize = 128;

@@ -14,6 +14,19 @@ use vmux_command::AppCommand;
 use crate::native_keyboard::{KeyAction, classify, key_code_from_vk, push_command};
 use crate::shortcut::{KeyCombo, Modifiers};
 
+/// Installs the macOS CGEvent tap that claims shortcuts before the focused webview sees
+/// them. Needs the keymap, so it runs after `init_shortcuts`.
+pub(crate) struct EventTapPlugin;
+
+impl Plugin for EventTapPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            install_event_tap.after(crate::shortcut::init_shortcuts),
+        );
+    }
+}
+
 struct TapState {
     port: CFRetained<CFMachPort>,
     wake: Box<dyn Fn()>,
@@ -111,7 +124,7 @@ unsafe extern "C-unwind" fn tap_callback(
     }
 }
 
-pub(crate) fn install_event_tap(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_event_tap(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let Some(proxy) = proxy else {
         return;
     };

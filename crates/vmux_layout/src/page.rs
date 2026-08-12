@@ -9,17 +9,20 @@ use crate::event::{
     BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent,
     CommandBarPanelCloseEvent, FolderRow, HeaderCommandEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT,
     LAYOUT_COMMAND_BAR_OPEN_EVENT, LAYOUT_STATE_EVENT, LayoutStateEvent, PANE_TREE_EVENT, PaneNode,
-    PaneTreeEvent, PanelPlacement, RELOAD_EVENT, ReloadEvent, STACKS_EVENT, StackNode, StackRow,
-    StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent, clamp_panel_placement,
+    PaneTreeEvent, PanelPlacement, RELOAD_EVENT, REMOTE_STATE_EVENT, ReloadEvent,
+    RemoteCommandEvent, RemoteCopyEvent, RemotePhase, RemoteStateEvent, STACKS_EVENT, StackNode,
+    StackRow, StacksHostEvent, TABS_EVENT, TabRow, TabsCommandEvent, TabsHostEvent,
+    clamp_panel_placement,
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use vmux_command::event::CommandBarOpenEvent;
-use vmux_core::event::extension::{
+use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
+use vmux_core::event::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,
     ExtensionsEvent,
 };
-use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::knowledge::{
     KNOWLEDGE_CREATE_RESULT_EVENT, KNOWLEDGE_SEARCH_EVENT, KNOWLEDGE_TREE_EVENT,
     KnowledgeCreateRequest, KnowledgeCreateResult, KnowledgeEntry, KnowledgeGitStatus,
@@ -32,10 +35,11 @@ use vmux_ui::components::context_menu::{
 };
 use vmux_ui::components::icon::Icon;
 use vmux_ui::favicon::{favicon_src_for_url, host_for_favicon_fallback};
-use vmux_ui::file_icon::type_icon;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_bin_event_listener, use_event, use_theme};
+use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::{PageIconView, builtin_icon};
+use vmux_ui::icon::{BuiltinIconView, PageIconView};
+use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
@@ -44,48 +48,45 @@ pub fn Page() -> Element {
 
     let mut layout_state = use_signal(LayoutStateEvent::default);
     let mut layout_state_received = use_signal(|| false);
-    let layout_listener =
-        use_bin_event_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
-            layout_state_received.set(true);
-            layout_state.set(data);
-        });
+    let layout_listener = use_listener::<LayoutStateEvent, _>(LAYOUT_STATE_EVENT, move |data| {
+        layout_state_received.set(true);
+        layout_state.set(data);
+    });
 
     let mut stacks_state = use_signal(StacksHostEvent::default);
     let mut stacks_state_received = use_signal(|| false);
-    let stacks_listener = use_bin_event_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
+    let stacks_listener = use_listener::<StacksHostEvent, _>(STACKS_EVENT, move |data| {
         stacks_state_received.set(true);
         stacks_state.set(data);
     });
 
     let mut tabs_state = use_signal(TabsHostEvent::default);
     let mut tabs_state_received = use_signal(|| false);
-    let tabs_listener = use_bin_event_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
+    let tabs_listener = use_listener::<TabsHostEvent, _>(TABS_EVENT, move |data| {
         tabs_state_received.set(true);
         tabs_state.set(data);
     });
 
     let mut bookmarks_state = use_signal(BookmarksHostEvent::default);
-    let _bookmarks_listener =
-        use_bin_event_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
-            bookmarks_state.set(data);
-        });
+    let _bookmarks_listener = use_listener::<BookmarksHostEvent, _>(BOOKMARKS_EVENT, move |data| {
+        bookmarks_state.set(data);
+    });
 
     let mut reload_key = use_signal(|| 0u32);
-    let _reload_listener = use_bin_event_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
+    let _reload_listener = use_listener::<ReloadEvent, _>(RELOAD_EVENT, move |_| {
         reload_key.set(reload_key() + 1);
     });
 
     let mut pane_tree_state = use_signal(PaneTreeEvent::default);
     let mut pane_tree_state_received = use_signal(|| false);
-    let pane_tree_listener =
-        use_bin_event_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
-            pane_tree_state_received.set(true);
-            pane_tree_state.set(data);
-        });
+    let pane_tree_listener = use_listener::<PaneTreeEvent, _>(PANE_TREE_EVENT, move |data| {
+        pane_tree_state_received.set(true);
+        pane_tree_state.set(data);
+    });
 
     let mut spaces_state = use_signal(vmux_core::event::space::SpacesListEvent::default);
     let mut spaces_state_received = use_signal(|| false);
-    let spaces_listener = use_bin_event_listener::<vmux_core::event::space::SpacesListEvent, _>(
+    let spaces_listener = use_listener::<vmux_core::event::space::SpacesListEvent, _>(
         vmux_core::event::space::SPACES_LIST_EVENT,
         move |data| {
             spaces_state_received.set(true);
@@ -101,34 +102,34 @@ pub fn Page() -> Element {
     let mut knowledge_state = use_signal(KnowledgeTreeEvent::default);
     let mut knowledge_state_received = use_signal(|| false);
     let _knowledge_listener =
-        use_bin_event_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
+        use_listener::<KnowledgeTreeEvent, _>(KNOWLEDGE_TREE_EVENT, move |data| {
             knowledge_state_received.set(true);
             knowledge_state.set(data);
         });
     let mut knowledge_search = use_signal(KnowledgeSearchEvent::default);
     let _knowledge_search_listener =
-        use_bin_event_listener::<KnowledgeSearchEvent, _>(KNOWLEDGE_SEARCH_EVENT, move |data| {
+        use_listener::<KnowledgeSearchEvent, _>(KNOWLEDGE_SEARCH_EVENT, move |data| {
             knowledge_search.set(data)
         });
 
     let mut tools_state = use_signal(ToolsSnapshot::default);
     let mut tools_state_received = use_signal(|| false);
-    let _tools_listener =
-        use_bin_event_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
-            tools_state_received.set(true);
-            tools_state.set(data);
-        });
+    let _tools_listener = use_listener::<ToolsSnapshot, _>(TOOLS_SNAPSHOT_EVENT, move |data| {
+        tools_state_received.set(true);
+        tools_state.set(data);
+    });
 
     let team_state = use_event::<TeamEvent>(TEAM_EVENT, TeamEvent::default);
+    let remote_state = use_event::<RemoteStateEvent>(REMOTE_STATE_EVENT, RemoteStateEvent::default);
 
     let extensions_state =
         use_event::<ExtensionsEvent>(EXTENSIONS_LIST_EVENT, ExtensionsEvent::default);
     use_effect(move || {
-        let _ = try_cef_bin_emit_rkyv(&ExtListRequest);
+        let _ = send(&ExtListRequest);
     });
 
     let mut update_phase = use_signal(|| None::<UpdatePhase>);
-    let _update_progress_listener = use_bin_event_listener::<crate::event::UpdateProgressEvent, _>(
+    let _update_progress_listener = use_listener::<crate::event::UpdateProgressEvent, _>(
         crate::event::UPDATE_PROGRESS_EVENT,
         move |evt| {
             update_phase.set(Some(if evt.installing {
@@ -144,7 +145,7 @@ pub fn Page() -> Element {
             }));
         },
     );
-    let _update_ready_listener = use_bin_event_listener::<crate::event::UpdateReadyEvent, _>(
+    let _update_ready_listener = use_listener::<crate::event::UpdateReadyEvent, _>(
         crate::event::UPDATE_READY_EVENT,
         move |evt| {
             update_phase.set(Some(UpdatePhase::Ready {
@@ -152,7 +153,7 @@ pub fn Page() -> Element {
             }))
         },
     );
-    let _update_cleared_listener = use_bin_event_listener::<crate::event::UpdateClearedEvent, _>(
+    let _update_cleared_listener = use_listener::<crate::event::UpdateClearedEvent, _>(
         crate::event::UPDATE_CLEARED_EVENT,
         move |_| update_phase.set(None),
     );
@@ -183,18 +184,16 @@ pub fn Page() -> Element {
     // Held above the panel so a closed bar does not forget where it was put. Survives reopen, not
     // an app restart; that needs the host store.
     let panel_placement = use_signal(|| None::<PanelPlacement>);
-    let _panel_listener = use_bin_event_listener::<CommandBarOpenEvent, _>(
-        LAYOUT_COMMAND_BAR_OPEN_EVENT,
-        move |data| {
+    let _panel_listener =
+        use_listener::<CommandBarOpenEvent, _>(LAYOUT_COMMAND_BAR_OPEN_EVENT, move |data| {
             panel_state.set(data);
             panel_open.set(true);
             set_command_bar_panel_active(true);
-        },
-    );
-    let _panel_close_listener = use_bin_event_listener::<CommandBarPanelCloseEvent, _>(
-        LAYOUT_COMMAND_BAR_CLOSE_EVENT,
-        move |_| panel_open.set(false),
-    );
+        });
+    let _panel_close_listener =
+        use_listener::<CommandBarPanelCloseEvent, _>(LAYOUT_COMMAND_BAR_CLOSE_EVENT, move |_| {
+            panel_open.set(false)
+        });
 
     let radius_px = state.radius;
     let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
@@ -235,13 +234,7 @@ pub fn Page() -> Element {
         if last_scrolled_stack() == Some((pane_id, stack_index)) {
             return;
         }
-        if let Some(el) = web_sys::window()
-            .and_then(|w| w.document())
-            .and_then(|d| d.get_element_by_id(&format!("sidesheet-stack-{pane_id}-{stack_index}")))
-        {
-            let opts = web_sys::ScrollIntoViewOptions::new();
-            opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
-            el.scroll_into_view_with_scroll_into_view_options(&opts);
+        if ScrollIntoView::nearest(&format!("sidesheet-stack-{pane_id}-{stack_index}")) {
             last_scrolled_stack.set(Some((pane_id, stack_index)));
         }
     });
@@ -274,6 +267,7 @@ pub fn Page() -> Element {
                             panes,
                             active_space,
                             tab_boundary,
+                            remote: remote_state(),
                             bookmarks: bookmarks_state(),
                             knowledge: knowledge_state(),
                             knowledge_search: knowledge_search(),
@@ -320,7 +314,7 @@ pub fn Page() -> Element {
 /// the keyboard on the layout shell and no pane can ever reclaim it, and unmount is the one event
 /// every close route has in common.
 fn set_command_bar_panel_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&CommandBarPanelActiveEvent { active });
+    let _ = send(&CommandBarPanelActiveEvent { active });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -431,6 +425,7 @@ fn SideSheetView(
     panes: Vec<PaneNode>,
     active_space: Option<vmux_core::event::space::SpaceRow>,
     tab_boundary: Option<crate::event::TabBoundary>,
+    remote: RemoteStateEvent,
     bookmarks: BookmarksHostEvent,
     knowledge: KnowledgeTreeEvent,
     knowledge_search: KnowledgeSearchEvent,
@@ -478,6 +473,7 @@ fn SideSheetView(
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
+                    RemotePanel { remote: remote.clone() }
                 }
             }
             if let Some(pane) = active_pane {
@@ -570,7 +566,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
         div {
             class: "shrink-0 mx-2 mb-2 mt-2 flex flex-col gap-2 rounded-md glass px-3 py-2 text-foreground",
             div { class: "flex items-center gap-2",
-                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-green-500" }
+                span { class: "inline-block h-2 w-2 shrink-0 rounded-full bg-success" }
                 span { class: "min-w-0 flex-1 text-ui font-medium", "{label}" }
                 span { class: "shrink-0 text-xs text-muted-foreground", "{version}" }
             }
@@ -586,7 +582,7 @@ fn UpdateNoticeFooter(phase: UpdatePhase) -> Element {
                         r#type: "button",
                         class: "w-full cursor-pointer rounded-md bg-primary px-2.5 py-1.5 text-ui font-medium text-primary-foreground hover:opacity-90",
                         onclick: move |_| {
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::RestartRequestEvent);
+                            let _ = send(&crate::event::RestartRequestEvent);
                         },
                         {translate("layout-restart-update")}
                     }
@@ -706,7 +702,7 @@ fn HeaderView(
                                 "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground"
                             },
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+                                let _ = send(&BookmarksCommandEvent {
                                     command: "toggle_active".into(),
                                     uuid: None,
                                     name: None,
@@ -868,7 +864,7 @@ fn SideSheetSpaceRow(space: vmux_core::event::space::SpaceRow) -> Element {
             r#type: "button",
             class: "group flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-foreground hover:bg-foreground/5",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&vmux_core::event::space::SpaceCommandEvent {
+                let _ = send(&vmux_core::event::space::SpaceCommandEvent {
                     command: "open_page".to_string(),
                     space_id: Some(space.id.clone()),
                     name: None,
@@ -965,6 +961,206 @@ fn dir_truncate_class(title: &str) -> &'static str {
     } else {
         "truncate"
     }
+}
+
+#[component]
+fn RemotePanel(remote: RemoteStateEvent) -> Element {
+    let mut show_pairing = use_signal(|| false);
+    let mut pairing_generation = use_signal(|| 0_u64);
+    let mut pairing_started_paired = use_signal(|| false);
+    let mut copied = use_signal(|| false);
+    let active = remote.phase == RemotePhase::Enabled;
+    let transitioning = remote.phase == RemotePhase::Starting;
+    let status = match remote.phase {
+        RemotePhase::Disabled => "Off",
+        RemotePhase::Starting if remote.enabled => "Starting…",
+        RemotePhase::Starting => "Stopping…",
+        RemotePhase::Enabled => "On",
+        RemotePhase::Error => "Needs attention",
+    };
+    let qr = if active
+        && show_pairing()
+        && (!remote.paired || pairing_started_paired())
+        && !remote.pairing_deep_link.is_empty()
+    {
+        pairing_qr_svg(&remote.pairing_deep_link)
+    } else {
+        None
+    };
+    rsx! {
+        div {
+            class: if remote.enabled {
+                "border-t border-success/30 bg-success/10 px-2.5 py-2.5"
+            } else {
+                "border-t border-foreground/10 px-2.5 py-2.5"
+            },
+            div { class: "flex items-center gap-2",
+                div {
+                    class: if remote.enabled {
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-success/15 text-success"
+                    } else {
+                        "flex size-7 shrink-0 items-center justify-center rounded-md bg-foreground/5 text-muted-foreground"
+                    },
+                    Icon { class: "size-4",
+                        path { d: "M12 2a10 10 0 1 0 10 10" }
+                        path { d: "M12 12 22 2" }
+                        path { d: "M15 2h7v7" }
+                    }
+                }
+                div { class: "min-w-0 flex-1",
+                    div { class: "flex items-center gap-1.5",
+                        span { class: "text-ui font-semibold", "Remote" }
+                        if active {
+                            span { class: "inline-flex items-center gap-1 rounded-full bg-success/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-success",
+                                span { class: "size-1.5 rounded-full bg-success" }
+                                "Live"
+                            }
+                        }
+                    }
+                    div {
+                        class: if remote.phase == RemotePhase::Error {
+                            "mt-0.5 truncate text-[10px] text-destructive"
+                        } else if remote.enabled {
+                            "mt-0.5 text-[10px] text-success/90"
+                        } else {
+                            "mt-0.5 text-[10px] text-muted-foreground"
+                        },
+                        "{status}"
+                    }
+                }
+                button {
+                    r#type: "button",
+                    class: if remote.enabled {
+                        "relative h-5 w-9 shrink-0 rounded-full bg-success transition-colors"
+                    } else {
+                        "relative h-5 w-9 shrink-0 rounded-full bg-foreground/15 transition-colors"
+                    },
+                    aria_label: "Toggle Remote",
+                    aria_pressed: remote.enabled,
+                    onclick: move |_| {
+                        if remote.enabled {
+                            pairing_generation.set(pairing_generation().wrapping_add(1));
+                            show_pairing.set(false);
+                        }
+                        let _ = send(&RemoteCommandEvent {
+                            enabled: !remote.enabled,
+                        });
+                    },
+                    span {
+                        class: if remote.enabled {
+                            "absolute left-[18px] top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
+                        } else {
+                            "absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow-sm transition-all"
+                        }
+                    }
+                }
+            }
+            if remote.phase == RemotePhase::Error {
+                div { class: "mt-2 rounded-md border border-destructive/20 bg-destructive/5 p-2",
+                    div { class: "break-words text-[10px] leading-4 text-destructive", "{remote.error}" }
+                    button {
+                        r#type: "button",
+                        class: "mt-1.5 text-[10px] font-semibold text-foreground hover:opacity-70",
+                        onclick: move |_| {
+                            let _ = send(&RemoteCommandEvent {
+                                enabled: remote.enabled,
+                            });
+                        },
+                        "Retry"
+                    }
+                }
+            } else if transitioning {
+                div { class: "mt-2 h-1 overflow-hidden rounded-full bg-foreground/10",
+                    div { class: "h-full w-full rounded-full bg-success" }
+                }
+            } else if active {
+                if let Some(svg) = qr {
+                    div { class: "mt-2 flex items-center justify-between gap-2",
+                        div { class: "text-[10px] font-semibold text-foreground", "Connect a device" }
+                        button {
+                            r#type: "button",
+                            class: "rounded px-1.5 py-1 text-[9px] font-semibold text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                            onclick: move |_| {
+                                pairing_generation.set(pairing_generation().wrapping_add(1));
+                                show_pairing.set(false);
+                            },
+                            "Close"
+                        }
+                    }
+                    div { class: "mt-2 flex flex-col items-center rounded-lg bg-white p-2.5 text-zinc-950",
+                        // The renderer sizes the QR in whole modules, so its intrinsic width has
+                        // nothing to do with the panel's. The viewBox is what scales; the width
+                        // and height attributes it also emits are what would not, so both are
+                        // overridden here and the square is held by aspect-ratio.
+                        div {
+                            class: "w-full rounded-sm [&>svg]:block [&>svg]:aspect-square [&>svg]:h-auto [&>svg]:w-full",
+                            dangerous_inner_html: "{svg}",
+                        }
+                        div { class: "mt-1.5 text-center text-[10px] font-semibold", "Scan with your phone" }
+                        div { class: "mt-0.5 text-center text-[9px] text-zinc-500", "Opens Vmux Remote and pairs automatically" }
+                    }
+                    div { class: "mt-2 flex items-center gap-1.5 rounded-md bg-foreground/5 py-1 pl-2 pr-1",
+                        div {
+                            class: "min-w-0 flex-1 truncate font-mono text-[9px] text-muted-foreground",
+                            title: "{remote.pairing_url}",
+                            "{remote.pairing_url}"
+                        }
+                        button {
+                            r#type: "button",
+                            class: "shrink-0 rounded px-1.5 py-1 text-[9px] font-semibold text-foreground hover:bg-foreground/10",
+                            onclick: move |_| {
+                                let _ = send(&RemoteCopyEvent);
+                                copied.set(true);
+                            },
+                            if copied() { "Copied" } else { "Copy" }
+                        }
+                    }
+                    div { class: "mt-1.5 text-[9px] leading-4 text-muted-foreground",
+                        "Pairing details hide automatically after 2 minutes."
+                    }
+                } else {
+                    div { class: "mt-2 flex items-center gap-2",
+                        div { class: if remote.paired { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-success" } else { "flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-muted-foreground" },
+                            span { class: if remote.paired { "size-1.5 rounded-full bg-success" } else { "size-1.5 rounded-full bg-foreground/25" } }
+                            if remote.paired { "Phone paired" } else { "No phone paired" }
+                        }
+                        button {
+                            r#type: "button",
+                            class: "text-[10px] font-semibold text-foreground hover:opacity-70",
+                            onclick: move |_| {
+                                copied.set(false);
+                                pairing_started_paired.set(remote.paired);
+                                let generation = pairing_generation().wrapping_add(1);
+                                pairing_generation.set(generation);
+                                show_pairing.set(true);
+                                spawn(async move {
+                                    TimeoutFuture::new(120_000).await;
+                                    if pairing_generation() == generation {
+                                        show_pairing.set(false);
+                                    }
+                                });
+                            },
+                            "Connect device"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn pairing_qr_svg(value: &str) -> Option<String> {
+    use qrcode::QrCode;
+    use qrcode::render::svg;
+
+    let code = QrCode::new(value).ok()?;
+    Some(
+        code.render::<svg::Color>()
+            .min_dimensions(148, 148)
+            .dark_color(svg::Color("#09090b"))
+            .light_color(svg::Color("#ffffff"))
+            .build(),
+    )
 }
 
 #[component]
@@ -1168,7 +1364,7 @@ fn VaultCard(pane_id: u64, vault: vmux_core::vault::VaultSnapshot, loaded: bool)
                     } else if pending > 0 {
                         "size-1.5 rounded-full bg-amber-500"
                     } else {
-                        "size-1.5 rounded-full bg-emerald-500"
+                        "size-1.5 rounded-full bg-success"
                     }
                 }
             }
@@ -1188,9 +1384,8 @@ fn KnowledgeCard(
     let create_prompt = use_signal(|| None::<KnowledgeCreatePrompt>);
     let create_draft = use_signal(String::new);
     let mut create_error = use_signal(String::new);
-    let _create_listener = use_bin_event_listener::<KnowledgeCreateResult, _>(
-        KNOWLEDGE_CREATE_RESULT_EVENT,
-        move |result| {
+    let _create_listener =
+        use_listener::<KnowledgeCreateResult, _>(KNOWLEDGE_CREATE_RESULT_EVENT, move |result| {
             if result.ok {
                 create_error.set(String::new());
                 if !result.is_directory {
@@ -1199,8 +1394,7 @@ fn KnowledgeCard(
             } else {
                 create_error.set(result.error);
             }
-        },
-    );
+        });
     let root = knowledge.root.clone();
     let landing_path = knowledge
         .entries
@@ -1321,7 +1515,7 @@ fn KnowledgeCard(
                                         oninput: move |event| {
                                             let value = event.value();
                                             query.set(value.clone());
-                                            let _ = try_cef_bin_emit_rkyv(&KnowledgeSearchRequest { query: value });
+                                            let _ = send(&KnowledgeSearchRequest { query: value });
                                         },
                                     }
                                 }
@@ -1391,7 +1585,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-2.5 py-2 text-left",
                     onclick: move |_| open_tools(pane_id),
                     div { class: "grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-foreground/[0.07] text-foreground ring-1 ring-inset ring-foreground/10",
-                        {builtin_icon(vmux_core::BuiltinIcon::Hammer, "h-4 w-4")}
+                        {rsx! { BuiltinIconView { icon: vmux_core::BuiltinIcon::Hammer, class: "h-4 w-4" } }}
                     }
                     div { class: "min-w-0 flex-1",
                         div { class: "flex items-baseline gap-1.5",
@@ -1468,7 +1662,7 @@ fn ToolsCard(pane_id: u64, tools: ToolsSnapshot, loaded: bool, expanded: bool) -
 }
 
 fn set_side_sheet_section(pane_id: u64, section: &str, expanded: bool) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = send(&crate::event::SideSheetCommandEvent {
         command: if expanded {
             "expand_section".to_string()
         } else {
@@ -1679,7 +1873,7 @@ fn open_knowledge_path(pane_id: u64, path: String) {
 }
 
 fn open_knowledge_result(pane_id: u64, path: String, line: u32) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_knowledge_path".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: line,
@@ -1726,7 +1920,7 @@ fn submit_knowledge_create(mut prompt: Signal<Option<KnowledgeCreatePrompt>>, na
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&KnowledgeCreateRequest {
+    let _ = send(&KnowledgeCreateRequest {
         parent: current.parent,
         name,
         is_directory: current.kind == KnowledgeCreateKind::Folder,
@@ -1806,7 +2000,7 @@ fn Tab(tab: TabRow) -> Element {
             class: "{tab_class}",
             style: "{tab_style}",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                let _ = send(&TabsCommandEvent {
                     command: "switch".to_string(),
                     tab_id: Some(id_switch.clone()),
                 });
@@ -1836,7 +2030,7 @@ fn Tab(tab: TabRow) -> Element {
                 onclick: move |evt| {
                     evt.prevent_default();
                     evt.stop_propagation();
-                    let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                    let _ = send(&TabsCommandEvent {
                         command: "close".to_string(),
                         tab_id: Some(id_close.clone()),
                     });
@@ -1877,7 +2071,7 @@ fn NewTabButton() -> Element {
             title: translate("layout-new-tab"),
             class: "flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-glass-hover hover:text-foreground active:bg-glass-active active:text-foreground",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&TabsCommandEvent {
+                let _ = send(&TabsCommandEvent {
                     command: "new".to_string(),
                     tab_id: None,
                 });
@@ -1911,7 +2105,7 @@ fn NavButton(
             class,
             onclick: move |_| {
                 if !disabled {
-                    let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
+                    let _ = send(&HeaderCommandEvent {
                         header_command: command.to_string(),
                     });
                 }
@@ -1921,7 +2115,9 @@ fn NavButton(
     }
 }
 
-fn knowledge_git_indicator(status: KnowledgeGitStatus) -> Element {
+/// The coloured dot marking a knowledge file's git state.
+#[component]
+fn KnowledgeGitIndicator(status: KnowledgeGitStatus) -> Element {
     let (class, title) = match status {
         KnowledgeGitStatus::Clean => return rsx! {},
         KnowledgeGitStatus::Added => ("bg-ansi-2", translate("git-status-untracked")),
@@ -1937,7 +2133,7 @@ fn knowledge_git_indicator(status: KnowledgeGitStatus) -> Element {
 }
 
 fn open_tools(pane_id: u64) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_tools".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: 0,
@@ -1946,7 +2142,7 @@ fn open_tools(pane_id: u64) {
 }
 
 fn open_vault(pane_id: u64) {
-    let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+    let _ = send(&crate::event::SideSheetCommandEvent {
         command: "open_vault".to_string(),
         pane_id: pane_id.to_string(),
         stack_index: 0,
@@ -1973,7 +2169,7 @@ fn HeaderAddressBar(active_row: Option<StackRow>, bg_color: Option<String>) -> E
         div {
             class: "flex h-8 min-w-0 flex-1 cursor-pointer items-center",
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&HeaderCommandEvent {
+                let _ = send(&HeaderCommandEvent {
                     header_command: "focus_address_bar".to_string(),
                 });
             },
@@ -2005,7 +2201,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                     class: "flex items-center gap-1.5 rounded-full bg-foreground/10 py-0.5 pl-0.5 pr-2.5 cursor-pointer transition-opacity hover:opacity-80",
                     title: translate("layout-team"),
                     onclick: move |_| {
-                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                        let _ = send(&TeamCommandEvent {
                             command: "open".to_string(),
                             member_id: None,
                         });
@@ -2031,7 +2227,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                     title: "{m.name}",
                                     class: "relative inline-flex size-5 shrink-0 cursor-pointer transition-opacity hover:opacity-80",
                                     onclick: move |_| {
-                                        let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                        let _ = send(&TeamCommandEvent {
                                             command: "focus".to_string(),
                                             member_id: Some(id.clone()),
                                         });
@@ -2046,7 +2242,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                                         }
                                     }
                                     if m.is_running {
-                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-emerald-400 ring-2 ring-background" }
+                                        span { class: "absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-2 ring-background" }
                                     } else if m.is_done_unseen {
                                         span { class: "absolute -bottom-0.5 -right-0.5 size-2 rounded-full bg-amber-400 ring-2 ring-background" }
                                     }
@@ -2059,7 +2255,7 @@ fn TeamFacepile(members: Vec<TeamMemberRow>) -> Element {
                             class: "relative inline-flex size-5 items-center justify-center rounded-full ring-2 ring-background bg-muted text-[9px] font-medium text-muted-foreground cursor-pointer transition-opacity hover:opacity-80",
                             title: translate("layout-team"),
                             onclick: move |_| {
-                                let _ = try_cef_bin_emit_rkyv(&TeamCommandEvent {
+                                let _ = send(&TeamCommandEvent {
                                     command: "open".to_string(),
                                     member_id: None,
                                 });
@@ -2087,7 +2283,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
                             key: "{ext.id}",
                             class: "flex h-7 w-7 items-center justify-center rounded-lg hover:bg-foreground/[0.08]",
                             title: "{name}",
-                            onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtActionRequest { id: id.clone() }); },
+                            onclick: move |_| { let _ = send(&ExtActionRequest { id: id.clone() }); },
                             img { class: "h-4 w-4", src: "{icon}" }
                         }
                     }
@@ -2096,7 +2292,7 @@ fn ExtensionBar(extensions: Vec<ExtRow>) -> Element {
             button {
                 class: "flex h-7 w-7 items-center justify-center rounded-lg text-foreground/80 hover:bg-foreground/[0.08]",
                 title: translate("layout-manage-extensions"),
-                onclick: move |_| { let _ = try_cef_bin_emit_rkyv(&ExtOpenManagerRequest); },
+                onclick: move |_| { let _ = send(&ExtOpenManagerRequest); },
                 Icon { class: "h-4 w-4",
                     path { d: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" }
                 }
@@ -2236,7 +2432,7 @@ fn PinTile(row: BookmarkRow) -> Element {
 }
 
 fn open_bookmark(url: String) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "open".into(),
         url: Some(url),
         uuid: None,
@@ -2247,7 +2443,7 @@ fn open_bookmark(url: String) {
 }
 
 fn bookmark_cmd(command: &str, uuid: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: command.into(),
         uuid,
         name: None,
@@ -2258,7 +2454,7 @@ fn bookmark_cmd(command: &str, uuid: Option<String>) {
 }
 
 fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: command.into(),
         uuid: None,
         name: None,
@@ -2269,7 +2465,7 @@ fn add_to_bookmarks(command: &str, metadata: PageMetadata, folder: Option<String
 }
 
 fn move_bookmark(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "move".into(),
         uuid: Some(uuid),
         name: None,
@@ -2280,7 +2476,7 @@ fn move_bookmark(uuid: String, folder: Option<String>) {
 }
 
 fn move_pin(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "move_pin".into(),
         uuid: Some(uuid),
         name: None,
@@ -2291,7 +2487,7 @@ fn move_pin(uuid: String, folder: Option<String>) {
 }
 
 fn move_bookmark_folder(uuid: String, folder: Option<String>) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "move_folder".into(),
         uuid: Some(uuid),
         name: None,
@@ -2306,7 +2502,7 @@ fn commit_bookmark_rename(uuid: String, name: String) {
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "rename".into(),
         uuid: Some(uuid),
         name: Some(name),
@@ -2321,7 +2517,7 @@ fn create_bookmark_folder(name: String, parent: Option<String>) {
     if name.is_empty() {
         return;
     }
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "new_folder".into(),
         uuid: None,
         name: Some(name),
@@ -2548,11 +2744,11 @@ fn bookmark_drop_targeted(
 }
 
 fn set_bookmark_text_input_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarkTextInputEvent { active });
+    let _ = send(&BookmarkTextInputEvent { active });
 }
 
 fn set_bookmark_context_menu_active(active: bool) {
-    let _ = try_cef_bin_emit_rkyv(&BookmarkContextMenuEvent { active });
+    let _ = send(&BookmarkContextMenuEvent { active });
 }
 
 #[component]
@@ -3021,7 +3217,7 @@ fn BookmarkEntry(
 }
 
 fn request_bookmark_menu() {
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: "menu_new_folder".into(),
         uuid: None,
         name: None,
@@ -3038,7 +3234,7 @@ fn commit_folder_rename(uuid: String, name: String) {
     } else {
         "rename_folder"
     };
-    let _ = try_cef_bin_emit_rkyv(&BookmarksCommandEvent {
+    let _ = send(&BookmarksCommandEvent {
         command: command.into(),
         uuid: Some(uuid),
         name: if name.is_empty() { None } else { Some(name) },
@@ -3138,7 +3334,7 @@ fn KnowledgeCreateInput(
     };
     rsx! {
         div { class: "flex h-9 items-center gap-2 rounded-md border border-transparent px-2",
-            {type_icon("untitled.md", kind == KnowledgeCreateKind::Folder, "h-4 w-4 shrink-0 text-muted-foreground")}
+            {rsx! { TypeIcon { path: "untitled.md", is_dir: kind == KnowledgeCreateKind::Folder, class: "h-4 w-4 shrink-0 text-muted-foreground" } }}
             BookmarkNameInput {
                 draft,
                 class: "min-w-0 flex-1 bg-transparent text-ui font-medium text-foreground outline-none".to_string(),
@@ -3179,7 +3375,7 @@ fn KnowledgeEntryRow(
                                 path { d: "M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" }
                             }
                             span { class: "min-w-0 flex-1 truncate text-ui font-medium", "{entry.name}" }
-                            {knowledge_git_indicator(entry.git_status)}
+                            KnowledgeGitIndicator { status: entry.git_status }
                         }
                     }
                     KnowledgeCreateMenu {
@@ -3235,9 +3431,9 @@ fn KnowledgeEntryRow(
                         title: "{entry.path}",
                         class: "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 pl-6 text-left text-muted-foreground hover:bg-glass-hover hover:text-foreground",
                         onclick: move |_| open_knowledge_path(pane_id, path.clone()),
-                        {type_icon(&entry.path, false, "h-3.5 w-3.5 shrink-0")}
+                        {rsx! { TypeIcon { path: entry.path.to_string(), is_dir: false, class: "h-3.5 w-3.5 shrink-0" } }}
                         span { class: "min-w-0 flex-1 truncate text-ui", "{title}" }
-                        {knowledge_git_indicator(entry.git_status)}
+                        KnowledgeGitIndicator { status: entry.git_status }
                     }
                 }
                 KnowledgeCreateMenu {
@@ -3362,7 +3558,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                             event.stop_propagation();
                             return;
                         }
-                        let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                        let _ = send(&crate::event::SideSheetCommandEvent {
                             command: "activate_stack".to_string(),
                             pane_id: pane_id.to_string(),
                             stack_index,
@@ -3391,7 +3587,7 @@ fn SideSheetStackRow(stack: StackNode, pane_id: u64) -> Element {
                         onclick: move |evt| {
                             evt.prevent_default();
                             evt.stop_propagation();
-                            let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                            let _ = send(&crate::event::SideSheetCommandEvent {
                                 command: "close_stack".to_string(),
                                 pane_id: pane_id.to_string(),
                                 stack_index,
@@ -3471,7 +3667,7 @@ fn NewStackRow(pane_id: u64) -> Element {
                 }
             },
             onclick: move |_| {
-                let _ = try_cef_bin_emit_rkyv(&crate::event::SideSheetCommandEvent {
+                let _ = send(&crate::event::SideSheetCommandEvent {
                     command: "new_stack".to_string(),
                     pane_id: pane_id.to_string(),
                     stack_index: 0,
@@ -3558,7 +3754,7 @@ enum UpdatePhase {
 #[component]
 fn ToolItemRow(item: ToolItem, pane_id: u64) -> Element {
     let status_class = match item.status {
-        ToolStatus::Installed => "bg-emerald-400",
+        ToolStatus::Installed => "bg-success",
         ToolStatus::Outdated => "bg-amber-400",
         ToolStatus::Conflict | ToolStatus::Failed => "bg-ansi-1",
         ToolStatus::Missing => "bg-muted-foreground/40",

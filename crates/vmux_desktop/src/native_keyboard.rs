@@ -10,11 +10,26 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSEventType};
 use parking_lot::Mutex;
 use vmux_command::AppCommand;
 
-use crate::shortcut::{
-    KeyCombo, Modifiers, ShortcutMap, chord_command, direct_command, has_chord_prefix,
-};
+use crate::shortcut::{KeyCombo, Keymap, Modifiers};
 
-static SHORTCUT_MAP: LazyLock<Mutex<Option<ShortcutMap>>> = LazyLock::new(|| Mutex::new(None));
+/// Installs the macOS NSEvent monitor that sees keys winit never delivers, and drains what it
+/// captured into app commands. Installation reads the keymap `init_shortcuts` builds.
+pub(crate) struct NativeKeyboardPlugin;
+
+impl Plugin for NativeKeyboardPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            install_native_key_monitor.after(crate::shortcut::init_shortcuts),
+        )
+        .add_systems(
+            Update,
+            process_monitored_keys.in_set(vmux_command::WriteAppCommands),
+        );
+    }
+}
+
+static SHORTCUT_MAP: LazyLock<Mutex<Option<Keymap>>> = LazyLock::new(|| Mutex::new(None));
 static PENDING_PREFIX: LazyLock<Mutex<Option<(KeyCombo, Instant)>>> =
     LazyLock::new(|| Mutex::new(None));
 static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
@@ -23,7 +38,7 @@ static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
 static ESC_EXITS_FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static EXIT_FULLSCREEN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn set_shortcut_map(map: ShortcutMap) {
+pub(crate) fn set_shortcut_map(map: Keymap) {
     *SHORTCUT_MAP.lock() = Some(map);
 }
 
@@ -59,7 +74,7 @@ pub(crate) enum KeyAction {
 }
 
 pub(crate) fn decide(
-    map: &ShortcutMap,
+    map: &Keymap,
     pending: &mut Option<(KeyCombo, Instant)>,
     combo: KeyCombo,
     now: Instant,
@@ -71,21 +86,21 @@ pub(crate) fn decide(
     }
 
     if let Some((prefix, _)) = pending.clone() {
-        if let Some(cmd) = chord_command(map, &prefix, &combo) {
+        if let Some(cmd) = map.chord(&prefix, &combo) {
             *pending = None;
             return KeyAction::Consume(Some(cmd));
         }
         *pending = None;
     }
 
-    if let Some(cmd) = direct_command(map, &combo) {
+    if let Some(cmd) = map.direct(&combo) {
         if combo.modifiers.ctrl || combo.modifiers.alt || combo.modifiers.super_key {
             return KeyAction::Consume(Some(cmd));
         }
         return KeyAction::PassThrough;
     }
 
-    if has_chord_prefix(map, &combo) {
+    if map.has_chord_prefix(&combo) {
         *pending = Some((combo, now));
         return KeyAction::Consume(None);
     }
@@ -248,7 +263,7 @@ fn install(wake: impl Fn() + Send + Sync + 'static) {
     }
 }
 
-pub(crate) fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
+fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) {
     let Some(proxy) = proxy else {
         return;
     };
@@ -258,7 +273,7 @@ pub(crate) fn install_native_key_monitor(proxy: Option<Res<EventLoopProxyWrapper
     });
 }
 
-pub(crate) fn process_monitored_keys(
+fn process_monitored_keys(
     mut issuer: vmux_command::CommandIssuer,
     user: Query<Entity, With<vmux_core::team::User>>,
 ) {
@@ -280,11 +295,8 @@ mod tests {
     use super::*;
     use vmux_command::{AppCommand, LayoutCommand, PaneCommand};
 
-    fn map() -> ShortcutMap {
-        ShortcutMap {
-            bindings: AppCommand::default_shortcuts(),
-            chord_timeout_ms: 1000,
-        }
+    fn map() -> Keymap {
+        Keymap::defaults()
     }
 
     fn combo(key: KeyCode, ctrl: bool) -> KeyCombo {

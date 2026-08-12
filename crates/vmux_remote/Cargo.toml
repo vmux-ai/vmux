@@ -1,0 +1,34 @@
+[package]
+name = "vmux_remote"
+version.workspace = true
+edition.workspace = true
+description = "Transport contract between Vmux clients, the relay and a desktop"
+publish = false
+
+# Deliberately depends on no vmux crate. The relay links this to route bytes; keeping the domain
+# types out means it cannot decode a payload even by accident.
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The QUIC endpoint helpers. Still no vmux dependency: the relay links this and must stay unable
+# to decode a payload.
+# Native, iOS included: not a host block. The phone dials the desktop over QUIC with these.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bytes = { workspace = true }
+quinn = { workspace = true }
+rcgen = { workspace = true }
+ring = { workspace = true }
+rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+webpki-roots = { workspace = true }
+tokio = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+quinn = { workspace = true }
+rustls = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

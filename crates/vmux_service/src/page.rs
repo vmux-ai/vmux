@@ -2,15 +2,12 @@
 
 use crate::event::*;
 use dioxus::prelude::*;
-use vmux_ui::hooks::{try_cef_bin_emit_rkyv, use_event, use_theme};
+use vmux_ui::hooks::{send, use_event, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
 #[component]
 pub fn Page() -> Element {
     use_theme();
-    if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-        document.set_title(&translate("services-title"));
-    }
     let state = use_event::<ProcessesListEvent>(PROCESSES_LIST_EVENT, || ProcessesListEvent {
         connected: false,
         processes: Vec::new(),
@@ -37,6 +34,7 @@ pub fn Page() -> Element {
     let process_count = data.processes.len();
 
     rsx! {
+        document::Title { {translate("services-title")} }
         div { class: "flex h-full flex-col bg-background p-4 overflow-auto",
             // Header
             div { class: "mb-3 flex items-center justify-between",
@@ -61,7 +59,7 @@ pub fn Page() -> Element {
                         class: "rounded bg-red-500/10 px-2.5 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors",
                         onclick: move |e: Event<MouseData>| {
                             e.stop_propagation();
-                            let _ = try_cef_bin_emit_rkyv(&ProcessKillAllEvent { kill_all: true });
+                            let _ = send(&ProcessKillAllEvent { kill_all: true });
                         },
                         {translate("services-kill-all")}
                     }
@@ -136,7 +134,7 @@ fn ServiceIcon() -> Element {
 #[component]
 fn StatusBadge(connected: bool) -> Element {
     let (color, text) = if connected {
-        ("bg-green-500", translate("services-connected"))
+        ("bg-success", translate("services-connected"))
     } else {
         ("bg-red-500", translate("services-disconnected"))
     };
@@ -168,7 +166,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
     let kill_id = process.id.clone();
 
     let onclick = move |_| {
-        let _ = try_cef_bin_emit_rkyv(&ProcessNavigateEvent {
+        let _ = send(&ProcessNavigateEvent {
             process_id: nav_id.clone(),
             navigate: true,
         });
@@ -176,7 +174,7 @@ fn ProcessCard(process: ProcessEntry) -> Element {
 
     let onkill = move |e: Event<MouseData>| {
         e.stop_propagation();
-        let _ = try_cef_bin_emit_rkyv(&ProcessKillEvent {
+        let _ = send(&ProcessKillEvent {
             process_id: kill_id.clone(),
             kill: true,
         });
