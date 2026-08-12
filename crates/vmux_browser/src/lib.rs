@@ -2705,14 +2705,12 @@ mod tests {
                 MinimalPlugins,
                 vmux_command::CommandPlugin,
                 vmux_terminal::TerminalContractPlugin,
+                crate::command::CommandPlugin,
             ))
             .add_message::<PageOpenRequest>()
             .add_systems(
                 Update,
-                (
-                    crate::command::handle_browser_commands.in_set(vmux_command::ReadAppCommands),
-                    capture_page_open_requests.after(vmux_command::ReadAppCommands),
-                ),
+                capture_page_open_requests.after(vmux_command::ReadAppCommands),
             )
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()

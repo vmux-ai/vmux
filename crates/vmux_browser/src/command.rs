@@ -45,7 +45,7 @@ impl Plugin for CommandPlugin {
     }
 }
 
-pub(crate) fn handle_browser_commands(
+fn handle_browser_commands(
     mut reader: MessageReader<AppCommand>,
     active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
