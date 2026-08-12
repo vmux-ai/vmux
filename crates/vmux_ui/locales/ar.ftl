@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = الاتصال بجهاز Mac
+mobile-pair-subtitle = في Vmux، افتح Remote واختر توصيل جهاز.
+mobile-pair-scan = مسح رمز QR
+mobile-pair-show-link = إدخال رابط الإقران يدويًا
+mobile-pair-hide-link = إخفاء رابط الإقران
+mobile-pair-link-placeholder = ألصق رابط الإقران
+mobile-pair-connect = اتصال
+mobile-pair-connecting = جارٍ الاتصال…
+mobile-pair-disconnect = قطع الاتصال
+mobile-status-connected = متصل
+mobile-status-reaching = جارٍ الوصول إلى Mac…
+mobile-status-disconnected = غير متصل
+
+mobile-url-invalid = رابط الإقران غير صالح.
+mobile-url-no-address = رابط الإقران لا يحتوي على عنوان خادم.
+mobile-url-bad-address = رابط الإقران يحتوي على عنوان خادم غير صالح.
+mobile-url-no-token = رابط الإقران لا يحتوي على رمز مميز.
+mobile-url-scheme = يجب أن يستخدم رابط الإقران HTTPS أو HTTP.
+mobile-url-paste-full = ألصق رابط الإقران الكامل الذي يعرضه Vmux على جهاز Mac.
+
+mobile-error-pairing-outdated = هذا الإقران قديم. امسح رمز QR على جهاز Mac مرة أخرى.
+mobile-error-pairing-expired = انتهت صلاحية الإقران. امسح رمز QR على جهاز Mac مرة أخرى.
+mobile-error-pairing-lost = انتهت صلاحية الإقران. أعد الإقران مع جهاز Mac.
+mobile-error-token-rejected = تم رفض رمز الإقران.
+mobile-error-stack-missing = فتح سطح المكتب المحادثة، لكن طبقتها لم تظهر.
+mobile-error-not-offered = جهاز Mac لا يوفر هذا بعد.
+mobile-error-remote-disabled = تم إيقاف Remote على جهاز Mac.
+mobile-error-session-gone = لم تعد تلك الجلسة موجودة.
+mobile-error-no-desktop = افتح نافذة Vmux على جهاز Mac.
+mobile-error-refused = تعذّر على جهاز Mac تنفيذ ذلك.
+mobile-error-no-answer = لا استجابة من { $address } بعد { $seconds } ثانية.
+
+mobile-start-stacks = الطبقات
+mobile-start-no-stacks = لا توجد طبقات مفتوحة
+mobile-start-team = الفريق
+mobile-start-search-placeholder = ابحث أو اسأل…
+mobile-start-new-chat = بدء محادثة
+mobile-start-starting = جارٍ البدء…
+
+mobile-chat-back = رجوع
+mobile-chat-back-to-stacks = العودة إلى الطبقات
+mobile-chat-no-messages = لا توجد رسائل بعد.
+mobile-chat-no-session = لا توجد جلسة نشطة
+mobile-chat-placeholder = راسل الوكيل…
+mobile-chat-send = إرسال
+mobile-chat-stop = إيقاف
+
+mobile-qr-title = امسح رمز QR الذي يعرضه Vmux
+mobile-qr-cancel = إلغاء
+mobile-qr-unavailable = ماسح QR غير متاح.
+mobile-qr-camera-unavailable = الكاميرا غير متاحة. أدخل رابط الإقران بدلاً من ذلك.
+mobile-qr-camera-failed = تعذّر فتح الكاميرا: { $error }
+mobile-qr-camera-input-unavailable = مدخل الكاميرا غير متاح.
+mobile-qr-unsupported-device = مسح QR غير متاح على هذا الجهاز.
+mobile-qr-unsupported-platform = مسح QR غير متاح على هذه المنصة بعد. أدخل رابط الإقران بدلاً من ذلك.
+mobile-error-unexpected-answer = ورد رد غير متوقع من جهاز Mac.
+mobile-error-connection-dropped = انقطع الاتصال بجهاز Mac.
+mobile-error-connection-closed = أغلق جهاز Mac الاتصال.
+mobile-error-address-invalid = عنوان الإقران هذا غير صالح.
+mobile-error-address-no-port = عنوان الإقران هذا لا يحتوي على منفذ.

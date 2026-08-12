@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = 連接你的 Mac
+mobile-pair-subtitle = 在 Vmux 裡開啟 Remote，並選擇 Connect device。
+mobile-pair-scan = 掃描 QR 碼
+mobile-pair-show-link = 自行輸入配對連結
+mobile-pair-hide-link = 收合配對連結
+mobile-pair-link-placeholder = 貼上配對連結
+mobile-pair-connect = 連接
+mobile-pair-connecting = 連接中…
+mobile-pair-disconnect = 中斷連線
+mobile-status-connected = 已連線
+mobile-status-reaching = 正在找你的 Mac…
+mobile-status-disconnected = 尚未連線
+
+mobile-url-invalid = 配對 URL 無效。
+mobile-url-no-address = 配對 URL 缺少伺服器位址。
+mobile-url-bad-address = 配對 URL 中的伺服器位址無效。
+mobile-url-no-token = 配對 URL 缺少權杖。
+mobile-url-scheme = 配對 URL 必須使用 HTTPS 或 HTTP。
+mobile-url-paste-full = 請貼上 Mac 上 Vmux 顯示的完整配對 URL。
+
+mobile-error-pairing-outdated = 這組配對已過期。請重新掃描 Mac 上的 QR 碼。
+mobile-error-pairing-expired = 配對已失效。請重新掃描 Mac 上的 QR 碼。
+mobile-error-pairing-lost = 配對已失效。請重新與 Mac 配對。
+mobile-error-token-rejected = 配對權杖已被拒絕。
+mobile-error-stack-missing = 桌面端開啟了聊天，但對應的堆疊沒有出現。
+mobile-error-not-offered = 你的 Mac 還不支援這項功能。
+mobile-error-remote-disabled = 你的 Mac 已關閉 Remote。
+mobile-error-session-gone = 那個工作階段已經不在了。
+mobile-error-no-desktop = 請在 Mac 上開啟 Vmux 視窗。
+mobile-error-refused = 你的 Mac 無法完成這項操作。
+mobile-error-no-answer = 等了 { $seconds } 秒仍未收到 { $address } 的回應。
+
+mobile-start-stacks = 堆疊
+mobile-start-no-stacks = 目前沒有開啟的堆疊
+mobile-start-team = 團隊
+mobile-start-search-placeholder = 搜尋或提問…
+mobile-start-new-chat = 開始聊天
+mobile-start-starting = 啟動中…
+
+mobile-chat-back = 返回
+mobile-chat-back-to-stacks = 回到堆疊
+mobile-chat-no-messages = 還沒有訊息。
+mobile-chat-no-session = 沒有作用中的工作階段
+mobile-chat-placeholder = 傳訊息給 Agent…
+mobile-chat-send = 傳送
+mobile-chat-stop = 停止
+
+mobile-qr-title = 掃描 Vmux 顯示的 QR 碼
+mobile-qr-cancel = 取消
+mobile-qr-unavailable = QR 掃描器無法使用。
+mobile-qr-camera-unavailable = 相機無法使用。請改用配對連結。
+mobile-qr-camera-failed = 無法開啟相機：{ $error }
+mobile-qr-camera-input-unavailable = 相機輸入無法使用。
+mobile-qr-unsupported-device = 這台裝置不支援 QR 掃描。
+mobile-qr-unsupported-platform = 這個平台還不支援 QR 掃描。請改用配對連結。
+mobile-error-unexpected-answer = 你的 Mac 傳回了非預期的回應。
+mobile-error-connection-dropped = 和你的 Mac 的連線中斷了。
+mobile-error-connection-closed = 你的 Mac 主動關閉了連線。
+mobile-error-address-invalid = 這組配對位址無效。
+mobile-error-address-no-port = 這組配對位址缺少連接埠。

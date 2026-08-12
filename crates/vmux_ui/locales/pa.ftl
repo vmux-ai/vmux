@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ਆਪਣੇ Mac ਨਾਲ ਜੁੜੋ
+mobile-pair-subtitle = Vmux ਵਿੱਚ Remote ਖੋਲ੍ਹੋ ਅਤੇ Connect device ਚੁਣੋ।
+mobile-pair-scan = QR ਕੋਡ ਸਕੈਨ ਕਰੋ
+mobile-pair-show-link = ਪੇਅਰਿੰਗ ਲਿੰਕ ਹੱਥੀਂ ਭਰੋ
+mobile-pair-hide-link = ਪੇਅਰਿੰਗ ਲਿੰਕ ਲੁਕਾਓ
+mobile-pair-link-placeholder = ਪੇਅਰਿੰਗ ਲਿੰਕ ਪੇਸਟ ਕਰੋ
+mobile-pair-connect = ਜੁੜੋ
+mobile-pair-connecting = ਜੁੜ ਰਿਹਾ ਹੈ…
+mobile-pair-disconnect = ਡਿਸਕਨੈਕਟ ਕਰੋ
+mobile-status-connected = ਕਨੈਕਟ ਹੈ
+mobile-status-reaching = ਤੁਹਾਡੇ Mac ਨਾਲ ਸੰਪਰਕ ਹੋ ਰਿਹਾ ਹੈ…
+mobile-status-disconnected = ਕਨੈਕਟ ਨਹੀਂ
+
+mobile-url-invalid = ਪੇਅਰਿੰਗ URL ਗਲਤ ਹੈ।
+mobile-url-no-address = ਪੇਅਰਿੰਗ URL ਵਿੱਚ ਸਰਵਰ ਦਾ ਪਤਾ ਨਹੀਂ ਹੈ।
+mobile-url-bad-address = ਪੇਅਰਿੰਗ URL ਵਿੱਚ ਸਰਵਰ ਦਾ ਪਤਾ ਗਲਤ ਹੈ।
+mobile-url-no-token = ਪੇਅਰਿੰਗ URL ਵਿੱਚ ਟੋਕਨ ਨਹੀਂ ਹੈ।
+mobile-url-scheme = ਪੇਅਰਿੰਗ URL ਲਈ HTTPS ਜਾਂ HTTP ਵਰਤਣਾ ਜ਼ਰੂਰੀ ਹੈ।
+mobile-url-paste-full = ਆਪਣੇ Mac ਉੱਤੇ Vmux ਵੱਲੋਂ ਦਿਖਾਇਆ ਪੂਰਾ ਪੇਅਰਿੰਗ URL ਪੇਸਟ ਕਰੋ।
+
+mobile-error-pairing-outdated = ਇਹ ਪੇਅਰਿੰਗ ਪੁਰਾਣੀ ਹੋ ਚੁੱਕੀ ਹੈ। ਆਪਣੇ Mac ਉੱਤੇ QR ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।
+mobile-error-pairing-expired = ਪੇਅਰਿੰਗ ਦੀ ਮਿਆਦ ਪੁੱਗ ਗਈ। ਆਪਣੇ Mac ਉੱਤੇ QR ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।
+mobile-error-pairing-lost = ਪੇਅਰਿੰਗ ਦੀ ਮਿਆਦ ਪੁੱਗ ਗਈ। Mac ਨਾਲ ਦੁਬਾਰਾ ਪੇਅਰ ਕਰੋ।
+mobile-error-token-rejected = ਪੇਅਰਿੰਗ ਟੋਕਨ ਰੱਦ ਕਰ ਦਿੱਤਾ ਗਿਆ।
+mobile-error-stack-missing = ਡੈਸਕਟਾਪ ਨੇ ਚੈਟ ਖੋਲ੍ਹ ਦਿੱਤੀ, ਪਰ ਇਸ ਦਾ ਸਟੈਕ ਨਹੀਂ ਦਿਸਿਆ।
+mobile-error-not-offered = ਤੁਹਾਡਾ Mac ਅਜੇ ਇਹ ਨਹੀਂ ਦਿੰਦਾ।
+mobile-error-remote-disabled = ਤੁਹਾਡੇ Mac ਉੱਤੇ Remote ਬੰਦ ਹੈ।
+mobile-error-session-gone = ਉਹ ਸੈਸ਼ਨ ਹੁਣ ਮੌਜੂਦ ਨਹੀਂ।
+mobile-error-no-desktop = ਆਪਣੇ Mac ਉੱਤੇ Vmux ਵਿੰਡੋ ਖੋਲ੍ਹੋ।
+mobile-error-refused = ਤੁਹਾਡਾ Mac ਇਹ ਨਹੀਂ ਕਰ ਸਕਿਆ।
+mobile-error-no-answer = { $seconds } ਸਕਿੰਟ ਬਾਅਦ ਵੀ { $address } ਤੋਂ ਕੋਈ ਜਵਾਬ ਨਹੀਂ।
+
+mobile-start-stacks = ਸਟੈਕ
+mobile-start-no-stacks = ਕੋਈ ਖੁੱਲ੍ਹਾ ਸਟੈਕ ਨਹੀਂ
+mobile-start-team = ਟੀਮ
+mobile-start-search-placeholder = ਲੱਭੋ ਜਾਂ ਪੁੱਛੋ…
+mobile-start-new-chat = ਚੈਟ ਸ਼ੁਰੂ ਕਰੋ
+mobile-start-starting = ਸ਼ੁਰੂ ਹੋ ਰਿਹਾ ਹੈ…
+
+mobile-chat-back = ਪਿੱਛੇ
+mobile-chat-back-to-stacks = ਸਟੈਕਾਂ ਵੱਲ ਵਾਪਸ
+mobile-chat-no-messages = ਅਜੇ ਕੋਈ ਸੁਨੇਹਾ ਨਹੀਂ।
+mobile-chat-no-session = ਕੋਈ ਸਰਗਰਮ ਸੈਸ਼ਨ ਨਹੀਂ
+mobile-chat-placeholder = ਏਜੰਟ ਨੂੰ ਸੁਨੇਹਾ…
+mobile-chat-send = ਭੇਜੋ
+mobile-chat-stop = ਰੋਕੋ
+
+mobile-qr-title = Vmux ਵੱਲੋਂ ਦਿਖਾਇਆ QR ਕੋਡ ਸਕੈਨ ਕਰੋ
+mobile-qr-cancel = ਰੱਦ ਕਰੋ
+mobile-qr-unavailable = QR ਸਕੈਨਰ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।
+mobile-qr-camera-unavailable = ਕੈਮਰਾ ਉਪਲਬਧ ਨਹੀਂ। ਇਸ ਦੀ ਥਾਂ ਪੇਅਰਿੰਗ ਲਿੰਕ ਭਰੋ।
+mobile-qr-camera-failed = ਕੈਮਰਾ ਨਹੀਂ ਖੁੱਲ੍ਹ ਸਕਿਆ: { $error }
+mobile-qr-camera-input-unavailable = ਕੈਮਰਾ ਇਨਪੁੱਟ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।
+mobile-qr-unsupported-device = ਇਸ ਡਿਵਾਈਸ ਉੱਤੇ QR ਸਕੈਨਿੰਗ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।
+mobile-qr-unsupported-platform = ਇਸ ਪਲੇਟਫਾਰਮ ਉੱਤੇ QR ਸਕੈਨਿੰਗ ਅਜੇ ਉਪਲਬਧ ਨਹੀਂ ਹੈ। ਇਸ ਦੀ ਥਾਂ ਪੇਅਰਿੰਗ ਲਿੰਕ ਭਰੋ।
+mobile-error-unexpected-answer = ਤੁਹਾਡੇ Mac ਨੇ ਅਣਕਿਆਸਿਆ ਜਵਾਬ ਦਿੱਤਾ।
+mobile-error-connection-dropped = ਤੁਹਾਡੇ Mac ਨਾਲ ਕਨੈਕਸ਼ਨ ਟੁੱਟ ਗਿਆ।
+mobile-error-connection-closed = ਤੁਹਾਡੇ Mac ਨੇ ਕਨੈਕਸ਼ਨ ਬੰਦ ਕਰ ਦਿੱਤਾ।
+mobile-error-address-invalid = ਉਹ ਪੇਅਰਿੰਗ ਪਤਾ ਗਲਤ ਹੈ।
+mobile-error-address-no-port = ਉਸ ਪੇਅਰਿੰਗ ਪਤੇ ਵਿੱਚ ਪੋਰਟ ਨਹੀਂ ਹੈ।

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = پنهنجي Mac سان ڳنڍيو
+mobile-pair-subtitle = Vmux ۾ Remote کوليو ۽ Connect device چونڊيو.
+mobile-pair-scan = QR ڪوڊ اسڪين ڪريو
+mobile-pair-show-link = ڳنڍڻ جو لنڪ پاڻ لکو
+mobile-pair-hide-link = ڳنڍڻ جو لنڪ لڪايو
+mobile-pair-link-placeholder = ڳنڍڻ جو لنڪ پيسٽ ڪريو
+mobile-pair-connect = ڳنڍيو
+mobile-pair-connecting = ڳنڍجي رهيو آهي…
+mobile-pair-disconnect = ڪٽيو
+mobile-status-connected = ڳنڍيل
+mobile-status-reaching = توهانجي Mac سان رابطو ٿي رهيو آهي…
+mobile-status-disconnected = ڳنڍيل ناهي
+
+mobile-url-invalid = ڳنڍڻ وارو URL غلط آهي.
+mobile-url-no-address = ڳنڍڻ واري URL ۾ سرور جو پتو ناهي.
+mobile-url-bad-address = ڳنڍڻ واري URL ۾ سرور جو پتو غلط آهي.
+mobile-url-no-token = ڳنڍڻ واري URL ۾ ٽوڪن ناهي.
+mobile-url-scheme = ڳنڍڻ واري URL کي HTTPS يا HTTP استعمال ڪرڻو پوندو.
+mobile-url-paste-full = توهانجي Mac تي Vmux ڏيکاريل مڪمل ڳنڍڻ وارو URL پيسٽ ڪريو.
+
+mobile-error-pairing-outdated = هي ڳنڍڻ پراڻو ٿي ويو آهي. پنهنجي Mac تي QR ٻيهر اسڪين ڪريو.
+mobile-error-pairing-expired = ڳنڍڻ جي مدت ختم ٿي وئي. پنهنجي Mac تي QR ٻيهر اسڪين ڪريو.
+mobile-error-pairing-lost = ڳنڍڻ جي مدت ختم ٿي وئي. Mac سان ٻيهر ڳنڍيو.
+mobile-error-token-rejected = ڳنڍڻ وارو ٽوڪن رد ڪيو ويو.
+mobile-error-stack-missing = ڊيسڪ ٽاپ چيٽ کولي، پر ان جو اسٽيڪ نه آيو.
+mobile-error-not-offered = توهانجو Mac اڃا هي نٿو ڏئي.
+mobile-error-remote-disabled = توهانجي Mac تي Remote بند آهي.
+mobile-error-session-gone = اهو سيشن هاڻي ناهي.
+mobile-error-no-desktop = پنهنجي Mac تي Vmux جي ونڊو کوليو.
+mobile-error-refused = توهانجو Mac اهو نه ڪري سگهيو.
+mobile-error-no-answer = { $seconds } سيڪنڊن کان پوءِ به { $address } کان ڪو جواب ناهي.
+
+mobile-start-stacks = اسٽيڪ
+mobile-start-no-stacks = ڪوبه کليل اسٽيڪ ناهي
+mobile-start-team = ٽيم
+mobile-start-search-placeholder = ڳوليو يا پڇو…
+mobile-start-new-chat = چيٽ شروع ڪريو
+mobile-start-starting = شروع ٿي رهيو آهي…
+
+mobile-chat-back = پوئتي
+mobile-chat-back-to-stacks = اسٽيڪ ڏانهن واپس
+mobile-chat-no-messages = اڃا ڪو پيغام ناهي.
+mobile-chat-no-session = ڪوبه سرگرم سيشن ناهي
+mobile-chat-placeholder = ايجنٽ ڏانهن پيغام…
+mobile-chat-send = موڪليو
+mobile-chat-stop = روڪيو
+
+mobile-qr-title = Vmux ڏيکاريل QR ڪوڊ اسڪين ڪريو
+mobile-qr-cancel = رد
+mobile-qr-unavailable = QR اسڪينر دستياب ناهي.
+mobile-qr-camera-unavailable = ڪئميرا دستياب ناهي. ان بدران ڳنڍڻ جو لنڪ لکو.
+mobile-qr-camera-failed = ڪئميرا نه کلي سگهي: { $error }
+mobile-qr-camera-input-unavailable = ڪئميرا جو ان پٽ دستياب ناهي.
+mobile-qr-unsupported-device = هن ڊوائيس تي QR اسڪيننگ دستياب ناهي.
+mobile-qr-unsupported-platform = هن پليٽ فارم تي QR اسڪيننگ اڃا دستياب ناهي. ان بدران ڳنڍڻ جو لنڪ لکو.
+mobile-error-unexpected-answer = توهانجي Mac اڻ ڄاتل جواب ڏنو.
+mobile-error-connection-dropped = توهانجي Mac سان رابطو ٽٽي ويو.
+mobile-error-connection-closed = توهانجي Mac رابطو بند ڪري ڇڏيو.
+mobile-error-address-invalid = ڳنڍڻ وارو پتو غلط آهي.
+mobile-error-address-no-port = ڳنڍڻ واري پتي ۾ پورٽ ناهي.

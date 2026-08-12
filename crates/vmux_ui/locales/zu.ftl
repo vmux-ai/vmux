@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Xhuma ku-Mac yakho
+mobile-pair-subtitle = Ku-Vmux, vula i-Remote bese ukhetha i-Connect device.
+mobile-pair-scan = Skena ikhodi ye-QR
+mobile-pair-show-link = Faka isixhumanisi sokubhangqa ngesandla
+mobile-pair-hide-link = Fihla isixhumanisi sokubhangqa
+mobile-pair-link-placeholder = Namathisela isixhumanisi sokubhangqa
+mobile-pair-connect = Xhuma
+mobile-pair-connecting = Iyaxhuma…
+mobile-pair-disconnect = Nqamula
+mobile-status-connected = Kuxhunyiwe
+mobile-status-reaching = Ifinyelela ku-Mac yakho…
+mobile-status-disconnected = Akuxhunyiwe
+
+mobile-url-invalid = I-URL yokubhangqa ayivumelekile.
+mobile-url-no-address = I-URL yokubhangqa ayinalo ikheli leseva.
+mobile-url-bad-address = I-URL yokubhangqa inekheli leseva elingavumelekile.
+mobile-url-no-token = I-URL yokubhangqa ayinalo ithokheni.
+mobile-url-scheme = I-URL yokubhangqa kufanele isebenzise i-HTTPS noma i-HTTP.
+mobile-url-paste-full = Namathisela yonke i-URL yokubhangqa eboniswa i-Vmux ku-Mac yakho.
+
+mobile-error-pairing-outdated = Lokhu kubhangqa sekuphelelwe yisikhathi. Skena kabusha i-QR ku-Mac yakho.
+mobile-error-pairing-expired = Ukubhangqa kuphelelwe yisikhathi. Skena kabusha i-QR ku-Mac yakho.
+mobile-error-pairing-lost = Ukubhangqa kuphelelwe yisikhathi. Buye ubhangqe ne-Mac futhi.
+mobile-error-token-rejected = Ithokheni yokubhangqa yenqatshiwe.
+mobile-error-stack-missing = Ideskithophu ivule ingxoxo, kodwa isitaki sayo asivelanga.
+mobile-error-not-offered = I-Mac yakho ayikakunikezi lokhu.
+mobile-error-remote-disabled = I-Remote ivaliwe ku-Mac yakho.
+mobile-error-session-gone = Leyo seshini ayisekho.
+mobile-error-no-desktop = Vula iwindi le-Vmux ku-Mac yakho.
+mobile-error-refused = I-Mac yakho ayikwazanga ukwenza lokho.
+mobile-error-no-answer = Ayikho impendulo evela ku-{ $address } emva kwamasekhondi angu-{ $seconds }.
+
+mobile-start-stacks = Izitaki
+mobile-start-no-stacks = Azikho izitaki ezivuliwe
+mobile-start-team = Ithimba
+mobile-start-search-placeholder = Sesha noma ubuze…
+mobile-start-new-chat = Qala ingxoxo
+mobile-start-starting = Iyaqala…
+
+mobile-chat-back = Emuva
+mobile-chat-back-to-stacks = Buyela ezitakini
+mobile-chat-no-messages = Ayikho imiyalezo okwamanje.
+mobile-chat-no-session = Ayikho iseshini esebenzayo
+mobile-chat-placeholder = Thumela umlayezo ku-ejenti…
+mobile-chat-send = Thumela
+mobile-chat-stop = Misa
+
+mobile-qr-title = Skena ikhodi ye-QR eboniswa i-Vmux
+mobile-qr-cancel = Khansela
+mobile-qr-unavailable = Isikeni se-QR asitholakali.
+mobile-qr-camera-unavailable = Ikhamera ayitholakali. Esikhundleni salokho faka isixhumanisi sokubhangqa.
+mobile-qr-camera-failed = Ayikwazanga ukuvula ikhamera: { $error }
+mobile-qr-camera-input-unavailable = Okokufaka kwekhamera akutholakali.
+mobile-qr-unsupported-device = Ukuskena i-QR akutholakali kule divayisi.
+mobile-qr-unsupported-platform = Ukuskena i-QR akukatholakali kule pulatifomu. Esikhundleni salokho faka isixhumanisi sokubhangqa.
+mobile-error-unexpected-answer = I-Mac yakho iphendule ngendlela engalindelekile.
+mobile-error-connection-dropped = Uxhumano ne-Mac yakho lunqamukile.
+mobile-error-connection-closed = I-Mac yakho ivale uxhumano.
+mobile-error-address-invalid = Lelo kheli lokubhangqa alivumelekile.
+mobile-error-address-no-port = Lelo kheli lokubhangqa alinayo iphothi.

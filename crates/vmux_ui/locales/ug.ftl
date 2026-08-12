@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac ئۈسكۈنىڭىزگە ئۇلىنىڭ
+mobile-pair-subtitle = Vmux تا Remote نى ئېچىپ Connect device نى تاللاڭ.
+mobile-pair-scan = QR كودىنى سىكانېرلاش
+mobile-pair-show-link = جۈپلەش ئۇلانمىسىنى قولدا كىرگۈزۈش
+mobile-pair-hide-link = جۈپلەش ئۇلانمىسىنى يوشۇرۇش
+mobile-pair-link-placeholder = جۈپلەش ئۇلانمىسىنى چاپلاڭ
+mobile-pair-connect = ئۇلاش
+mobile-pair-connecting = ئۇلىنىۋاتىدۇ…
+mobile-pair-disconnect = ئۈزۈش
+mobile-status-connected = ئۇلانغان
+mobile-status-reaching = Mac ئۈسكۈنىڭىزگە يېتىشىۋاتىدۇ…
+mobile-status-disconnected = ئۇلانمىغان
+
+mobile-url-invalid = جۈپلەش URL ئىناۋەتسىز.
+mobile-url-no-address = جۈپلەش URL دا مۇلازىمېتىر ئادرېسى يوق.
+mobile-url-bad-address = جۈپلەش URL دىكى مۇلازىمېتىر ئادرېسى ئىناۋەتسىز.
+mobile-url-no-token = جۈپلەش URL دا توكېن يوق.
+mobile-url-scheme = جۈپلەش URL چوقۇم HTTPS ياكى HTTP ئىشلىتىشى كېرەك.
+mobile-url-paste-full = Mac ئۈسكۈنىڭىزدە Vmux كۆرسەتكەن تولۇق جۈپلەش URL نى چاپلاڭ.
+
+mobile-error-pairing-outdated = بۇ جۈپلەش كونىراپ كەتتى. Mac ئۈسكۈنىڭىزدىكى QR كودىنى قايتا سىكانېرلاڭ.
+mobile-error-pairing-expired = جۈپلەش ۋاقتى توشتى. Mac ئۈسكۈنىڭىزدىكى QR كودىنى قايتا سىكانېرلاڭ.
+mobile-error-pairing-lost = جۈپلەش ۋاقتى توشتى. Mac بىلەن قايتا جۈپلەڭ.
+mobile-error-token-rejected = جۈپلەش توكېنى رەت قىلىندى.
+mobile-error-stack-missing = ئۈستەلئۈستى سۆھبەتنى ئاچتى، لېكىن ئۇنىڭ قاتلىمى كۆرۈنمىدى.
+mobile-error-not-offered = Mac ئۈسكۈنىڭىز بۇنى تېخى قوللىمايدۇ.
+mobile-error-remote-disabled = Mac ئۈسكۈنىڭىزدە Remote ئېتىۋېتىلگەن.
+mobile-error-session-gone = بۇ ئولتۇرۇم يوقاپ كەتتى.
+mobile-error-no-desktop = Mac ئۈسكۈنىڭىزدە Vmux كۆزنىكىنى ئېچىڭ.
+mobile-error-refused = Mac ئۈسكۈنىڭىز بۇنى قىلالمىدى.
+mobile-error-no-answer = { $seconds } سېكۇنتتىن كېيىنمۇ { $address } دىن جاۋاب كەلمىدى.
+
+mobile-start-stacks = قاتلاملار
+mobile-start-no-stacks = ئوچۇق قاتلام يوق
+mobile-start-team = گۇرۇپپا
+mobile-start-search-placeholder = ئىزدەڭ ياكى سوراڭ…
+mobile-start-new-chat = سۆھبەت باشلاش
+mobile-start-starting = باشلىنىۋاتىدۇ…
+
+mobile-chat-back = كەينىگە
+mobile-chat-back-to-stacks = قاتلاملارغا قايتىش
+mobile-chat-no-messages = تېخى ئۇچۇر يوق.
+mobile-chat-no-session = ئاكتىپ ئولتۇرۇم يوق
+mobile-chat-placeholder = ئاگېنتقا ئۇچۇر…
+mobile-chat-send = ئەۋەت
+mobile-chat-stop = توختات
+
+mobile-qr-title = Vmux كۆرسەتكەن QR كودىنى سىكانېرلاڭ
+mobile-qr-cancel = ۋاز كەچ
+mobile-qr-unavailable = QR سىكانېرلىغۇچنى ئىشلەتكىلى بولمايدۇ.
+mobile-qr-camera-unavailable = كامېرانى ئىشلەتكىلى بولمايدۇ. ئۇنىڭ ئورنىغا جۈپلەش ئۇلانمىسىنى كىرگۈزۈڭ.
+mobile-qr-camera-failed = كامېرانى ئاچقىلى بولمىدى: { $error }
+mobile-qr-camera-input-unavailable = كامېرا كىرگۈزۈشنى ئىشلەتكىلى بولمايدۇ.
+mobile-qr-unsupported-device = بۇ ئۈسكۈنىدە QR سىكانېرلاشنى ئىشلەتكىلى بولمايدۇ.
+mobile-qr-unsupported-platform = QR سىكانېرلاش بۇ سۇپىدا تېخى ئىشلىمەيدۇ. ئۇنىڭ ئورنىغا جۈپلەش ئۇلانمىسىنى كىرگۈزۈڭ.
+mobile-error-unexpected-answer = Mac ئۈسكۈنىڭىز ئويلىمىغان جاۋاب قايتۇردى.
+mobile-error-connection-dropped = Mac ئۈسكۈنىڭىز بىلەن ئۇلىنىش ئۈزۈلۈپ كەتتى.
+mobile-error-connection-closed = Mac ئۈسكۈنىڭىز ئۇلىنىشنى تاقىۋەتتى.
+mobile-error-address-invalid = جۈپلەش ئادرېسى ئىناۋەتسىز.
+mobile-error-address-no-port = جۈپلەش ئادرېسىدا پورت يوق.

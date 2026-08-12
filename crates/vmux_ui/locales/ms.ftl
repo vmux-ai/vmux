@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Sambung ke Mac anda
+mobile-pair-subtitle = Dalam Vmux, buka Remote dan pilih Connect device.
+mobile-pair-scan = Imbas kod QR
+mobile-pair-show-link = Masukkan pautan pasangan secara manual
+mobile-pair-hide-link = Sembunyikan pautan pasangan
+mobile-pair-link-placeholder = Tampal pautan pasangan
+mobile-pair-connect = Sambung
+mobile-pair-connecting = Menyambung…
+mobile-pair-disconnect = Putuskan
+mobile-status-connected = Bersambung
+mobile-status-reaching = Menghubungi Mac anda…
+mobile-status-disconnected = Tidak bersambung
+
+mobile-url-invalid = URL pasangan tidak sah.
+mobile-url-no-address = URL pasangan tiada alamat pelayan.
+mobile-url-bad-address = URL pasangan mempunyai alamat pelayan yang tidak sah.
+mobile-url-no-token = URL pasangan tiada token.
+mobile-url-scheme = URL pasangan mesti menggunakan HTTPS atau HTTP.
+mobile-url-paste-full = Tampal URL pasangan penuh yang dipaparkan oleh Vmux pada Mac anda.
+
+mobile-error-pairing-outdated = Pasangan ini sudah lapuk. Imbas semula QR pada Mac anda.
+mobile-error-pairing-expired = Pasangan telah tamat tempoh. Imbas semula QR pada Mac anda.
+mobile-error-pairing-lost = Pasangan telah tamat tempoh. Pasangkan semula dengan Mac.
+mobile-error-token-rejected = Token pasangan ditolak.
+mobile-error-stack-missing = Desktop membuka sembang, tetapi stack-nya tidak muncul.
+mobile-error-not-offered = Mac anda belum menawarkan ini.
+mobile-error-remote-disabled = Remote dimatikan pada Mac anda.
+mobile-error-session-gone = Sesi itu sudah tiada.
+mobile-error-no-desktop = Buka tetingkap Vmux pada Mac anda.
+mobile-error-refused = Mac anda tidak dapat melakukannya.
+mobile-error-no-answer = Tiada jawapan daripada { $address } selepas { $seconds }s.
+
+mobile-start-stacks = Stack
+mobile-start-no-stacks = Tiada stack terbuka
+mobile-start-team = Pasukan
+mobile-start-search-placeholder = Cari atau tanya…
+mobile-start-new-chat = Mula sembang
+mobile-start-starting = Memulakan…
+
+mobile-chat-back = Kembali
+mobile-chat-back-to-stacks = Kembali ke stack
+mobile-chat-no-messages = Belum ada mesej.
+mobile-chat-no-session = Tiada sesi aktif
+mobile-chat-placeholder = Mesej kepada agen…
+mobile-chat-send = Hantar
+mobile-chat-stop = Henti
+
+mobile-qr-title = Imbas kod QR yang dipaparkan oleh Vmux
+mobile-qr-cancel = Batal
+mobile-qr-unavailable = Pengimbas QR tidak tersedia.
+mobile-qr-camera-unavailable = Kamera tidak tersedia. Masukkan pautan pasangan sebaliknya.
+mobile-qr-camera-failed = Tidak dapat membuka kamera: { $error }
+mobile-qr-camera-input-unavailable = Input kamera tidak tersedia.
+mobile-qr-unsupported-device = Pengimbasan QR tidak tersedia pada peranti ini.
+mobile-qr-unsupported-platform = Pengimbasan QR belum tersedia pada platform ini. Masukkan pautan pasangan sebaliknya.
+mobile-error-unexpected-answer = Mac anda memberi jawapan yang tidak dijangka.
+mobile-error-connection-dropped = Sambungan ke Mac anda terputus.
+mobile-error-connection-closed = Mac anda menutup sambungan.
+mobile-error-address-invalid = Alamat pasangan itu tidak sah.
+mobile-error-address-no-port = Alamat pasangan itu tiada port.

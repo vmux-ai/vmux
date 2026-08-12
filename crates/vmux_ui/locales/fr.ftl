@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Se connecter à votre Mac
+mobile-pair-subtitle = Dans Vmux, ouvrez Remote et choisissez Connect device.
+mobile-pair-scan = Scanner le code QR
+mobile-pair-show-link = Saisir le lien d’appairage
+mobile-pair-hide-link = Masquer le lien d’appairage
+mobile-pair-link-placeholder = Collez le lien d’appairage
+mobile-pair-connect = Connecter
+mobile-pair-connecting = Connexion…
+mobile-pair-disconnect = Déconnecter
+mobile-status-connected = Connecté
+mobile-status-reaching = Connexion à votre Mac…
+mobile-status-disconnected = Non connecté
+
+mobile-url-invalid = L’URL d’appairage n’est pas valide.
+mobile-url-no-address = L’URL d’appairage ne contient pas d’adresse de serveur.
+mobile-url-bad-address = L’URL d’appairage contient une adresse de serveur non valide.
+mobile-url-no-token = L’URL d’appairage ne contient pas de jeton.
+mobile-url-scheme = L’URL d’appairage doit utiliser HTTPS ou HTTP.
+mobile-url-paste-full = Collez l’URL d’appairage complète affichée par Vmux sur votre Mac.
+
+mobile-error-pairing-outdated = Cet appairage n’est plus à jour. Scannez à nouveau le QR sur votre Mac.
+mobile-error-pairing-expired = Appairage expiré. Scannez à nouveau le QR sur votre Mac.
+mobile-error-pairing-lost = Appairage expiré. Appairez à nouveau le Mac.
+mobile-error-token-rejected = Le jeton d’appairage a été refusé.
+mobile-error-stack-missing = Le bureau a ouvert le chat, mais sa pile n’est pas apparue.
+mobile-error-not-offered = Votre Mac ne propose pas encore cela.
+mobile-error-remote-disabled = Remote est désactivé sur votre Mac.
+mobile-error-session-gone = Cette session n’existe plus.
+mobile-error-no-desktop = Ouvrez la fenêtre Vmux sur votre Mac.
+mobile-error-refused = Votre Mac n’a pas pu le faire.
+mobile-error-no-answer = Aucune réponse de { $address } après { $seconds } s.
+
+mobile-start-stacks = Piles
+mobile-start-no-stacks = Aucune pile ouverte
+mobile-start-team = Équipe
+mobile-start-search-placeholder = Rechercher ou demander…
+mobile-start-new-chat = Démarrer un chat
+mobile-start-starting = Démarrage…
+
+mobile-chat-back = Précédent
+mobile-chat-back-to-stacks = Retour aux piles
+mobile-chat-no-messages = Aucun message pour l’instant.
+mobile-chat-no-session = Aucune session active
+mobile-chat-placeholder = Message à l’agent…
+mobile-chat-send = Envoyer
+mobile-chat-stop = Arrêter
+
+mobile-qr-title = Scannez le code QR affiché par Vmux
+mobile-qr-cancel = Annuler
+mobile-qr-unavailable = Le scanner QR n’est pas disponible.
+mobile-qr-camera-unavailable = Caméra indisponible. Saisissez plutôt le lien d’appairage.
+mobile-qr-camera-failed = Impossible d’ouvrir la caméra : { $error }
+mobile-qr-camera-input-unavailable = L’entrée caméra n’est pas disponible.
+mobile-qr-unsupported-device = Le scan QR n’est pas disponible sur cet appareil.
+mobile-qr-unsupported-platform = Le scan QR n’est pas encore disponible sur cette plateforme. Saisissez plutôt le lien d’appairage.
+mobile-error-unexpected-answer = Votre Mac a répondu de manière inattendue.
+mobile-error-connection-dropped = La connexion à votre Mac a été perdue.
+mobile-error-connection-closed = Votre Mac a fermé la connexion.
+mobile-error-address-invalid = Cette adresse d’appairage n’est pas valide.
+mobile-error-address-no-port = Cette adresse d’appairage ne contient pas de port.

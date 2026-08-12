@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac-ə qoşulun
+mobile-pair-subtitle = Vmux-da Remote bölməsini açın və Cihaz qoş seçin.
+mobile-pair-scan = QR kodu skan et
+mobile-pair-show-link = Qoşulma linkini əl ilə daxil et
+mobile-pair-hide-link = Qoşulma linkini gizlət
+mobile-pair-link-placeholder = Qoşulma linkini yapışdırın
+mobile-pair-connect = Qoşul
+mobile-pair-connecting = Qoşulur…
+mobile-pair-disconnect = Ayır
+mobile-status-connected = Qoşulub
+mobile-status-reaching = Mac-ə çatmağa çalışılır…
+mobile-status-disconnected = Qoşulmayıb
+
+mobile-url-invalid = Qoşulma URL-i yanlışdır.
+mobile-url-no-address = Qoşulma URL-ində server ünvanı yoxdur.
+mobile-url-bad-address = Qoşulma URL-ində server ünvanı yanlışdır.
+mobile-url-no-token = Qoşulma URL-ində token yoxdur.
+mobile-url-scheme = Qoşulma URL-i HTTPS və ya HTTP istifadə etməlidir.
+mobile-url-paste-full = Vmux-un Mac-də göstərdiyi tam qoşulma URL-ini yapışdırın.
+
+mobile-error-pairing-outdated = Bu qoşulma köhnəlib. Mac-dəki QR kodu yenidən skan edin.
+mobile-error-pairing-expired = Qoşulmanın vaxtı bitdi. Mac-dəki QR kodu yenidən skan edin.
+mobile-error-pairing-lost = Qoşulmanın vaxtı bitdi. Mac ilə yenidən qoşulun.
+mobile-error-token-rejected = Qoşulma tokeni rədd edildi.
+mobile-error-stack-missing = Masaüstü söhbəti açdı, lakin onun qatı görünmədi.
+mobile-error-not-offered = Mac-iniz bunu hələ dəstəkləmir.
+mobile-error-remote-disabled = Mac-inizdə Remote söndürülüb.
+mobile-error-session-gone = Həmin sessiya artıq yoxdur.
+mobile-error-no-desktop = Mac-inizdə Vmux pəncərəsini açın.
+mobile-error-refused = Mac-iniz bunu edə bilmədi.
+mobile-error-no-answer = { $seconds } saniyə sonra { $address } ünvanından cavab yoxdur.
+
+mobile-start-stacks = Qatlar
+mobile-start-no-stacks = Açıq qat yoxdur
+mobile-start-team = Komanda
+mobile-start-search-placeholder = Axtar və ya soruş…
+mobile-start-new-chat = Söhbətə başla
+mobile-start-starting = Başladılır…
+
+mobile-chat-back = Geri
+mobile-chat-back-to-stacks = Qatlara qayıt
+mobile-chat-no-messages = Hələ mesaj yoxdur.
+mobile-chat-no-session = Aktiv sessiya yoxdur
+mobile-chat-placeholder = Agentə mesaj…
+mobile-chat-send = Göndər
+mobile-chat-stop = Dayandır
+
+mobile-qr-title = Vmux-un göstərdiyi QR kodu skan edin
+mobile-qr-cancel = Ləğv et
+mobile-qr-unavailable = QR skaner əlçatan deyil.
+mobile-qr-camera-unavailable = Kamera əlçatan deyil. Əvəzinə qoşulma linkini daxil edin.
+mobile-qr-camera-failed = Kamera açıla bilmədi: { $error }
+mobile-qr-camera-input-unavailable = Kamera girişi əlçatan deyil.
+mobile-qr-unsupported-device = Bu cihazda QR skan etmək mümkün deyil.
+mobile-qr-unsupported-platform = Bu platformada QR skan hələ mövcud deyil. Əvəzinə qoşulma linkini daxil edin.
+mobile-error-unexpected-answer = Mac-iniz gözlənilməz cavab verdi.
+mobile-error-connection-dropped = Mac-inizlə bağlantı kəsildi.
+mobile-error-connection-closed = Mac-iniz bağlantını bağladı.
+mobile-error-address-invalid = Həmin qoşulma ünvanı yanlışdır.
+mobile-error-address-no-port = Həmin qoşulma ünvanında port yoxdur.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac-ке қосылу
+mobile-pair-subtitle = Vmux-те Remote бөлімін ашып, Құрылғыны қосу дегенді таңдаңыз.
+mobile-pair-scan = QR кодын сканерлеу
+mobile-pair-show-link = Жұптау сілтемесін қолмен енгізу
+mobile-pair-hide-link = Жұптау сілтемесін жасыру
+mobile-pair-link-placeholder = Жұптау сілтемесін қойыңыз
+mobile-pair-connect = Қосылу
+mobile-pair-connecting = Қосылуда…
+mobile-pair-disconnect = Ажырату
+mobile-status-connected = Қосылған
+mobile-status-reaching = Mac-ке қосылу орындалуда…
+mobile-status-disconnected = Қосылмаған
+
+mobile-url-invalid = Жұптау URL мекенжайы жарамсыз.
+mobile-url-no-address = Жұптау URL мекенжайында сервер адресі жоқ.
+mobile-url-bad-address = Жұптау URL мекенжайындағы сервер адресі жарамсыз.
+mobile-url-no-token = Жұптау URL мекенжайында токен жоқ.
+mobile-url-scheme = Жұптау URL мекенжайы HTTPS немесе HTTP қолдануы керек.
+mobile-url-paste-full = Mac-тегі Vmux көрсеткен толық жұптау URL мекенжайын қойыңыз.
+
+mobile-error-pairing-outdated = Бұл жұптау ескірген. Mac-тегі QR кодын қайта сканерлеңіз.
+mobile-error-pairing-expired = Жұптау мерзімі бітті. Mac-тегі QR кодын қайта сканерлеңіз.
+mobile-error-pairing-lost = Жұптау мерзімі бітті. Mac-пен қайта жұптаңыз.
+mobile-error-token-rejected = Жұптау токені қабылданбады.
+mobile-error-stack-missing = Компьютерде чат ашылды, бірақ оның стегі көрінбеді.
+mobile-error-not-offered = Mac-іңіз мұны әзірге ұсынбайды.
+mobile-error-remote-disabled = Mac-іңізде Remote өшірулі.
+mobile-error-session-gone = Ол сессия жоқ.
+mobile-error-no-desktop = Mac-іңізде Vmux терезесін ашыңыз.
+mobile-error-refused = Mac-іңіз мұны орындай алмады.
+mobile-error-no-answer = { $seconds } секундтан кейін { $address } жауап бермеді.
+
+mobile-start-stacks = Стектер
+mobile-start-no-stacks = Ашық стектер жоқ
+mobile-start-team = Топ
+mobile-start-search-placeholder = Іздеу немесе сұрау…
+mobile-start-new-chat = Чат бастау
+mobile-start-starting = Басталуда…
+
+mobile-chat-back = Артқа
+mobile-chat-back-to-stacks = Стектерге оралу
+mobile-chat-no-messages = Әзірге хабарлама жоқ.
+mobile-chat-no-session = Белсенді сессия жоқ
+mobile-chat-placeholder = Агентке хабарлама…
+mobile-chat-send = Жіберу
+mobile-chat-stop = Тоқтату
+
+mobile-qr-title = Vmux көрсеткен QR кодын сканерлеңіз
+mobile-qr-cancel = Бас тарту
+mobile-qr-unavailable = QR сканері қолжетімсіз.
+mobile-qr-camera-unavailable = Камера қолжетімсіз. Оның орнына жұптау сілтемесін енгізіңіз.
+mobile-qr-camera-failed = Камераны ашу мүмкін болмады: { $error }
+mobile-qr-camera-input-unavailable = Камера кірісі қолжетімсіз.
+mobile-qr-unsupported-device = Бұл құрылғыда QR сканерлеу қолжетімсіз.
+mobile-qr-unsupported-platform = Бұл платформада QR сканерлеу әзірге қолжетімсіз. Оның орнына жұптау сілтемесін енгізіңіз.
+mobile-error-unexpected-answer = Mac-іңіз күтпеген жауап берді.
+mobile-error-connection-dropped = Mac-іңізбен байланыс үзілді.
+mobile-error-connection-closed = Mac-іңіз байланысты жапты.
+mobile-error-address-invalid = Бұл жұптау адресі жарамсыз.
+mobile-error-address-no-port = Бұл жұптау адресінде порт жоқ.

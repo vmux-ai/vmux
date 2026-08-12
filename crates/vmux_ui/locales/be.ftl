@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Падключыцца да Mac
+mobile-pair-subtitle = У Vmux адкрыйце Remote і выберыце Падключыць прыладу.
+mobile-pair-scan = Сканаваць QR-код
+mobile-pair-show-link = Увесці спасылку ўручную
+mobile-pair-hide-link = Схаваць спасылку спалучэння
+mobile-pair-link-placeholder = Устаўце спасылку спалучэння
+mobile-pair-connect = Падключыцца
+mobile-pair-connecting = Падключэнне…
+mobile-pair-disconnect = Адключыцца
+mobile-status-connected = Падключана
+mobile-status-reaching = Спроба звязацца з Mac…
+mobile-status-disconnected = Не падключана
+
+mobile-url-invalid = Няправільны URL спалучэння.
+mobile-url-no-address = У URL спалучэння няма адраса сервера.
+mobile-url-bad-address = У URL спалучэння няправільны адрас сервера.
+mobile-url-no-token = У URL спалучэння няма токена.
+mobile-url-scheme = URL спалучэння павінен выкарыстоўваць HTTPS або HTTP.
+mobile-url-paste-full = Устаўце поўны URL спалучэння, які Vmux паказвае на вашым Mac.
+
+mobile-error-pairing-outdated = Гэта спалучэнне састарэла. Адсканіруйце QR на Mac яшчэ раз.
+mobile-error-pairing-expired = Тэрмін спалучэння скончыўся. Адсканіруйце QR на Mac яшчэ раз.
+mobile-error-pairing-lost = Тэрмін спалучэння скончыўся. Спалучыцеся з Mac зноў.
+mobile-error-token-rejected = Токен спалучэння адхілены.
+mobile-error-stack-missing = Настольная праграма адкрыла чат, але яго стэк не з’явіўся.
+mobile-error-not-offered = Ваш Mac пакуль гэтага не падтрымлівае.
+mobile-error-remote-disabled = Remote выключаны на вашым Mac.
+mobile-error-session-gone = Гэтага сеанса больш няма.
+mobile-error-no-desktop = Адкрыйце акно Vmux на вашым Mac.
+mobile-error-refused = Ваш Mac не змог гэтага зрабіць.
+mobile-error-no-answer = Няма адказу ад { $address } праз { $seconds } с.
+
+mobile-start-stacks = Стэкі
+mobile-start-no-stacks = Няма адкрытых стэкаў
+mobile-start-team = Каманда
+mobile-start-search-placeholder = Шукаць або спытаць…
+mobile-start-new-chat = Пачаць чат
+mobile-start-starting = Запуск…
+
+mobile-chat-back = Назад
+mobile-chat-back-to-stacks = Назад да стэкаў
+mobile-chat-no-messages = Паведамленняў пакуль няма.
+mobile-chat-no-session = Няма актыўнага сеанса
+mobile-chat-placeholder = Паведамленне агенту…
+mobile-chat-send = Адправіць
+mobile-chat-stop = Спыніць
+
+mobile-qr-title = Адсканіруйце QR-код, які паказвае Vmux
+mobile-qr-cancel = Скасаваць
+mobile-qr-unavailable = Сканер QR недаступны.
+mobile-qr-camera-unavailable = Камера недаступная. Увядзіце спасылку спалучэння.
+mobile-qr-camera-failed = Не ўдалося адкрыць камеру: { $error }
+mobile-qr-camera-input-unavailable = Уваход камеры недаступны.
+mobile-qr-unsupported-device = Сканаванне QR недаступнае на гэтай прыладзе.
+mobile-qr-unsupported-platform = Сканаванне QR пакуль недаступнае на гэтай платформе. Увядзіце спасылку спалучэння.
+mobile-error-unexpected-answer = Ваш Mac адказаў нечакана.
+mobile-error-connection-dropped = Падключэнне да вашага Mac перарвалася.
+mobile-error-connection-closed = Ваш Mac закрыў падключэнне.
+mobile-error-address-invalid = Няправільны адрас спалучэння.
+mobile-error-address-no-port = У адрасе спалучэння няма порта.

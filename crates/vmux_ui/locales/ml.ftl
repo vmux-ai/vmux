@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = നിങ്ങളുടെ Mac-ലേക്ക് കണക്റ്റ് ചെയ്യുക
+mobile-pair-subtitle = Vmux-ൽ Remote തുറന്ന് Connect device തിരഞ്ഞെടുക്കുക.
+mobile-pair-scan = QR കോഡ് സ്കാൻ ചെയ്യുക
+mobile-pair-show-link = പെയറിംഗ് ലിങ്ക് നേരിട്ട് നൽകുക
+mobile-pair-hide-link = പെയറിംഗ് ലിങ്ക് മറയ്ക്കുക
+mobile-pair-link-placeholder = പെയറിംഗ് ലിങ്ക് ഒട്ടിക്കുക
+mobile-pair-connect = കണക്റ്റ് ചെയ്യുക
+mobile-pair-connecting = കണക്റ്റ് ചെയ്യുന്നു…
+mobile-pair-disconnect = വിച്ഛേദിക്കുക
+mobile-status-connected = കണക്റ്റ് ചെയ്തു
+mobile-status-reaching = നിങ്ങളുടെ Mac-നെ തിരയുന്നു…
+mobile-status-disconnected = കണക്റ്റ് ചെയ്തിട്ടില്ല
+
+mobile-url-invalid = പെയറിംഗ് URL അസാധുവാണ്.
+mobile-url-no-address = പെയറിംഗ് URL-ൽ സെർവർ വിലാസമില്ല.
+mobile-url-bad-address = പെയറിംഗ് URL-ലെ സെർവർ വിലാസം അസാധുവാണ്.
+mobile-url-no-token = പെയറിംഗ് URL-ൽ ടോക്കണില്ല.
+mobile-url-scheme = പെയറിംഗ് URL HTTPS അല്ലെങ്കിൽ HTTP ഉപയോഗിക്കണം.
+mobile-url-paste-full = നിങ്ങളുടെ Mac-ൽ Vmux കാണിക്കുന്ന പൂർണ്ണ പെയറിംഗ് URL ഒട്ടിക്കുക.
+
+mobile-error-pairing-outdated = ഈ പെയറിംഗ് കാലഹരണപ്പെട്ടു. Mac-ലെ QR വീണ്ടും സ്കാൻ ചെയ്യുക.
+mobile-error-pairing-expired = പെയറിംഗ് കാലഹരണപ്പെട്ടു. Mac-ലെ QR വീണ്ടും സ്കാൻ ചെയ്യുക.
+mobile-error-pairing-lost = പെയറിംഗ് കാലഹരണപ്പെട്ടു. Mac-മായി വീണ്ടും പെയർ ചെയ്യുക.
+mobile-error-token-rejected = പെയറിംഗ് ടോക്കൺ നിരസിക്കപ്പെട്ടു.
+mobile-error-stack-missing = ഡെസ്ക്ടോപ്പ് ചാറ്റ് തുറന്നു, പക്ഷേ അതിന്റെ സ്റ്റാക്ക് പ്രത്യക്ഷപ്പെട്ടില്ല.
+mobile-error-not-offered = നിങ്ങളുടെ Mac ഇത് ഇതുവരെ നൽകുന്നില്ല.
+mobile-error-remote-disabled = നിങ്ങളുടെ Mac-ൽ Remote ഓഫാണ്.
+mobile-error-session-gone = ആ സെഷൻ ഇല്ലാതായി.
+mobile-error-no-desktop = നിങ്ങളുടെ Mac-ൽ Vmux വിൻഡോ തുറക്കുക.
+mobile-error-refused = നിങ്ങളുടെ Mac-ന് അത് ചെയ്യാനായില്ല.
+mobile-error-no-answer = { $seconds }s കഴിഞ്ഞിട്ടും { $address } മറുപടി നൽകിയില്ല.
+
+mobile-start-stacks = സ്റ്റാക്കുകൾ
+mobile-start-no-stacks = തുറന്ന സ്റ്റാക്കുകളില്ല
+mobile-start-team = ടീം
+mobile-start-search-placeholder = തിരയുക അല്ലെങ്കിൽ ചോദിക്കുക…
+mobile-start-new-chat = ചാറ്റ് തുടങ്ങുക
+mobile-start-starting = ആരംഭിക്കുന്നു…
+
+mobile-chat-back = പിന്നോട്ട്
+mobile-chat-back-to-stacks = സ്റ്റാക്കുകളിലേക്ക് മടങ്ങുക
+mobile-chat-no-messages = ഇതുവരെ സന്ദേശങ്ങളില്ല.
+mobile-chat-no-session = സജീവ സെഷനില്ല
+mobile-chat-placeholder = ഏജന്റിന് സന്ദേശം…
+mobile-chat-send = അയയ്ക്കുക
+mobile-chat-stop = നിർത്തുക
+
+mobile-qr-title = Vmux കാണിക്കുന്ന QR കോഡ് സ്കാൻ ചെയ്യുക
+mobile-qr-cancel = റദ്ദാക്കുക
+mobile-qr-unavailable = QR സ്കാനർ ലഭ്യമല്ല.
+mobile-qr-camera-unavailable = ക്യാമറ ലഭ്യമല്ല. പകരം പെയറിംഗ് ലിങ്ക് നൽകുക.
+mobile-qr-camera-failed = ക്യാമറ തുറക്കാനായില്ല: { $error }
+mobile-qr-camera-input-unavailable = ക്യാമറ ഇൻപുട്ട് ലഭ്യമല്ല.
+mobile-qr-unsupported-device = ഈ ഉപകരണത്തിൽ QR സ്കാനിംഗ് ലഭ്യമല്ല.
+mobile-qr-unsupported-platform = ഈ പ്ലാറ്റ്‌ഫോമിൽ QR സ്കാനിംഗ് ഇതുവരെ ലഭ്യമല്ല. പകരം പെയറിംഗ് ലിങ്ക് നൽകുക.
+mobile-error-unexpected-answer = നിങ്ങളുടെ Mac അപ്രതീക്ഷിതമായി പ്രതികരിച്ചു.
+mobile-error-connection-dropped = നിങ്ങളുടെ Mac-മായുള്ള കണക്ഷൻ നഷ്ടപ്പെട്ടു.
+mobile-error-connection-closed = നിങ്ങളുടെ Mac കണക്ഷൻ അടച്ചു.
+mobile-error-address-invalid = പെയറിംഗ് വിലാസം അസാധുവാണ്.
+mobile-error-address-no-port = പെയറിംഗ് വിലാസത്തിൽ പോർട്ടില്ല.

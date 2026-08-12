@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac’inize bağlanın
+mobile-pair-subtitle = Vmux’ta Remote’u açıp Connect device seçeneğini seçin.
+mobile-pair-scan = QR kodu tara
+mobile-pair-show-link = Eşleştirme bağlantısını elle gir
+mobile-pair-hide-link = Eşleştirme bağlantısını gizle
+mobile-pair-link-placeholder = Eşleştirme bağlantısını yapıştır
+mobile-pair-connect = Bağlan
+mobile-pair-connecting = Bağlanıyor…
+mobile-pair-disconnect = Bağlantıyı kes
+mobile-status-connected = Bağlı
+mobile-status-reaching = Mac’inize ulaşılıyor…
+mobile-status-disconnected = Bağlı değil
+
+mobile-url-invalid = Eşleştirme URL’si geçersiz.
+mobile-url-no-address = Eşleştirme URL’sinde sunucu adresi yok.
+mobile-url-bad-address = Eşleştirme URL’sindeki sunucu adresi geçersiz.
+mobile-url-no-token = Eşleştirme URL’sinde token yok.
+mobile-url-scheme = Eşleştirme URL’si HTTPS veya HTTP kullanmalı.
+mobile-url-paste-full = Mac’inizde Vmux’ın gösterdiği eşleştirme URL’sinin tamamını yapıştırın.
+
+mobile-error-pairing-outdated = Bu eşleştirme güncel değil. Mac’inizdeki QR kodu yeniden tarayın.
+mobile-error-pairing-expired = Eşleştirmenin süresi doldu. Mac’inizdeki QR kodu yeniden tarayın.
+mobile-error-pairing-lost = Eşleştirmenin süresi doldu. Mac ile yeniden eşleştirin.
+mobile-error-token-rejected = Eşleştirme token’ı reddedildi.
+mobile-error-stack-missing = Masaüstü sohbeti açtı ama yığını görünmedi.
+mobile-error-not-offered = Mac’iniz bunu henüz sunmuyor.
+mobile-error-remote-disabled = Mac’inizde Remote kapalı.
+mobile-error-session-gone = O oturum artık yok.
+mobile-error-no-desktop = Mac’inizde Vmux penceresini açın.
+mobile-error-refused = Mac’iniz bunu yapamadı.
+mobile-error-no-answer = { $seconds } sn içinde { $address } adresinden yanıt gelmedi.
+
+mobile-start-stacks = Yığınlar
+mobile-start-no-stacks = Açık yığın yok
+mobile-start-team = Ekip
+mobile-start-search-placeholder = Ara veya sor…
+mobile-start-new-chat = Sohbet başlat
+mobile-start-starting = Başlatılıyor…
+
+mobile-chat-back = Geri
+mobile-chat-back-to-stacks = Yığınlara dön
+mobile-chat-no-messages = Henüz mesaj yok.
+mobile-chat-no-session = Etkin oturum yok
+mobile-chat-placeholder = Ajana mesaj yaz…
+mobile-chat-send = Gönder
+mobile-chat-stop = Durdur
+
+mobile-qr-title = Vmux’ın gösterdiği QR kodu tarayın
+mobile-qr-cancel = İptal
+mobile-qr-unavailable = QR tarayıcı kullanılamıyor.
+mobile-qr-camera-unavailable = Kamera kullanılamıyor. Bunun yerine eşleştirme bağlantısını girin.
+mobile-qr-camera-failed = Kamera açılamadı: { $error }
+mobile-qr-camera-input-unavailable = Kamera girişi kullanılamıyor.
+mobile-qr-unsupported-device = Bu aygıtta QR tarama kullanılamıyor.
+mobile-qr-unsupported-platform = QR tarama bu platformda henüz kullanılamıyor. Bunun yerine eşleştirme bağlantısını girin.
+mobile-error-unexpected-answer = Mac’iniz beklenmedik bir yanıt verdi.
+mobile-error-connection-dropped = Mac’inizle bağlantı koptu.
+mobile-error-connection-closed = Mac’iniz bağlantıyı kapattı.
+mobile-error-address-invalid = Eşleştirme adresi geçersiz.
+mobile-error-address-no-port = Eşleştirme adresinde port yok.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Cysylltu â’ch Mac
+mobile-pair-subtitle = Yn Vmux, agorwch Remote a dewiswch Cysylltu dyfais.
+mobile-pair-scan = Sganio cod QR
+mobile-pair-show-link = Rhoi’r ddolen bario â llaw
+mobile-pair-hide-link = Cuddio’r ddolen bario
+mobile-pair-link-placeholder = Gludwch y ddolen bario
+mobile-pair-connect = Cysylltu
+mobile-pair-connecting = Wrthi’n cysylltu…
+mobile-pair-disconnect = Datgysylltu
+mobile-status-connected = Wedi cysylltu
+mobile-status-reaching = Wrthi’n cyrraedd eich Mac…
+mobile-status-disconnected = Heb gysylltu
+
+mobile-url-invalid = Mae’r URL pario yn annilys.
+mobile-url-no-address = Nid oes cyfeiriad gweinydd yn yr URL pario.
+mobile-url-bad-address = Mae cyfeiriad gweinydd annilys yn yr URL pario.
+mobile-url-no-token = Nid oes tocyn yn yr URL pario.
+mobile-url-scheme = Rhaid i’r URL pario ddefnyddio HTTPS neu HTTP.
+mobile-url-paste-full = Gludwch yr URL pario llawn y mae Vmux yn ei ddangos ar eich Mac.
+
+mobile-error-pairing-outdated = Mae’r pario hwn wedi dyddio. Sganiwch y cod QR ar eich Mac eto.
+mobile-error-pairing-expired = Mae’r pario wedi dod i ben. Sganiwch y cod QR ar eich Mac eto.
+mobile-error-pairing-lost = Mae’r pario wedi dod i ben. Pariwch â’r Mac eto.
+mobile-error-token-rejected = Gwrthodwyd y tocyn pario.
+mobile-error-stack-missing = Agorodd y bwrdd gwaith y sgwrs, ond ni ymddangosodd ei stac.
+mobile-error-not-offered = Nid yw eich Mac yn cynnig hyn eto.
+mobile-error-remote-disabled = Mae Remote wedi’i ddiffodd ar eich Mac.
+mobile-error-session-gone = Mae’r sesiwn honno wedi mynd.
+mobile-error-no-desktop = Agorwch ffenestr Vmux ar eich Mac.
+mobile-error-refused = Ni allai eich Mac wneud hynny.
+mobile-error-no-answer = Dim ateb gan { $address } ar ôl { $seconds } eiliad.
+
+mobile-start-stacks = Staciau
+mobile-start-no-stacks = Dim staciau ar agor
+mobile-start-team = Tîm
+mobile-start-search-placeholder = Chwilio neu ofyn…
+mobile-start-new-chat = Dechrau sgwrs
+mobile-start-starting = Wrthi’n dechrau…
+
+mobile-chat-back = Nôl
+mobile-chat-back-to-stacks = Nôl i’r staciau
+mobile-chat-no-messages = Dim negeseuon eto.
+mobile-chat-no-session = Dim sesiwn weithredol
+mobile-chat-placeholder = Neges at yr asiant…
+mobile-chat-send = Anfon
+mobile-chat-stop = Stopio
+
+mobile-qr-title = Sganiwch y cod QR y mae Vmux yn ei ddangos
+mobile-qr-cancel = Canslo
+mobile-qr-unavailable = Nid yw’r sganiwr QR ar gael.
+mobile-qr-camera-unavailable = Camera ddim ar gael. Rhowch y ddolen bario yn lle hynny.
+mobile-qr-camera-failed = Methu agor y camera: { $error }
+mobile-qr-camera-input-unavailable = Nid yw mewnbwn y camera ar gael.
+mobile-qr-unsupported-device = Nid yw sganio QR ar gael ar y ddyfais hon.
+mobile-qr-unsupported-platform = Nid yw sganio QR ar gael ar y platfform hwn eto. Rhowch y ddolen bario yn lle hynny.
+mobile-error-unexpected-answer = Atebodd eich Mac yn annisgwyl.
+mobile-error-connection-dropped = Mae’r cysylltiad â’ch Mac wedi torri.
+mobile-error-connection-closed = Caeodd eich Mac y cysylltiad.
+mobile-error-address-invalid = Mae’r cyfeiriad pario hwnnw yn annilys.
+mobile-error-address-no-port = Nid oes porth yn y cyfeiriad pario hwnnw.

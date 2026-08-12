@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac kompyuteringizga ulaning
+mobile-pair-subtitle = Vmux ilovasida Remote bo‘limini oching va Connect device ni tanlang.
+mobile-pair-scan = QR kodni skanerlash
+mobile-pair-show-link = Juftlash havolasini qo‘lda kiritish
+mobile-pair-hide-link = Juftlash havolasini yashirish
+mobile-pair-link-placeholder = Juftlash havolasini joylashtiring
+mobile-pair-connect = Ulanish
+mobile-pair-connecting = Ulanmoqda…
+mobile-pair-disconnect = Uzish
+mobile-status-connected = Ulangan
+mobile-status-reaching = Mac bilan bog‘lanilmoqda…
+mobile-status-disconnected = Ulanmagan
+
+mobile-url-invalid = Juftlash URL manzili yaroqsiz.
+mobile-url-no-address = Juftlash URL manzilida server manzili yo‘q.
+mobile-url-bad-address = Juftlash URL manzilidagi server manzili yaroqsiz.
+mobile-url-no-token = Juftlash URL manzilida token yo‘q.
+mobile-url-scheme = Juftlash URL manzili HTTPS yoki HTTP bo‘lishi kerak.
+mobile-url-paste-full = Mac kompyuteringizdagi Vmux ko‘rsatgan to‘liq juftlash URL manzilini joylashtiring.
+
+mobile-error-pairing-outdated = Bu juftlash eskirgan. Mac kompyuteringizdagi QR kodni qayta skanerlang.
+mobile-error-pairing-expired = Juftlash muddati tugadi. Mac kompyuteringizdagi QR kodni qayta skanerlang.
+mobile-error-pairing-lost = Juftlash muddati tugadi. Mac bilan qaytadan juftlang.
+mobile-error-token-rejected = Juftlash tokeni rad etildi.
+mobile-error-stack-missing = Kompyuter chatni ochdi, lekin uning steki ko‘rinmadi.
+mobile-error-not-offered = Mac kompyuteringiz buni hali taklif qilmaydi.
+mobile-error-remote-disabled = Mac kompyuteringizda Remote o‘chirilgan.
+mobile-error-session-gone = Bu sessiya endi mavjud emas.
+mobile-error-no-desktop = Mac kompyuteringizda Vmux oynasini oching.
+mobile-error-refused = Mac kompyuteringiz buni bajara olmadi.
+mobile-error-no-answer = { $seconds } soniyadan keyin ham { $address } manzilidan javob yo‘q.
+
+mobile-start-stacks = Steklar
+mobile-start-no-stacks = Ochiq stek yo‘q
+mobile-start-team = Jamoa
+mobile-start-search-placeholder = Qidiring yoki so‘rang…
+mobile-start-new-chat = Chatni boshlash
+mobile-start-starting = Boshlanmoqda…
+
+mobile-chat-back = Orqaga
+mobile-chat-back-to-stacks = Steklarga qaytish
+mobile-chat-no-messages = Hozircha xabarlar yo‘q.
+mobile-chat-no-session = Faol sessiya yo‘q
+mobile-chat-placeholder = Agentga xabar…
+mobile-chat-send = Yuborish
+mobile-chat-stop = To‘xtatish
+
+mobile-qr-title = Vmux ko‘rsatgan QR kodni skanerlang
+mobile-qr-cancel = Bekor qilish
+mobile-qr-unavailable = QR skaner mavjud emas.
+mobile-qr-camera-unavailable = Kamera mavjud emas. Buning o‘rniga juftlash havolasini kiriting.
+mobile-qr-camera-failed = Kamerani ochib bo‘lmadi: { $error }
+mobile-qr-camera-input-unavailable = Kamera kirishi mavjud emas.
+mobile-qr-unsupported-device = Bu qurilmada QR skanerlash mavjud emas.
+mobile-qr-unsupported-platform = Bu platformada QR skanerlash hali mavjud emas. Buning o‘rniga juftlash havolasini kiriting.
+mobile-error-unexpected-answer = Mac kompyuteringiz kutilmagan javob qaytardi.
+mobile-error-connection-dropped = Mac kompyuteringiz bilan ulanish uzildi.
+mobile-error-connection-closed = Mac kompyuteringiz ulanishni yopdi.
+mobile-error-address-invalid = Juftlash manzili yaroqsiz.
+mobile-error-address-no-port = Juftlash manzilida port yo‘q.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Поврзи се со твојот Mac
+mobile-pair-subtitle = Во Vmux отвори Remote и избери Connect device.
+mobile-pair-scan = Скенирај QR код
+mobile-pair-show-link = Внеси го линкот за поврзување рачно
+mobile-pair-hide-link = Сокриј го линкот за поврзување
+mobile-pair-link-placeholder = Залепи го линкот за поврзување
+mobile-pair-connect = Поврзи се
+mobile-pair-connecting = Се поврзува…
+mobile-pair-disconnect = Прекини
+mobile-status-connected = Поврзано
+mobile-status-reaching = Се бара твојот Mac…
+mobile-status-disconnected = Не е поврзано
+
+mobile-url-invalid = URL-то за поврзување е невалидно.
+mobile-url-no-address = URL-то за поврзување нема адреса на сервер.
+mobile-url-bad-address = URL-то за поврзување има невалидна адреса на сервер.
+mobile-url-no-token = URL-то за поврзување нема токен.
+mobile-url-scheme = URL-то за поврзување мора да користи HTTPS или HTTP.
+mobile-url-paste-full = Залепи го целото URL за поврзување што го прикажува Vmux на твојот Mac.
+
+mobile-error-pairing-outdated = Ова поврзување е застарено. Скенирај го QR кодот на твојот Mac повторно.
+mobile-error-pairing-expired = Поврзувањето истече. Скенирај го QR кодот на твојот Mac повторно.
+mobile-error-pairing-lost = Поврзувањето истече. Поврзи се со Mac повторно.
+mobile-error-token-rejected = Токенот за поврзување беше одбиен.
+mobile-error-stack-missing = Десктопот го отвори разговорот, но неговиот стек не се појави.
+mobile-error-not-offered = Твојот Mac сè уште не го нуди ова.
+mobile-error-remote-disabled = Remote е исклучен на твојот Mac.
+mobile-error-session-gone = Таа сесија ја нема.
+mobile-error-no-desktop = Отвори го прозорецот на Vmux на твојот Mac.
+mobile-error-refused = Твојот Mac не можеше да го направи тоа.
+mobile-error-no-answer = Нема одговор од { $address } по { $seconds }s.
+
+mobile-start-stacks = Стекови
+mobile-start-no-stacks = Нема отворени стекови
+mobile-start-team = Тим
+mobile-start-search-placeholder = Пребарај или прашај…
+mobile-start-new-chat = Започни разговор
+mobile-start-starting = Се стартува…
+
+mobile-chat-back = Назад
+mobile-chat-back-to-stacks = Назад кон стековите
+mobile-chat-no-messages = Сè уште нема пораки.
+mobile-chat-no-session = Нема активна сесија
+mobile-chat-placeholder = Порака до агентот…
+mobile-chat-send = Испрати
+mobile-chat-stop = Запри
+
+mobile-qr-title = Скенирај го QR кодот прикажан од Vmux
+mobile-qr-cancel = Откажи
+mobile-qr-unavailable = QR скенерот е недостапен.
+mobile-qr-camera-unavailable = Камерата е недостапна. Внеси го линкот за поврзување наместо тоа.
+mobile-qr-camera-failed = Камерата не можеше да се отвори: { $error }
+mobile-qr-camera-input-unavailable = Влезот од камерата е недостапен.
+mobile-qr-unsupported-device = QR скенирањето е недостапно на овој уред.
+mobile-qr-unsupported-platform = QR скенирањето сè уште не е достапно на оваа платформа. Внеси го линкот за поврзување наместо тоа.
+mobile-error-unexpected-answer = Твојот Mac одговори неочекувано.
+mobile-error-connection-dropped = Врската со твојот Mac се прекина.
+mobile-error-connection-closed = Твојот Mac ја затвори врската.
+mobile-error-address-invalid = Адресата за поврзување е невалидна.
+mobile-error-address-no-port = Адресата за поврзување нема порта.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Koppel aan jou Mac
+mobile-pair-subtitle = Maak Remote in Vmux oop en kies Koppel toestel.
+mobile-pair-scan = Skandeer QR-kode
+mobile-pair-show-link = Voer koppelskakel handmatig in
+mobile-pair-hide-link = Versteek koppelskakel
+mobile-pair-link-placeholder = Plak koppelskakel
+mobile-pair-connect = Koppel
+mobile-pair-connecting = Koppel tans…
+mobile-pair-disconnect = Ontkoppel
+mobile-status-connected = Gekoppel
+mobile-status-reaching = Kontak jou Mac…
+mobile-status-disconnected = Nie gekoppel nie
+
+mobile-url-invalid = Koppel-URL is ongeldig.
+mobile-url-no-address = Koppel-URL het geen bedieneradres nie.
+mobile-url-bad-address = Koppel-URL het ’n ongeldige bedieneradres.
+mobile-url-no-token = Koppel-URL het geen token nie.
+mobile-url-scheme = Koppel-URL moet HTTPS of HTTP gebruik.
+mobile-url-paste-full = Plak die volledige koppel-URL wat Vmux op jou Mac wys.
+
+mobile-error-pairing-outdated = Hierdie koppeling is verouderd. Skandeer die QR op jou Mac weer.
+mobile-error-pairing-expired = Koppeling het verval. Skandeer die QR op jou Mac weer.
+mobile-error-pairing-lost = Koppeling het verval. Koppel weer aan die Mac.
+mobile-error-token-rejected = Koppeltoken is verwerp.
+mobile-error-stack-missing = Die rekenaar het die klets oopgemaak, maar sy stapel het nie verskyn nie.
+mobile-error-not-offered = Jou Mac bied dit nog nie aan nie.
+mobile-error-remote-disabled = Remote is afgeskakel op jou Mac.
+mobile-error-session-gone = Daardie sessie is weg.
+mobile-error-no-desktop = Maak die Vmux-venster op jou Mac oop.
+mobile-error-refused = Jou Mac kon dit nie doen nie.
+mobile-error-no-answer = Geen antwoord van { $address } na { $seconds }s nie.
+
+mobile-start-stacks = Stapels
+mobile-start-no-stacks = Geen oop stapels nie
+mobile-start-team = Span
+mobile-start-search-placeholder = Soek of vra…
+mobile-start-new-chat = Begin klets
+mobile-start-starting = Begin tans…
+
+mobile-chat-back = Terug
+mobile-chat-back-to-stacks = Terug na stapels
+mobile-chat-no-messages = Nog geen boodskappe nie.
+mobile-chat-no-session = Geen aktiewe sessie nie
+mobile-chat-placeholder = Boodskap aan agent…
+mobile-chat-send = Stuur
+mobile-chat-stop = Stop
+
+mobile-qr-title = Skandeer die QR-kode wat Vmux wys
+mobile-qr-cancel = Kanselleer
+mobile-qr-unavailable = QR-skandeerder is nie beskikbaar nie.
+mobile-qr-camera-unavailable = Kamera nie beskikbaar nie. Voer eerder die koppelskakel in.
+mobile-qr-camera-failed = Kon nie kamera oopmaak nie: { $error }
+mobile-qr-camera-input-unavailable = Kamera-invoer is nie beskikbaar nie.
+mobile-qr-unsupported-device = QR-skandering is nie op hierdie toestel beskikbaar nie.
+mobile-qr-unsupported-platform = QR-skandering is nog nie op hierdie platform beskikbaar nie. Voer eerder die koppelskakel in.
+mobile-error-unexpected-answer = Jou Mac het onverwags geantwoord.
+mobile-error-connection-dropped = Die verbinding met jou Mac het verlore gegaan.
+mobile-error-connection-closed = Jou Mac het die verbinding gesluit.
+mobile-error-address-invalid = Daardie koppeladres is ongeldig.
+mobile-error-address-no-port = Daardie koppeladres het geen poort nie.

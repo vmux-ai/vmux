@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Sopọ̀ mọ́ Mac rẹ
+mobile-pair-subtitle = Nínú Vmux, ṣí Remote kí o sì yan Connect device.
+mobile-pair-scan = Ṣàyẹ̀wò kóòdù QR
+mobile-pair-show-link = Tẹ ọ̀nà ìsopọ̀ pẹ̀lú ọwọ́
+mobile-pair-hide-link = Fi ọ̀nà ìsopọ̀ pamọ́
+mobile-pair-link-placeholder = Lẹ̀ ọ̀nà ìsopọ̀ mọ́
+mobile-pair-connect = Sopọ̀
+mobile-pair-connecting = Ń sopọ̀…
+mobile-pair-disconnect = Já ìsopọ̀
+mobile-status-connected = Ti sopọ̀
+mobile-status-reaching = Ń wá Mac rẹ…
+mobile-status-disconnected = Kò sopọ̀
+
+mobile-url-invalid = URL ìsopọ̀ kò tọ́.
+mobile-url-no-address = URL ìsopọ̀ kò ní àdírẹ́sì olùpèsè.
+mobile-url-bad-address = Àdírẹ́sì olùpèsè nínú URL ìsopọ̀ kò tọ́.
+mobile-url-no-token = URL ìsopọ̀ kò ní token.
+mobile-url-scheme = URL ìsopọ̀ gbọ́dọ̀ lo HTTPS tàbí HTTP.
+mobile-url-paste-full = Lẹ̀ gbogbo URL ìsopọ̀ tí Vmux fihàn lórí Mac rẹ mọ́.
+
+mobile-error-pairing-outdated = Ìsopọ̀ yìí ti dàgbà. Tún kóòdù QR tó wà lórí Mac rẹ ṣàyẹ̀wò.
+mobile-error-pairing-expired = Ìsopọ̀ ti pari. Tún kóòdù QR tó wà lórí Mac rẹ ṣàyẹ̀wò.
+mobile-error-pairing-lost = Ìsopọ̀ ti pari. Tún sopọ̀ mọ́ Mac.
+mobile-error-token-rejected = A kọ̀ token ìsopọ̀.
+mobile-error-stack-missing = Kọ̀ǹpútà náà ṣí ìfọ̀rọ̀wérọ̀, ṣùgbọ́n stack rẹ̀ kò farahàn.
+mobile-error-not-offered = Mac rẹ kò tíì pèsè èyí.
+mobile-error-remote-disabled = A ti pa Remote lórí Mac rẹ.
+mobile-error-session-gone = Sẹ́ṣọ́n yẹn kò sí mọ́.
+mobile-error-no-desktop = Ṣí fèrèsé Vmux lórí Mac rẹ.
+mobile-error-refused = Mac rẹ kò lè ṣe bẹ́ẹ̀.
+mobile-error-no-answer = Kò sí ìdáhùn láti { $address } lẹ́yìn ìṣẹ́jú-àáyá { $seconds }.
+
+mobile-start-stacks = Stack
+mobile-start-no-stacks = Kò sí stack tí ó ṣí
+mobile-start-team = Ẹgbẹ́
+mobile-start-search-placeholder = Wá tàbí béèrè…
+mobile-start-new-chat = Bẹ̀rẹ̀ ìfọ̀rọ̀wérọ̀
+mobile-start-starting = Ń bẹ̀rẹ̀…
+
+mobile-chat-back = Padà
+mobile-chat-back-to-stacks = Padà sí stack
+mobile-chat-no-messages = Kò sí ìfiránṣẹ́ kankan síbẹ̀.
+mobile-chat-no-session = Kò sí sẹ́ṣọ́n tí ń ṣiṣẹ́
+mobile-chat-placeholder = Fi ìfiránṣẹ́ ránṣẹ́ sí agent…
+mobile-chat-send = Fi ránṣẹ́
+mobile-chat-stop = Dáwọ́ dúró
+
+mobile-qr-title = Ṣàyẹ̀wò kóòdù QR tí Vmux fihàn
+mobile-qr-cancel = Fagilé
+mobile-qr-unavailable = Ẹ̀rọ ìṣàyẹ̀wò QR kò sí.
+mobile-qr-camera-unavailable = Kámẹ́rà kò sí. Dípò rẹ̀, tẹ ọ̀nà ìsopọ̀ sí i.
+mobile-qr-camera-failed = Kámẹ́rà kò ṣeé ṣí: { $error }
+mobile-qr-camera-input-unavailable = Ìwọlé kámẹ́rà kò sí.
+mobile-qr-unsupported-device = Ìṣàyẹ̀wò QR kò sí lórí device yìí.
+mobile-qr-unsupported-platform = Ìṣàyẹ̀wò QR kò tíì sí lórí pẹpẹ yìí. Dípò rẹ̀, tẹ ọ̀nà ìsopọ̀ sí i.
+mobile-error-unexpected-answer = Mac rẹ dáhùn ní ọ̀nà tí a kò retí.
+mobile-error-connection-dropped = Ìsopọ̀ sí Mac rẹ ti já.
+mobile-error-connection-closed = Mac rẹ ti pa ìsopọ̀ náà.
+mobile-error-address-invalid = Àdírẹ́sì ìsopọ̀ yẹn kò tọ́.
+mobile-error-address-no-port = Àdírẹ́sì ìsopọ̀ yẹn kò ní port.

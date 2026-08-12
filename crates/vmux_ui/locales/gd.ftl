@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Ceangail ris a’ Mac agad
+mobile-pair-subtitle = Ann an Vmux, fosgail Remote agus tagh Connect device.
+mobile-pair-scan = Sganaich còd QR
+mobile-pair-show-link = Cuir a-steach an ceangal paidhreachaidh a làimh
+mobile-pair-hide-link = Falaich an ceangal paidhreachaidh
+mobile-pair-link-placeholder = Cuir ann an ceangal paidhreachaidh
+mobile-pair-connect = Ceangail
+mobile-pair-connecting = A’ ceangal…
+mobile-pair-disconnect = Dì-cheangail
+mobile-status-connected = Ceangailte
+mobile-status-reaching = A’ ruigsinn a’ Mac agad…
+mobile-status-disconnected = Gun cheangal
+
+mobile-url-invalid = Chan eil an URL paidhreachaidh dligheach.
+mobile-url-no-address = Chan eil seòladh frithealaiche san URL paidhreachaidh.
+mobile-url-bad-address = Tha seòladh frithealaiche mì-dhligheach san URL paidhreachaidh.
+mobile-url-no-token = Chan eil tòcan san URL paidhreachaidh.
+mobile-url-scheme = Feumaidh an URL paidhreachaidh HTTPS no HTTP a chleachdadh.
+mobile-url-paste-full = Cuir ann an URL paidhreachaidh slàn a tha Vmux a’ sealltainn air a’ Mac agad.
+
+mobile-error-pairing-outdated = Tha am paidhreachadh seo ro shean. Sganaich an còd QR air a’ Mac agad a-rithist.
+mobile-error-pairing-expired = Dh’fhalbh an ùine air a’ phaidhreachadh. Sganaich an còd QR air a’ Mac agad a-rithist.
+mobile-error-pairing-lost = Dh’fhalbh an ùine air a’ phaidhreachadh. Paidhrich ris a’ Mac a-rithist.
+mobile-error-token-rejected = Chaidh an tòcan paidhreachaidh a dhiùltadh.
+mobile-error-stack-missing = Dh’fhosgail an deasg a’ chabadaich, ach cha do nochd an staca aige.
+mobile-error-not-offered = Chan eil a’ Mac agad a’ tabhann seo fhathast.
+mobile-error-remote-disabled = Tha Remote dheth air a’ Mac agad.
+mobile-error-session-gone = Tha an seisean sin air falbh.
+mobile-error-no-desktop = Fosgail uinneag Vmux air a’ Mac agad.
+mobile-error-refused = Cha b’ urrainn dhan Mac agad sin a dhèanamh.
+mobile-error-no-answer = Gun fhreagairt o { $address } às dèidh { $seconds } d.
+
+mobile-start-stacks = Stacan
+mobile-start-no-stacks = Chan eil stac fosgailte ann
+mobile-start-team = Sgioba
+mobile-start-search-placeholder = Lorg no faighnich…
+mobile-start-new-chat = Tòisich cabadaich
+mobile-start-starting = A’ tòiseachadh…
+
+mobile-chat-back = Air ais
+mobile-chat-back-to-stacks = Air ais gu na stacan
+mobile-chat-no-messages = Chan eil teachdaireachd ann fhathast.
+mobile-chat-no-session = Chan eil seisean gnìomhach ann
+mobile-chat-placeholder = Teachdaireachd dhan àidseant…
+mobile-chat-send = Cuir
+mobile-chat-stop = Stad
+
+mobile-qr-title = Sganaich an còd QR a tha Vmux a’ sealltainn
+mobile-qr-cancel = Sguir dheth
+mobile-qr-unavailable = Chan eil an sganair QR ri fhaighinn.
+mobile-qr-camera-unavailable = Chan eil an camara ri fhaighinn. Cuir a-steach an ceangal paidhreachaidh na àite.
+mobile-qr-camera-failed = Cha b’ urrainn an camara fhosgladh: { $error }
+mobile-qr-camera-input-unavailable = Chan eil ion-chur a’ chamara ri fhaighinn.
+mobile-qr-unsupported-device = Chan eil sganadh QR ri fhaighinn air an inneal seo.
+mobile-qr-unsupported-platform = Chan eil sganadh QR ri fhaighinn air an ùrlar seo fhathast. Cuir a-steach an ceangal paidhreachaidh na àite.
+mobile-error-unexpected-answer = Fhreagair a’ Mac agad gun dùil.
+mobile-error-connection-dropped = Chaidh an ceangal ris a’ Mac agad a chall.
+mobile-error-connection-closed = Dhùin a’ Mac agad an ceangal.
+mobile-error-address-invalid = Chan eil an seòladh paidhreachaidh sin dligheach.
+mobile-error-address-no-port = Chan eil port anns an t-seòladh paidhreachaidh sin.

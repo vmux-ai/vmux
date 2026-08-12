@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Haɗa da Mac ɗinka
+mobile-pair-subtitle = A cikin Vmux, buɗe Remote sannan ka zaɓi Connect device.
+mobile-pair-scan = Duba QR code
+mobile-pair-show-link = Shigar da hanyar haɗi da hannu
+mobile-pair-hide-link = Ɓoye hanyar haɗi
+mobile-pair-link-placeholder = Manna hanyar haɗi
+mobile-pair-connect = Haɗa
+mobile-pair-connecting = Ana haɗawa…
+mobile-pair-disconnect = Katse haɗi
+mobile-status-connected = An haɗa
+mobile-status-reaching = Ana neman Mac ɗinka…
+mobile-status-disconnected = Ba a haɗa
+
+mobile-url-invalid = URL ɗin haɗi ba shi da inganci.
+mobile-url-no-address = URL ɗin haɗi ba shi da adireshin sabar.
+mobile-url-bad-address = URL ɗin haɗi yana da adireshin sabar mara inganci.
+mobile-url-no-token = URL ɗin haɗi ba shi da token.
+mobile-url-scheme = URL ɗin haɗi dole ya yi amfani da HTTPS ko HTTP.
+mobile-url-paste-full = Manna cikakken URL ɗin haɗi da Vmux ke nunawa a Mac ɗinka.
+
+mobile-error-pairing-outdated = Wannan haɗin ya tsufa. Sake duba QR ɗin da ke Mac ɗinka.
+mobile-error-pairing-expired = Haɗin ya ƙare. Sake duba QR ɗin da ke Mac ɗinka.
+mobile-error-pairing-lost = Haɗin ya ƙare. Sake haɗawa da Mac.
+mobile-error-token-rejected = An ƙi token ɗin haɗi.
+mobile-error-stack-missing = Kwamfutar ta buɗe hirar, amma stack ɗinta bai bayyana ba.
+mobile-error-not-offered = Mac ɗinka bai bayar da wannan ba tukuna.
+mobile-error-remote-disabled = An kashe Remote a Mac ɗinka.
+mobile-error-session-gone = Wannan zaman aikin ya ƙare.
+mobile-error-no-desktop = Buɗe taga Vmux a Mac ɗinka.
+mobile-error-refused = Mac ɗinka bai iya yin hakan ba.
+mobile-error-no-answer = Babu amsa daga { $address } bayan daƙiƙa { $seconds }.
+
+mobile-start-stacks = Stacks
+mobile-start-no-stacks = Babu stack a buɗe
+mobile-start-team = Ƙungiya
+mobile-start-search-placeholder = Nema ko tambaya…
+mobile-start-new-chat = Fara hira
+mobile-start-starting = Ana farawa…
+
+mobile-chat-back = Baya
+mobile-chat-back-to-stacks = Koma stacks
+mobile-chat-no-messages = Babu saƙo tukuna.
+mobile-chat-no-session = Babu zaman aiki mai gudana
+mobile-chat-placeholder = Aika wa wakilin AI…
+mobile-chat-send = Aika
+mobile-chat-stop = Tsaya
+
+mobile-qr-title = Duba QR code ɗin da Vmux ke nunawa
+mobile-qr-cancel = Soke
+mobile-qr-unavailable = Na'urar duba QR ba ta samuwa.
+mobile-qr-camera-unavailable = Kyamara ba ta samuwa. Shigar da hanyar haɗi maimakon.
+mobile-qr-camera-failed = An kasa buɗe kyamara: { $error }
+mobile-qr-camera-input-unavailable = Shigarwar kyamara ba ta samuwa.
+mobile-qr-unsupported-device = Duba QR ba ya samuwa a wannan na'urar.
+mobile-qr-unsupported-platform = Duba QR bai samuwa a wannan dandalin tukuna. Shigar da hanyar haɗi maimakon.
+mobile-error-unexpected-answer = Mac ɗinka ya ba da amsa da ba a zata ba.
+mobile-error-connection-dropped = Haɗin da Mac ɗinka ya katse.
+mobile-error-connection-closed = Mac ɗinka ya rufe haɗin.
+mobile-error-address-invalid = Wannan adireshin haɗi ba shi da inganci.
+mobile-error-address-no-port = Wannan adireshin haɗi ba shi da port.

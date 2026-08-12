@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ನಿಮ್ಮ Mac ಗೆ ಸಂಪರ್ಕಿಸಿ
+mobile-pair-subtitle = Vmux ನಲ್ಲಿ Remote ತೆರೆದು ಸಾಧನ ಸಂಪರ್ಕಿಸಿ ಆಯ್ಕೆಮಾಡಿ.
+mobile-pair-scan = QR ಕೋಡ್ ಸ್ಕ್ಯಾನ್ ಮಾಡಿ
+mobile-pair-show-link = ಜೋಡಣೆ ಲಿಂಕ್ ಕೈಯಾರೆ ನಮೂದಿಸಿ
+mobile-pair-hide-link = ಜೋಡಣೆ ಲಿಂಕ್ ಮರೆಮಾಡಿ
+mobile-pair-link-placeholder = ಜೋಡಣೆ ಲಿಂಕ್ ಅಂಟಿಸಿ
+mobile-pair-connect = ಸಂಪರ್ಕಿಸಿ
+mobile-pair-connecting = ಸಂಪರ್ಕಿಸಲಾಗುತ್ತಿದೆ…
+mobile-pair-disconnect = ಸಂಪರ್ಕ ಕಡಿತಗೊಳಿಸಿ
+mobile-status-connected = ಸಂಪರ್ಕಗೊಂಡಿದೆ
+mobile-status-reaching = ನಿಮ್ಮ Mac ಅನ್ನು ತಲುಪಲಾಗುತ್ತಿದೆ…
+mobile-status-disconnected = ಸಂಪರ್ಕಗೊಂಡಿಲ್ಲ
+
+mobile-url-invalid = ಜೋಡಣೆ URL ಅಮಾನ್ಯವಾಗಿದೆ.
+mobile-url-no-address = ಜೋಡಣೆ URL ನಲ್ಲಿ ಸರ್ವರ್ ವಿಳಾಸವಿಲ್ಲ.
+mobile-url-bad-address = ಜೋಡಣೆ URL ನಲ್ಲಿ ಸರ್ವರ್ ವಿಳಾಸ ಅಮಾನ್ಯವಾಗಿದೆ.
+mobile-url-no-token = ಜೋಡಣೆ URL ನಲ್ಲಿ ಟೋಕನ್ ಇಲ್ಲ.
+mobile-url-scheme = ಜೋಡಣೆ URL HTTPS ಅಥವಾ HTTP ಬಳಸಬೇಕು.
+mobile-url-paste-full = ನಿಮ್ಮ Mac ನಲ್ಲಿ Vmux ತೋರಿಸಿದ ಪೂರ್ಣ ಜೋಡಣೆ URL ಅಂಟಿಸಿ.
+
+mobile-error-pairing-outdated = ಈ ಜೋಡಣೆ ಹಳೆಯದಾಗಿದೆ. ನಿಮ್ಮ Mac ನಲ್ಲಿರುವ QR ಅನ್ನು ಮತ್ತೆ ಸ್ಕ್ಯಾನ್ ಮಾಡಿ.
+mobile-error-pairing-expired = ಜೋಡಣೆ ಅವಧಿ ಮುಗಿದಿದೆ. ನಿಮ್ಮ Mac ನಲ್ಲಿರುವ QR ಅನ್ನು ಮತ್ತೆ ಸ್ಕ್ಯಾನ್ ಮಾಡಿ.
+mobile-error-pairing-lost = ಜೋಡಣೆ ಅವಧಿ ಮುಗಿದಿದೆ. Mac ನೊಂದಿಗೆ ಮತ್ತೆ ಜೋಡಿಸಿ.
+mobile-error-token-rejected = ಜೋಡಣೆ ಟೋಕನ್ ತಿರಸ್ಕರಿಸಲಾಗಿದೆ.
+mobile-error-stack-missing = ಡೆಸ್ಕ್‌ಟಾಪ್ ಚಾಟ್ ತೆರೆಯಿತು, ಆದರೆ ಅದರ ಸ್ಟ್ಯಾಕ್ ಕಾಣಿಸಲಿಲ್ಲ.
+mobile-error-not-offered = ನಿಮ್ಮ Mac ಇದನ್ನು ಇನ್ನೂ ನೀಡುತ್ತಿಲ್ಲ.
+mobile-error-remote-disabled = ನಿಮ್ಮ Mac ನಲ್ಲಿ Remote ಆಫ್ ಆಗಿದೆ.
+mobile-error-session-gone = ಆ ಸೆಷನ್ ಇನ್ನಿಲ್ಲ.
+mobile-error-no-desktop = ನಿಮ್ಮ Mac ನಲ್ಲಿ Vmux ವಿಂಡೋ ತೆರೆಯಿರಿ.
+mobile-error-refused = ನಿಮ್ಮ Mac ಅದನ್ನು ಮಾಡಲಾಗಲಿಲ್ಲ.
+mobile-error-no-answer = { $seconds } ಸೆಕೆಂಡ್ ನಂತರವೂ { $address } ನಿಂದ ಉತ್ತರವಿಲ್ಲ.
+
+mobile-start-stacks = ಸ್ಟ್ಯಾಕ್‌ಗಳು
+mobile-start-no-stacks = ತೆರೆದ ಸ್ಟ್ಯಾಕ್‌ಗಳಿಲ್ಲ
+mobile-start-team = ತಂಡ
+mobile-start-search-placeholder = ಹುಡುಕಿ ಅಥವಾ ಕೇಳಿ…
+mobile-start-new-chat = ಚಾಟ್ ಪ್ರಾರಂಭಿಸಿ
+mobile-start-starting = ಪ್ರಾರಂಭಿಸಲಾಗುತ್ತಿದೆ…
+
+mobile-chat-back = ಹಿಂದೆ
+mobile-chat-back-to-stacks = ಸ್ಟ್ಯಾಕ್‌ಗಳಿಗೆ ಹಿಂತಿರುಗಿ
+mobile-chat-no-messages = ಇನ್ನೂ ಸಂದೇಶಗಳಿಲ್ಲ.
+mobile-chat-no-session = ಸಕ್ರಿಯ ಸೆಷನ್ ಇಲ್ಲ
+mobile-chat-placeholder = ಏಜೆಂಟ್‌ಗೆ ಸಂದೇಶ…
+mobile-chat-send = ಕಳುಹಿಸಿ
+mobile-chat-stop = ನಿಲ್ಲಿಸಿ
+
+mobile-qr-title = Vmux ತೋರಿಸಿದ QR ಕೋಡ್ ಸ್ಕ್ಯಾನ್ ಮಾಡಿ
+mobile-qr-cancel = ರದ್ದುಮಾಡಿ
+mobile-qr-unavailable = QR ಸ್ಕ್ಯಾನರ್ ಲಭ್ಯವಿಲ್ಲ.
+mobile-qr-camera-unavailable = ಕ್ಯಾಮೆರಾ ಲಭ್ಯವಿಲ್ಲ. ಬದಲಿಗೆ ಜೋಡಣೆ ಲಿಂಕ್ ನಮೂದಿಸಿ.
+mobile-qr-camera-failed = ಕ್ಯಾಮೆರಾ ತೆರೆಯಲಾಗಲಿಲ್ಲ: { $error }
+mobile-qr-camera-input-unavailable = ಕ್ಯಾಮೆರಾ ಇನ್‌ಪುಟ್ ಲಭ್ಯವಿಲ್ಲ.
+mobile-qr-unsupported-device = ಈ ಸಾಧನದಲ್ಲಿ QR ಸ್ಕ್ಯಾನಿಂಗ್ ಲಭ್ಯವಿಲ್ಲ.
+mobile-qr-unsupported-platform = ಈ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್‌ನಲ್ಲಿ QR ಸ್ಕ್ಯಾನಿಂಗ್ ಇನ್ನೂ ಲಭ್ಯವಿಲ್ಲ. ಬದಲಿಗೆ ಜೋಡಣೆ ಲಿಂಕ್ ನಮೂದಿಸಿ.
+mobile-error-unexpected-answer = ನಿಮ್ಮ Mac ಅನಿರೀಕ್ಷಿತವಾಗಿ ಉತ್ತರಿಸಿತು.
+mobile-error-connection-dropped = ನಿಮ್ಮ Mac ನೊಂದಿಗಿನ ಸಂಪರ್ಕ ಕಡಿದುಹೋಯಿತು.
+mobile-error-connection-closed = ನಿಮ್ಮ Mac ಸಂಪರ್ಕವನ್ನು ಮುಚ್ಚಿತು.
+mobile-error-address-invalid = ಆ ಜೋಡಣೆ ವಿಳಾಸ ಅಮಾನ್ಯವಾಗಿದೆ.
+mobile-error-address-no-port = ಆ ಜೋಡಣೆ ವಿಳಾಸದಲ್ಲಿ ಪೋರ್ಟ್ ಇಲ್ಲ.

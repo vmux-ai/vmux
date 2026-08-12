@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = E hoʻohui i kāu Mac
+mobile-pair-subtitle = Ma Vmux, e wehe iā Remote a koho iā Connect device.
+mobile-pair-scan = Kālai i ka QR code
+mobile-pair-show-link = E hoʻokomo lima i ka loulou hoʻohui
+mobile-pair-hide-link = Hūnā i ka loulou hoʻohui
+mobile-pair-link-placeholder = Kāpili i ka loulou hoʻohui
+mobile-pair-connect = Hoʻohui
+mobile-pair-connecting = Ke hoʻohui nei…
+mobile-pair-disconnect = Hoʻokaʻawale
+mobile-status-connected = Pili
+mobile-status-reaching = Ke kāhea nei i kāu Mac…
+mobile-status-disconnected = ʻAʻole pili
+
+mobile-url-invalid = ʻAʻole kūpono ka URL hoʻohui.
+mobile-url-no-address = ʻAʻohe helu kikowaena ma ka URL hoʻohui.
+mobile-url-bad-address = He helu kikowaena hewa ko ka URL hoʻohui.
+mobile-url-no-token = ʻAʻohe token ma ka URL hoʻohui.
+mobile-url-scheme = Pono ka URL hoʻohui e hoʻohana iā HTTPS a i ʻole HTTP.
+mobile-url-paste-full = E kāpili i ka URL hoʻohui piha a Vmux e hōʻike nei ma kāu Mac.
+
+mobile-error-pairing-outdated = Ua kahiko kēia hoʻohui. E kālai hou i ka QR ma kāu Mac.
+mobile-error-pairing-expired = Ua pau ka hoʻohui. E kālai hou i ka QR ma kāu Mac.
+mobile-error-pairing-lost = Ua pau ka hoʻohui. E hoʻohui hou me ka Mac.
+mobile-error-token-rejected = Ua hōʻole ʻia ka token hoʻohui.
+mobile-error-stack-missing = Ua wehe ka kamepiula i ke kamaʻilio, akā ʻaʻole i puka mai kona ahu.
+mobile-error-not-offered = ʻAʻole hāʻawi kāu Mac i kēia i kēia manawa.
+mobile-error-remote-disabled = Ua pio ʻo Remote ma kāu Mac.
+mobile-error-session-gone = Ua nalowale kēlā kau.
+mobile-error-no-desktop = E wehe i ka puka makani Vmux ma kāu Mac.
+mobile-error-refused = ʻAʻole hiki i kāu Mac ke hana i kēlā.
+mobile-error-no-answer = ʻAʻohe pane mai { $address } ma hope o { $seconds } kekona.
+
+mobile-start-stacks = Nā ahu
+mobile-start-no-stacks = ʻAʻohe ahu hāmama
+mobile-start-team = Kime
+mobile-start-search-placeholder = Huli a nīnau…
+mobile-start-new-chat = Hoʻomaka kamaʻilio
+mobile-start-starting = Ke hoʻomaka nei…
+
+mobile-chat-back = Hoʻi
+mobile-chat-back-to-stacks = Hoʻi i nā ahu
+mobile-chat-no-messages = ʻAʻohe leka i kēia manawa.
+mobile-chat-no-session = ʻAʻohe kau e holo nei
+mobile-chat-placeholder = Leka i ka ʻākena…
+mobile-chat-send = Hoʻouna
+mobile-chat-stop = Kū
+
+mobile-qr-title = E kālai i ka QR code a Vmux e hōʻike nei
+mobile-qr-cancel = Hoʻopau
+mobile-qr-unavailable = ʻAʻole loaʻa ka mea kālai QR.
+mobile-qr-camera-unavailable = ʻAʻole loaʻa ke paʻi kiʻi. E hoʻokomo i ka loulou hoʻohui.
+mobile-qr-camera-failed = ʻAʻole hiki ke wehe i ke paʻi kiʻi: { $error }
+mobile-qr-camera-input-unavailable = ʻAʻole loaʻa ka hoʻokomo paʻi kiʻi.
+mobile-qr-unsupported-device = ʻAʻole hiki ke kālai QR ma kēia hāmeʻa.
+mobile-qr-unsupported-platform = ʻAʻole hiki ke kālai QR ma kēia kahua i kēia manawa. E hoʻokomo i ka loulou hoʻohui.
+mobile-error-unexpected-answer = Ua pane kāu Mac me ka manaʻo ʻole ʻia.
+mobile-error-connection-dropped = Ua moku ka pilina me kāu Mac.
+mobile-error-connection-closed = Ua pani kāu Mac i ka pilina.
+mobile-error-address-invalid = ʻAʻole kūpono kēlā helu hoʻohui.
+mobile-error-address-no-port = ʻAʻohe awa ma kēlā helu hoʻohui.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Huza na Mac yawe
+mobile-pair-subtitle = Muri Vmux, fungura Remote hanyuma uhitemo Connect device.
+mobile-pair-scan = Sikana kode QR
+mobile-pair-show-link = Andika ihuriro ryo guhuza wenyine
+mobile-pair-hide-link = Hisha ihuriro ryo guhuza
+mobile-pair-link-placeholder = Omeka ihuriro ryo guhuza
+mobile-pair-connect = Ihuze
+mobile-pair-connecting = Irahuzwa…
+mobile-pair-disconnect = Hagarika guhuza
+mobile-status-connected = Byahujwe
+mobile-status-reaching = Hashakwa Mac yawe…
+mobile-status-disconnected = Ntabwo bihujwe
+
+mobile-url-invalid = URL yo guhuza ntiyemewe.
+mobile-url-no-address = URL yo guhuza nta aderesi ya seriveri irimo.
+mobile-url-bad-address = URL yo guhuza ifite aderesi ya seriveri itariyo.
+mobile-url-no-token = URL yo guhuza nta token irimo.
+mobile-url-scheme = URL yo guhuza igomba gukoresha HTTPS cyangwa HTTP.
+mobile-url-paste-full = Omeka URL yose yo guhuza Vmux yerekana kuri Mac yawe.
+
+mobile-error-pairing-outdated = Uku guhuza kwarataye igihe. Ongera usikane QR kuri Mac yawe.
+mobile-error-pairing-expired = Guhuza byarangiye igihe. Ongera usikane QR kuri Mac yawe.
+mobile-error-pairing-lost = Guhuza byarangiye igihe. Ongera uhuze na Mac.
+mobile-error-token-rejected = Token yo guhuza yanzwe.
+mobile-error-stack-missing = Mudasobwa yafunguye ikiganiro, ariko stack yacyo ntiyagaragaye.
+mobile-error-not-offered = Mac yawe iracyabura ibi.
+mobile-error-remote-disabled = Remote yazimye kuri Mac yawe.
+mobile-error-session-gone = Iyo session ntikiriho.
+mobile-error-no-desktop = Fungura idirishya rya Vmux kuri Mac yawe.
+mobile-error-refused = Mac yawe ntiyashoboye kubikora.
+mobile-error-no-answer = Nta gisubizo kiva kuri { $address } nyuma ya { $seconds }s.
+
+mobile-start-stacks = Stacks
+mobile-start-no-stacks = Nta stack ifunguye
+mobile-start-team = Ikipe
+mobile-start-search-placeholder = Shakisha cyangwa ubaze…
+mobile-start-new-chat = Tangira ikiganiro
+mobile-start-starting = Biratangira…
+
+mobile-chat-back = Subira inyuma
+mobile-chat-back-to-stacks = Subira kuri stacks
+mobile-chat-no-messages = Nta butumwa burahaba.
+mobile-chat-no-session = Nta session ikora
+mobile-chat-placeholder = Ubutumwa kuri ajenti…
+mobile-chat-send = Kohereza
+mobile-chat-stop = Guhagarika
+
+mobile-qr-title = Sikana kode QR Vmux yerekana
+mobile-qr-cancel = Kureka
+mobile-qr-unavailable = Isikana rya QR ntiriboneka.
+mobile-qr-camera-unavailable = Kamera ntiboneka. Andika ihuriro ryo guhuza aho.
+mobile-qr-camera-failed = Ntibyashobotse gufungura kamera: { $error }
+mobile-qr-camera-input-unavailable = Iyinjiza rya kamera ntiriboneka.
+mobile-qr-unsupported-device = Gusikana QR ntibiboneka kuri iki gikoresho.
+mobile-qr-unsupported-platform = Gusikana QR ntiraboneka kuri uru rubuga. Andika ihuriro ryo guhuza aho.
+mobile-error-unexpected-answer = Mac yawe yasubije mu buryo butunguranye.
+mobile-error-connection-dropped = Guhuza na Mac yawe byaciwe.
+mobile-error-connection-closed = Mac yawe yahagaritse guhuza.
+mobile-error-address-invalid = Aderesi yo guhuza ntiyemewe.
+mobile-error-address-no-port = Aderesi yo guhuza nta port irimo.

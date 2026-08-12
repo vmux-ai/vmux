@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = உங்கள் Mac உடன் இணைக்கவும்
+mobile-pair-subtitle = Vmux இல் Remote ஐத் திறந்து Connect device ஐத் தேர்ந்தெடுக்கவும்.
+mobile-pair-scan = QR குறியீட்டை ஸ்கேன் செய்யவும்
+mobile-pair-show-link = இணைப்புச் சுட்டியை கைமுறையாக உள்ளிடவும்
+mobile-pair-hide-link = இணைப்புச் சுட்டியை மறை
+mobile-pair-link-placeholder = இணைப்புச் சுட்டியை ஒட்டவும்
+mobile-pair-connect = இணை
+mobile-pair-connecting = இணைக்கிறது…
+mobile-pair-disconnect = துண்டி
+mobile-status-connected = இணைந்தது
+mobile-status-reaching = உங்கள் Mac ஐ அணுகுகிறது…
+mobile-status-disconnected = இணைக்கப்படவில்லை
+
+mobile-url-invalid = இணைப்பு URL செல்லாது.
+mobile-url-no-address = இணைப்பு URL இல் சேவையக முகவரி இல்லை.
+mobile-url-bad-address = இணைப்பு URL இல் தவறான சேவையக முகவரி உள்ளது.
+mobile-url-no-token = இணைப்பு URL இல் டோக்கன் இல்லை.
+mobile-url-scheme = இணைப்பு URL ஆனது HTTPS அல்லது HTTP ஐப் பயன்படுத்த வேண்டும்.
+mobile-url-paste-full = உங்கள் Mac இல் Vmux காட்டும் முழு இணைப்பு URL ஐ ஒட்டவும்.
+
+mobile-error-pairing-outdated = இந்த இணைப்பு காலாவதியானது. உங்கள் Mac இல் QR ஐ மீண்டும் ஸ்கேன் செய்யவும்.
+mobile-error-pairing-expired = இணைப்பு காலாவதியானது. உங்கள் Mac இல் QR ஐ மீண்டும் ஸ்கேன் செய்யவும்.
+mobile-error-pairing-lost = இணைப்பு காலாவதியானது. Mac உடன் மீண்டும் இணையவும்.
+mobile-error-token-rejected = இணைப்பு டோக்கன் நிராகரிக்கப்பட்டது.
+mobile-error-stack-missing = டெஸ்க்டாப் அரட்டையைத் திறந்தது, ஆனால் அதன் அடுக்கு தோன்றவில்லை.
+mobile-error-not-offered = உங்கள் Mac இதை இன்னும் வழங்கவில்லை.
+mobile-error-remote-disabled = உங்கள் Mac இல் Remote அணைக்கப்பட்டுள்ளது.
+mobile-error-session-gone = அந்த அமர்வு இல்லை.
+mobile-error-no-desktop = உங்கள் Mac இல் Vmux சாளரத்தைத் திறக்கவும்.
+mobile-error-refused = உங்கள் Mac ஆல் அதைச் செய்ய முடியவில்லை.
+mobile-error-no-answer = { $seconds } வினாடிகளுக்குப் பிறகும் { $address } இலிருந்து பதில் இல்லை.
+
+mobile-start-stacks = அடுக்குகள்
+mobile-start-no-stacks = திறந்த அடுக்குகள் இல்லை
+mobile-start-team = குழு
+mobile-start-search-placeholder = தேடுங்கள் அல்லது கேளுங்கள்…
+mobile-start-new-chat = அரட்டையைத் தொடங்கு
+mobile-start-starting = தொடங்குகிறது…
+
+mobile-chat-back = பின்
+mobile-chat-back-to-stacks = அடுக்குகளுக்குத் திரும்பு
+mobile-chat-no-messages = இதுவரை செய்திகள் இல்லை.
+mobile-chat-no-session = செயலில் அமர்வு இல்லை
+mobile-chat-placeholder = முகவருக்குச் செய்தி…
+mobile-chat-send = அனுப்பு
+mobile-chat-stop = நிறுத்து
+
+mobile-qr-title = Vmux காட்டும் QR குறியீட்டை ஸ்கேன் செய்யவும்
+mobile-qr-cancel = ரத்துசெய்
+mobile-qr-unavailable = QR ஸ்கேனர் கிடைக்கவில்லை.
+mobile-qr-camera-unavailable = கேமரா கிடைக்கவில்லை. அதற்குப் பதிலாக இணைப்புச் சுட்டியை உள்ளிடவும்.
+mobile-qr-camera-failed = கேமராவைத் திறக்க முடியவில்லை: { $error }
+mobile-qr-camera-input-unavailable = கேமரா உள்ளீடு கிடைக்கவில்லை.
+mobile-qr-unsupported-device = இந்தச் சாதனத்தில் QR ஸ்கேன் செய்ய முடியாது.
+mobile-qr-unsupported-platform = இந்தத் தளத்தில் QR ஸ்கேன் இன்னும் கிடைக்கவில்லை. அதற்குப் பதிலாக இணைப்புச் சுட்டியை உள்ளிடவும்.
+mobile-error-unexpected-answer = உங்கள் Mac எதிர்பாராத விதமாகப் பதிலளித்தது.
+mobile-error-connection-dropped = உங்கள் Mac உடனான இணைப்பு அறுந்தது.
+mobile-error-connection-closed = உங்கள் Mac இணைப்பை மூடியது.
+mobile-error-address-invalid = அந்த இணைப்பு முகவரி செல்லாது.
+mobile-error-address-no-port = அந்த இணைப்பு முகவரியில் போர்ட் இல்லை.

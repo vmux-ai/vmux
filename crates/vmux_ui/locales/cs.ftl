@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Připojit se k Macu
+mobile-pair-subtitle = Ve Vmuxu otevři Remote a zvol Připojit zařízení.
+mobile-pair-scan = Naskenovat QR kód
+mobile-pair-show-link = Zadat odkaz ručně
+mobile-pair-hide-link = Skrýt odkaz pro párování
+mobile-pair-link-placeholder = Vlož odkaz pro párování
+mobile-pair-connect = Připojit
+mobile-pair-connecting = Připojování…
+mobile-pair-disconnect = Odpojit
+mobile-status-connected = Připojeno
+mobile-status-reaching = Hledám tvůj Mac…
+mobile-status-disconnected = Nepřipojeno
+
+mobile-url-invalid = Párovací URL je neplatná.
+mobile-url-no-address = Párovací URL neobsahuje adresu serveru.
+mobile-url-bad-address = Párovací URL má neplatnou adresu serveru.
+mobile-url-no-token = Párovací URL neobsahuje token.
+mobile-url-scheme = Párovací URL musí používat HTTPS nebo HTTP.
+mobile-url-paste-full = Vlož celou párovací URL, kterou Vmux zobrazuje na tvém Macu.
+
+mobile-error-pairing-outdated = Toto párování je zastaralé. Naskenuj QR na svém Macu znovu.
+mobile-error-pairing-expired = Párování vypršelo. Naskenuj QR na svém Macu znovu.
+mobile-error-pairing-lost = Párování vypršelo. Spáruj se s Macem znovu.
+mobile-error-token-rejected = Párovací token byl odmítnut.
+mobile-error-stack-missing = Desktop chat otevřel, ale jeho vrstva se neobjevila.
+mobile-error-not-offered = Tvůj Mac to zatím nenabízí.
+mobile-error-remote-disabled = Remote je na tvém Macu vypnutý.
+mobile-error-session-gone = Tato relace už neexistuje.
+mobile-error-no-desktop = Otevři okno Vmuxu na svém Macu.
+mobile-error-refused = Tvůj Mac to nedokázal provést.
+mobile-error-no-answer = Žádná odpověď z { $address } po { $seconds } s.
+
+mobile-start-stacks = Vrstvy
+mobile-start-no-stacks = Žádné otevřené vrstvy
+mobile-start-team = Tým
+mobile-start-search-placeholder = Hledat nebo se zeptat…
+mobile-start-new-chat = Začít chat
+mobile-start-starting = Spouštění…
+
+mobile-chat-back = Zpět
+mobile-chat-back-to-stacks = Zpět na vrstvy
+mobile-chat-no-messages = Zatím žádné zprávy.
+mobile-chat-no-session = Žádná aktivní relace
+mobile-chat-placeholder = Zpráva agentovi…
+mobile-chat-send = Odeslat
+mobile-chat-stop = Zastavit
+
+mobile-qr-title = Naskenuj QR kód, který zobrazuje Vmux
+mobile-qr-cancel = Zrušit
+mobile-qr-unavailable = QR skener není k dispozici.
+mobile-qr-camera-unavailable = Kamera není k dispozici. Zadej místo toho odkaz pro párování.
+mobile-qr-camera-failed = Kameru se nepodařilo otevřít: { $error }
+mobile-qr-camera-input-unavailable = Vstup kamery není k dispozici.
+mobile-qr-unsupported-device = Skenování QR není na tomto zařízení dostupné.
+mobile-qr-unsupported-platform = Skenování QR zatím není na této platformě dostupné. Zadej místo toho odkaz pro párování.
+mobile-error-unexpected-answer = Tvůj Mac odpověděl nečekaně.
+mobile-error-connection-dropped = Připojení k tvému Macu se přerušilo.
+mobile-error-connection-closed = Tvůj Mac připojení ukončil.
+mobile-error-address-invalid = Tato párovací adresa je neplatná.
+mobile-error-address-no-port = Tato párovací adresa neobsahuje port.

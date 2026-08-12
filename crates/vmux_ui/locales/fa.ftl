@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = اتصال به Mac شما
+mobile-pair-subtitle = در Vmux، بخش Remote را باز کنید و Connect device را انتخاب کنید.
+mobile-pair-scan = اسکن کد QR
+mobile-pair-show-link = وارد کردن دستی پیوند جفت‌سازی
+mobile-pair-hide-link = پنهان کردن پیوند جفت‌سازی
+mobile-pair-link-placeholder = پیوند جفت‌سازی را بچسبانید
+mobile-pair-connect = اتصال
+mobile-pair-connecting = در حال اتصال…
+mobile-pair-disconnect = قطع اتصال
+mobile-status-connected = متصل
+mobile-status-reaching = در حال دسترسی به Mac شما…
+mobile-status-disconnected = متصل نیست
+
+mobile-url-invalid = نشانی جفت‌سازی نامعتبر است.
+mobile-url-no-address = نشانی جفت‌سازی آدرس سرور ندارد.
+mobile-url-bad-address = آدرس سرور در نشانی جفت‌سازی نامعتبر است.
+mobile-url-no-token = نشانی جفت‌سازی توکن ندارد.
+mobile-url-scheme = نشانی جفت‌سازی باید از HTTPS یا HTTP استفاده کند.
+mobile-url-paste-full = نشانی کامل جفت‌سازی را که Vmux روی Mac شما نشان می‌دهد بچسبانید.
+
+mobile-error-pairing-outdated = این جفت‌سازی قدیمی است. کد QR روی Mac خود را دوباره اسکن کنید.
+mobile-error-pairing-expired = جفت‌سازی منقضی شد. کد QR روی Mac خود را دوباره اسکن کنید.
+mobile-error-pairing-lost = جفت‌سازی منقضی شد. دوباره با Mac جفت شوید.
+mobile-error-token-rejected = توکن جفت‌سازی رد شد.
+mobile-error-stack-missing = دسکتاپ گفت‌وگو را باز کرد، اما استک آن ظاهر نشد.
+mobile-error-not-offered = Mac شما هنوز این را ارائه نمی‌کند.
+mobile-error-remote-disabled = Remote روی Mac شما خاموش است.
+mobile-error-session-gone = آن نشست دیگر وجود ندارد.
+mobile-error-no-desktop = پنجرهٔ Vmux را روی Mac خود باز کنید.
+mobile-error-refused = Mac شما نتوانست این کار را انجام دهد.
+mobile-error-no-answer = پس از { $seconds } ثانیه پاسخی از { $address } دریافت نشد.
+
+mobile-start-stacks = استک‌ها
+mobile-start-no-stacks = هیچ استک بازی نیست
+mobile-start-team = تیم
+mobile-start-search-placeholder = جست‌وجو یا پرسش…
+mobile-start-new-chat = شروع گفت‌وگو
+mobile-start-starting = در حال شروع…
+
+mobile-chat-back = بازگشت
+mobile-chat-back-to-stacks = بازگشت به استک‌ها
+mobile-chat-no-messages = هنوز پیامی نیست.
+mobile-chat-no-session = نشست فعالی نیست
+mobile-chat-placeholder = پیام به عامل…
+mobile-chat-send = ارسال
+mobile-chat-stop = توقف
+
+mobile-qr-title = کد QR نمایش‌داده‌شده توسط Vmux را اسکن کنید
+mobile-qr-cancel = لغو
+mobile-qr-unavailable = اسکنر QR در دسترس نیست.
+mobile-qr-camera-unavailable = دوربین در دسترس نیست. به‌جای آن پیوند جفت‌سازی را وارد کنید.
+mobile-qr-camera-failed = دوربین باز نشد: { $error }
+mobile-qr-camera-input-unavailable = ورودی دوربین در دسترس نیست.
+mobile-qr-unsupported-device = اسکن QR روی این دستگاه در دسترس نیست.
+mobile-qr-unsupported-platform = اسکن QR هنوز روی این پلتفرم در دسترس نیست. به‌جای آن پیوند جفت‌سازی را وارد کنید.
+mobile-error-unexpected-answer = Mac شما پاسخ غیرمنتظره‌ای داد.
+mobile-error-connection-dropped = اتصال به Mac شما قطع شد.
+mobile-error-connection-closed = Mac شما اتصال را بست.
+mobile-error-address-invalid = آن آدرس جفت‌سازی معتبر نیست.
+mobile-error-address-no-port = آن آدرس جفت‌سازی درگاه ندارد.

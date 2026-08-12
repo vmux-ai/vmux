@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ከእርስዎ Mac ጋር ይገናኙ
+mobile-pair-subtitle = በVmux ውስጥ Remote ን ይክፈቱ እና መሣሪያ አገናኝ የሚለውን ይምረጡ።
+mobile-pair-scan = QR ኮድ ይቃኙ
+mobile-pair-show-link = የማጣመሪያ አገናኝ በእጅ ያስገቡ
+mobile-pair-hide-link = የማጣመሪያ አገናኝ ደብቅ
+mobile-pair-link-placeholder = የማጣመሪያ አገናኝ ይለጥፉ
+mobile-pair-connect = ተገናኝ
+mobile-pair-connecting = በመገናኘት ላይ…
+mobile-pair-disconnect = ግንኙነት አቋርጥ
+mobile-status-connected = ተገናኝቷል
+mobile-status-reaching = Mac ዎን በመፈለግ ላይ…
+mobile-status-disconnected = አልተገናኘም
+
+mobile-url-invalid = የማጣመሪያ URL ልክ አይደለም።
+mobile-url-no-address = የማጣመሪያ URL የአገልጋይ አድራሻ የለውም።
+mobile-url-bad-address = የማጣመሪያ URL ልክ ያልሆነ የአገልጋይ አድራሻ አለው።
+mobile-url-no-token = የማጣመሪያ URL ቶከን የለውም።
+mobile-url-scheme = የማጣመሪያ URL HTTPS ወይም HTTP መጠቀም አለበት።
+mobile-url-paste-full = Vmux በMac ዎ ላይ የሚያሳየውን ሙሉ የማጣመሪያ URL ይለጥፉ።
+
+mobile-error-pairing-outdated = ይህ ማጣመሪያ ጊዜው አልፎበታል። በMac ዎ ላይ ያለውን QR እንደገና ይቃኙ።
+mobile-error-pairing-expired = ማጣመሪያው ጊዜው አልፎበታል። በMac ዎ ላይ ያለውን QR እንደገና ይቃኙ።
+mobile-error-pairing-lost = ማጣመሪያው ጊዜው አልፎበታል። ከMac ጋር እንደገና ያጣምሩ።
+mobile-error-token-rejected = የማጣመሪያ ቶከኑ ተቀባይነት አላገኘም።
+mobile-error-stack-missing = ዴስክቶፑ ውይይቱን ከፍቷል፣ ነገር ግን ቁልሉ አልታየም።
+mobile-error-not-offered = Mac ዎ ይህን ገና አይደግፍም።
+mobile-error-remote-disabled = Remote በMac ዎ ላይ ጠፍቷል።
+mobile-error-session-gone = ያ ክፍለ ጊዜ የለም።
+mobile-error-no-desktop = በMac ዎ ላይ የVmux መስኮቱን ይክፈቱ።
+mobile-error-refused = Mac ዎ ይህን ማድረግ አልቻለም።
+mobile-error-no-answer = { $seconds } ሰከንድ ካለፈ በኋላ ከ{ $address } ምንም ምላሽ የለም።
+
+mobile-start-stacks = ቁልሎች
+mobile-start-no-stacks = ክፍት ቁልሎች የሉም
+mobile-start-team = ቡድን
+mobile-start-search-placeholder = ፈልግ ወይም ጠይቅ…
+mobile-start-new-chat = ውይይት ጀምር
+mobile-start-starting = በመጀመር ላይ…
+
+mobile-chat-back = ተመለስ
+mobile-chat-back-to-stacks = ወደ ቁልሎች ተመለስ
+mobile-chat-no-messages = ገና ምንም መልእክት የለም።
+mobile-chat-no-session = ንቁ ክፍለ ጊዜ የለም
+mobile-chat-placeholder = ለኤጀንቱ መልእክት…
+mobile-chat-send = ላክ
+mobile-chat-stop = አቁም
+
+mobile-qr-title = Vmux የሚያሳየውን QR ኮድ ይቃኙ
+mobile-qr-cancel = ሰርዝ
+mobile-qr-unavailable = የQR ቃኚ አይገኝም።
+mobile-qr-camera-unavailable = ካሜራ አይገኝም። በምትኩ የማጣመሪያ አገናኙን ያስገቡ።
+mobile-qr-camera-failed = ካሜራውን መክፈት አልተቻለም፦ { $error }
+mobile-qr-camera-input-unavailable = የካሜራ ግብዓት አይገኝም።
+mobile-qr-unsupported-device = በዚህ መሣሪያ ላይ QR መቃኘት አይገኝም።
+mobile-qr-unsupported-platform = በዚህ መድረክ ላይ QR መቃኘት ገና አይገኝም። በምትኩ የማጣመሪያ አገናኙን ያስገቡ።
+mobile-error-unexpected-answer = Mac ዎ ባልተጠበቀ ሁኔታ መልስ ሰጠ።
+mobile-error-connection-dropped = ከMac ዎ ጋር ያለው ግንኙነት ተቋርጧል።
+mobile-error-connection-closed = Mac ዎ ግንኙነቱን ዘግቷል።
+mobile-error-address-invalid = ያ የማጣመሪያ አድራሻ ልክ አይደለም።
+mobile-error-address-no-port = ያ የማጣመሪያ አድራሻ ወደብ የለውም።

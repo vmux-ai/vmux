@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Conectează-te la Mac-ul tău
+mobile-pair-subtitle = În Vmux, deschide Remote și alege Connect device.
+mobile-pair-scan = Scanează codul QR
+mobile-pair-show-link = Introdu manual linkul de asociere
+mobile-pair-hide-link = Ascunde linkul de asociere
+mobile-pair-link-placeholder = Lipește linkul de asociere
+mobile-pair-connect = Conectează
+mobile-pair-connecting = Se conectează…
+mobile-pair-disconnect = Deconectează
+mobile-status-connected = Conectat
+mobile-status-reaching = Se caută Mac-ul tău…
+mobile-status-disconnected = Nu este conectat
+
+mobile-url-invalid = URL-ul de asociere nu este valid.
+mobile-url-no-address = URL-ul de asociere nu conține adresa serverului.
+mobile-url-bad-address = URL-ul de asociere conține o adresă de server nevalidă.
+mobile-url-no-token = URL-ul de asociere nu conține un token.
+mobile-url-scheme = URL-ul de asociere trebuie să folosească HTTPS sau HTTP.
+mobile-url-paste-full = Lipește URL-ul complet de asociere afișat de Vmux pe Mac-ul tău.
+
+mobile-error-pairing-outdated = Această asociere este învechită. Scanează din nou codul QR de pe Mac.
+mobile-error-pairing-expired = Asocierea a expirat. Scanează din nou codul QR de pe Mac.
+mobile-error-pairing-lost = Asocierea a expirat. Asociază din nou cu Mac-ul.
+mobile-error-token-rejected = Tokenul de asociere a fost respins.
+mobile-error-stack-missing = Aplicația desktop a deschis chatul, dar stiva lui nu a apărut.
+mobile-error-not-offered = Mac-ul tău nu oferă încă acest lucru.
+mobile-error-remote-disabled = Remote este dezactivat pe Mac-ul tău.
+mobile-error-session-gone = Acea sesiune nu mai există.
+mobile-error-no-desktop = Deschide fereastra Vmux pe Mac-ul tău.
+mobile-error-refused = Mac-ul tău nu a putut face asta.
+mobile-error-no-answer = Niciun răspuns de la { $address } după { $seconds } s.
+
+mobile-start-stacks = Stive
+mobile-start-no-stacks = Nicio stivă deschisă
+mobile-start-team = Echipă
+mobile-start-search-placeholder = Caută sau întreabă…
+mobile-start-new-chat = Începe un chat
+mobile-start-starting = Se pornește…
+
+mobile-chat-back = Înapoi
+mobile-chat-back-to-stacks = Înapoi la stive
+mobile-chat-no-messages = Încă niciun mesaj.
+mobile-chat-no-session = Nicio sesiune activă
+mobile-chat-placeholder = Scrie agentului…
+mobile-chat-send = Trimite
+mobile-chat-stop = Oprește
+
+mobile-qr-title = Scanează codul QR afișat de Vmux
+mobile-qr-cancel = Anulează
+mobile-qr-unavailable = Scanerul QR nu este disponibil.
+mobile-qr-camera-unavailable = Camera nu este disponibilă. Introdu în schimb linkul de asociere.
+mobile-qr-camera-failed = Camera nu a putut fi deschisă: { $error }
+mobile-qr-camera-input-unavailable = Intrarea camerei nu este disponibilă.
+mobile-qr-unsupported-device = Scanarea QR nu este disponibilă pe acest dispozitiv.
+mobile-qr-unsupported-platform = Scanarea QR nu este încă disponibilă pe această platformă. Introdu în schimb linkul de asociere.
+mobile-error-unexpected-answer = Mac-ul tău a răspuns neașteptat.
+mobile-error-connection-dropped = Conexiunea cu Mac-ul tău s-a întrerupt.
+mobile-error-connection-closed = Mac-ul tău a închis conexiunea.
+mobile-error-address-invalid = Adresa de asociere nu este validă.
+mobile-error-address-no-port = Adresa de asociere nu conține un port.

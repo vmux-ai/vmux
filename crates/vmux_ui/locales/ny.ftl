@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Lumikizani ndi Mac yanu
+mobile-pair-subtitle = Mu Vmux, tsegulani Remote ndipo sankhani Connect device.
+mobile-pair-scan = Skanani QR code
+mobile-pair-show-link = Lowetsani ulalo wolumikizira pamanja
+mobile-pair-hide-link = Bisani ulalo wolumikizira
+mobile-pair-link-placeholder = Matani ulalo wolumikizira
+mobile-pair-connect = Lumikizani
+mobile-pair-connecting = Kulumikiza…
+mobile-pair-disconnect = Lekanitsani
+mobile-status-connected = Zalumikizidwa
+mobile-status-reaching = Kuyesa kufikira Mac yanu…
+mobile-status-disconnected = Osalumikizidwa
+
+mobile-url-invalid = URL yolumikizira si yolondola.
+mobile-url-no-address = URL yolumikizira ilibe adilesi ya seva.
+mobile-url-bad-address = URL yolumikizira ili ndi adilesi ya seva yolakwika.
+mobile-url-no-token = URL yolumikizira ilibe token.
+mobile-url-scheme = URL yolumikizira iyenera kugwiritsa ntchito HTTPS kapena HTTP.
+mobile-url-paste-full = Matani URL yolumikizira yonse imene Vmux ikuwonetsa pa Mac yanu.
+
+mobile-error-pairing-outdated = Kulumikizana uku ndi kwakale. Skanani QR pa Mac yanu kachiwiri.
+mobile-error-pairing-expired = Kulumikizana kwatha. Skanani QR pa Mac yanu kachiwiri.
+mobile-error-pairing-lost = Kulumikizana kwatha. Lumikizaninso ndi Mac.
+mobile-error-token-rejected = Token yolumikizira yakanidwa.
+mobile-error-stack-missing = Desktop yatsegula chat, koma mulu wake sunawonekere.
+mobile-error-not-offered = Mac yanu sinapereke izi panobe.
+mobile-error-remote-disabled = Remote yazimitsidwa pa Mac yanu.
+mobile-error-session-gone = Gawo limenelo lilibenso.
+mobile-error-no-desktop = Tsegulani zenera la Vmux pa Mac yanu.
+mobile-error-refused = Mac yanu sinathe kuchita zimenezo.
+mobile-error-no-answer = Palibe yankho kuchokera ku { $address } patatha { $seconds }s.
+
+mobile-start-stacks = Milu
+mobile-start-no-stacks = Palibe milu yotsegulidwa
+mobile-start-team = Gulu
+mobile-start-search-placeholder = Sakani kapena funsani…
+mobile-start-new-chat = Yambani chat
+mobile-start-starting = Kuyamba…
+
+mobile-chat-back = Bwerera
+mobile-chat-back-to-stacks = Bwerera ku milu
+mobile-chat-no-messages = Palibe mauthenga pakadali pano.
+mobile-chat-no-session = Palibe gawo logwira ntchito
+mobile-chat-placeholder = Uthenga kwa ajenti…
+mobile-chat-send = Tumizani
+mobile-chat-stop = Imitsani
+
+mobile-qr-title = Skanani QR code imene Vmux ikuwonetsa
+mobile-qr-cancel = Letsani
+mobile-qr-unavailable = Choskana QR sichikupezeka.
+mobile-qr-camera-unavailable = Kamera sikupezeka. Lowetsani ulalo wolumikizira m'malo mwake.
+mobile-qr-camera-failed = Sindinathe kutsegula kamera: { $error }
+mobile-qr-camera-input-unavailable = Zolowetsa za kamera sizikupezeka.
+mobile-qr-unsupported-device = Kuskana QR sikupezeka pa chipangizo ichi.
+mobile-qr-unsupported-platform = Kuskana QR sikupezeka pa nsanja iyi panobe. Lowetsani ulalo wolumikizira m'malo mwake.
+mobile-error-unexpected-answer = Mac yanu yayankha mosayembekezereka.
+mobile-error-connection-dropped = Kulumikizana ndi Mac yanu kwadulika.
+mobile-error-connection-closed = Mac yanu yatseka kulumikizana.
+mobile-error-address-invalid = Adilesi yolumikizira imeneyo si yolondola.
+mobile-error-address-no-port = Adilesi yolumikizira imeneyo ilibe port.

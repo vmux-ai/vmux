@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Hokela ho Mac ya hao
+mobile-pair-subtitle = Ho Vmux, bula Remote mme o kgethe Connect device.
+mobile-pair-scan = Skena khoutu ya QR
+mobile-pair-show-link = Kenya sehokelo sa ho kopanya ka letsoho
+mobile-pair-hide-link = Pata sehokelo sa ho kopanya
+mobile-pair-link-placeholder = Momahanya sehokelo sa ho kopanya
+mobile-pair-connect = Hokela
+mobile-pair-connecting = E a hokela…
+mobile-pair-disconnect = Kgaola
+mobile-status-connected = E hoketswe
+mobile-status-reaching = E fihlella Mac ya hao…
+mobile-status-disconnected = Ha e a hokelwa
+
+mobile-url-invalid = URL ya ho kopanya ha e nepahala.
+mobile-url-no-address = URL ya ho kopanya ha e na aterese ya seva.
+mobile-url-bad-address = URL ya ho kopanya e na le aterese ya seva e sa nepahalang.
+mobile-url-no-token = URL ya ho kopanya ha e na token.
+mobile-url-scheme = URL ya ho kopanya e tlameha ho sebedisa HTTPS kapa HTTP.
+mobile-url-paste-full = Momahanya URL yohle ya ho kopanya e bontshwang ke Vmux ho Mac ya hao.
+
+mobile-error-pairing-outdated = Kopano ena e se e tsofetse. Skena QR hape ho Mac ya hao.
+mobile-error-pairing-expired = Kopano e felile. Skena QR hape ho Mac ya hao.
+mobile-error-pairing-lost = Kopano e felile. Kopanya hape le Mac.
+mobile-error-token-rejected = Token ya ho kopanya e hannwe.
+mobile-error-stack-missing = Desktop e butse moqoqo, empa mokgobo wa yona ha o a hlaha.
+mobile-error-not-offered = Mac ya hao ha e so fane ka sena.
+mobile-error-remote-disabled = Remote e timilwe ho Mac ya hao.
+mobile-error-session-gone = Seshene seo ha se sa le teng.
+mobile-error-no-desktop = Bula fensetere ya Vmux ho Mac ya hao.
+mobile-error-refused = Mac ya hao e hlolehile ho etsa seo.
+mobile-error-no-answer = Ha ho karabo e tswang ho { $address } kamora metsotswana e { $seconds }.
+
+mobile-start-stacks = Mekgobo
+mobile-start-no-stacks = Ha ho mekgobo e butsweng
+mobile-start-team = Sehlopha
+mobile-start-search-placeholder = Batla kapa botsa…
+mobile-start-new-chat = Qala moqoqo
+mobile-start-starting = E a qala…
+
+mobile-chat-back = Morao
+mobile-chat-back-to-stacks = Kgutlela mekgobong
+mobile-chat-no-messages = Ha ho melaetsa hajwale.
+mobile-chat-no-session = Ha ho seshene se sebetsang
+mobile-chat-placeholder = Molaetsa ho agent…
+mobile-chat-send = Romela
+mobile-chat-stop = Emisa
+
+mobile-qr-title = Skena khoutu ya QR e bontshwang ke Vmux
+mobile-qr-cancel = Hlakola
+mobile-qr-unavailable = Sekena sa QR ha se fumanehe.
+mobile-qr-camera-unavailable = Khamera ha e fumanehe. Kenya sehokelo sa ho kopanya.
+mobile-qr-camera-failed = Ha e a kgona ho bula khamera: { $error }
+mobile-qr-camera-input-unavailable = Kenyo ya khamera ha e fumanehe.
+mobile-qr-unsupported-device = Ho skena QR ha ho fumanehe sesebedisweng sena.
+mobile-qr-unsupported-platform = Ho skena QR ha ho so fumanehe sethaleng sena. Kenya sehokelo sa ho kopanya.
+mobile-error-unexpected-answer = Mac ya hao e arabile ka mokgwa o sa lebellwang.
+mobile-error-connection-dropped = Kgokahano le Mac ya hao e kgaohile.
+mobile-error-connection-closed = Mac ya hao e kwetse kgokahano.
+mobile-error-address-invalid = Aterese eo ya ho kopanya ha e nepahala.
+mobile-error-address-no-port = Aterese eo ya ho kopanya ha e na port.

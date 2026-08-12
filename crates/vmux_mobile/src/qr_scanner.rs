@@ -22,6 +22,7 @@ mod platform {
         NSTextAlignment, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState, UIFont,
         UILabel, UIModalPresentationStyle, UIViewController,
     };
+    use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
     thread_local! {
         static ROOT_CONTROLLER: Cell<*mut UIViewController> = const { Cell::new(ptr::null_mut()) };
@@ -115,7 +116,7 @@ mod platform {
             preview: Retained<AVCaptureVideoPreviewLayer>,
         ) -> Retained<Self> {
             let title = UILabel::initWithFrame(UILabel::alloc(marker), CGRect::ZERO);
-            title.setText(Some(&NSString::from_str("Scan the QR code shown by Vmux")));
+            title.setText(Some(&NSString::from_str(&translate("mobile-qr-title"))));
             unsafe {
                 title.setTextColor(Some(&UIColor::whiteColor()));
                 title.setFont(Some(&UIFont::boldSystemFontOfSize(17.0)));
@@ -124,7 +125,10 @@ mod platform {
             title.setNumberOfLines(2);
 
             let cancel = UIButton::buttonWithType(UIButtonType::System, marker);
-            cancel.setTitle_forState(Some(&NSString::from_str("Cancel")), UIControlState::Normal);
+            cancel.setTitle_forState(
+                Some(&NSString::from_str(&translate("mobile-qr-cancel"))),
+                UIControlState::Normal,
+            );
             cancel.setTitleColor_forState(Some(&UIColor::whiteColor()), UIControlState::Normal);
             cancel.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(0.0, 0.45)));
             cancel.layer().setCornerRadius(16.0);
@@ -175,16 +179,22 @@ mod platform {
             .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
         let root = ROOT_CONTROLLER
             .with(|pointer| unsafe { Retained::retain(pointer.get()) })
-            .ok_or_else(|| "QR scanner is unavailable.".to_string())?;
-        let media_type = unsafe { AVMediaTypeVideo }
-            .ok_or_else(|| "Camera unavailable. Enter the pairing link instead.".to_string())?;
+            .ok_or_else(|| translate("mobile-qr-unavailable"))?;
+        let media_type =
+            unsafe { AVMediaTypeVideo }.ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
         let device = unsafe { AVCaptureDevice::defaultDeviceWithMediaType(media_type) }
-            .ok_or_else(|| "Camera unavailable. Enter the pairing link instead.".to_string())?;
-        let input = unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&device) }
-            .map_err(|error| format!("Could not open camera: {error}"))?;
+            .ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
+        let input = unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&device) }.map_err(
+            |error| {
+                translate_with(
+                    "mobile-qr-camera-failed",
+                    &[("error", TranslationValue::String(&error.to_string()))],
+                )
+            },
+        )?;
         let session = unsafe { AVCaptureSession::new() };
         if !unsafe { session.canAddInput(&input) } {
-            return Err("Camera input is unavailable.".to_string());
+            return Err(translate("mobile-qr-camera-input-unavailable"));
         }
         unsafe {
             session.addInput(&input);
@@ -192,7 +202,7 @@ mod platform {
 
         let output = unsafe { AVCaptureMetadataOutput::new() };
         if !unsafe { session.canAddOutput(&output) } {
-            return Err("QR scanning is unavailable on this device.".to_string());
+            return Err(translate("mobile-qr-unsupported-device"));
         }
         unsafe {
             session.addOutput(&output);
@@ -230,13 +240,12 @@ mod platform {
 
 #[cfg(not(target_os = "ios"))]
 mod platform {
+    use vmux_ui::i18n::translate;
+
     pub fn install(_: &dioxus::mobile::DesktopContext) {}
 
     pub fn open() -> Result<(), String> {
-        Err(
-            "QR scanning is not available on this platform yet. Enter the pairing link instead."
-                .to_string(),
-        )
+        Err(translate("mobile-qr-unsupported-platform"))
     }
 
     pub fn take_result() -> Option<Result<String, String>> {

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Koble til Mac-en din
+mobile-pair-subtitle = I Vmux åpner du Remote og velger Connect device.
+mobile-pair-scan = Skann QR-kode
+mobile-pair-show-link = Skriv inn koblingslenken manuelt
+mobile-pair-hide-link = Skjul koblingslenken
+mobile-pair-link-placeholder = Lim inn koblingslenken
+mobile-pair-connect = Koble til
+mobile-pair-connecting = Kobler til…
+mobile-pair-disconnect = Koble fra
+mobile-status-connected = Tilkoblet
+mobile-status-reaching = Kontakter Mac-en din…
+mobile-status-disconnected = Ikke tilkoblet
+
+mobile-url-invalid = Koblings-URL-en er ugyldig.
+mobile-url-no-address = Koblings-URL-en mangler serveradresse.
+mobile-url-bad-address = Koblings-URL-en har en ugyldig serveradresse.
+mobile-url-no-token = Koblings-URL-en mangler token.
+mobile-url-scheme = Koblings-URL-en må bruke HTTPS eller HTTP.
+mobile-url-paste-full = Lim inn hele koblings-URL-en som Vmux viser på Mac-en din.
+
+mobile-error-pairing-outdated = Denne koblingen er utdatert. Skann QR-koden på Mac-en din på nytt.
+mobile-error-pairing-expired = Koblingen er utløpt. Skann QR-koden på Mac-en din på nytt.
+mobile-error-pairing-lost = Koblingen er utløpt. Koble til Mac-en på nytt.
+mobile-error-token-rejected = Koblingstokenet ble avvist.
+mobile-error-stack-missing = Skrivebordet åpnet chatten, men stabelen dukket ikke opp.
+mobile-error-not-offered = Mac-en din tilbyr ikke dette ennå.
+mobile-error-remote-disabled = Remote er slått av på Mac-en din.
+mobile-error-session-gone = Den økten finnes ikke lenger.
+mobile-error-no-desktop = Åpne Vmux-vinduet på Mac-en din.
+mobile-error-refused = Mac-en din kunne ikke gjøre det.
+mobile-error-no-answer = Ingen svar fra { $address } etter { $seconds }s.
+
+mobile-start-stacks = Stabler
+mobile-start-no-stacks = Ingen åpne stabler
+mobile-start-team = Team
+mobile-start-search-placeholder = Søk eller spør…
+mobile-start-new-chat = Start chat
+mobile-start-starting = Starter…
+
+mobile-chat-back = Tilbake
+mobile-chat-back-to-stacks = Tilbake til stabler
+mobile-chat-no-messages = Ingen meldinger ennå.
+mobile-chat-no-session = Ingen aktiv økt
+mobile-chat-placeholder = Melding til agenten…
+mobile-chat-send = Send
+mobile-chat-stop = Stopp
+
+mobile-qr-title = Skann QR-koden som Vmux viser
+mobile-qr-cancel = Avbryt
+mobile-qr-unavailable = QR-skanneren er utilgjengelig.
+mobile-qr-camera-unavailable = Kameraet er utilgjengelig. Skriv inn koblingslenken i stedet.
+mobile-qr-camera-failed = Kunne ikke åpne kameraet: { $error }
+mobile-qr-camera-input-unavailable = Kamerainngangen er utilgjengelig.
+mobile-qr-unsupported-device = QR-skanning er utilgjengelig på denne enheten.
+mobile-qr-unsupported-platform = QR-skanning er ikke tilgjengelig på denne plattformen ennå. Skriv inn koblingslenken i stedet.
+mobile-error-unexpected-answer = Mac-en din svarte uventet.
+mobile-error-connection-dropped = Tilkoblingen til Mac-en din ble brutt.
+mobile-error-connection-closed = Mac-en din lukket tilkoblingen.
+mobile-error-address-invalid = Den koblingsadressen er ugyldig.
+mobile-error-address-no-port = Den koblingsadressen mangler port.

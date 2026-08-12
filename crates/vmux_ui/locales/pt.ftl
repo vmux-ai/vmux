@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Conecte-se ao seu Mac
+mobile-pair-subtitle = No Vmux, abra Remote e escolha Connect device.
+mobile-pair-scan = Ler o código QR
+mobile-pair-show-link = Introduzir o link de emparelhamento manualmente
+mobile-pair-hide-link = Ocultar o link de emparelhamento
+mobile-pair-link-placeholder = Cole o link de emparelhamento
+mobile-pair-connect = Conectar
+mobile-pair-connecting = A conectar…
+mobile-pair-disconnect = Desconectar
+mobile-status-connected = Conectado
+mobile-status-reaching = A procurar o seu Mac…
+mobile-status-disconnected = Não conectado
+
+mobile-url-invalid = O URL de emparelhamento é inválido.
+mobile-url-no-address = O URL de emparelhamento não indica o endereço do servidor.
+mobile-url-bad-address = O URL de emparelhamento indica um endereço de servidor inválido.
+mobile-url-no-token = O URL de emparelhamento não inclui um token.
+mobile-url-scheme = O URL de emparelhamento deve usar HTTPS ou HTTP.
+mobile-url-paste-full = Cole o URL de emparelhamento completo mostrado pelo Vmux no seu Mac.
+
+mobile-error-pairing-outdated = Este emparelhamento está desatualizado. Leia de novo o QR no seu Mac.
+mobile-error-pairing-expired = O emparelhamento expirou. Leia de novo o QR no seu Mac.
+mobile-error-pairing-lost = O emparelhamento expirou. Emparelhe de novo com o Mac.
+mobile-error-token-rejected = O token de emparelhamento foi rejeitado.
+mobile-error-stack-missing = O computador abriu o chat, mas a pilha correspondente não apareceu.
+mobile-error-not-offered = O seu Mac ainda não oferece isto.
+mobile-error-remote-disabled = O Remote está desligado no seu Mac.
+mobile-error-session-gone = Essa sessão desapareceu.
+mobile-error-no-desktop = Abra a janela do Vmux no seu Mac.
+mobile-error-refused = O seu Mac não conseguiu fazer isso.
+mobile-error-no-answer = Sem resposta de { $address } ao fim de { $seconds } s.
+
+mobile-start-stacks = Pilhas
+mobile-start-no-stacks = Sem pilhas abertas
+mobile-start-team = Equipe
+mobile-start-search-placeholder = Pesquisar ou perguntar…
+mobile-start-new-chat = Iniciar chat
+mobile-start-starting = A iniciar…
+
+mobile-chat-back = Voltar
+mobile-chat-back-to-stacks = Voltar às pilhas
+mobile-chat-no-messages = Ainda sem mensagens.
+mobile-chat-no-session = Sem sessão ativa
+mobile-chat-placeholder = Mensagem para o agente…
+mobile-chat-send = Enviar
+mobile-chat-stop = Parar
+
+mobile-qr-title = Leia o código QR mostrado pelo Vmux
+mobile-qr-cancel = Cancelar
+mobile-qr-unavailable = O leitor de QR está indisponível.
+mobile-qr-camera-unavailable = Câmara indisponível. Introduza antes o link de emparelhamento.
+mobile-qr-camera-failed = Não foi possível abrir a câmara: { $error }
+mobile-qr-camera-input-unavailable = A entrada da câmara está indisponível.
+mobile-qr-unsupported-device = A leitura de QR está indisponível neste dispositivo.
+mobile-qr-unsupported-platform = A leitura de QR ainda não está disponível nesta plataforma. Introduza antes o link de emparelhamento.
+mobile-error-unexpected-answer = O seu Mac respondeu de forma inesperada.
+mobile-error-connection-dropped = A conexão com o seu Mac foi perdida.
+mobile-error-connection-closed = O seu Mac encerrou a conexão.
+mobile-error-address-invalid = O endereço de emparelhamento é inválido.
+mobile-error-address-no-port = O endereço de emparelhamento não indica uma porta.

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Kumonekta sa iyong Mac
+mobile-pair-subtitle = Sa Vmux, buksan ang Remote at piliin ang Connect device.
+mobile-pair-scan = I-scan ang QR code
+mobile-pair-show-link = Manual na ilagay ang pairing link
+mobile-pair-hide-link = Itago ang pairing link
+mobile-pair-link-placeholder = I-paste ang pairing link
+mobile-pair-connect = Kumonekta
+mobile-pair-connecting = Kumokonekta…
+mobile-pair-disconnect = Idiskonekta
+mobile-status-connected = Nakakonekta
+mobile-status-reaching = Inaabot ang iyong Mac…
+mobile-status-disconnected = Hindi nakakonekta
+
+mobile-url-invalid = Hindi wasto ang pairing URL.
+mobile-url-no-address = Walang server address ang pairing URL.
+mobile-url-bad-address = May hindi wastong server address ang pairing URL.
+mobile-url-no-token = Walang token ang pairing URL.
+mobile-url-scheme = Dapat gumamit ng HTTPS o HTTP ang pairing URL.
+mobile-url-paste-full = I-paste ang buong pairing URL na ipinapakita ng Vmux sa iyong Mac.
+
+mobile-error-pairing-outdated = Luma na ang pairing na ito. I-scan muli ang QR sa iyong Mac.
+mobile-error-pairing-expired = Nag-expire ang pairing. I-scan muli ang QR sa iyong Mac.
+mobile-error-pairing-lost = Nag-expire ang pairing. Mag-pair muli sa Mac.
+mobile-error-token-rejected = Tinanggihan ang pairing token.
+mobile-error-stack-missing = Binuksan ng desktop ang chat, ngunit hindi lumitaw ang stack nito.
+mobile-error-not-offered = Hindi pa ito inaalok ng iyong Mac.
+mobile-error-remote-disabled = Naka-off ang Remote sa iyong Mac.
+mobile-error-session-gone = Wala na ang session na iyon.
+mobile-error-no-desktop = Buksan ang window ng Vmux sa iyong Mac.
+mobile-error-refused = Hindi iyon nagawa ng iyong Mac.
+mobile-error-no-answer = Walang sagot mula sa { $address } pagkalipas ng { $seconds }s.
+
+mobile-start-stacks = Mga Stack
+mobile-start-no-stacks = Walang bukas na stack
+mobile-start-team = Team
+mobile-start-search-placeholder = Maghanap o magtanong…
+mobile-start-new-chat = Simulan ang chat
+mobile-start-starting = Sinisimulan…
+
+mobile-chat-back = Bumalik
+mobile-chat-back-to-stacks = Bumalik sa mga stack
+mobile-chat-no-messages = Wala pang mensahe.
+mobile-chat-no-session = Walang aktibong session
+mobile-chat-placeholder = Mag-message sa agent…
+mobile-chat-send = Ipadala
+mobile-chat-stop = Ihinto
+
+mobile-qr-title = I-scan ang QR code na ipinapakita ng Vmux
+mobile-qr-cancel = Kanselahin
+mobile-qr-unavailable = Hindi available ang QR scanner.
+mobile-qr-camera-unavailable = Hindi available ang camera. Ilagay na lang ang pairing link.
+mobile-qr-camera-failed = Hindi mabuksan ang camera: { $error }
+mobile-qr-camera-input-unavailable = Hindi available ang input ng camera.
+mobile-qr-unsupported-device = Hindi available ang QR scanning sa device na ito.
+mobile-qr-unsupported-platform = Hindi pa available ang QR scanning sa platform na ito. Ilagay na lang ang pairing link.
+mobile-error-unexpected-answer = Hindi inaasahan ang sagot ng iyong Mac.
+mobile-error-connection-dropped = Naputol ang koneksyon sa iyong Mac.
+mobile-error-connection-closed = Isinara ng iyong Mac ang koneksyon.
+mobile-error-address-invalid = Hindi wasto ang pairing address na iyon.
+mobile-error-address-no-port = Walang port ang pairing address na iyon.

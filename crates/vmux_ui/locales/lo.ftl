@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ເຊື່ອມຕໍ່ກັບ Mac ຂອງທ່ານ
+mobile-pair-subtitle = ໃນ Vmux ໃຫ້ເປີດ Remote ແລ້ວເລືອກ ເຊື່ອມຕໍ່ອຸປະກອນ.
+mobile-pair-scan = ສະແກນລະຫັດ QR
+mobile-pair-show-link = ປ້ອນລິ້ງຈັບຄູ່ດ້ວຍຕົນເອງ
+mobile-pair-hide-link = ເຊື່ອງລິ້ງຈັບຄູ່
+mobile-pair-link-placeholder = ວາງລິ້ງຈັບຄູ່
+mobile-pair-connect = ເຊື່ອມຕໍ່
+mobile-pair-connecting = ກຳລັງເຊື່ອມຕໍ່…
+mobile-pair-disconnect = ຕັດການເຊື່ອມຕໍ່
+mobile-status-connected = ເຊື່ອມຕໍ່ແລ້ວ
+mobile-status-reaching = ກຳລັງຕິດຕໍ່ Mac ຂອງທ່ານ…
+mobile-status-disconnected = ບໍ່ໄດ້ເຊື່ອມຕໍ່
+
+mobile-url-invalid = URL ຈັບຄູ່ບໍ່ຖືກຕ້ອງ.
+mobile-url-no-address = URL ຈັບຄູ່ບໍ່ມີທີ່ຢູ່ເຊີບເວີ.
+mobile-url-bad-address = URL ຈັບຄູ່ມີທີ່ຢູ່ເຊີບເວີບໍ່ຖືກຕ້ອງ.
+mobile-url-no-token = URL ຈັບຄູ່ບໍ່ມີໂທເຄັນ.
+mobile-url-scheme = URL ຈັບຄູ່ຕ້ອງໃຊ້ HTTPS ຫຼື HTTP.
+mobile-url-paste-full = ວາງ URL ຈັບຄູ່ທັງໝົດທີ່ Vmux ສະແດງຢູ່ Mac ຂອງທ່ານ.
+
+mobile-error-pairing-outdated = ການຈັບຄູ່ນີ້ລ້າສະໄໝແລ້ວ. ສະແກນ QR ຢູ່ Mac ຂອງທ່ານອີກຄັ້ງ.
+mobile-error-pairing-expired = ການຈັບຄູ່ໝົດອາຍຸແລ້ວ. ສະແກນ QR ຢູ່ Mac ຂອງທ່ານອີກຄັ້ງ.
+mobile-error-pairing-lost = ການຈັບຄູ່ໝົດອາຍຸແລ້ວ. ຈັບຄູ່ກັບ Mac ອີກຄັ້ງ.
+mobile-error-token-rejected = ໂທເຄັນຈັບຄູ່ຖືກປະຕິເສດ.
+mobile-error-stack-missing = ເດັສທັອບເປີດແຊັດແລ້ວ ແຕ່ສະແຕັກຂອງມັນບໍ່ປາກົດ.
+mobile-error-not-offered = Mac ຂອງທ່ານຍັງບໍ່ຮອງຮັບສິ່ງນີ້.
+mobile-error-remote-disabled = Remote ຖືກປິດຢູ່ Mac ຂອງທ່ານ.
+mobile-error-session-gone = ເຊສຊັນນັ້ນບໍ່ມີແລ້ວ.
+mobile-error-no-desktop = ເປີດໜ້າຕ່າງ Vmux ຢູ່ Mac ຂອງທ່ານ.
+mobile-error-refused = Mac ຂອງທ່ານບໍ່ສາມາດເຮັດສິ່ງນັ້ນໄດ້.
+mobile-error-no-answer = ບໍ່ມີການຕອບຈາກ { $address } ຫຼັງຈາກ { $seconds } ວິນາທີ.
+
+mobile-start-stacks = ສະແຕັກ
+mobile-start-no-stacks = ບໍ່ມີສະແຕັກທີ່ເປີດຢູ່
+mobile-start-team = ທີມ
+mobile-start-search-placeholder = ຄົ້ນຫາ ຫຼື ຖາມ…
+mobile-start-new-chat = ເລີ່ມແຊັດ
+mobile-start-starting = ກຳລັງເລີ່ມ…
+
+mobile-chat-back = ກັບຄືນ
+mobile-chat-back-to-stacks = ກັບໄປຫາສະແຕັກ
+mobile-chat-no-messages = ຍັງບໍ່ມີຂໍ້ຄວາມ.
+mobile-chat-no-session = ບໍ່ມີເຊສຊັນທີ່ໃຊ້ງານຢູ່
+mobile-chat-placeholder = ສົ່ງຂໍ້ຄວາມຫາເອເຈນຕ໌…
+mobile-chat-send = ສົ່ງ
+mobile-chat-stop = ຢຸດ
+
+mobile-qr-title = ສະແກນລະຫັດ QR ທີ່ Vmux ສະແດງ
+mobile-qr-cancel = ຍົກເລີກ
+mobile-qr-unavailable = ບໍ່ສາມາດໃຊ້ເຄື່ອງສະແກນ QR ໄດ້.
+mobile-qr-camera-unavailable = ບໍ່ສາມາດໃຊ້ກ້ອງໄດ້. ໃຫ້ປ້ອນລິ້ງຈັບຄູ່ແທນ.
+mobile-qr-camera-failed = ບໍ່ສາມາດເປີດກ້ອງໄດ້: { $error }
+mobile-qr-camera-input-unavailable = ບໍ່ສາມາດໃຊ້ອິນພຸດຈາກກ້ອງໄດ້.
+mobile-qr-unsupported-device = ບໍ່ສາມາດສະແກນ QR ໃນອຸປະກອນນີ້ໄດ້.
+mobile-qr-unsupported-platform = ຍັງບໍ່ສາມາດສະແກນ QR ໃນແພລດຟອມນີ້ໄດ້. ໃຫ້ປ້ອນລິ້ງຈັບຄູ່ແທນ.
+mobile-error-unexpected-answer = Mac ຂອງທ່ານຕອບກັບຢ່າງບໍ່ຄາດຄິດ.
+mobile-error-connection-dropped = ການເຊື່ອມຕໍ່ກັບ Mac ຂອງທ່ານຂາດແລ້ວ.
+mobile-error-connection-closed = Mac ຂອງທ່ານໄດ້ປິດການເຊື່ອມຕໍ່.
+mobile-error-address-invalid = ທີ່ຢູ່ຈັບຄູ່ບໍ່ຖືກຕ້ອງ.
+mobile-error-address-no-port = ທີ່ຢູ່ຈັບຄູ່ບໍ່ມີພອດ.

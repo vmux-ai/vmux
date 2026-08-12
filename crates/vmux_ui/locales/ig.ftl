@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Jikọọ na Mac gị
+mobile-pair-subtitle = Na Vmux, mepee Remote wee họrọ Connect device.
+mobile-pair-scan = Nyochaa koodu QR
+mobile-pair-show-link = Tinye njikọ njikọta n'aka
+mobile-pair-hide-link = Zoo njikọ njikọta
+mobile-pair-link-placeholder = Mapado njikọ njikọta
+mobile-pair-connect = Jikọọ
+mobile-pair-connecting = Na-ejikọ…
+mobile-pair-disconnect = Kwụsị njikọ
+mobile-status-connected = Ejikọrọ
+mobile-status-reaching = Na-achọ Mac gị…
+mobile-status-disconnected = Ejikọtaghị ya
+
+mobile-url-invalid = URL njikọta ezighi ezi.
+mobile-url-no-address = URL njikọta enweghị adreesị sava.
+mobile-url-bad-address = URL njikọta nwere adreesị sava na-ezighi ezi.
+mobile-url-no-token = URL njikọta enweghị token.
+mobile-url-scheme = URL njikọta ga-eji HTTPS ma ọ bụ HTTP.
+mobile-url-paste-full = Mapado URL njikọta zuru ezu nke Vmux na-egosi na Mac gị.
+
+mobile-error-pairing-outdated = Njikọta a agafeela. Nyochaa QR dị na Mac gị ọzọ.
+mobile-error-pairing-expired = Njikọta agwụla. Nyochaa QR dị na Mac gị ọzọ.
+mobile-error-pairing-lost = Njikọta agwụla. Jikọọ na Mac ọzọ.
+mobile-error-token-rejected = A jụrụ token njikọta.
+mobile-error-stack-missing = Kọmpụta ahụ mepere mkparịta ụka, mana stack ya apụtaghị.
+mobile-error-not-offered = Mac gị enyebeghị nke a.
+mobile-error-remote-disabled = A gbanyụrụ Remote na Mac gị.
+mobile-error-session-gone = Oge ahụ adịghịzi.
+mobile-error-no-desktop = Mepee windo Vmux na Mac gị.
+mobile-error-refused = Mac gị enweghị ike ime nke ahụ.
+mobile-error-no-answer = Enweghị azịza si { $address } mgbe sekọnd { $seconds } gasịrị.
+
+mobile-start-stacks = Stacks
+mobile-start-no-stacks = Enweghị stack mepere emepe
+mobile-start-team = Ndị otu
+mobile-start-search-placeholder = Chọọ ma ọ bụ jụọ…
+mobile-start-new-chat = Malite mkparịta ụka
+mobile-start-starting = Na-amalite…
+
+mobile-chat-back = Laghachi
+mobile-chat-back-to-stacks = Laghachi na stacks
+mobile-chat-no-messages = Enweghị ozi ugbu a.
+mobile-chat-no-session = Enweghị oge na-arụ ọrụ
+mobile-chat-placeholder = Zipụ ozi na agent…
+mobile-chat-send = Zipụ
+mobile-chat-stop = Kwụsị
+
+mobile-qr-title = Nyochaa koodu QR nke Vmux na-egosi
+mobile-qr-cancel = Kagbuo
+mobile-qr-unavailable = Ihe nyocha QR adịghị.
+mobile-qr-camera-unavailable = Igwefoto adịghị. Tinye njikọ njikọta kama.
+mobile-qr-camera-failed = Enweghị ike imepe igwefoto: { $error }
+mobile-qr-camera-input-unavailable = Ntinye igwefoto adịghị.
+mobile-qr-unsupported-device = Nyocha QR adịghị na ngwaọrụ a.
+mobile-qr-unsupported-platform = Nyocha QR adịbeghị na ikpo okwu a. Tinye njikọ njikọta kama.
+mobile-error-unexpected-answer = Mac gị zara azịza a na-atụghị anya ya.
+mobile-error-connection-dropped = Njikọ na Mac gị adaala.
+mobile-error-connection-closed = Mac gị mechiri njikọ ahụ.
+mobile-error-address-invalid = Adreesị njikọta ahụ ezighi ezi.
+mobile-error-address-no-port = Adreesị njikọta ahụ enweghị port.

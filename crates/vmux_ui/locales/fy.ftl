@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Ferbine mei jo Mac
+mobile-pair-subtitle = Iepenje yn Vmux Remote en kies Connect device.
+mobile-pair-scan = QR-koade scanne
+mobile-pair-show-link = Keppellink mei de hân ynfiere
+mobile-pair-hide-link = Keppellink ferbergje
+mobile-pair-link-placeholder = Keppellink plakke
+mobile-pair-connect = Ferbine
+mobile-pair-connecting = Ferbine…
+mobile-pair-disconnect = Ferbining ferbrekke
+mobile-status-connected = Ferbûn
+mobile-status-reaching = Jo Mac berikke…
+mobile-status-disconnected = Net ferbûn
+
+mobile-url-invalid = De keppel-URL is ûnjildich.
+mobile-url-no-address = De keppel-URL hat gjin serveradres.
+mobile-url-bad-address = De keppel-URL hat in ûnjildich serveradres.
+mobile-url-no-token = De keppel-URL hat gjin token.
+mobile-url-scheme = De keppel-URL moat HTTPS of HTTP brûke.
+mobile-url-paste-full = Plak de folsleine keppel-URL dy’t Vmux op jo Mac sjen lit.
+
+mobile-error-pairing-outdated = Dizze keppeling is ferâldere. Scan de QR op jo Mac opnij.
+mobile-error-pairing-expired = Keppeling ferrûn. Scan de QR op jo Mac opnij.
+mobile-error-pairing-lost = Keppeling ferrûn. Keppelje opnij mei de Mac.
+mobile-error-token-rejected = It keppeltoken is wegere.
+mobile-error-stack-missing = It buroblêd iepene it petear, mar de steapel derfan ferskynde net.
+mobile-error-not-offered = Jo Mac biedt dit noch net oan.
+mobile-error-remote-disabled = Remote stiet út op jo Mac.
+mobile-error-session-gone = Dy sesje bestiet net mear.
+mobile-error-no-desktop = Iepenje it Vmux-finster op jo Mac.
+mobile-error-refused = Jo Mac koe dat net dwaan.
+mobile-error-no-answer = Gjin antwurd fan { $address } nei { $seconds } s.
+
+mobile-start-stacks = Steapels
+mobile-start-no-stacks = Gjin iepen steapels
+mobile-start-team = Team
+mobile-start-search-placeholder = Sykje of freegje…
+mobile-start-new-chat = Petear begjinne
+mobile-start-starting = Begjinne…
+
+mobile-chat-back = Tebek
+mobile-chat-back-to-stacks = Werom nei steapels
+mobile-chat-no-messages = Noch gjin berjochten.
+mobile-chat-no-session = Gjin aktive sesje
+mobile-chat-placeholder = Berjocht oan agent…
+mobile-chat-send = Ferstjoere
+mobile-chat-stop = Stopje
+
+mobile-qr-title = Scan de QR-koade dy’t Vmux sjen lit
+mobile-qr-cancel = Annulearje
+mobile-qr-unavailable = De QR-scanner is net beskikber.
+mobile-qr-camera-unavailable = Kamera net beskikber. Fier ynstee de keppellink yn.
+mobile-qr-camera-failed = Kamera koe net iepene wurde: { $error }
+mobile-qr-camera-input-unavailable = De kamera-ynfier is net beskikber.
+mobile-qr-unsupported-device = QR-scannen is net beskikber op dit apparaat.
+mobile-qr-unsupported-platform = QR-scannen is noch net beskikber op dit platfoarm. Fier ynstee de keppellink yn.
+mobile-error-unexpected-answer = Jo Mac joech in ûnferwacht antwurd.
+mobile-error-connection-dropped = De ferbining mei jo Mac is ferlern gien.
+mobile-error-connection-closed = Jo Mac hat de ferbining sluten.
+mobile-error-address-invalid = Dat keppeladres is ûnjildich.
+mobile-error-address-no-port = Dat keppeladres hat gjin poarte.

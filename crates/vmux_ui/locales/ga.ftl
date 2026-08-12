@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Ceangail le do Mac
+mobile-pair-subtitle = In Vmux, oscail Remote agus roghnaigh Connect device.
+mobile-pair-scan = Scan cód QR
+mobile-pair-show-link = Cuir an nasc péireála isteach de láimh
+mobile-pair-hide-link = Folaigh an nasc péireála
+mobile-pair-link-placeholder = Greamaigh an nasc péireála
+mobile-pair-connect = Ceangail
+mobile-pair-connecting = Ag ceangal…
+mobile-pair-disconnect = Dícheangail
+mobile-status-connected = Ceangailte
+mobile-status-reaching = Ag teagmháil le do Mac…
+mobile-status-disconnected = Gan ceangal
+
+mobile-url-invalid = Tá an URL péireála neamhbhailí.
+mobile-url-no-address = Níl seoladh freastalaí san URL péireála.
+mobile-url-bad-address = Tá seoladh freastalaí neamhbhailí san URL péireála.
+mobile-url-no-token = Níl comhartha san URL péireála.
+mobile-url-scheme = Caithfidh an URL péireála HTTPS nó HTTP a úsáid.
+mobile-url-paste-full = Greamaigh an URL péireála iomlán a thaispeánann Vmux ar do Mac.
+
+mobile-error-pairing-outdated = Tá an péireáil seo as dáta. Scan an cód QR ar do Mac arís.
+mobile-error-pairing-expired = Chuaigh an péireáil in éag. Scan an cód QR ar do Mac arís.
+mobile-error-pairing-lost = Chuaigh an péireáil in éag. Péireáil leis an Mac arís.
+mobile-error-token-rejected = Diúltaíodh don chomhartha péireála.
+mobile-error-stack-missing = D’oscail an deasc an comhrá, ach níor tháinig a chruach chun solais.
+mobile-error-not-offered = Ní chuireann do Mac é seo ar fáil fós.
+mobile-error-remote-disabled = Tá Remote múchta ar do Mac.
+mobile-error-session-gone = Tá an seisiún sin imithe.
+mobile-error-no-desktop = Oscail fuinneog Vmux ar do Mac.
+mobile-error-refused = Níorbh fhéidir le do Mac é sin a dhéanamh.
+mobile-error-no-answer = Gan freagra ó { $address } tar éis { $seconds } s.
+
+mobile-start-stacks = Cruacha
+mobile-start-no-stacks = Níl aon chruach oscailte
+mobile-start-team = Foireann
+mobile-start-search-placeholder = Cuardaigh nó fiafraigh…
+mobile-start-new-chat = Tosaigh comhrá
+mobile-start-starting = Ag tosú…
+
+mobile-chat-back = Siar
+mobile-chat-back-to-stacks = Ar ais go dtí na cruacha
+mobile-chat-no-messages = Níl aon teachtaireacht ann fós.
+mobile-chat-no-session = Níl aon seisiún gníomhach ann
+mobile-chat-placeholder = Teachtaireacht chuig an ngníomhaire…
+mobile-chat-send = Seol
+mobile-chat-stop = Stop
+
+mobile-qr-title = Scan an cód QR a thaispeánann Vmux
+mobile-qr-cancel = Cealaigh
+mobile-qr-unavailable = Níl an scanóir QR ar fáil.
+mobile-qr-camera-unavailable = Níl an ceamara ar fáil. Cuir an nasc péireála isteach ina áit.
+mobile-qr-camera-failed = Níorbh fhéidir an ceamara a oscailt: { $error }
+mobile-qr-camera-input-unavailable = Níl ionchur an cheamara ar fáil.
+mobile-qr-unsupported-device = Níl scanadh QR ar fáil ar an ngléas seo.
+mobile-qr-unsupported-platform = Níl scanadh QR ar fáil ar an ardán seo fós. Cuir an nasc péireála isteach ina áit.
+mobile-error-unexpected-answer = Thug do Mac freagra gan choinne.
+mobile-error-connection-dropped = Cailleadh an ceangal le do Mac.
+mobile-error-connection-closed = Dhún do Mac an ceangal.
+mobile-error-address-invalid = Tá an seoladh péireála sin neamhbhailí.
+mobile-error-address-no-port = Níl port sa seoladh péireála sin.

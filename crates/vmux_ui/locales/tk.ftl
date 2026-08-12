@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Mac-yňyza birikdiriň
+mobile-pair-subtitle = Vmux-da Remote açyň we Connect device saýlaň.
+mobile-pair-scan = QR kody skanerläň
+mobile-pair-show-link = Jübütleme salgysyny elde giriziň
+mobile-pair-hide-link = Jübütleme salgysyny gizle
+mobile-pair-link-placeholder = Jübütleme salgysyny goýuň
+mobile-pair-connect = Birik
+mobile-pair-connecting = Birikdirilýär…
+mobile-pair-disconnect = Aýyr
+mobile-status-connected = Birikdirilen
+mobile-status-reaching = Mac-yňyza ýetilýär…
+mobile-status-disconnected = Birikdirilmedik
+
+mobile-url-invalid = Jübütleme URL-i nädogry.
+mobile-url-no-address = Jübütleme URL-inde server salgysy ýok.
+mobile-url-bad-address = Jübütleme URL-inde nädogry server salgysy bar.
+mobile-url-no-token = Jübütleme URL-inde token ýok.
+mobile-url-scheme = Jübütleme URL-i HTTPS ýa-da HTTP ulanmaly.
+mobile-url-paste-full = Mac-yňyzda Vmux görkezýän doly jübütleme URL-ini goýuň.
+
+mobile-error-pairing-outdated = Bu jübütleme köneldi. Mac-yňyzdaky QR-i täzeden skanerläň.
+mobile-error-pairing-expired = Jübütlemäniň möhleti gutardy. Mac-yňyzdaky QR-i täzeden skanerläň.
+mobile-error-pairing-lost = Jübütlemäniň möhleti gutardy. Mac bilen täzeden jübütleşiň.
+mobile-error-token-rejected = Jübütleme tokeni ret edildi.
+mobile-error-stack-missing = Kompýuter çaty açdy, emma onuň gatlagy peýda bolmady.
+mobile-error-not-offered = Mac-yňyz muny heniz hödürlemeýär.
+mobile-error-remote-disabled = Mac-yňyzda Remote öçürilen.
+mobile-error-session-gone = Ol sessiýa indi ýok.
+mobile-error-no-desktop = Mac-yňyzda Vmux penjiresini açyň.
+mobile-error-refused = Mac-yňyz muny başaryp bilmedi.
+mobile-error-no-answer = { $seconds } sekuntdan soň { $address } jogap bermedi.
+
+mobile-start-stacks = Gatlaklar
+mobile-start-no-stacks = Açyk gatlak ýok
+mobile-start-team = Topar
+mobile-start-search-placeholder = Gözläň ýa-da soraň…
+mobile-start-new-chat = Çat başlat
+mobile-start-starting = Başlaýar…
+
+mobile-chat-back = Yza
+mobile-chat-back-to-stacks = Gatlaklara dolan
+mobile-chat-no-messages = Heniz habar ýok.
+mobile-chat-no-session = Işjeň sessiýa ýok
+mobile-chat-placeholder = Agente habar…
+mobile-chat-send = Iber
+mobile-chat-stop = Duruz
+
+mobile-qr-title = Vmux görkezýän QR kody skanerläň
+mobile-qr-cancel = Ýatyr
+mobile-qr-unavailable = QR skaner elýeterli däl.
+mobile-qr-camera-unavailable = Kamera elýeterli däl. Deregine jübütleme salgysyny giriziň.
+mobile-qr-camera-failed = Kamerany açyp bolmady: { $error }
+mobile-qr-camera-input-unavailable = Kamera girişi elýeterli däl.
+mobile-qr-unsupported-device = Bu enjamda QR skanerlemek elýeterli däl.
+mobile-qr-unsupported-platform = Bu platformada QR skanerlemek heniz elýeterli däl. Deregine jübütleme salgysyny giriziň.
+mobile-error-unexpected-answer = Mac-yňyz garaşylmadyk jogap berdi.
+mobile-error-connection-dropped = Mac-yňyz bilen birikme üzüldi.
+mobile-error-connection-closed = Mac-yňyz birikmäni ýapdy.
+mobile-error-address-invalid = Jübütleme salgysy nädogry.
+mobile-error-address-no-port = Jübütleme salgysynda port ýok.

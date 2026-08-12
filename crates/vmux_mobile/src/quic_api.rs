@@ -19,6 +19,7 @@ use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::{
     ClientHello, CloseCode, ServerHello, StreamKind, decode_hello, encode_hello,
 };
+use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 /// Matches the daemon's cap on a control response.
@@ -41,13 +42,15 @@ pub enum QuicError {
 impl std::fmt::Display for QuicError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unauthorized => f.write_str("Pairing expired. Scan the QR on your Mac again."),
-            Self::RemoteDisabled => f.write_str("Remote is switched off on your Mac."),
-            Self::Refused(SharedFailure::NotFound) => f.write_str("That session is gone."),
-            Self::Refused(SharedFailure::NoDesktop) => {
-                f.write_str("Open the Vmux window on your Mac.")
+            Self::Unauthorized => f.write_str(&translate("mobile-error-pairing-expired")),
+            Self::RemoteDisabled => f.write_str(&translate("mobile-error-remote-disabled")),
+            Self::Refused(SharedFailure::NotFound) => {
+                f.write_str(&translate("mobile-error-session-gone"))
             }
-            Self::Refused(_) => f.write_str("Your Mac could not do that."),
+            Self::Refused(SharedFailure::NoDesktop) => {
+                f.write_str(&translate("mobile-error-no-desktop"))
+            }
+            Self::Refused(_) => f.write_str(&translate("mobile-error-refused")),
             Self::Transport(message) => f.write_str(message),
         }
     }
@@ -77,7 +80,7 @@ impl QuicError {
                 Self::from_close_code(closed.error_code.into_inner())
             }
             Some(other) => Self::Transport(other.to_string()),
-            None => Self::Transport("The connection to your Mac dropped.".into()),
+            None => Self::Transport(translate("mobile-error-connection-dropped")),
         }
     }
 
@@ -86,7 +89,7 @@ impl QuicError {
         match u32::try_from(code).ok().and_then(CloseCode::from_u32) {
             Some(CloseCode::Unauthorized) => Self::Unauthorized,
             Some(CloseCode::RemoteDisabled) => Self::RemoteDisabled,
-            _ => Self::Transport("Your Mac closed the connection.".into()),
+            _ => Self::Transport(translate("mobile-error-connection-closed")),
         }
     }
 }
@@ -150,10 +153,15 @@ impl QuicApi {
     async fn dial(&self) -> Result<quinn::Connection, QuicError> {
         match tokio::time::timeout(Self::DIAL_TIMEOUT, self.dial_inner()).await {
             Ok(result) => result,
-            Err(_) => Err(QuicError::Transport(format!(
-                "No answer from {} after {}s.",
-                self.endpoint.address,
-                Self::DIAL_TIMEOUT.as_secs()
+            Err(_) => Err(QuicError::Transport(translate_with(
+                "mobile-error-no-answer",
+                &[
+                    ("address", TranslationValue::String(&self.endpoint.address)),
+                    (
+                        "seconds",
+                        TranslationValue::Number(Self::DIAL_TIMEOUT.as_secs() as i64),
+                    ),
+                ],
             ))),
         }
     }
@@ -166,10 +174,10 @@ impl QuicApi {
             .endpoint
             .address
             .rsplit_once(':')
-            .ok_or_else(|| QuicError::Transport("That pairing address is not valid.".into()))?;
+            .ok_or_else(|| QuicError::Transport(translate("mobile-error-address-invalid")))?;
         let port: u16 = port
             .parse()
-            .map_err(|_| QuicError::Transport("That pairing address has no port.".into()))?;
+            .map_err(|_| QuicError::Transport(translate("mobile-error-address-no-port")))?;
         let address = vmux_remote::quic::endpoint::resolve_preferring_ipv4(host, port)
             .await
             .map_err(QuicError::Transport)?;
@@ -338,8 +346,12 @@ mod tests {
 
     /// A refusal reaches the user as advice, not a status code. `NoDesktop` in particular must
     /// not read as broken — it clears when a window opens.
+    ///
+    /// Pins the locale first: `Display` reads the current one, which otherwise comes from
+    /// whatever the machine running the tests is set to.
     #[test]
     fn a_refusal_explains_what_to_do() {
+        vmux_ui::i18n::Locale::from("en-US").make_current();
         assert_eq!(
             QuicError::Refused(SharedFailure::NoDesktop).to_string(),
             "Open the Vmux window on your Mac."

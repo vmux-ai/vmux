@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ភ្ជាប់ទៅ Mac របស់អ្នក
+mobile-pair-subtitle = នៅក្នុង Vmux សូមបើក Remote រួចជ្រើសរើស ភ្ជាប់ឧបករណ៍។
+mobile-pair-scan = ស្កេនកូដ QR
+mobile-pair-show-link = បញ្ចូលតំណភ្ជាប់ដោយដៃ
+mobile-pair-hide-link = លាក់តំណភ្ជាប់
+mobile-pair-link-placeholder = បិទភ្ជាប់តំណភ្ជាប់
+mobile-pair-connect = ភ្ជាប់
+mobile-pair-connecting = កំពុងភ្ជាប់…
+mobile-pair-disconnect = ផ្ដាច់
+mobile-status-connected = បានភ្ជាប់
+mobile-status-reaching = កំពុងទាក់ទង Mac របស់អ្នក…
+mobile-status-disconnected = មិនបានភ្ជាប់
+
+mobile-url-invalid = URL ភ្ជាប់មិនត្រឹមត្រូវ។
+mobile-url-no-address = URL ភ្ជាប់គ្មានអាសយដ្ឋានម៉ាស៊ីនមេ។
+mobile-url-bad-address = URL ភ្ជាប់មានអាសយដ្ឋានម៉ាស៊ីនមេមិនត្រឹមត្រូវ។
+mobile-url-no-token = URL ភ្ជាប់គ្មានថូខឹន។
+mobile-url-scheme = URL ភ្ជាប់ត្រូវតែប្រើ HTTPS ឬ HTTP។
+mobile-url-paste-full = សូមបិទភ្ជាប់ URL ភ្ជាប់ពេញលេញដែល Vmux បង្ហាញនៅលើ Mac របស់អ្នក។
+
+mobile-error-pairing-outdated = ការភ្ជាប់នេះហួសសម័យហើយ។ សូមស្កេន QR នៅលើ Mac របស់អ្នកម្ដងទៀត។
+mobile-error-pairing-expired = ការភ្ជាប់ផុតកំណត់ហើយ។ សូមស្កេន QR នៅលើ Mac របស់អ្នកម្ដងទៀត។
+mobile-error-pairing-lost = ការភ្ជាប់ផុតកំណត់ហើយ។ សូមភ្ជាប់ជាមួយ Mac ម្ដងទៀត។
+mobile-error-token-rejected = ថូខឹនភ្ជាប់ត្រូវបានបដិសេធ។
+mobile-error-stack-missing = កុំព្យូទ័របានបើកការជជែក ប៉ុន្តែស្តាក់របស់វាមិនបានបង្ហាញទេ។
+mobile-error-not-offered = Mac របស់អ្នកមិនទាន់ផ្ដល់មុខងារនេះទេ។
+mobile-error-remote-disabled = Remote ត្រូវបានបិទនៅលើ Mac របស់អ្នក។
+mobile-error-session-gone = សម័យនោះលែងមានទៀតហើយ។
+mobile-error-no-desktop = សូមបើកបង្អួច Vmux នៅលើ Mac របស់អ្នក។
+mobile-error-refused = Mac របស់អ្នកមិនអាចធ្វើវាបានទេ។
+mobile-error-no-answer = គ្មានចម្លើយពី { $address } បន្ទាប់ពី { $seconds } វិនាទី។
+
+mobile-start-stacks = ស្តាក់
+mobile-start-no-stacks = គ្មានស្តាក់បើកទេ
+mobile-start-team = ក្រុម
+mobile-start-search-placeholder = ស្វែងរក ឬសួរ…
+mobile-start-new-chat = ចាប់ផ្ដើមជជែក
+mobile-start-starting = កំពុងចាប់ផ្ដើម…
+
+mobile-chat-back = ថយក្រោយ
+mobile-chat-back-to-stacks = ត្រឡប់ទៅស្តាក់
+mobile-chat-no-messages = មិនទាន់មានសារទេ។
+mobile-chat-no-session = គ្មានសម័យសកម្ម
+mobile-chat-placeholder = ផ្ញើសារទៅ agent…
+mobile-chat-send = ផ្ញើ
+mobile-chat-stop = បញ្ឈប់
+
+mobile-qr-title = ស្កេនកូដ QR ដែល Vmux បង្ហាញ
+mobile-qr-cancel = បោះបង់
+mobile-qr-unavailable = ម៉ាស៊ីនស្កេន QR មិនអាចប្រើបានទេ។
+mobile-qr-camera-unavailable = កាមេរ៉ាមិនអាចប្រើបានទេ។ សូមបញ្ចូលតំណភ្ជាប់ជំនួសវិញ។
+mobile-qr-camera-failed = មិនអាចបើកកាមេរ៉ាបានទេ: { $error }
+mobile-qr-camera-input-unavailable = ការបញ្ចូលពីកាមេរ៉ាមិនអាចប្រើបានទេ។
+mobile-qr-unsupported-device = ការស្កេន QR មិនអាចប្រើបាននៅលើឧបករណ៍នេះទេ។
+mobile-qr-unsupported-platform = ការស្កេន QR មិនទាន់អាចប្រើបាននៅលើវេទិកានេះទេ។ សូមបញ្ចូលតំណភ្ជាប់ជំនួសវិញ។
+mobile-error-unexpected-answer = Mac របស់អ្នកបានឆ្លើយតបយ៉ាងមិននឹកស្មានដល់។
+mobile-error-connection-dropped = ការភ្ជាប់ទៅ Mac របស់អ្នកបានដាច់។
+mobile-error-connection-closed = Mac របស់អ្នកបានបិទការភ្ជាប់។
+mobile-error-address-invalid = អាសយដ្ឋានភ្ជាប់នោះមិនត្រឹមត្រូវ។
+mobile-error-address-no-port = អាសយដ្ឋានភ្ជាប់នោះគ្មានច្រក។

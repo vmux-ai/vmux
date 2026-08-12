@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Connettiti al tuo Mac
+mobile-pair-subtitle = In Vmux, apri Remote e scegli Connect device.
+mobile-pair-scan = Scansiona il codice QR
+mobile-pair-show-link = Inserisci il link di abbinamento
+mobile-pair-hide-link = Nascondi il link
+mobile-pair-link-placeholder = Incolla il link di abbinamento
+mobile-pair-connect = Connetti
+mobile-pair-connecting = Connessione…
+mobile-pair-disconnect = Disconnetti
+mobile-status-connected = Connesso
+mobile-status-reaching = Contatto il tuo Mac…
+mobile-status-disconnected = Non connesso
+
+mobile-url-invalid = URL di abbinamento non valido.
+mobile-url-no-address = L'URL di abbinamento non contiene l'indirizzo del server.
+mobile-url-bad-address = L'URL di abbinamento contiene un indirizzo server non valido.
+mobile-url-no-token = L'URL di abbinamento non contiene il token.
+mobile-url-scheme = L'URL di abbinamento deve usare HTTPS o HTTP.
+mobile-url-paste-full = Incolla l'URL di abbinamento completo mostrato da Vmux sul tuo Mac.
+
+mobile-error-pairing-outdated = Questo abbinamento non è aggiornato. Scansiona di nuovo il QR sul tuo Mac.
+mobile-error-pairing-expired = Abbinamento scaduto. Scansiona di nuovo il QR sul tuo Mac.
+mobile-error-pairing-lost = Abbinamento scaduto. Ripeti l'abbinamento con il Mac.
+mobile-error-token-rejected = Token di abbinamento rifiutato.
+mobile-error-stack-missing = Il desktop ha aperto la chat, ma il suo stack non è comparso.
+mobile-error-not-offered = Il tuo Mac non lo offre ancora.
+mobile-error-remote-disabled = Remote è disattivato sul tuo Mac.
+mobile-error-session-gone = Quella sessione non esiste più.
+mobile-error-no-desktop = Apri la finestra di Vmux sul tuo Mac.
+mobile-error-refused = Il tuo Mac non è riuscito a farlo.
+mobile-error-no-answer = Nessuna risposta da { $address } dopo { $seconds } s.
+
+mobile-start-stacks = Stack
+mobile-start-no-stacks = Nessuno stack aperto
+mobile-start-team = Team
+mobile-start-search-placeholder = Cerca o chiedi…
+mobile-start-new-chat = Avvia chat
+mobile-start-starting = Avvio…
+
+mobile-chat-back = Indietro
+mobile-chat-back-to-stacks = Torna agli stack
+mobile-chat-no-messages = Ancora nessun messaggio.
+mobile-chat-no-session = Nessuna sessione attiva
+mobile-chat-placeholder = Messaggio all'agente…
+mobile-chat-send = Invia
+mobile-chat-stop = Ferma
+
+mobile-qr-title = Scansiona il codice QR mostrato da Vmux
+mobile-qr-cancel = Annulla
+mobile-qr-unavailable = Lo scanner QR non è disponibile.
+mobile-qr-camera-unavailable = Fotocamera non disponibile. Inserisci invece il link di abbinamento.
+mobile-qr-camera-failed = Impossibile aprire la fotocamera: { $error }
+mobile-qr-camera-input-unavailable = L'ingresso della fotocamera non è disponibile.
+mobile-qr-unsupported-device = La scansione QR non è disponibile su questo dispositivo.
+mobile-qr-unsupported-platform = La scansione QR non è ancora disponibile su questa piattaforma. Inserisci invece il link di abbinamento.
+mobile-error-unexpected-answer = Il tuo Mac ha risposto in modo inatteso.
+mobile-error-connection-dropped = La connessione al tuo Mac è caduta.
+mobile-error-connection-closed = Il tuo Mac ha chiuso la connessione.
+mobile-error-address-invalid = Quell'indirizzo di abbinamento non è valido.
+mobile-error-address-no-port = Quell'indirizzo di abbinamento non contiene la porta.

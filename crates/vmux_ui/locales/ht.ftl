@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Konekte ak Mac ou
+mobile-pair-subtitle = Nan Vmux, louvri Remote epi chwazi Connect device.
+mobile-pair-scan = Eskane kòd QR
+mobile-pair-show-link = Antre lyen konesyon an alamen
+mobile-pair-hide-link = Kache lyen konesyon an
+mobile-pair-link-placeholder = Kole lyen konesyon an
+mobile-pair-connect = Konekte
+mobile-pair-connecting = Ap konekte…
+mobile-pair-disconnect = Dekonekte
+mobile-status-connected = Konekte
+mobile-status-reaching = Ap chèche Mac ou…
+mobile-status-disconnected = Pa konekte
+
+mobile-url-invalid = URL konesyon an pa valab.
+mobile-url-no-address = URL konesyon an pa gen adrès sèvè.
+mobile-url-bad-address = URL konesyon an gen yon adrès sèvè ki pa valab.
+mobile-url-no-token = URL konesyon an pa gen token.
+mobile-url-scheme = URL konesyon an dwe sèvi ak HTTPS oswa HTTP.
+mobile-url-paste-full = Kole tout URL konesyon an Vmux montre sou Mac ou a.
+
+mobile-error-pairing-outdated = Konesyon sa a demode. Eskane kòd QR ki sou Mac ou a ankò.
+mobile-error-pairing-expired = Konesyon an ekspire. Eskane kòd QR ki sou Mac ou a ankò.
+mobile-error-pairing-lost = Konesyon an ekspire. Konekte ak Mac la ankò.
+mobile-error-token-rejected = Yo refize token konesyon an.
+mobile-error-stack-missing = Òdinatè a louvri chat la, men pil li a pa parèt.
+mobile-error-not-offered = Mac ou a poko ofri sa.
+mobile-error-remote-disabled = Remote etenn sou Mac ou a.
+mobile-error-session-gone = Sesyon sa a disparèt.
+mobile-error-no-desktop = Louvri fenèt Vmux la sou Mac ou a.
+mobile-error-refused = Mac ou a pa t kapab fè sa.
+mobile-error-no-answer = Pa gen repons nan { $address } apre { $seconds } segond.
+
+mobile-start-stacks = Pil
+mobile-start-no-stacks = Pa gen pil ki louvri
+mobile-start-team = Ekip
+mobile-start-search-placeholder = Chèche oswa mande…
+mobile-start-new-chat = Kòmanse chat
+mobile-start-starting = Ap kòmanse…
+
+mobile-chat-back = Tounen
+mobile-chat-back-to-stacks = Tounen nan pil yo
+mobile-chat-no-messages = Poko gen mesaj.
+mobile-chat-no-session = Pa gen sesyon aktif
+mobile-chat-placeholder = Mesaj pou ajan an…
+mobile-chat-send = Voye
+mobile-chat-stop = Sispann
+
+mobile-qr-title = Eskane kòd QR Vmux montre a
+mobile-qr-cancel = Anile
+mobile-qr-unavailable = Eskanè QR a pa disponib.
+mobile-qr-camera-unavailable = Kamera a pa disponib. Antre lyen konesyon an pito.
+mobile-qr-camera-failed = Pa t kapab louvri kamera a: { $error }
+mobile-qr-camera-input-unavailable = Antre kamera a pa disponib.
+mobile-qr-unsupported-device = Eskanè QR pa disponib sou aparèy sa a.
+mobile-qr-unsupported-platform = Eskanè QR poko disponib sou platfòm sa a. Antre lyen konesyon an pito.
+mobile-error-unexpected-answer = Mac ou a bay yon repons ou pa t atann.
+mobile-error-connection-dropped = Konesyon an ak Mac ou a koupe.
+mobile-error-connection-closed = Mac ou a fèmen konesyon an.
+mobile-error-address-invalid = Adrès konesyon sa a pa valab.
+mobile-error-address-no-port = Adrès konesyon sa a pa gen port.

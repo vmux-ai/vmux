@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = သင့် Mac နှင့် ချိတ်ဆက်ပါ
+mobile-pair-subtitle = Vmux တွင် Remote ကိုဖွင့်ပြီး Connect device ကို ရွေးပါ။
+mobile-pair-scan = QR ကုဒ် စကင်ဖတ်ရန်
+mobile-pair-show-link = ချိတ်ဆက်လင့်ခ်ကို ကိုယ်တိုင် ထည့်ရန်
+mobile-pair-hide-link = ချိတ်ဆက်လင့်ခ်ကို ဖျောက်ရန်
+mobile-pair-link-placeholder = ချိတ်ဆက်လင့်ခ်ကို ကူးထည့်ပါ
+mobile-pair-connect = ချိတ်ဆက်
+mobile-pair-connecting = ချိတ်ဆက်နေသည်…
+mobile-pair-disconnect = ဖြုတ်မည်
+mobile-status-connected = ချိတ်ဆက်ထားသည်
+mobile-status-reaching = သင့် Mac ကို ရှာနေသည်…
+mobile-status-disconnected = မချိတ်ဆက်ရသေးပါ
+
+mobile-url-invalid = ချိတ်ဆက် URL မမှန်ကန်ပါ။
+mobile-url-no-address = ချိတ်ဆက် URL တွင် ဆာဗာလိပ်စာ မပါပါ။
+mobile-url-bad-address = ချိတ်ဆက် URL ၏ ဆာဗာလိပ်စာ မမှန်ကန်ပါ။
+mobile-url-no-token = ချိတ်ဆက် URL တွင် token မပါပါ။
+mobile-url-scheme = ချိတ်ဆက် URL သည် HTTPS သို့မဟုတ် HTTP ဖြစ်ရမည်။
+mobile-url-paste-full = သင့် Mac ရှိ Vmux ပြသထားသော ချိတ်ဆက် URL အပြည့်အစုံကို ကူးထည့်ပါ။
+
+mobile-error-pairing-outdated = ဤချိတ်ဆက်မှု ခေတ်မမီတော့ပါ။ Mac ရှိ QR ကို ပြန်စကင်ဖတ်ပါ။
+mobile-error-pairing-expired = ချိတ်ဆက်မှု သက်တမ်းကုန်သွားပြီ။ Mac ရှိ QR ကို ပြန်စကင်ဖတ်ပါ။
+mobile-error-pairing-lost = ချိတ်ဆက်မှု သက်တမ်းကုန်သွားပြီ။ Mac နှင့် ပြန်ချိတ်ဆက်ပါ။
+mobile-error-token-rejected = ချိတ်ဆက် token ကို ငြင်းပယ်လိုက်သည်။
+mobile-error-stack-missing = ဒက်စ်တော့က ချတ်ကို ဖွင့်ခဲ့သော်လည်း ၎င်း၏ Stack မပေါ်လာပါ။
+mobile-error-not-offered = သင့် Mac က ဤအရာကို မပေးသေးပါ။
+mobile-error-remote-disabled = သင့် Mac တွင် Remote ကို ပိတ်ထားသည်။
+mobile-error-session-gone = ထို session မရှိတော့ပါ။
+mobile-error-no-desktop = သင့် Mac တွင် Vmux ဝင်းဒိုးကို ဖွင့်ပါ။
+mobile-error-refused = သင့် Mac က ထိုအရာကို မလုပ်နိုင်ပါ။
+mobile-error-no-answer = { $seconds }s ကြာသော်လည်း { $address } မှ အဖြေမရပါ။
+
+mobile-start-stacks = Stack များ
+mobile-start-no-stacks = ဖွင့်ထားသော Stack မရှိပါ
+mobile-start-team = အဖွဲ့
+mobile-start-search-placeholder = ရှာရန် သို့မဟုတ် မေးရန်…
+mobile-start-new-chat = ချတ် စတင်
+mobile-start-starting = စတင်နေသည်…
+
+mobile-chat-back = နောက်သို့
+mobile-chat-back-to-stacks = Stack များသို့ ပြန်သွား
+mobile-chat-no-messages = မက်ဆေ့ဂျ် မရှိသေးပါ။
+mobile-chat-no-session = လက်ရှိ session မရှိပါ
+mobile-chat-placeholder = Agent ကို မက်ဆေ့ဂျ်…
+mobile-chat-send = ပို့
+mobile-chat-stop = ရပ်
+
+mobile-qr-title = Vmux ပြသထားသော QR ကုဒ်ကို စကင်ဖတ်ပါ
+mobile-qr-cancel = မလုပ်တော့
+mobile-qr-unavailable = QR စကင်နာ မရရှိနိုင်ပါ။
+mobile-qr-camera-unavailable = ကင်မရာ မရရှိနိုင်ပါ။ ချိတ်ဆက်လင့်ခ်ကို ထည့်ပါ။
+mobile-qr-camera-failed = ကင်မရာကို မဖွင့်နိုင်ပါ - { $error }
+mobile-qr-camera-input-unavailable = ကင်မရာ input မရရှိနိုင်ပါ။
+mobile-qr-unsupported-device = ဤစက်ပစ္စည်းတွင် QR စကင်ဖတ်ခြင်း မရရှိနိုင်ပါ။
+mobile-qr-unsupported-platform = ဤပလက်ဖောင်းတွင် QR စကင်ဖတ်ခြင်း မရသေးပါ။ ချိတ်ဆက်လင့်ခ်ကို ထည့်ပါ။
+mobile-error-unexpected-answer = သင့် Mac က မမျှော်လင့်ဘဲ တုံ့ပြန်လိုက်သည်။
+mobile-error-connection-dropped = သင့် Mac နှင့် ချိတ်ဆက်မှု ပြတ်တောက်သွားပြီ။
+mobile-error-connection-closed = သင့် Mac က ချိတ်ဆက်မှုကို ပိတ်လိုက်သည်။
+mobile-error-address-invalid = ထို ချိတ်ဆက် လိပ်စာ မမှန်ကန်ပါ။
+mobile-error-address-no-port = ထို ချိတ်ဆက် လိပ်စာတွင် port မပါပါ။

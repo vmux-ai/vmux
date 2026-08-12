@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Kết nối với máy Mac của bạn
+mobile-pair-subtitle = Trong Vmux, mở Remote và chọn Connect device.
+mobile-pair-scan = Quét mã QR
+mobile-pair-show-link = Nhập liên kết ghép nối thủ công
+mobile-pair-hide-link = Ẩn liên kết ghép nối
+mobile-pair-link-placeholder = Dán liên kết ghép nối
+mobile-pair-connect = Kết nối
+mobile-pair-connecting = Đang kết nối…
+mobile-pair-disconnect = Ngắt kết nối
+mobile-status-connected = Đã kết nối
+mobile-status-reaching = Đang liên lạc với máy Mac của bạn…
+mobile-status-disconnected = Chưa kết nối
+
+mobile-url-invalid = URL ghép nối không hợp lệ.
+mobile-url-no-address = URL ghép nối không có địa chỉ máy chủ.
+mobile-url-bad-address = URL ghép nối có địa chỉ máy chủ không hợp lệ.
+mobile-url-no-token = URL ghép nối không có token.
+mobile-url-scheme = URL ghép nối phải dùng HTTPS hoặc HTTP.
+mobile-url-paste-full = Dán đầy đủ URL ghép nối mà Vmux hiển thị trên máy Mac của bạn.
+
+mobile-error-pairing-outdated = Ghép nối này đã lỗi thời. Hãy quét lại mã QR trên máy Mac.
+mobile-error-pairing-expired = Ghép nối đã hết hạn. Hãy quét lại mã QR trên máy Mac.
+mobile-error-pairing-lost = Ghép nối đã hết hạn. Hãy ghép nối lại với máy Mac.
+mobile-error-token-rejected = Token ghép nối bị từ chối.
+mobile-error-stack-missing = Máy tính đã mở cuộc trò chuyện nhưng ngăn xếp của nó không xuất hiện.
+mobile-error-not-offered = Máy Mac của bạn chưa hỗ trợ việc này.
+mobile-error-remote-disabled = Remote đang tắt trên máy Mac của bạn.
+mobile-error-session-gone = Phiên đó không còn nữa.
+mobile-error-no-desktop = Hãy mở cửa sổ Vmux trên máy Mac của bạn.
+mobile-error-refused = Máy Mac của bạn không thể làm điều đó.
+mobile-error-no-answer = Không có phản hồi từ { $address } sau { $seconds } giây.
+
+mobile-start-stacks = Ngăn xếp
+mobile-start-no-stacks = Không có ngăn xếp nào đang mở
+mobile-start-team = Nhóm
+mobile-start-search-placeholder = Tìm kiếm hoặc hỏi…
+mobile-start-new-chat = Bắt đầu trò chuyện
+mobile-start-starting = Đang bắt đầu…
+
+mobile-chat-back = Quay lại
+mobile-chat-back-to-stacks = Về ngăn xếp
+mobile-chat-no-messages = Chưa có tin nhắn nào.
+mobile-chat-no-session = Không có phiên hoạt động
+mobile-chat-placeholder = Nhắn cho tác nhân…
+mobile-chat-send = Gửi
+mobile-chat-stop = Dừng
+
+mobile-qr-title = Quét mã QR mà Vmux hiển thị
+mobile-qr-cancel = Hủy
+mobile-qr-unavailable = Trình quét QR không khả dụng.
+mobile-qr-camera-unavailable = Máy ảnh không khả dụng. Hãy nhập liên kết ghép nối.
+mobile-qr-camera-failed = Không mở được máy ảnh: { $error }
+mobile-qr-camera-input-unavailable = Đầu vào máy ảnh không khả dụng.
+mobile-qr-unsupported-device = Thiết bị này không hỗ trợ quét QR.
+mobile-qr-unsupported-platform = Nền tảng này chưa hỗ trợ quét QR. Hãy nhập liên kết ghép nối.
+mobile-error-unexpected-answer = Máy Mac của bạn phản hồi bất thường.
+mobile-error-connection-dropped = Kết nối tới máy Mac của bạn đã bị ngắt.
+mobile-error-connection-closed = Máy Mac của bạn đã đóng kết nối.
+mobile-error-address-invalid = Địa chỉ ghép nối không hợp lệ.
+mobile-error-address-no-port = Địa chỉ ghép nối không có cổng.

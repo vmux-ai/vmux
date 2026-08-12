@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = আপনার Mac-এর সাথে সংযোগ করুন
+mobile-pair-subtitle = Vmux-এ Remote খুলুন এবং ডিভাইস সংযুক্ত করুন বেছে নিন।
+mobile-pair-scan = QR কোড স্ক্যান করুন
+mobile-pair-show-link = পেয়ারিং লিঙ্ক নিজে লিখুন
+mobile-pair-hide-link = পেয়ারিং লিঙ্ক লুকান
+mobile-pair-link-placeholder = পেয়ারিং লিঙ্ক পেস্ট করুন
+mobile-pair-connect = সংযোগ করুন
+mobile-pair-connecting = সংযোগ করা হচ্ছে…
+mobile-pair-disconnect = সংযোগ বিচ্ছিন্ন করুন
+mobile-status-connected = সংযুক্ত
+mobile-status-reaching = আপনার Mac-এ পৌঁছানো হচ্ছে…
+mobile-status-disconnected = সংযুক্ত নয়
+
+mobile-url-invalid = পেয়ারিং URL বৈধ নয়।
+mobile-url-no-address = পেয়ারিং URL-এ সার্ভার ঠিকানা নেই।
+mobile-url-bad-address = পেয়ারিং URL-এ সার্ভার ঠিকানা অবৈধ।
+mobile-url-no-token = পেয়ারিং URL-এ টোকেন নেই।
+mobile-url-scheme = পেয়ারিং URL-কে HTTPS বা HTTP ব্যবহার করতে হবে।
+mobile-url-paste-full = আপনার Mac-এ Vmux যে সম্পূর্ণ পেয়ারিং URL দেখাচ্ছে সেটি পেস্ট করুন।
+
+mobile-error-pairing-outdated = এই পেয়ারিং পুরোনো হয়ে গেছে। Mac-এ থাকা QR আবার স্ক্যান করুন।
+mobile-error-pairing-expired = পেয়ারিংয়ের মেয়াদ শেষ। Mac-এ থাকা QR আবার স্ক্যান করুন।
+mobile-error-pairing-lost = পেয়ারিংয়ের মেয়াদ শেষ। Mac-এর সাথে আবার পেয়ার করুন।
+mobile-error-token-rejected = পেয়ারিং টোকেন প্রত্যাখ্যাত হয়েছে।
+mobile-error-stack-missing = ডেস্কটপ চ্যাটটি খুলেছে, কিন্তু এর স্ট্যাক দেখা যায়নি।
+mobile-error-not-offered = আপনার Mac এখনও এটি সমর্থন করে না।
+mobile-error-remote-disabled = আপনার Mac-এ Remote বন্ধ আছে।
+mobile-error-session-gone = সেই সেশনটি আর নেই।
+mobile-error-no-desktop = আপনার Mac-এ Vmux উইন্ডোটি খুলুন।
+mobile-error-refused = আপনার Mac এটি করতে পারেনি।
+mobile-error-no-answer = { $seconds } সেকেন্ড পরেও { $address } থেকে কোনো উত্তর নেই।
+
+mobile-start-stacks = স্ট্যাক
+mobile-start-no-stacks = কোনো খোলা স্ট্যাক নেই
+mobile-start-team = টিম
+mobile-start-search-placeholder = খুঁজুন বা জিজ্ঞেস করুন…
+mobile-start-new-chat = চ্যাট শুরু করুন
+mobile-start-starting = শুরু হচ্ছে…
+
+mobile-chat-back = পিছনে
+mobile-chat-back-to-stacks = স্ট্যাকে ফিরুন
+mobile-chat-no-messages = এখনও কোনো বার্তা নেই।
+mobile-chat-no-session = কোনো সক্রিয় সেশন নেই
+mobile-chat-placeholder = এজেন্টকে বার্তা…
+mobile-chat-send = পাঠান
+mobile-chat-stop = থামান
+
+mobile-qr-title = Vmux যে QR কোড দেখাচ্ছে সেটি স্ক্যান করুন
+mobile-qr-cancel = বাতিল
+mobile-qr-unavailable = QR স্ক্যানার উপলব্ধ নয়।
+mobile-qr-camera-unavailable = ক্যামেরা উপলব্ধ নয়। বদলে পেয়ারিং লিঙ্ক লিখুন।
+mobile-qr-camera-failed = ক্যামেরা খোলা যায়নি: { $error }
+mobile-qr-camera-input-unavailable = ক্যামেরা ইনপুট উপলব্ধ নয়।
+mobile-qr-unsupported-device = এই ডিভাইসে QR স্ক্যান করা যায় না।
+mobile-qr-unsupported-platform = এই প্ল্যাটফর্মে QR স্ক্যান এখনও উপলব্ধ নয়। বদলে পেয়ারিং লিঙ্ক লিখুন।
+mobile-error-unexpected-answer = আপনার Mac অপ্রত্যাশিত উত্তর দিয়েছে।
+mobile-error-connection-dropped = আপনার Mac-এর সাথে সংযোগ বিচ্ছিন্ন হয়ে গেছে।
+mobile-error-connection-closed = আপনার Mac সংযোগটি বন্ধ করে দিয়েছে।
+mobile-error-address-invalid = সেই পেয়ারিং ঠিকানা বৈধ নয়।
+mobile-error-address-no-port = সেই পেয়ারিং ঠিকানায় কোনো পোর্ট নেই।

@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Poveži se sa svojim Mac-om
+mobile-pair-subtitle = U Vmuxu otvori Remote i odaberi Poveži uređaj.
+mobile-pair-scan = Skeniraj QR kod
+mobile-pair-show-link = Unesi link za uparivanje ručno
+mobile-pair-hide-link = Sakrij link za uparivanje
+mobile-pair-link-placeholder = Zalijepi link za uparivanje
+mobile-pair-connect = Poveži
+mobile-pair-connecting = Povezivanje…
+mobile-pair-disconnect = Prekini vezu
+mobile-status-connected = Povezano
+mobile-status-reaching = Traženje tvog Mac-a…
+mobile-status-disconnected = Nije povezano
+
+mobile-url-invalid = URL za uparivanje nije ispravan.
+mobile-url-no-address = URL za uparivanje nema adresu servera.
+mobile-url-bad-address = URL za uparivanje ima neispravnu adresu servera.
+mobile-url-no-token = URL za uparivanje nema token.
+mobile-url-scheme = URL za uparivanje mora koristiti HTTPS ili HTTP.
+mobile-url-paste-full = Zalijepi cijeli URL za uparivanje koji Vmux prikazuje na tvom Mac-u.
+
+mobile-error-pairing-outdated = Ovo uparivanje je zastarjelo. Ponovo skeniraj QR na svom Mac-u.
+mobile-error-pairing-expired = Uparivanje je isteklo. Ponovo skeniraj QR na svom Mac-u.
+mobile-error-pairing-lost = Uparivanje je isteklo. Ponovo se upari s Mac-om.
+mobile-error-token-rejected = Token za uparivanje je odbijen.
+mobile-error-stack-missing = Desktop je otvorio chat, ali se njegov sloj nije pojavio.
+mobile-error-not-offered = Tvoj Mac ovo još ne nudi.
+mobile-error-remote-disabled = Remote je isključen na tvom Mac-u.
+mobile-error-session-gone = Ta sesija više ne postoji.
+mobile-error-no-desktop = Otvori Vmux prozor na svom Mac-u.
+mobile-error-refused = Tvoj Mac to nije mogao uraditi.
+mobile-error-no-answer = Nema odgovora sa { $address } nakon { $seconds } s.
+
+mobile-start-stacks = Slojevi
+mobile-start-no-stacks = Nema otvorenih slojeva
+mobile-start-team = Tim
+mobile-start-search-placeholder = Pretraži ili pitaj…
+mobile-start-new-chat = Pokreni chat
+mobile-start-starting = Pokretanje…
+
+mobile-chat-back = Nazad
+mobile-chat-back-to-stacks = Nazad na slojeve
+mobile-chat-no-messages = Još nema poruka.
+mobile-chat-no-session = Nema aktivne sesije
+mobile-chat-placeholder = Poruka agentu…
+mobile-chat-send = Pošalji
+mobile-chat-stop = Zaustavi
+
+mobile-qr-title = Skeniraj QR kod koji prikazuje Vmux
+mobile-qr-cancel = Otkaži
+mobile-qr-unavailable = QR skener nije dostupan.
+mobile-qr-camera-unavailable = Kamera nije dostupna. Umjesto toga unesi link za uparivanje.
+mobile-qr-camera-failed = Kamera se nije mogla otvoriti: { $error }
+mobile-qr-camera-input-unavailable = Ulaz kamere nije dostupan.
+mobile-qr-unsupported-device = Skeniranje QR koda nije dostupno na ovom uređaju.
+mobile-qr-unsupported-platform = Skeniranje QR koda još nije dostupno na ovoj platformi. Umjesto toga unesi link za uparivanje.
+mobile-error-unexpected-answer = Tvoj Mac je odgovorio neočekivano.
+mobile-error-connection-dropped = Veza s tvojim Mac-om je prekinuta.
+mobile-error-connection-closed = Tvoj Mac je zatvorio vezu.
+mobile-error-address-invalid = Ta adresa za uparivanje nije ispravna.
+mobile-error-address-no-port = Ta adresa za uparivanje nema port.

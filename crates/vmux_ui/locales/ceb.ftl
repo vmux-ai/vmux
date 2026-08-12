@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = Konekta sa imong Mac
+mobile-pair-subtitle = Sa Vmux, ablihi ang Remote ug pilia ang Connect device.
+mobile-pair-scan = I-scan ang QR code
+mobile-pair-show-link = Isulat ang pairing link
+mobile-pair-hide-link = Itago ang pairing link
+mobile-pair-link-placeholder = I-paste ang pairing link
+mobile-pair-connect = Konekta
+mobile-pair-connecting = Nagkonekta…
+mobile-pair-disconnect = Putla ang koneksyon
+mobile-status-connected = Nakakonekta
+mobile-status-reaching = Nagkontak sa imong Mac…
+mobile-status-disconnected = Dili konektado
+
+mobile-url-invalid = Dili balido ang pairing URL.
+mobile-url-no-address = Ang pairing URL walay address sa server.
+mobile-url-bad-address = Ang pairing URL adunay dili balido nga address sa server.
+mobile-url-no-token = Ang pairing URL walay token.
+mobile-url-scheme = Ang pairing URL kinahanglan mogamit ug HTTPS o HTTP.
+mobile-url-paste-full = I-paste ang tibuok pairing URL nga gipakita sa Vmux sa imong Mac.
+
+mobile-error-pairing-outdated = Karaan na kini nga pairing. I-scan pag-usab ang QR sa imong Mac.
+mobile-error-pairing-expired = Expired na ang pairing. I-scan pag-usab ang QR sa imong Mac.
+mobile-error-pairing-lost = Expired na ang pairing. Pares pag-usab sa Mac.
+mobile-error-token-rejected = Gibalibaran ang pairing token.
+mobile-error-stack-missing = Giablihan sa desktop ang chat, apan wala mogawas ang stack niini.
+mobile-error-not-offered = Wala pa kini gitanyag sa imong Mac.
+mobile-error-remote-disabled = Naka-off ang Remote sa imong Mac.
+mobile-error-session-gone = Wala na kana nga session.
+mobile-error-no-desktop = Ablihi ang bintana sa Vmux sa imong Mac.
+mobile-error-refused = Wala kini mahimo sa imong Mac.
+mobile-error-no-answer = Walay tubag gikan sa { $address } human sa { $seconds }s.
+
+mobile-start-stacks = Mga Stack
+mobile-start-no-stacks = Walay abli nga stack
+mobile-start-team = Team
+mobile-start-search-placeholder = Pangitaa o pangutana…
+mobile-start-new-chat = Sugdi ang chat
+mobile-start-starting = Nagsugod…
+
+mobile-chat-back = Balik
+mobile-chat-back-to-stacks = Balik sa mga stack
+mobile-chat-no-messages = Wala pay mensahe.
+mobile-chat-no-session = Walay aktibo nga session
+mobile-chat-placeholder = Mensahe sa agent…
+mobile-chat-send = Ipadala
+mobile-chat-stop = Hunong
+
+mobile-qr-title = I-scan ang QR code nga gipakita sa Vmux
+mobile-qr-cancel = Kanselahon
+mobile-qr-unavailable = Dili magamit ang QR scanner.
+mobile-qr-camera-unavailable = Dili magamit ang camera. Isulat na lang ang pairing link.
+mobile-qr-camera-failed = Wala maablihi ang camera: { $error }
+mobile-qr-camera-input-unavailable = Dili magamit ang input sa camera.
+mobile-qr-unsupported-device = Dili magamit ang QR scanning niini nga device.
+mobile-qr-unsupported-platform = Wala pa magamit ang QR scanning niini nga platform. Isulat na lang ang pairing link.
+mobile-error-unexpected-answer = Wala damha ang tubag sa imong Mac.
+mobile-error-connection-dropped = Naputol ang koneksyon sa imong Mac.
+mobile-error-connection-closed = Gisirhan sa imong Mac ang koneksyon.
+mobile-error-address-invalid = Dili balido kana nga pairing address.
+mobile-error-address-no-port = Kana nga pairing address walay port.

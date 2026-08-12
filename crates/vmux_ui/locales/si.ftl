@@ -737,3 +737,64 @@ agent-error-startup-title = Agent failed to start
 agent-error-version-suggestion = This looks like a blocked or unavailable package version. Open Agents to choose one that works.
 agent-error-open-agents = Open Agents Page
 agents-apply-version = Apply
+
+mobile-pair-title = ඔබේ Mac වෙත සම්බන්ධ වන්න
+mobile-pair-subtitle = Vmux හි Remote විවෘත කර Connect device තෝරන්න.
+mobile-pair-scan = QR කේතය පරිලෝකනය කරන්න
+mobile-pair-show-link = යුගල කිරීමේ සබැඳිය අතින් ඇතුළු කරන්න
+mobile-pair-hide-link = යුගල කිරීමේ සබැඳිය සඟවන්න
+mobile-pair-link-placeholder = යුගල කිරීමේ සබැඳිය අලවන්න
+mobile-pair-connect = සම්බන්ධ වන්න
+mobile-pair-connecting = සම්බන්ධ වෙමින්…
+mobile-pair-disconnect = විසන්ධි කරන්න
+mobile-status-connected = සම්බන්ධයි
+mobile-status-reaching = ඔබේ Mac සොයමින්…
+mobile-status-disconnected = සම්බන්ධ වී නැත
+
+mobile-url-invalid = යුගල කිරීමේ URL එක වලංගු නැත.
+mobile-url-no-address = යුගල කිරීමේ URL එකේ සේවාදායක ලිපිනයක් නැත.
+mobile-url-bad-address = යුගල කිරීමේ URL එකේ ඇති සේවාදායක ලිපිනය වලංගු නැත.
+mobile-url-no-token = යුගල කිරීමේ URL එකේ ටෝකනයක් නැත.
+mobile-url-scheme = යුගල කිරීමේ URL එක HTTPS හෝ HTTP භාවිත කළ යුතුය.
+mobile-url-paste-full = ඔබේ Mac හි Vmux පෙන්වන සම්පූර්ණ යුගල කිරීමේ URL එක අලවන්න.
+
+mobile-error-pairing-outdated = මෙම යුගලනය යල් පැන ගොස් ඇත. ඔබේ Mac හි QR නැවත පරිලෝකනය කරන්න.
+mobile-error-pairing-expired = යුගලනය කල් ඉකුත් විය. ඔබේ Mac හි QR නැවත පරිලෝකනය කරන්න.
+mobile-error-pairing-lost = යුගලනය කල් ඉකුත් විය. Mac සමඟ නැවත යුගල කරන්න.
+mobile-error-token-rejected = යුගල කිරීමේ ටෝකනය ප්‍රතික්ෂේප විය.
+mobile-error-stack-missing = ඩෙස්ක්ටොප් එක කතාබහ විවෘත කළත්, එහි ස්ටැක් එක නොපෙනුණි.
+mobile-error-not-offered = ඔබේ Mac තවම මෙය ලබා දෙන්නේ නැත.
+mobile-error-remote-disabled = ඔබේ Mac හි Remote ක්‍රියාවිරහිතයි.
+mobile-error-session-gone = එම සැසිය තවදුරටත් නැත.
+mobile-error-no-desktop = ඔබේ Mac හි Vmux කවුළුව විවෘත කරන්න.
+mobile-error-refused = ඔබේ Mac හට එය කළ නොහැකි විය.
+mobile-error-no-answer = තත්පර { $seconds } කට පසුවත් { $address } වෙතින් පිළිතුරක් නැත.
+
+mobile-start-stacks = ස්ටැක්
+mobile-start-no-stacks = විවෘත ස්ටැක් නැත
+mobile-start-team = කණ්ඩායම
+mobile-start-search-placeholder = සොයන්න හෝ අසන්න…
+mobile-start-new-chat = කතාබහ අරඹන්න
+mobile-start-starting = ආරම්භ වෙමින්…
+
+mobile-chat-back = ආපසු
+mobile-chat-back-to-stacks = ස්ටැක් වෙත ආපසු
+mobile-chat-no-messages = තවම පණිවුඩ නැත.
+mobile-chat-no-session = ක්‍රියාකාරී සැසියක් නැත
+mobile-chat-placeholder = ඒජන්ට් වෙත පණිවුඩයක්…
+mobile-chat-send = යවන්න
+mobile-chat-stop = නවත්වන්න
+
+mobile-qr-title = Vmux පෙන්වන QR කේතය පරිලෝකනය කරන්න
+mobile-qr-cancel = අවලංගු කරන්න
+mobile-qr-unavailable = QR පරිලෝකකය නොමැත.
+mobile-qr-camera-unavailable = කැමරාව නොමැත. ඒ වෙනුවට යුගල කිරීමේ සබැඳිය ඇතුළු කරන්න.
+mobile-qr-camera-failed = කැමරාව විවෘත කළ නොහැකි විය: { $error }
+mobile-qr-camera-input-unavailable = කැමරා ආදානය නොමැත.
+mobile-qr-unsupported-device = මෙම උපාංගයේ QR පරිලෝකනය නොමැත.
+mobile-qr-unsupported-platform = මෙම වේදිකාවේ QR පරිලෝකනය තවම නොමැත. ඒ වෙනුවට යුගල කිරීමේ සබැඳිය ඇතුළු කරන්න.
+mobile-error-unexpected-answer = ඔබේ Mac අනපේක්ෂිත ලෙස පිළිතුරු දුන්නේය.
+mobile-error-connection-dropped = ඔබේ Mac වෙත වූ සම්බන්ධතාවය බිඳ වැටිණි.
+mobile-error-connection-closed = ඔබේ Mac සම්බන්ධතාවය වසා දැමීය.
+mobile-error-address-invalid = යුගල කිරීමේ ලිපිනය වලංගු නැත.
+mobile-error-address-no-port = යුගල කිරීමේ ලිපිනයේ පෝට් එකක් නැත.
