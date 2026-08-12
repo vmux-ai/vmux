@@ -1,10 +1,10 @@
 use bevy::prelude::*;
 
 use crate::client::acp::AcpSession;
-use crate::components::AgentSession;
 use crate::run_state::AgentRunState;
 use crate::run_state_kind::{AgentRunStateKind, LastRunStateKind};
 use crate::toast::{AgentToast, ToastLevel};
+use vmux_session::AgentSession;
 
 /// On a transition into `Errored`, fire a toast. The chat page renders the errored run-state as a
 /// styled inline card, so the error is not also pushed into the transcript (which duplicated it).

@@ -78,7 +78,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
         ..default()
     });
     commands.entity(stack).insert((
-        crate::components::AgentSession {
+        vmux_session::AgentSession {
             kind,
             variant: AgentVariant::Page,
             sid: sid.to_string(),

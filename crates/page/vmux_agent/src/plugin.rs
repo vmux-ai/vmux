@@ -17,7 +17,6 @@ pub mod chat;
 pub mod client;
 pub mod command;
 pub mod command_bar;
-pub mod components;
 pub mod echo;
 pub mod echo_plugin;
 pub mod events;
@@ -73,7 +72,6 @@ pub use vmux_service::{http, message, stream};
 
 pub use client::acp::AcpSession;
 pub use client::cli::strategy::CliAgentStrategy;
-pub use components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue, QueuedPrompt};
 pub use events::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
     ScreenshotImage, ScreenshotRequest, ScreenshotResponse,
@@ -87,12 +85,14 @@ pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tools::mcp_tool_defs;
 pub use url::{AgentKind, AgentUrl};
-pub use vmux_session::AgentVariant;
 pub use vmux_session::room::{
     ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
     MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
     RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
     RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
+};
+pub use vmux_session::{
+    AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue, QueuedPrompt,
 };
 
 #[cfg(test)]

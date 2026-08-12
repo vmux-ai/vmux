@@ -3,7 +3,6 @@ use bevy_cef::prelude::BinEventEmitterPlugin;
 
 use crate::AgentVariant;
 use crate::client::acp::AcpSession;
-use crate::components::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 use crate::events::{AgentApprovalRequest, AgentDelta};
 use crate::handoff::{ImportedConversation, PendingHandoff, sanitize_replayed_messages};
 use crate::message::Message;
@@ -18,6 +17,7 @@ use vmux_service::agent_events::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentRunStatus, ClientMessage, SharedMessage};
+use vmux_session::{AgentApprovalPolicy, AgentMessages, AgentSession, PromptQueue};
 
 impl Plugin for PageAgentPlugin {
     fn build(&self, app: &mut App) {
@@ -378,11 +378,11 @@ mod tests {
     #[test]
     fn interrupted_status_pauses_queue_and_idles() {
         use crate::client::acp::AcpSession;
-        use crate::components::PromptQueue;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::PromptQueue;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -430,11 +430,11 @@ mod tests {
     #[test]
     fn flush_pending_interrupt_does_not_pause() {
         use crate::client::acp::AcpSession;
-        use crate::components::PromptQueue;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::PromptQueue;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -491,11 +491,11 @@ mod tests {
     #[test]
     fn flush_pending_error_rearms_queue() {
         use crate::client::acp::AcpSession;
-        use crate::components::PromptQueue;
         use vmux_service::agent_events::{
             PageAgentAwaitingApproval, PageAgentDelta, PageAgentRunStatus, PageAgentSnapshot,
         };
         use vmux_service::protocol::AgentRunStatus;
+        use vmux_session::PromptQueue;
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
@@ -546,7 +546,7 @@ mod tests {
 
     #[test]
     fn acp_streaming_to_idle_raises_attention() {
-        use crate::components::PromptQueue;
+        use vmux_session::PromptQueue;
         let mut app = App::new();
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
@@ -590,7 +590,7 @@ mod tests {
 
     #[test]
     fn idle_to_idle_does_not_raise_attention() {
-        use crate::components::PromptQueue;
+        use vmux_session::PromptQueue;
         let mut app = App::new();
         app.add_message::<PageAgentDelta>()
             .add_message::<PageAgentRunStatus>()
