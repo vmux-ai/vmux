@@ -169,6 +169,11 @@ if [[ "${VMUX_IOS_UPLOAD:-}" != "1" ]]; then
     exit 0
 fi
 
+if ! xcrun --find altool >/dev/null 2>&1; then
+    echo "Error: altool not found. Install Xcode, not just the Command Line Tools." >&2
+    exit 1
+fi
+
 : "${APPLE_ID:?missing APPLE_ID}"
 : "${APPLE_APP_PASSWORD:?missing APPLE_APP_PASSWORD}"
 

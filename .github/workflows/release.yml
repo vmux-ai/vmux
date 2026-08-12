@@ -63,7 +63,12 @@ jobs:
     if: needs.detect-version.outputs.should_release == 'true'
     runs-on: macos-latest
     steps:
+      # The job builds and uploads to Apple; it never pushes. The workflow token carries
+      # contents: write for the publish job, so leaving it in the checkout would hand a
+      # write-capable credential to every build step for no reason.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@1.95.0
         with:

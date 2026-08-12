@@ -103,7 +103,6 @@ fi
 
 # The version keys are stamped onto the built copy, so a mismatch means the injection step did
 # not run and the checked-in placeholders shipped instead.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
 if [[ "$(plist_value CFBundleShortVersionString)" != "$VERSION" ]]; then
     echo "Info.plist CFBundleShortVersionString does not match Cargo.toml ($VERSION)" >&2

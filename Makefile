@@ -360,9 +360,12 @@ ensure-package-deps:
 		"$(CARGO_BIN)" install bevy_cef_bundle_app --locked --version "$(BEVY_CEF_BUNDLE_APP_VERSION)"; \
 	fi
 
+# altool is not here: it is only reached when VMUX_IOS_UPLOAD asks for an upload, and requiring
+# it up front would refuse a build-and-sign on a machine that can do one. The script checks for
+# it where it uses it.
 ensure-ios-release-deps: ensure-mobile-ios-deps ensure-codesign-deps
 	@echo "Checking iOS release dependencies..."
-	@for tool in actool ibtool altool; do \
+	@for tool in actool ibtool; do \
 		if ! xcrun --find "$$tool" >/dev/null 2>&1; then \
 			echo "$$tool not found. Install Xcode, not just the Command Line Tools."; \
 			exit 1; \
