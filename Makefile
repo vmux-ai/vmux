@@ -87,19 +87,33 @@ mobile-ios: ensure-mobile-ios-deps
 	"$(DX_BIN)" build --ios -p vmux_mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh
 
+# The icon, launch screen and privacy manifest exist only in a bundle the injector has been over,
+# and `mobile-ios-run` cannot be that bundle: `dx serve` installs what it just built and reinstalls
+# on every reload, so anything added afterwards is gone by the next keystroke. This installs the
+# app as it actually ships, at the cost of the hot-reload loop.
+ios-local: mobile-ios ensure-booted-simulator
+	@. ./scripts/cargo-target-paths.sh; \
+	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_mobile/$${VMUX_IOS_PROFILE:-debug}/ios/VmuxMobile.app"; \
+	xcrun simctl install booted "$$bundle"; \
+	xcrun simctl launch booted ai.vmux.mobile
+
 mobile-android: ensure-mobile-android-deps
 	"$(DX_BIN)" build --android -p vmux_mobile
 
-mobile-ios-run: ensure-mobile-ios-deps
-	@udid="$$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries | sort_by(.key) | reverse[] | .value[] | select(.isAvailable != false and (.name | startswith("iPhone")))] | first | .udid // empty')"; \
+# Boot the newest available iPhone, and leave it booted. `dx serve` and `simctl install` both
+# address the simulator as `booted` rather than by name, so both need one and neither brings one up.
+ensure-booted-simulator:
+	@if xcrun simctl list devices booted -j | jq -e '[.devices[][] | select(.name | startswith("iPhone"))] | length > 0' >/dev/null; then exit 0; fi; \
+	udid="$$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries | sort_by(.key) | reverse[] | .value[] | select(.isAvailable != false and (.name | startswith("iPhone")))] | first | .udid // empty')"; \
 	if [ -z "$$udid" ]; then \
 		echo "No available iPhone simulator. Install one in Xcode Settings > Components."; \
 		exit 1; \
 	fi; \
-	xcrun simctl shutdown booted >/dev/null 2>&1 || true; \
 	xcrun simctl boot "$$udid"; \
 	xcrun simctl bootstatus "$$udid" -b; \
 	open -a Simulator --args -CurrentDeviceUDID "$$udid"
+
+mobile-ios-run: ensure-mobile-ios-deps ensure-booted-simulator
 	"$(DX_BIN)" serve --ios -p vmux_mobile
 
 mobile-android-run: ensure-mobile-android-deps
