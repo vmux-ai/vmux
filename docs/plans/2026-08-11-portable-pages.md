@@ -55,7 +55,16 @@ Unifying on the timer was a mistake, since corrected: rAF stops when a page stop
 timer costs wakeups on every background page and, for an off-screen browser whose frames Bevy
 composites, wakes the app loop to spend them. That was speculative scope creep inside a refactor
 meant to preserve behaviour — the reasoning ("rAF is least reliable before the host produces
-frames") was never tested against a real cold start. Back on rAF, which is what shipped before.
+frames") was never tested against a real cold start.
+
+**Then the poll went away entirely.** The two failure modes are not separate: `focus()` makes the
+element `activeElement` immediately, and what lags is `document.hasFocus()`, which is the host's
+to grant and the host's to announce. So the claim asks once and waits for the window `focus`
+event. CEF's own `on_got_focus` turned out not to be needed — `on_set_focus` returns 1 to
+*cancel* CEF focus so winit keeps the macOS first responder, and focus reaches a page only
+through the host's `set_focus` calls in `sync_osr_focus_to_active_pane`, which Blink surfaces as
+the ordinary DOM event. The start page was already listening for it, which is what settled the
+question.
 
 ### Step 2 — `document::Title` (`50d48240`)
 

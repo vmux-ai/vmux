@@ -1,19 +1,24 @@
 //! Claiming keyboard focus from a host that grants it late.
 
-/// A claim on keyboard focus for one element, re-asserted until the host honours it.
+/// A claim on keyboard focus for one element, honoured as soon as the host grants the document
+/// focus.
 ///
 /// CEF grants an off-screen browser keyboard focus a frame or more after the page mounts — by
 /// which time the `autofocus` attribute has already been ignored, because the document was not
-/// focused when it was parsed. Asking once is not enough and asking forever is a spin, so the
-/// claim asks once a frame up to a bound and stops as soon as the document agrees.
+/// focused when it was parsed. So the claim asks once, and if the document does not yet have
+/// focus to give, waits for the `focus` event that says it does.
 ///
-/// Polling is the wrong shape and this should not be the final answer: CEF knows the moment it
-/// grants focus and says so through `on_got_focus`, which the browser process currently uses only
-/// to wake the loop. Routed to the page, this becomes one event and no retry at all. The reason
-/// that is not a small change is `on_set_focus`, which returns 1 to *cancel* CEF focus so winit
-/// keeps the macOS first responder and Bevy keeps the keyboard — so what "focused" means here is
-/// already not what it means in a browser, and the replacement has to be tried against a running
-/// app rather than reasoned into place.
+/// Waiting on the event rather than re-asking every frame is possible because the two failures
+/// are not really separate. Calling `focus()` makes the element `activeElement` there and then;
+/// what lags is `document.hasFocus()`, which is the host's to grant and the host's to announce.
+/// There is nothing else to wait for, so there is nothing to poll for.
+///
+/// The CEF side of this is worth knowing, because it is not what it looks like: `on_set_focus`
+/// returns 1 to *cancel* CEF focus, so that winit keeps the macOS first responder and Bevy keeps
+/// the keyboard. Focus reaches a page only through the host's own `set_focus` calls
+/// (`sync_osr_focus_to_active_pane`), and Blink turns those into the ordinary window `focus`
+/// event — which is why the page can listen for a plain DOM event and does not need CEF's
+/// `on_got_focus` routed to it over IPC.
 ///
 /// This is a fact about the host, not about any page, which is why it lives here rather than in
 /// the two pages that used to carry a copy of it.
@@ -56,17 +61,9 @@ mod imp {
 
     use super::{Caret, FocusClaim};
 
-    /// How many frames to re-assert the claim for before giving up.
-    ///
-    /// Scheduled with `requestAnimationFrame` rather than a timer, and the difference matters more
-    /// than it looks: rAF stops when the page stops rendering, so a page nobody is looking at costs
-    /// nothing, while a 16ms timer would keep firing on every background page and — for an
-    /// off-screen browser, whose frames Bevy composites — wake the app loop to do it.
-    const RETRY_FRAMES: u32 = 90;
-
     impl FocusClaim {
-        /// Take focus now, then keep re-asserting until the document holds it. Concurrent claims
-        /// on the same element share one bounded retry.
+        /// Take focus now, or when the host next grants the document any. Concurrent claims on the
+        /// same element share one wait.
         pub fn request(self) {
             let Some(window) = web_sys::window() else {
                 return;
@@ -75,21 +72,39 @@ mod imp {
                 return;
             }
             set_pending(&window, self.element_id, true);
-            self.retry(window, RETRY_FRAMES);
+            self.wait_for_window_focus(&window);
         }
 
-        fn retry(self, window: web_sys::Window, frames_left: u32) {
-            let retry_window = window.clone();
-            let callback = Closure::once(move || {
-                if self.settle() || frames_left <= 1 {
-                    set_pending(&retry_window, self.element_id, false);
+        /// Assert the claim again the next time the window gains focus, and keep waiting if that
+        /// still was not enough.
+        ///
+        /// Nothing can arrive between the check that failed and this listener existing, because
+        /// both are one synchronous run and a `focus` event has to queue behind it. The listener
+        /// captures two `Copy` fields and no signal, so — unlike a listener holding a component's
+        /// state — there is nothing it can outlive.
+        fn wait_for_window_focus(self, window: &web_sys::Window) {
+            let handler = Closure::once_into_js(move || {
+                let Some(window) = web_sys::window() else {
+                    return;
+                };
+                if self.settle() {
+                    set_pending(&window, self.element_id, false);
                 } else {
-                    self.retry(retry_window, frames_left - 1);
+                    self.wait_for_window_focus(&window);
                 }
             });
-            match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
-                Ok(_) => callback.forget(),
-                Err(_) => set_pending(&window, self.element_id, false),
+            let options = web_sys::AddEventListenerOptions::new();
+            options.set_once(true);
+            let target: &web_sys::EventTarget = window.as_ref();
+            if target
+                .add_event_listener_with_callback_and_add_event_listener_options(
+                    "focus",
+                    handler.unchecked_ref(),
+                    &options,
+                )
+                .is_err()
+            {
+                set_pending(window, self.element_id, false);
             }
         }
 
@@ -133,9 +148,9 @@ mod imp {
         }
     }
 
-    /// The latch lives on `window` rather than in a Rust static because a scheduled retry outlives
-    /// the wasm instance that started it: a document reused for another page has to see the chain
-    /// the previous one left running.
+    /// The latch lives on `window` rather than in a Rust static because a listener waiting on
+    /// focus outlives the wasm instance that added it: a document reused for another page has to
+    /// see the wait the previous one left running.
     fn pending(window: &web_sys::Window, element_id: &str) -> bool {
         js_sys::Reflect::get(window, &key(element_id))
             .map(|value| value.is_truthy())
