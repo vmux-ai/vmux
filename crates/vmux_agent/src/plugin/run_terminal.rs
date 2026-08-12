@@ -24,6 +24,62 @@ pub struct AgentTerminalRegions {
     pub run_panes: std::collections::HashMap<ProcessId, Entity>,
 }
 
+impl AgentTerminalRegions {
+    /// The run terminal a follow-up `run` from `anchor` belongs in.
+    ///
+    /// The cached terminal wins for as long as it is still a candidate, so an agent's output
+    /// stays in the one place the user has already put on screen. Once that process exits the
+    /// cached *pane* is the next best answer — the user moved a terminal there, and a
+    /// replacement should land in the same spot. Only with neither does the newest pane other
+    /// than the agent's own win, because splitting output into the agent's pane would bury the
+    /// conversation.
+    pub(crate) fn choose_reusable_terminal(
+        &self,
+        anchor: ProcessId,
+        agent_pane: Entity,
+        candidates: &[RunTerminalCandidate],
+    ) -> Option<RunTerminalCandidate> {
+        if let Some(pid) = self.run_terminals.get(&anchor)
+            && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
+        {
+            return Some(*candidate);
+        }
+        if let Some(pane) = self.run_panes.get(&anchor)
+            && let Some(candidate) = candidates
+                .iter()
+                .filter(|c| c.pane == *pane)
+                .max_by_key(|c| c.pane_spawn_seq)
+        {
+            return Some(*candidate);
+        }
+        candidates
+            .iter()
+            .filter(|c| c.pane != agent_pane)
+            .max_by_key(|c| c.pane_spawn_seq)
+            .copied()
+    }
+
+    /// The pane a split `run` should stack into rather than split again.
+    ///
+    /// Falls back to the cached pane on its own so that a `run` after the terminal exited still
+    /// stacks where the previous one was, instead of carving a new pane out of the layout.
+    pub(crate) fn choose_bucket_pane(
+        &self,
+        anchor: ProcessId,
+        agent_pane: Entity,
+        candidates: &[RunTerminalCandidate],
+    ) -> Option<Entity> {
+        self.choose_reusable_terminal(anchor, agent_pane, candidates)
+            .map(|c| c.pane)
+            .or_else(|| {
+                self.run_panes
+                    .get(&anchor)
+                    .copied()
+                    .filter(|pane| *pane != agent_pane)
+            })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RunTerminalCandidate {
     pub(crate) terminal: Entity,
@@ -33,192 +89,261 @@ pub(crate) struct RunTerminalCandidate {
     pub(crate) pane_spawn_seq: u64,
 }
 
+impl RunTerminalCandidate {
+    /// Every terminal a `run` from `agent_pane` may reuse.
+    ///
+    /// Reuse is confined to the agent's own tab and to terminals it started itself, so a `run`
+    /// never types into a shell the user owns. A candidate also has to still be sitting in
+    /// `desired_cwd`: rebinding a tab to a worktree changes where commands must execute, and a
+    /// terminal left in the old directory would silently run them in the wrong repository.
+    pub(crate) fn collect(
+        agent_pane: Entity,
+        terminals: &Query<
+            (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
+            (
+                With<Terminal>,
+                Without<AgentSession>,
+                Without<ProcessExited>,
+            ),
+        >,
+        child_of_q: &Query<&ChildOf>,
+        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+        desired_cwd: &Path,
+    ) -> Vec<Self> {
+        use bevy::ecs::relationship::Relationship;
+        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
+            return Vec::new();
+        };
+        let desired_cwd = desired_cwd
+            .canonicalize()
+            .unwrap_or_else(|_| desired_cwd.to_path_buf());
+        terminals
+            .iter()
+            .filter_map(|(terminal, pid, launch, agent_run)| {
+                if !agent_run {
+                    return None;
+                }
+                let stack = child_of_q.get(terminal).ok()?.get();
+                let pane = child_of_q.get(stack).ok()?.get();
+                if pane == agent_pane {
+                    return None;
+                }
+                if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
+                    return None;
+                }
+                if !Self::launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
+                    return None;
+                }
+                Some(Self {
+                    terminal,
+                    pid: *pid,
+                    stack,
+                    pane,
+                    pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
+    /// Reusing a terminal has to look like opening one, or the output lands in a pane the user
+    /// cannot see. Stack, pane and tab are all marked as just-activated so every level of the
+    /// layout brings it forward.
+    pub(crate) fn focus(
+        &self,
+        commands: &mut Commands,
+        child_of_q: &Query<&ChildOf>,
+        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+    ) {
+        commands.entity(self.stack).insert(LastActivatedAt::now());
+        commands.entity(self.pane).insert(LastActivatedAt::now());
+        if let Some(tab) = AgentPane::new(self.pane).tab(child_of_q, tab_q) {
+            commands.entity(tab).insert(LastActivatedAt::now());
+        }
+    }
+
+    fn launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+        let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
+            return false;
+        };
+        let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
+        launch_cwd == desired_cwd
+    }
+
+    #[cfg(test)]
+    fn launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
+        let desired_cwd = desired_cwd
+            .canonicalize()
+            .unwrap_or_else(|_| desired_cwd.to_path_buf());
+        Self::launch_matches_canonical_cwd(launch_cwd, &desired_cwd)
+    }
+}
+
+/// A pane an agent command targets, and the layout moves it is allowed to make there.
+///
+/// The layout crate works in bare entities; naming the pane here is what keeps the rules an
+/// agent's `run` and `open` obey — which tab owns it, how a split batches, how it is ordered
+/// against its siblings — in one place instead of spread across the command handler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AgentPane(Entity);
+
+impl AgentPane {
+    pub(crate) fn new(pane: Entity) -> Self {
+        Self(pane)
+    }
+
+    fn tab(
+        &self,
+        child_of_q: &Query<&ChildOf>,
+        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+    ) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let mut cur = self.0;
+        for _ in 0..32 {
+            if tab_q.contains(cur) {
+                return Some(cur);
+            }
+            cur = child_of_q.get(cur).ok()?.get();
+        }
+        None
+    }
+
+    /// Split this pane and return the new leaf pane. Batches several splits of the same
+    /// pane in one tick (extend an existing split instead of re-splitting the leaf).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn split_off(
+        &self,
+        commands: &mut Commands,
+        direction: &vmux_service::protocol::AgentPaneDirection,
+        focus: bool,
+        pane_children: &Query<&Children, With<Pane>>,
+        tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
+        split_dir_q: &Query<&PaneSplit>,
+        split_this_batch: &mut std::collections::HashSet<Entity>,
+    ) -> Entity {
+        let existing_tabs: Vec<Entity> = pane_children
+            .get(self.0)
+            .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
+            .unwrap_or_default();
+        let split_dir = vmux_layout::pane::direction_to_split(&Self::direction(direction));
+        let already_split = !split_this_batch.insert(self.0) || split_dir_q.contains(self.0);
+        vmux_layout::pane::split_or_extend(
+            commands,
+            self.0,
+            split_dir,
+            &existing_tabs,
+            focus,
+            already_split,
+        )
+    }
+
+    /// Make this pane the newest one, so the next `run` that spirals off the newest leaf
+    /// continues in the pane the last one used instead of walking away from it.
+    pub(crate) fn touch_spawn_seq(
+        &self,
+        commands: &mut Commands,
+        spawn_counter: &mut vmux_layout::pane::SpawnCounter,
+        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+    ) {
+        let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
+        if spawn_counter.0 <= max_existing {
+            spawn_counter.0 = max_existing;
+        }
+        spawn_counter.0 += 1;
+        commands
+            .entity(self.0)
+            .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
+    }
+
+    /// The protocol and the layout crate each spell a direction in their own enum; the
+    /// translation lives here so a command handler never has to.
+    pub(crate) fn direction(
+        d: &vmux_service::protocol::AgentPaneDirection,
+    ) -> vmux_command::open::PaneDirection {
+        use vmux_command::open::PaneDirection;
+        use vmux_service::protocol::AgentPaneDirection as D;
+        match d {
+            D::Top => PaneDirection::Top,
+            D::Right => PaneDirection::Right,
+            D::Bottom => PaneDirection::Bottom,
+            D::Left => PaneDirection::Left,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct RunTerminalBucketPaneCandidate {
     pane: Entity,
     pane_spawn_seq: u64,
 }
 
-pub(crate) fn choose_reusable_run_terminal(
-    anchor: ProcessId,
-    agent_pane: Entity,
-    regions: &AgentTerminalRegions,
-    candidates: &[RunTerminalCandidate],
-) -> Option<RunTerminalCandidate> {
-    if let Some(pid) = regions.run_terminals.get(&anchor)
-        && let Some(candidate) = candidates.iter().find(|c| c.pid == *pid)
-    {
-        return Some(*candidate);
+/// The panes in the agent's tab that hold terminals and nothing else.
+///
+/// A split `run` stacks into one of these instead of carving out a new pane, which keeps a
+/// session's terminals gathered in one bucket. A pane showing a browser or a file is excluded:
+/// stacking a terminal on top of it would hide what the user is reading.
+pub(crate) struct RunTerminalBucketPanes(Vec<RunTerminalBucketPaneCandidate>);
+
+impl RunTerminalBucketPanes {
+    /// Every leaf pane in the agent's own tab whose stacks are all terminal pages.
+    pub(crate) fn collect(
+        agent_pane: Entity,
+        child_of_q: &Query<&ChildOf>,
+        tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
+        leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
+        pane_children: &Query<&Children, With<Pane>>,
+        stack_q: &Query<Entity, With<vmux_layout::stack::Stack>>,
+        page_q: &Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
+        seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
+    ) -> Self {
+        let Some(agent_tab) = AgentPane::new(agent_pane).tab(child_of_q, tab_q) else {
+            return Self(Vec::new());
+        };
+        Self(
+            leaf_panes
+                .iter()
+                .filter_map(|pane| {
+                    if pane == agent_pane {
+                        return None;
+                    }
+                    if AgentPane::new(pane).tab(child_of_q, tab_q) != Some(agent_tab) {
+                        return None;
+                    }
+                    let children = pane_children.get(pane).ok()?;
+                    let mut has_stack = false;
+                    for stack in children.iter().filter(|&child| stack_q.contains(child)) {
+                        has_stack = true;
+                        let meta = page_q.get(stack).ok()?;
+                        if vmux_layout::placement::page_kind_for_url(&meta.url)
+                            != vmux_layout::placement::PageKind::Terminal
+                        {
+                            return None;
+                        }
+                    }
+                    has_stack.then(|| RunTerminalBucketPaneCandidate {
+                        pane,
+                        pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
+                    })
+                })
+                .collect(),
+        )
     }
-    if let Some(pane) = regions.run_panes.get(&anchor)
-        && let Some(candidate) = candidates
+
+    /// The bucket a `run` with no remembered pane should use — the most recently spawned one,
+    /// which is the terminal group the user last worked in.
+    pub(crate) fn newest(&self, agent_pane: Entity) -> Option<Entity> {
+        self.0
             .iter()
-            .filter(|c| c.pane == *pane)
+            .filter(|c| c.pane != agent_pane)
             .max_by_key(|c| c.pane_spawn_seq)
-    {
-        return Some(*candidate);
+            .map(|c| c.pane)
     }
-    candidates
-        .iter()
-        .filter(|c| c.pane != agent_pane)
-        .max_by_key(|c| c.pane_spawn_seq)
-        .copied()
-}
 
-pub(crate) fn choose_run_terminal_bucket_pane(
-    anchor: ProcessId,
-    agent_pane: Entity,
-    regions: &AgentTerminalRegions,
-    candidates: &[RunTerminalCandidate],
-) -> Option<Entity> {
-    choose_reusable_run_terminal(anchor, agent_pane, regions, candidates)
-        .map(|c| c.pane)
-        .or_else(|| {
-            regions
-                .run_panes
-                .get(&anchor)
-                .copied()
-                .filter(|pane| *pane != agent_pane)
-        })
-}
-
-/// The pane containing the terminal whose `ProcessId` is `pid` (its stack's
-/// parent pane). Used to anchor a `run` next to an existing terminal page.
-pub(crate) fn resolve_pane_for_pid(
-    pid: ProcessId,
-    term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
-    child_of_q: &Query<&ChildOf>,
-) -> Option<Entity> {
-    use bevy::ecs::relationship::Relationship;
-    let (term, _) = term_pids.iter().find(|(_, p)| **p == pid)?;
-    let stack = child_of_q.get(term).ok()?.get();
-    let pane = child_of_q.get(stack).ok()?.get();
-    Some(pane)
-}
-
-fn tab_of_run_pane(
-    pane: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-) -> Option<Entity> {
-    use bevy::ecs::relationship::Relationship;
-    let mut cur = pane;
-    for _ in 0..32 {
-        if tab_q.contains(cur) {
-            return Some(cur);
-        }
-        cur = child_of_q.get(cur).ok()?.get();
+    /// Whether a remembered pane is still a terminal bucket. A pane that has since gained a
+    /// browser or file page is no longer safe to stack into.
+    pub(crate) fn contains(&self, pane: Entity) -> bool {
+        self.0.iter().any(|c| c.pane == pane)
     }
-    None
-}
-
-pub(crate) fn run_terminal_candidates(
-    agent_pane: Entity,
-    terminals: &Query<
-        (Entity, &ProcessId, &TerminalLaunch, Has<AgentRunTerminal>),
-        (
-            With<Terminal>,
-            Without<AgentSession>,
-            Without<ProcessExited>,
-        ),
-    >,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-    desired_cwd: &Path,
-) -> Vec<RunTerminalCandidate> {
-    use bevy::ecs::relationship::Relationship;
-    let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
-        return Vec::new();
-    };
-    let desired_cwd = desired_cwd
-        .canonicalize()
-        .unwrap_or_else(|_| desired_cwd.to_path_buf());
-    terminals
-        .iter()
-        .filter_map(|(terminal, pid, launch, agent_run)| {
-            if !agent_run {
-                return None;
-            }
-            let stack = child_of_q.get(terminal).ok()?.get();
-            let pane = child_of_q.get(stack).ok()?.get();
-            if pane == agent_pane {
-                return None;
-            }
-            if tab_of_run_pane(pane, child_of_q, tab_q) != Some(agent_tab) {
-                return None;
-            }
-            if !run_terminal_launch_matches_canonical_cwd(&launch.cwd, &desired_cwd) {
-                return None;
-            }
-            Some(RunTerminalCandidate {
-                terminal,
-                pid: *pid,
-                stack,
-                pane,
-                pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
-            })
-        })
-        .collect()
-}
-
-pub(crate) fn run_terminal_bucket_panes(
-    agent_pane: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_q: &Query<Entity, With<vmux_layout::stack::Stack>>,
-    page_q: &Query<&PageMetadata, With<vmux_layout::stack::Stack>>,
-    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-) -> Vec<RunTerminalBucketPaneCandidate> {
-    let Some(agent_tab) = tab_of_run_pane(agent_pane, child_of_q, tab_q) else {
-        return Vec::new();
-    };
-    leaf_panes
-        .iter()
-        .filter_map(|pane| {
-            if pane == agent_pane {
-                return None;
-            }
-            if tab_of_run_pane(pane, child_of_q, tab_q) != Some(agent_tab) {
-                return None;
-            }
-            let children = pane_children.get(pane).ok()?;
-            let mut has_stack = false;
-            for stack in children.iter().filter(|&child| stack_q.contains(child)) {
-                has_stack = true;
-                let meta = page_q.get(stack).ok()?;
-                if vmux_layout::placement::page_kind_for_url(&meta.url)
-                    != vmux_layout::placement::PageKind::Terminal
-                {
-                    return None;
-                }
-            }
-            has_stack.then(|| RunTerminalBucketPaneCandidate {
-                pane,
-                pane_spawn_seq: seq_q.get(pane).map(|s| s.0).unwrap_or(0),
-            })
-        })
-        .collect()
-}
-
-pub(crate) fn newest_run_terminal_bucket_pane(
-    agent_pane: Entity,
-    candidates: &[RunTerminalBucketPaneCandidate],
-) -> Option<Entity> {
-    candidates
-        .iter()
-        .filter(|c| c.pane != agent_pane)
-        .max_by_key(|c| c.pane_spawn_seq)
-        .map(|c| c.pane)
-}
-
-pub(crate) fn is_run_terminal_bucket_pane(
-    pane: Entity,
-    candidates: &[RunTerminalBucketPaneCandidate],
-) -> bool {
-    candidates.iter().any(|c| c.pane == pane)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -228,110 +353,155 @@ pub(crate) struct PendingRunTerminalSpawn {
     pub(crate) shell: String,
 }
 
-pub(crate) fn append_pending_run_terminal_input(
-    anchor: ProcessId,
-    pending_spawns: &std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
-    terminal_spawns: &mut [TerminalStackSpawnRequest],
-    desired_cwd: &Path,
-    command: &str,
-    token: Option<&str>,
-) -> Option<ProcessId> {
-    let pending = pending_spawns.get(&anchor)?;
-    let request = terminal_spawns.get_mut(pending.request_index)?;
-    let request_cwd = request.cwd.as_deref()?.canonicalize().ok()?;
-    let desired_cwd = desired_cwd.canonicalize().ok()?;
-    if request_cwd != desired_cwd {
-        return None;
-    }
-    let data = run_command_input(command, token, &pending.shell);
-    match &mut request.pending_input {
-        Some(input) => input.extend(data),
-        None => request.pending_input = Some(data),
-    }
-    Some(pending.pid)
-}
+/// Run terminals asked for earlier in this tick that no process exists for yet.
+///
+/// Several `run`s can arrive in one frame before any of their terminals have spawned. Without
+/// this the second one would find no candidate to reuse and split another pane, so a burst of
+/// commands would shatter the layout.
+#[derive(Default)]
+pub(crate) struct PendingRunTerminalSpawns(
+    std::collections::HashMap<ProcessId, PendingRunTerminalSpawn>,
+);
 
-pub(crate) fn touch_reused_run_pane_spawn_seq(
-    pane: Entity,
-    commands: &mut Commands,
-    spawn_counter: &mut vmux_layout::pane::SpawnCounter,
-    seq_q: &Query<&vmux_layout::pane::SpawnSeq>,
-) {
-    let max_existing = seq_q.iter().map(|s| s.0).max().unwrap_or(0);
-    if spawn_counter.0 <= max_existing {
-        spawn_counter.0 = max_existing;
+impl PendingRunTerminalSpawns {
+    /// Remember the terminal `anchor` just asked for, so the rest of this tick can queue into it.
+    pub(crate) fn insert(&mut self, anchor: ProcessId, spawn: PendingRunTerminalSpawn) {
+        self.0.insert(anchor, spawn);
     }
-    spawn_counter.0 += 1;
-    commands
-        .entity(pane)
-        .insert(vmux_layout::pane::SpawnSeq(spawn_counter.0));
-}
 
-pub(crate) fn focus_reused_run_terminal(
-    candidate: RunTerminalCandidate,
-    commands: &mut Commands,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<Entity, With<vmux_layout::tab::Tab>>,
-) {
-    commands
-        .entity(candidate.stack)
-        .insert(LastActivatedAt::now());
-    commands
-        .entity(candidate.pane)
-        .insert(LastActivatedAt::now());
-    if let Some(tab) = tab_of_run_pane(candidate.pane, child_of_q, tab_q) {
-        commands.entity(tab).insert(LastActivatedAt::now());
+    /// Append a command to the terminal `anchor` is already waiting on, and answer with the
+    /// process id the caller should report.
+    ///
+    /// The queued spawn only counts when it starts in the same directory: a tab rebound between
+    /// the two commands must not run the second one in the previous worktree.
+    pub(crate) fn append_input(
+        &self,
+        anchor: ProcessId,
+        terminal_spawns: &mut [TerminalStackSpawnRequest],
+        desired_cwd: &Path,
+        run: RunCommand<'_>,
+    ) -> Option<ProcessId> {
+        let pending = self.0.get(&anchor)?;
+        let request = terminal_spawns.get_mut(pending.request_index)?;
+        let request_cwd = request.cwd.as_deref()?.canonicalize().ok()?;
+        let desired_cwd = desired_cwd.canonicalize().ok()?;
+        if request_cwd != desired_cwd {
+            return None;
+        }
+        let data = run.input(&pending.shell);
+        match &mut request.pending_input {
+            Some(input) => input.extend(data),
+            None => request.pending_input = Some(data),
+        }
+        Some(pending.pid)
     }
 }
 
-/// Split `pane` and return the new leaf pane. Batches several splits of the same
-/// pane in one tick (extend an existing split instead of re-splitting the leaf).
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn split_pane_off(
-    commands: &mut Commands,
-    pane: Entity,
-    direction: &vmux_service::protocol::AgentPaneDirection,
-    focus: bool,
-    pane_children: &Query<&Children, With<Pane>>,
-    tab_filter: &Query<Entity, With<vmux_layout::stack::Stack>>,
-    split_dir_q: &Query<&PaneSplit>,
-    split_this_batch: &mut std::collections::HashSet<Entity>,
-) -> Entity {
-    let existing_tabs: Vec<Entity> = pane_children
-        .get(pane)
-        .map(|c| c.iter().filter(|&e| tab_filter.contains(e)).collect())
-        .unwrap_or_default();
-    let split_dir = vmux_layout::pane::direction_to_split(&to_pane_direction(direction));
-    let already_split = !split_this_batch.insert(pane) || split_dir_q.contains(pane);
-    vmux_layout::pane::split_or_extend(
-        commands,
-        pane,
-        split_dir,
-        &existing_tabs,
-        focus,
-        already_split,
-    )
-}
+/// A terminal that already exists, addressed the way an agent addresses it: by process id.
+///
+/// An agent names a terminal in `run.terminal` and `run.beside` long after it has forgotten the
+/// entity behind it, so both lookups start from the id and have to fail with a message the agent
+/// can act on rather than silently doing something else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RunTerminal(ProcessId);
 
-pub(crate) fn to_pane_direction(
-    d: &vmux_service::protocol::AgentPaneDirection,
-) -> vmux_command::open::PaneDirection {
-    use vmux_command::open::PaneDirection;
-    use vmux_service::protocol::AgentPaneDirection as D;
-    match d {
-        D::Top => PaneDirection::Top,
-        D::Right => PaneDirection::Right,
-        D::Bottom => PaneDirection::Bottom,
-        D::Left => PaneDirection::Left,
+impl RunTerminal {
+    pub(crate) fn new(process_id: ProcessId) -> Self {
+        Self(process_id)
+    }
+
+    /// The pane containing this terminal (its stack's parent pane). Used to anchor a `run`
+    /// next to an existing terminal page.
+    pub(crate) fn pane(
+        &self,
+        term_pids: &Query<(Entity, &ProcessId), With<Terminal>>,
+        child_of_q: &Query<&ChildOf>,
+    ) -> Option<Entity> {
+        use bevy::ecs::relationship::Relationship;
+        let (term, _) = term_pids.iter().find(|(_, p)| **p == self.0)?;
+        let stack = child_of_q.get(term).ok()?.get();
+        let pane = child_of_q.get(stack).ok()?.get();
+        Some(pane)
+    }
+
+    /// How this terminal was started, which is also which shell any further input has to be
+    /// written for. A missing page and a missing launch are different mistakes, so they are
+    /// reported differently.
+    pub(crate) fn launch(
+        &self,
+        terminals: &Query<(Entity, &ProcessId), With<Terminal>>,
+        launches: &Query<&TerminalLaunch>,
+    ) -> Result<TerminalLaunch, String> {
+        let process_id = self.0;
+        let Some(entity) = terminals
+            .iter()
+            .find_map(|(entity, candidate)| (*candidate == process_id).then_some(entity))
+        else {
+            return Err(format!("run.terminal page not found: {process_id}"));
+        };
+        launches
+            .get(entity)
+            .cloned()
+            .map_err(|_| format!("run terminal launch not found: {process_id}"))
     }
 }
 
-pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
-    settings
-        .terminal
-        .as_ref()
-        .map(|t| t.resolve_theme(&t.default_theme).shell)
-        .unwrap_or_else(|| std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()))
+/// A command an agent asked to run, with the token that reports its exit code.
+///
+/// The command text and its token travel together everywhere — into a fresh shell, into a
+/// terminal that already exists, into a spawn that has not happened yet — and every one of those
+/// has to wrap them the same way or the run never completes. Keeping them one value is what
+/// stops a caller from wrapping only sometimes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RunCommand<'a> {
+    command: &'a str,
+    token: Option<&'a str>,
+}
+
+impl<'a> RunCommand<'a> {
+    pub(crate) fn new(command: &'a str, token: Option<&'a str>) -> Self {
+        Self { command, token }
+    }
+
+    fn line(&self, shell: &str) -> String {
+        match self.token {
+            Some(token) => command_with_marker(shell, self.command, token),
+            None => self.command.to_string(),
+        }
+    }
+
+    fn input(&self, shell: &str) -> Vec<u8> {
+        let mut data = self.line(shell).into_bytes();
+        data.push(b'\r');
+        data
+    }
+
+    fn input_for_launch(&self, launch: &TerminalLaunch) -> Vec<u8> {
+        self.input(&launch.command)
+    }
+
+    /// Type this command into a terminal that is already running. The launch decides the shell —
+    /// the marker syntax differs per shell, and the running process is not the configured one if
+    /// the setting changed since it started.
+    pub(crate) fn queue(
+        &self,
+        writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
+        process_id: ProcessId,
+        launch: &TerminalLaunch,
+    ) {
+        writer.write(vmux_terminal::TerminalReinputRequest {
+            process_id,
+            data: self.input_for_launch(launch),
+        });
+    }
+
+    /// The shell to start and the first thing to type into it, for a run that has no terminal
+    /// yet. Both come back together because the input is only valid for that shell.
+    pub(crate) fn for_new_terminal(&self, settings: &AppSettings) -> (AgentTerminalShell, Vec<u8>) {
+        let shell = AgentTerminalShell::configured(settings);
+        let input = self.input(shell.as_str());
+        (shell, input)
+    }
 }
 
 /// Wrap a `run` command so the shell emits an invisible OSC completion escape
@@ -381,134 +551,134 @@ fn pager_env_prefix(base: &str) -> &'static str {
     }
 }
 
-fn run_command_line(command: &str, token: Option<&str>, shell: &str) -> String {
-    match token {
-        Some(token) => command_with_marker(shell, command, token),
-        None => command.to_string(),
+/// The shell a run terminal starts in, and whether the machine can actually start it.
+///
+/// A theme names the shell, so it can be anything the user typed — a path that has since been
+/// uninstalled included. Spawning that shell fails somewhere deep in the terminal host with
+/// nothing an agent can read, so the check happens here, before a pane is ever split for it.
+#[derive(Clone, Debug)]
+pub(crate) struct AgentTerminalShell(String);
+
+impl AgentTerminalShell {
+    /// The shell of the active terminal theme, falling back to the environment's `SHELL` and
+    /// finally to zsh, so a run still starts on a machine with no terminal settings at all.
+    pub(crate) fn configured(settings: &AppSettings) -> Self {
+        Self(
+            settings
+                .terminal
+                .as_ref()
+                .map(|t| t.resolve_theme(&t.default_theme).shell)
+                .unwrap_or_else(|| {
+                    std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+                }),
+        )
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The path the terminal host is asked to launch.
+    pub(crate) fn into_string(self) -> String {
+        self.0
+    }
+
+    /// Refuse a run whose shell is missing or not executable, so the agent is told what is wrong
+    /// instead of watching an empty pane appear.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let shell = &self.0;
+        if crate::exec::find_executable(shell).is_some() {
+            Ok(())
+        } else {
+            Err(format!(
+                "terminal shell not found or not executable: {shell}"
+            ))
+        }
     }
 }
 
-pub(crate) const RUN_PLACEMENT_OVERRIDE_DISABLED: &str =
-    "run placement overrides are disabled; omit mode, direction, and beside and retry";
+/// ACP install resolves the same shell to read a login environment out of it, and reaches it
+/// through `crate::plugin`; it wants the bare path rather than the type.
+pub(crate) fn agent_terminal_shell(settings: &AppSettings) -> String {
+    AgentTerminalShell::configured(settings).into_string()
+}
 
-pub(crate) fn validate_run_placement_policy(
-    settings: &AppSettings,
+/// Whether a `run` asked to place its own terminal, and whether it is allowed to.
+///
+/// Left to itself an agent splits a pane for every command and takes the window apart. Placement
+/// is therefore the user's to give: the default refuses an override and says how to retry
+/// without one, rather than quietly ignoring the arguments it was handed.
+pub(crate) struct RunPlacementPolicy {
     placement_override: bool,
-) -> Result<(), &'static str> {
-    if placement_override && !settings.agent.allow_run_placement_override {
-        Err(RUN_PLACEMENT_OVERRIDE_DISABLED)
-    } else {
-        Ok(())
+}
+
+impl RunPlacementPolicy {
+    /// What an agent is told when it asks for placement the user has not opted into.
+    pub(crate) const OVERRIDE_DISABLED: &'static str =
+        "run placement overrides are disabled; omit mode, direction, and beside and retry";
+
+    pub(crate) fn new(placement_override: bool) -> Self {
+        Self { placement_override }
+    }
+
+    pub(crate) fn validate(&self, settings: &AppSettings) -> Result<(), &'static str> {
+        if self.placement_override && !settings.agent.allow_run_placement_override {
+            Err(Self::OVERRIDE_DISABLED)
+        } else {
+            Ok(())
+        }
     }
 }
 
-fn run_command_input(command: &str, token: Option<&str>, shell: &str) -> Vec<u8> {
-    let mut data = run_command_line(command, token, shell).into_bytes();
-    data.push(b'\r');
-    data
+/// The directory an agent-owned page or run terminal starts in.
+///
+/// A tab's stored directory is the answer whenever it survives validation: it is what the user
+/// picked, and what a worktree rebind updates. The rest of the type is the fallback order for
+/// when it does not, which every caller has to agree on — a page opened in one directory while
+/// its commands run in another is the bug this prevents.
+pub(crate) struct AgentCwd<'a> {
+    tab_cwd: Option<&'a str>,
 }
 
-fn terminal_run_command_input(
-    command: &str,
-    token: Option<&str>,
-    launch: &TerminalLaunch,
-) -> Vec<u8> {
-    run_command_input(command, token, &launch.command)
-}
-
-pub(crate) fn explicit_run_terminal_launch(
-    process_id: ProcessId,
-    terminals: &Query<(Entity, &ProcessId), With<Terminal>>,
-    launches: &Query<&TerminalLaunch>,
-) -> Result<TerminalLaunch, String> {
-    let Some(entity) = terminals
-        .iter()
-        .find_map(|(entity, candidate)| (*candidate == process_id).then_some(entity))
-    else {
-        return Err(format!("run.terminal page not found: {process_id}"));
-    };
-    launches
-        .get(entity)
-        .cloned()
-        .map_err(|_| format!("run terminal launch not found: {process_id}"))
-}
-
-pub(crate) fn queue_terminal_run_command_input(
-    writer: &mut MessageWriter<vmux_terminal::TerminalReinputRequest>,
-    process_id: ProcessId,
-    command: &str,
-    token: Option<&str>,
-    launch: &TerminalLaunch,
-) {
-    writer.write(vmux_terminal::TerminalReinputRequest {
-        process_id,
-        data: terminal_run_command_input(command, token, launch),
-    });
-}
-
-pub(crate) fn new_run_terminal_command(
-    settings: &AppSettings,
-    command: &str,
-    token: Option<&str>,
-) -> (String, Vec<u8>) {
-    let shell = agent_terminal_shell(settings);
-    let input = run_command_input(command, token, &shell);
-    (shell, input)
-}
-
-pub(crate) fn validate_agent_terminal_shell(shell: &str) -> Result<(), String> {
-    if crate::exec::find_executable(shell).is_some() {
-        Ok(())
-    } else {
-        Err(format!(
-            "terminal shell not found or not executable: {shell}"
-        ))
+impl<'a> AgentCwd<'a> {
+    pub(crate) fn of_tab(tab_cwd: Option<&'a str>) -> Self {
+        Self { tab_cwd }
     }
-}
 
-pub(crate) fn stored_tab_cwd(tab_cwd: Option<&str>) -> Result<Option<PathBuf>, String> {
-    let Some(tab_cwd) = tab_cwd else {
-        return Ok(None);
-    };
-    vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
-}
-
-pub(crate) fn process_cwd() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_dir())
-        .or_else(|| std::env::current_dir().ok())
-        .filter(|path| path.is_dir())
-        .unwrap_or_else(|| PathBuf::from("/"))
-}
-
-pub(crate) fn run_terminal_cwd(
-    tab_cwd: Option<&str>,
-    agent_launch_cwd: Option<&str>,
-) -> Result<PathBuf, String> {
-    if let Some(path) = stored_tab_cwd(tab_cwd)? {
-        return Ok(path);
+    /// The tab's directory, or `None` when the tab has none. A stored path that no longer exists
+    /// is an error rather than a `None`, because falling back would hide a deleted worktree.
+    pub(crate) fn stored(&self) -> Result<Option<PathBuf>, String> {
+        let Some(tab_cwd) = self.tab_cwd else {
+            return Ok(None);
+        };
+        vmux_setting::validate_tab_workspace_dir(tab_cwd).map(Some)
     }
-    if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
-        return Ok(path);
+
+    /// The tab's directory, or the one the agent itself was launched in. A run with neither is
+    /// refused: guessing a directory would run the command against the wrong repository.
+    pub(crate) fn or_agent_launch(
+        &self,
+        agent_launch_cwd: Option<&str>,
+    ) -> Result<PathBuf, String> {
+        if let Some(path) = self.stored()? {
+            return Ok(path);
+        }
+        if let Some(Ok(Some(path))) = agent_launch_cwd.map(valid_cwd) {
+            return Ok(path);
+        }
+        Err("tab and agent project directories are missing".to_string())
     }
-    Err("tab and agent project directories are missing".to_string())
-}
 
-#[cfg(test)]
-fn run_terminal_launch_matches_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
-    let desired_cwd = desired_cwd
-        .canonicalize()
-        .unwrap_or_else(|_| desired_cwd.to_path_buf());
-    run_terminal_launch_matches_canonical_cwd(launch_cwd, &desired_cwd)
-}
-
-fn run_terminal_launch_matches_canonical_cwd(launch_cwd: &str, desired_cwd: &Path) -> bool {
-    let Some(launch_cwd) = valid_cwd(launch_cwd).ok().flatten() else {
-        return false;
-    };
-    let launch_cwd = launch_cwd.canonicalize().unwrap_or(launch_cwd);
-    launch_cwd == desired_cwd
+    /// Where a page with no tab directory at all opens: the user's home, then the process's own
+    /// directory, then the root — the last of which always exists, so a page always opens.
+    pub(crate) fn process() -> PathBuf {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .or_else(|| std::env::current_dir().ok())
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
 }
 
 #[cfg(test)]
@@ -525,11 +695,9 @@ mod tests {
         std::fs::create_dir_all(&agent_dir).unwrap();
         let canonical_tab_dir = tab_dir.canonicalize().unwrap();
         assert_eq!(
-            run_terminal_cwd(
-                Some(tab_dir.to_string_lossy().as_ref()),
-                Some(agent_dir.to_string_lossy().as_ref()),
-            )
-            .unwrap(),
+            AgentCwd::of_tab(Some(tab_dir.to_string_lossy().as_ref()))
+                .or_agent_launch(Some(agent_dir.to_string_lossy().as_ref()))
+                .unwrap(),
             canonical_tab_dir
         );
         let _ = std::fs::remove_dir_all(&agent_dir);
@@ -542,11 +710,11 @@ mod tests {
         let stale = std::env::temp_dir().join(format!("vmux-stale-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&current).unwrap();
         std::fs::create_dir_all(&stale).unwrap();
-        assert!(run_terminal_launch_matches_cwd(
+        assert!(RunTerminalCandidate::launch_matches_cwd(
             current.to_string_lossy().as_ref(),
             &current,
         ));
-        assert!(!run_terminal_launch_matches_cwd(
+        assert!(!RunTerminalCandidate::launch_matches_cwd(
             stale.to_string_lossy().as_ref(),
             &current,
         ));
@@ -558,27 +726,33 @@ mod tests {
     pub(crate) fn run_terminal_cwd_inherits_agent_launch_dir() {
         let dir = std::env::temp_dir().join(format!("vmux-run-cwd-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let got = run_terminal_cwd(None, Some(&dir.to_string_lossy())).unwrap();
+        let got = AgentCwd::of_tab(None)
+            .or_agent_launch(Some(&dir.to_string_lossy()))
+            .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got, dir);
     }
 
     #[test]
     pub(crate) fn run_terminal_cwd_requires_tab_or_agent_workspace() {
-        assert!(run_terminal_cwd(None, Some("")).is_err());
-        assert!(run_terminal_cwd(None, None).is_err());
+        assert!(AgentCwd::of_tab(None).or_agent_launch(Some("")).is_err());
+        assert!(AgentCwd::of_tab(None).or_agent_launch(None).is_err());
     }
 
     #[test]
     pub(crate) fn run_terminal_cwd_rejects_invalid_stored_tab_directory() {
         let agent_dir = std::env::temp_dir();
 
-        assert!(run_terminal_cwd(Some("/no/such/vmux-tab-workspace"), agent_dir.to_str()).is_err());
+        assert!(
+            AgentCwd::of_tab(Some("/no/such/vmux-tab-workspace"))
+                .or_agent_launch(agent_dir.to_str())
+                .is_err()
+        );
     }
 
     #[test]
     pub(crate) fn run_terminal_cwd_rejects_relative_stored_tab_directory() {
-        assert!(run_terminal_cwd(Some("."), None).is_err());
+        assert!(AgentCwd::of_tab(Some(".")).or_agent_launch(None).is_err());
     }
 
     #[test]
@@ -608,12 +782,12 @@ mod tests {
 
     #[test]
     pub(crate) fn run_command_line_noop_when_token_absent() {
-        assert_eq!(run_command_line("ls -la", None, "/bin/zsh"), "ls -la");
+        assert_eq!(RunCommand::new("ls -la", None).line("/bin/zsh"), "ls -la");
     }
 
     #[test]
     pub(crate) fn run_command_line_embeds_marker_when_token_present() {
-        let out = run_command_line("ls -la", Some("tok9"), "/bin/zsh");
+        let out = RunCommand::new("ls -la", Some("tok9")).line("/bin/zsh");
         assert!(out.contains("ls -la"), "got: {out}");
         assert!(out.contains("]6973;tok9;"), "got: {out}");
         assert!(
@@ -641,9 +815,9 @@ mod tests {
             ..Default::default()
         });
 
-        let (shell, input) = new_run_terminal_command(&settings, "cd /tmp", Some("tok9"));
+        let (shell, input) = RunCommand::new("cd /tmp", Some("tok9")).for_new_terminal(&settings);
 
-        assert_eq!(shell, "/opt/homebrew/bin/nu");
+        assert_eq!(shell.as_str(), "/opt/homebrew/bin/nu");
         let input = String::from_utf8(input).unwrap();
         assert!(input.contains("try { cd /tmp;"), "got: {input}");
         assert!(input.contains("]6973;tok9;"), "got: {input}");
@@ -656,7 +830,7 @@ mod tests {
         let shell = "/definitely/missing/vmux-terminal-shell";
 
         assert_eq!(
-            validate_agent_terminal_shell(shell),
+            AgentTerminalShell(shell.to_string()).validate(),
             Err(format!(
                 "terminal shell not found or not executable: {shell}"
             ))
@@ -673,7 +847,7 @@ mod tests {
             kind: vmux_terminal::launch::TerminalKind::Plain,
         };
 
-        let input = terminal_run_command_input("pwd", Some("tok2"), &launch);
+        let input = RunCommand::new("pwd", Some("tok2")).input_for_launch(&launch);
         let input = String::from_utf8(input).unwrap();
 
         assert!(input.contains("set __vmux_status $status"), "got: {input}");
@@ -696,9 +870,11 @@ mod tests {
                 move |terminals: Query<(Entity, &ProcessId), With<Terminal>>,
                       launches: Query<&TerminalLaunch>| {
                     (
-                        explicit_run_terminal_launch(missing_pid, &terminals, &launches)
+                        RunTerminal::new(missing_pid)
+                            .launch(&terminals, &launches)
                             .unwrap_err(),
-                        explicit_run_terminal_launch(terminal_pid, &terminals, &launches)
+                        RunTerminal::new(terminal_pid)
+                            .launch(&terminals, &launches)
                             .unwrap_err(),
                     )
                 },
@@ -730,11 +906,9 @@ mod tests {
             input: Res<Input>,
             mut writer: MessageWriter<vmux_terminal::TerminalReinputRequest>,
         ) {
-            queue_terminal_run_command_input(
+            RunCommand::new("pwd", Some("tok4")).queue(
                 &mut writer,
                 input.process_id,
-                "pwd",
-                Some("tok4"),
                 &input.launch,
             );
         }
@@ -798,7 +972,7 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
         mut out: ResMut<RunTerminalCandidateOutput>,
     ) {
-        out.0 = run_terminal_candidates(
+        out.0 = RunTerminalCandidate::collect(
             input.agent_pane,
             &terminals,
             &child_of_q,
@@ -1009,7 +1183,7 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
         mut out: ResMut<RunTerminalBucketPaneOutput>,
     ) {
-        out.0 = run_terminal_bucket_panes(
+        out.0 = RunTerminalBucketPanes::collect(
             input.agent_pane,
             &child_of_q,
             &tab_q,
@@ -1019,6 +1193,7 @@ mod tests {
             &page_q,
             &seq_q,
         )
+        .0
         .into_iter()
         .map(|candidate| candidate.pane)
         .collect();
@@ -1061,7 +1236,7 @@ mod tests {
         let anchor = ProcessId::new();
         let terminal = ProcessId::new();
         let pane = Entity::from_bits(20);
-        let mut pending_spawns = std::collections::HashMap::new();
+        let mut pending_spawns = PendingRunTerminalSpawns::default();
         pending_spawns.insert(
             anchor,
             PendingRunTerminalSpawn {
@@ -1080,13 +1255,11 @@ mod tests {
             activate: false,
         }];
 
-        let picked = append_pending_run_terminal_input(
+        let picked = pending_spawns.append_input(
             anchor,
-            &pending_spawns,
             &mut terminal_spawns,
             &std::env::temp_dir(),
-            "pwd",
-            Some("tok2"),
+            RunCommand::new("pwd", Some("tok2")),
         );
 
         assert_eq!(picked, Some(terminal));
@@ -1105,7 +1278,7 @@ mod tests {
         std::fs::create_dir_all(&new_cwd).unwrap();
         let anchor = ProcessId::new();
         let terminal = ProcessId::new();
-        let mut pending_spawns = std::collections::HashMap::new();
+        let mut pending_spawns = PendingRunTerminalSpawns::default();
         pending_spawns.insert(
             anchor,
             PendingRunTerminalSpawn {
@@ -1124,13 +1297,11 @@ mod tests {
             activate: false,
         }];
 
-        let picked = append_pending_run_terminal_input(
+        let picked = pending_spawns.append_input(
             anchor,
-            &pending_spawns,
             &mut terminal_spawns,
             &new_cwd,
-            "pwd",
-            Some("tok2"),
+            RunCommand::new("pwd", Some("tok2")),
         );
 
         let _ = std::fs::remove_dir_all(&old_cwd);
@@ -1153,7 +1324,7 @@ mod tests {
         mut spawn_counter: ResMut<vmux_layout::pane::SpawnCounter>,
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
-        touch_reused_run_pane_spawn_seq(input.pane, &mut commands, &mut spawn_counter, &seq_q);
+        AgentPane::new(input.pane).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
     }
 
     #[test]
@@ -1199,9 +1370,8 @@ mod tests {
         seq_q: Query<&vmux_layout::pane::SpawnSeq>,
     ) {
         let mut split_batch = std::collections::HashSet::new();
-        let target = split_pane_off(
+        let target = AgentPane::new(input.pane).split_off(
             &mut commands,
-            input.pane,
             &vmux_service::protocol::AgentPaneDirection::Bottom,
             false,
             &pane_children,
@@ -1209,7 +1379,7 @@ mod tests {
             &split_dir_q,
             &mut split_batch,
         );
-        touch_reused_run_pane_spawn_seq(target, &mut commands, &mut spawn_counter, &seq_q);
+        AgentPane::new(target).touch_spawn_seq(&mut commands, &mut spawn_counter, &seq_q);
         out.0 = Some(target);
     }
 
@@ -1266,8 +1436,9 @@ mod tests {
             pane_spawn_seq: 7,
         }];
 
-        let picked =
-            choose_reusable_run_terminal(anchor, agent_pane, &regions, &candidates).unwrap();
+        let picked = regions
+            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+            .unwrap();
 
         assert_eq!(picked.pid, terminal);
         assert_eq!(picked.pane, terminal_pane);
@@ -1277,7 +1448,7 @@ mod tests {
     pub(crate) fn run_placement_policy_rejects_override_by_default() {
         let settings = test_settings();
         assert_eq!(
-            validate_run_placement_policy(&settings, true),
+            RunPlacementPolicy::new(true).validate(&settings),
             Err("run placement overrides are disabled; omit mode, direction, and beside and retry")
         );
     }
@@ -1285,14 +1456,14 @@ mod tests {
     #[test]
     pub(crate) fn run_placement_policy_allows_bare_run() {
         let settings = test_settings();
-        assert_eq!(validate_run_placement_policy(&settings, false), Ok(()));
+        assert_eq!(RunPlacementPolicy::new(false).validate(&settings), Ok(()));
     }
 
     #[test]
     pub(crate) fn run_placement_policy_honors_user_opt_out() {
         let mut settings = test_settings();
         settings.agent.allow_run_placement_override = true;
-        assert_eq!(validate_run_placement_policy(&settings, true), Ok(()));
+        assert_eq!(RunPlacementPolicy::new(true).validate(&settings), Ok(()));
     }
 
     #[test]
@@ -1323,8 +1494,9 @@ mod tests {
             },
         ];
 
-        let picked =
-            choose_reusable_run_terminal(anchor, agent_pane, &regions, &candidates).unwrap();
+        let picked = regions
+            .choose_reusable_terminal(anchor, agent_pane, &candidates)
+            .unwrap();
 
         assert_eq!(picked.pid, cached);
         assert_eq!(picked.pane, cached_pane);
@@ -1341,7 +1513,7 @@ mod tests {
         child_of_q: Query<&ChildOf>,
         tab_q: Query<Entity, With<vmux_layout::tab::Tab>>,
     ) {
-        focus_reused_run_terminal(input.candidate, &mut commands, &child_of_q, &tab_q);
+        input.candidate.focus(&mut commands, &child_of_q, &tab_q);
     }
 
     #[test]
@@ -1404,7 +1576,7 @@ mod tests {
         }];
 
         assert_eq!(
-            choose_run_terminal_bucket_pane(anchor, agent_pane, &regions, &candidates),
+            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
             Some(terminal_pane)
         );
     }
@@ -1419,7 +1591,7 @@ mod tests {
         let candidates = [];
 
         assert_eq!(
-            choose_run_terminal_bucket_pane(anchor, agent_pane, &regions, &candidates),
+            regions.choose_bucket_pane(anchor, agent_pane, &candidates),
             Some(terminal_pane)
         );
     }

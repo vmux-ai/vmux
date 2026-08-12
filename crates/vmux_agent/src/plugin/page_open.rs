@@ -20,7 +20,7 @@ use super::attach::{
     acp_icon_for_id, acp_profile_name_for_id, acp_registry_agent_for_id, attach_acp_agent_to_stack,
     attach_acp_agent_to_stack_with_webview, attach_page_agent_to_stack_with_webview,
 };
-use super::run_terminal::{process_cwd, stored_tab_cwd};
+use super::run_terminal::AgentCwd;
 use super::spawn::PendingPageOpen;
 
 pub(super) struct PageOpenPlugin;
@@ -164,11 +164,13 @@ fn prepare_agent_tab_worktrees(
                     if workspace.project_dir.is_empty() {
                         Ok(())
                     } else if metadata.is_none()
-                        && stored_tab_cwd(tab.startup_dir.as_deref())
+                        && AgentCwd::of_tab(tab.startup_dir.as_deref())
+                            .stored()
                             .ok()
                             .flatten()
                             .is_none()
-                        && stored_tab_cwd(Some(&workspace.project_dir))
+                        && AgentCwd::of_tab(Some(&workspace.project_dir))
+                            .stored()
                             .ok()
                             .flatten()
                             .is_none()
@@ -323,11 +325,11 @@ fn handle_agent_page_open(
             &settings,
             workspace.active_space.as_deref(),
         );
-        let default_cwd = match stored_tab_cwd(tab_dir.as_deref()) {
+        let default_cwd = match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
             Ok(Some(path)) => path,
             Ok(None) => space_startup_dir
                 .map(|(path, _)| path)
-                .unwrap_or_else(process_cwd),
+                .unwrap_or_else(AgentCwd::process),
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
                 continue;
@@ -1492,7 +1494,7 @@ mod tests {
             .drain()
             .collect();
         assert_eq!(spawns.len(), 1);
-        assert_eq!(spawns[0].cwd, process_cwd());
+        assert_eq!(spawns[0].cwd, AgentCwd::process());
         assert_eq!(
             spawns[0].initial_prompt.as_deref(),
             Some("Show me something fun in terminal")
@@ -1541,7 +1543,7 @@ mod tests {
             .world()
             .get::<crate::client::acp::AcpSession>(stack)
             .unwrap();
-        assert_eq!(session.cwd, process_cwd());
+        assert_eq!(session.cwd, AgentCwd::process());
         assert_eq!(
             app.world()
                 .get::<crate::components::PromptQueue>(stack)
@@ -1711,7 +1713,7 @@ mod tests {
                 .get::<crate::client::acp::AcpSession>(stack)
                 .unwrap()
                 .cwd,
-            process_cwd()
+            AgentCwd::process()
         );
         assert_eq!(
             app.world()

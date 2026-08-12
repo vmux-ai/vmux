@@ -24,13 +24,8 @@ use crate::session::AgentSession;
 use super::command::requested_focus_for_origin;
 use super::follow::file_touch_url;
 use super::run_terminal::{
-    AgentTerminalRegions, PendingRunTerminalSpawn, append_pending_run_terminal_input,
-    choose_reusable_run_terminal, choose_run_terminal_bucket_pane, explicit_run_terminal_launch,
-    focus_reused_run_terminal, is_run_terminal_bucket_pane, new_run_terminal_command,
-    newest_run_terminal_bucket_pane, queue_terminal_run_command_input, resolve_pane_for_pid,
-    run_terminal_bucket_panes, run_terminal_candidates, run_terminal_cwd, split_pane_off,
-    stored_tab_cwd, to_pane_direction, touch_reused_run_pane_spawn_seq,
-    validate_agent_terminal_shell, validate_run_placement_policy,
+    AgentCwd, AgentPane, AgentTerminalRegions, PendingRunTerminalSpawn, PendingRunTerminalSpawns,
+    RunCommand, RunPlacementPolicy, RunTerminal, RunTerminalBucketPanes, RunTerminalCandidate,
 };
 use super::workspace::{
     AgentTabWorktreeContext, PendingAgentChoice, PendingAgentChoiceAction, PendingWorkspacePicker,
@@ -243,8 +238,7 @@ pub(super) fn handle_agent_self_commands(
     let mut worktree_created_this_batch: std::collections::HashMap<Entity, String> =
         std::collections::HashMap::new();
     let mut terminal_spawns: Vec<TerminalStackSpawnRequest> = Vec::new();
-    let mut pending_run_spawns: std::collections::HashMap<ProcessId, PendingRunTerminalSpawn> =
-        std::collections::HashMap::new();
+    let mut pending_run_spawns = PendingRunTerminalSpawns::default();
     let mut failed_worktree_anchors = std::collections::HashSet::new();
     let mut workspace_picker_tabs: std::collections::HashSet<Entity> = workspace_picker
         .pickers
@@ -276,7 +270,7 @@ pub(super) fn handle_agent_self_commands(
                     let focus = requested_focus_for_origin(&request.origin, *focus);
                     writers.open_beside.write(vmux_layout::OpenBesideRequest {
                         pane,
-                        direction: direction.as_ref().map(to_pane_direction),
+                        direction: direction.as_ref().map(AgentPane::direction),
                         url: url.clone(),
                         request_id: request.request_id.0,
                         focus,
@@ -310,20 +304,16 @@ pub(super) fn handle_agent_self_commands(
                 ) || beside.is_some()
                     || *mode != vmux_service::protocol::PlacementMode::Auto
                     || *direction != vmux_service::protocol::AgentPaneDirection::Right;
-                if let Err(error) = validate_run_placement_policy(&settings, placement_override) {
+                if let Err(error) = RunPlacementPolicy::new(placement_override).validate(&settings)
+                {
                     break 'run AgentCommandResult::Error(error.to_string());
                 }
                 let focus = requested_focus_for_origin(&request.origin, *focus);
+                let run = RunCommand::new(command, done_marker.as_deref());
                 match terminal {
-                    Some(pid) => match explicit_run_terminal_launch(*pid, &term_pids, &launch_q) {
+                    Some(pid) => match RunTerminal::new(*pid).launch(&term_pids, &launch_q) {
                         Ok(launch) => {
-                            queue_terminal_run_command_input(
-                                &mut writers.terminal_reinput,
-                                *pid,
-                                command,
-                                done_marker.as_deref(),
-                                &launch,
-                            );
+                            run.queue(&mut writers.terminal_reinput, *pid, &launch);
                             AgentCommandResult::Text(pid.to_string())
                         }
                         Err(error) => AgentCommandResult::Error(error),
@@ -360,11 +350,13 @@ pub(super) fn handle_agent_self_commands(
                                     .ok()
                                     .map(|session| session.cwd.to_string_lossy().into_owned())
                             });
-                        let cwd = match run_terminal_cwd(tab_cwd.as_deref(), agent_cwd.as_deref()) {
+                        let cwd = match AgentCwd::of_tab(tab_cwd.as_deref())
+                            .or_agent_launch(agent_cwd.as_deref())
+                        {
                             Ok(cwd) => cwd,
                             Err(message) => break 'spawn AgentCommandResult::Error(message),
                         };
-                        let candidates = run_terminal_candidates(
+                        let candidates = RunTerminalCandidate::collect(
                             self_pane,
                             &run_terms,
                             &ctx.child_of_q,
@@ -372,7 +364,7 @@ pub(super) fn handle_agent_self_commands(
                             &ctx.seq_q,
                             &cwd,
                         );
-                        let terminal_bucket_panes = run_terminal_bucket_panes(
+                        let terminal_bucket_panes = RunTerminalBucketPanes::collect(
                             self_pane,
                             &ctx.child_of_q,
                             &ctx.tab_q,
@@ -384,25 +376,19 @@ pub(super) fn handle_agent_self_commands(
                         );
                         if beside.is_none()
                             && *mode == vmux_service::protocol::PlacementMode::Auto
-                            && let Some(pid) = append_pending_run_terminal_input(
+                            && let Some(pid) = pending_run_spawns.append_input(
                                 *anchor,
-                                &pending_run_spawns,
                                 &mut terminal_spawns,
                                 &cwd,
-                                command,
-                                done_marker.as_deref(),
+                                run,
                             )
                         {
                             break 'spawn AgentCommandResult::Text(pid.to_string());
                         }
                         if beside.is_none()
                             && *mode == vmux_service::protocol::PlacementMode::Auto
-                            && let Some(candidate) = choose_reusable_run_terminal(
-                                *anchor,
-                                self_pane,
-                                &regions,
-                                &candidates,
-                            )
+                            && let Some(candidate) =
+                                regions.choose_reusable_terminal(*anchor, self_pane, &candidates)
                         {
                             let Ok(launch) = launch_q.get(candidate.terminal) else {
                                 break 'spawn AgentCommandResult::Error(format!(
@@ -410,35 +396,23 @@ pub(super) fn handle_agent_self_commands(
                                     candidate.pid
                                 ));
                             };
-                            queue_terminal_run_command_input(
-                                &mut writers.terminal_reinput,
-                                candidate.pid,
-                                command,
-                                done_marker.as_deref(),
-                                launch,
-                            );
+                            run.queue(&mut writers.terminal_reinput, candidate.pid, launch);
                             regions.run_terminals.insert(*anchor, candidate.pid);
                             regions.run_panes.insert(*anchor, candidate.pane);
-                            touch_reused_run_pane_spawn_seq(
-                                candidate.pane,
+                            AgentPane::new(candidate.pane).touch_spawn_seq(
                                 &mut commands,
                                 &mut spawn_counter,
                                 &ctx.seq_q,
                             );
                             if focus {
-                                focus_reused_run_terminal(
-                                    candidate,
-                                    &mut commands,
-                                    &ctx.child_of_q,
-                                    &ctx.tab_q,
-                                );
+                                candidate.focus(&mut commands, &ctx.child_of_q, &ctx.tab_q);
                             }
                             break 'spawn AgentCommandResult::Text(candidate.pid.to_string());
                         }
                         // Resolve an explicit `beside` anchor up front (errors if stale).
                         let beside_pane = match beside {
                             Some(pid) => {
-                                match resolve_pane_for_pid(*pid, &term_pids, &ctx.child_of_q) {
+                                match RunTerminal::new(*pid).pane(&term_pids, &ctx.child_of_q) {
                                     Some(pane) => Some(pane),
                                     None => {
                                         break 'spawn AgentCommandResult::Error(format!(
@@ -449,31 +423,20 @@ pub(super) fn handle_agent_self_commands(
                             }
                             None => None,
                         };
-                        let (shell, data) =
-                            new_run_terminal_command(&settings, command, done_marker.as_deref());
-                        if let Err(error) = validate_agent_terminal_shell(&shell) {
+                        let (shell, data) = run.for_new_terminal(&settings);
+                        if let Err(error) = shell.validate() {
                             break 'spawn AgentCommandResult::Error(error);
                         }
+                        let shell = shell.into_string();
 
                         use vmux_service::protocol::PlacementMode;
                         let target_pane = match (beside_pane, *mode) {
                             (anchor_pane, PlacementMode::Split) => {
                                 let bucket_pane = if anchor_pane.is_none() {
-                                    choose_run_terminal_bucket_pane(
-                                        *anchor,
-                                        self_pane,
-                                        &regions,
-                                        &candidates,
-                                    )
-                                    .filter(|pane| {
-                                        is_run_terminal_bucket_pane(*pane, &terminal_bucket_panes)
-                                    })
-                                    .or_else(|| {
-                                        newest_run_terminal_bucket_pane(
-                                            self_pane,
-                                            &terminal_bucket_panes,
-                                        )
-                                    })
+                                    regions
+                                        .choose_bucket_pane(*anchor, self_pane, &candidates)
+                                        .filter(|pane| terminal_bucket_panes.contains(*pane))
+                                        .or_else(|| terminal_bucket_panes.newest(self_pane))
                                 } else {
                                     None
                                 };
@@ -485,9 +448,8 @@ pub(super) fn handle_agent_self_commands(
                                             self_pane, &ctx,
                                         )
                                     });
-                                    split_pane_off(
+                                    AgentPane::new(anchor_pane).split_off(
                                         &mut commands,
-                                        anchor_pane,
                                         direction,
                                         focus,
                                         &ctx.pane_children,
@@ -507,8 +469,7 @@ pub(super) fn handle_agent_self_commands(
                                 &ctx,
                             ),
                         };
-                        touch_reused_run_pane_spawn_seq(
-                            target_pane,
+                        AgentPane::new(target_pane).touch_spawn_seq(
                             &mut commands,
                             &mut spawn_counter,
                             &ctx.seq_q,
@@ -823,10 +784,12 @@ pub(super) fn handle_agent_self_commands(
                         });
                         continue;
                     };
-                    let current_dir =
-                        tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
-                            stored_tab_cwd(tab.startup_dir.as_deref()).ok().flatten()
-                        });
+                    let current_dir = tab_worktree.tabs.get(tab_entity).ok().and_then(|tab| {
+                        AgentCwd::of_tab(tab.startup_dir.as_deref())
+                            .stored()
+                            .ok()
+                            .flatten()
+                    });
                     if let Some(current_dir) = current_dir.as_deref()
                         && vmux_git::worktree::is_linked_worktree(current_dir)
                     {
@@ -837,7 +800,10 @@ pub(super) fn handle_agent_self_commands(
                             .get(tab_entity)
                             .ok()
                             .and_then(|workspace| {
-                                stored_tab_cwd(Some(&workspace.project_dir)).ok().flatten()
+                                AgentCwd::of_tab(Some(&workspace.project_dir))
+                                    .stored()
+                                    .ok()
+                                    .flatten()
                             })
                             .or_else(|| {
                                 tab_worktree
@@ -984,7 +950,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .ok()
                                     .and_then(|t| t.startup_dir.clone());
-                                match stored_tab_cwd(tab_dir.as_deref()) {
+                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
                                     Ok(Some(path)) => AgentCommandResult::Text(
                                         path.to_string_lossy().into_owned(),
                                     ),
@@ -1005,7 +971,7 @@ pub(super) fn handle_agent_self_commands(
                                     .get(tab_e)
                                     .map(|t| t.name.clone())
                                     .unwrap_or_default();
-                                match stored_tab_cwd(tab_dir.as_deref()) {
+                                match AgentCwd::of_tab(tab_dir.as_deref()).stored() {
                                     Err(message) => AgentCommandResult::Error(message),
                                     Ok(stored) => 'create_worktree: {
                                         let configured_dir =
@@ -1018,7 +984,8 @@ pub(super) fn handle_agent_self_commands(
                                         let workspace_dir =
                                             tab_worktree.workspaces.get(tab_e).ok().and_then(
                                                 |workspace| {
-                                                    stored_tab_cwd(Some(&workspace.project_dir))
+                                                    AgentCwd::of_tab(Some(&workspace.project_dir))
+                                                        .stored()
                                                         .ok()
                                                         .flatten()
                                                 },
@@ -1137,7 +1104,8 @@ pub(super) fn handle_agent_self_commands(
                                 .or_else(|| {
                                     tab_worktree.workspaces.get(tab_entity).ok().and_then(
                                         |workspace| {
-                                            stored_tab_cwd(Some(&workspace.project_dir))
+                                            AgentCwd::of_tab(Some(&workspace.project_dir))
+                                                .stored()
                                                 .ok()
                                                 .flatten()
                                         },

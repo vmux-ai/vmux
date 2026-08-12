@@ -578,7 +578,7 @@ pub(super) fn send_pending_agent_continuations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::run_terminal::process_cwd;
+    use crate::plugin::run_terminal::AgentCwd;
     use crate::plugin::test_support::init_worktree_test_repo;
     use vmux_core::agent::AgentKind;
     use vmux_service::protocol::ProcessId;
@@ -752,11 +752,11 @@ mod tests {
                 crate::client::acp::AcpSession {
                     agent_id: "claude".into(),
                     sid: "routing-session".into(),
-                    cwd: process_cwd(),
+                    cwd: AgentCwd::process(),
                     anchor,
                     resume: None,
                 },
-                vmux_core::AgentWorkingDir(process_cwd().to_string_lossy().into_owned()),
+                vmux_core::AgentWorkingDir(AgentCwd::process().to_string_lossy().into_owned()),
                 ChildOf(pane),
             ))
             .id();

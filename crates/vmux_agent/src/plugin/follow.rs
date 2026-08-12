@@ -682,7 +682,7 @@ pub(crate) fn on_tidy_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::run_terminal::run_terminal_cwd;
+    use crate::plugin::run_terminal::AgentCwd;
     use crate::plugin::test_support::{
         close_stack_requests, spawn_file_preview_stack, test_settings,
     };
@@ -1225,7 +1225,9 @@ mod tests {
             for request in reader.read() {
                 if matches!(request.command, ServiceAgentCommand::Run { .. }) {
                     let tab = tabs.get(run_tab.0).unwrap();
-                    captured.0 = run_terminal_cwd(tab.startup_dir.as_deref(), None).ok();
+                    captured.0 = AgentCwd::of_tab(tab.startup_dir.as_deref())
+                        .or_agent_launch(None)
+                        .ok();
                 }
             }
         }
