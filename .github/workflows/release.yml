@@ -102,6 +102,27 @@ jobs:
       - name: Verify bundle layout
         run: ./scripts/test-ios-bundle-layout.sh --signed
 
+  # Separate from testflight, and on ubuntu, because waiting out Apple's processing queue is up to
+  # half an hour of curl — no reason to hold a macOS runner for it.
+  submit-app-store:
+    name: Submit iOS for review
+    needs: [detect-version, testflight]
+    if: needs.detect-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Submit to App Store review
+        env:
+          APPLE_ASC_KEY_ID: ${{ secrets.APPLE_ASC_KEY_ID }}
+          APPLE_ASC_ISSUER_ID: ${{ secrets.APPLE_ASC_ISSUER_ID }}
+          APPLE_ASC_PRIVATE_KEY: ${{ secrets.APPLE_ASC_PRIVATE_KEY }}
+          # Must match what build-ios-release.sh stamped, so the same run number.
+          VMUX_IOS_BUILD_NUMBER: ${{ github.run_number }}
+        run: ./scripts/submit-ios-release.sh
+
+  # Deliberately not `needs: testflight`. A broken signing certificate should not hold back a
+  # desktop release that already built, notarized and smoke-tested.
   publish:
     name: Publish Release
     needs: detect-version
