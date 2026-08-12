@@ -74,7 +74,7 @@ fn main() {
                     .unwrap_or_else(|error| error.into_inner());
                 opened.extend(
                     urls.iter()
-                        .filter(|url| url.scheme() == "vmux")
+                        .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
                         .map(ToString::to_string),
                 );
             }
