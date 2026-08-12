@@ -1,6 +1,6 @@
 use crate::protocol::{ClientMessage, ServiceMessage};
 use crate::{DaemonBinary, DaemonIdentity, ServicePaths};
-use bevy::ecs::resource::Resource;
+use bevy_ecs::resource::Resource;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

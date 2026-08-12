@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy_app::prelude::*;
 
 /// Registers the services/processes-monitor webview page; the persistent-process server
 /// itself runs in the `vmux_service` binary.

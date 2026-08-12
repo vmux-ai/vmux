@@ -11624,7 +11624,7 @@ dependencies = [
  "agent-client-protocol",
  "alacritty_terminal",
  "base64 0.22.1",
- "bevy",
+ "bevy_app",
  "bevy_ecs",
  "chrono",
  "crossbeam-channel",
