@@ -5,7 +5,15 @@
 /// CEF grants an off-screen browser keyboard focus a frame or more after the page mounts — by
 /// which time the `autofocus` attribute has already been ignored, because the document was not
 /// focused when it was parsed. Asking once is not enough and asking forever is a spin, so the
-/// claim asks on a timer up to a bound and stops as soon as the document agrees.
+/// claim asks once a frame up to a bound and stops as soon as the document agrees.
+///
+/// Polling is the wrong shape and this should not be the final answer: CEF knows the moment it
+/// grants focus and says so through `on_got_focus`, which the browser process currently uses only
+/// to wake the loop. Routed to the page, this becomes one event and no retry at all. The reason
+/// that is not a small change is `on_set_focus`, which returns 1 to *cancel* CEF focus so winit
+/// keeps the macOS first responder and Bevy keeps the keyboard — so what "focused" means here is
+/// already not what it means in a browser, and the replacement has to be tried against a running
+/// app rather than reasoned into place.
 ///
 /// This is a fact about the host, not about any page, which is why it lives here rather than in
 /// the two pages that used to carry a copy of it.
@@ -48,12 +56,13 @@ mod imp {
 
     use super::{Caret, FocusClaim};
 
-    /// How many times to re-assert before giving up, at [`RETRY_INTERVAL_MS`] apart.
-    const RETRY_ATTEMPTS: u32 = 90;
-
-    /// Roughly one 60Hz frame. A timer rather than `requestAnimationFrame` because the claim is
-    /// most needed exactly when the host is not yet producing frames.
-    const RETRY_INTERVAL_MS: i32 = 16;
+    /// How many frames to re-assert the claim for before giving up.
+    ///
+    /// Scheduled with `requestAnimationFrame` rather than a timer, and the difference matters more
+    /// than it looks: rAF stops when the page stops rendering, so a page nobody is looking at costs
+    /// nothing, while a 16ms timer would keep firing on every background page and — for an
+    /// off-screen browser, whose frames Bevy composites — wake the app loop to do it.
+    const RETRY_FRAMES: u32 = 90;
 
     impl FocusClaim {
         /// Take focus now, then keep re-asserting until the document holds it. Concurrent claims
@@ -66,23 +75,19 @@ mod imp {
                 return;
             }
             set_pending(&window, self.element_id, true);
-            self.retry(window, RETRY_ATTEMPTS);
+            self.retry(window, RETRY_FRAMES);
         }
 
-        fn retry(self, window: web_sys::Window, attempts_left: u32) {
+        fn retry(self, window: web_sys::Window, frames_left: u32) {
             let retry_window = window.clone();
             let callback = Closure::once(move || {
-                if self.settle() || attempts_left <= 1 {
+                if self.settle() || frames_left <= 1 {
                     set_pending(&retry_window, self.element_id, false);
                 } else {
-                    self.retry(retry_window, attempts_left - 1);
+                    self.retry(retry_window, frames_left - 1);
                 }
             });
-            let scheduled = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-                callback.as_ref().unchecked_ref(),
-                RETRY_INTERVAL_MS,
-            );
-            match scheduled {
+            match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
                 Ok(_) => callback.forget(),
                 Err(_) => set_pending(&window, self.element_id, false),
             }

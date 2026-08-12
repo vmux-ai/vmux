@@ -49,9 +49,13 @@ one-shot with 28 call sites — already shared, unchanged. `command_bar/page.rs`
 *send*, not a focus.
 
 The two disagreed on scheduling (rAF vs a 16ms timer) and the launcher's copy placed the caret
-with a byte count where `set_selection_range` wants UTF-16 code units. Unified on the timer,
-because rAF is least reliable exactly when the claim is most needed — before the host produces
-frames. **Not behaviour-preserving; wants eyes on a cold start.**
+with a byte count where `set_selection_range` wants UTF-16 code units.
+
+Unifying on the timer was a mistake, since corrected: rAF stops when a page stops rendering, so a
+timer costs wakeups on every background page and, for an off-screen browser whose frames Bevy
+composites, wakes the app loop to spend them. That was speculative scope creep inside a refactor
+meant to preserve behaviour — the reasoning ("rAF is least reliable before the host produces
+frames") was never tested against a real cold start. Back on rAF, which is what shipped before.
 
 ### Step 2 — `document::Title` (`50d48240`)
 
