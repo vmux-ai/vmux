@@ -64,24 +64,64 @@ fn next_client_op_id() -> ClientOpId {
 /// is cheaper than discovering it through a stalled request.
 static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// `background` from `crates/vmux_ui/assets/theme.css`, as the webview wants it.
+///
+/// oklch(0.88 0 0) and oklch(0.145 0 0), converted to sRGB — the same two values
+/// `packaging/ios/Assets.xcassets/LaunchBackground.colorset` carries for the launch screen, so
+/// the launch screen and the first webview frame are the same colour.
+const LIGHT_BACKGROUND: (u8, u8, u8, u8) = (215, 215, 215, 255);
+const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
+
+/// The webview's own background, which is what shows before the document loads at all.
+///
+/// Without this the first frame after the launch screen is plain white — a stylesheet cannot
+/// reach it, because there is no document yet. It has to be one colour decided up front, before
+/// there is any UIKit environment to consult, so this reads the appearance from
+/// `currentTraitCollection`, which UIKit documents as meaningful only inside a trait-environment
+/// callback and this is not one.
+///
+/// It does answer correctly here, checked both ways: a dark cold start produced a dark first
+/// frame, where an `Unspecified` reading would have fallen through to a light one, and forcing
+/// the reading to light produced a light frame in dark mode. There is no second line of defence
+/// behind it — an inline media query in the document was tried and does not repaint over this —
+/// so if the reading is ever wrong, the wrong colour shows until the app paints.
+#[cfg(target_os = "ios")]
+fn webview_background() -> (u8, u8, u8, u8) {
+    use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
+
+    let style = unsafe { UITraitCollection::currentTraitCollection().userInterfaceStyle() };
+    if style == UIUserInterfaceStyle::Dark {
+        DARK_BACKGROUND
+    } else {
+        LIGHT_BACKGROUND
+    }
+}
+
+#[cfg(not(target_os = "ios"))]
+fn webview_background() -> (u8, u8, u8, u8) {
+    LIGHT_BACKGROUND
+}
+
 fn main() {
-    let config = dioxus::mobile::Config::new().with_custom_event_handler(|event, _| {
-        use dioxus::mobile::tao::event::Event;
-        match event {
-            Event::Opened { urls } => {
-                let mut opened = OPENED_URLS
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                opened.extend(
-                    urls.iter()
-                        .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
-                        .map(ToString::to_string),
-                );
+    let config = dioxus::mobile::Config::new()
+        .with_background_color(webview_background())
+        .with_custom_event_handler(|event, _| {
+            use dioxus::mobile::tao::event::Event;
+            match event {
+                Event::Opened { urls } => {
+                    let mut opened = OPENED_URLS
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    opened.extend(
+                        urls.iter()
+                            .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
+                            .map(ToString::to_string),
+                    );
+                }
+                Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
+                _ => {}
             }
-            Event::Resumed => RESUMED.store(true, std::sync::atomic::Ordering::Release),
-            _ => {}
-        }
-    });
+        });
     dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
 }
 

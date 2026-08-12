@@ -72,6 +72,8 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = [
 ] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = [
     "block2",
+    "UIInterface",
+    "UITraitCollection",
     "NSText",
     "objc2-core-foundation",
     "objc2-quartz-core",
