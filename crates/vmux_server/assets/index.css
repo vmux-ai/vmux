@@ -6,7 +6,7 @@
 @source "../../page/vmux_editor/src";
 @source "../../page/vmux_history/src";
 @source "../../page/vmux_layout/src";
-@source "../../vmux_service/src";
+@source "../../host/vmux_service/src";
 @source "../../page/vmux_setting/src";
 @source "../../page/vmux_space/src";
 @source "../../page/vmux_team/src";

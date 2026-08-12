@@ -100,7 +100,7 @@ vmux_command = { path = "../../vmux_command" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tracing-appender = "0.2"
-vmux_service = { path = "../../vmux_service" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_space = { path = "../../page/vmux_space" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }

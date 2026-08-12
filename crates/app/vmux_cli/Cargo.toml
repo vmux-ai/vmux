@@ -13,9 +13,9 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 tokio = { workspace = true }
-vmux_mcp = { path = "../../vmux_mcp" }
+vmux_mcp = { path = "../../host/vmux_mcp" }
 vmux_profile = { path = "../../vmux_profile" }
-vmux_client = { path = "../../vmux_client" }
+vmux_client = { path = "../../host/vmux_client" }
 
 [dev-dependencies]
 assert_cmd = "2"

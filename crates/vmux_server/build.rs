@@ -21,7 +21,7 @@ fn main() {
             "../page/vmux_history/src",
             "../page/vmux_layout/src",
             "../vmux_profile/src",
-            "../vmux_service/src",
+            "../host/vmux_service/src",
             "../page/vmux_setting/src",
             "../page/vmux_space/src",
             "../page/vmux_team/src",

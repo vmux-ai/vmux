@@ -1,6 +1,6 @@
 #[test]
 fn embedded_plist_uses_bundle_program_relative_path() {
-    let xml = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let xml = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     assert!(
         xml.contains("<key>BundleProgram</key>"),
         "embedded plist must use BundleProgram, not ProgramArguments"
@@ -17,14 +17,14 @@ fn embedded_plist_uses_bundle_program_relative_path() {
 
 #[test]
 fn embedded_plist_keeps_alive_on_crash() {
-    let xml = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let xml = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     assert!(xml.contains("<key>KeepAlive</key>"));
     assert!(xml.contains("<key>Crashed</key>"));
 }
 
 #[test]
 fn embedded_plist_label_matches_release_profile() {
-    let xml = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let xml = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     assert!(
         xml.contains("<string>ai.vmux.service</string>"),
         "release builds must use the suffix-less label"
@@ -33,14 +33,14 @@ fn embedded_plist_label_matches_release_profile() {
 
 #[test]
 fn embedded_plist_sets_build_profile_release() {
-    let xml = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let xml = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     assert!(xml.contains("<key>VMUX_BUILD_PROFILE</key>"));
     assert!(xml.contains("{{PROFILE}}") || xml.contains("<string>release</string>"));
 }
 
 #[test]
 fn embedded_plist_associates_with_parent_bundle() {
-    let xml = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let xml = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     assert!(
         xml.contains("<key>AssociatedBundleIdentifiers</key>"),
         "embedded plist must declare AssociatedBundleIdentifiers so Login Items \
@@ -54,7 +54,7 @@ fn embedded_plist_associates_with_parent_bundle() {
 
 #[test]
 fn embed_script_creates_named_service_app_with_icon() {
-    let script = include_str!("../../../scripts/embed-launch-agent-plist.sh");
+    let script = include_str!("../../../../scripts/embed-launch-agent-plist.sh");
     assert!(script.contains("Vmux Service.app"));
     assert!(script.contains("CFBundleDisplayName"));
     assert!(script.contains("CFBundleIconFile"));

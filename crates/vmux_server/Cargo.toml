@@ -46,7 +46,7 @@ vmux_chat = { path = "../page/vmux_chat", optional = true }
 vmux_editor = { path = "../page/vmux_editor", optional = true }
 vmux_history = { path = "../page/vmux_history", optional = true }
 vmux_layout = { path = "../page/vmux_layout", optional = true }
-vmux_service = { path = "../vmux_service", optional = true }
+vmux_service = { path = "../host/vmux_service", optional = true }
 vmux_setting = { path = "../page/vmux_setting", optional = true }
 vmux_space = { path = "../page/vmux_space", optional = true }
 vmux_team = { path = "../page/vmux_team", optional = true }
