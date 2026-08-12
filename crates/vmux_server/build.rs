@@ -14,19 +14,19 @@ fn main() {
     PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[
             "../vmux_ui/assets/theme.css",
-            "../vmux_editor/src",
+            "../page/vmux_editor/src",
             "../vmux_command/src",
             "../vmux_core/src",
             "../vmux_git/src",
-            "../vmux_history/src",
-            "../vmux_layout/src",
+            "../page/vmux_history/src",
+            "../page/vmux_layout/src",
             "../vmux_profile/src",
             "../vmux_service/src",
-            "../vmux_setting/src",
-            "../vmux_space/src",
-            "../vmux_team/src",
-            "../vmux_terminal/src",
-            "../vmux_agent/src",
+            "../page/vmux_setting/src",
+            "../page/vmux_space/src",
+            "../page/vmux_team/src",
+            "../page/vmux_terminal/src",
+            "../page/vmux_agent/src",
             "../vmux_wire/src",
         ])
         .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
@@ -34,6 +34,6 @@ fn main() {
             strip_uncompiled_tailwind_css: true,
         })
         .tailwind_postprocess_after_dx(&["index-dxv", "vmux_server-dxv"])
-        .copy_manifest_dir_to_dist("../vmux_terminal/assets/fonts", "assets/fonts")
+        .copy_manifest_dir_to_dist("../page/vmux_terminal/assets/fonts", "assets/fonts")
         .run("vmux_server");
 }

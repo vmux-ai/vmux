@@ -41,15 +41,15 @@ required-features = ["web"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, optional = true }
-vmux_agent = { path = "../vmux_agent", optional = true }
-vmux_chat = { path = "../vmux_chat", optional = true }
-vmux_editor = { path = "../vmux_editor", optional = true }
-vmux_history = { path = "../vmux_history", optional = true }
-vmux_layout = { path = "../vmux_layout", optional = true }
+vmux_agent = { path = "../page/vmux_agent", optional = true }
+vmux_chat = { path = "../page/vmux_chat", optional = true }
+vmux_editor = { path = "../page/vmux_editor", optional = true }
+vmux_history = { path = "../page/vmux_history", optional = true }
+vmux_layout = { path = "../page/vmux_layout", optional = true }
 vmux_service = { path = "../vmux_service", optional = true }
-vmux_setting = { path = "../vmux_setting", optional = true }
-vmux_space = { path = "../vmux_space", optional = true }
-vmux_team = { path = "../vmux_team", optional = true }
-vmux_terminal = { path = "../vmux_terminal", optional = true }
+vmux_setting = { path = "../page/vmux_setting", optional = true }
+vmux_space = { path = "../page/vmux_space", optional = true }
+vmux_team = { path = "../page/vmux_team", optional = true }
+vmux_terminal = { path = "../page/vmux_terminal", optional = true }
 vmux_ui = { path = "../vmux_ui", optional = true }
 web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

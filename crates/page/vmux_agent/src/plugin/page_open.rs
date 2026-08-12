@@ -1920,7 +1920,7 @@ mod tests {
             .resource_mut::<Messages<SpawnAgentInStackRequest>>()
             .write(SpawnAgentInStackRequest {
                 kind: AgentKind::Codex,
-                cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+                cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."),
                 session_id: None,
                 stack,
                 initial_prompt: Some("@asdfas".to_string()),

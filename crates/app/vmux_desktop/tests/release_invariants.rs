@@ -14,8 +14,8 @@ fn startup_does_not_mutate_chromium_safe_storage_acl() {
 #[test]
 fn unprovisioned_macos_signing_avoids_restricted_keychain_groups() {
     for entitlements in [
-        include_str!("../../../packaging/macos/Vmux.entitlements"),
-        include_str!("../../../packaging/macos/VmuxDev.entitlements"),
+        include_str!("../../../../packaging/macos/Vmux.entitlements"),
+        include_str!("../../../../packaging/macos/VmuxDev.entitlements"),
     ] {
         assert!(!entitlements.contains("<key>keychain-access-groups</key>"));
     }
@@ -23,7 +23,7 @@ fn unprovisioned_macos_signing_avoids_restricted_keychain_groups() {
 
 #[test]
 fn dev_target_signs_then_runs_debug_binary() {
-    let makefile = include_str!("../../../Makefile");
+    let makefile = include_str!("../../../../Makefile");
 
     assert!(makefile.contains(".DEFAULT_GOAL := dev"));
     assert!(
@@ -45,14 +45,14 @@ fn dev_target_signs_then_runs_debug_binary() {
 
 #[test]
 fn test_app_marks_test_session() {
-    let makefile = include_str!("../../../Makefile");
+    let makefile = include_str!("../../../../Makefile");
     assert!(makefile.contains("test-app:"));
     assert!(makefile.contains("$(MAKE) dev VMUX_PROFILE=gregor VMUX_TEST=1"));
 }
 
 #[test]
 fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
-    let makefile = include_str!("../../../Makefile");
+    let makefile = include_str!("../../../../Makefile");
 
     assert!(makefile.contains("$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli"));
     assert!(
@@ -70,8 +70,8 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
 
 #[test]
 fn local_cargo_builds_share_cef_sdk_and_sccache() {
-    let makefile = include_str!("../../../Makefile");
-    let wrapper = include_str!("../../../scripts/cargo-with-cef-cache.sh");
+    let makefile = include_str!("../../../../Makefile");
+    let wrapper = include_str!("../../../../scripts/cargo-with-cef-cache.sh");
 
     assert!(makefile.contains("./scripts/cargo-with-cef-cache.sh"));
     assert!(wrapper.contains("seed-worktree-target.sh\" --if-needed"));
@@ -133,7 +133,7 @@ fi
     }
 
     let wrapper = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/cargo-with-cef-cache.sh");
+        .join("../../../scripts/cargo-with-cef-cache.sh");
     let mut command = Command::new("bash");
     command
         .arg(&wrapper)
@@ -177,9 +177,9 @@ fi
 #[test]
 fn cef_wheel_forwarding_rejects_invalid_events() {
     let source =
-        include_str!("../../../patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs");
+        include_str!("../../../../patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs");
     let sprite_source =
-        include_str!("../../../patches/bevy_cef-0.5.2/src/webview/webview_sprite.rs");
+        include_str!("../../../../patches/bevy_cef-0.5.2/src/webview/webview_sprite.rs");
 
     assert!(source.contains("fn cef_mouse_wheel_event"));
     assert!(source.contains("!position.is_finite() || !delta.is_finite()"));
@@ -204,8 +204,8 @@ fn bookmark_changes_save_without_a_debounce_window() {
 
 #[test]
 fn worktree_target_seed_uses_copy_on_write_and_relocates_cef_cmake_state() {
-    let makefile = include_str!("../../../Makefile");
-    let script = include_str!("../../../scripts/seed-worktree-target.sh");
+    let makefile = include_str!("../../../../Makefile");
+    let script = include_str!("../../../../scripts/seed-worktree-target.sh");
 
     assert!(makefile.contains("seed-target:"));
     assert!(script.contains("git rev-parse --path-format=absolute --git-common-dir"));
@@ -223,7 +223,7 @@ fn target_seed_key_resolves_a_symlinked_repo_root() {
 
     let temp = tempfile::tempdir().expect("tempdir");
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
+        .join("../../..")
         .canonicalize()
         .expect("repo root");
     let linked_repo = temp.path().join("repo");
@@ -288,7 +288,7 @@ fn cef_target_relocator_rewrites_only_cef_build_state() {
     fs::write(&unrelated, format!("{}\n", source.display())).expect("write unrelated fixture");
 
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/relocate-cef-target.sh");
+        .join("../../../scripts/relocate-cef-target.sh");
     let status = Command::new("bash")
         .arg(script)
         .arg(&staging)
@@ -313,8 +313,8 @@ fn cef_target_relocator_rewrites_only_cef_build_state() {
 
 #[test]
 fn debug_render_process_install_uses_fingerprint_cache() {
-    let makefile = include_str!("../../../Makefile");
-    let script = include_str!("../../../scripts/install-debug-render-process.sh");
+    let makefile = include_str!("../../../../Makefile");
+    let script = include_str!("../../../../scripts/install-debug-render-process.sh");
 
     assert!(makefile.contains("./scripts/install-debug-render-process.sh"));
     assert!(!makefile.contains(
@@ -328,15 +328,15 @@ fn debug_render_process_install_uses_fingerprint_cache() {
 
 #[test]
 fn package_builds_cef_helper_separately_without_lto() {
-    let manifest = include_str!("../../../Cargo.toml");
-    let core_manifest = include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
-    let core_source = include_str!("../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
+    let manifest = include_str!("../../../../Cargo.toml");
+    let core_manifest = include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
+    let core_source = include_str!("../../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
     let handler = include_str!(
-        "../../../patches/bevy_cef_core-0.5.2/src/render_process/render_process_handler.rs"
+        "../../../../patches/bevy_cef_core-0.5.2/src/render_process/render_process_handler.rs"
     );
     let helper_manifest =
-        include_str!("../../../patches/bevy_cef_debug_render_process-0.5.2/Cargo.toml");
-    let script = include_str!("../../../scripts/build-package-binaries.sh");
+        include_str!("../../../../patches/bevy_cef_debug_render_process-0.5.2/Cargo.toml");
+    let script = include_str!("../../../../scripts/build-package-binaries.sh");
 
     assert!(script.contains("build -p vmux_cli --release"));
     assert!(script.contains(
@@ -370,7 +370,7 @@ fn package_builds_cef_helper_separately_without_lto() {
 
 #[test]
 fn macos_ci_shares_cef_sdk_without_installing_unused_render_process() {
-    let workflow = include_str!("../../../.github/workflows/ci.yml");
+    let workflow = include_str!("../../../../.github/workflows/ci.yml");
 
     assert!(workflow.contains("VMUX_CEF_SDK_CACHE: ${{ github.workspace }}/.cache/cef-sdk"));
     assert!(!workflow.contains("- name: Cache CEF SDK"));
@@ -379,7 +379,7 @@ fn macos_ci_shares_cef_sdk_without_installing_unused_render_process() {
 
 #[test]
 fn cef_debug_loader_requires_debug_feature() {
-    let core_source = include_str!("../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
+    let core_source = include_str!("../../../../patches/bevy_cef_core-0.5.2/src/lib.rs");
     let feature_gate = "#[cfg(all(target_os = \"macos\", feature = \"debug\"))]";
 
     assert_eq!(core_source.matches(feature_gate).count(), 2);
@@ -387,7 +387,7 @@ fn cef_debug_loader_requires_debug_feature() {
 
 #[test]
 fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
-    let makefile = include_str!("../../../Makefile");
+    let makefile = include_str!("../../../../Makefile");
     let stop_idx = makefile
         .find("target/debug/vmux_desktop")
         .expect("debug desktop stop");
@@ -402,7 +402,7 @@ fn dev_target_stops_existing_debug_desktop_before_cef_initialize() {
 
 #[test]
 fn local_package_uses_per_sha_bundle_name() {
-    let package_script = include_str!("../../../scripts/package.sh");
+    let package_script = include_str!("../../../../scripts/package.sh");
 
     assert!(package_script.contains("PRODUCT_NAME=\"Vmux ($SHA)\""));
     assert!(package_script.contains("BUNDLE_ID=\"ai.vmux.desktop.$SHA\""));
@@ -411,7 +411,7 @@ fn local_package_uses_per_sha_bundle_name() {
 
 #[test]
 fn build_git_env_uses_github_style_short_hash() {
-    let source = include_str!("../../build_git_env.rs");
+    let source = include_str!("../../../build_git_env.rs");
 
     assert!(source.contains("\"--short=7\""));
     assert!(!source.contains("\"--short\", \"HEAD\""));
@@ -419,7 +419,7 @@ fn build_git_env_uses_github_style_short_hash() {
 
 #[test]
 fn local_package_only_builds_app_bundle() {
-    let package_script = include_str!("../../../scripts/package.sh");
+    let package_script = include_str!("../../../../scripts/package.sh");
 
     assert!(package_script.contains("packager_args=(packager --release)"));
     assert!(package_script.contains("packager_args+=(--formats app)"));
@@ -428,7 +428,7 @@ fn local_package_only_builds_app_bundle() {
 
 #[test]
 fn cef_injection_uses_ci_cached_framework_path() {
-    let inject_script = include_str!("../../../scripts/inject-cef.sh");
+    let inject_script = include_str!("../../../../scripts/inject-cef.sh");
 
     assert!(inject_script.contains("--cef-framework \"$CEF_FRAMEWORK\""));
     assert!(inject_script.contains("CEF_FRAMEWORK=\"${CEF_FRAMEWORK:-${HOME}/.local/share/Chromium Embedded Framework.framework}\""));
@@ -436,10 +436,10 @@ fn cef_injection_uses_ci_cached_framework_path() {
 
 #[test]
 fn local_signing_uses_stable_codesigning_identity() {
-    let signing_script = include_str!("../../../scripts/ensure-local-codesign-identity.sh");
-    let build_script = include_str!("../../../scripts/build-mac-release.sh");
-    let notarize_script = include_str!("../../../scripts/sign-and-notarize.sh");
-    let makefile = include_str!("../../../Makefile");
+    let signing_script = include_str!("../../../../scripts/ensure-local-codesign-identity.sh");
+    let build_script = include_str!("../../../../scripts/build-mac-release.sh");
+    let notarize_script = include_str!("../../../../scripts/sign-and-notarize.sh");
+    let makefile = include_str!("../../../../Makefile");
 
     assert!(signing_script.contains("Vmux Dev"));
     assert!(!signing_script.contains("Vmux Development"));
@@ -464,7 +464,7 @@ fn local_signing_uses_stable_codesigning_identity() {
 
 #[test]
 fn dev_signing_uses_default_keychain_directly() {
-    let signing_script = include_str!("../../../scripts/sign-dev-mac.sh");
+    let signing_script = include_str!("../../../../scripts/sign-dev-mac.sh");
 
     assert!(signing_script.contains("CODESIGN_KEYCHAIN"));
     assert!(signing_script.contains("--keychain"));
@@ -472,8 +472,8 @@ fn dev_signing_uses_default_keychain_directly() {
 
 #[test]
 fn dev_and_local_use_distinct_bundle_identifiers() {
-    let signing_script = include_str!("../../../scripts/sign-dev-mac.sh");
-    let package_script = include_str!("../../../scripts/package.sh");
+    let signing_script = include_str!("../../../../scripts/sign-dev-mac.sh");
+    let package_script = include_str!("../../../../scripts/package.sh");
 
     assert!(signing_script.contains("APP_IDENTIFIER=\"ai.vmux.desktop.dev\""));
     assert!(!signing_script.contains("ai.vmux.desktop.local"));
@@ -481,7 +481,7 @@ fn dev_and_local_use_distinct_bundle_identifiers() {
 }
 
 fn workspace_bevy_spec() -> &'static str {
-    let manifest = include_str!("../../../Cargo.toml");
+    let manifest = include_str!("../../../../Cargo.toml");
     let deps = manifest
         .split("[workspace.dependencies]")
         .nth(1)
@@ -592,7 +592,7 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
 #[test]
 fn player_mode_owns_player_only_bevy_features() {
     let desktop = include_str!("../Cargo.toml");
-    let layout = include_str!("../../vmux_layout/Cargo.toml");
+    let layout = include_str!("../../../page/vmux_layout/Cargo.toml");
 
     assert!(desktop.contains("default = [\"full\"]"));
     let full = desktop
@@ -616,7 +616,7 @@ fn player_mode_owns_player_only_bevy_features() {
 
 #[test]
 fn patched_bevy_remote_does_not_pull_bevy_dev_tools() {
-    let manifest = include_str!("../../../patches/bevy_remote-0.19.0/Cargo.toml");
+    let manifest = include_str!("../../../../patches/bevy_remote-0.19.0/Cargo.toml");
 
     assert!(!manifest.contains("bevy_dev_tools"));
 }
@@ -635,15 +635,15 @@ fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
 
     for block in [
         dependency_block(
-            include_str!("../../../patches/bevy_cef-0.5.2/Cargo.toml"),
+            include_str!("../../../../patches/bevy_cef-0.5.2/Cargo.toml"),
             "[dependencies.bevy]",
         ),
         dependency_block(
-            include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
+            include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
             "[dependencies.bevy]",
         ),
         dependency_block(
-            include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
+            include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml"),
             "[dependencies.bevy_winit]",
         ),
     ] {
@@ -654,7 +654,7 @@ fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
 
 #[test]
 fn patched_bevy_cef_sprite_backend_enables_render_support_without_pbr() {
-    let manifest = include_str!("../../../patches/bevy_cef-0.5.2/Cargo.toml");
+    let manifest = include_str!("../../../../patches/bevy_cef-0.5.2/Cargo.toml");
     let start = manifest
         .find("[dependencies.bevy]")
         .expect("bevy_cef bevy dependency");
@@ -668,7 +668,7 @@ fn patched_bevy_cef_sprite_backend_enables_render_support_without_pbr() {
 
 #[test]
 fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
-    let manifest = include_str!("../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
+    let manifest = include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
     let start = manifest
         .find("[dependencies.bevy]")
         .expect("bevy_cef_core bevy dependency");
@@ -681,7 +681,7 @@ fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
 
 #[test]
 fn workspace_bevy_winit_does_not_reenable_default_platform() {
-    let manifest = include_str!("../../../Cargo.toml");
+    let manifest = include_str!("../../../../Cargo.toml");
 
     assert!(manifest.contains("bevy_winit = { version = \"0.19.0\", default-features = false"));
 }

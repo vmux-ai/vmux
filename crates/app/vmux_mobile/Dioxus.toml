@@ -14,7 +14,7 @@ ios_info_plist = "packaging/ios/Info.plist"
 identifier = "ai.vmux.mobile"
 publisher = "Vmux"
 short_description = "Continue Vmux agent chats from your phone."
-icon = ["../../icon.png"]
+icon = ["../../../icon.png"]
 
 [deep_links]
 schemes = ["vmux"]
@@ -22,14 +22,14 @@ schemes = ["vmux"]
 [ios]
 deployment_target = "15.0"
 identifier = "ai.vmux.mobile"
-icon = ["../../icon.png"]
+icon = ["../../../icon.png"]
 
 [android]
 min_sdk = 24
 target_sdk = 35
 compile_sdk = 35
 identifier = "ai.vmux.mobile"
-icon = ["../../icon.png"]
+icon = ["../../../icon.png"]
 
 [android.application]
 uses_cleartext_traffic = true

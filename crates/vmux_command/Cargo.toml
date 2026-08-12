@@ -19,7 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 url = { workspace = true }
 vmux_core = { path = "../vmux_core" }
-vmux_history = { path = "../vmux_history", default-features = false }
+vmux_history = { path = "../page/vmux_history", default-features = false }
 vmux_wire = { path = "../vmux_wire" }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]

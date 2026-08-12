@@ -33,7 +33,7 @@ fn before_packaging_command_prepares_named_binaries() {
         line.contains("scripts/build-package-binaries.sh"),
         "before-packaging-command must prepare the bundled binaries: {line}"
     );
-    let script = include_str!("../../../scripts/build-package-binaries.sh");
+    let script = include_str!("../../../../scripts/build-package-binaries.sh");
     assert!(script.contains("-p vmux_desktop"));
     assert!(script.contains("-p vmux_cli"));
     assert!(script.contains(r#"$release_dir/Vmux Service"#));
@@ -101,7 +101,7 @@ printf '%s\n' "${CEF_PATH:-}" >> "$FAKE_CARGO_LOG"
     fs::set_permissions(&cargo, permissions).expect("make fake cargo executable");
 
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/build-package-binaries.sh");
+        .join("../../../scripts/build-package-binaries.sh");
     let status = Command::new("bash")
         .arg(script)
         .env("CI", "true")
@@ -127,12 +127,12 @@ printf '%s\n' "${CEF_PATH:-}" >> "$FAKE_CARGO_LOG"
 
 #[test]
 fn packaging_scripts_share_resolved_release_dir() {
-    let paths = include_str!("../../../scripts/cargo-target-paths.sh");
-    let build = include_str!("../../../scripts/build-package-binaries.sh");
-    let package = include_str!("../../../scripts/package.sh");
-    let inject = include_str!("../../../scripts/inject-cef.sh");
-    let before_each = include_str!("../../../scripts/before-each-package.sh");
-    let signing = include_str!("../../../scripts/sign-and-notarize.sh");
+    let paths = include_str!("../../../../scripts/cargo-target-paths.sh");
+    let build = include_str!("../../../../scripts/build-package-binaries.sh");
+    let package = include_str!("../../../../scripts/package.sh");
+    let inject = include_str!("../../../../scripts/inject-cef.sh");
+    let before_each = include_str!("../../../../scripts/before-each-package.sh");
+    let signing = include_str!("../../../../scripts/sign-and-notarize.sh");
 
     assert!(paths.contains("CARGO_TARGET_DIR"));
     assert!(paths.contains("CARGO_BUILD_TARGET"));
@@ -147,7 +147,7 @@ fn packaging_scripts_share_resolved_release_dir() {
 
 #[test]
 fn macos_bundle_layout_uses_collision_safe_names() {
-    let layout_script = include_str!("../../../scripts/test-bundle-layout.sh");
+    let layout_script = include_str!("../../../../scripts/test-bundle-layout.sh");
     let required_block = layout_script.split("FORBIDDEN=(").next().unwrap();
     assert!(required_block.contains("Contents/MacOS/vmux_desktop"));
     assert!(required_block.contains("Contents/MacOS/vmux"));
@@ -171,7 +171,7 @@ fn macos_bundle_layout_uses_collision_safe_names() {
 
 #[test]
 fn cef_injection_uses_named_helper_base_and_icon() {
-    let inject_script = include_str!("../../../scripts/inject-cef.sh");
+    let inject_script = include_str!("../../../../scripts/inject-cef.sh");
     assert!(inject_script.contains("--bin-name vmux_desktop"));
     assert!(inject_script.contains("vmux_desktop Helper.app"));
     assert!(inject_script.contains("CFBundleIconFile"));
@@ -180,7 +180,7 @@ fn cef_injection_uses_named_helper_base_and_icon() {
 
 #[test]
 fn signing_includes_service_helper_app() {
-    let signing_script = include_str!("../../../scripts/sign-and-notarize.sh");
+    let signing_script = include_str!("../../../../scripts/sign-and-notarize.sh");
     assert!(signing_script.contains("$APP_BUNDLE/Contents/Library"));
     assert!(signing_script.contains("Vmux Service"));
     assert!(signing_script.contains("ai.vmux.service%s"));
@@ -188,7 +188,7 @@ fn signing_includes_service_helper_app() {
 
 #[test]
 fn generated_info_plist_uses_named_executable() {
-    let info_plist = include_str!("../../../packaging/macos/Info.plist");
+    let info_plist = include_str!("../../../../packaging/macos/Info.plist");
     let after_key = info_plist
         .split("<key>CFBundleExecutable</key>")
         .nth(1)
