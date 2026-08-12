@@ -11155,6 +11155,7 @@ dependencies = [
  "vmux_mcp",
  "vmux_remote",
  "vmux_service",
+ "vmux_session",
  "vmux_setting",
  "vmux_space",
  "vmux_terminal",
@@ -11657,6 +11658,16 @@ dependencies = [
  "vmux_ui",
  "vmux_wire",
  "vte",
+]
+
+[[package]]
+name = "vmux_session"
+version = "0.0.30"
+dependencies = [
+ "bevy_ecs",
+ "bevy_reflect",
+ "serde",
+ "vmux_wire",
 ]
 
 [[package]]
