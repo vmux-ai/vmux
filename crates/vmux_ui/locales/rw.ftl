@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Guhuza na Mac yawe byaciwe.
 mobile-error-connection-closed = Mac yawe yahagaritse guhuza.
 mobile-error-address-invalid = Aderesi yo guhuza ntiyemewe.
 mobile-error-address-no-port = Aderesi yo guhuza nta port irimo.
+mobile-qr-denied = Vmux ntishobora gukoresha kamera. Yifungurire muri Settings kugira ngo usikane kode QR, cyangwa usubire inyuma womeke ihuriro ryo guhuza.
+mobile-qr-open-settings = Fungura Settings
+mobile-qr-session-error = Kamera yahagaze. Ongera ugerageze, cyangwa omeka ihuriro ryo guhuza.

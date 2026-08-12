@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Coniunctio cum Mac tuo intercidit.
 mobile-error-connection-closed = Mac tuum coniunctionem clausit.
 mobile-error-address-invalid = Inscriptio coniunctionis invalida est.
 mobile-error-address-no-port = Inscriptio coniunctionis portum non habet.
+mobile-qr-denied = Vmux camera uti non potest. Eam in Optionibus accende ut codicem QR legas, vel redi et nexum coniunctionis potius insere.
+mobile-qr-open-settings = Optiones aperire
+mobile-qr-session-error = Camera destitit. Iterum conare, vel nexum coniunctionis potius insere.

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = די פֿאַרבינדונג מיט אײַע�
 mobile-error-connection-closed = אײַער Mac האָט פֿאַרמאַכט די פֿאַרבינדונג.
 mobile-error-address-invalid = דער פּערינג־אַדרעס איז אומגילטיק.
 mobile-error-address-no-port = דער פּערינג־אַדרעס האָט נישט קיין פּאָרט.
+mobile-qr-denied = Vmux קען נישט נוצן די קאַמערע. שאַלט זי אָן אין Settings כּדי צו סקאַנירן דעם QR־קאָד, אָדער גייט צוריק און לייגט אַרײַן דעם פּערינג־לינק.
+mobile-qr-open-settings = עפֿנט Settings
+mobile-qr-session-error = די קאַמערע האָט זיך אָפּגעשטעלט. פּרוּווט נאָך אַ מאָל, אָדער לייגט אַרײַן דעם פּערינג־לינק.

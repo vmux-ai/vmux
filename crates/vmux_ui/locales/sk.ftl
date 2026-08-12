@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Spojenie s vaším Mac sa prerušilo.
 mobile-error-connection-closed = Váš Mac ukončil spojenie.
 mobile-error-address-invalid = Párovacia adresa je neplatná.
 mobile-error-address-no-port = Párovacia adresa neobsahuje port.
+mobile-qr-denied = Vmux nemôže použiť fotoaparát. Povoľte ho v Nastaveniach, aby ste naskenovali QR kód, alebo sa vráťte späť a vložte párovací odkaz.
+mobile-qr-open-settings = Otvoriť Nastavenia
+mobile-qr-session-error = Fotoaparát sa zastavil. Skúste to znova alebo vložte párovací odkaz.

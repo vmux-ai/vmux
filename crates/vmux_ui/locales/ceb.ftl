@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Naputol ang koneksyon sa imong Mac.
 mobile-error-connection-closed = Gisirhan sa imong Mac ang koneksyon.
 mobile-error-address-invalid = Dili balido kana nga pairing address.
 mobile-error-address-no-port = Kana nga pairing address walay port.
+mobile-qr-denied = Dili magamit sa Vmux ang camera. I-on kini sa Settings aron ma-scan ang QR code, o balik ug i-paste na lang ang pairing link.
+mobile-qr-open-settings = Ablihi ang Settings
+mobile-qr-session-error = Mihunong ang camera. Sulayi pag-usab, o i-paste na lang ang pairing link.

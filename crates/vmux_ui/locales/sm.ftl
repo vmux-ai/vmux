@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Ua motu le so‘otaga i lau Mac.
 mobile-error-connection-closed = Ua tapunia e lau Mac le so‘otaga.
 mobile-error-address-invalid = E lē aogā lena tuatusi feso‘ota‘i.
 mobile-error-address-no-port = E leai se port i lena tuatusi feso‘ota‘i.
+mobile-qr-denied = E le mafai e Vmux ona fa‘aoga le mea pu‘eata. Ki i luga i Settings e siaki ai le QR code, pe toe fo‘i i tua ma fa‘apipi‘i le so‘otaga feso‘ota‘i.
+mobile-qr-open-settings = Tatala Settings
+mobile-qr-session-error = Ua tu le mea pu‘eata. Toe taumafai, pe fa‘apipi‘i le so‘otaga feso‘ota‘i.

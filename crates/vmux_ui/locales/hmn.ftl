@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Qhov txuas mus rau koj lub Mac tu lawm.
 mobile-error-connection-closed = Koj lub Mac kaw qhov txuas lawm.
 mobile-error-address-invalid = Qhov chaw nyob txuas ntawd tsis raug.
 mobile-error-address-no-port = Qhov chaw nyob txuas ntawd tsis muaj port.
+mobile-qr-denied = Vmux siv tsis tau koob yees duab. Qhib nws hauv Chaw Teeb Tsa kom luam tau QR code, los sis rov qab mus thiab ntaus txoj link txuas hloov chaw.
+mobile-qr-open-settings = Qhib Chaw Teeb Tsa
+mobile-qr-session-error = Koob yees duab tau nres. Sim dua, los sis ntaus txoj link txuas hloov chaw.

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = اتصال به Mac شما قطع شد.
 mobile-error-connection-closed = Mac شما اتصال را بست.
 mobile-error-address-invalid = آن آدرس جفت‌سازی معتبر نیست.
 mobile-error-address-no-port = آن آدرس جفت‌سازی درگاه ندارد.
+mobile-qr-denied = Vmux نمی‌تواند از دوربین استفاده کند. برای اسکن کد QR آن را در تنظیمات روشن کنید، یا برگردید و به‌جای آن پیوند جفت‌سازی را جای‌گذاری کنید.
+mobile-qr-open-settings = باز کردن تنظیمات
+mobile-qr-session-error = دوربین متوقف شد. دوباره تلاش کنید، یا به‌جای آن پیوند جفت‌سازی را جای‌گذاری کنید.

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Zure Mac-arekiko konexioa eten da.
 mobile-error-connection-closed = Zure Mac-ek konexioa itxi du.
 mobile-error-address-invalid = Parekatze-helbide hori ez da baliozkoa.
 mobile-error-address-no-port = Parekatze-helbide horrek ez du atakarik.
+mobile-qr-denied = Vmux-ek ezin du kamera erabili. Aktibatu Ezarpenak atalean QR kodea eskaneatzeko, edo itzuli atzera eta itsatsi parekatze-esteka horren ordez.
+mobile-qr-open-settings = Ireki Ezarpenak
+mobile-qr-session-error = Kamera gelditu da. Saiatu berriro, edo itsatsi parekatze-esteka horren ordez.

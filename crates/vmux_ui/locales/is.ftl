@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Tengingin við Mac-tölvuna þína rofnaði.
 mobile-error-connection-closed = Mac-tölvan þín lokaði tengingunni.
 mobile-error-address-invalid = Þetta pörunarvistfang er ógilt.
 mobile-error-address-no-port = Þetta pörunarvistfang hefur enga gátt.
+mobile-qr-denied = Vmux getur ekki notað myndavélina. Kveiktu á henni í Stillingum til að skanna QR-kóðann, eða farðu til baka og límdu inn pörunartengilinn í staðinn.
+mobile-qr-open-settings = Opna Stillingar
+mobile-qr-session-error = Myndavélin stöðvaðist. Reyndu aftur eða límdu inn pörunartengilinn í staðinn.

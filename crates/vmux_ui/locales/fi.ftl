@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Yhteys Maciisi katkesi.
 mobile-error-connection-closed = Macisi sulki yhteyden.
 mobile-error-address-invalid = Tämä pariliitososoite on virheellinen.
 mobile-error-address-no-port = Tästä pariliitososoitteesta puuttuu portti.
+mobile-qr-denied = Vmux ei voi käyttää kameraa. Ota se käyttöön Asetuksissa, jotta voit skannata QR-koodin, tai palaa takaisin ja liitä sen sijaan pariliitoslinkki.
+mobile-qr-open-settings = Avaa Asetukset
+mobile-qr-session-error = Kamera pysähtyi. Yritä uudelleen tai liitä sen sijaan pariliitoslinkki.

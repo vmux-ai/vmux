@@ -798,3 +798,6 @@ mobile-error-connection-dropped = له ستاسو Mac سره اړیکه پرې �
 mobile-error-connection-closed = ستاسو Mac اړیکه بنده کړه.
 mobile-error-address-invalid = د پیرنګ پته ناسمه ده.
 mobile-error-address-no-port = د پیرنګ په پته کې پورټ نشته.
+mobile-qr-denied = Vmux کامره نشي کارولی. د QR کوډ سکن کولو لپاره یې په تنظیماتو کې فعاله کړئ، یا شاته ولاړ شئ او د پیرنګ لینک پیست کړئ.
+mobile-qr-open-settings = تنظیمات پرانیزئ
+mobile-qr-session-error = کامره ودرېده. بیا هڅه وکړئ، یا د پیرنګ لینک پیست کړئ.

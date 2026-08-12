@@ -798,3 +798,6 @@ mobile-error-connection-dropped = A Mac gépével való kapcsolat megszakadt.
 mobile-error-connection-closed = A Mac gépe bontotta a kapcsolatot.
 mobile-error-address-invalid = Ez a párosítási cím érvénytelen.
 mobile-error-address-no-port = Ez a párosítási cím nem tartalmaz portot.
+mobile-qr-denied = A Vmux nem tudja használni a kamerát. Kapcsolja be a Beállításokban a QR-kód beolvasásához, vagy lépjen vissza, és illessze be inkább a párosítási hivatkozást.
+mobile-qr-open-settings = Beállítások megnyitása
+mobile-qr-session-error = A kamera leállt. Próbálja újra, vagy illessze be inkább a párosítási hivatkozást.
