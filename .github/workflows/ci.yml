@@ -225,10 +225,58 @@ jobs:
               - '.github/workflows/release.yml'
               - '.github/workflows/ci.yml'
 
+  deps-rust:
+    name: Deps (rust)
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+
+      # No CEF install and no apt packages on purpose. `cargo tree` reads the resolve graph and
+      # `cargo check` on a pure-Rust crate links nothing, so this job proves the headless path
+      # stands up on a box that has never seen the framework.
+      - name: No crate on the headless path links bevy_cef
+        run: |
+          set -euo pipefail
+
+          links_cef() {
+            cargo tree --locked -p "$1" -i bevy_cef >/dev/null 2>&1
+          }
+
+          # `cargo tree -i` exits 101 both when the package is absent from the graph and when
+          # the name is misspelled, so a bare "it found nothing" assertion passes for a crate
+          # that is clean and for a check that is broken. Pin the spec against a crate that
+          # must link CEF before trusting the negative results below.
+          if ! links_cef vmux_desktop; then
+            echo "::error::positive control failed: bevy_cef not found in vmux_desktop, so this job is asserting nothing"
+            exit 1
+          fi
+          echo "control ok: vmux_desktop links bevy_cef"
+
+          # vmux_service joins this list once VMX-142 lands. It reaches bevy_cef today through
+          # vmux_core directly and through vmux_layout -> vmux_command.
+          for pkg in vmux_session; do
+            if links_cef "$pkg"; then
+              echo "::error::$pkg links bevy_cef:"
+              cargo tree --locked -p "$pkg" -i bevy_cef
+              exit 1
+            fi
+            echo "ok: $pkg does not link bevy_cef"
+          done
+
+      # The graph is not the build. Feature unification across a workspace invocation can supply
+      # a dependency this crate never asked for, which `cargo tree` cannot see and only a
+      # single-package build catches.
+      - name: vmux_session builds alone
+        run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    needs: [changes, lint-rust]
+    needs: [changes, lint-rust, deps-rust]
     if: always()
     steps:
       - name: Gate
@@ -236,6 +284,7 @@ jobs:
           CHANGES: ${{ needs.changes.result }}
           CODE: ${{ needs.changes.outputs.code }}
           RESULT: ${{ needs.lint-rust.result }}
+          DEPS: ${{ needs.deps-rust.result }}
         run: |
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
@@ -245,7 +294,11 @@ jobs:
             echo "::error::Lint (rust) result: $RESULT"
             exit 1
           fi
-          echo "Lint gate ok (code=$CODE rust=$RESULT)"
+          if [ "$CODE" = "true" ] && [ "$DEPS" != "success" ]; then
+            echo "::error::Deps (rust) result: $DEPS"
+            exit 1
+          fi
+          echo "Lint gate ok (code=$CODE rust=$RESULT deps=$DEPS)"
 
   test:
     name: Test
