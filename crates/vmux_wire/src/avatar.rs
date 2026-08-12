@@ -1,9 +1,9 @@
 //! How a participant is drawn when there is no picture of them: initials and a colour.
 //!
 //! Lives here rather than in `vmux_core` because the phone has to reach the same colour the
-//! desktop does, and `vmux_core` pulls in bevy and CEF off wasm. Keying the agent
-//! palette by URL segment rather than `AgentKind` is what makes that possible — `AgentKind`
-//! lives on the host side, but both sides already speak in segments.
+//! desktop does, and `vmux_core` pulls in bevy and CEF off wasm. The palette is keyed by URL
+//! segment rather than [`crate::agent::AgentKind`] because a registry-driven ACP agent has no
+//! kind at all — the segment is the one name every agent has.
 
 /// Initials and colour for a participant with no avatar image.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

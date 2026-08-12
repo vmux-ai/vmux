@@ -49,35 +49,9 @@ impl Profile {
     }
 }
 
-impl AgentKind {
-    /// How this agent is drawn without a picture. Hangs off the kind rather than AvatarSpec
-    /// because that type lives in vmux_wire now — the phone needs the same colours and cannot
-    /// take a dependency on this crate.
-    pub fn avatar(self) -> AvatarSpec {
-        AvatarSpec {
-            initials: match self {
-                AgentKind::Claude => "CL",
-                AgentKind::Codex => "CX",
-                AgentKind::Vibe => "VB",
-            }
-            .into(),
-            color: vmux_wire::avatar::agent_color(self.as_url_segment()),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn agent_avatar_is_kind_specific() {
-        assert_eq!(AgentKind::Claude.avatar().initials, "CL");
-        assert_ne!(
-            AgentKind::Codex.avatar().color,
-            AgentKind::Vibe.avatar().color
-        );
-    }
 
     #[test]
     fn agent_profile_name_is_display_name() {
