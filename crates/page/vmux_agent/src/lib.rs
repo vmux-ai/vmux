@@ -10,6 +10,6 @@ pub mod page;
 pub mod vibe;
 
 #[cfg(host)]
-pub mod plugin;
+pub mod host;
 #[cfg(host)]
-pub use plugin::*;
+pub use host::*;

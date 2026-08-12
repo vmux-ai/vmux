@@ -8,12 +8,12 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
 use super::AgentChatView;
-use crate::client::acp::AcpSession;
 use crate::events::{AgentCommandRequest, CommandOrigin};
 use vmux_chat::event::{
     COMPOSER_CONTEXT_EVENT, ChatCreateWorktree, ChatSelectWorkspace, ComposerContext,
 };
 use vmux_service::protocol::{AgentCommand as ServiceAgentCommand, AgentRequestId};
+use vmux_session::AcpSession;
 use vmux_session::AgentApprovalPolicy;
 
 /// The composer's project context, and the two controls that change it.

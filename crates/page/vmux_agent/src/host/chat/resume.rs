@@ -8,7 +8,6 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive};
 
-use crate::client::acp::AcpSession;
 use crate::handoff::{DEFAULT_CONTEXT_LIMIT, build_context};
 use crate::run_state::AgentRunState;
 use crate::strategy::{AgentStrategies, acp_agent_kind, kind_supports_cross_runtime};
@@ -18,6 +17,7 @@ use vmux_chat::event::{
 };
 use vmux_core::agent::{AgentKind, StackSessionHandoff, SwapStackSession};
 use vmux_core::team::Profile;
+use vmux_session::AcpSession;
 use vmux_session::AgentSession;
 
 /// Resuming a session, and switching the runtime that serves one.

@@ -1,8 +1,8 @@
 //! Everything that only exists on a desktop.
 //!
-//! One gate for the lot, rather than an attribute on each declaration. The crate's public paths
-//! are unchanged: `lib.rs` re-exports this module's contents, so `vmux_agent::plugin` still
-//! resolves from outside and `crate::plugin` still resolves from within.
+//! One gate for the lot, rather than an attribute on each declaration. Named for the `host` cfg
+//! that gates it, as in `vmux_core`, `vmux_layout` and `vmux_terminal`. `lib.rs` re-exports the
+//! contents, so the flat `vmux_agent::` paths resolve as well as `vmux_agent::host::`.
 
 mod tree;
 pub use tree::{AgentPagesPlugin, AgentPlugin, AgentSessionPlugin};
@@ -70,7 +70,6 @@ pub(crate) use self::workspace::{
 
 pub use vmux_service::{http, message, stream};
 
-pub use client::acp::AcpSession;
 pub use client::cli::strategy::CliAgentStrategy;
 pub use events::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
@@ -92,7 +91,8 @@ pub use vmux_session::room::{
     RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
 };
 pub use vmux_session::{
-    AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue, QueuedPrompt,
+    AcpSession, AgentApprovalPolicy, AgentMessages, AgentSession, AgentVariant, PromptQueue,
+    QueuedPrompt,
 };
 
 #[cfg(test)]

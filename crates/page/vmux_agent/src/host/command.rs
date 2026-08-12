@@ -688,8 +688,8 @@ fn forward_history_open_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::AgentSessionPlugin;
-    use crate::plugin::test_support::test_settings;
+    use crate::host::AgentSessionPlugin;
+    use crate::host::test_support::test_settings;
     use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;

@@ -3,11 +3,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use crate::client::acp::AcpSession;
 use crate::events::{AgentApprovalReply, ApprovalDecision};
 use crate::run_state::AgentRunState;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{ClientMessage, SharedMessage};
+use vmux_session::AcpSession;
 use vmux_session::{AgentApprovalPolicy, AgentSession, approval_tool_key};
 
 #[derive(Default, Deserialize, Serialize)]
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn acp_session_reply_sets_streaming() {
-        use crate::client::acp::AcpSession;
+        use vmux_session::AcpSession;
         let mut app = make_app();
         let entity = app
             .world_mut()

@@ -684,7 +684,7 @@ impl<'a> AgentCwd<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::test_support::{spawn_stack_in_pane, test_settings};
+    use crate::host::test_support::{spawn_stack_in_pane, test_settings};
     use vmux_terminal::Terminal;
 
     #[test]

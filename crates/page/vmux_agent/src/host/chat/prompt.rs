@@ -8,7 +8,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
-use crate::client::acp::AcpSession;
 use crate::events::{AgentApprovalReply, AgentChoiceSelected};
 use crate::run_state::AgentRunState;
 use vmux_chat::event::{
@@ -17,6 +16,7 @@ use vmux_chat::event::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentAttachment, ClientMessage, SharedMessage};
+use vmux_session::AcpSession;
 use vmux_session::{
     AgentConversationTitle, AgentSession, PromptQueue, provisional_conversation_title,
 };

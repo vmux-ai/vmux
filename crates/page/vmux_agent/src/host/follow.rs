@@ -566,7 +566,7 @@ pub(super) fn tidy_on_agent_attention(
 fn tidy_acp_on_idle(
     settings: Res<AppSettings>,
     sessions: Query<
-        (&crate::client::acp::AcpSession, &crate::AgentRunState),
+        (&vmux_session::AcpSession, &crate::AgentRunState),
         Changed<crate::AgentRunState>,
     >,
     resolve: AgentFileResolve,
@@ -682,8 +682,8 @@ pub(crate) fn on_tidy_action(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::run_terminal::AgentCwd;
-    use crate::plugin::test_support::{
+    use crate::host::run_terminal::AgentCwd;
+    use crate::host::test_support::{
         close_stack_requests, spawn_file_preview_stack, test_settings,
     };
     use vmux_layout::pane::PaneSplit;

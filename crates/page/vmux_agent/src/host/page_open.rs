@@ -290,7 +290,7 @@ fn handle_agent_page_open(
     )>,
     children_q: Query<&Children>,
     agents: Query<&vmux_core::agent::AgentSession>,
-    acp_sessions: Query<&crate::client::acp::AcpSession>,
+    acp_sessions: Query<&vmux_session::AcpSession>,
     child_of_q: Query<&ChildOf>,
     agent_to_entity: Option<Res<AgentSessionToEntity>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
@@ -456,7 +456,7 @@ fn handle_swap_stack_session(
         // terminal child).
         commands
             .entity(ev.stack)
-            .remove::<crate::client::acp::AcpSession>()
+            .remove::<vmux_session::AcpSession>()
             .remove::<crate::client::acp::AcpInstallStarted>()
             .remove::<vmux_session::AgentSession>()
             .remove::<crate::AgentMessages>()
@@ -518,7 +518,7 @@ fn handle_agent_page_open_task(
     transition_webview: Option<Entity>,
     children_q: &Query<&Children>,
     agents: &Query<&vmux_core::agent::AgentSession>,
-    acp_sessions: &Query<&crate::client::acp::AcpSession>,
+    acp_sessions: &Query<&vmux_session::AcpSession>,
     child_of_q: &Query<&ChildOf>,
     agent_to_entity: Option<&AgentSessionToEntity>,
     idx: Option<&crate::client::page::strategy_index::PageStrategyIndex>,
@@ -851,9 +851,9 @@ fn data_url_for_html(html: &str) -> String {
 mod tests {
     use super::*;
     use crate::client::cli::vibe::VibeStrategy;
-    use crate::plugin::provider::AgentExecutableOverride;
-    use crate::plugin::spawn::handle_spawn_agent_requests;
-    use crate::plugin::test_support::{init_worktree_test_repo, test_settings};
+    use crate::host::provider::AgentExecutableOverride;
+    use crate::host::spawn::handle_spawn_agent_requests;
+    use crate::host::test_support::{init_worktree_test_repo, test_settings};
     use crate::session::{AgentSession, SessionId};
     use crate::strategy::AgentStrategies;
     use vmux_terminal::Terminal;
@@ -935,7 +935,7 @@ mod tests {
 
         app.update();
 
-        let session = app.world().get::<crate::AcpSession>(stack).unwrap();
+        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.agent_id, "claude");
         assert_eq!(session.cwd, std::path::PathBuf::from("/source/work"));
         assert!(session.resume.is_none());
@@ -976,7 +976,7 @@ mod tests {
                 .get::<crate::client::acp::AcpInstallStarted>(stack)
                 .is_none()
         );
-        let session = app.world().get::<crate::AcpSession>(stack).unwrap();
+        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.resume.as_deref(), Some("session-2"));
     }
 
@@ -1145,10 +1145,7 @@ mod tests {
         app.update();
 
         assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let session = app
-            .world()
-            .get::<crate::client::acp::AcpSession>(stack)
-            .unwrap();
+        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.agent_id, "custom");
         let meta = app.world().get::<PageMetadata>(stack).unwrap();
         assert_eq!(meta.url, "vmux://agent/custom");
@@ -1539,10 +1536,7 @@ mod tests {
 
         app.update();
 
-        let session = app
-            .world()
-            .get::<crate::client::acp::AcpSession>(stack)
-            .unwrap();
+        let session = app.world().get::<vmux_session::AcpSession>(stack).unwrap();
         assert_eq!(session.cwd, AgentCwd::process());
         assert_eq!(
             app.world()
@@ -1560,7 +1554,7 @@ mod tests {
         );
         assert_eq!(
             app.world_mut()
-                .query_filtered::<&ChildOf, With<crate::plugin::chat::AgentChatView>>()
+                .query_filtered::<&ChildOf, With<crate::host::chat::AgentChatView>>()
                 .iter(app.world())
                 .filter(|child_of| child_of.parent() == stack)
                 .count(),
@@ -1619,7 +1613,7 @@ mod tests {
         assert!(app.world().get_entity(webview).is_ok());
         assert!(
             app.world()
-                .get::<crate::plugin::chat::AgentChatView>(webview)
+                .get::<crate::host::chat::AgentChatView>(webview)
                 .is_some()
         );
         assert!(
@@ -1707,7 +1701,7 @@ mod tests {
         assert!(app.world().get::<PageOpenError>(task).is_none());
         assert_eq!(
             app.world()
-                .get::<crate::client::acp::AcpSession>(stack)
+                .get::<vmux_session::AcpSession>(stack)
                 .unwrap()
                 .cwd,
             AgentCwd::process()

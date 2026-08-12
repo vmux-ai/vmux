@@ -103,7 +103,7 @@ fn acp_agent_summaries(
 }
 
 pub(crate) fn update_recent_agents(
-    acp_sessions: Query<(&crate::client::acp::AcpSession, Option<&LastActivatedAt>)>,
+    acp_sessions: Query<(&vmux_session::AcpSession, Option<&LastActivatedAt>)>,
     cli_sessions: Query<(&vmux_core::agent::AgentSession, &ChildOf)>,
     stack_times: Query<&LastActivatedAt>,
     archived_pages: Query<&ArchivedPage>,
@@ -287,7 +287,7 @@ mod tests {
             ChildOf(cli_stack),
         ));
         app.world_mut().spawn((
-            crate::client::acp::AcpSession {
+            vmux_session::AcpSession {
                 agent_id: "claude".to_string(),
                 sid: "acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),
@@ -297,7 +297,7 @@ mod tests {
             LastActivatedAt(30),
         ));
         app.world_mut().spawn((
-            crate::client::acp::AcpSession {
+            vmux_session::AcpSession {
                 agent_id: "claude-acp".to_string(),
                 sid: "older-acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),
@@ -321,7 +321,7 @@ mod tests {
 
         let mut q = app
             .world_mut()
-            .query_filtered::<Entity, With<crate::client::acp::AcpSession>>();
+            .query_filtered::<Entity, With<vmux_session::AcpSession>>();
         let acp_sessions: Vec<_> = q.iter(app.world()).collect();
         for session in acp_sessions {
             app.world_mut().despawn(session);
@@ -376,7 +376,7 @@ mod tests {
         app.init_resource::<CommandBarAgentsSnapshot>()
             .add_systems(Update, update_recent_agents);
         app.world_mut().spawn((
-            crate::client::acp::AcpSession {
+            vmux_session::AcpSession {
                 agent_id: "claude-acp".to_string(),
                 sid: "acp-session".to_string(),
                 cwd: std::path::PathBuf::new(),

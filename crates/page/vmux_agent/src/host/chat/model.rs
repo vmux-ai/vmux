@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers};
 
-use crate::client::acp::{AcpModelState, AcpSession};
+use crate::client::acp::AcpModelState;
 use crate::events::AgentCommandRequest;
 use crate::strategy::{acp_agent_kind, kind_supports_cross_runtime};
 use vmux_chat::event::{
@@ -17,6 +17,7 @@ use vmux_chat::event::{
 };
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
+use vmux_session::AcpSession;
 use vmux_wire::room::RemoteModelState;
 
 /// Model selection and effort, for the page and for a remote peer.
