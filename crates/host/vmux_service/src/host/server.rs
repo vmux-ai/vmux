@@ -144,8 +144,11 @@ where
 // inside a spawned task that doesn't return Result).
 
 /// Run the IPC server loop, accepting connections and dispatching messages.
-pub async fn run_server(listener: UnixListener) {
-    let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
+///
+/// `wake_tx` belongs to the caller because the headless runner parks on its receiver: PTY output
+/// is what tells the app there is something to do. Dropping every sender — which happens when
+/// this function returns — is how the runner learns the server is gone.
+pub async fn run_server(listener: UnixListener, wake_tx: mpsc::UnboundedSender<ProcessId>) {
     let manager = Arc::new(Mutex::new(ProcessManager::new(wake_tx)));
     let input_writers = Arc::new(Mutex::new(HashMap::new()));
     let (agent_tx, _) = broadcast::channel::<ServiceMessage>(128);
@@ -178,7 +181,6 @@ pub async fn run_server(listener: UnixListener) {
 
         loop {
             interval.tick().await;
-            drain_pending_wakes(&mut wake_rx);
 
             let reaped = {
                 let mut mgr = poll_mgr.lock().await;
@@ -256,10 +258,6 @@ pub async fn run_server(listener: UnixListener) {
     poll_handle.abort();
     remote_handle.abort();
     tracing::info!("server: drain complete, exiting");
-}
-
-fn drain_pending_wakes(wake_rx: &mut mpsc::UnboundedReceiver<ProcessId>) {
-    while wake_rx.try_recv().is_ok() {}
 }
 
 fn command_result_to_content(result: crate::protocol::AgentCommandResult) -> (String, bool) {
@@ -1158,20 +1156,6 @@ mod tests {
         assert!(production.contains("acp_manager.lock().await.agent_info(&sid)"));
     }
 
-    #[test]
-    fn wake_drain_coalesces_all_pending_output() {
-        let (wake_tx, mut wake_rx) = mpsc::unbounded_channel();
-        for _ in 0..1024 {
-            wake_tx
-                .send(ProcessId::new())
-                .expect("wake event should queue");
-        }
-
-        drain_pending_wakes(&mut wake_rx);
-
-        assert!(wake_rx.try_recv().is_err());
-    }
-
     #[tokio::test]
     async fn pending_queries_roundtrips_oneshot() {
         let pending: PendingQueries = Arc::new(Mutex::new(HashMap::new()));
@@ -1221,7 +1205,8 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
-        let server = tokio::spawn(super::run_server(listener));
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(super::run_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (_r, mut w) = stream.into_split();
@@ -1320,7 +1305,8 @@ mod tests {
         let _ = std::fs::remove_file(&pidfile);
         let listener = tokio::net::UnixListener::bind(&sock).unwrap();
 
-        let server = tokio::spawn(super::run_server(listener));
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(super::run_server(listener, wake_tx));
 
         let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
         let (r, mut w) = stream.into_split();
