@@ -22,6 +22,7 @@ pub mod process;
 pub mod providers;
 pub mod registry;
 pub mod run_marker;
+pub mod runner;
 pub mod server;
 pub mod service;
 mod shell_integration;
