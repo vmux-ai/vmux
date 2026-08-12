@@ -1,5 +1,6 @@
 //! Lightweight types serialized between vmux processes and pages.
 
+pub mod agent;
 pub mod avatar;
 pub mod chat;
 pub mod command_bar;
@@ -16,6 +17,7 @@ pub mod space;
 pub mod team;
 pub mod terminal;
 
+pub use agent::AgentKind;
 pub use icon::{BuiltinIcon, PageIcon};
 pub use process_id::ProcessId;
 pub use terminal::{

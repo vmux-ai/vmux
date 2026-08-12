@@ -4,71 +4,7 @@ use std::time::SystemTime;
 use bevy::prelude::*;
 
 use crate::terminal::TerminalKind;
-
-#[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    bevy::prelude::Reflect,
-)]
-#[type_path = "vmux_core::agent"]
-pub enum AgentKind {
-    Vibe,
-    Claude,
-    Codex,
-}
-
-impl AgentKind {
-    pub fn executable(self) -> &'static str {
-        match self {
-            AgentKind::Vibe => "vibe",
-            AgentKind::Claude => "claude",
-            AgentKind::Codex => "codex",
-        }
-    }
-
-    pub fn display_name(self) -> &'static str {
-        match self {
-            AgentKind::Vibe => "Vibe",
-            AgentKind::Claude => "Claude",
-            AgentKind::Codex => "Codex",
-        }
-    }
-
-    pub fn as_url_segment(self) -> &'static str {
-        match self {
-            AgentKind::Vibe => "vibe",
-            AgentKind::Claude => "claude",
-            AgentKind::Codex => "codex",
-        }
-    }
-
-    pub fn from_url_segment(segment: &str) -> Option<Self> {
-        match segment {
-            "vibe" => Some(AgentKind::Vibe),
-            "claude" => Some(AgentKind::Claude),
-            "codex" => Some(AgentKind::Codex),
-            _ => None,
-        }
-    }
-
-    pub fn cli_url_prefix(self) -> String {
-        format!("vmux://agent/{}/", self.as_url_segment())
-    }
-
-    pub fn setup_url(self) -> String {
-        format!("vmux://agent/{}/setup", self.as_url_segment())
-    }
-
-    pub fn all() -> [AgentKind; 3] {
-        [AgentKind::Vibe, AgentKind::Claude, AgentKind::Codex]
-    }
-}
+pub use vmux_wire::agent::AgentKind;
 
 /// Reasoning-effort levels selectable for an agent, keyed by agent key — an ACP agent id
 /// (`"claude"`) or a CLI key (`"cli:claude"`, `"cli:codex"`). Ordered low→high for display.
@@ -213,30 +149,6 @@ pub fn parse_acp_agent_url(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn from_url_segment_recognizes_known_kinds() {
-        assert_eq!(AgentKind::from_url_segment("vibe"), Some(AgentKind::Vibe));
-        assert_eq!(
-            AgentKind::from_url_segment("claude"),
-            Some(AgentKind::Claude)
-        );
-        assert_eq!(AgentKind::from_url_segment("codex"), Some(AgentKind::Codex));
-        assert_eq!(AgentKind::from_url_segment("nope"), None);
-    }
-
-    #[test]
-    fn executable_returns_cli_binary_name() {
-        assert_eq!(AgentKind::Vibe.executable(), "vibe");
-        assert_eq!(AgentKind::Claude.executable(), "claude");
-        assert_eq!(AgentKind::Codex.executable(), "codex");
-    }
-
-    #[test]
-    fn cli_url_prefix_returns_three_segment_form() {
-        assert_eq!(AgentKind::Vibe.cli_url_prefix(), "vmux://agent/vibe/");
-        assert_eq!(AgentKind::Claude.cli_url_prefix(), "vmux://agent/claude/");
-    }
 
     #[test]
     fn agent_kind_into_terminal_kind() {
