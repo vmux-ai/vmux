@@ -75,8 +75,16 @@ const DARK_BACKGROUND: (u8, u8, u8, u8) = (10, 10, 10, 255);
 /// The webview's own background, which is what shows before the document loads at all.
 ///
 /// Without this the first frame after the launch screen is plain white — a stylesheet cannot
-/// reach it, because there is no document yet. It has to be one colour decided up front, so the
-/// system appearance is read directly rather than left to a media query.
+/// reach it, because there is no document yet. It has to be one colour decided up front, before
+/// there is any UIKit environment to consult, so this reads the appearance from
+/// `currentTraitCollection`, which UIKit documents as meaningful only inside a trait-environment
+/// callback and this is not one.
+///
+/// It does answer correctly here, checked both ways: a dark cold start produced a dark first
+/// frame, where an `Unspecified` reading would have fallen through to a light one, and forcing
+/// the reading to light produced a light frame in dark mode. There is no second line of defence
+/// behind it — an inline media query in the document was tried and does not repaint over this —
+/// so if the reading is ever wrong, the wrong colour shows until the app paints.
 #[cfg(target_os = "ios")]
 fn webview_background() -> (u8, u8, u8, u8) {
     use objc2_ui_kit::{UITraitCollection, UIUserInterfaceStyle};
