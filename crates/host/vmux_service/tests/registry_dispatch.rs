@@ -52,7 +52,7 @@ fn ensure_running_kickstarts_after_register_for_sm_app_service_path() {
 
 #[test]
 fn embedded_agent_label_matches_packaging_plist() {
-    let plist = include_str!("../../../packaging/macos/ai.vmux.service.plist");
+    let plist = include_str!("../../../../packaging/macos/ai.vmux.service.plist");
     let needle = format!("<string>{EMBEDDED_AGENT_LABEL}</string>");
     assert!(
         plist.contains(&needle),

@@ -7,7 +7,7 @@ publish = false
 
 [dependencies]
 serde_json = { workspace = true }
-vmux_macro = { path = "../vmux_macro" }
+vmux_macro = { path = "../../vmux_macro" }
 
 [dev-dependencies]
-vmux_command = { path = "../vmux_command" }
+vmux_command = { path = "../../vmux_command" }

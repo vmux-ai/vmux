@@ -35,7 +35,7 @@ vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../page/vmux_history" }
 vmux_layout = { path = "../page/vmux_layout" }
-vmux_service = { path = "../vmux_service" }
+vmux_service = { path = "../host/vmux_service" }
 vmux_setting = { path = "../page/vmux_setting" }
 vmux_space = { path = "../page/vmux_space" }
 vmux_terminal = { path = "../page/vmux_terminal" }

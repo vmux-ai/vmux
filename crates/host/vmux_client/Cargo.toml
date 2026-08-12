@@ -11,8 +11,8 @@ rkyv = { workspace = true }
 tokio = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
-vmux_profile = { path = "../vmux_profile" }
-vmux_wire = { path = "../vmux_wire" }
+vmux_profile = { path = "../../vmux_profile" }
+vmux_wire = { path = "../../vmux_wire" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"

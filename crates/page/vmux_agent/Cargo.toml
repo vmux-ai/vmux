@@ -40,9 +40,9 @@ vmux_editor = { path = "../vmux_editor" }
 vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_mcp = { path = "../../vmux_mcp" }
-vmux_remote = { path = "../../vmux_remote" }
-vmux_service = { path = "../../vmux_service" }
+vmux_mcp = { path = "../../host/vmux_mcp" }
+vmux_remote = { path = "../../host/vmux_remote" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
