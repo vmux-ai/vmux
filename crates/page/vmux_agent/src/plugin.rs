@@ -43,7 +43,6 @@ pub mod strategy;
 pub mod toast;
 pub mod tools;
 pub mod url;
-pub mod variant;
 pub mod workspace;
 
 pub mod systems {
@@ -95,7 +94,7 @@ pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
 pub use toast::{AgentToast, ToastLevel};
 pub use tools::mcp_tool_defs;
 pub use url::{AgentKind, AgentUrl};
-pub use variant::AgentVariant;
+pub use vmux_session::AgentVariant;
 
 #[cfg(test)]
 mod tests {

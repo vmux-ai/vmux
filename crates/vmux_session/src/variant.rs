@@ -1,13 +1,7 @@
+use bevy_reflect::Reflect;
+
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    bevy::prelude::Reflect,
+    Copy, Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Reflect,
 )]
 pub enum AgentVariant {
     Page,

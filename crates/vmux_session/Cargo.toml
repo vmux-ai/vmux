@@ -1,0 +1,15 @@
+[package]
+name = "vmux_session"
+description = "Render-free ECS model of an agent session and its room projection"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+bevy_ecs = { workspace = true }
+bevy_reflect = { workspace = true }
+serde = { workspace = true }
+vmux_wire = { path = "../vmux_wire", features = ["bevy"] }
