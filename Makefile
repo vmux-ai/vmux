@@ -1,4 +1,4 @@
-.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
+.PHONY: dev dev-full dev-player dev-rust web-bundle test-app local release build-local build-release build setup-cef install-debug-render-process seed-target doctor ensure-mac-deps ensure-native-deps ensure-web-deps ensure-dioxus-deps ensure-mobile-ios-deps ensure-mobile-android-deps ios android mobile-ios mobile-android mobile-ios-run mobile-android-run build-ios-release ios-release ensure-ios-release-deps ensure-package-deps ensure-codesign-deps website build-website-release build-website-css api-docs lint lint-fix test setup-hooks cleanup cleanup-local
 
 .DEFAULT_GOAL := dev
 
@@ -86,6 +86,13 @@ android: mobile-android-run
 mobile-ios: ensure-mobile-ios-deps
 	"$(DX_BIN)" build --ios -p vmux_mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
 	./scripts/inject-ios-resources.sh
+	./scripts/test-ios-bundle-layout.sh
+
+build-ios-release: ensure-ios-release-deps
+	./scripts/build-ios-release.sh
+
+ios-release: build-ios-release
+	./scripts/test-ios-bundle-layout.sh --signed
 
 # The icon, launch screen and privacy manifest exist only in a bundle the injector has been over,
 # and `mobile-ios-run` cannot be that bundle: `dx serve` installs what it just built and reinstalls
@@ -352,6 +359,18 @@ ensure-package-deps:
 		echo "Installing bevy_cef_bundle_app $(BEVY_CEF_BUNDLE_APP_VERSION) (found: $${bcb_version:-missing})..."; \
 		"$(CARGO_BIN)" install bevy_cef_bundle_app --locked --version "$(BEVY_CEF_BUNDLE_APP_VERSION)"; \
 	fi
+
+# altool is not here: it is only reached when VMUX_IOS_UPLOAD asks for an upload, and requiring
+# it up front would refuse a build-and-sign on a machine that can do one. The script checks for
+# it where it uses it.
+ensure-ios-release-deps: ensure-mobile-ios-deps ensure-codesign-deps
+	@echo "Checking iOS release dependencies..."
+	@for tool in actool ibtool; do \
+		if ! xcrun --find "$$tool" >/dev/null 2>&1; then \
+			echo "$$tool not found. Install Xcode, not just the Command Line Tools."; \
+			exit 1; \
+		fi; \
+	done
 
 ensure-codesign-deps:
 	@echo "Checking codesigning dependencies..."

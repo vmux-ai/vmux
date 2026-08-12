@@ -11,6 +11,7 @@ description: Use when releasing a new vmux version, cutting a vmux release, vali
 - Main is clean and current enough to branch from.
 - All recent CI runs green.
 - Apple signing secrets configured in repo Actions secrets: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID`.
+- iOS App Store secrets configured: `APPLE_IOS_SIGNING_IDENTITY`, `APPLE_IOS_CERTIFICATE`, `APPLE_IOS_CERTIFICATE_PASSWORD`, `APPLE_IOS_PROVISIONING_PROFILE`. Distinct from the macOS pair above — `APPLE_CERTIFICATE` is a Developer ID certificate and cannot sign for the App Store, so this needs an Apple Distribution certificate and a provisioning profile for `ai.vmux.mobile`. `APPLE_ID`, `APPLE_APP_PASSWORD` and `APPLE_TEAM_ID` are shared with macOS.
 - Update signing secrets configured: `VMUX_UPDATE_PUBLIC_KEY`, `VMUX_UPDATE_PRIVATE_KEY`, `VMUX_UPDATE_PRIVATE_KEY_PASSWORD`.
 
 ## Steps
