@@ -4,32 +4,31 @@ default_platform = "ios"
 public_dir = "assets"
 tailwind_input = "assets/tailwind.css"
 tailwind_output = "assets/tailwind.out.css"
+# Supplies the whole plist rather than merging. `[ios.plist]` is appended after the keys dx
+# hardcodes and a duplicate key loses on parse, so UIDeviceFamily, the orientations and
+# CFBundleVersion cannot be set that way. Read relative to the working directory, so dx has to
+# be invoked from the repo root — `make mobile-ios` is.
+ios_info_plist = "packaging/ios/Info.plist"
 
 [bundle]
-identifier = "ai.vmux.remote"
+identifier = "ai.vmux.mobile"
 publisher = "Vmux"
 short_description = "Continue Vmux agent chats from your phone."
 icon = ["../../icon.png"]
 
 [deep_links]
-schemes = ["vmuxremote"]
+schemes = ["vmux"]
 
 [ios]
 deployment_target = "15.0"
-identifier = "ai.vmux.remote"
+identifier = "ai.vmux.mobile"
 icon = ["../../icon.png"]
-
-[ios.plist]
-CFBundleDisplayName = "Vmux"
-CFBundleName = "Vmux"
-NSAppTransportSecurity = { NSAllowsLocalNetworking = true }
-NSCameraUsageDescription = "Scan the pairing QR code shown by Vmux on your Mac."
 
 [android]
 min_sdk = 24
 target_sdk = 35
 compile_sdk = 35
-identifier = "ai.vmux.remote"
+identifier = "ai.vmux.mobile"
 icon = ["../../icon.png"]
 
 [android.application]

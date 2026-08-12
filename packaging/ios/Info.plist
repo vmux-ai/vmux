@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+	Replaces the dx template wholesale: `[ios] info_plist` returns this file verbatim instead of
+	rendering assets/ios/ios.plist.hbs. `[ios.plist]` cannot be used for the keys below, because
+	the template writes them first and a duplicate key loses on parse.
+
+	Keep in sync with crates/vmux_mobile/Dioxus.toml. CFBundleExecutable is the [[bin]] name.
+
+	The two version keys below are placeholders: scripts/inject-ios-resources.sh stamps the built
+	copy from the workspace version and the CI run number. Editing them here has no effect.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Vmux</string>
+
+	<key>CFBundleExecutable</key>
+	<string>vmux_mobile</string>
+
+	<key>CFBundleIdentifier</key>
+	<string>ai.vmux.mobile</string>
+
+	<key>CFBundleName</key>
+	<string>Vmux</string>
+
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.30</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en_US</string>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UISupportsTrueScreenSizeOnMac</key>
+	<true/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+		<string>metal</string>
+	</array>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+	</array>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ai.vmux.mobile</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>vmux</string>
+			</array>
+		</dict>
+	</array>
+
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Scan the pairing QR code shown by Vmux on your Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Connect to Vmux on your Mac when it is on the same network as this iPhone.</string>
+
+	<!-- rustls-tls only: standard HTTPS, exempt. Unset forces a manual prompt on every upload. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

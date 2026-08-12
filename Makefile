@@ -81,8 +81,11 @@ ios: mobile-ios-run
 
 android: mobile-android-run
 
+# `inject-ios-resources.sh` reads VMUX_IOS_PROFILE to decide which bundle to write into, so the
+# build has to be told the same thing or the script looks for a bundle dx never produced.
 mobile-ios: ensure-mobile-ios-deps
-	"$(DX_BIN)" build --ios -p vmux_mobile
+	"$(DX_BIN)" build --ios -p vmux_mobile $(if $(filter release,$(VMUX_IOS_PROFILE)),--release)
+	./scripts/inject-ios-resources.sh
 
 mobile-android: ensure-mobile-android-deps
 	"$(DX_BIN)" build --android -p vmux_mobile

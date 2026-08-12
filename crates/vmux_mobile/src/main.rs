@@ -74,7 +74,7 @@ fn main() {
                     .unwrap_or_else(|error| error.into_inner());
                 opened.extend(
                     urls.iter()
-                        .filter(|url| url.scheme() == "vmuxremote")
+                        .filter(|url| url.scheme() == "vmux" && url.host_str() == Some("pair"))
                         .map(ToString::to_string),
                 );
             }
@@ -1935,9 +1935,9 @@ fn apply_remote_event(
 
 fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
     let input = input.trim();
-    if input.starts_with("vmuxremote://") {
+    if input.starts_with("vmux://") {
         let parsed = Url::parse(input).map_err(|_| "Pairing URL is invalid.".to_string())?;
-        if parsed.scheme() != "vmuxremote" || parsed.host_str() != Some("pair") {
+        if parsed.scheme() != "vmux" || parsed.host_str() != Some("pair") {
             return Err("Pairing URL is invalid.".to_string());
         }
         let params = parsed
@@ -2104,7 +2104,7 @@ mod tests {
         ))
         .unwrap();
         let deep_link = parse_pairing_url(&format!(
-            "vmuxremote://pair?base=https%3A%2F%2Fmac.example.ts.net&token=secret&fp={expected}"
+            "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net&token=secret&fp={expected}"
         ))
         .unwrap();
 
@@ -2147,7 +2147,7 @@ mod tests {
     fn parses_pairing_deep_link() {
         assert_eq!(
             parse_pairing_url(
-                "vmuxremote://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret"
+                "vmux://pair?base=https%3A%2F%2Fmac.example.ts.net%3A54821&token=secret"
             )
             .unwrap(),
             Credentials {

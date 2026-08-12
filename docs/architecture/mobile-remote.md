@@ -46,7 +46,7 @@ with the relay and waits for it to allocate a port; the pairing link cannot be s
 because the link has to name that port.
 
 The first time, scan the QR code with the phone. It opens Vmux Remote through the
-`vmuxremote://pair` deep link, verifies the endpoint, and stores the credentials. After the first
+`vmux://pair` deep link, verifies the endpoint, and stores the credentials. After the first
 authenticated request, the desktop card switches to **Phone paired**. Use **Pair another** to show
 the QR again. In a simulator, copy the pairing URL from the desktop card and paste it in — a
 simulator cannot scan the screen behind it.

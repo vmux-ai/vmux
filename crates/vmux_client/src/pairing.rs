@@ -224,7 +224,7 @@ impl PersistedRelay {
 pub struct PairingInfo {
     /// Carried by the QR code.
     pub url: String,
-    /// Carried by the `vmuxremote://` deep link, for a phone already holding the device.
+    /// Carried by the `vmux://` deep link, for a phone already holding the device.
     pub deep_link: String,
 }
 
@@ -242,8 +242,7 @@ impl PairingInfo {
             format!("token={token}&fp={fingerprint}")
         }));
 
-        let mut deep_link =
-            url::Url::parse("vmuxremote://pair").map_err(|error| error.to_string())?;
+        let mut deep_link = url::Url::parse("vmux://pair").map_err(|error| error.to_string())?;
         deep_link
             .query_pairs_mut()
             .append_pair("base", base_url)
@@ -311,7 +310,7 @@ mod tests {
         );
         assert_eq!(
             pairing.deep_link,
-            "vmuxremote://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret&fp=abc123"
+            "vmux://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret&fp=abc123"
         );
     }
 
@@ -322,7 +321,7 @@ mod tests {
         assert_eq!(pairing.url, "https://localhost:41003/#token=secret");
         assert_eq!(
             pairing.deep_link,
-            "vmuxremote://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret"
+            "vmux://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret"
         );
     }
 
