@@ -62,7 +62,7 @@
 			<string>ai.vmux.mobile</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>vmuxremote</string>
+				<string>vmux</string>
 			</array>
 		</dict>
 	</array>
