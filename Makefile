@@ -91,8 +91,12 @@ mobile-ios: ensure-mobile-ios-deps
 # and `mobile-ios-run` cannot be that bundle: `dx serve` installs what it just built and reinstalls
 # on every reload, so anything added afterwards is gone by the next keystroke. This installs the
 # app as it actually ships, at the cost of the hot-reload loop.
+# `set -e` because make reads the exit status of the last command in the chain: a failed install
+# followed by a launch of whatever was already on the simulator would report success, and show a
+# stale app that looks like the new one.
 ios-local: mobile-ios ensure-booted-simulator
-	@. ./scripts/cargo-target-paths.sh; \
+	@set -e; \
+	. ./scripts/cargo-target-paths.sh; \
 	bundle="$$(vmux_cargo_target_dir .)/dx/vmux_mobile/$${VMUX_IOS_PROFILE:-debug}/ios/VmuxMobile.app"; \
 	xcrun simctl install booted "$$bundle"; \
 	xcrun simctl launch booted ai.vmux.mobile
@@ -103,7 +107,8 @@ mobile-android: ensure-mobile-android-deps
 # Boot the newest available iPhone, and leave it booted. `dx serve` and `simctl install` both
 # address the simulator as `booted` rather than by name, so both need one and neither brings one up.
 ensure-booted-simulator:
-	@if xcrun simctl list devices booted -j | jq -e '[.devices[][] | select(.name | startswith("iPhone"))] | length > 0' >/dev/null; then exit 0; fi; \
+	@set -e; \
+	if xcrun simctl list devices booted -j | jq -e '[.devices[][] | select(.name | startswith("iPhone"))] | length > 0' >/dev/null; then exit 0; fi; \
 	udid="$$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries | sort_by(.key) | reverse[] | .value[] | select(.isAvailable != false and (.name | startswith("iPhone")))] | first | .udid // empty')"; \
 	if [ -z "$$udid" ]; then \
 		echo "No available iPhone simulator. Install one in Xcode Settings > Components."; \
