@@ -1,5 +1,6 @@
 [package]
 name = "vmux_editor"
+build = "../../build_cfg.rs"
 description = "Bevy + CEF + Dioxus file viewer webview"
 version.workspace = true
 edition.workspace = true

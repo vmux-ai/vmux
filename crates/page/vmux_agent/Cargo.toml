@@ -1,5 +1,6 @@
 [package]
 name = "vmux_agent"
+build = "../../build_cfg.rs"
 description = "Agent CLI strategies (vibe, claude, codex) and shared session ECS abstractions"
 version.workspace = true
 edition.workspace = true

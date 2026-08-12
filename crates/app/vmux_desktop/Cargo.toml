@@ -1,5 +1,6 @@
 [package]
 name = "vmux_desktop"
+build = "../../build_cfg_git.rs"
 version.workspace = true
 edition.workspace = true
 description.workspace = true

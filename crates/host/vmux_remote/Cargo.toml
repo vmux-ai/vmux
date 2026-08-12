@@ -1,5 +1,6 @@
 [package]
 name = "vmux_remote"
+build = "../../build_cfg.rs"
 version.workspace = true
 edition.workspace = true
 description = "Transport contract between Vmux clients, the relay and a desktop"

@@ -4,7 +4,7 @@ description = "Command vocab + command-bar wire events"
 version.workspace = true
 edition.workspace = true
 publish = false
-build = "build.rs"
+build = "../build_cfg_git.rs"
 
 [features]
 default = []

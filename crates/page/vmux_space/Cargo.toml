@@ -1,5 +1,6 @@
 [package]
 name = "vmux_space"
+build = "../../build_cfg.rs"
 description = "Space list webview app"
 version.workspace = true
 edition.workspace = true

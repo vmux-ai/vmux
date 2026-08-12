@@ -1,5 +1,6 @@
 [package]
 name = "vmux_knowledge"
+build = "../../build_cfg.rs"
 description = "Local-first Markdown knowledge base"
 version.workspace = true
 edition.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "vmux_history"
+build = "../../build_cfg.rs"
 description = "Minimal Bevy + CEF + Dioxus POC (history host message bridge)"
 version.workspace = true
 edition.workspace = true
