@@ -46,6 +46,9 @@ bevy = { version = "0.19.0", default-features = false, features = [
 ] }
 bevy_ecs = { version = "0.19.0", default-features = true }
 bevy_reflect = { version = "0.19.0", default-features = true }
+# Reproduces the feature set bevy_internal already resolves bevy_app to. Its defaults would add
+# error_panic_hook, which bevy does not forward, changing the desktop's panic handler.
+bevy_app = { version = "0.19.0", default-features = false, features = ["bevy_reflect", "std"] }
 bevy_winit = { version = "0.19.0", default-features = false, features = [
     "x11",
     "wayland",

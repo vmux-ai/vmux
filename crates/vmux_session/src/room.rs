@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use bevy::prelude::*;
+use bevy_app::prelude::*;
+use bevy_ecs::prelude::*;
 use vmux_wire::room::{
     ClientOpId, EventId, MemberId, MemberKind, Message, RoomEvent, RoomId, RoomRole,
 };
 
-use crate::client::acp::AcpSession;
-use crate::components::{AgentConversationTitle, AgentMessages, AgentSession};
+use crate::acp::AcpSession;
+use crate::session::{AgentConversationTitle, AgentMessages, AgentSession};
 
 /// Projects each agent session into a collaborative room: members, a draft document, and one
 /// materialized event per message, kept in step with the session's transcript.
@@ -402,12 +403,13 @@ fn cleanup_orphaned_rooms(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AgentKind, AgentVariant};
+    use crate::variant::AgentVariant;
+    use vmux_wire::agent::AgentKind;
 
     #[test]
     fn projects_agent_session_into_stable_room_entities() {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(RoomPlugin);
+        app.add_plugins(RoomPlugin);
         let session = app
             .world_mut()
             .spawn((

@@ -31,7 +31,6 @@ pub mod page_open;
 pub mod provider;
 pub mod providers;
 pub mod query;
-pub mod room;
 pub mod run_state;
 pub mod run_state_kind;
 pub mod run_terminal;
@@ -82,12 +81,6 @@ pub use events::{
 pub use launch::build_agent_launch;
 pub use mcp::McpServerConfig;
 pub use message::{AssistantBlock, Message};
-pub use room::{
-    ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
-    MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
-    RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
-    RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
-};
 pub use run_state::AgentRunState;
 pub use run_state_kind::{AgentRunStateKind, LastRunStateKind};
 pub use stream::{PartialToolUse, StopReason, StreamEvent, ToolDef};
@@ -95,6 +88,12 @@ pub use toast::{AgentToast, ToastLevel};
 pub use tools::mcp_tool_defs;
 pub use url::{AgentKind, AgentUrl};
 pub use vmux_session::AgentVariant;
+pub use vmux_session::room::{
+    ChatRoom, CollaborativeDocument, CrdtChangeReceived, DocumentKind, MaterializedRoomEvent,
+    MemberPresence, MessageDelivery, RoomAgentBinding, RoomEventIdentity, RoomEventIndex,
+    RoomIndex, RoomIntent, RoomMember, RoomMessageContent, RoomMetadata, RoomOpCommitted,
+    RoomOpReceived, RoomPlugin, RoomProjection, StreamingMessage,
+};
 
 #[cfg(test)]
 mod tests {
