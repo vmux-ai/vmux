@@ -14,21 +14,14 @@ fn main() {
     PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
         .track_manifest_rel_paths(&[
             "../vmux_ui/assets/theme.css",
-            "../page/vmux_editor/src",
             "../vmux_command/src",
             "../vmux_core/src",
             "../vmux_git/src",
-            "../page/vmux_history/src",
-            "../page/vmux_layout/src",
             "../vmux_profile/src",
             "../host/vmux_service/src",
-            "../page/vmux_setting/src",
-            "../page/vmux_space/src",
-            "../page/vmux_team/src",
-            "../page/vmux_terminal/src",
-            "../page/vmux_agent/src",
             "../vmux_wire/src",
         ])
+        .track_bucket_crates("../page", "src")
         .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
         .cef_finalize(CefEmbeddedPageFinalize {
             strip_uncompiled_tailwind_css: true,

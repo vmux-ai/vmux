@@ -76,6 +76,25 @@ impl PageBuilder {
         self
     }
 
+    /// Tracks `<rel_bucket>/*/<rel_within>` for every crate in a bucket directory.
+    ///
+    /// Enumerating the bucket instead of listing its crates is what keeps a page added later from
+    /// being silently untracked: a missing entry does not fail the build, it just stops the bundle
+    /// rebuilding when that page changes, and the stale bundle is indistinguishable from a fresh
+    /// one. Panics if the bucket is unreadable, for the same reason.
+    pub fn track_bucket_crates(mut self, rel_bucket: &str, rel_within: &str) -> Self {
+        let bucket = self.manifest_dir.join(rel_bucket);
+        let entries = fs::read_dir(&bucket)
+            .unwrap_or_else(|e| panic!("cannot read crate bucket {}: {e}", bucket.display()));
+        for entry in entries {
+            let path = entry.expect("bucket entry").path().join(rel_within);
+            if path.is_dir() {
+                self.extra_tracked.push(path);
+            }
+        }
+        self
+    }
+
     pub fn copy_manifest_dir_to_dist(mut self, source_rel: &str, dest_rel: &str) -> Self {
         let source = self.manifest_dir.join(source_rel);
         self.extra_tracked.push(source.clone());
@@ -877,9 +896,9 @@ mod tests {
             std::process::id()
         ));
         let manifest_dir = root.join("crates/vmux_server");
-        let layout_src = root.join("crates/vmux_layout/src");
+        let layout_src = root.join("crates/page/vmux_layout/src");
         let nested_src = layout_src.join("nested");
-        let terminal_fonts = root.join("crates/vmux_terminal/assets/fonts");
+        let terminal_fonts = root.join("crates/page/vmux_terminal/assets/fonts");
         fs::create_dir_all(manifest_dir.join("assets")).unwrap();
         fs::create_dir_all(manifest_dir.join("src")).unwrap();
         fs::create_dir_all(&nested_src).unwrap();
@@ -895,8 +914,8 @@ mod tests {
         fs::write(terminal_fonts.join("terminal.woff2"), "").unwrap();
 
         let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
-            .track_manifest_rel_paths(&["../vmux_layout/src"])
-            .copy_manifest_dir_to_dist("../vmux_terminal/assets/fonts", "assets/fonts")
+            .track_manifest_rel_paths(&["../page/vmux_layout/src"])
+            .copy_manifest_dir_to_dist("../page/vmux_terminal/assets/fonts", "assets/fonts")
             .tracked_paths();
 
         let _ = fs::remove_dir_all(&root);
@@ -907,5 +926,39 @@ mod tests {
             tracked
                 .contains(&manifest_dir.join("../page/vmux_terminal/assets/fonts/terminal.woff2"))
         );
+    }
+
+    #[test]
+    fn tracks_every_crate_in_a_bucket() {
+        let root = std::env::temp_dir().join(format!(
+            "vmux-page-builder-bucket-test-{}",
+            std::process::id()
+        ));
+        let manifest_dir = root.join("crates/vmux_server");
+        fs::create_dir_all(manifest_dir.join("assets")).unwrap();
+        fs::create_dir_all(manifest_dir.join("src")).unwrap();
+        fs::write(manifest_dir.join("Cargo.toml"), "").unwrap();
+        fs::write(manifest_dir.join("Dioxus.toml"), "").unwrap();
+        fs::write(manifest_dir.join("assets/index.html"), "").unwrap();
+        fs::write(manifest_dir.join("assets/index.css"), "").unwrap();
+        fs::write(manifest_dir.join("src/lib.rs"), "").unwrap();
+
+        let pages = ["vmux_agent", "vmux_chat", "vmux_terminal"];
+        for page in pages {
+            let src = root.join("crates/page").join(page).join("src");
+            fs::create_dir_all(&src).unwrap();
+            fs::write(src.join("page.rs"), "").unwrap();
+        }
+        fs::create_dir_all(root.join("crates/page/vmux_start/assets")).unwrap();
+
+        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
+            .track_bucket_crates("../page", "src")
+            .tracked_paths();
+
+        let _ = fs::remove_dir_all(&root);
+        for page in pages {
+            let expected = manifest_dir.join(format!("../page/{page}/src/page.rs"));
+            assert!(tracked.contains(&expected), "{page} was not tracked");
+        }
     }
 }
