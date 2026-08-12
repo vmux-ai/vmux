@@ -16,7 +16,7 @@ PROFILE="${1:-local}"
 export PATH="${HOME}/.cargo/bin:${PATH}"
 source "$ROOT/scripts/cargo-target-paths.sh"
 
-CARGO_TOML="$ROOT/crates/vmux_desktop/Cargo.toml"
+CARGO_TOML="$ROOT/crates/app/vmux_desktop/Cargo.toml"
 INFO_PLIST="$ROOT/packaging/macos/Info.plist"
 
 case "$PROFILE" in

@@ -900,11 +900,12 @@ mod tests {
             .tracked_paths();
 
         let _ = fs::remove_dir_all(&root);
-        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/page.rs")));
-        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/nested/pane.rs")));
-        assert!(tracked.contains(&manifest_dir.join("../vmux_layout/src/nested/pane.css")));
+        assert!(tracked.contains(&manifest_dir.join("../page/vmux_layout/src/page.rs")));
+        assert!(tracked.contains(&manifest_dir.join("../page/vmux_layout/src/nested/pane.rs")));
+        assert!(tracked.contains(&manifest_dir.join("../page/vmux_layout/src/nested/pane.css")));
         assert!(
-            tracked.contains(&manifest_dir.join("../vmux_terminal/assets/fonts/terminal.woff2"))
+            tracked
+                .contains(&manifest_dir.join("../page/vmux_terminal/assets/fonts/terminal.woff2"))
         );
     }
 }

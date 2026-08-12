@@ -1,7 +1,7 @@
 [workspace]
-members = ["crates/*", "patches/*"]
+members = ["crates/app/*", "crates/page/*", "crates/vmux_*", "patches/*"]
 exclude = ["patches/cargo-packager-0.11.8", "website", "vmux_docs"]
-default-members = ["crates/vmux_desktop"]
+default-members = ["crates/app/vmux_desktop"]
 resolver = "3"
 
 [workspace.package]

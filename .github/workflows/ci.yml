@@ -220,7 +220,7 @@ jobs:
               - 'packaging/**'
               - 'Cargo.toml'
               - 'Makefile'
-              - 'crates/vmux_desktop/Cargo.toml'
+              - 'crates/app/vmux_desktop/Cargo.toml'
               - 'Cargo.lock'
               - '.github/workflows/release.yml'
               - '.github/workflows/ci.yml'

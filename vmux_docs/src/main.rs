@@ -71,13 +71,14 @@ fn main() -> Result<()> {
     let mut failed = Vec::new();
     for name in wanted {
         eprintln!("doc: {name}");
-        let manifest = root.join(format!("crates/{name}/Cargo.toml"));
+        let krate_path = DocCrate(name);
+        let manifest = krate_path.manifest(&root)?;
         let mut builder = rustdoc_json::Builder::default()
             .toolchain(NIGHTLY)
             .manifest_path(&manifest)
             .document_private_items(false)
             .cap_lints(Some("allow"));
-        if let Some(bin) = bin_target(name) {
+        if let Some(bin) = krate_path.bin_target() {
             builder = builder.package_target(rustdoc_json::PackageTarget::Bin(bin.to_string()));
         }
         let built = builder.build();
@@ -130,9 +131,28 @@ fn first_paragraph(md: &str) -> String {
     md.split("\n\n").next().unwrap_or("").trim().to_string()
 }
 
-fn bin_target(crate_name: &str) -> Option<&'static str> {
-    match crate_name {
-        "vmux_cli" => Some("vmux"),
-        _ => None,
+struct DocCrate<'a>(&'a str);
+
+impl DocCrate<'_> {
+    /// Locates the crate's manifest, whichever bucket under `crates/` holds it.
+    fn manifest(&self, root: &Path) -> Result<PathBuf> {
+        for bucket in ["app", "page", "."] {
+            let path = root
+                .join("crates")
+                .join(bucket)
+                .join(self.0)
+                .join("Cargo.toml");
+            if path.is_file() {
+                return Ok(path);
+            }
+        }
+        anyhow::bail!("no manifest found for {}", self.0)
+    }
+
+    fn bin_target(&self) -> Option<&'static str> {
+        match self.0 {
+            "vmux_cli" => Some("vmux"),
+            _ => None,
+        }
     }
 }

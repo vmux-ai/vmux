@@ -1,16 +1,16 @@
 @import "../../vmux_ui/assets/theme.css";
 @import "tailwindcss";
 @source "../src";
-@source "../../vmux_agent/src";
-@source "../../vmux_chat/src";
-@source "../../vmux_editor/src";
-@source "../../vmux_history/src";
-@source "../../vmux_layout/src";
+@source "../../page/vmux_agent/src";
+@source "../../page/vmux_chat/src";
+@source "../../page/vmux_editor/src";
+@source "../../page/vmux_history/src";
+@source "../../page/vmux_layout/src";
 @source "../../vmux_service/src";
-@source "../../vmux_setting/src";
-@source "../../vmux_space/src";
-@source "../../vmux_team/src";
-@source "../../vmux_terminal/src";
+@source "../../page/vmux_setting/src";
+@source "../../page/vmux_space/src";
+@source "../../page/vmux_team/src";
+@source "../../page/vmux_terminal/src";
 @source "../../vmux_ui/src";
 @source ".";
 

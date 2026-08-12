@@ -54,12 +54,13 @@ dev-rust:
 	@wasm="$$(find crates/vmux_server/dist -type f -name '*_bg.wasm' -print -quit 2>/dev/null)"; \
 	stale="$$(find \
 		Cargo.toml Cargo.lock crates/vmux_*/Cargo.toml \
+		crates/app/*/Cargo.toml crates/page/*/Cargo.toml \
 		crates/vmux_server/Cargo.toml crates/vmux_server/Dioxus.toml crates/vmux_server/build.rs \
 		crates/vmux_server/assets crates/vmux_server/src crates/vmux_ui/assets crates/vmux_ui/src \
-		crates/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/vmux_editor/src \
-		crates/vmux_git/src crates/vmux_history/src crates/vmux_layout/src crates/vmux_profile/src \
-		crates/vmux_service/src crates/vmux_setting/src crates/vmux_space/src \
-		crates/vmux_team/src crates/vmux_terminal/assets/fonts crates/vmux_terminal/src \
+		crates/page/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/page/vmux_editor/src \
+		crates/vmux_git/src crates/page/vmux_history/src crates/page/vmux_layout/src crates/vmux_profile/src \
+		crates/vmux_service/src crates/page/vmux_setting/src crates/page/vmux_space/src \
+		crates/page/vmux_team/src crates/page/vmux_terminal/assets/fonts crates/page/vmux_terminal/src \
 		crates/vmux_wire/src \
 		-type f -newer "$$wasm" -print -quit 2>/dev/null)"; \
 	if [ -z "$$wasm" ] || [ -n "$$stale" ]; then \

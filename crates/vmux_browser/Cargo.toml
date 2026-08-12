@@ -33,12 +33,12 @@ tempfile = "3"
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
-vmux_history = { path = "../vmux_history" }
-vmux_layout = { path = "../vmux_layout" }
+vmux_history = { path = "../page/vmux_history" }
+vmux_layout = { path = "../page/vmux_layout" }
 vmux_service = { path = "../vmux_service" }
-vmux_setting = { path = "../vmux_setting" }
-vmux_space = { path = "../vmux_space" }
-vmux_terminal = { path = "../vmux_terminal" }
+vmux_setting = { path = "../page/vmux_setting" }
+vmux_space = { path = "../page/vmux_space" }
+vmux_terminal = { path = "../page/vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -52,5 +52,5 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 async-channel = "2"
-vmux_agent = { path = "../vmux_agent" }
+vmux_agent = { path = "../page/vmux_agent" }
 zip = { version = "2", default-features = false, features = ["deflate"] }

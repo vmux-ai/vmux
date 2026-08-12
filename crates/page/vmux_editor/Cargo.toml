@@ -15,8 +15,8 @@ path = "src/lib.rs"
 regex.workspace = true
 serde = { workspace = true }
 rkyv = { workspace = true }
-vmux_core = { path = "../vmux_core" }
-vmux_git = { path = "../vmux_git" }
+vmux_core = { path = "../../vmux_core" }
+vmux_git = { path = "../../vmux_git" }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
@@ -43,7 +43,7 @@ pulldown-cmark = { version = "0.12", default-features = false }
 arboard = "3"
 unicode-width = "0.2"
 unicode-segmentation = "1"
-vmux_command = { path = "../vmux_command" }
+vmux_command = { path = "../../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
@@ -57,7 +57,7 @@ url = { workspace = true }
 # does; the editor proper still needs the DOM and stays in the wasm block below.
 [target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
 dioxus = { workspace = true }
-vmux_ui = { path = "../vmux_ui", default-features = false }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"

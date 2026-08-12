@@ -15,7 +15,7 @@ path = "src/lib.rs"
 serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
-vmux_core = { path = "../vmux_core" }
+vmux_core = { path = "../../vmux_core" }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
@@ -26,10 +26,10 @@ rfd = { workspace = true }
 sysinfo = "0.38"
 tracing = "0.1"
 url = { workspace = true }
-vmux_command = { path = "../vmux_command" }
+vmux_command = { path = "../../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
-vmux_service = { path = "../vmux_service" }
+vmux_service = { path = "../../vmux_service" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 
@@ -55,7 +55,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true }
 js-sys = "0.3"
-vmux_ui = { path = "../vmux_ui", default-features = false }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "Node",

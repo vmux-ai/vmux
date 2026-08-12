@@ -87,25 +87,25 @@ rfd = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-vmux_agent = { path = "../vmux_agent" }
-vmux_browser = { path = "../vmux_browser" }
-vmux_core = { path = "../vmux_core" }
-vmux_ui = { path = "../vmux_ui", default-features = false }
-vmux_editor = { path = "../vmux_editor" }
-vmux_git = { path = "../vmux_git" }
-vmux_history = { path = "../vmux_history" }
-vmux_knowledge = { path = "../vmux_knowledge" }
-vmux_layout = { path = "../vmux_layout" }
-vmux_command = { path = "../vmux_command" }
+vmux_agent = { path = "../../page/vmux_agent" }
+vmux_browser = { path = "../../vmux_browser" }
+vmux_core = { path = "../../vmux_core" }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
+vmux_editor = { path = "../../page/vmux_editor" }
+vmux_git = { path = "../../vmux_git" }
+vmux_history = { path = "../../page/vmux_history" }
+vmux_knowledge = { path = "../../page/vmux_knowledge" }
+vmux_layout = { path = "../../page/vmux_layout" }
+vmux_command = { path = "../../vmux_command" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tracing-appender = "0.2"
-vmux_service = { path = "../vmux_service" }
-vmux_space = { path = "../vmux_space" }
-vmux_team = { path = "../vmux_team" }
-vmux_terminal = { path = "../vmux_terminal" }
-vmux_setting = { path = "../vmux_setting" }
-vmux_server = { path = "../vmux_server", optional = true }
+vmux_service = { path = "../../vmux_service" }
+vmux_space = { path = "../../page/vmux_space" }
+vmux_team = { path = "../../page/vmux_team" }
+vmux_terminal = { path = "../../page/vmux_terminal" }
+vmux_setting = { path = "../../page/vmux_setting" }
+vmux_server = { path = "../../vmux_server", optional = true }
 url = { workspace = true }
 uuid = { workspace = true }
 
@@ -241,9 +241,9 @@ category = "Productivity"
 copyright = "Copyright 2024-2025 Junichi Sugiura. GPL-3.0-or-later."
 homepage = "https://vmux.ai"
 formats = ["app", "dmg"]
-icons = ["../../packaging/macos/Vmux.icns"]
-before-packaging-command = "bash ../../scripts/build-package-binaries.sh"
-before-each-package-command = "bash ../../scripts/before-each-package.sh"
+icons = ["../../../packaging/macos/Vmux.icns"]
+before-packaging-command = "bash ../../../scripts/build-package-binaries.sh"
+before-each-package-command = "bash ../../../scripts/before-each-package.sh"
 binaries = [
     { path = "vmux_desktop", main = true },
     { path = "vmux" },
@@ -251,7 +251,7 @@ binaries = [
 ]
 
 [package.metadata.packager.dmg]
-background = "../../packaging/macos/dmg-background.png"
+background = "../../../packaging/macos/dmg-background.png"
 
 window-size = { width = 660, height = 400 }
 app-position = { x = 180, y = 180 }
@@ -259,5 +259,5 @@ application-folder-position = { x = 480, y = 180 }
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"
-entitlements = "../../packaging/macos/Vmux.entitlements"
-info-plist-path = "../../packaging/macos/usage-descriptions.plist"
+entitlements = "../../../packaging/macos/Vmux.entitlements"
+info-plist-path = "../../../packaging/macos/usage-descriptions.plist"
