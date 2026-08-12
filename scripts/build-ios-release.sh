@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build, sign and package Vmux for iOS as an App Store .ipa, optionally uploading it to
-# TestFlight. Imports the distribution certificate from APPLE_IOS_CERTIFICATE /
+# Build, sign and package Vmux for iOS as an App Store .ipa. Uploading to TestFlight is opt-in.
+# Imports the distribution certificate from APPLE_IOS_CERTIFICATE /
 # APPLE_IOS_CERTIFICATE_PASSWORD (or `.env`) into a temporary keychain so signing works the same
 # way locally and in CI, mirroring scripts/build-mac-release.sh.
 #
@@ -13,11 +13,11 @@ set -euo pipefail
 # Required unless the identity is already in the login keychain:
 #   APPLE_IOS_CERTIFICATE             base64 of the distribution .p12
 #   APPLE_IOS_CERTIFICATE_PASSWORD    that .p12's export password
-# Required to upload (skip with SKIP_UPLOAD=1):
+# Required only when uploading:
 #   APPLE_ID, APPLE_APP_PASSWORD
 # Optional:
 #   VMUX_IOS_BUILD_NUMBER             CFBundleVersion; CI passes the run number
-#   SKIP_UPLOAD=1                     build and sign only
+#   VMUX_IOS_UPLOAD=1                 send the .ipa to App Store Connect; off by default
 #
 # Usage: ./scripts/build-ios-release.sh
 
@@ -160,8 +160,12 @@ cp -R "$APP_BUNDLE" "$PAYLOAD/"
 
 echo "==> Built $IPA"
 
-if [[ "${SKIP_UPLOAD:-}" == "1" ]]; then
-    echo "==> SKIP_UPLOAD=1, not uploading"
+# Uploading is opt-in rather than opt-out. App Store Connect keeps what it is given: a build
+# cannot be withdrawn once uploaded, and its CFBundleVersion is burned even if the build is
+# rejected, so a mistake here costs a version number rather than a retry. Building and signing
+# are safe to repeat; sending is not, so the sending is what has to be asked for.
+if [[ "${VMUX_IOS_UPLOAD:-}" != "1" ]]; then
+    echo "==> Not uploading. Set VMUX_IOS_UPLOAD=1 to send this to App Store Connect."
     exit 0
 fi
 

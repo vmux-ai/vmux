@@ -89,6 +89,9 @@ jobs:
           # version alone cannot carry a resubmission. run_number is monotonic and needs no
           # committed state, which would otherwise trip update-release-metadata.sh --check.
           VMUX_IOS_BUILD_NUMBER: ${{ github.run_number }}
+          # The script builds and signs but will not send unless asked. This is the only place
+          # that asks, so an upload can only come from a release run.
+          VMUX_IOS_UPLOAD: "1"
         run: ./scripts/build-ios-release.sh
 
       - name: Verify bundle layout
