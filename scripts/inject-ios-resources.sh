@@ -96,4 +96,36 @@ fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
 
+# Keys Xcode writes into a built app and dx does not. App Store Connect validates them on upload,
+# so without these the .ipa is rejected before review ever sees it.
+#
+# CFBundleIconName is the one that looks redundant and is not: the copy inside CFBundleIcons says
+# which icon to draw, and this top-level one is what the upload check reads. Only the nested copy
+# existed, so the bundle looked complete and would still have been refused.
+#
+# The DT* keys and BuildMachineOSBuild record which toolchain produced the bundle, so they are
+# asked of the toolchain rather than written down. DTXcode is Xcode's version without the dots,
+# padded — 26.6 is 2660.
+set_plist() {
+    /usr/libexec/PlistBuddy -c "Delete :$1" "$PLIST" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Add :$1 string $2" "$PLIST"
+}
+
+SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
+SDK_BUILD="$(xcrun --sdk iphoneos --show-sdk-build-version)"
+XCODE_VERSION="$(xcodebuild -version | head -1 | awk '{print $2}')"
+XCODE_BUILD="$(xcodebuild -version | tail -1 | awk '{print $3}')"
+XCODE_PADDED="$(printf '%d%d0' "${XCODE_VERSION%%.*}" "$(echo "$XCODE_VERSION" | cut -d. -f2)")"
+
+set_plist CFBundleIconName AppIcon
+set_plist MinimumOSVersion "$DEPLOYMENT_TARGET"
+set_plist DTPlatformName iphoneos
+set_plist DTPlatformVersion "$SDK_VERSION"
+set_plist DTPlatformBuild "$SDK_BUILD"
+set_plist DTSDKName "iphoneos$SDK_VERSION"
+set_plist DTSDKBuild "$SDK_BUILD"
+set_plist DTXcode "$XCODE_PADDED"
+set_plist DTXcodeBuild "$XCODE_BUILD"
+set_plist BuildMachineOSBuild "$(sw_vers -buildVersion)"
+
 echo "inject-ios-resources: $APP_BUNDLE (version $VERSION, build $BUILD_NUMBER)"

@@ -76,7 +76,23 @@ if [[ "$(plist_value CFBundleIdentifier)" != "ai.vmux.mobile" ]]; then
 fi
 
 if [[ "$(plist_value 'CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName')" != "AppIcon" ]]; then
-    echo "Info.plist is missing CFBundleIconName" >&2
+    echo "Info.plist is missing CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName" >&2
+    exit 1
+fi
+
+# Everything Xcode would have written and dx does not. Checking only the nested icon name above
+# passed while the upload would still have been refused for the top-level one, so each key App
+# Store Connect validates is asserted by the name it validates.
+for key in CFBundleIconName MinimumOSVersion DTPlatformName DTPlatformVersion DTPlatformBuild \
+    DTSDKName DTSDKBuild DTXcode DTXcodeBuild BuildMachineOSBuild; do
+    if [[ -z "$(plist_value "$key")" ]]; then
+        echo "Info.plist is missing $key, which App Store Connect rejects on upload" >&2
+        exit 1
+    fi
+done
+
+if [[ "$(plist_value CFBundleIconName)" != "AppIcon" ]]; then
+    echo "Info.plist CFBundleIconName is not AppIcon" >&2
     exit 1
 fi
 
