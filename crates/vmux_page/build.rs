@@ -11,7 +11,7 @@ use page_build::{CefEmbeddedPageFinalize, PageBuilder};
 fn main() {
     build_platform_cfg::emit();
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
+    PageBuilder::new(manifest_dir.clone(), "vmux_page", "vmux_page")
         .track_manifest_rel_paths(&[
             "../vmux_ui/assets/theme.css",
             "../vmux_command/src",
@@ -22,11 +22,11 @@ fn main() {
             "../vmux_wire/src",
         ])
         .track_bucket_crates("../page", "src")
-        .dx_extra_args(&["--bin", "vmux_server", "--features", "web"])
+        .dx_extra_args(&["--bin", "vmux_page", "--features", "web"])
         .cef_finalize(CefEmbeddedPageFinalize {
             strip_uncompiled_tailwind_css: true,
         })
-        .tailwind_postprocess_after_dx(&["index-dxv", "vmux_server-dxv"])
+        .tailwind_postprocess_after_dx(&["index-dxv", "vmux_page-dxv"])
         .copy_manifest_dir_to_dist("../page/vmux_terminal/assets/fonts", "assets/fonts")
-        .run("vmux_server");
+        .run("vmux_page");
 }

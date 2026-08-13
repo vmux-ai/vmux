@@ -12,7 +12,7 @@ mod build_platform_cfg;
 
 #[cfg(feature = "gallery")]
 #[allow(dead_code)]
-#[path = "../vmux_server/src/build.rs"]
+#[path = "../vmux_page/src/build.rs"]
 mod page_build;
 
 #[cfg(feature = "gallery")]
@@ -75,7 +75,7 @@ fn build_gallery() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = workspace_root_from_manifest_dir(&manifest_dir);
 
-    println!("cargo:rerun-if-changed=../vmux_server/src/build.rs");
+    println!("cargo:rerun-if-changed=../vmux_page/src/build.rs");
     println!("cargo:rerun-if-env-changed={SKIP_DX_BUILD_ENV}");
 
     let target = std::env::var("TARGET").unwrap_or_default();

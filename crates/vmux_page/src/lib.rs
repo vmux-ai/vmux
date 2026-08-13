@@ -14,6 +14,6 @@ pub use web::App;
 
 #[cfg(not(web))]
 pub use vmux_core::page::{
-    PAGE_READY_BIN_EVENT_ID, PageManifest, PageReady, ServerEmbedSet, ServerPlugin,
+    PAGE_READY_BIN_EVENT_ID, PageEmbedSet, PageManifest, PagePlugin, PageReady,
     mark_webview_page_ready,
 };

@@ -23,7 +23,7 @@ CEF_FRAMEWORK_DIR := $(HOME)/.local/share/Chromium Embedded Framework.framework
 CEF_DEBUG_RENDER := $(CEF_FRAMEWORK_DIR)/Libraries/bevy_cef_debug_render_process
 
 web-bundle: ensure-web-deps
-	$(CARGO_WITH_CEF_CACHE) build -p vmux_server
+	$(CARGO_WITH_CEF_CACHE) build -p vmux_page
 
 dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-render-process
 	$(CARGO_WITH_CEF_CACHE) build -p vmux_service -p vmux_cli
@@ -51,12 +51,12 @@ dev-player:
 
 dev-rust:
 	@./scripts/verify-web-bundle.sh debug || (echo "missing or incompatible debug web bundle; run make dev first" && exit 1)
-	@wasm="$$(find crates/vmux_server/dist -type f -name '*_bg.wasm' -print -quit 2>/dev/null)"; \
+	@wasm="$$(find crates/vmux_page/dist -type f -name '*_bg.wasm' -print -quit 2>/dev/null)"; \
 	stale="$$(find \
 		Cargo.toml Cargo.lock crates/vmux_*/Cargo.toml \
 		crates/app/*/Cargo.toml crates/page/*/Cargo.toml \
-		crates/vmux_server/Cargo.toml crates/vmux_server/Dioxus.toml crates/vmux_server/build.rs \
-		crates/vmux_server/assets crates/vmux_server/src crates/vmux_ui/assets crates/vmux_ui/src \
+		crates/vmux_page/Cargo.toml crates/vmux_page/Dioxus.toml crates/vmux_page/build.rs \
+		crates/vmux_page/assets crates/vmux_page/src crates/vmux_ui/assets crates/vmux_ui/src \
 		crates/page/vmux_agent/src crates/vmux_command/src crates/vmux_core/src crates/page/vmux_editor/src \
 		crates/vmux_git/src crates/page/vmux_history/src crates/page/vmux_layout/src crates/vmux_profile/src \
 		crates/host/vmux_service/src crates/page/vmux_setting/src crates/page/vmux_space/src \

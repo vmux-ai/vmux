@@ -77,7 +77,7 @@
       "blurb_md": "Dioxus WASM UI library: [`components`] and [`hooks`] for CEF IPC."
     },
     {
-      "name": "vmux_server",
+      "name": "vmux_page",
       "version": "0.0.19",
       "blurb_md": "Serves embedded webview page bundles over `vmux://` URLs on the host, and on wasm\ndispatches the web build to the correct per-host Dioxus page."
     },

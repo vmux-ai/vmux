@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 expected_profile="${1:?expected profile required}"
-dist="${2:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_server/dist}}"
+dist="${2:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_page/dist}}"
 stamp="$dist/.bundle-stamp"
 
 if [[ ! -f "$dist/index.html" || ! -f "$dist/.dx-profile" || ! -f "$stamp" ]]; then

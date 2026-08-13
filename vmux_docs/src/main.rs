@@ -23,7 +23,7 @@ const CRATES: &[&str] = &[
     "vmux_mcp",
     "vmux_team",
     "vmux_ui",
-    "vmux_server",
+    "vmux_page",
     "vmux_desktop",
     "vmux_cli",
     "vmux_macro",

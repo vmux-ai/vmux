@@ -63,7 +63,7 @@ recording = [
 screenshots = ["screen-capture-backend"]
 tray = ["dep:tray-icon"]
 updater = ["dep:cargo-packager-updater", "dep:semver"]
-web-bundle = ["dep:vmux_server"]
+web-bundle = ["dep:vmux_page"]
 
 [[bin]]
 name = "vmux_desktop"
@@ -104,7 +104,7 @@ vmux_space = { path = "../../page/vmux_space" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }
 vmux_setting = { path = "../../page/vmux_setting" }
-vmux_server = { path = "../../vmux_server", optional = true }
+vmux_page = { path = "../../vmux_page", optional = true }
 url = { workspace = true }
 uuid = { workspace = true }
 
