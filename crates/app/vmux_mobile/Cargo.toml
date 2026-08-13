@@ -15,6 +15,9 @@ path = "src/main.rs"
 required-features = ["mobile"]
 
 [dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
 dioxus = { version = "=0.7.9", default-features = false, features = [
     "minimal",
     "document",

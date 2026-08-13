@@ -1,10 +1,13 @@
 #![allow(non_snake_case)]
 
 mod credentials;
+mod logs;
 mod native_transition;
 mod page_host;
 mod qr_scanner;
 mod quic_api;
+
+use crate::logs::Logs;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -104,6 +107,8 @@ fn webview_background() -> (u8, u8, u8, u8) {
 }
 
 fn main() {
+    Logs::start();
+
     let config = dioxus::mobile::Config::new()
         .with_background_color(webview_background())
         .with_custom_event_handler(|event, _| {
