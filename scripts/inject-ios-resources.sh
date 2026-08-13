@@ -113,8 +113,12 @@ set_plist() {
 
 SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
 SDK_BUILD="$(xcrun --sdk iphoneos --show-sdk-build-version)"
-XCODE_VERSION="$(xcodebuild -version | head -1 | awk '{print $2}')"
-XCODE_BUILD="$(xcodebuild -version | tail -1 | awk '{print $3}')"
+# Read once, and without `head`: it closes the pipe after the first line, xcodebuild takes
+# SIGPIPE for the second, and `set -o pipefail` surfaces that as exit 141. It only loses the
+# race when xcodebuild is still writing, so it fails intermittently under load.
+XCODE_INFO="$(xcodebuild -version)"
+XCODE_VERSION="$(awk 'NR == 1 { print $2 }' <<<"$XCODE_INFO")"
+XCODE_BUILD="$(awk 'END { print $3 }' <<<"$XCODE_INFO")"
 XCODE_PADDED="$(printf '%d%d0' "${XCODE_VERSION%%.*}" "$(echo "$XCODE_VERSION" | cut -d. -f2)")"
 
 set_plist CFBundleIconName AppIcon
