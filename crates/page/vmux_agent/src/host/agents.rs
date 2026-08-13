@@ -62,6 +62,8 @@ impl Plugin for AgentsManagerPlugin {
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agents",
     title: "Agents",
+    title_message_id: Some("agents-title"),
+    replaces_command: None,
     keywords: &["acp", "agent", "install", "registry"],
     icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: true,

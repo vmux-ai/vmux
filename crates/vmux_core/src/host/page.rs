@@ -27,6 +27,18 @@ pub const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 pub struct PageManifest {
     pub host: &'static str,
     pub title: &'static str,
+    /// Fluent id naming this page in the command bar, resolved against the active locale.
+    ///
+    /// `None` falls back to [`Self::title`], which is untranslated. Declared here rather than
+    /// looked up by host so a page names itself, and adding one does not mean editing the command
+    /// bar.
+    pub title_message_id: Option<&'static str>,
+    /// A command id this page supersedes.
+    ///
+    /// The command's own row is dropped from the command bar and its shortcut is shown on this
+    /// page's entry instead, because reaching the page is what the command did. Its menu item and
+    /// its keybinding are untouched.
+    pub replaces_command: Option<&'static str>,
     pub keywords: &'static [&'static str],
     pub icon: Option<crate::icon::BuiltinIcon>,
     pub command_bar: bool,
@@ -240,6 +252,8 @@ mod tests {
         let manifest = PageManifest {
             host: "settings",
             title: "Settings",
+            title_message_id: Some("settings-title"),
+            replaces_command: None,
             keywords: &["preferences"],
             icon: Some(crate::icon::BuiltinIcon::Settings),
             command_bar: true,
@@ -280,6 +294,8 @@ mod tests {
         app.world_mut().spawn(PageManifest {
             host: "history",
             title: "History",
+            title_message_id: Some("history-title"),
+            replaces_command: Some("browser_open_history"),
             keywords: &["recent", "visited"],
             icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,
@@ -301,6 +317,8 @@ mod tests {
         let manifest = PageManifest {
             host: "history",
             title: "History",
+            title_message_id: Some("history-title"),
+            replaces_command: Some("browser_open_history"),
             keywords: &["recent", "visited"],
             icon: Some(crate::icon::BuiltinIcon::Clock),
             command_bar: true,

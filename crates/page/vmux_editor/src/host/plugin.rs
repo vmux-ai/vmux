@@ -3885,6 +3885,8 @@ fn on_explorer_search_open(
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "files",
     title: "Files",
+    title_message_id: None,
+    replaces_command: None,
     keywords: &["file", "open"],
     icon: Some(vmux_core::BuiltinIcon::Files),
     command_bar: true,

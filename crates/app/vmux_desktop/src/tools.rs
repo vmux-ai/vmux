@@ -173,6 +173,8 @@ impl Plugin for ToolsPlugin {
 const PAGE_MANIFEST: PageManifest = PageManifest {
     host: "tools",
     title: "Tools",
+    title_message_id: Some("tools-title"),
+    replaces_command: None,
     keywords: &[
         "packages", "tools", "dotfiles", "homebrew", "npm", "mcp", "import",
     ],
@@ -183,6 +185,8 @@ const PAGE_MANIFEST: PageManifest = PageManifest {
 const VAULT_PAGE_MANIFEST: PageManifest = PageManifest {
     host: "vault",
     title: "Vault",
+    title_message_id: Some("vault-title"),
+    replaces_command: None,
     keywords: &["vault", "sync", "git", "backup", "dotfiles", "knowledge"],
     icon: Some(vmux_core::BuiltinIcon::Vault),
     command_bar: true,

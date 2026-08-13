@@ -47,6 +47,8 @@ impl Plugin for ManagerPlugin {
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "lsp",
     title: "Language Servers",
+    title_message_id: Some("lsp-title"),
+    replaces_command: None,
     keywords: &["lsp", "language", "server", "install", "mason"],
     icon: Some(vmux_core::BuiltinIcon::Server),
     command_bar: true,

@@ -161,6 +161,8 @@ mod apply_page_icons_tests {
     const TEAM: PageManifest = PageManifest {
         host: "team",
         title: "Team",
+        title_message_id: Some("team-title"),
+        replaces_command: None,
         keywords: &[],
         icon: Some(BuiltinIcon::Users),
         command_bar: true,
@@ -168,6 +170,8 @@ mod apply_page_icons_tests {
     const AGENT: PageManifest = PageManifest {
         host: "agent",
         title: "Agent",
+        title_message_id: None,
+        replaces_command: None,
         keywords: &[],
         icon: Some(BuiltinIcon::Sparkles),
         command_bar: false,
