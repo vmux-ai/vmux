@@ -14,7 +14,6 @@ full = [
     "bevy_cef_core/native-video-overlay",
     "native-glass",
     "native-notifications",
-    "player-mode",
     "recording",
     "screenshots",
     "tray",
@@ -50,7 +49,6 @@ native-notifications = [
     "objc2-foundation/NSBundle",
     "objc2-foundation/NSError",
 ]
-player-mode = ["vmux_layout/player-mode"]
 recording = [
     "screen-capture-backend",
     "dep:color_quant",
