@@ -7707,9 +7707,9 @@
           },
           {
             "kind": "struct",
-            "name": "ServerEmbedSet",
-            "path": "vmux_core::page::ServerEmbedSet",
-            "signature": "pub struct ServerEmbedSet",
+            "name": "PageEmbedSet",
+            "path": "vmux_core::page::PageEmbedSet",
+            "signature": "pub struct PageEmbedSet",
             "docs_md": "",
             "members": [],
             "links": []
@@ -7753,9 +7753,9 @@
           },
           {
             "kind": "struct",
-            "name": "ServerPlugin",
-            "path": "vmux_core::page::ServerPlugin",
-            "signature": "pub struct ServerPlugin",
+            "name": "PagePlugin",
+            "path": "vmux_core::page::PagePlugin",
+            "signature": "pub struct PagePlugin",
             "docs_md": "Embeds each page manifest's static webview bundle into Bevy's asset registry so pages\ncan be served over `vmux://` URLs.",
             "members": [],
             "links": []

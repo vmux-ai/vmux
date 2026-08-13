@@ -31,7 +31,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
-use vmux_core::page::ServerEmbedSet;
+use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
 use vmux_history::{CreatedAt, LastActivatedAt};
 
@@ -50,7 +50,7 @@ impl Plugin for WindowLayoutPlugin {
                 setup
                     .in_set(LayoutStartupSet::Window)
                     .after(crate::scene::setup)
-                    .after(ServerEmbedSet),
+                    .after(PageEmbedSet),
             )
             .add_systems(
                 Startup,

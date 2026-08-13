@@ -121,7 +121,7 @@ fn knowledge_side_sheet_opens_markdown_tree_through_file_pages() {
 #[test]
 fn embedded_header_css_has_fixed_tab_utilities() {
     let css_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../vmux_server/dist/assets/index.css");
+        .join("../../vmux_page/dist/assets/index.css");
     let Ok(css) = std::fs::read_to_string(css_path) else {
         return;
     };
@@ -222,9 +222,9 @@ fn dir_path_titles_truncate_at_start() {
     assert!(theme.contains("direction: rtl"));
     assert!(theme.contains("text-overflow: ellipsis"));
 
-    let server_css = include_str!("../../../vmux_server/assets/index.css");
-    assert!(server_css.contains("../../vmux_ui/assets/theme.css"));
-    assert!(server_css.contains("@source \"../../page/vmux_layout/src\""));
+    let page_css = include_str!("../../../vmux_page/assets/index.css");
+    assert!(page_css.contains("../../vmux_ui/assets/theme.css"));
+    assert!(page_css.contains("@source \"../../page/vmux_layout/src\""));
 }
 
 #[test]

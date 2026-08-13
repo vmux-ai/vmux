@@ -560,10 +560,10 @@ mod custom_scheme_url_tests {
         );
         assert_eq!(
             asset_load_path_from_request_url_with(
-                "https://vault.vmux.ai/wasm/vmux_server_bg.wasm",
+                "https://vault.vmux.ai/wasm/vmux_page_bg.wasm",
                 &cfg,
             ),
-            "embedded://vault/wasm/vmux_server_bg.wasm"
+            "embedded://vault/wasm/vmux_page_bg.wasm"
         );
         assert_eq!(
             asset_load_path_from_request_url_with("https://vault.vmux.ai.evil.test/", &cfg),

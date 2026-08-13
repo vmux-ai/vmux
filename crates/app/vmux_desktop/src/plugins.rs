@@ -20,7 +20,7 @@ impl PluginGroup for VmuxCorePlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
             .add(vmux_core::CorePlugin)
-            .add(vmux_core::page::ServerPlugin)
+            .add(vmux_core::page::PagePlugin)
             .add(vmux_command::CommandPlugin)
             .add(vmux_setting::SettingsPlugin)
             .add(PersistencePlugin)

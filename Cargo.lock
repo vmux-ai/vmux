@@ -11361,7 +11361,7 @@ dependencies = [
  "vmux_history",
  "vmux_knowledge",
  "vmux_layout",
- "vmux_server",
+ "vmux_page",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -11567,6 +11567,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_page"
+version = "0.0.30"
+dependencies = [
+ "dioxus",
+ "regex",
+ "sha2",
+ "vmux_agent",
+ "vmux_chat",
+ "vmux_core",
+ "vmux_editor",
+ "vmux_history",
+ "vmux_layout",
+ "vmux_service",
+ "vmux_setting",
+ "vmux_space",
+ "vmux_team",
+ "vmux_terminal",
+ "vmux_ui",
+ "web-sys",
+]
+
+[[package]]
 name = "vmux_profile"
 version = "0.0.30"
 dependencies = [
@@ -11598,28 +11620,6 @@ dependencies = [
  "tokio",
  "tracing",
  "webpki-roots",
-]
-
-[[package]]
-name = "vmux_server"
-version = "0.0.30"
-dependencies = [
- "dioxus",
- "regex",
- "sha2",
- "vmux_agent",
- "vmux_chat",
- "vmux_core",
- "vmux_editor",
- "vmux_history",
- "vmux_layout",
- "vmux_service",
- "vmux_setting",
- "vmux_space",
- "vmux_team",
- "vmux_terminal",
- "vmux_ui",
- "web-sys",
 ]
 
 [[package]]

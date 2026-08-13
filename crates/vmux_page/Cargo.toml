@@ -1,5 +1,5 @@
 [package]
-name = "vmux_server"
+name = "vmux_page"
 description = "Bevy plugin: serve embedded webview pages over vmux:// URLs"
 version.workspace = true
 edition.workspace = true
@@ -35,7 +35,7 @@ regex = { workspace = true }
 sha2 = "0.10"
 
 [[bin]]
-name = "vmux_server"
+name = "vmux_page"
 path = "src/main.rs"
 required-features = ["web"]
 

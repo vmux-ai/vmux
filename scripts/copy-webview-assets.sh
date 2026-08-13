@@ -11,7 +11,7 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 
 copy_shared_webview_app() {
-    local src="${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_server/dist}"
+    local src="${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_page/dist}"
     local dest="$WEBVIEW_ROOT/_shared"
 
     "$ROOT/scripts/verify-web-bundle.sh" release "$src"

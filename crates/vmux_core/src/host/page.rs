@@ -12,12 +12,12 @@ use std::path::{Path, PathBuf};
 
 /// Embeds each page manifest's static webview bundle into Bevy's asset registry so pages
 /// can be served over `vmux://` URLs.
-pub struct ServerPlugin;
+pub struct PagePlugin;
 
-impl Plugin for ServerPlugin {
+impl Plugin for PagePlugin {
     fn build(&self, app: &mut App) {
-        app.configure_sets(Startup, ServerEmbedSet)
-            .add_systems(Startup, embed_page_static_assets.in_set(ServerEmbedSet));
+        app.configure_sets(Startup, PageEmbedSet)
+            .add_systems(Startup, embed_page_static_assets.in_set(PageEmbedSet));
     }
 }
 
@@ -54,14 +54,13 @@ impl PageManifest {
     }
 
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
-        packaged_page_root(resources_dir, self.host).unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_server/dist")
-        })
+        packaged_page_root(resources_dir, self.host)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist"))
     }
 }
 
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ServerEmbedSet;
+pub struct PageEmbedSet;
 
 #[derive(
     Clone,
@@ -297,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn registered_hosts_use_vmux_server_dist() {
+    fn registered_hosts_use_vmux_page_dist() {
         let manifest = PageManifest {
             host: "history",
             title: "History",
@@ -308,7 +307,7 @@ mod tests {
 
         assert_eq!(
             manifest.bundle_root(None),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_server/dist")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist")
         );
     }
 

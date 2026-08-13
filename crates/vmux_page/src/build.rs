@@ -895,7 +895,7 @@ mod tests {
             "vmux-page-builder-track-test-{}",
             std::process::id()
         ));
-        let manifest_dir = root.join("crates/vmux_server");
+        let manifest_dir = root.join("crates/vmux_page");
         let layout_src = root.join("crates/page/vmux_layout/src");
         let nested_src = layout_src.join("nested");
         let terminal_fonts = root.join("crates/page/vmux_terminal/assets/fonts");
@@ -913,7 +913,7 @@ mod tests {
         fs::write(nested_src.join("pane.css"), "").unwrap();
         fs::write(terminal_fonts.join("terminal.woff2"), "").unwrap();
 
-        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
+        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_page", "vmux_page")
             .track_manifest_rel_paths(&["../page/vmux_layout/src"])
             .copy_manifest_dir_to_dist("../page/vmux_terminal/assets/fonts", "assets/fonts")
             .tracked_paths();
@@ -934,7 +934,7 @@ mod tests {
             "vmux-page-builder-bucket-test-{}",
             std::process::id()
         ));
-        let manifest_dir = root.join("crates/vmux_server");
+        let manifest_dir = root.join("crates/vmux_page");
         fs::create_dir_all(manifest_dir.join("assets")).unwrap();
         fs::create_dir_all(manifest_dir.join("src")).unwrap();
         fs::write(manifest_dir.join("Cargo.toml"), "").unwrap();
@@ -951,7 +951,7 @@ mod tests {
         }
         fs::create_dir_all(root.join("crates/page/vmux_start/assets")).unwrap();
 
-        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_server", "vmux_server")
+        let tracked = PageBuilder::new(manifest_dir.clone(), "vmux_page", "vmux_page")
             .track_bucket_crates("../page", "src")
             .tracked_paths();
 
