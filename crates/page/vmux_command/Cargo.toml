@@ -1,0 +1,53 @@
+[package]
+name = "vmux_command"
+description = "The vmux://command-bar/ page, the command vocabulary, and the launcher wire events"
+version.workspace = true
+edition.workspace = true
+publish = false
+build = "../../build_cfg_git.rs"
+
+[features]
+default = []
+debug = []
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rkyv = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+url = { workspace = true }
+vmux_core = { path = "../../vmux_core" }
+vmux_history = { path = "../vmux_history", default-features = false }
+vmux_wire = { path = "../../vmux_wire" }
+
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+bevy = { workspace = true }
+bevy_cef = { workspace = true }
+bevy_ecs = { workspace = true }
+muda = "0.19"
+vmux_macro = { path = "../../vmux_macro" }
+
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+dioxus = { workspace = true }
+vmux_start = { path = "../vmux_start" }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2.115"
+web-sys = { version = "0.3", features = [
+    "CssStyleDeclaration",
+    "Document",
+    "DomRect",
+    "Element",
+    "Event",
+    "EventInit",
+    "EventTarget",
+    "HtmlElement",
+    "HtmlInputElement",
+    "KeyboardEvent",
+    "Node",
+    "Window",
+] }

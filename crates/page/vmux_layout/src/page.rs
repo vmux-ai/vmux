@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::event::{
     BOOKMARKS_EVENT, BookmarkContextMenuEvent, BookmarkNode, BookmarkRow, BookmarkTextInputEvent,
     BookmarksCommandEvent, BookmarksHostEvent, CommandBarPanelActiveEvent,
@@ -18,6 +17,7 @@ use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use vmux_command::event::CommandBarOpenEvent;
+use vmux_command::palette::{CommandPalette, PaletteVariant};
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::event::{
     EXTENSIONS_LIST_EVENT, ExtActionRequest, ExtListRequest, ExtOpenManagerRequest, ExtRow,

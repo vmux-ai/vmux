@@ -960,28 +960,7 @@ pub struct BookmarksHostEvent {
     pub roots: Vec<BookmarkNode>,
 }
 
-#[derive(
-    Clone,
-    Debug,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct BookmarksCommandEvent {
-    pub command: String,
-    #[serde(default)]
-    pub uuid: Option<String>,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub metadata: Option<PageMetadata>,
-    #[serde(default)]
-    pub folder: Option<String>,
-}
+pub use vmux_command::event::BookmarksCommandEvent;
 
 #[derive(
     Clone,

@@ -44,7 +44,7 @@ pulldown-cmark = { version = "0.12", default-features = false }
 arboard = "3"
 unicode-width = "0.2"
 unicode-segmentation = "1"
-vmux_command = { path = "../../vmux_command" }
+vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }

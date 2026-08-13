@@ -24,7 +24,7 @@ bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 moonshine-save = { workspace = true }
 ron = { workspace = true }
-vmux_command = { path = "../../vmux_command" }
+vmux_command = { path = "../vmux_command" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_setting = { path = "../vmux_setting" }

@@ -95,7 +95,7 @@ vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../../page/vmux_history" }
 vmux_knowledge = { path = "../../page/vmux_knowledge" }
 vmux_layout = { path = "../../page/vmux_layout" }
-vmux_command = { path = "../../vmux_command" }
+vmux_command = { path = "../../page/vmux_command" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 tracing-appender = "0.2"
