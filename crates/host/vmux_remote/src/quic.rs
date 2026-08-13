@@ -26,7 +26,7 @@ use crate::DeviceId;
 /// byte is exchanged. There is deliberately no second version field in the hellos: one gate that
 /// always runs beats two that can disagree, and rkyv's positional variants mean a mismatched peer
 /// has to be refused outright rather than negotiated with.
-pub const ALPN: &[u8] = b"vmux/1";
+pub const ALPN: &[u8] = b"vmux/2";
 
 /// ALPN a liveness probe negotiates instead of [`ALPN`].
 ///
@@ -252,7 +252,7 @@ mod tests {
 pub enum PeerRole {
     /// Holds the sessions. Registers once, then answers whatever the relay forwards to it.
     Desktop,
-    /// Wants to reach a desktop. Dials the port the relay allocated that desktop.
+    /// Wants to reach a desktop. Dials the same port the desktop did and names the one it wants.
     Client,
 }
 
@@ -262,17 +262,20 @@ pub enum PeerRole {
 /// between two peers — the relay routes on `device_id` and never learns what it moved.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct RelayHello {
+    /// The desktop being named, whichever end is speaking: its own id from a
+    /// [`PeerRole::Desktop`], the id of the desktop it wants from a [`PeerRole::Client`].
+    ///
+    /// Never the phone's own id. This identifies a pair, not a peer.
     pub device_id: DeviceId,
     pub role: PeerRole,
     /// Proves both ends belong to the same pairing. The relay compares, it does not mint.
     pub token: String,
 }
 
-/// The relay's answer to a desktop's hello.
+/// The relay's answer to a hello it admitted.
 ///
-/// A pairing link has to name the UDP port the phone should dial, and only the relay knows which
-/// one this desktop was given — so the desktop cannot build a link until this arrives.
+/// Carries nothing, and exists for the ordering alone: a desktop must not offer a pairing link
+/// for a registration the relay has not taken, and a phone must not tunnel into a pairing it has
+/// not matched. Both only need to know the hello was accepted.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RelayAllocation {
-    pub port: u16,
-}
+pub struct RelayAccepted {}

@@ -40,8 +40,9 @@ impl RemoteArgs {
             let _ = std::fs::remove_file(remote.paired());
             let _ = std::fs::remove_file(remote.relay_device());
             let _ = std::fs::remove_file(remote.relay_url());
-            // A new device id earns a different port, so the recorded one would name someone else's.
-            let _ = std::fs::remove_file(remote.relay_port());
+            // The next device id is a different desktop as far as the relay is concerned, so a
+            // registration recorded for the old one would put someone else's id in a pairing link.
+            let _ = std::fs::remove_file(remote.relay_registration());
         }
         agent.ensure_running(vmux_client::DaemonBinary::current()?.path())
     }

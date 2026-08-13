@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use vmux_remote::quic::endpoint::SelfSignedIdentity;
 use vmux_remote::quic::tunnel::TunnelSocket;
-use vmux_remote::quic::{RelayAllocation, RelayHello, decode_hello, encode_hello};
+use vmux_remote::quic::{RelayAccepted, RelayHello, decode_hello, encode_hello};
 use vmux_remote::{DeviceId, PeerRole};
 
 use super::super::server::RemoteState;
@@ -48,7 +48,8 @@ pub fn spawn(state: RemoteState, liveness: watch::Receiver<bool>) -> tokio::task
 /// port the relay allocated behind it.
 struct Registration {
     control: quinn::Connection,
-    port: AllocatedPort,
+    /// Held for its [`Drop`], which withdraws the pairing link when the session ends.
+    _registered: RegisteredDevice,
     since: Instant,
 }
 
@@ -93,14 +94,14 @@ impl Registration {
             .await
             .map_err(|error| format!("relay connect {} at {address}: {error}", relay.url()))?;
 
-        let allocated = register(&control, &device_id, token).await?;
-        let port = AllocatedPort::claim(allocated)
-            .map_err(|error| format!("persist relay port: {error}"))?;
-        tracing::info!(port = allocated, relay = %relay.url(), "remote quic: registered with the relay");
+        register(&control, &device_id, token).await?;
+        let registered = RegisteredDevice::claim(&device_id)
+            .map_err(|error| format!("persist relay registration: {error}"))?;
+        tracing::info!(device_id = %device_id.as_str(), relay = %relay.url(), "remote quic: registered with the relay");
 
         Ok(Self {
             control,
-            port,
+            _registered: registered,
             since: Instant::now(),
         })
     }
@@ -139,7 +140,6 @@ impl Registration {
     /// End the session, which gives up the allocated port along with it.
     fn ended(self, reason: impl Into<String>) -> SessionEnd {
         SessionEnd::Registered {
-            port: self.port.number(),
             held: self.since.elapsed(),
             reason: reason.into(),
         }
@@ -154,12 +154,8 @@ enum SessionEnd {
     /// No registration was established: name resolution, the dial, the handshake or the hello
     /// failed, so the relay is holding no port for this desktop.
     Unregistered(String),
-    /// The relay allocated `port`, and the registration stood for `held` before it ended.
-    Registered {
-        port: u16,
-        held: Duration,
-        reason: String,
-    },
+    /// The relay accepted the registration, and it stood for `held` before it ended.
+    Registered { held: Duration, reason: String },
 }
 
 impl SessionEnd {
@@ -183,8 +179,7 @@ impl SessionEnd {
             Self::Unregistered(reason) => {
                 tracing::warn!(reason = %reason, "remote quic: could not register with the relay");
             }
-            Self::Registered { port, held, reason } => tracing::warn!(
-                port,
+            Self::Registered { held, reason } => tracing::warn!(
                 held_secs = held.as_secs(),
                 reason = %reason,
                 "remote quic: relay session ended"
@@ -225,40 +220,33 @@ impl Backoff {
     }
 }
 
-/// The port the relay allocated this desktop, recorded for as long as the registration holds it.
+/// This desktop's device id, recorded for as long as the registration holds.
 ///
-/// The pairing link is built from this file and has no other way to learn the port. The relay
-/// frees the port the moment the registration ends, so a file that outlives its session points
-/// phones at nothing — which a phone can only discover by waiting out a timeout. Removing it on
-/// drop is also what stops the app offering a link with no session behind it: every reader
-/// already treats a missing port as "not registered yet".
+/// The pairing link is built from this file, and its absence is what tells every reader the
+/// desktop is not registered — so a link is never offered for a session the relay would not
+/// route to. Removing it on drop is what keeps that true.
 ///
 /// Turning Remote off aborts the dialer, which drops this along with everything else the task
-/// held, so the switch gives the port back without anything having to remember to.
-pub(super) struct AllocatedPort {
-    number: u16,
+/// held, so the switch withdraws the registration without anything having to remember to.
+pub(super) struct RegisteredDevice {
     path: PathBuf,
 }
 
-impl AllocatedPort {
-    /// Record `number` as this desktop's, replacing whatever the last session left behind.
-    fn claim(number: u16) -> std::io::Result<Self> {
-        let path = RemotePaths::current().relay_port();
-        super::super::write_private(&path, &number.to_string())?;
-        Ok(Self { number, path })
+impl RegisteredDevice {
+    /// Record `device_id` as registered, replacing whatever the last session left behind.
+    fn claim(device_id: &DeviceId) -> std::io::Result<Self> {
+        let path = RemotePaths::current().relay_registration();
+        super::super::write_private(&path, device_id.as_str())?;
+        Ok(Self { path })
     }
 
-    /// Forget a port recorded by a previous process.
+    /// Forget a registration recorded by a previous process.
     ///
     /// [`Drop`] covers a session this process owned; a daemon that was killed never got to run it,
     /// so the file is cleared once at startup before anything can read it as live. That has to
-    /// happen whether or not Remote is on, since the stale port is readable either way.
+    /// happen whether or not Remote is on, since the stale value is readable either way.
     pub(super) fn release_stale() {
-        Self::remove(&RemotePaths::current().relay_port());
-    }
-
-    fn number(&self) -> u16 {
-        self.number
+        Self::remove(&RemotePaths::current().relay_registration());
     }
 
     fn remove(path: &Path) {
@@ -268,24 +256,24 @@ impl AllocatedPort {
             Err(error) => tracing::warn!(
                 %error,
                 path = %path.display(),
-                "remote quic: the allocated relay port could not be cleared"
+                "remote quic: the relay registration could not be cleared"
             ),
         }
     }
 }
 
-impl Drop for AllocatedPort {
+impl Drop for RegisteredDevice {
     fn drop(&mut self) {
         Self::remove(&self.path);
     }
 }
 
-/// Send the hello and read back the port phones should dial.
+/// Send the hello and wait for the relay to admit it.
 async fn register(
     control: &quinn::Connection,
     device_id: &DeviceId,
     token: &str,
-) -> Result<u16, String> {
+) -> Result<(), String> {
     let (mut send, mut recv) = control
         .open_bi()
         .await
@@ -304,10 +292,10 @@ async fn register(
     let answer = recv
         .read_to_end(16 * 1024)
         .await
-        .map_err(|error| format!("read allocation: {error}"))?;
-    let (allocation, _) = decode_hello::<RelayAllocation>(&answer)
-        .map_err(|error| format!("decode allocation: {error:?}"))?;
-    Ok(allocation.port)
+        .map_err(|error| format!("read acceptance: {error}"))?;
+    decode_hello::<RelayAccepted>(&answer)
+        .map_err(|error| format!("decode acceptance: {error:?}"))?;
+    Ok(())
 }
 
 /// The relay's QUIC control port, resolved.
@@ -330,7 +318,7 @@ fn host_of(relay_url: &str) -> Result<String, String> {
 
 /// This desktop's identity to the relay, minted once and kept.
 fn ensure_device_id() -> std::io::Result<DeviceId> {
-    let path = RemotePaths::current().relay_device();
+    let path = RemotePaths::current().relay_registration();
     if let Ok(existing) = std::fs::read_to_string(&path) {
         let existing = existing.trim();
         if !existing.is_empty() {
@@ -353,7 +341,6 @@ mod tests {
 
         fn held_for(held: Duration) -> Self {
             Self::Registered {
-                port: 41003,
                 held,
                 reason: "control connection closed".to_string(),
             }
@@ -406,31 +393,31 @@ mod tests {
         assert_eq!(Backoff::delays(flapping, 4), [1, 2, 4, 8]);
     }
 
-    impl AllocatedPort {
-        /// A recorded port under `path`, so a test never writes into the user's profile.
+    impl RegisteredDevice {
+        /// A registration recorded under `path`, so a test never writes into the user's profile.
         fn recorded_at(path: &Path) -> Self {
-            std::fs::write(path, "41003").expect("write port");
+            std::fs::write(path, "device-1").expect("write registration");
             Self {
-                number: 41003,
                 path: path.to_path_buf(),
             }
         }
     }
 
-    /// The relay frees the port when the registration ends, so the recorded one must not outlive
-    /// it — a pairing link built from a stale port sends the phone somewhere nothing answers.
+    /// The relay drops the registration when the session ends, so the recorded one must not
+    /// outlive it — a pairing link built from a stale registration names a desktop the relay
+    /// would refuse to route to.
     #[test]
-    fn the_recorded_port_does_not_outlive_its_registration() {
+    fn the_recorded_registration_does_not_outlive_its_session() {
         let directory = tempfile::tempdir().expect("temp dir");
-        let path = directory.path().join("remote-relay-port");
-        let claimed = AllocatedPort::recorded_at(&path);
+        let path = directory.path().join("remote-relay-registration");
+        let claimed = RegisteredDevice::recorded_at(&path);
         assert!(path.exists());
 
         drop(claimed);
 
         assert!(
             !path.exists(),
-            "the allocated port outlived the session that held it"
+            "the registration outlived the session that held it"
         );
     }
 
@@ -439,18 +426,18 @@ mod tests {
     /// drop did not reach here, disabling Remote would leave the relay holding a port for a
     /// desktop that no longer answers.
     #[tokio::test]
-    async fn aborting_the_dialer_gives_the_port_back() {
+    async fn aborting_the_dialer_withdraws_the_registration() {
         let directory = tempfile::tempdir().expect("temp dir");
-        let path = directory.path().join("remote-relay-port");
+        let path = directory.path().join("remote-relay-registration");
 
         let claimed = path.clone();
         let (holding, held) = tokio::sync::oneshot::channel();
         let dialer = tokio::spawn(async move {
-            let _port = AllocatedPort::recorded_at(&claimed);
+            let _registered = RegisteredDevice::recorded_at(&claimed);
             let _ = holding.send(());
             std::future::pending::<()>().await;
         });
-        held.await.expect("the dialer claimed a port");
+        held.await.expect("the dialer registered");
         assert!(path.exists());
 
         dialer.abort();

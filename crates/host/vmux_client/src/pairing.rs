@@ -119,37 +119,47 @@ impl Relay {
         Ok(())
     }
 
-    /// Where the phone should dial: this relay's host, on the UDP port it allocated this desktop.
+    /// Where the phone should dial: this relay, on the one port every peer uses.
     ///
-    /// The relay's own control port is discarded — that one is for desktops registering, and a
-    /// phone sending there reaches no particular desktop. `None` until a port has been recorded.
+    /// `None` until the daemon has registered. The address is the same for every desktop, so what
+    /// is being waited on is the registration itself — a link handed out before the relay has
+    /// accepted this desktop names a pairing it would refuse.
     pub fn base_url(&self) -> Result<Option<String>, String> {
-        let Some(port) = recorded_port() else {
+        if recorded_device().is_none() {
             return Ok(None);
-        };
-        self.base_url_on(port).map(Some)
-    }
-
-    fn base_url_on(&self, port: u16) -> Result<String, String> {
+        }
         let parsed = url::Url::parse(&self.url).map_err(|error| error.to_string())?;
         let host = parsed.host_str().ok_or("relay url has no host")?;
         let scheme = parsed.scheme();
-        Ok(format!("{scheme}://{host}:{port}"))
+        match parsed.port() {
+            Some(port) => Ok(Some(format!("{scheme}://{host}:{port}"))),
+            None => Ok(Some(format!("{scheme}://{host}"))),
+        }
     }
 
-    /// The complete link, or `None` until the daemon has recorded both a port and a certificate.
+    /// The device id the relay has a registration for, or `None` while there is none.
+    ///
+    /// Exposed because the app builds links from the certificate it holds in memory rather than
+    /// the recorded fingerprint, so it assembles a [`PairingInfo`] itself and still needs this.
+    pub fn registered_device(&self) -> Option<String> {
+        recorded_device()
+    }
+
+    /// The complete link, or `None` until the daemon has registered and recorded a certificate.
     pub fn pairing(&self, token: &str) -> Result<Option<PairingInfo>, String> {
-        let (Some(base_url), Some(fingerprint)) = (self.base_url()?, recorded_fingerprint()) else {
+        let (Some(base_url), Some(device), Some(fingerprint)) =
+            (self.base_url()?, recorded_device(), recorded_fingerprint())
+        else {
             return Ok(None);
         };
-        PairingInfo::new(&base_url, token, &fingerprint).map(Some)
+        PairingInfo::new(&base_url, token, &fingerprint, &device).map(Some)
     }
 
-    /// Block until the relay has allocated a port for this desktop, then return the pairing link.
+    /// Block until the relay has registered this desktop, then return the pairing link.
     ///
-    /// The port comes from the relay and the fingerprint from the certificate the daemon loads, so
-    /// neither exists until it has started and dialled out. Waiting beats printing a link that
-    /// names a port nothing answers on.
+    /// Registration comes from the relay and the fingerprint from the certificate the daemon
+    /// loads, so neither exists until it has started and dialled out. Waiting beats printing a
+    /// link for a desktop the relay would not route to.
     pub fn wait_for_pairing(&self, token: &str, timeout: Duration) -> std::io::Result<String> {
         let deadline = Instant::now() + timeout;
         loop {
@@ -159,10 +169,7 @@ impl Relay {
             if Instant::now() >= deadline {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
-                    format!(
-                        "{} has not allocated a port for this desktop yet",
-                        self.url()
-                    ),
+                    format!("{} has not registered this desktop yet", self.url()),
                 ));
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -234,12 +241,19 @@ impl PairingInfo {
     /// `fingerprint` is passed in rather than read here so the result depends only on the
     /// arguments — reading the certificate from disk would make this answer differ between a
     /// machine that has started Remote and one that has not.
-    pub fn new(base_url: &str, token: &str, fingerprint: &str) -> Result<Self, String> {
+    /// `device` names which desktop the phone wants. Every desktop is reached at the same relay
+    /// address now, so without it the link says where to dial and not who to ask for.
+    pub fn new(
+        base_url: &str,
+        token: &str,
+        fingerprint: &str,
+        device: &str,
+    ) -> Result<Self, String> {
         let mut url = url::Url::parse(base_url).map_err(|error| error.to_string())?;
         url.set_fragment(Some(&if fingerprint.is_empty() {
-            format!("token={token}")
+            format!("token={token}&device={device}")
         } else {
-            format!("token={token}&fp={fingerprint}")
+            format!("token={token}&fp={fingerprint}&device={device}")
         }));
 
         let mut deep_link = url::Url::parse("vmux://pair").map_err(|error| error.to_string())?;
@@ -250,6 +264,7 @@ impl PairingInfo {
         if !fingerprint.is_empty() {
             deep_link.query_pairs_mut().append_pair("fp", fingerprint);
         }
+        deep_link.query_pairs_mut().append_pair("device", device);
 
         Ok(Self {
             url: url.to_string(),
@@ -258,11 +273,12 @@ impl PairingInfo {
     }
 }
 
-/// The port the relay gave this desktop, as recorded by the daemon at registration.
-fn recorded_port() -> Option<u16> {
-    read_trimmed(&RemotePaths::current().relay_port())?
-        .parse()
-        .ok()
+/// This desktop's device id, written by the daemon once the relay accepted its registration.
+///
+/// Doubles as the registration marker: the file does not exist until the relay has taken it, and
+/// the phone needs the value to name which desktop it wants.
+fn recorded_device() -> Option<String> {
+    read_trimmed(&RemotePaths::current().relay_registration())
 }
 
 /// The fingerprint of the certificate the desktop presents, as recorded beside it.
@@ -280,49 +296,47 @@ fn read_trimmed(path: &Path) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn a_base_url_takes_the_relay_host_and_the_allocated_port() {
-        assert_eq!(
-            Relay::new("https://relay.vmux.ai")
-                .base_url_on(41003)
-                .unwrap(),
-            "https://relay.vmux.ai:41003"
-        );
-        // The relay's own control port is replaced, not appended to.
-        assert_eq!(
-            Relay::new("https://localhost:8787")
-                .base_url_on(41003)
-                .unwrap(),
-            "https://localhost:41003"
-        );
-    }
-
     /// The phone can only pin the desktop's certificate if the fingerprint survives into both
     /// pairing shapes — the QR-encoded URL and the deep link. Dropping it from either would
     /// downgrade that phone to an unpinned connection with nothing to show for it.
     #[test]
     fn a_fingerprint_reaches_both_pairing_shapes() {
-        let pairing = PairingInfo::new("https://localhost:41003", "secret", "abc123").unwrap();
+        let pairing =
+            PairingInfo::new("https://relay.vmux.ai", "secret", "abc123", "dev-1").unwrap();
 
         assert_eq!(
             pairing.url,
-            "https://localhost:41003/#token=secret&fp=abc123"
+            "https://relay.vmux.ai/#token=secret&fp=abc123&device=dev-1"
         );
         assert_eq!(
             pairing.deep_link,
-            "vmux://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret&fp=abc123"
+            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&token=secret&fp=abc123&device=dev-1"
         );
     }
 
     #[test]
     fn an_absent_fingerprint_leaves_both_shapes_well_formed() {
-        let pairing = PairingInfo::new("https://localhost:41003", "secret", "").unwrap();
+        let pairing = PairingInfo::new("https://relay.vmux.ai", "secret", "", "dev-1").unwrap();
 
-        assert_eq!(pairing.url, "https://localhost:41003/#token=secret");
+        assert_eq!(
+            pairing.url,
+            "https://relay.vmux.ai/#token=secret&device=dev-1"
+        );
         assert_eq!(
             pairing.deep_link,
-            "vmux://pair?base=https%3A%2F%2Flocalhost%3A41003&token=secret"
+            "vmux://pair?base=https%3A%2F%2Frelay.vmux.ai&token=secret&device=dev-1"
         );
+    }
+
+    /// Every desktop is reached at the same address, so the link is useless without naming one.
+    /// A phone that followed a link with no device would dial the relay and be refused.
+    #[test]
+    fn every_pairing_shape_names_a_device() {
+        let pairing =
+            PairingInfo::new("https://relay.vmux.ai", "secret", "abc123", "dev-2").unwrap();
+
+        assert!(pairing.url.contains("device=dev-2"));
+        assert!(pairing.deep_link.contains("device=dev-2"));
     }
 
     /// There is no way to ask for no relay: a desktop behind NAT is unreachable without one, so

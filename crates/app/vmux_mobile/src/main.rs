@@ -1,10 +1,13 @@
 #![allow(non_snake_case)]
 
 mod credentials;
+mod logs;
 mod native_transition;
 mod page_host;
 mod qr_scanner;
 mod quic_api;
+
+use crate::logs::Logs;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -104,6 +107,8 @@ fn webview_background() -> (u8, u8, u8, u8) {
 }
 
 fn main() {
+    Logs::start();
+
     let config = dioxus::mobile::Config::new()
         .with_background_color(webview_background())
         .with_custom_event_handler(|event, _| {
@@ -156,6 +161,13 @@ struct Credentials {
     /// forgetting the Mac.
     #[serde(default)]
     fingerprint: String,
+    /// Which desktop to ask the relay for.
+    ///
+    /// Every desktop is reached at the same relay address, so the link has to name one. Defaulted
+    /// for the same reason as the fingerprint: a pairing written before the relay routed by
+    /// identity still deserialises, and is refused on use rather than forgotten silently.
+    #[serde(default)]
+    device: String,
 }
 
 #[derive(Clone)]
@@ -199,6 +211,11 @@ impl Api {
     /// Drop any live QUIC connection so the next call redials.
     async fn reset_transport(&self) {
         self.quic.reset().await;
+    }
+
+    /// Close the connection, for a client being replaced or cleared.
+    fn close(&self) {
+        self.quic.close();
     }
 
     async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
@@ -385,24 +402,23 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
     }
 }
 
-/// Build the QUIC endpoint from a pairing, when it carried a fingerprint.
+/// Build the QUIC endpoint from a pairing, when it carried both a fingerprint and a device.
 ///
-/// The device id is derived from the pairing address rather than stored separately: the relay
-/// routes by port, so this only labels the hello the desktop reads.
+/// A pairing missing either cannot reach anything: the fingerprint is what the inner session pins,
+/// and the device is what the relay routes on. Returning `None` sends the phone back to the
+/// scanner rather than into a dial that would be refused.
 fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint> {
-    if credentials.fingerprint.is_empty() {
+    if credentials.fingerprint.is_empty() || credentials.device.is_empty() {
         return None;
     }
     let parsed = Url::parse(&credentials.base_url).ok()?;
     let host = parsed.host_str()?;
     let port = parsed.port().unwrap_or(443);
-    // The relay routes by port, not by name — a phone's packets reach exactly one desktop because
-    // of which port they arrived on. This id only labels the hello the desktop reads.
     Some(crate::quic_api::Endpoint {
         address: format!("{host}:{port}"),
         token: credentials.token.clone(),
         fingerprint: credentials.fingerprint.clone(),
-        device_id: vmux_remote::DeviceId::new(format!("{host}:{port}")),
+        desktop: vmux_remote::DeviceId::new(&credentials.device),
     })
 }
 
@@ -834,7 +850,11 @@ fn AppBody() -> Element {
         // Stored credentials already answer "is this paired?", so paint the start page now and let
         // reachability resolve behind it. Waiting on the first round trip meant a spinner for as
         // long as the dial takes to give up, which is the whole dial timeout when the Mac is off.
+        let displaced = api.peek().clone();
         api.set(Some(client.clone()));
+        if let Some(displaced) = displaced {
+            displaced.close();
+        }
         auth.set(AuthState::Paired);
         match client.sessions().await {
             Ok(next) => {
@@ -911,7 +931,11 @@ fn AppBody() -> Element {
                 Ok(next) => {
                     credentials::StoredCredentials::save(&credentials);
                     pair_url.set(pairing_url(&credentials));
+                    let displaced = api.peek().clone();
                     api.set(Some(client.clone()));
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     sessions.set(next);
                     auth.set(AuthState::Paired);
                 }
@@ -946,7 +970,11 @@ fn AppBody() -> Element {
                 Err(ApiError::Unauthorized) => {
                     reachable.set(false);
                     credentials::StoredCredentials::clear();
+                    let displaced = api.peek().clone();
                     api.set(None);
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     error.set(translate("mobile-error-pairing-expired"));
                     auth.set(AuthState::Unpaired);
                 }
@@ -1055,7 +1083,11 @@ fn AppBody() -> Element {
                 on_disconnect: move |_| {
                     credentials::StoredCredentials::clear();
                     stream_generation.set(stream_generation().wrapping_add(1));
+                    let displaced = api.peek().clone();
                     api.set(None);
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     sessions.set(Vec::new());
                     auth.set(AuthState::Unpaired);
                 },
@@ -2019,6 +2051,10 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
             .get("fp")
             .map(|value| value.to_string())
             .unwrap_or_default();
+        let device = params
+            .get("device")
+            .map(|value| value.to_string())
+            .unwrap_or_default();
         let base_url = normalized_pairing_base(base)?;
         if base_url.is_empty() {
             return Err(translate("mobile-url-no-address"));
@@ -2027,6 +2063,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
             base_url,
             token,
             fingerprint,
+            device,
         });
     }
     let start = input
@@ -2055,6 +2092,14 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
                 .map(|(_, value)| value.into_owned())
         })
         .unwrap_or_default();
+    let device = parsed
+        .fragment()
+        .and_then(|fragment| {
+            url::form_urlencoded::parse(fragment.as_bytes())
+                .find(|(name, _)| name == "device")
+                .map(|(_, value)| value.into_owned())
+        })
+        .unwrap_or_default();
     let base_url = normalized_pairing_base(parsed)?;
     if base_url.is_empty() {
         return Err(translate("mobile-url-no-address"));
@@ -2063,6 +2108,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         base_url,
         token,
         fingerprint,
+        device,
     })
 }
 

@@ -183,6 +183,26 @@ impl Trust {
         Ok(endpoint)
     }
 
+    /// A client endpoint over `socket` rather than a real UDP socket, for dialling through a
+    /// tunnel.
+    ///
+    /// `None` for the server config is what makes it client-only: the peer at the other end of a
+    /// tunnel is one desktop, and nothing dials back through it.
+    pub fn endpoint_on(
+        &self,
+        socket: std::sync::Arc<dyn quinn::AsyncUdpSocket>,
+    ) -> Result<Endpoint, String> {
+        let mut endpoint = Endpoint::new_with_abstract_socket(
+            quinn::EndpointConfig::default(),
+            None,
+            socket,
+            std::sync::Arc::new(quinn::TokioRuntime),
+        )
+        .map_err(|error| format!("QUIC tunnel endpoint failed: {error}"))?;
+        endpoint.set_default_client_config(self.client_config()?);
+        Ok(endpoint)
+    }
+
     /// Complete a [`PROBE_ALPN`] handshake against `remote` and hang up.
     ///
     /// Returning `Ok` means the UDP port answered, the certificate verified, and the peer's accept
