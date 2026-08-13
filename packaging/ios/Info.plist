@@ -5,7 +5,7 @@
 	rendering assets/ios/ios.plist.hbs. `[ios.plist]` cannot be used for the keys below, because
 	the template writes them first and a duplicate key loses on parse.
 
-	Keep in sync with crates/vmux_mobile/Dioxus.toml. CFBundleExecutable is the [[bin]] name.
+	Keep in sync with crates/app/vmux_mobile/Dioxus.toml. CFBundleExecutable is the [[bin]] name.
 
 	The two version keys below are placeholders: scripts/inject-ios-resources.sh stamps the built
 	copy from the workspace version and the CI run number. Editing them here has no effect.
