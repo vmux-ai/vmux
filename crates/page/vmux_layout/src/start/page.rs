@@ -10,7 +10,7 @@ use crate::start::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
 };
 use crate::start::focus::StartFocus;
-use vmux_command::palette::{CommandPalette, PaletteVariant, StartInlineTransition};
+use vmux_command::page::{CommandPalette, PaletteVariant, StartInlineTransition};
 
 /// The `vmux://start/` launcher page: a cinematic centered hero that requests its
 /// entries on mount and renders [`CommandPalette`] in [`PaletteVariant::Start`].

@@ -107,7 +107,7 @@ fn StartAgentPage() -> Element {
     }
     rsx! {
         vmux_layout::start::page::Page {
-            on_inline_transition: move |next: vmux_command::palette::StartInlineTransition| {
+            on_inline_transition: move |next: vmux_command::page::StartInlineTransition| {
                 vmux_layout::start::page::begin_agent_transition();
                 InlineAgentWindow::set(&next.target_url);
                 transition.set(Some(next));
@@ -124,10 +124,10 @@ impl InlineAgentWindow {
     const PREFIX: &'static str = "vmux-inline-agent:";
 
     /// The transition this window was opened for, if it was opened for one.
-    fn pending() -> Option<vmux_command::palette::StartInlineTransition> {
+    fn pending() -> Option<vmux_command::page::StartInlineTransition> {
         let name = web_sys::window()?.name().ok()?;
         let agent_url = name.strip_prefix(Self::PREFIX)?;
-        Some(vmux_command::palette::StartInlineTransition {
+        Some(vmux_command::page::StartInlineTransition {
             target_url: agent_url.to_string(),
             prompt: String::new(),
             attachments: Vec::new(),
