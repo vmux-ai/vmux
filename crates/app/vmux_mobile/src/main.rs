@@ -156,6 +156,13 @@ struct Credentials {
     /// forgetting the Mac.
     #[serde(default)]
     fingerprint: String,
+    /// Which desktop to ask the relay for.
+    ///
+    /// Every desktop is reached at the same relay address, so the link has to name one. Defaulted
+    /// for the same reason as the fingerprint: a pairing written before the relay routed by
+    /// identity still deserialises, and is refused on use rather than forgotten silently.
+    #[serde(default)]
+    device: String,
 }
 
 #[derive(Clone)]
@@ -385,24 +392,23 @@ fn remote_event_from_shared(event: vmux_wire::protocol::SharedEvent) -> Option<R
     }
 }
 
-/// Build the QUIC endpoint from a pairing, when it carried a fingerprint.
+/// Build the QUIC endpoint from a pairing, when it carried both a fingerprint and a device.
 ///
-/// The device id is derived from the pairing address rather than stored separately: the relay
-/// routes by port, so this only labels the hello the desktop reads.
+/// A pairing missing either cannot reach anything: the fingerprint is what the inner session pins,
+/// and the device is what the relay routes on. Returning `None` sends the phone back to the
+/// scanner rather than into a dial that would be refused.
 fn quic_endpoint(credentials: &Credentials) -> Option<crate::quic_api::Endpoint> {
-    if credentials.fingerprint.is_empty() {
+    if credentials.fingerprint.is_empty() || credentials.device.is_empty() {
         return None;
     }
     let parsed = Url::parse(&credentials.base_url).ok()?;
     let host = parsed.host_str()?;
     let port = parsed.port().unwrap_or(443);
-    // The relay routes by port, not by name — a phone's packets reach exactly one desktop because
-    // of which port they arrived on. This id only labels the hello the desktop reads.
     Some(crate::quic_api::Endpoint {
         address: format!("{host}:{port}"),
         token: credentials.token.clone(),
         fingerprint: credentials.fingerprint.clone(),
-        device_id: vmux_remote::DeviceId::new(format!("{host}:{port}")),
+        desktop: vmux_remote::DeviceId::new(&credentials.device),
     })
 }
 
@@ -2011,6 +2017,10 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
             .get("fp")
             .map(|value| value.to_string())
             .unwrap_or_default();
+        let device = params
+            .get("device")
+            .map(|value| value.to_string())
+            .unwrap_or_default();
         let base_url = normalized_pairing_base(base)?;
         if base_url.is_empty() {
             return Err(translate("mobile-url-no-address"));
@@ -2019,6 +2029,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
             base_url,
             token,
             fingerprint,
+            device,
         });
     }
     let start = input
@@ -2047,6 +2058,14 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
                 .map(|(_, value)| value.into_owned())
         })
         .unwrap_or_default();
+    let device = parsed
+        .fragment()
+        .and_then(|fragment| {
+            url::form_urlencoded::parse(fragment.as_bytes())
+                .find(|(name, _)| name == "device")
+                .map(|(_, value)| value.into_owned())
+        })
+        .unwrap_or_default();
     let base_url = normalized_pairing_base(parsed)?;
     if base_url.is_empty() {
         return Err(translate("mobile-url-no-address"));
@@ -2055,6 +2074,7 @@ fn parse_pairing_url(input: &str) -> Result<Credentials, String> {
         base_url,
         token,
         fingerprint,
+        device,
     })
 }
 

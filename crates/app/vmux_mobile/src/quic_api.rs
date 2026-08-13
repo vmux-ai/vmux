@@ -15,9 +15,12 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use vmux_remote::DeviceId;
+use vmux_remote::PeerRole;
 use vmux_remote::quic::endpoint::Trust;
+use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
 use vmux_remote::quic::{
-    ClientHello, CloseCode, ServerHello, StreamKind, decode_hello, encode_hello,
+    ClientHello, CloseCode, RelayAccepted, RelayHello, ServerHello, StreamKind, decode_hello,
+    encode_hello,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
@@ -97,11 +100,14 @@ impl QuicError {
 /// Where and how to reach one paired desktop.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Endpoint {
+    /// The relay, which every desktop is reached through.
     pub address: String,
     pub token: String,
     /// SHA-256 of the desktop's certificate, from the pairing link.
     pub fingerprint: String,
-    pub device_id: DeviceId,
+    /// Which desktop to ask the relay for. Not this phone's own id — the relay has no use for
+    /// that, since it routes to a pair rather than to a peer.
+    pub desktop: DeviceId,
 }
 
 /// A connection, reconnected on demand.
@@ -166,6 +172,12 @@ impl QuicApi {
         }
     }
 
+    /// Dial the relay, ask it for this pairing's desktop, and stack the session that terminates
+    /// on that desktop over the tunnel it hands back.
+    ///
+    /// Two QUIC connections, deliberately. The outer one is with the relay and verified against
+    /// the public roots; the inner one terminates on the desktop and is pinned by fingerprint, so
+    /// the relay carries bytes it holds no key for.
     async fn dial_inner(&self) -> Result<quinn::Connection, QuicError> {
         // The pairing link names the relay by host, so this has to resolve rather than parse: a
         // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
@@ -182,8 +194,6 @@ impl QuicApi {
             .await
             .map_err(QuicError::Transport)?;
 
-        // The certificate is pinned by fingerprint and the verifier ignores the name, but the
-        // relay may still route on SNI, so send the real host rather than a placeholder.
         let server_name = self
             .endpoint
             .address
@@ -191,16 +201,35 @@ impl QuicApi {
             .map(|(host, _)| host)
             .unwrap_or(&self.endpoint.address)
             .to_string();
-        let endpoint = Trust::Desktop {
-            fingerprint: self.endpoint.fingerprint.clone(),
+
+        let relay_endpoint = Trust::Relay {
+            host: server_name.clone(),
         }
         .endpoint(address)
         .map_err(QuicError::Transport)?;
-        let connection = endpoint
+        let control = relay_endpoint
             .connect(address, &server_name)
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;
+        // Dropping the endpoint would close the connection with it.
+        std::mem::forget(relay_endpoint);
+
+        self.say_hello_to_the_relay(&control).await?;
+
+        let tunnel = TunnelSocket::new(control.clone());
+        let inner_endpoint = Trust::Desktop {
+            fingerprint: self.endpoint.fingerprint.clone(),
+        }
+        .endpoint_on(tunnel)
+        .map_err(QuicError::Transport)?;
+        // The name is not checked — the certificate is pinned outright — but quinn requires one.
+        let connection = inner_endpoint
+            .connect(relayed_peer(DESKTOP_TAG), "desktop")
+            .map_err(|error| QuicError::Transport(error.to_string()))?
+            .await
+            .map_err(|error| QuicError::from_connection_error(&error))?;
+        std::mem::forget(inner_endpoint);
 
         let (mut send, mut recv) = connection
             .open_bi()
@@ -228,6 +257,36 @@ impl QuicApi {
         // arrives as a close code instead, which is what `from_close` turns into advice.
         decode_hello::<ServerHello>(&answer).map_err(|_| QuicError::from_close(&connection))?;
         Ok(connection)
+    }
+
+    /// Name the desktop this pairing is for, and wait for the relay to admit it.
+    ///
+    /// The token is the desktop's own registration token: it proves the pair rather than the
+    /// peer, which is what stops anyone who merely knows a device id attaching to it.
+    async fn say_hello_to_the_relay(&self, control: &quinn::Connection) -> Result<(), QuicError> {
+        let (mut send, mut recv) = control
+            .open_bi()
+            .await
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        let hello = RelayHello {
+            device_id: self.endpoint.desktop.clone(),
+            role: PeerRole::Client,
+            token: self.endpoint.token.clone(),
+        };
+        let bytes =
+            encode_hello(&hello).map_err(|error| QuicError::Transport(error.to_string()))?;
+        send.write_all(&bytes)
+            .await
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        send.finish()
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+
+        let answer = recv
+            .read_to_end(16 * 1024)
+            .await
+            .map_err(|_| QuicError::from_close(control))?;
+        decode_hello::<RelayAccepted>(&answer).map_err(|_| QuicError::from_close(control))?;
+        Ok(())
     }
 
     /// Subscribe to a session's events.

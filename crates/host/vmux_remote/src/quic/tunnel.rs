@@ -27,6 +27,13 @@ use quinn::{AsyncUdpSocket, UdpPoller};
 /// the relay would have no way to tell which of a desktop's phones a datagram was for.
 const TAG_BYTES: usize = 2;
 
+/// The tag a phone always sees for its desktop.
+///
+/// A phone has exactly one peer, so one number does, and keeping it fixed means the phone never
+/// has to learn what the relay called it. A desktop's phones get their own tags, assigned by the
+/// relay, which rewrites the number as it forwards.
+pub const DESKTOP_TAG: u16 = 1;
+
 /// The synthetic address a relayed peer appears at, one per tag.
 ///
 /// TEST-NET-1, so it can never collide with something routable. The tag rides in the port, which
