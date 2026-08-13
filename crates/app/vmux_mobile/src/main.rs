@@ -21,6 +21,7 @@ use vmux_chat::page::approval::ApprovalPanel;
 use vmux_chat::page::composer::ComposerStatus;
 use vmux_chat::page::composer::options::{EffortMenu, ModelMenu, ModelPill};
 use vmux_chat::transcript::{AssistantTurn, ChatItemRow, MD_CSS, WorkingIndicator};
+use vmux_service::chat::group_turns_tail;
 use vmux_start::results::CommandBarResultItem;
 use vmux_start::row::ResultRow;
 use vmux_ui::components::prompt_box::{PromptPopup, PromptPopupPlacement};
@@ -33,10 +34,8 @@ use vmux_ui::favicon::Favicon;
 use vmux_ui::hooks::{MenuDirection, move_selection};
 use vmux_ui::i18n::translate;
 use vmux_wire::PageIcon;
-use vmux_wire::chat::{
-    ChatBlock, ChatItem, ChatPlanStep, ChatSubagent, ChatTurn, latest_tool_location,
-};
-use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
+use vmux_wire::chat::{ChatItem, latest_tool_location};
+use vmux_wire::prompt_media::ChatAttachment;
 use vmux_wire::protocol::{AgentAction, SharedAgentCommand, SharedMessage, SharedResponse};
 use vmux_wire::room::{
     AgentAttachment, ApprovalRequest, AssistantBlock, ClientOpId, Message, ModelOptionEntry,
@@ -143,6 +142,26 @@ struct MobileRoomProjection {
     room_id: Option<RoomId>,
     through_seq: u64,
     events: Vec<RoomEvent>,
+}
+
+impl MobileRoomProjection {
+    /// Fold the replayed log into rendered chat items, with any streaming delta as the tail of
+    /// the live turn.
+    ///
+    /// The phone has no imported history and no per-turn durations, so it always asks for the
+    /// whole transcript and lets every turn resolve its duration to `None`.
+    fn chat_items(&self, live_delta: &str, running: bool) -> Vec<ChatItem> {
+        let mut messages = Vec::with_capacity(self.events.len() + 1);
+        for event in &self.events {
+            messages.push(event.message.clone());
+        }
+        if !live_delta.is_empty() {
+            messages.push(Message::Assistant {
+                blocks: vec![AssistantBlock::Text(live_delta.to_string())],
+            });
+        }
+        group_turns_tail(&[], &messages, &[], running, usize::MAX).items
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1145,7 +1164,7 @@ fn AppBody() -> Element {
     let approval_value = approval();
     let live_delta_value = live_delta();
     let room_value = room();
-    let transcript_items = group_messages(room_value.events, &live_delta_value, is_streaming);
+    let transcript_items = room_value.chat_items(&live_delta_value, is_streaming);
     let latest_tool = latest_tool_location(&transcript_items);
     let activity = vmux_wire::chat::activity_counts(&transcript_items);
     let attachment_previews = use_signal(HashMap::<String, ChatAttachment>::new);
@@ -1740,126 +1759,6 @@ fn PairCard(props: PairCardProps) -> Element {
 
 /// Fold the room's event log into the shared transcript model. The desktop gets this from
 /// `group_turns` on the daemon side; the relay does not pre-group yet, so mobile folds locally.
-fn group_messages(events: Vec<RoomEvent>, live_delta: &str, running: bool) -> Vec<ChatItem> {
-    let mut items: Vec<ChatItem> = Vec::new();
-    let mut turn: Vec<ChatBlock> = Vec::new();
-    for event in events {
-        match event.message {
-            Message::User { text, attachments } => {
-                if !turn.is_empty() {
-                    items.push(ChatItem::Turn(chat_turn(std::mem::take(&mut turn), false)));
-                }
-                items.push(ChatItem::User {
-                    text,
-                    context: None,
-                    attachments: attachments
-                        .into_iter()
-                        .map(|attachment| ChatSubmitAttachment {
-                            path: attachment.path,
-                            name: attachment.name,
-                            mime_type: attachment.mime_type,
-                            size: attachment.size,
-                        })
-                        .collect(),
-                });
-            }
-            Message::Assistant { blocks } => turn.extend(blocks.into_iter().map(chat_block)),
-            Message::ToolResult {
-                call_id,
-                content,
-                is_error,
-            } => turn.push(ChatBlock::ToolResult {
-                call_id,
-                content,
-                is_error,
-            }),
-        }
-    }
-    if !live_delta.is_empty() {
-        turn.push(ChatBlock::Text(live_delta.to_string()));
-    }
-    if !turn.is_empty() {
-        items.push(ChatItem::Turn(chat_turn(turn, running)));
-    }
-    items
-}
-
-fn chat_turn(blocks: Vec<ChatBlock>, running: bool) -> ChatTurn {
-    let step_count = blocks
-        .iter()
-        .enumerate()
-        .filter(|(index, block)| {
-            !matches!(block, ChatBlock::Text(_))
-                && ChatTurn {
-                    blocks: blocks.clone(),
-                    ..ChatTurn::default()
-                }
-                .parent_tool_index(*index)
-                .is_none()
-        })
-        .count() as u32;
-    ChatTurn {
-        blocks,
-        running,
-        duration_secs: None,
-        step_count,
-    }
-}
-
-fn chat_block(block: AssistantBlock) -> ChatBlock {
-    match block {
-        AssistantBlock::Text(text) => ChatBlock::Text(text),
-        AssistantBlock::Thinking(text) => ChatBlock::Thinking(text),
-        AssistantBlock::ToolUse {
-            call_id,
-            name,
-            args,
-            parent_call_id,
-        } => ChatBlock::ToolUse {
-            call_id,
-            name,
-            args,
-            parent_call_id,
-        },
-        AssistantBlock::Subagent(subagent) => ChatBlock::Subagent(Box::new(ChatSubagent {
-            call_id: subagent.call_id,
-            provider: subagent.provider,
-            title: subagent.title,
-            status: subagent.status,
-            action: subagent.action,
-            agent_name: subagent.agent_name,
-            thread_id: subagent.thread_id,
-            parent_thread_id: subagent.parent_thread_id,
-            child_thread_ids: subagent.child_thread_ids,
-            parent_call_id: subagent.parent_call_id,
-            prompt: subagent.prompt,
-            model: subagent.model,
-            reasoning_effort: subagent.reasoning_effort,
-            raw_input: subagent.raw_input,
-        })),
-        AssistantBlock::Diff {
-            call_id,
-            path,
-            old_text,
-            new_text,
-        } => ChatBlock::Diff {
-            call_id,
-            path,
-            old_text,
-            new_text,
-        },
-        AssistantBlock::Plan { steps } => ChatBlock::Plan {
-            steps: steps
-                .into_iter()
-                .map(|step| ChatPlanStep {
-                    content: step.content,
-                    status: step.status,
-                })
-                .collect(),
-        },
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn open_session(
     api: Api,
@@ -2147,6 +2046,7 @@ fn session_result_item(session: &RemoteSession) -> CommandBarResultItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_wire::chat::ChatBlock;
 
     /// The fingerprint is the whole basis for trusting the desktop's certificate. If it were
     /// dropped while parsing, the phone would silently fall back to an unpinned connection —
@@ -2226,30 +2126,36 @@ mod tests {
         );
     }
 
-    fn sample_events() -> Vec<RoomEvent> {
-        vmux_wire::room::RoomEvent::from_messages(
-            "s",
-            0,
-            &[
-                Message::user("hello"),
-                Message::Assistant {
-                    blocks: vec![AssistantBlock::Thinking("working".to_string())],
-                },
-                Message::ToolResult {
-                    call_id: "tool-1".to_string(),
-                    content: "done".to_string(),
-                    is_error: false,
-                },
-                Message::Assistant {
-                    blocks: vec![AssistantBlock::Text("answer".to_string())],
-                },
-            ],
-        )
+    impl MobileRoomProjection {
+        fn sample() -> Self {
+            Self {
+                room_id: None,
+                through_seq: 0,
+                events: RoomEvent::from_messages(
+                    "s",
+                    0,
+                    &[
+                        Message::user("hello"),
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Thinking("working".to_string())],
+                        },
+                        Message::ToolResult {
+                            call_id: "tool-1".to_string(),
+                            content: "done".to_string(),
+                            is_error: false,
+                        },
+                        Message::Assistant {
+                            blocks: vec![AssistantBlock::Text("answer".to_string())],
+                        },
+                    ],
+                ),
+            }
+        }
     }
 
     #[test]
     fn groups_agent_activity_into_one_turn() {
-        let items = group_messages(sample_events(), "", false);
+        let items = MobileRoomProjection::sample().chat_items("", false);
 
         assert_eq!(items.len(), 2);
         assert!(matches!(items[0], ChatItem::User { .. }));
@@ -2261,7 +2167,7 @@ mod tests {
 
     #[test]
     fn streaming_delta_extends_the_live_turn() {
-        let items = group_messages(sample_events(), "partial", true);
+        let items = MobileRoomProjection::sample().chat_items("partial", true);
 
         let ChatItem::Turn(turn) = &items[1] else {
             panic!("expected a turn");

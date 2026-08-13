@@ -11556,6 +11556,7 @@ dependencies = [
  "url",
  "vmux_chat",
  "vmux_remote",
+ "vmux_service",
  "vmux_start",
  "vmux_team",
  "vmux_ui",
