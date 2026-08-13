@@ -48,6 +48,8 @@ impl Plugin for SettingsPlugin {
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "settings",
     title: "Settings",
+    title_message_id: Some("settings-title"),
+    replaces_command: None,
     keywords: &["preferences", "config"],
     icon: Some(vmux_core::BuiltinIcon::Settings),
     command_bar: true,

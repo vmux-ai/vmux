@@ -280,7 +280,19 @@ pub struct CommandBarTerminalsSnapshot {
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarPagesSnapshot {
-    pub pages: Vec<CommandBarPage>,
+    pub pages: Vec<RegisteredPage>,
+}
+
+/// A page the command bar lists, with the parts of its manifest that only resolve per locale.
+///
+/// The title and the superseded command stay unresolved here because the snapshot is built once at
+/// startup and the locale can change after it. Whoever renders the payload holds the locale and
+/// finishes the job.
+#[derive(Clone, Debug)]
+pub struct RegisteredPage {
+    pub page: CommandBarPage,
+    pub title_message_id: Option<&'static str>,
+    pub replaces_command: Option<&'static str>,
 }
 
 /// Command-bar "current work" data: working dirs of open terminal/agent panes and
@@ -299,23 +311,29 @@ fn update_pages_snapshot(
     if !snapshot.pages.is_empty() {
         return;
     }
-    let mut pages: Vec<CommandBarPage> = manifests
-        .iter()
-        .filter(|manifest| manifest.command_bar)
-        .map(|manifest| CommandBarPage {
-            host: manifest.host.to_string(),
-            url: manifest.url(),
-            title: manifest.title.to_string(),
-            keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
-            icon: manifest
-                .icon
-                .map(vmux_core::PageIcon::Builtin)
-                .unwrap_or_default(),
-            shortcut: String::new(),
-            prompt_target: false,
-        })
-        .collect();
-    pages.sort_by(|a, b| a.url.cmp(&b.url));
+    let mut pages = Vec::new();
+    for manifest in &manifests {
+        if !manifest.command_bar {
+            continue;
+        }
+        pages.push(RegisteredPage {
+            page: CommandBarPage {
+                host: manifest.host.to_string(),
+                url: manifest.url(),
+                title: manifest.title.to_string(),
+                keywords: manifest.keywords.iter().map(|k| k.to_string()).collect(),
+                icon: manifest
+                    .icon
+                    .map(vmux_core::PageIcon::Builtin)
+                    .unwrap_or_default(),
+                shortcut: String::new(),
+                prompt_target: false,
+            },
+            title_message_id: manifest.title_message_id,
+            replaces_command: manifest.replaces_command,
+        });
+    }
+    pages.sort_by(|a, b| a.page.url.cmp(&b.page.url));
     snapshot.pages = pages;
 }
 
@@ -532,15 +550,19 @@ mod tests {
         app.init_resource::<CommandBarPagesSnapshot>()
             .add_systems(Update, update_pages_snapshot);
         app.world_mut().spawn(PageManifest {
-            host: "settings",
-            title: "Settings",
-            keywords: &["preferences"],
+            host: "services",
+            title: "Services",
+            title_message_id: Some("services-title"),
+            replaces_command: Some("service_open"),
+            keywords: &["daemon"],
             icon: Some(vmux_core::BuiltinIcon::Settings),
             command_bar: true,
         });
         app.world_mut().spawn(PageManifest {
             host: "layout",
             title: "Layout",
+            title_message_id: None,
+            replaces_command: None,
             keywords: &[],
             icon: None,
             command_bar: false,
@@ -550,7 +572,9 @@ mod tests {
 
         let snap = app.world().resource::<CommandBarPagesSnapshot>();
         assert_eq!(snap.pages.len(), 1);
-        assert_eq!(snap.pages[0].host, "settings");
-        assert_eq!(snap.pages[0].url, "vmux://settings/");
+        assert_eq!(snap.pages[0].page.host, "services");
+        assert_eq!(snap.pages[0].page.url, "vmux://services/");
+        assert_eq!(snap.pages[0].title_message_id, Some("services-title"));
+        assert_eq!(snap.pages[0].replaces_command, Some("service_open"));
     }
 }

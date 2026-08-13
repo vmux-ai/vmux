@@ -43,6 +43,8 @@ impl Plugin for TeamPlugin {
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "team",
     title: "Team",
+    title_message_id: Some("team-title"),
+    replaces_command: None,
     keywords: &["team", "agents", "profile"],
     icon: Some(vmux_core::BuiltinIcon::Users),
     command_bar: true,

@@ -173,22 +173,25 @@ pub struct CommandBarEntry {
     pub shortcut: String,
 }
 
-/// Command ids surfaced through a page entry instead of a command row: the
-/// Services page (vmux://services/) replaces "Open Service Monitor", and the
-/// History page shows the History shortcut. Their menu items + shortcuts stay.
-const COMMAND_BAR_SKIP_IDS: &[&str] = &["service_open", "browser_open_history"];
-
 /// Built-in command rows plus whatever other crates contributed, already named.
-pub fn command_list(locale: &Locale, contributed: Vec<CommandBarEntry>) -> Vec<CommandBarEntry> {
-    let mut entries: Vec<CommandBarEntry> = AppCommand::command_bar_entries()
-        .into_iter()
-        .filter(|(id, _, _)| !COMMAND_BAR_SKIP_IDS.contains(id))
-        .map(|(id, name, shortcut)| CommandBarEntry {
+///
+/// `superseded` names commands a registered page stands in for, whose rows the page entry replaces.
+pub fn command_list(
+    locale: &Locale,
+    contributed: Vec<CommandBarEntry>,
+    superseded: &[&str],
+) -> Vec<CommandBarEntry> {
+    let mut entries = Vec::new();
+    for (id, name, shortcut) in AppCommand::command_bar_entries() {
+        if superseded.contains(&id) {
+            continue;
+        }
+        entries.push(CommandBarEntry {
             id: id.to_string(),
             name: localized_command_name(locale.as_str(), id, name),
             shortcut: shortcut.to_string(),
-        })
-        .collect();
+        });
+    }
     entries.extend(contributed);
     entries
 }
@@ -1079,22 +1082,23 @@ pub(crate) fn build_command_bar_open_payload(
             shortcut: String::new(),
         });
     }
-    let mut pages = pages_snapshot.pages.clone();
-    for page in &mut pages {
-        if let Some(message_id) = page_title_message_id(&page.host) {
+    let mut pages = Vec::with_capacity(pages_snapshot.pages.len());
+    let mut superseded = Vec::new();
+    for entry in &pages_snapshot.pages {
+        let mut page = entry.page.clone();
+        if let Some(message_id) = entry.title_message_id {
             page.title = locale.translate(message_id);
         }
+        if let Some(command_id) = entry.replaces_command {
+            page.shortcut = command_shortcut(command_id);
+            superseded.push(command_id);
+        }
+        pages.push(page);
     }
     for entry in contributions.pages() {
         pages.push(entry.page.clone());
     }
-    let history_shortcut = command_shortcut("browser_open_history");
-    if !history_shortcut.is_empty()
-        && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
-    {
-        page.shortcut = history_shortcut;
-    }
-    let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed)
+    let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed, &superseded)
         .into_iter()
         .map(|e| CommandBarCommandEntry {
             id: e.id,
@@ -1134,22 +1138,6 @@ pub(crate) fn build_command_bar_open_payload(
         work_snapshot.recent_files.clone(),
         work_snapshot.search_engines.clone(),
     )
-}
-
-fn page_title_message_id(host: &str) -> Option<&'static str> {
-    match host {
-        "agents" => Some("agents-title"),
-        "extensions" => Some("extensions-title"),
-        "history" => Some("history-title"),
-        "lsp" => Some("lsp-title"),
-        "services" => Some("services-title"),
-        "settings" => Some("settings-title"),
-        "spaces" => Some("spaces-title"),
-        "start" => Some("start-title"),
-        "team" => Some("team-title"),
-        "terminal" => Some("command-terminal"),
-        _ => None,
-    }
 }
 
 #[derive(SystemParam)]

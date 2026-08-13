@@ -66,6 +66,8 @@ impl Plugin for ExtensionsPlugin {
 const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "extensions",
     title: "Extensions",
+    title_message_id: Some("extensions-title"),
+    replaces_command: None,
     keywords: &["extension", "extensions", "chrome", "addon", "install"],
     icon: Some(vmux_core::BuiltinIcon::Puzzle),
     command_bar: true,

@@ -43,6 +43,8 @@ impl Plugin for AgentChatPagePlugin {
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "agent",
     title: "Agent",
+    title_message_id: None,
+    replaces_command: None,
     keywords: &["ai", "chat", "assistant", "agent"],
     icon: Some(vmux_core::BuiltinIcon::Sparkles),
     command_bar: false,

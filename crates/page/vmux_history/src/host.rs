@@ -37,6 +37,8 @@ impl Plugin for HistoryPlugin {
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "history",
     title: "History",
+    title_message_id: Some("history-title"),
+    replaces_command: Some("browser_open_history"),
     keywords: &["recent", "visited"],
     icon: Some(vmux_core::BuiltinIcon::Clock),
     command_bar: true,

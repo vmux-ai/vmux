@@ -34,6 +34,8 @@ pub mod supervisor;
 pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "services",
     title: "Services",
+    title_message_id: Some("services-title"),
+    replaces_command: Some("service_open"),
     keywords: &["processes", "monitor"],
     icon: Some(vmux_core::BuiltinIcon::Activity),
     command_bar: true,
