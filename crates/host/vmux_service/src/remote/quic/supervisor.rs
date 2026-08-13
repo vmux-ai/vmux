@@ -13,7 +13,7 @@
 use tokio::sync::watch;
 
 use super::super::server::RemoteState;
-use super::dialer::AllocatedPort;
+use super::dialer::RegisteredDevice;
 
 /// Keeps the relay dialer running for exactly as long as Remote is switched on.
 ///
@@ -53,7 +53,7 @@ impl<D: Dial> Supervisor<D> {
     /// starts: a daemon that was killed never ran the guard that clears it, and a reader asking
     /// the moment Remote is switched back on would otherwise be handed the dead one.
     async fn run(mut self) {
-        AllocatedPort::release_stale();
+        RegisteredDevice::release_stale();
         loop {
             self.reconcile().await;
             if self.exposed.changed().await.is_err() {

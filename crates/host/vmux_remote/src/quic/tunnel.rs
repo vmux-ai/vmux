@@ -20,15 +20,23 @@ use bytes::Bytes;
 use quinn::udp::{RecvMeta, Transmit};
 use quinn::{AsyncUdpSocket, UdpPoller};
 
-/// The address every relayed peer appears to come from.
+/// Bytes the relay prefixes to every tunnelled datagram, naming which peer it belongs to.
 ///
-/// The relay does not say which phone a datagram came from, and does not need to: quinn tells
-/// connections apart by connection ID, not by address. TEST-NET-1, so it can never collide with
-/// something routable.
-pub const RELAYED_PEER: SocketAddr = SocketAddr::new(
-    std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
-    443,
-);
+/// Inbound demultiplexing does not need this — quinn tells connections apart by connection ID.
+/// The reply direction does: without a tag every connection would transmit to one address, and
+/// the relay would have no way to tell which of a desktop's phones a datagram was for.
+const TAG_BYTES: usize = 2;
+
+/// The synthetic address a relayed peer appears at, one per tag.
+///
+/// TEST-NET-1, so it can never collide with something routable. The tag rides in the port, which
+/// is what makes quinn hand it back on the way out as `Transmit::destination`.
+pub fn relayed_peer(tag: u16) -> SocketAddr {
+    SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)),
+        tag,
+    )
+}
 
 /// The address the inner endpoint reports as its own. Nothing dials it.
 const TUNNEL_LOCAL: SocketAddr = SocketAddr::new(
@@ -68,7 +76,7 @@ impl TunnelSocket {
     /// `None` when the peer refuses datagrams outright, which makes the tunnel unusable and is
     /// worth failing loudly on rather than discovering as an unreachable desktop.
     pub fn usable_mtu(&self) -> Option<usize> {
-        self.control.max_datagram_size()
+        self.control.max_datagram_size()?.checked_sub(TAG_BYTES)
     }
 }
 
@@ -81,9 +89,10 @@ impl AsyncUdpSocket for TunnelSocket {
         // Never reports WouldBlock: a full send buffer drops the packet, which the inner
         // connection recovers from, rather than stalling quinn behind a poller that would have to
         // learn when the outer connection drains.
-        let _ = self
-            .control
-            .send_datagram(Bytes::copy_from_slice(transmit.contents));
+        let mut tagged = Vec::with_capacity(TAG_BYTES + transmit.contents.len());
+        tagged.extend_from_slice(&transmit.destination.port().to_be_bytes());
+        tagged.extend_from_slice(transmit.contents);
+        let _ = self.control.send_datagram(Bytes::from(tagged));
         Ok(())
     }
 
@@ -113,10 +122,19 @@ impl AsyncUdpSocket for TunnelSocket {
             Poll::Pending => return Poll::Pending,
         };
 
-        let len = datagram.len().min(buffer.len());
-        buffer[..len].copy_from_slice(&datagram[..len]);
+        // A datagram too short to carry a tag cannot be attributed to a peer, so it is dropped
+        // rather than guessed at. Waking keeps the endpoint from stalling behind it.
+        if datagram.len() < TAG_BYTES {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        let tag = u16::from_be_bytes([datagram[0], datagram[1]]);
+        let payload = &datagram[TAG_BYTES..];
+
+        let len = payload.len().min(buffer.len());
+        buffer[..len].copy_from_slice(&payload[..len]);
         meta[0] = RecvMeta {
-            addr: RELAYED_PEER,
+            addr: relayed_peer(tag),
             len,
             stride: len,
             ecn: None,

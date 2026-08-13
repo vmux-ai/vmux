@@ -165,12 +165,13 @@ impl RemotePaths {
         self.service.runtime_file("remote-relay-url")
     }
 
-    /// The UDP port the relay allocated this desktop.
+    /// The device id the relay has accepted a registration for, while it holds.
     ///
-    /// Written by the daemon when it registers, read by the app when it builds a pairing link —
-    /// the port is the relay's to choose, and the link has no other way to learn it.
-    pub fn relay_port(&self) -> PathBuf {
-        self.service.runtime_file("remote-relay-port")
+    /// Distinct from [`RemotePaths::relay_device`], which is this desktop's id whether or not
+    /// anything has been registered. The app builds a pairing link from this one, so a link is
+    /// never offered for a desktop the relay would not route to.
+    pub fn relay_registration(&self) -> PathBuf {
+        self.service.runtime_file("remote-relay-registration")
     }
 }
 

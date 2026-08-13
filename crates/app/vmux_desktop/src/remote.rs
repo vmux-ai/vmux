@@ -72,18 +72,21 @@ impl RemotePairingInfo {
         }
     }
 
-    /// The link, or `None` while the relay has yet to allocate a port or the identity to be written.
+    /// The link, or `None` while the relay has yet to register this desktop or the identity to be
+    /// written.
     ///
     /// There is no loopback fallback: a desktop behind NAT is only reachable through the relay, so
     /// a link naming anything else would pair a phone that can never connect.
     fn ready(relay: &vmux_service::pairing::Relay, token: &str) -> Result<Option<Self>, String> {
-        let (Some(base_url), Some(fingerprint)) = (
+        let (Some(base_url), Some(device), Some(fingerprint)) = (
             relay.base_url()?,
+            relay.registered_device(),
             vmux_service::remote::quic::identity_fingerprint(),
         ) else {
             return Ok(None);
         };
-        let pairing = vmux_service::pairing::PairingInfo::new(&base_url, token, &fingerprint)?;
+        let pairing =
+            vmux_service::pairing::PairingInfo::new(&base_url, token, &fingerprint, &device)?;
         Ok(Some(Self {
             pairing_url: pairing.url,
             pairing_deep_link: pairing.deep_link,

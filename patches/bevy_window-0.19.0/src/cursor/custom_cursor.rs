@@ -6,7 +6,7 @@ use bevy_image::{Image, TextureAtlas};
 use bevy_math::URect;
 
 #[cfg(feature = "bevy_reflect")]
-use bevy_reflect::{std_traits::ReflectDefault, Reflect};
+use bevy_reflect::{Reflect, std_traits::ReflectDefault};
 
 /// A custom cursor created from an image.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, FromTemplate)]
