@@ -767,8 +767,6 @@ mod tests {
         assert!(source.contains("interactive_mode_user"));
         assert!(source.contains("interactive_mode_player"));
         assert!(source.contains("set_enabled(*mode != InteractionMode::User)"));
-        // Player mode is gone, so its entry is permanently unselectable. The entry itself
-        // goes when InteractionMode collapses to a single variant.
         assert!(source.contains("self.player.set_enabled(false)"));
     }
 }
