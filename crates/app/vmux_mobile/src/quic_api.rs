@@ -117,7 +117,19 @@ pub struct Endpoint {
 #[derive(Clone)]
 pub struct QuicApi {
     endpoint: Endpoint,
-    connection: Arc<Mutex<Option<quinn::Connection>>>,
+    connection: Arc<Mutex<Option<Dialled>>>,
+}
+
+/// A live connection and the endpoints underneath it.
+///
+/// The endpoints are held rather than dropped at the end of the dial: they own the sockets the
+/// session runs over. Holding them here rather than leaking them is what lets a replaced or reset
+/// connection take its sockets with it, instead of surviving to the far end's idle timeout and
+/// showing up on the relay as another attached phone.
+struct Dialled {
+    connection: quinn::Connection,
+    _relay: quinn::Endpoint,
+    _inner: quinn::Endpoint,
 }
 
 impl QuicApi {
@@ -133,20 +145,23 @@ impl QuicApi {
     /// Called when the app foregrounds: iOS tears the UDP socket down while suspended without
     /// telling anyone, so a connection that looks alive after a resume usually is not.
     pub async fn reset(&self) {
-        if let Some(connection) = self.connection.lock().await.take() {
-            connection.close(CloseCode::Normal.as_u32().into(), b"suspended");
+        if let Some(dialled) = self.connection.lock().await.take() {
+            dialled
+                .connection
+                .close(CloseCode::Normal.as_u32().into(), b"suspended");
         }
     }
 
     async fn connected(&self) -> Result<quinn::Connection, QuicError> {
         let mut slot = self.connection.lock().await;
         if let Some(existing) = slot.as_ref()
-            && existing.close_reason().is_none()
+            && existing.connection.close_reason().is_none()
         {
-            return Ok(existing.clone());
+            return Ok(existing.connection.clone());
         }
-        let connection = self.dial().await?;
-        *slot = Some(connection.clone());
+        let dialled = self.dial().await?;
+        let connection = dialled.connection.clone();
+        *slot = Some(dialled);
         Ok(connection)
     }
 
@@ -156,7 +171,7 @@ impl QuicApi {
     /// not apply until a connection exists, so nothing ever completes and nothing ever fails.
     const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
-    async fn dial(&self) -> Result<quinn::Connection, QuicError> {
+    async fn dial(&self) -> Result<Dialled, QuicError> {
         match tokio::time::timeout(Self::DIAL_TIMEOUT, self.dial_inner()).await {
             Ok(result) => result,
             Err(_) => Err(QuicError::Transport(translate_with(
@@ -178,7 +193,7 @@ impl QuicApi {
     /// Two QUIC connections, deliberately. The outer one is with the relay and verified against
     /// the public roots; the inner one terminates on the desktop and is pinned by fingerprint, so
     /// the relay carries bytes it holds no key for.
-    async fn dial_inner(&self) -> Result<quinn::Connection, QuicError> {
+    async fn dial_inner(&self) -> Result<Dialled, QuicError> {
         // The pairing link names the relay by host, so this has to resolve rather than parse: a
         // hostname is not a SocketAddr, and the old parse turned every relay pairing into "that
         // pairing address is not valid".
@@ -212,8 +227,6 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;
-        // Dropping the endpoint would close the connection with it.
-        std::mem::forget(relay_endpoint);
 
         self.say_hello_to_the_relay(&control).await?;
 
@@ -229,7 +242,6 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?
             .await
             .map_err(|error| QuicError::from_connection_error(&error))?;
-        std::mem::forget(inner_endpoint);
 
         let (mut send, mut recv) = connection
             .open_bi()
@@ -258,7 +270,11 @@ impl QuicApi {
         // The answer carries nothing; reading a well-formed one is the accept signal. A refusal
         // arrives as a close code instead, which is what `from_close` turns into advice.
         decode_hello::<ServerHello>(&answer).map_err(|_| QuicError::from_close(&connection))?;
-        Ok(connection)
+        Ok(Dialled {
+            connection,
+            _relay: relay_endpoint,
+            _inner: inner_endpoint,
+        })
     }
 
     /// Name the desktop this pairing is for, and wait for the relay to admit it.
