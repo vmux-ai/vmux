@@ -1,4 +1,5 @@
 use crate::event::{CommandBarPage, CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 use vmux_core::agent::AgentKind;
@@ -14,7 +15,6 @@ pub struct CommandBarSnapshotPlugin;
 impl Plugin for CommandBarSnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandBarAgentsSnapshot>()
-            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
@@ -38,11 +38,15 @@ pub struct CommandBarAgentsSnapshot {
 
 impl CommandBarAgentsSnapshot {
     /// Launcher entries for installed ACP and CLI agents, most recently used first.
+    ///
+    /// Ranked by that order, since the entities these become carry preference rather than inherit
+    /// it from their position.
     pub fn launcher_pages(&self) -> Vec<ContributedPage> {
         let mut pages = Vec::with_capacity(self.acp.len() + self.providers.len());
         for agent in &self.acp {
             pages.push(ContributedPage {
                 id: agent.id.clone(),
+                rank: 0,
                 page: CommandBarPage {
                     host: "agent".to_string(),
                     url: agent.url.clone(),
@@ -61,6 +65,7 @@ impl CommandBarAgentsSnapshot {
         for agent in &self.providers {
             pages.push(ContributedPage {
                 id: agent.id.clone(),
+                rank: 0,
                 page: CommandBarPage {
                     host: "agent".to_string(),
                     url: agent.url.clone(),
@@ -89,6 +94,9 @@ impl CommandBarAgentsSnapshot {
                         .cmp(&b.page.title.to_lowercase())
                 })
         });
+        for (rank, page) in pages.iter_mut().enumerate() {
+            page.rank = rank;
+        }
         pages
     }
 }
@@ -96,51 +104,50 @@ impl CommandBarAgentsSnapshot {
 /// What other crates add to the command bar.
 ///
 /// The command bar lists pages and commands; it does not know what any of them are for. Whoever
-/// owns a capability describes it here and handles it when it is chosen, so the command bar stays
-/// a launcher rather than growing a branch per feature.
-#[derive(Resource, Default, Clone, Debug)]
-pub struct CommandBarContributions {
-    /// Pages to list, and the targets a prompt can be sent to, most preferred first.
-    pub pages: Vec<ContributedPage>,
-    pub commands: Vec<ContributedCommand>,
-    /// Urls a contributor resolves itself instead of them naming a page to open.
+/// owns a capability spawns it as an entity and handles it when it is chosen, so the command bar
+/// stays a launcher rather than growing a branch per feature.
+///
+/// One entity per row is what lets more than one crate contribute. The list used to be a resource
+/// every contributor overwrote wholesale, so a second one silently erased the first every frame.
+/// A contributor now despawns only the entities it spawned, which it recognises by its own private
+/// marker component — this type never needs to know who owns what.
+#[derive(SystemParam)]
+pub struct Contributions<'w, 's> {
+    pages: Query<'w, 's, &'static ContributedPage>,
+    commands: Query<'w, 's, &'static ContributedCommand>,
+    claimed: Query<'w, 's, &'static ClaimedUrl>,
+}
+
+impl Contributions<'_, '_> {
+    /// Contributed pages, most preferred first.
     ///
-    /// Opening one of these as an ordinary url would land on nothing: they stand for a choice the
-    /// contributor has to make — "the default one" — not for a page that exists yet.
-    pub claimed_urls: Vec<String>,
-}
+    /// Entity iteration order carries no meaning, so preference is [`ContributedPage::rank`] and
+    /// ties break by id. Rank orders one contributor's own pages; between two contributors the id
+    /// is all there is to go on, which is arbitrary but stable.
+    pub fn pages(&self) -> Vec<&ContributedPage> {
+        let mut pages: Vec<&ContributedPage> = self.pages.iter().collect();
+        pages.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
+        pages
+    }
 
-/// One contributed page: something the command bar can list, open, and send a prompt to.
-#[derive(Clone, Debug)]
-pub struct ContributedPage {
-    /// Echoed back when this page is chosen by id rather than by url. Opaque to the command bar.
-    pub id: String,
-    pub page: CommandBarPage,
-}
+    /// Contributed command rows, in no particular order.
+    pub fn commands(&self) -> impl Iterator<Item = &ContributedCommand> {
+        self.commands.iter()
+    }
 
-/// One contributed command-bar row.
-#[derive(Clone, Debug)]
-pub struct ContributedCommand {
-    /// Echoed back by the command bar when this row is chosen. Opaque to it.
-    pub id: String,
-    /// Fluent message naming the row, with its arguments. Not a rendered string: the contributor
-    /// has no locale, and the command bar does.
-    pub message_id: String,
-    pub args: Vec<(String, String)>,
-}
-
-impl CommandBarContributions {
     /// Where a prompt should go: `requested` when that page is listed, else the most preferred.
     ///
     /// `None` means nothing accepts a prompt, which a caller has to refuse rather than substitute
     /// for — opening something other than what was asked for would be worse than doing nothing.
     pub fn prompt_url(&self, requested: Option<&str>) -> Option<String> {
         if let Some(requested) = requested
-            && let Some(entry) = self.pages.iter().find(|entry| entry.page.url == requested)
+            && self.pages.iter().any(|entry| entry.page.url == requested)
         {
-            return Some(entry.page.url.clone());
+            return Some(requested.to_string());
         }
-        self.pages.first().map(|entry| entry.page.url.clone())
+        let pages = self.pages();
+        let first = pages.first()?;
+        Some(first.page.url.clone())
     }
 
     /// The page a contributed id names.
@@ -151,9 +158,69 @@ impl CommandBarContributions {
 
     /// Whether a contributor resolves this url itself.
     pub fn claims_url(&self, url: &str) -> bool {
-        self.claimed_urls.iter().any(|claimed| claimed == url)
+        self.claimed.iter().any(|claimed| claimed.0 == url)
     }
 }
+
+/// Matches a contribution entity of any kind whose row was spawned or edited.
+type ContributionTouched = Or<(
+    Changed<ContributedPage>,
+    Changed<ContributedCommand>,
+    Changed<ClaimedUrl>,
+)>;
+
+/// Whether the contributed rows changed since the reading system last ran, despawns included.
+///
+/// Split from [`Contributions`] because reading despawns needs `&mut` and every other reader only
+/// wants to look. Both halves are needed: a republish arrives as spawns, but the last row going
+/// away is a despawn and nothing else.
+#[derive(SystemParam)]
+pub struct ContributionsChanged<'w, 's> {
+    touched: Query<'w, 's, (), ContributionTouched>,
+    pages: RemovedComponents<'w, 's, ContributedPage>,
+    commands: RemovedComponents<'w, 's, ContributedCommand>,
+    claimed: RemovedComponents<'w, 's, ClaimedUrl>,
+}
+
+impl ContributionsChanged<'_, '_> {
+    /// True when a row was spawned, edited or despawned.
+    ///
+    /// Every removal reader is drained even once the answer is known, so a despawn this frame
+    /// cannot be reported again as a change next frame.
+    pub fn any(&mut self) -> bool {
+        let removed =
+            self.pages.read().count() + self.commands.read().count() + self.claimed.read().count();
+        removed > 0 || !self.touched.is_empty()
+    }
+}
+
+/// One contributed page: something the command bar can list, open, and send a prompt to.
+#[derive(Component, Clone, Debug)]
+pub struct ContributedPage {
+    /// Echoed back when this page is chosen by id rather than by url. Opaque to the command bar.
+    pub id: String,
+    pub page: CommandBarPage,
+    /// Preference among this contributor's pages, lowest first.
+    pub rank: usize,
+}
+
+/// One contributed command-bar row.
+#[derive(Component, Clone, Debug)]
+pub struct ContributedCommand {
+    /// Echoed back by the command bar when this row is chosen. Opaque to it.
+    pub id: String,
+    /// Fluent message naming the row, with its arguments. Not a rendered string: the contributor
+    /// has no locale, and the command bar does.
+    pub message_id: String,
+    pub args: Vec<(String, String)>,
+}
+
+/// A url a contributor resolves itself instead of naming a page to open.
+///
+/// Opening one of these as an ordinary url would land on nothing: they stand for a choice the
+/// contributor has to make — "the default one" — not for a page that exists yet.
+#[derive(Component, Clone, Debug)]
+pub struct ClaimedUrl(pub String);
 
 /// Agent identity used for recent-first launcher ordering.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -255,13 +322,25 @@ fn update_pages_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_core::agent::AgentKind;
 
-    /// What the contributing crate publishes, so the prompt tests run the real path.
-    fn contributions(agents: &CommandBarAgentsSnapshot) -> CommandBarContributions {
-        CommandBarContributions {
-            pages: agents.launcher_pages(),
-            ..Default::default()
+    impl CommandBarAgentsSnapshot {
+        /// Publish what the contributing crate would, then ask where a prompt goes.
+        ///
+        /// Spawns the pages rather than handing [`Contributions`] a list, so the prompt tests run
+        /// against the entities the command bar actually reads.
+        fn resolve_prompt_url(&self, requested: Option<&str>) -> Option<String> {
+            let mut world = World::new();
+            for page in self.launcher_pages() {
+                world.spawn(page);
+            }
+            let requested = requested.map(str::to_string);
+            world
+                .run_system_once(move |contributions: Contributions| {
+                    contributions.prompt_url(requested.as_deref())
+                })
+                .expect("prompt_url system runs")
         }
     }
 
@@ -294,7 +373,7 @@ mod tests {
         };
 
         assert_eq!(
-            contributions(&snapshot).prompt_url(None).as_deref(),
+            snapshot.resolve_prompt_url(None).as_deref(),
             Some("vmux://agent/codex/cli")
         );
     }
@@ -312,11 +391,11 @@ mod tests {
         };
 
         assert_eq!(
-            contributions(&snapshot).prompt_url(None).as_deref(),
+            snapshot.resolve_prompt_url(None).as_deref(),
             Some("vmux://agent/claude")
         );
         assert_eq!(
-            contributions(&CommandBarAgentsSnapshot::default()).prompt_url(None),
+            CommandBarAgentsSnapshot::default().resolve_prompt_url(None),
             None
         );
     }
@@ -341,14 +420,14 @@ mod tests {
         };
 
         assert_eq!(
-            contributions(&snapshot)
-                .prompt_url(Some("vmux://agent/claude"))
+            snapshot
+                .resolve_prompt_url(Some("vmux://agent/claude"))
                 .as_deref(),
             Some("vmux://agent/claude")
         );
         assert_eq!(
-            contributions(&snapshot)
-                .prompt_url(Some("vmux://agent/uninstalled"))
+            snapshot
+                .resolve_prompt_url(Some("vmux://agent/uninstalled"))
                 .as_deref(),
             Some("vmux://agent/codex/cli")
         );
@@ -388,6 +467,56 @@ mod tests {
             pages[1].page.icon,
             vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
         ));
+        assert_eq!(pages[0].rank, 0);
+        assert_eq!(pages[1].rank, 1);
+    }
+
+    #[derive(Component)]
+    struct FirstContributor;
+
+    #[derive(Component)]
+    struct SecondContributor;
+
+    impl ContributedCommand {
+        fn named(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                message_id: "command-test-row".to_string(),
+                args: Vec::new(),
+            }
+        }
+    }
+
+    /// Republishing is scoped to the rows the contributor spawned.
+    ///
+    /// The shape this replaced was a resource each contributor overwrote, so the second one to run
+    /// each frame erased the first. Only one crate ever contributed, which is why it never showed.
+    #[test]
+    fn one_contributor_rebuilding_leaves_the_others_rows() {
+        let mut world = World::new();
+        world.spawn((FirstContributor, ContributedCommand::named("first")));
+        world.spawn((SecondContributor, ContributedCommand::named("second")));
+
+        world
+            .run_system_once(
+                |mine: Query<Entity, With<FirstContributor>>, mut commands: Commands| {
+                    for entity in mine.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    commands.spawn((FirstContributor, ContributedCommand::named("first-again")));
+                },
+            )
+            .expect("republish runs");
+
+        let ids = world
+            .run_system_once(|contributions: Contributions| {
+                let mut ids: Vec<String> =
+                    contributions.commands().map(|row| row.id.clone()).collect();
+                ids.sort();
+                ids
+            })
+            .expect("read runs");
+        assert_eq!(ids, ["first-again", "second"]);
     }
 
     #[test]

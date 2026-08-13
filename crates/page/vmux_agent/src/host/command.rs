@@ -253,10 +253,10 @@ pub(crate) fn remote_agents(
 /// system-parameter limit.
 #[cfg(not(web))]
 #[derive(bevy::ecs::system::SystemParam)]
-pub(crate) struct DesktopContext<'w> {
+pub(crate) struct DesktopContext<'w, 's> {
     focus: Res<'w, FocusedStack>,
     agents: Res<'w, vmux_command::snapshot::CommandBarAgentsSnapshot>,
-    contributions: Res<'w, vmux_command::snapshot::CommandBarContributions>,
+    contributions: vmux_command::snapshot::Contributions<'w, 's>,
 }
 
 pub(super) fn handle_agent_commands(

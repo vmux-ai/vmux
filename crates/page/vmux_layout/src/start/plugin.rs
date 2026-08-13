@@ -8,8 +8,8 @@ use bevy_cef::prelude::{
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarWorkSnapshot,
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
+    ContributionsChanged,
 };
 use vmux_core::{
     CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
@@ -302,7 +302,8 @@ fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Res<CommandBarContributions>,
+    contributions: Contributions,
+    mut contributions_changed: ContributionsChanged,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -339,7 +340,7 @@ fn sync_live_start_pages(
     let focus_changed = focused.is_changed();
     let changed = should_refresh_start_payload(
         spaces_snapshot.is_changed(),
-        contributions.is_changed(),
+        contributions_changed.any(),
         pages_snapshot.is_changed(),
         work_snapshot.is_changed(),
         focus_changed,
@@ -509,7 +510,7 @@ fn on_start_spare_revealed(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Res<CommandBarContributions>,
+    contributions: Contributions,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -553,7 +554,7 @@ fn on_start_data_request(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
     spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Res<CommandBarContributions>,
+    contributions: Contributions,
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
@@ -596,7 +597,7 @@ fn on_start_data_request(
 fn build_start_payload(
     tab_gather: &TabGatherParams,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &CommandBarContributions,
+    contributions: &Contributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &CommandBarWorkSnapshot,
     prompt_context: &StartPromptContextParams,
@@ -663,7 +664,6 @@ mod tests {
     fn start_ready_app() -> App {
         let mut app = App::new();
         app.init_resource::<CommandBarSpacesSnapshot>()
-            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<CommandBarWorkSnapshot>()
             .init_resource::<EmittedIds>()
