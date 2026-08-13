@@ -36,68 +36,17 @@ pub struct CommandBarAgentsSnapshot {
     pub recent: Vec<AgentPromptTarget>,
 }
 
-impl CommandBarAgentsSnapshot {
-    /// Launcher entries for installed ACP and CLI agents, most recently used first.
+impl AgentPromptTarget {
+    /// Rank of each target's url, most recently used first.
     ///
-    /// Ranked by that order, since the entities these become carry preference rather than inherit
-    /// it from their position.
-    pub fn launcher_pages(&self) -> Vec<ContributedPage> {
-        let mut pages = Vec::with_capacity(self.acp.len() + self.providers.len());
-        for agent in &self.acp {
-            pages.push(ContributedPage {
-                id: agent.id.clone(),
-                rank: 0,
-                page: CommandBarPage {
-                    host: "agent".to_string(),
-                    url: agent.url.clone(),
-                    title: agent.name.clone(),
-                    keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
-                    icon: if agent.icon.is_empty() {
-                        vmux_core::PageIcon::None
-                    } else {
-                        vmux_core::PageIcon::Favicon(agent.icon.clone())
-                    },
-                    shortcut: String::new(),
-                    prompt_target: true,
-                },
-            });
+    /// The snapshot records recency; turning it into the launcher's order is the contributing
+    /// crate's business, and this is the part of it that needs no knowledge of what an agent is.
+    pub fn recency_ranks(targets: &[Self]) -> HashMap<String, usize> {
+        let mut ranks = HashMap::new();
+        for (rank, target) in targets.iter().enumerate() {
+            ranks.insert(target.url(), rank);
         }
-        for agent in &self.providers {
-            pages.push(ContributedPage {
-                id: agent.id.clone(),
-                rank: 0,
-                page: CommandBarPage {
-                    host: "agent".to_string(),
-                    url: agent.url.clone(),
-                    title: format!("{} (CLI)", agent.name),
-                    keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
-                    icon: vmux_core::PageIcon::None,
-                    shortcut: String::new(),
-                    prompt_target: true,
-                },
-            });
-        }
-        let mut recent_rank: HashMap<String, usize> = HashMap::new();
-        for (rank, target) in self.recent.iter().enumerate() {
-            recent_rank.insert(target.url(), rank);
-        }
-        pages.sort_by(|a, b| {
-            recent_rank
-                .get(&a.page.url)
-                .copied()
-                .unwrap_or(usize::MAX)
-                .cmp(&recent_rank.get(&b.page.url).copied().unwrap_or(usize::MAX))
-                .then_with(|| {
-                    a.page
-                        .title
-                        .to_lowercase()
-                        .cmp(&b.page.title.to_lowercase())
-                })
-        });
-        for (rank, page) in pages.iter_mut().enumerate() {
-            page.rank = rank;
-        }
-        pages
+        ranks
     }
 }
 
@@ -343,14 +292,27 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use vmux_core::agent::AgentKind;
 
-    impl CommandBarAgentsSnapshot {
-        /// Publish what the contributing crate would, then ask where a prompt goes.
+    impl ContributedPage {
+        fn ranked(url: &str, rank: usize) -> Self {
+            Self {
+                id: url.to_string(),
+                rank,
+                page: CommandBarPage {
+                    host: "test".to_string(),
+                    url: url.to_string(),
+                    prompt_target: true,
+                    ..Default::default()
+                },
+            }
+        }
+
+        /// Spawn these rows, then ask where a prompt would go.
         ///
-        /// Spawns the pages rather than handing [`Contributions`] a list, so the prompt tests run
-        /// against the entities the command bar actually reads.
-        fn resolve_prompt_url(&self, requested: Option<&str>) -> Option<String> {
+        /// Spawns rather than handing [`Contributions`] a list, so the prompt tests run against
+        /// the entities the command bar actually reads.
+        fn prompt_url_among(pages: Vec<Self>, requested: Option<&str>) -> Option<String> {
             let mut world = World::new();
-            for page in self.launcher_pages() {
+            for page in pages {
                 world.spawn(page);
             }
             let requested = requested.map(str::to_string);
@@ -372,169 +334,43 @@ mod tests {
     }
 
     #[test]
-    fn prompt_prefers_most_recent_installed_agent() {
-        let snapshot = CommandBarAgentsSnapshot {
-            recent: vec![AgentPromptTarget::Cli(AgentKind::Codex)],
-            providers: vec![AgentProviderSummary {
-                id: "codex".to_string(),
-                name: "Codex".to_string(),
-                url: "vmux://agent/codex/cli".to_string(),
-                icon: String::new(),
-            }],
-            acp: vec![AgentProviderSummary {
-                id: "claude-acp".to_string(),
-                name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude".to_string(),
-                icon: String::new(),
-            }],
-            ..Default::default()
-        };
+    fn prompt_goes_to_the_lowest_ranked_page() {
+        let pages = vec![
+            ContributedPage::ranked("vmux://agent/claude", 1),
+            ContributedPage::ranked("vmux://agent/codex/cli", 0),
+        ];
 
         assert_eq!(
-            snapshot.resolve_prompt_url(None).as_deref(),
+            ContributedPage::prompt_url_among(pages, None).as_deref(),
             Some("vmux://agent/codex/cli")
         );
     }
 
+    /// A request names a page; honouring one that is no longer listed would send the prompt
+    /// somewhere the user did not ask for, so it falls back to the preferred page instead.
     #[test]
-    fn prompt_falls_back_to_installed_agent() {
-        let snapshot = CommandBarAgentsSnapshot {
-            acp: vec![AgentProviderSummary {
-                id: "claude-acp".to_string(),
-                name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude".to_string(),
-                icon: String::new(),
-            }],
-            ..Default::default()
+    fn prompt_honours_a_listed_request_and_ignores_a_stale_one() {
+        let pages = || {
+            vec![
+                ContributedPage::ranked("vmux://agent/codex/cli", 0),
+                ContributedPage::ranked("vmux://agent/claude", 1),
+            ]
         };
 
         assert_eq!(
-            snapshot.resolve_prompt_url(None).as_deref(),
+            ContributedPage::prompt_url_among(pages(), Some("vmux://agent/claude")).as_deref(),
             Some("vmux://agent/claude")
         );
         assert_eq!(
-            CommandBarAgentsSnapshot::default().resolve_prompt_url(None),
-            None
-        );
-    }
-
-    #[test]
-    fn prompt_uses_selected_installed_agent_and_rejects_stale_url() {
-        let snapshot = CommandBarAgentsSnapshot {
-            providers: vec![AgentProviderSummary {
-                id: "codex".to_string(),
-                name: "Codex".to_string(),
-                url: "vmux://agent/codex/cli".to_string(),
-                icon: String::new(),
-            }],
-            acp: vec![AgentProviderSummary {
-                id: "claude-acp".to_string(),
-                name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude".to_string(),
-                icon: String::new(),
-            }],
-            recent: vec![AgentPromptTarget::Cli(AgentKind::Codex)],
-            ..Default::default()
-        };
-
-        assert_eq!(
-            snapshot
-                .resolve_prompt_url(Some("vmux://agent/claude"))
-                .as_deref(),
-            Some("vmux://agent/claude")
-        );
-        assert_eq!(
-            snapshot
-                .resolve_prompt_url(Some("vmux://agent/uninstalled"))
-                .as_deref(),
+            ContributedPage::prompt_url_among(pages(), Some("vmux://agent/uninstalled")).as_deref(),
             Some("vmux://agent/codex/cli")
         );
     }
 
+    /// Nothing accepting a prompt has to be refused rather than substituted for.
     #[test]
-    fn launcher_pages_lists_only_snapshot_agents_in_recent_order() {
-        let snapshot = CommandBarAgentsSnapshot {
-            providers: vec![AgentProviderSummary {
-                id: "codex".to_string(),
-                name: "Codex".to_string(),
-                url: "vmux://agent/codex/cli".to_string(),
-                icon: String::new(),
-            }],
-            acp: vec![AgentProviderSummary {
-                id: "claude-acp".to_string(),
-                name: "Claude Agent".to_string(),
-                url: "vmux://agent/claude".to_string(),
-                icon: "https://cdn.example/claude-acp.svg".to_string(),
-            }],
-            recent: vec![
-                AgentPromptTarget::Cli(AgentKind::Codex),
-                AgentPromptTarget::Acp {
-                    id: "claude".to_string(),
-                },
-            ],
-            ..Default::default()
-        };
-        let pages = snapshot.launcher_pages();
-        assert_eq!(pages.len(), 2);
-        assert_eq!(pages[0].id, "codex");
-        assert_eq!(pages[0].page.url, "vmux://agent/codex/cli");
-        assert_eq!(pages[0].page.title, "Codex (CLI)");
-        assert_eq!(pages[0].page.host, "agent");
-        assert_eq!(pages[1].page.title, "Claude Agent");
-        assert!(matches!(
-            pages[1].page.icon,
-            vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
-        ));
-        assert_eq!(pages[0].rank, 0);
-        assert_eq!(pages[1].rank, 1);
-    }
-
-    #[derive(Component)]
-    struct FirstContributor;
-
-    #[derive(Component)]
-    struct SecondContributor;
-
-    impl ContributedCommand {
-        fn named(id: &str) -> Self {
-            Self {
-                id: id.to_string(),
-                message_id: "command-test-row".to_string(),
-                args: Vec::new(),
-            }
-        }
-    }
-
-    /// Republishing is scoped to the rows the contributor spawned.
-    ///
-    /// The shape this replaced was a resource each contributor overwrote, so the second one to run
-    /// each frame erased the first. Only one crate ever contributed, which is why it never showed.
-    #[test]
-    fn one_contributor_rebuilding_leaves_the_others_rows() {
-        let mut world = World::new();
-        world.spawn((FirstContributor, ContributedCommand::named("first")));
-        world.spawn((SecondContributor, ContributedCommand::named("second")));
-
-        world
-            .run_system_once(
-                |mine: Query<Entity, With<FirstContributor>>, mut commands: Commands| {
-                    for entity in mine.iter() {
-                        commands.entity(entity).despawn();
-                    }
-                    commands.spawn((FirstContributor, ContributedCommand::named("first-again")));
-                },
-            )
-            .expect("republish runs");
-
-        let ids = world
-            .run_system_once(|contributions: Contributions| {
-                let mut ids: Vec<String> =
-                    contributions.commands().map(|row| row.id.clone()).collect();
-                ids.sort();
-                ids
-            })
-            .expect("read runs");
-        assert_eq!(ids, ["first-again", "second"]);
+    fn prompt_refuses_when_no_page_accepts_one() {
+        assert_eq!(ContributedPage::prompt_url_among(Vec::new(), None), None);
     }
 
     #[test]

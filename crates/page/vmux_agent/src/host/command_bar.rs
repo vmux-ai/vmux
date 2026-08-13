@@ -6,8 +6,10 @@
 //! between them, and splitting it would let the two drift.
 
 use bevy::prelude::*;
+use vmux_command::event::CommandBarPage;
 use vmux_command::snapshot::{
-    ClaimedUrl, CommandBarAgentsSnapshot, ContributedCommand, WriteCommandBarSnapshots,
+    AgentPromptTarget, ClaimedUrl, CommandBarAgentsSnapshot, ContributedCommand, ContributedPage,
+    WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -42,6 +44,70 @@ const DEFAULT_AGENT_URLS: [&str; 2] = ["vmux://agent/", "vmux://agent"];
 #[derive(Component)]
 struct AgentContribution;
 
+impl AgentContribution {
+    /// Launcher rows for installed ACP and CLI agents, most recently used first.
+    ///
+    /// What an agent looks like in a launcher is this crate's to decide: that a CLI provider is
+    /// labelled as one, that an ACP agent's icon is a favicon when the registry gave it a url, and
+    /// that recency beats alphabetical. Rank is written onto each row because the entities these
+    /// become carry preference rather than inherit it from a position in a list.
+    fn launcher_pages(agents: &CommandBarAgentsSnapshot) -> Vec<ContributedPage> {
+        let mut pages = Vec::with_capacity(agents.acp.len() + agents.providers.len());
+        for agent in &agents.acp {
+            pages.push(ContributedPage {
+                id: agent.id.clone(),
+                rank: 0,
+                page: CommandBarPage {
+                    host: "agent".to_string(),
+                    url: agent.url.clone(),
+                    title: agent.name.clone(),
+                    keywords: vec![agent.id.clone(), "acp".to_string(), "agent".to_string()],
+                    icon: if agent.icon.is_empty() {
+                        vmux_core::PageIcon::None
+                    } else {
+                        vmux_core::PageIcon::Favicon(agent.icon.clone())
+                    },
+                    shortcut: String::new(),
+                    prompt_target: true,
+                },
+            });
+        }
+        for agent in &agents.providers {
+            pages.push(ContributedPage {
+                id: agent.id.clone(),
+                rank: 0,
+                page: CommandBarPage {
+                    host: "agent".to_string(),
+                    url: agent.url.clone(),
+                    title: format!("{} (CLI)", agent.name),
+                    keywords: vec![agent.id.clone(), "cli".to_string(), "agent".to_string()],
+                    icon: vmux_core::PageIcon::None,
+                    shortcut: String::new(),
+                    prompt_target: true,
+                },
+            });
+        }
+        let recency = AgentPromptTarget::recency_ranks(&agents.recent);
+        pages.sort_by(|a, b| {
+            recency
+                .get(&a.page.url)
+                .copied()
+                .unwrap_or(usize::MAX)
+                .cmp(&recency.get(&b.page.url).copied().unwrap_or(usize::MAX))
+                .then_with(|| {
+                    a.page
+                        .title
+                        .to_lowercase()
+                        .cmp(&b.page.title.to_lowercase())
+                })
+        });
+        for (rank, page) in pages.iter_mut().enumerate() {
+            page.rank = rank;
+        }
+        pages
+    }
+}
+
 /// Publish the agents to launch, and a row per model.
 fn publish_contributions(
     agents: Res<CommandBarAgentsSnapshot>,
@@ -54,7 +120,7 @@ fn publish_contributions(
     for entity in mine.iter() {
         commands.entity(entity).despawn();
     }
-    for page in agents.launcher_pages() {
+    for page in AgentContribution::launcher_pages(&agents) {
         commands.spawn((AgentContribution, page));
     }
     for strategy in &agents.strategies {
@@ -151,7 +217,50 @@ impl std::fmt::Display for AppAgentId {
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::snapshot::Contributions;
+    use vmux_command::snapshot::{AgentProviderSummary, Contributions};
+    use vmux_core::agent::AgentKind;
+
+    /// The launcher lists exactly what is installed, most recently used first, and each row
+    /// carries that order as its rank because the entity it becomes has no position to inherit.
+    #[test]
+    fn launcher_pages_list_only_installed_agents_in_recent_order() {
+        let snapshot = CommandBarAgentsSnapshot {
+            providers: vec![AgentProviderSummary {
+                id: "codex".to_string(),
+                name: "Codex".to_string(),
+                url: "vmux://agent/codex/cli".to_string(),
+                icon: String::new(),
+            }],
+            acp: vec![AgentProviderSummary {
+                id: "claude-acp".to_string(),
+                name: "Claude Agent".to_string(),
+                url: "vmux://agent/claude".to_string(),
+                icon: "https://cdn.example/claude-acp.svg".to_string(),
+            }],
+            recent: vec![
+                AgentPromptTarget::Cli(AgentKind::Codex),
+                AgentPromptTarget::Acp {
+                    id: "claude".to_string(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let pages = AgentContribution::launcher_pages(&snapshot);
+
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].id, "codex");
+        assert_eq!(pages[0].rank, 0);
+        assert_eq!(pages[0].page.url, "vmux://agent/codex/cli");
+        assert_eq!(pages[0].page.title, "Codex (CLI)");
+        assert_eq!(pages[0].page.host, "agent");
+        assert_eq!(pages[1].rank, 1);
+        assert_eq!(pages[1].page.title, "Claude Agent");
+        assert!(matches!(
+            pages[1].page.icon,
+            vmux_core::PageIcon::Favicon(ref u) if u == "https://cdn.example/claude-acp.svg"
+        ));
+    }
 
     /// The id is a private round trip between the two halves of this file. A row whose id does not
     /// survive it is published and then silently ignored when the user picks it.
