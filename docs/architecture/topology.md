@@ -151,7 +151,7 @@ The shape above is OS-agnostic; the builds are not yet. Being honest about the d
 | macOS | host — server + local client | Primary. Packaged, launchd-managed, shipped. |
 | Linux | host | Builds and tests in CI. Not packaged. |
 | Windows | host | Not started — no platform code exists. |
-| iOS | remote client | Real and buildable via `dx`; no CI job. |
+| iOS | remote client | Linked in CI for `aarch64-apple-ios`; packaged and shipped via `dx`. |
 | Android | remote client | Configured in `Dioxus.toml` and the `Makefile`; no platform code yet. |
 | iPadOS · watchOS · others | remote client | Nothing platform-specific stands in the way. |
 

@@ -195,13 +195,18 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       website: ${{ steps.filter.outputs.website }}
-      packaging: ${{ steps.filter.outputs.packaging }}
+      macos: ${{ steps.filter.outputs.macos }}
+      ios: ${{ steps.filter.outputs.ios }}
       code: ${{ steps.filter.outputs.code }}
     steps:
       - uses: actions/checkout@v5
       - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # Under the default 'some' a lone '!' rule matches almost everything, because any file
+          # the rule does not exclude satisfies it. 'some-with-excludes' is the one that reads the
+          # way the lists below look: at least one positive rule, and no negated rule.
+          predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
               - 'crates/**'
@@ -214,16 +219,32 @@ jobs:
               - '.github/workflows/ci.yml'
             website:
               - 'website/**'
-            packaging:
-              - 'scripts/**'
+            macos:
+              - 'crates/**'
               - 'patches/**'
               - 'packaging/**'
+              - 'scripts/**'
               - 'Cargo.toml'
-              - 'Makefile'
-              - 'crates/app/vmux_desktop/Cargo.toml'
               - 'Cargo.lock'
-              - '.github/workflows/release.yml'
+              - 'Makefile'
+              - 'rust-toolchain.toml'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/release.yml'
+              - '!crates/app/vmux_mobile/**'
+              - '!packaging/ios/**'
+              - '!scripts/*ios*'
+            ios:
+              - 'crates/**'
+              - 'packaging/ios/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'Makefile'
+              - 'rust-toolchain.toml'
+              - 'scripts/*ios*'
+              - '.github/workflows/ci.yml'
+              - '!crates/app/vmux_desktop/**'
+              - '!crates/vmux_page/**'
+              - '!patches/**'
 
   deps-rust:
     name: Deps (rust)
@@ -272,6 +293,84 @@ jobs:
       # single-package build catches.
       - name: vmux_session builds alone
         run: env -u CEF_PATH cargo check --locked -p vmux_session --all-targets
+
+  ios-build:
+    name: Build iOS App
+    runs-on: macos-latest
+    needs: [changes]
+    if: needs.changes.outputs.ios == 'true'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ios
+
+      - name: Cache tailwindcss
+        uses: actions/cache@v5
+        with:
+          path: ~/.local/bin/tailwindcss
+          key: tailwindcss-${{ runner.os }}-${{ env.TAILWINDCSS_VERSION }}
+
+      - name: Add ~/.local/bin to PATH
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Install tailwindcss
+        run: TAILWINDCSS_INSTALL_DIR="$HOME/.local/bin" ./scripts/install-tailwindcss.sh
+
+      # `dx` runs tailwind before cargo, and `assets/tailwind.out.css` is generated and gitignored.
+      # `asset!()` resolves at compile time, so without this cargo cannot even check the crate.
+      - name: Generate the tailwind bundle dx would
+        run: |
+          tailwindcss \
+            -i crates/app/vmux_mobile/assets/tailwind.css \
+            -o crates/app/vmux_mobile/assets/tailwind.out.css
+
+      # Build, not check. A dropped codegen-unit symbol once shipped a broken app while every
+      # `cargo check` stayed green — see docs/plans/2026-08-11-portable-pages.md. Only a linker
+      # catches that, and the bin is `required-features = ["mobile"]`, so a plain
+      # `cargo build -p vmux_mobile` would compile nothing and pass for free.
+      - name: Build the phone app
+        run: cargo build --locked -p vmux_mobile --target aarch64-apple-ios --features mobile --bin vmux_mobile
+
+      # vmux_mobile does not depend on every page that claims to be portable, so compiling it
+      # proves nothing about them. This went green once while vmux_editor for iOS was broken.
+      # Crates left `cfg(web)` on purpose — vmux_layout, vmux_editor, vmux_terminal — are absent
+      # deliberately: they render only in CEF and are not meant to build for the phone.
+      - name: Check the pages that ship on the phone
+        run: cargo check --locked --target aarch64-apple-ios -p vmux_chat -p vmux_start -p vmux_team -p vmux_ui
+
+      - name: bevy_cef does not reach the phone
+        run: |
+          set -euo pipefail
+
+          cef_tree() {
+            cargo tree --locked --target aarch64-apple-ios -p "$1" -i bevy_cef 2>/dev/null
+          }
+
+          # Unlike the host-target query in deps-rust, `cargo tree --target` exits 0 whether or not
+          # it found anything and prints "nothing to print" to stderr, so the exit code says
+          # nothing and stdout is the only signal. Prove the query can still find bevy_cef before
+          # trusting it not to.
+          if [ -z "$(cef_tree vmux_desktop)" ]; then
+            echo "::error::positive control failed: bevy_cef not found in vmux_desktop, so this job is asserting nothing"
+            exit 1
+          fi
+          echo "control ok: vmux_desktop links bevy_cef"
+
+          found="$(cef_tree vmux_mobile)"
+          if [ -n "$found" ]; then
+            echo "::error::bevy_cef reaches the phone:"
+            echo "$found"
+            exit 1
+          fi
+          echo "ok: vmux_mobile does not link bevy_cef"
 
   lint:
     name: Lint
@@ -331,19 +430,40 @@ jobs:
       - name: Gate
         env:
           CHANGES: ${{ needs.changes.result }}
-          CODE: ${{ needs.changes.outputs.code }}
-          PACKAGING: ${{ needs.changes.outputs.packaging }}
+          MACOS: ${{ needs.changes.outputs.macos }}
           RESULT: ${{ needs.build-mac.result }}
         run: |
           if [ "$CHANGES" != "success" ]; then
             echo "::error::Detect Changes did not succeed ($CHANGES)"
             exit 1
           fi
-          if { [ "$CODE" = "true" ] || [ "$PACKAGING" = "true" ]; } && [ "$RESULT" != "success" ]; then
+          if [ "$MACOS" = "true" ] && [ "$RESULT" != "success" ]; then
             echo "::error::Build macOS App result: $RESULT"
             exit 1
           fi
-          echo "Build macOS gate ok (code=$CODE packaging=$PACKAGING build=$RESULT)"
+          echo "Build macOS gate ok (macos=$MACOS build=$RESULT)"
+
+  build-ios:
+    name: Build iOS
+    runs-on: ubuntu-latest
+    needs: [changes, ios-build]
+    if: always()
+    steps:
+      - name: Gate
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          IOS: ${{ needs.changes.outputs.ios }}
+          RESULT: ${{ needs.ios-build.result }}
+        run: |
+          if [ "$CHANGES" != "success" ]; then
+            echo "::error::Detect Changes did not succeed ($CHANGES)"
+            exit 1
+          fi
+          if [ "$IOS" = "true" ] && [ "$RESULT" != "success" ]; then
+            echo "::error::Build iOS App result: $RESULT"
+            exit 1
+          fi
+          echo "Build iOS gate ok (ios=$IOS build=$RESULT)"
 
   website:
     name: Website Build
@@ -381,7 +501,7 @@ jobs:
   build-mac:
     name: Build macOS App
     needs: [changes, cef-version]
-    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.packaging == 'true'
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-latest
     permissions:
       contents: write
