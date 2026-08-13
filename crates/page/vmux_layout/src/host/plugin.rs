@@ -10,8 +10,6 @@ use crate::command_bar::handler::CommandBarInputPlugin;
 use crate::command_bar::key::CommandBarKeyPlugin;
 use crate::command_bar::panel::CommandBarPanelPlugin;
 use crate::contract::LayoutContractPlugin;
-#[cfg(feature = "player-mode")]
-use crate::host::focus_ring::FocusRingPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::pane::PanePlugin;
@@ -90,7 +88,5 @@ impl Plugin for LayoutPlugin {
                 CommandBarKeyPlugin,
                 LayoutCefPlugin,
             ));
-        #[cfg(feature = "player-mode")]
-        app.add_plugins(FocusRingPlugin);
     }
 }

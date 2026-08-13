@@ -589,20 +589,15 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
     }
 }
 
+/// The 3D scene is gone, and the Bevy subsystems it alone pulled must not return through
+/// a crate-level feature. The test above covers the workspace dependency; this covers the
+/// crate that used to opt in.
 #[test]
-fn player_mode_owns_player_only_bevy_features() {
-    let desktop = include_str!("../Cargo.toml");
+fn no_crate_reenables_the_player_only_bevy_features() {
     let layout = include_str!("../../../page/vmux_layout/Cargo.toml");
 
-    assert!(desktop.contains("default = [\"full\"]"));
-    let full = desktop
-        .split_once("full = [")
-        .and_then(|(_, rest)| rest.split_once(']'))
-        .map(|(features, _)| features)
-        .expect("full feature list");
-    assert!(full.contains("\"player-mode\""));
-    assert!(desktop.contains("player-mode = [\"vmux_layout/player-mode\"]"));
     for feature in [
+        "player-mode",
         "bevy/bevy_animation",
         "bevy/bevy_camera_controller",
         "bevy/bevy_pbr",
@@ -610,7 +605,10 @@ fn player_mode_owns_player_only_bevy_features() {
         "bevy/free_camera",
         "bevy_cef/pbr",
     ] {
-        assert!(layout.contains(feature));
+        assert!(
+            !layout.contains(feature),
+            "vmux_layout should not enable {feature}"
+        );
     }
 }
 

@@ -101,9 +101,6 @@ struct InteractiveModeMenuItems {
 impl InteractiveModeMenuItems {
     fn sync(&self, mode: &InteractionMode) {
         self.user.set_enabled(*mode != InteractionMode::User);
-        #[cfg(feature = "player-mode")]
-        self.player.set_enabled(*mode != InteractionMode::Player);
-        #[cfg(not(feature = "player-mode"))]
         self.player.set_enabled(false);
     }
 }
@@ -770,6 +767,6 @@ mod tests {
         assert!(source.contains("interactive_mode_user"));
         assert!(source.contains("interactive_mode_player"));
         assert!(source.contains("set_enabled(*mode != InteractionMode::User)"));
-        assert!(source.contains("set_enabled(*mode != InteractionMode::Player)"));
+        assert!(source.contains("self.player.set_enabled(false)"));
     }
 }

@@ -37,13 +37,6 @@ mod header;
 mod swap;
 mod webview_reveal;
 
-#[cfg(feature = "player-mode")]
-mod focus_ring;
-
-#[cfg(feature = "player-mode")]
-pub mod scene;
-#[cfg(not(feature = "player-mode"))]
-#[path = "host/scene_user.rs"]
 pub mod scene;
 
 pub use cef::{

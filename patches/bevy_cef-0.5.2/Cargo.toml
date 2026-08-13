@@ -50,42 +50,52 @@ path = "src/lib.rs"
 [[example]]
 name = "brp"
 path = "examples/brp.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "custom_material"
 path = "examples/custom_material.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "devtool"
 path = "examples/devtool.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "extensions"
 path = "examples/extensions.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "host_emit"
 path = "examples/host_emit.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "inline_html"
 path = "examples/inline_html.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "js_emit"
 path = "examples/js_emit.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "navigation"
 path = "examples/navigation.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "preload_scripts"
 path = "examples/preload_scripts.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "simple"
 path = "examples/simple.rs"
+required-features = ["pbr"]
 
 [[example]]
 name = "sprite"
@@ -94,6 +104,7 @@ path = "examples/sprite.rs"
 [[example]]
 name = "zoom_level"
 path = "examples/zoom_level.rs"
+required-features = ["pbr"]
 
 [dependencies.async-channel]
 version = "2.5"
