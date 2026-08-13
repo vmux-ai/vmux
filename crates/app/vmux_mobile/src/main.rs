@@ -1662,6 +1662,10 @@ struct PairCardProps {
 #[component]
 fn PairCard(props: PairCardProps) -> Element {
     let mut show_link = use_signal(|| !props.value.trim().is_empty());
+    let unavailable = use_hook(|| match qr_scanner::ScannerSupport::detect() {
+        qr_scanner::ScannerSupport::Available => None,
+        qr_scanner::ScannerSupport::Unavailable(reason) => Some(reason),
+    });
 
     rsx! {
         div { class: "w-full",
@@ -1670,8 +1674,9 @@ fn PairCard(props: PairCardProps) -> Element {
                 p { class: "mt-1 text-xs leading-5 text-muted-foreground", {translate("mobile-pair-subtitle")} }
             }
             button {
-                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 active:scale-[0.99] active:bg-primary/90",
+                class: "flex h-14 w-full items-center justify-center gap-2.5 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground shadow-xl shadow-black/20 disabled:pointer-events-none disabled:opacity-40 disabled:shadow-none active:scale-[0.99] active:bg-primary/90",
                 r#type: "button",
+                disabled: unavailable.is_some(),
                 onclick: move |_| props.on_scan.call(()),
                 svg {
                     class: "h-5 w-5",
@@ -1697,6 +1702,9 @@ fn PairCard(props: PairCardProps) -> Element {
                 r#type: "button",
                 onclick: move |_| show_link.set(!show_link()),
                 {if show_link() { translate("mobile-pair-hide-link") } else { translate("mobile-pair-show-link") }}
+            }
+            if let Some(reason) = unavailable.clone() {
+                p { class: "mt-3 text-center text-xs leading-5 text-muted-foreground", "{reason}" }
             }
             if show_link() {
                 form {

@@ -268,6 +268,37 @@ mod platform {
         ROOT_CONTROLLER.set(window.window.ui_view_controller().cast());
     }
 
+    /// Whether a camera exists to scan with, so the button can be dead rather than dead-ended.
+    ///
+    /// Permission is deliberately not part of this. A denied camera can be turned back on and
+    /// [`open`] presents the screen that does it, so the button stays live; a device with no
+    /// camera at all has no such route and a tap can only ever produce an error.
+    pub enum ScannerSupport {
+        Available,
+        Unavailable(String),
+    }
+
+    impl ScannerSupport {
+        pub fn detect() -> Self {
+            let Some(media_type) = (unsafe { AVMediaTypeVideo }) else {
+                return Self::Unavailable(translate("mobile-qr-camera-unavailable"));
+            };
+            // Checked before the device probe: a denied camera can report no default device, and
+            // that must not read as absent hardware.
+            let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
+            if matches!(
+                status,
+                AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted
+            ) {
+                return Self::Available;
+            }
+            match unsafe { AVCaptureDevice::defaultDeviceWithMediaType(media_type) } {
+                Some(_) => Self::Available,
+                None => Self::Unavailable(translate("mobile-qr-camera-unavailable")),
+            }
+        }
+    }
+
     pub fn open() -> Result<(), String> {
         if ACTIVE.get() || REQUESTING.get() {
             return Ok(());
@@ -405,6 +436,17 @@ mod platform {
     use vmux_ui::i18n::translate;
 
     pub fn install(_: &dioxus::mobile::DesktopContext) {}
+
+    pub enum ScannerSupport {
+        Available,
+        Unavailable(String),
+    }
+
+    impl ScannerSupport {
+        pub fn detect() -> Self {
+            Self::Unavailable(translate("mobile-qr-unsupported-platform"))
+        }
+    }
 
     pub fn open() -> Result<(), String> {
         Err(translate("mobile-qr-unsupported-platform"))
