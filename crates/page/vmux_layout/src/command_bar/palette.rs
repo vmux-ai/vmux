@@ -701,14 +701,13 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             on_close.call(());
             let selected_attachments = attachments.peek().clone();
             if prompt_target_matches_query(item, &prompt) && selected_attachments.is_empty() {
-                emit_action_with_target("open", target_url, open_target);
+                let _ = send(&CommandBarActionEvent::open(target_url, open_target));
             } else {
-                emit_prompt_action(
+                let _ = send(&CommandBarActionEvent::prompt(
                     prompt.trim(),
-                    open_target,
                     target_url,
                     &selected_attachments,
-                );
+                ));
             }
             if let Some((handler, next)) = transition {
                 handler.call(next);
@@ -718,45 +717,62 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         on_close.call(());
         match item {
             ResultItem::Terminal { path } => {
-                emit_action("terminal", path);
+                let _ = send(&CommandBarActionEvent::Terminal {
+                    value: path.clone(),
+                });
             }
             ResultItem::Stack {
                 pane_id, tab_index, ..
             } => {
-                emit_action("switch_tab", &format!("{pane_id}:{tab_index}"));
+                let _ = send(&CommandBarActionEvent::SwitchTab {
+                    pane: *pane_id,
+                    index: *tab_index,
+                });
             }
             ResultItem::Command { id, .. } => {
-                emit_action("command", id);
+                let _ = send(&CommandBarActionEvent::Command {
+                    id: id.clone(),
+                    open: open_target,
+                });
             }
             ResultItem::Space { id, .. } => {
-                emit_action("space", id);
+                let _ = send(&CommandBarActionEvent::Space { id: id.clone() });
             }
             ResultItem::Page { url, .. } => {
                 if !url.is_empty() {
-                    emit_action_with_target("open", url, open_target);
+                    let _ = send(&CommandBarActionEvent::open(url, open_target));
                 }
             }
             ResultItem::Navigate { url } => {
                 if !url.is_empty() {
-                    emit_action_with_target("open", url, open_target);
+                    let _ = send(&CommandBarActionEvent::open(url, open_target));
                 }
             }
             ResultItem::Search { engine, query } => {
-                emit_action_with_target("open", &engine.search_url(query), open_target);
+                let _ = send(&CommandBarActionEvent::open(
+                    &engine.search_url(query),
+                    open_target,
+                ));
             }
             ResultItem::History { url, .. } => {
                 if !url.is_empty() {
-                    emit_action_with_target("open", url, open_target);
+                    let _ = send(&CommandBarActionEvent::open(url, open_target));
                 }
             }
             ResultItem::File { path, .. } => {
-                emit_action_with_target("open", &format!("file://{path}"), open_target);
+                let _ = send(&CommandBarActionEvent::open(
+                    &format!("file://{path}"),
+                    open_target,
+                ));
             }
             ResultItem::WorkDir { path, .. } => {
-                emit_action_with_target("open", &format!("file://{path}"), open_target);
+                let _ = send(&CommandBarActionEvent::open(
+                    &format!("file://{path}"),
+                    open_target,
+                ));
             }
             ResultItem::RecentFile { url, .. } => {
-                emit_action_with_target("open", url, open_target);
+                let _ = send(&CommandBarActionEvent::open(url, open_target));
             }
         }
         if let Some((handler, next)) = transition {
@@ -1034,7 +1050,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     execute(item);
                 } else {
                     let selected_attachments = attachments.peek().clone();
-                    emit_prompt_action("", open_target, "", &selected_attachments);
+                    let _ = send(&CommandBarActionEvent::prompt(
+                        "",
+                        "",
+                        &selected_attachments,
+                    ));
                 }
                 return;
             }
@@ -1057,12 +1077,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                 } else {
                     on_close.call(());
                     let selected_attachments = attachments.peek().clone();
-                    emit_prompt_action(
+                    let _ = send(&CommandBarActionEvent::prompt(
                         start_keydown_q.trim(),
-                        open_target,
                         "",
                         &selected_attachments,
-                    );
+                    ));
                 }
             } else {
                 let prefer_page = matches!(
@@ -1076,11 +1095,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
-                    emit_action_with_target("open", &start_keydown_q, open_target);
+                    let _ = send(&CommandBarActionEvent::open(&start_keydown_q, open_target));
                 } else if let Some(item) = start_keydown_results.get(sel) {
                     execute(item);
                 } else if !start_keydown_q.is_empty() {
-                    emit_action_with_target("open", &start_keydown_q, open_target);
+                    let _ = send(&CommandBarActionEvent::open(&start_keydown_q, open_target));
                 }
             }
         }
@@ -1127,11 +1146,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                         .opens_typed_url_on_enter(open_target, nav_mode())
                 {
                     on_close.call(());
-                    emit_action_with_target("open", &modal_keydown_q, open_target);
+                    let _ = send(&CommandBarActionEvent::open(&modal_keydown_q, open_target));
                 } else if let Some(item) = modal_keydown_results.get(sel) {
                     execute(item);
                 } else if !modal_keydown_q.is_empty() {
-                    emit_action_with_target("open", &modal_keydown_q, open_target);
+                    let _ = send(&CommandBarActionEvent::open(&modal_keydown_q, open_target));
                 }
             }
             return;
@@ -1247,12 +1266,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                 } else {
                                     on_close.call(());
                                     let selected_attachments = attachments.peek().clone();
-                                    emit_prompt_action(
+                                    let _ = send(&CommandBarActionEvent::prompt(
                                         action_query.trim(),
-                                        open_target,
                                         "",
                                         &selected_attachments,
-                                    );
+                                    ));
                                 }
                             }
                         }
@@ -1488,47 +1506,6 @@ fn select_start_media_entry(
     ));
     selected.set(0);
     focus_prompt_end(PROMPT_INPUT_ID);
-}
-
-/// Emit a command-bar action to the host with no explicit open target.
-pub(crate) fn emit_action(action: &str, value: &str) {
-    emit_action_with_target(action, value, None);
-}
-
-/// Emit a [`CommandBarActionEvent`] to the host (open / command / space / terminal / switch_tab).
-pub(crate) fn emit_action_with_target(action: &str, value: &str, target: Option<OpenTarget>) {
-    let _ = send(&CommandBarActionEvent {
-        action: action.to_string(),
-        value: value.to_string(),
-        target,
-        target_url: None,
-        attachments: Vec::new(),
-    });
-}
-
-fn emit_prompt_action(
-    value: &str,
-    target: Option<OpenTarget>,
-    target_url: &str,
-    attachments: &[ChatAttachment],
-) {
-    let _ = send(&CommandBarActionEvent {
-        action: "prompt".to_string(),
-        value: value.to_string(),
-        target,
-        target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
-        attachments: attachments
-            .iter()
-            .map(
-                |attachment| vmux_command::prompt_media::ChatSubmitAttachment {
-                    path: attachment.path.clone(),
-                    name: attachment.name.clone(),
-                    mime_type: attachment.mime_type.clone(),
-                    size: attachment.size,
-                },
-            )
-            .collect(),
-    });
 }
 
 const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
