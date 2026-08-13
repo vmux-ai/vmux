@@ -10,8 +10,6 @@
 
 #[cfg(web)]
 pub mod page;
-#[cfg(web)]
-pub mod palette;
 
 pub mod event;
 pub mod size;
