@@ -1162,17 +1162,43 @@ struct CommandBarActionQueries<'w, 's> {
     webview_sources: Query<'w, 's, &'static WebviewSource>,
 }
 
-fn inline_transition_stack_for(
-    webview: Entity,
-    queries: &CommandBarActionQueries,
-) -> Option<Entity> {
-    let WebviewSource::Url(url) = queries.webview_sources.get(webview).ok()? else {
-        return None;
-    };
-    if !url.starts_with(crate::start::START_PAGE_URL) {
-        return None;
+impl CommandBarActionQueries<'_, '_> {
+    /// The stack an action lands in when the command bar did not open an empty one for it.
+    fn focused_stack(&self) -> Option<Entity> {
+        let (_, _, stack) = focused_stack(
+            self.active_tab_param.get(),
+            &self.all_children,
+            &self.leaf_panes,
+            &self.pane_ts,
+            &self.pane_children,
+            &self.stack_ts,
+        );
+        stack
     }
-    queries.child_of_q.get(webview).ok().map(|parent| parent.0)
+
+    /// The pane an action lands in when there is no stack to put it in.
+    fn focused_pane(&self) -> Option<Entity> {
+        let (_, pane, _) = focused_stack(
+            self.active_tab_param.get(),
+            &self.all_children,
+            &self.leaf_panes,
+            &self.pane_ts,
+            &self.pane_children,
+            &self.stack_ts,
+        );
+        pane
+    }
+
+    /// The stack holding the start page that raised this action, which can transition in place.
+    fn inline_transition_stack(&self, webview: Entity) -> Option<Entity> {
+        let WebviewSource::Url(url) = self.webview_sources.get(webview).ok()? else {
+            return None;
+        };
+        if !url.starts_with(crate::start::START_PAGE_URL) {
+            return None;
+        }
+        self.child_of_q.get(webview).ok().map(|parent| parent.0)
+    }
 }
 
 fn mark_inline_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
@@ -1262,7 +1288,7 @@ fn on_command_bar_action(
     let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
-    let inline_transition_stack = inline_transition_stack_for(webview, &queries);
+    let inline_transition_stack = queries.inline_transition_stack(webview);
     let locale = resource_params
         .p3()
         .as_deref()
@@ -1283,15 +1309,8 @@ fn on_command_bar_action(
                 })
                 .collect::<Vec<_>>();
             if !prompt.is_empty() || !attachments.is_empty() {
-                let (_, _, focused_stack) = focused_stack(
-                    queries.active_tab_param.get(),
-                    &queries.all_children,
-                    &queries.leaf_panes,
-                    &queries.pane_ts,
-                    &queries.pane_children,
-                    &queries.stack_ts,
-                );
-                if let Some(stack) = empty_stack.or(focused_stack)
+                let focused = queries.focused_stack();
+                if let Some(stack) = empty_stack.or(focused)
                     && let Some(url) = resource_params.p2().prompt_url(evt.target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
@@ -1386,14 +1405,7 @@ fn on_command_bar_action(
                         new_stack_ctx.previous_stack = None;
                         custom_keyboard_restore = true;
                     } else {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            queries.active_tab_param.get(),
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
+                        let active_pane_opt = queries.focused_pane();
                         if let Some(pane_e) = active_pane_opt {
                             chosen_writer.write(crate::ContributedCommandChosen {
                                 id: url.clone(),
@@ -1466,14 +1478,7 @@ fn on_command_bar_action(
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
-                    let (_, active_pane_opt, _) = focused_stack(
-                        queries.active_tab_param.get(),
-                        &queries.all_children,
-                        &queries.leaf_panes,
-                        &queries.pane_ts,
-                        &queries.pane_children,
-                        &queries.stack_ts,
-                    );
+                    let active_pane_opt = queries.focused_pane();
                     if let Some(pane_e) = active_pane_opt {
                         let stack_e = commands
                             .spawn((
@@ -1514,14 +1519,7 @@ fn on_command_bar_action(
                 let pane = match empty_stack {
                     Some(_) => None,
                     None => {
-                        let (_, active_pane_opt, _) = focused_stack(
-                            queries.active_tab_param.get(),
-                            &queries.all_children,
-                            &queries.leaf_panes,
-                            &queries.pane_ts,
-                            &queries.pane_children,
-                            &queries.stack_ts,
-                        );
+                        let active_pane_opt = queries.focused_pane();
                         active_pane_opt
                     }
                 };
@@ -1678,14 +1676,7 @@ fn on_command_bar_action(
             .remove::<CommandBarRecreating>();
     }
     if !custom_keyboard_restore {
-        let (_, _, active_stack) = focused_stack(
-            queries.active_tab_param.get(),
-            &queries.all_children,
-            &queries.leaf_panes,
-            &queries.pane_ts,
-            &queries.pane_children,
-            &queries.stack_ts,
-        );
+        let active_stack = queries.focused_stack();
         if let Some(tab) = active_stack {
             for browser_e in &queries.content_browsers {
                 let is_child = queries
