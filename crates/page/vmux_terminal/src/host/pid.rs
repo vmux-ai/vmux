@@ -16,6 +16,18 @@ impl Plugin for PidPlugin {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pid(pub u32);
 
+impl Pid {
+    /// The page url a terminal running under this pid is addressed by.
+    ///
+    /// Three readers agree on this format: the pane's own `PageMetadata`, the key
+    /// `CommandBarTerminalsSnapshot::running` is built from, and the value the command bar hands
+    /// back when that row is chosen. Disagreeing spawns a second terminal instead of going to the
+    /// one the user picked, and says nothing, so exactly one place writes it.
+    pub fn page_url(&self) -> String {
+        format!("{}{}", vmux_layout::event::TERMINAL_PAGE_URL, self.0)
+    }
+}
+
 #[derive(Resource, Default, Debug)]
 pub struct PidToEntity(pub HashMap<u32, Entity>);
 

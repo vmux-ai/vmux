@@ -431,7 +431,7 @@ pub fn format_terminal_url(
 ) {
     for (pid, mut meta) in &mut q {
         let next = match pid {
-            Some(Pid(p)) => format!("{TERMINAL_PAGE_URL}{p}"),
+            Some(pid) => pid.page_url(),
             None => TERMINAL_PAGE_URL.to_string(),
         };
         if meta.url != next {
