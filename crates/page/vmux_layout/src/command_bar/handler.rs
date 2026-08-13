@@ -32,8 +32,8 @@ use vmux_command::event::{
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarContributions, CommandBarPagesSnapshot, CommandBarSpacesSnapshot,
-    CommandBarTerminalsSnapshot, WriteCommandBarSnapshots,
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, Contributions,
+    WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -667,8 +667,8 @@ fn handle_open_command_bar(
             Without<Modal>,
         ),
     >,
+    contributions: Contributions,
     mut snapshot_params: ParamSet<(
-        Res<CommandBarContributions>,
         Res<CommandBarSpacesSnapshot>,
         ResMut<NewStackContext>,
         Option<Res<crate::settings::EffectiveStartupUrl>>,
@@ -683,14 +683,13 @@ fn handle_open_command_bar(
         return;
     };
     let active_stack_count = stack_q.iter().count();
-    let spaces_snapshot = snapshot_params.p1().clone();
+    let spaces_snapshot = snapshot_params.p0().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
-    let contributions = snapshot_params.p0().clone();
-    let startup_url = snapshot_params.p3().map(|url| url.0.clone());
-    let pages_snap = snapshot_params.p5().clone();
-    let work_snap = snapshot_params.p6().clone();
+    let startup_url = snapshot_params.p2().map(|url| url.0.clone());
+    let pages_snap = snapshot_params.p4().clone();
+    let work_snap = snapshot_params.p5().clone();
     let locale = snapshot_params
-        .p7()
+        .p6()
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
@@ -711,7 +710,7 @@ fn handle_open_command_bar(
 
     let mut active_stack_override = None;
     let canceled_pending_stack = {
-        let mut new_stack_ctx = snapshot_params.p2();
+        let mut new_stack_ctx = snapshot_params.p1();
         command_bar_cancel_pending_stack_for_active_open(&mut new_stack_ctx, replace_active_stack)
     };
     if let Some((stack, previous_stack)) = canceled_pending_stack {
@@ -724,7 +723,7 @@ fn handle_open_command_bar(
 
     if (should_dismiss || toggle_closes) && is_open {
         close_command_bar_panel(layout_e, &mut commands);
-        let mut new_stack_ctx = snapshot_params.p2();
+        let mut new_stack_ctx = snapshot_params.p1();
         // Discard empty tab created by a previous Cmd+T
         if let Some(stack_e) = new_stack_ctx.stack.take() {
             commands.entity(stack_e).despawn();
@@ -767,21 +766,21 @@ fn handle_open_command_bar(
     // handle_tab_commands / on_pane_select to clean up.
     if should_dismiss_nav && is_open {
         close_command_bar_panel(layout_e, &mut commands);
-        snapshot_params.p2().needs_open = false;
+        snapshot_params.p1().needs_open = false;
         return;
     }
 
     let startup_request = {
-        let mut new_stack_ctx = snapshot_params.p2();
+        let mut new_stack_ctx = snapshot_params.p1();
         pending_stack_startup_url_request(&mut new_stack_ctx, startup_url.as_deref())
     };
     if let Some(request) = startup_request {
-        snapshot_params.p4().write(request);
+        snapshot_params.p3().write(request);
         return;
     }
 
     let should_open_pending_stack = {
-        let mut new_stack_ctx = snapshot_params.p2();
+        let mut new_stack_ctx = snapshot_params.p1();
         command_bar_should_open_pending_stack(&mut new_stack_ctx, should_toggle)
     };
     if should_open_pending_stack {
@@ -796,7 +795,7 @@ fn handle_open_command_bar(
         return;
     }
 
-    let is_new_stack = snapshot_params.p2().stack.is_some();
+    let is_new_stack = snapshot_params.p1().stack.is_some();
 
     if !is_new_stack {
         let active_stack = active_stack_override.or_else(|| {
@@ -1059,7 +1058,7 @@ pub(crate) fn build_command_bar_open_payload(
     space_name: String,
     url: String,
     spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &CommandBarContributions,
+    contributions: &Contributions,
     pages_snapshot: &CommandBarPagesSnapshot,
     work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
     locale: &Locale,
@@ -1067,8 +1066,8 @@ pub(crate) fn build_command_bar_open_payload(
     tabs: Vec<CommandBarTab>,
     target: Option<OpenTarget>,
 ) -> CommandBarOpenEvent {
-    let mut contributed = Vec::with_capacity(contributions.commands.len());
-    for command in &contributions.commands {
+    let mut contributed = Vec::new();
+    for command in contributions.commands() {
         let args: Vec<(&str, TranslationValue<'_>)> = command
             .args
             .iter()
@@ -1086,7 +1085,9 @@ pub(crate) fn build_command_bar_open_payload(
             page.title = locale.translate(message_id);
         }
     }
-    pages.extend(contributions.pages.iter().map(|entry| entry.page.clone()));
+    for entry in contributions.pages() {
+        pages.push(entry.page.clone());
+    }
     let history_shortcut = command_shortcut("browser_open_history");
     if !history_shortcut.is_empty()
         && let Some(page) = pages.iter_mut().find(|page| page.host == "history")
@@ -1252,7 +1253,7 @@ fn on_command_bar_action(
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
-        Res<CommandBarContributions>,
+        Contributions,
         Option<Res<ResolvedLocale>>,
     )>,
     mut new_stack_ctx: ResMut<NewStackContext>,
@@ -1521,8 +1522,7 @@ fn on_command_bar_action(
         "command" => {
             let is_contributed = resource_params
                 .p2()
-                .commands
-                .iter()
+                .commands()
                 .any(|command| command.id == evt.value);
             if is_contributed {
                 let pane = match empty_stack {
@@ -2052,29 +2052,31 @@ mod tests {
     use super::*;
     use crate::command_bar::state::CommandBarState;
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
+    use bevy::ecs::system::RunSystemOnce;
     use vmux_command::event::CommandBarSpace;
     use vmux_command::{CommandPlugin, ReadAppCommands};
 
     #[test]
     fn build_payload_includes_commands_and_target() {
-        let pages = CommandBarPagesSnapshot::default();
-        let spaces = CommandBarSpacesSnapshot::default();
-        let agents = CommandBarContributions::default();
-        let work = vmux_command::snapshot::CommandBarWorkSnapshot::default();
-        let payload = build_command_bar_open_payload(
-            OpenId(7),
-            false,
-            String::new(),
-            String::new(),
-            &spaces,
-            &agents,
-            &pages,
-            &work,
-            &Locale::from("en-US"),
-            0,
-            Vec::new(),
-            Some(OpenTarget::InPlace),
-        );
+        let mut world = World::new();
+        let payload = world
+            .run_system_once(|contributions: Contributions| {
+                build_command_bar_open_payload(
+                    OpenId(7),
+                    false,
+                    String::new(),
+                    String::new(),
+                    &CommandBarSpacesSnapshot::default(),
+                    &contributions,
+                    &CommandBarPagesSnapshot::default(),
+                    &vmux_command::snapshot::CommandBarWorkSnapshot::default(),
+                    &Locale::from("en-US"),
+                    0,
+                    Vec::new(),
+                    Some(OpenTarget::InPlace),
+                )
+            })
+            .expect("payload system runs");
         assert_eq!(payload.open_id, OpenId(7));
         assert_eq!(payload.target, Some(OpenTarget::InPlace));
         assert!(!payload.commands.is_empty());
@@ -2663,7 +2665,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AppCommand>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<CommandBarContributions>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()

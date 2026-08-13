@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 use vmux_command::snapshot::{
-    CommandBarAgentsSnapshot, CommandBarContributions, ContributedCommand, WriteCommandBarSnapshots,
+    ClaimedUrl, CommandBarAgentsSnapshot, ContributedCommand, WriteCommandBarSnapshots,
 };
 use vmux_core::agent::{
     PageAgentAttachDefaultRequest, PageAgentAttachRequest, PageAgentSpawnDefaultRequest,
@@ -35,31 +35,48 @@ impl Plugin for CommandBarPlugin {
 /// at them until this crate picks one — so it hands them back instead.
 const DEFAULT_AGENT_URLS: [&str; 2] = ["vmux://agent/", "vmux://agent"];
 
+/// Marks a contribution entity as this crate's, so a republish clears only what it published.
+///
+/// Private on purpose: ownership is between a contributor and its own rows, and the command bar
+/// reads every contribution without caring which crate spawned it.
+#[derive(Component)]
+struct AgentContribution;
+
 /// Publish the agents to launch, and a row per model.
 fn publish_contributions(
     agents: Res<CommandBarAgentsSnapshot>,
-    mut contributions: ResMut<CommandBarContributions>,
+    mine: Query<Entity, With<AgentContribution>>,
+    mut commands: Commands,
 ) {
     if !agents.is_changed() {
         return;
     }
-    contributions.pages = agents.launcher_pages();
-    contributions.commands.clear();
+    for entity in mine.iter() {
+        commands.entity(entity).despawn();
+    }
+    for page in agents.launcher_pages() {
+        commands.spawn((AgentContribution, page));
+    }
     for strategy in &agents.strategies {
         let row = AppAgentId {
             provider: strategy.provider.clone(),
             model: strategy.model.clone(),
         };
-        contributions.commands.push(ContributedCommand {
-            id: row.to_string(),
-            message_id: "command-new-app-chat".to_string(),
-            args: vec![
-                ("provider".to_string(), row.provider),
-                ("model".to_string(), row.model),
-            ],
-        });
+        commands.spawn((
+            AgentContribution,
+            ContributedCommand {
+                id: row.to_string(),
+                message_id: "command-new-app-chat".to_string(),
+                args: vec![
+                    ("provider".to_string(), row.provider),
+                    ("model".to_string(), row.model),
+                ],
+            },
+        ));
     }
-    contributions.claimed_urls = DEFAULT_AGENT_URLS.map(str::to_string).to_vec();
+    for url in DEFAULT_AGENT_URLS {
+        commands.spawn((AgentContribution, ClaimedUrl(url.to_string())));
+    }
 }
 
 /// Act on a row or url the command bar handed back.
@@ -133,6 +150,8 @@ impl std::fmt::Display for AppAgentId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use vmux_command::snapshot::Contributions;
 
     /// The id is a private round trip between the two halves of this file. A row whose id does not
     /// survive it is published and then silently ignored when the user picks it.
@@ -164,15 +183,22 @@ mod tests {
     /// send the user to whichever agent is default instead of the one they named.
     #[test]
     fn only_the_bare_agent_url_is_claimed() {
-        let contributions = CommandBarContributions {
-            claimed_urls: DEFAULT_AGENT_URLS.map(str::to_string).to_vec(),
-            ..Default::default()
-        };
+        let mut world = World::new();
+        for url in DEFAULT_AGENT_URLS {
+            world.spawn(ClaimedUrl(url.to_string()));
+        }
 
-        assert!(contributions.claims_url("vmux://agent/"));
-        assert!(contributions.claims_url("vmux://agent"));
+        let claimed = world
+            .run_system_once(|contributions: Contributions| {
+                [
+                    contributions.claims_url("vmux://agent/"),
+                    contributions.claims_url("vmux://agent"),
+                    contributions.claims_url("vmux://agent/codex"),
+                    contributions.claims_url("vmux://agent/codex/cli"),
+                ]
+            })
+            .expect("claims_url system runs");
 
-        assert!(!contributions.claims_url("vmux://agent/codex"));
-        assert!(!contributions.claims_url("vmux://agent/codex/cli"));
+        assert_eq!(claimed, [true, true, false, false]);
     }
 }
