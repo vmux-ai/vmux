@@ -140,6 +140,23 @@ impl QuicApi {
         }
     }
 
+    /// Close the connection now, without waiting to take the lock.
+    ///
+    /// For the callers that replace or clear the client outright: they are not all async, and a
+    /// client dropped without this keeps its connection until the far end's idle timeout, which
+    /// the relay counts as another attached phone the whole time. A held lock means someone is
+    /// mid-call, so leaving that one to time out is the right trade rather than blocking the UI.
+    pub fn close(&self) {
+        let Ok(mut slot) = self.connection.try_lock() else {
+            return;
+        };
+        if let Some(dialled) = slot.take() {
+            dialled
+                .connection
+                .close(CloseCode::Normal.as_u32().into(), b"replaced");
+        }
+    }
+
     /// Drop the connection so the next call redials.
     ///
     /// Called when the app foregrounds: iOS tears the UDP socket down while suspended without

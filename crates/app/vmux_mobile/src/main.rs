@@ -213,6 +213,11 @@ impl Api {
         self.quic.reset().await;
     }
 
+    /// Close the connection, for a client being replaced or cleared.
+    fn close(&self) {
+        self.quic.close();
+    }
+
     async fn agents(&self) -> Result<Vec<RemoteAgent>, ApiError> {
         broker_json(&self.quic, SharedAgentCommand::ListAgents).await
     }
@@ -845,7 +850,11 @@ fn AppBody() -> Element {
         // Stored credentials already answer "is this paired?", so paint the start page now and let
         // reachability resolve behind it. Waiting on the first round trip meant a spinner for as
         // long as the dial takes to give up, which is the whole dial timeout when the Mac is off.
+        let displaced = api.peek().clone();
         api.set(Some(client.clone()));
+        if let Some(displaced) = displaced {
+            displaced.close();
+        }
         auth.set(AuthState::Paired);
         match client.sessions().await {
             Ok(next) => {
@@ -922,7 +931,11 @@ fn AppBody() -> Element {
                 Ok(next) => {
                     credentials::StoredCredentials::save(&credentials);
                     pair_url.set(pairing_url(&credentials));
+                    let displaced = api.peek().clone();
                     api.set(Some(client.clone()));
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     sessions.set(next);
                     auth.set(AuthState::Paired);
                 }
@@ -957,7 +970,11 @@ fn AppBody() -> Element {
                 Err(ApiError::Unauthorized) => {
                     reachable.set(false);
                     credentials::StoredCredentials::clear();
+                    let displaced = api.peek().clone();
                     api.set(None);
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     error.set(translate("mobile-error-pairing-expired"));
                     auth.set(AuthState::Unpaired);
                 }
@@ -1066,7 +1083,11 @@ fn AppBody() -> Element {
                 on_disconnect: move |_| {
                     credentials::StoredCredentials::clear();
                     stream_generation.set(stream_generation().wrapping_add(1));
+                    let displaced = api.peek().clone();
                     api.set(None);
+                    if let Some(displaced) = displaced {
+                        displaced.close();
+                    }
                     sessions.set(Vec::new());
                     auth.set(AuthState::Unpaired);
                 },
