@@ -62,16 +62,7 @@ pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page:
     icon: None,
     command_bar: false,
 };
-pub const COMMAND_BAR_PAGE_MANIFEST: vmux_core::page::PageManifest =
-    vmux_core::page::PageManifest {
-        host: "command-bar",
-        title: "Command Bar",
-        title_message_id: None,
-        replaces_command: None,
-        keywords: &[],
-        icon: None,
-        command_bar: false,
-    };
+pub use vmux_command::COMMAND_BAR_PAGE_MANIFEST;
 pub const DEBUG_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "debug",
     title: "Debug",

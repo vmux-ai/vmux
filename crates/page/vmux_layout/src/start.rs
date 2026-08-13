@@ -3,15 +3,7 @@
 
 pub mod event;
 
-/// Whether an agent page can replace the launcher inside its existing webview.
-pub fn supports_inline_agent_transition(url: &str) -> bool {
-    let Some(path) = url.strip_prefix("vmux://agent/") else {
-        return false;
-    };
-    !path
-        .split('/')
-        .any(|segment| matches!(segment, "cli" | "setup"))
-}
+pub use vmux_wire::agent::supports_inline_agent_transition;
 
 pub mod focus;
 // `web` only until `command_bar::palette` is portable. That is now the sole thing holding the

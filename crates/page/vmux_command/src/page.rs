@@ -3,14 +3,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::command_bar::palette::{CommandPalette, PaletteVariant};
-use crate::command_bar::size::CommandBarSizeEmissionState;
-use crate::command_bar::style::{command_bar_root_class, command_bar_shell_class};
-use dioxus::prelude::*;
-use vmux_command::event::{
+use crate::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
     CommandBarRenderedEvent, CommandBarSizeEvent, OpenId,
 };
+use crate::palette::{CommandPalette, PaletteVariant};
+use crate::size::{CommandBarSize, CommandBarSizeEmissionState};
+use dioxus::prelude::*;
+use vmux_start::style::{command_bar_root_class, command_bar_shell_class};
 use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use wasm_bindgen::JsCast;
@@ -185,17 +185,16 @@ fn emit_command_bar_size(open_id: OpenId) {
         .offset_height()
         .max(shell.scroll_height() + result_list_extra_height)
         .max(1) as u32;
-    let should_emit = COMMAND_BAR_SIZE_EMISSION.with(|state| {
-        state.borrow().should_emit(
-            open_id,
-            width,
-            height,
-            shell_left,
-            shell_top,
-            shell_width,
-            shell_height,
-        )
-    });
+    let size = CommandBarSize {
+        width,
+        height,
+        shell_left,
+        shell_top,
+        shell_width,
+        shell_height,
+    };
+    let should_emit =
+        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow().should_emit(open_id, size));
     if !should_emit {
         return;
     }
@@ -209,17 +208,7 @@ fn emit_command_bar_size(open_id: OpenId) {
     })
     .is_ok()
     {
-        COMMAND_BAR_SIZE_EMISSION.with(|state| {
-            state.borrow_mut().mark_emitted(
-                open_id,
-                width,
-                height,
-                shell_left,
-                shell_top,
-                shell_width,
-                shell_height,
-            )
-        });
+        COMMAND_BAR_SIZE_EMISSION.with(|state| state.borrow_mut().mark_emitted(open_id, size));
     }
 }
 

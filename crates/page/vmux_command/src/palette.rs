@@ -4,33 +4,33 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::command_bar::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
-use crate::command_bar::results::{
-    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
-    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
-    space_switch_results, start_page_results,
-};
-use crate::command_bar::style::{
-    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_list_class,
-};
-use crate::start::event::StartSelectWorkspace;
-use dioxus::prelude::*;
-use vmux_command::event::{
+use crate::event::StartSelectWorkspace;
+use crate::event::{
     COMMAND_BAR_KEY_EVENT, CommandBarActionEvent, CommandBarKey, CommandBarOpenEvent,
     CommandBarQuery, HISTORY_SUGGESTIONS_RESPONSE_EVENT, HistoryEntry, HistorySuggestionsRequest,
     HistorySuggestionsResponse, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
     PathCompleteResponse, PathEntry, is_data_uri,
 };
-use vmux_command::open_target::OpenTarget;
-use vmux_command::prompt_media::{
+use crate::open_target::OpenTarget;
+use crate::prompt_media::{
     CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT, CHAT_MEDIA_ENTRIES_EVENT,
     ChatAttachPaths, ChatAttachment, ChatAttachments, ChatMediaEntries, ChatMediaEntry,
     ChatMediaListRequest, ChatPasteMedia, ChatPickFiles, inline_media_query,
     merge_chat_attachments, replace_inline_media_query,
 };
+use dioxus::prelude::*;
 use vmux_core::input::{PageKeyContext, Unclaimed};
+use vmux_start::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
+use vmux_start::results::{
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
+    space_switch_results, start_page_results,
+};
 use vmux_start::row::ResultRow;
+use vmux_start::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    result_list_class,
+};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::TextCaret;
 use vmux_ui::components::icon::Icon;
@@ -87,7 +87,7 @@ pub enum PaletteVariant {
 pub struct StartInlineTransition {
     pub target_url: String,
     pub prompt: String,
-    pub attachments: Vec<vmux_command::prompt_media::ChatAttachment>,
+    pub attachments: Vec<crate::prompt_media::ChatAttachment>,
 }
 
 /// Props for [`CommandPalette`].
@@ -680,7 +680,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
         let prompt = query();
         let transition = if is_start
             && let Some(target_url) = prompt_target_url(item)
-            && crate::start::supports_inline_agent_transition(target_url)
+            && vmux_wire::agent::supports_inline_agent_transition(target_url)
             && let Some(handler) = on_start_inline_transition
         {
             Some((
@@ -1067,9 +1067,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     start_keydown_nav
                         || prompt_target_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
-                            && crate::command_bar::results::terminal_matches_query(
-                                &start_keydown_q,
-                            ))
+                            && vmux_start::results::terminal_matches_query(&start_keydown_q))
                 }) {
                     execute(item);
                 } else if let Some(item) = start_keydown_default_agent.as_ref() {
@@ -1255,7 +1253,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     || action_nav
                                     || prompt_target_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
-                                        && crate::command_bar::results::terminal_matches_query(&action_query))
+                                        && vmux_start::results::terminal_matches_query(&action_query))
                             }) {
                                 execute(item);
                             } else if !action_query.trim().is_empty()

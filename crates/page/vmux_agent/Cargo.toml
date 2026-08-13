@@ -18,7 +18,7 @@ vmux_chat = { path = "../vmux_chat" }
 vmux_wire = { path = "../../vmux_wire" }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
-vmux_command = { path = "../../vmux_command" }
+vmux_command = { path = "../vmux_command" }
 base64 = "0.22"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }

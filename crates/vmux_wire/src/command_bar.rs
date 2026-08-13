@@ -362,6 +362,26 @@ pub enum CommandBarActionEvent {
     Dismiss,
 }
 
+/// Page→host: the launcher's workspace picker chose a directory to work in.
+///
+/// Lives here rather than with the rest of the start page's vocabulary because the palette emits
+/// it, and the palette answers `vmux://command-bar/` as well as `vmux://start/`.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct StartSelectWorkspace {
+    pub current_dir: String,
+}
+
 impl CommandBarActionEvent {
     /// Open what the user typed or picked, in the target they asked for.
     pub fn open(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {

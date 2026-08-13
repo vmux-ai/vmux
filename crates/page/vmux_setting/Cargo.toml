@@ -25,7 +25,7 @@ bevy_ecs = { workspace = true }
 notify = { workspace = true }
 ron = { workspace = true }
 tempfile = "3"
-vmux_command = { path = "../../vmux_command" }
+vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../../vmux_core" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }

@@ -11158,6 +11158,8 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
+ "dioxus",
+ "js-sys",
  "muda 0.19.2",
  "rkyv",
  "serde",
@@ -11166,7 +11168,11 @@ dependencies = [
  "vmux_core",
  "vmux_history",
  "vmux_macro",
+ "vmux_start",
+ "vmux_ui",
  "vmux_wire",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -11472,6 +11478,7 @@ dependencies = [
  "sha2",
  "vmux_agent",
  "vmux_chat",
+ "vmux_command",
  "vmux_core",
  "vmux_editor",
  "vmux_history",

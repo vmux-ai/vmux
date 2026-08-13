@@ -30,7 +30,7 @@ tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 tempfile = "3"
-vmux_command = { path = "../vmux_command" }
+vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../page/vmux_history" }

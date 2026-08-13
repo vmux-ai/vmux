@@ -15,21 +15,7 @@
 )]
 pub struct StartDataRequest;
 
-#[derive(
-    Clone,
-    Debug,
-    Default,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct StartSelectWorkspace {
-    pub current_dir: String,
-}
+pub use vmux_wire::command_bar::StartSelectWorkspace;
 
 pub const START_COMMAND_BAR_OPEN_EVENT: &str = "start-command-bar-open";
 
