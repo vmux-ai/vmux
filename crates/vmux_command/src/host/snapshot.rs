@@ -222,7 +222,13 @@ pub struct SpaceSummary {
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarTerminalsSnapshot {
-    pub pid_to_entity: HashMap<u32, Entity>,
+    /// The pane already running each terminal row, keyed by the url that row carries.
+    ///
+    /// Keyed by url rather than by pid so that choosing a terminal is a lookup. The command bar
+    /// would otherwise have to parse a pid back out of the url, which means knowing how
+    /// `vmux_terminal` builds one — and being wrong about it silently spawns a second terminal
+    /// instead of going to the one the user picked.
+    pub running: HashMap<String, Entity>,
     pub agent_session_to_entity: HashMap<(AgentKind, String), Entity>,
     pub terminal_page_url: String,
 }
@@ -290,7 +296,6 @@ fn update_pages_snapshot(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_core::agent::AgentKind;
 
     impl ContributedPage {
         fn ranked(url: &str, rank: usize) -> Self {
@@ -373,11 +378,52 @@ mod tests {
         assert_eq!(ContributedPage::prompt_url_among(Vec::new(), None), None);
     }
 
+    #[derive(Component)]
+    struct FirstContributor;
+
+    #[derive(Component)]
+    struct SecondContributor;
+
+    impl ContributedCommand {
+        fn named(id: &str) -> Self {
+            Self {
+                id: id.to_string(),
+                message_id: "command-test-row".to_string(),
+                args: Vec::new(),
+            }
+        }
+    }
+
+    /// Republishing is scoped to the rows the contributor spawned.
+    ///
+    /// The shape this replaced was a resource each contributor overwrote, so the second one to run
+    /// each frame erased the first. Only one crate ever contributed, which is why it never showed.
     #[test]
-    fn terminals_snapshot_default_is_empty() {
-        let s = CommandBarTerminalsSnapshot::default();
-        assert!(s.pid_to_entity.is_empty());
-        assert!(s.agent_session_to_entity.is_empty());
+    fn one_contributor_rebuilding_leaves_the_others_rows() {
+        let mut world = World::new();
+        world.spawn((FirstContributor, ContributedCommand::named("first")));
+        world.spawn((SecondContributor, ContributedCommand::named("second")));
+
+        world
+            .run_system_once(
+                |mine: Query<Entity, With<FirstContributor>>, mut commands: Commands| {
+                    for entity in mine.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    commands.spawn((FirstContributor, ContributedCommand::named("first-again")));
+                },
+            )
+            .expect("republish runs");
+
+        let ids = world
+            .run_system_once(|contributions: Contributions| {
+                let mut ids: Vec<String> =
+                    contributions.commands().map(|row| row.id.clone()).collect();
+                ids.sort();
+                ids
+            })
+            .expect("read runs");
+        assert_eq!(ids, ["first-again", "second"]);
     }
 
     #[test]

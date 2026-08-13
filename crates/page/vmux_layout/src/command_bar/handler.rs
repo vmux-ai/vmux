@@ -113,14 +113,6 @@ impl Plugin for CommandBarInputPlugin {
     }
 }
 
-pub(crate) fn parse_pid_from_url(url: &str, terminal_page_url: &str) -> Option<u32> {
-    let suffix = url.strip_prefix(terminal_page_url)?;
-    if suffix.is_empty() {
-        return None;
-    }
-    suffix.parse::<u32>().ok()
-}
-
 #[derive(Component)]
 struct CommandBarReady;
 
@@ -1286,7 +1278,7 @@ fn on_command_bar_action(
     let caller = user_q.single().unwrap_or(Entity::PLACEHOLDER);
     let terminals_snapshot = resource_params.p1().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
-    let pid_to_entity = terminals_snapshot.pid_to_entity.clone();
+    let running_terminals = terminals_snapshot.running.clone();
     let mut empty_stack = new_stack_ctx.stack;
     let previous_stack = new_stack_ctx.previous_stack;
     let mut custom_keyboard_restore = false;
@@ -1439,16 +1431,15 @@ fn on_command_bar_action(
             }
         }
         "terminal" => {
-            let known_terminal = parse_pid_from_url(&evt.value, &terminal_page_url)
-                .and_then(|p| pid_to_entity.get(&p).copied());
+            let known_terminal = running_terminals.get(&evt.value).copied();
             if let Some(entity) = known_terminal {
                 focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                 new_stack_ctx.stack = None;
                 new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
             } else {
-                if let Some(pid) = parse_pid_from_url(&evt.value, &terminal_page_url) {
-                    bevy::log::warn!("no terminal pane for pid {pid}; spawning new");
+                if evt.value.starts_with(&terminal_page_url) {
+                    bevy::log::warn!("no terminal pane for {}; spawning new", evt.value);
                 }
                 let cwd = if evt.value.is_empty() || evt.value.contains("://") {
                     None
@@ -1520,10 +1511,7 @@ fn on_command_bar_action(
             if is_contributed {
                 let pane = match empty_stack {
                     Some(_) => None,
-                    None => {
-                        let active_pane_opt = queries.focused_pane();
-                        active_pane_opt
-                    }
+                    None => queries.focused_pane(),
                 };
                 if let Some(stack_e) = empty_stack {
                     commands.entity(stack_e).insert(LastActivatedAt::now());
@@ -3000,42 +2988,6 @@ mod tests {
             NodeId::Set(tab_command_set),
             NodeId::System(command_bar_open_system)
         ));
-    }
-
-    const TEST_TERMINAL_URL: &str = "vmux://terminal/";
-
-    #[test]
-    fn parse_pid_from_url_accepts_numeric() {
-        assert_eq!(
-            parse_pid_from_url("vmux://terminal/12345", TEST_TERMINAL_URL),
-            Some(12345)
-        );
-        assert_eq!(
-            parse_pid_from_url("vmux://terminal/0", TEST_TERMINAL_URL),
-            Some(0)
-        );
-    }
-
-    #[test]
-    fn parse_pid_from_url_rejects_uuid_form() {
-        let uuid_url = "vmux://terminal/ae724a54-c387-5359-0687-ccfc155558b6";
-        assert_eq!(parse_pid_from_url(uuid_url, TEST_TERMINAL_URL), None);
-    }
-
-    #[test]
-    fn parse_pid_from_url_rejects_empty_path() {
-        assert_eq!(
-            parse_pid_from_url("vmux://terminal/", TEST_TERMINAL_URL),
-            None
-        );
-    }
-
-    #[test]
-    fn parse_pid_from_url_rejects_overflow() {
-        assert_eq!(
-            parse_pid_from_url("vmux://terminal/99999999999999999", TEST_TERMINAL_URL),
-            None
-        );
     }
 
     #[test]
