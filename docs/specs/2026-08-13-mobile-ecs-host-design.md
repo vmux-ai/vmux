@@ -132,17 +132,29 @@ Each stage ships on its own.
 
 1. **Delete the duplicate projection.** Depend on `vmux_service` from `vmux_mobile`, call `group_turns_tail`, delete `main.rs:1743-1861`. No ECS. Landed with this spec.
 2. **Give the phone a `World`.** `MinimalPlugins`, the wake-driven pump, nothing in it. Answer the `Reflect`-on-iOS question first. Record idle CPU and battery — the baseline every later stage is judged against.
-3. **Move the QUIC client in.** `Api` becomes a resource, the subscribe loop at `main.rs:1888` becomes a system draining into components, and `AppBody`'s session signals become reads.
+3. **Move the QUIC client in.** `Api` becomes a resource, the subscribe loop at `main.rs:1888` becomes a system draining into components, and `AppBody`'s session signals become reads. This stage owns the connection and the projection across a suspend, so it carries the resume criteria below and cannot land without them.
 4. **Make `PageHost` real.** `send` queues, `listen` registers, `PostUpdate` pushes. `TEAM_EVENT` stops polling and `POLL_INTERVAL_MS` goes.
 5. **Camera as a capability.** Port the QR scanner onto `CameraPlugin`, preserving VMX-132's denied-permission behaviour.
 6. **Retire the rest of `AppBody`.** Composer, media, pairing.
 
 Stages 1 and 2 are independent of each other. Stage 3 is where behaviour can actually regress, and is the one to land alone.
 
-## Open
+### Suspend and resume, which stage 3 must preserve
 
-- **Backgrounding.** iOS suspends the process; the QUIC connection dies and the World stops being pumped. Today `RESUMED` (`main.rs:104`) triggers a re-read. What the World does across suspend — reconnect, refetch, or restore — is undecided.
-- **Persistence.** The desktop persists ECS state through `moonshine-save`. Whether the phone persists a transcript or refetches it is open, and depends on the above.
+The phone already answers this, and moving the connection into the World must not quietly drop the answer. Both rules are current behaviour, not new design.
+
+**The connection is suspect after a resume, not dead.** iOS tears down the UDP socket while the process is suspended without closing the QUIC connection, so a connection that still looks alive usually is not (`main.rs:60-65`). `RESUMED` records the resume and the next call redials, which is cheaper than discovering it through a stalled request. In the World this becomes a wake source that marks the `Api` resource stale; the redial stays lazy.
+
+**The Mac is the authoritative transcript, always.** Nothing is persisted on the phone today, and stage 3 does not change that. The World's session components are a cache of a projection whose record lives on the host, so the recovery path after a suspend is to reattach and re-project — never to trust what the World was holding when it was frozen.
+
+Acceptance criteria for the stage:
+
+- [ ] Background for longer than the QUIC idle timeout, foreground, and send a prompt — it arrives, with no stalled request and no manual retry
+- [ ] Background mid-stream and foreground — the transcript reconciles to what the Mac has, with no duplicated or truncated turn
+- [ ] The World stops being pumped while suspended and resumes without a burst of catch-up updates
+- [ ] Reattach failure is visible in the UI rather than presenting stale state as live
+
+**Persistence stays open**, and is deliberately not a stage 3 concern. The desktop persists ECS state through `moonshine-save`; whether the phone ever caches a transcript for offline reading is a stage 6+ question, and the answer above — host authoritative, phone refetches — is what makes it safe to defer.
 
 ## Dependencies
 
