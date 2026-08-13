@@ -32,6 +32,7 @@ tokio = { workspace = true, features = ["time"] }
 url = { workspace = true }
 quinn = { workspace = true }
 vmux_remote = { path = "../../host/vmux_remote" }
+vmux_service = { path = "../../host/vmux_service" }
 vmux_wire = { path = "../../vmux_wire" }
 vmux_chat = { path = "../../page/vmux_chat" }
 vmux_start = { path = "../../page/vmux_start" }

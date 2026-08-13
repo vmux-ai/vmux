@@ -19,7 +19,7 @@ More than the issue assumed.
 - **The page/host seam is two methods.** `PageHost` (`vmux_ui/src/transport.rs:27`) is `send(id, bytes)` and `listen(id, on_bytes)`. `transport/cef.rs` answers it for the desktop, `vmux_mobile/src/page_host.rs:30` for the phone. A page does not know which it has.
 - **Pages already compile for iOS.** `ui` means wasm *or* iOS (`crates/build_platform_cfg.rs:31`), so `vmux_chat::page` and its leaves are already built on the phone.
 - **The push channel exists.** `quic_api.rs:238` opens the stream client-side and writes once, because the relay only routes streams the client opened. The constraint is real and the workaround is built.
-- **The session model is render-free and phone-linkable.** VMX-140 landed `vmux_session`, whose whole dependency list is `bevy_app`, `bevy_ecs`, `bevy_reflect`, `serde`, `vmux_wire`. `room.rs` is 485 lines of it.
+- **The session model is render-free.** VMX-140 landed `vmux_session`, whose whole dependency list is `bevy_app`, `bevy_ecs`, `bevy_reflect`, `serde`, `vmux_wire`. It is not, however, phone-linkable — see the seam section below.
 
 ## The duplicate projection is a missing dependency, not a missing ECS
 
@@ -29,7 +29,16 @@ This issue claimed 1078 lines the phone "cannot call because it has no ECS". Tha
 
 The phone re-implements them at `main.rs:1743`, `:1787` and `:1809` because `vmux_mobile` does not list `vmux_service` as a dependency. Nothing else stops it.
 
-So deleting the duplicate is a manifest line and a call-site change. **It should land first and alone, and it does not need any of the rest of this design.**
+So deleting the duplicate is a manifest line and a call-site change, and **it does not need any of the rest of this design.** It lands with this spec.
+
+It is not free of behaviour change, though, because the shared fold does more than the phone's copy did. Four differences, all of them the desktop's existing behaviour:
+
+- Private context is split out of a user prompt into `ChatItem::User.context` (`chat.rs:121`). The phone rendered the composed prompt raw and always set `context: None`.
+- A user message with no text and no attachments is skipped rather than rendered empty.
+- A turn that has started but produced nothing yet renders, instead of being suppressed until its first block.
+- Prose is trimmed, and `reconnect_progress` lines fold into a reconnect block instead of showing as text.
+
+Each is a fix in the phone's favour, but together they are a visible change to the chat surface and need eyeballing on device.
 
 That removes the strongest-sounding argument for the World, so the honest justification is what remains:
 
@@ -39,13 +48,15 @@ That removes the strongest-sounding argument for the World, so the honest justif
 
 The World is for those. The projection is a dependency line.
 
-### Where the grouping should live
+### The grouping stays where it is
 
-`vmux_session`, not `vmux_service`. It is pure, three surfaces consume it, and `host/` means "runtime that runs with no UI and owns state" — a fold over a slice is not that. Move it beside `room.rs` and re-export from `vmux_service::chat` so no caller changes, exactly as stage 1 of the sibling spec moved the components.
+Moving it to `vmux_session`, beside `room.rs`, was tried first and is wrong — `vmux_session` does not compile for iOS at all, for the reason in the seam section below.
+
+`vmux_service::chat` is already the correct home, and `app/vmux_mobile` depending on `host/vmux_service` is the established shape: `page/vmux_agent` already does exactly that, because the crate cfg-splits and a non-host target links only the non-host half. `cargo tree --target aarch64-apple-ios -p vmux_mobile -i bevy_cef` finds nothing after the dependency is added, and neither does the same query for `bevy_ecs`.
 
 ## Ownership after
 
-- `vmux_session` — session and room components, plus transcript grouping. No `App`, no CEF, no target gate.
+- `vmux_service` — the transcript grouping, in the half that survives the iOS cfg gate. Unchanged by this design.
 - `app/vmux_mobile` — the `World`, the device capability plugins, the QUIC forwarder, and `MobileHost`.
 
 **No new crate.** One consumer, and the seam that would justify one is already enforced by the target (below). A `vmux_mobile_host` crate earns its place when a second thing links it.
@@ -54,13 +65,19 @@ The World is for those. The projection is a dependency line.
 
 The sibling spec needed a crate boundary because cloud Linux and desktop Linux are the same triple, so no cfg could separate them. Here the discriminator is `aarch64-apple-ios`, and `build_platform_cfg.rs` already resolves it to `ui`.
 
-The risk is therefore inverted, and worth stating because it reads backwards. `vmux_agent` and `vmux_service` both gate their Bevy halves with `cfg(not(any(target_arch = "wasm32", target_os = "ios")))`. That is correct — it is what keeps CEF off the phone — but it also means **those crates compile without Bevy on iOS**. The phone cannot reuse their plugins. It links `vmux_session` and writes its own.
+The risk is therefore inverted, and worth stating because it reads backwards. `vmux_agent` and `vmux_service` both gate their Bevy halves with `cfg(not(any(target_arch = "wasm32", target_os = "ios")))`. That is correct — it is what keeps CEF off the phone — but it also means **those crates compile without Bevy on iOS**. The phone cannot reuse their plugins; it writes its own.
+
+**`vmux_session` goes further: it does not compile for iOS at all.** `vmux_wire` declares `bevy_ecs` and `bevy_reflect` for host targets only, and `vmux_wire/build.rs:26` emits `bevy_linked` only when the feature is on *and* the target is neither wasm nor iOS — so on the phone the wire types carry no `Reflect` derive. `vmux_session` derives `Reflect` unconditionally on structs holding those types, and eleven trait bounds fail. Confirmed with `cargo check -p vmux_session --target aarch64-apple-ios`.
+
+This is the single most important constraint on the client ECS, and it is not a bug to fix in passing. Anything the phone's World stores must either avoid `Reflect` or the wire types must gain derives on iOS — which means linking `bevy_reflect` there, the very thing the gate exists to prevent. **Stage 2 has to answer this before any component is written.**
 
 CI asserts the direction that can still break:
 
 ```text
 cargo tree --target aarch64-apple-ios -p vmux_mobile -i bevy_cef   # must find nothing
 ```
+
+Nothing in CI builds `vmux_mobile` at all today — only `make ios` does, locally. That is how a 226-line duplicate of a shared function survived unnoticed, and it is worth closing independently of this design.
 
 ## Topology: one host, two legs
 
@@ -113,8 +130,8 @@ Native navigation — the `UINavigationController` stack, the back gesture, per-
 
 Each stage ships on its own.
 
-1. **Delete the duplicate projection.** Move the grouping to `vmux_session`, re-export from `vmux_service::chat`, depend on it from `vmux_mobile`, delete `main.rs:1743-1861`. No ECS, no behaviour change. Worth landing whether or not the rest happens.
-2. **Give the phone a `World`.** `MinimalPlugins`, the wake-driven pump, nothing in it. Record idle CPU and battery — the baseline every later stage is judged against.
+1. **Delete the duplicate projection.** Depend on `vmux_service` from `vmux_mobile`, call `group_turns_tail`, delete `main.rs:1743-1861`. No ECS. Landed with this spec.
+2. **Give the phone a `World`.** `MinimalPlugins`, the wake-driven pump, nothing in it. Answer the `Reflect`-on-iOS question first. Record idle CPU and battery — the baseline every later stage is judged against.
 3. **Move the QUIC client in.** `Api` becomes a resource, the subscribe loop at `main.rs:1888` becomes a system draining into components, and `AppBody`'s session signals become reads.
 4. **Make `PageHost` real.** `send` queues, `listen` registers, `PostUpdate` pushes. `TEAM_EVENT` stops polling and `POLL_INTERVAL_MS` goes.
 5. **Camera as a capability.** Port the QR scanner onto `CameraPlugin`, preserving VMX-132's denied-permission behaviour.
