@@ -37,23 +37,25 @@ flowchart LR
     relay(["relay<br/>vmux-cloud"])
 
     service <-->|"QUIC control · held open"| relay
-    remote <-->|"QUIC · allocated UDP port"| relay
+    remote <-->|"QUIC · the same UDP port"| relay
 
     style relay stroke-dasharray: 4 4
 ```
 
-Neither end of the relay listens for the other. The server dials out and holds one QUIC connection
-open; the relay allocates it a UDP port and tells it which. The pairing link names that port, so a
-remote client reaches a host behind NAT without either side opening one.
+Neither end of the relay listens for the other. Both dial the same UDP port and are told apart by
+the hello they open with, which names the desktop and presents the pairing token. The pairing link
+names that desktop, so a remote client reaches a host behind NAT without either side opening a
+port.
 
 **The relay cannot read any of it.** A remote client's packets belong to a second QUIC session that
 terminates on the *host*, and cross the relay as DATAGRAM frames on the control connection. TLS 1.3
 is end to end; the relay holds no key for it and links no crate that could decode a payload even
 with one. What it does see is metadata — which device talks when, and how much.
 
-Forwarding only works in that direction. The desktop's NAT mapping was opened toward the control
-port, and a port-restricted NAT — most consumer routers — drops anything arriving from a different
-source port, so replies cannot be sent straight from the allocated port.
+Forwarding only works in that direction. The desktop's NAT mapping was opened by its own dial and
+a port-restricted NAT — most consumer routers — admits only what comes back on that same pairing,
+so the relay cannot start a fresh flow toward the desktop. Everything rides the connection the
+desktop already holds open.
 
 Nothing is dialled until Remote is switched on. The server checks that before connecting and a
 single watcher closes every live connection the moment it goes off.
@@ -107,7 +109,7 @@ named that way precisely because it resolves on its own, unlike `NotFound`.
 | page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope, host→page bare |
 | local client ↔ server | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
 | remote client ↔ server | QUIC, one bidirectional stream per request | rkyv `SharedMessage` / `SharedResponse`, after a JSON hello |
-| server ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAllocation`, then opaque DATAGRAM frames |
+| server ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAccepted`, then opaque DATAGRAM frames |
 
 The last row is the one worth reading twice. Only the hello is the relay's business; everything
 after it is a remote client's own QUIC session in transit.

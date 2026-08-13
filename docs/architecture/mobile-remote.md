@@ -42,8 +42,8 @@ make ios
 ```
 
 Open the left side sheet in Vmux and enable **Remote** in the space card. The desktop registers
-with the relay and waits for it to allocate a port; the pairing link cannot be shown until it has,
-because the link has to name that port.
+with the relay and waits for it to accept; the pairing link cannot be shown until it has, because
+a link offered first would name a pairing the relay would refuse.
 
 The first time, scan the QR code with the phone. It opens Vmux Remote through the
 `vmux://pair` deep link, verifies the endpoint, and stores the credentials. After the first
@@ -112,7 +112,8 @@ nothing and reports only a timeout, so an untagged value is logged and ignored r
 inherited. The tag is what is checked and never the port number, so a relay deliberately stood up
 somewhere other than the default survives the upgrade. Enabling Remote rewrites the file tagged.
 
-The port the relay allocates is recorded beside it and lives exactly as long as the registration
-does: written when the daemon registers, removed when that session ends and again at daemon
-startup. Every reader treats a missing port as "not registered yet", so the app offers no pairing
-link during that window rather than one naming a port the relay has already freed.
+The device id the relay accepted is recorded beside it and lives exactly as long as the
+registration does: written when the relay admits the desktop, removed when that session ends.
+It is not the same as the desktop's own id, which exists whether or not anything is registered.
+Every reader treats its absence as "not registered yet", so the app offers no pairing link during
+that window rather than one the relay would refuse.
