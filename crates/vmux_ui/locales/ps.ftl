@@ -372,7 +372,6 @@ schema-language-id = د ژبې ID
 schema-root-markers = د ریښې نښې
 schema-output-directory = د وتۍ پوښۍ
 
-menu-scene = صحنه
 menu-layout = ترتیب
 menu-terminal = ټرمینل
 menu-browser = لټونګر
@@ -424,8 +423,6 @@ error-unknown-host = ناپېژندل شوی د Vmux اپ کوربه: { $host }
 history-title = مخینه
 
 command-new-app-chat = نوې { $provider }/{ $model } خبرې اترې (اپ)
-command-interactive-mode-user = صحنه > تعاملي حالت > کارن
-command-interactive-mode-player = صحنه > تعاملي حالت > لوبغاړی
 command-minimize-window = ترتیب > کړکۍ > کوچنۍ کول
 command-toggle-layout = ترتیب > ترتیب > ترتیب بدلول
 command-close-tab = ترتیب > ټب > ټب تړل
@@ -694,7 +691,6 @@ command-manage-spaces = سپېسونه مدیریت کړئ…
 command-pane-stack-location = پین { $pane } / سټک { $stack }
 command-space-pane-stack-location = { $space } / پین { $pane } / سټک { $stack }
 command-terminal-path = ټرمینل ({ $path })
-command-group-interactive-mode = تعاملي حالت
 command-group-window = کړکۍ
 command-group-tab = ټب
 command-group-pane = پین

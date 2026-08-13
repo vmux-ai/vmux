@@ -372,7 +372,6 @@ schema-language-id = ID limbaj
 schema-root-markers = Marcatori rădăcină
 schema-output-directory = Director de ieșire
 
-menu-scene = Scenă
 menu-layout = Aranjament
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Gazdă necunoscută pentru aplicația Vmux: { $host }
 history-title = Istoric
 
 command-new-app-chat = Chat nou { $provider }/{ $model } (Aplicație)
-command-interactive-mode-user = Scenă > Mod interactiv > Utilizator
-command-interactive-mode-player = Scenă > Mod interactiv > Player
 command-minimize-window = Aranjare > Fereastră > Minimizează
 command-toggle-layout = Aranjare > Aranjare > Comută aranjarea
 command-close-tab = Aranjare > Filă > Închide fila
@@ -694,7 +691,6 @@ command-manage-spaces = Gestionează spațiile…
 command-pane-stack-location = panou { $pane } / stivă { $stack }
 command-space-pane-stack-location = { $space } / panou { $pane } / stivă { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Mod interactiv
 command-group-window = Fereastră
 command-group-tab = Filă
 command-group-pane = Panou

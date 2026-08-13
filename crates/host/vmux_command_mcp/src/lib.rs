@@ -6,26 +6,9 @@ use vmux_macro::McpTool;
 
 #[derive(Debug, McpTool)]
 enum AppCommand {
-    Scene(SceneCommand),
     Terminal(TerminalCommand),
     Browser(BrowserCommand),
     Service(ServiceCommand),
-}
-
-#[derive(Debug, McpTool)]
-enum SceneCommand {
-    InteractiveMode(SceneInteractiveModeCommand),
-}
-
-#[derive(Debug, McpTool)]
-enum SceneInteractiveModeCommand {
-    #[menu(id = "interactive_mode_user", label = "User")]
-    User,
-    #[menu(id = "interactive_mode_player", label = "Player")]
-    Player,
-    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode")]
-    #[mcp(skip)]
-    Toggle,
 }
 
 #[derive(Debug, McpTool)]

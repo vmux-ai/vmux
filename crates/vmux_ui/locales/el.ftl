@@ -372,7 +372,6 @@ schema-language-id = ID γλώσσας
 schema-root-markers = Δείκτες ρίζας
 schema-output-directory = Κατάλογος εξόδου
 
-menu-scene = Σκηνή
 menu-layout = Διάταξη
 menu-terminal = Τερματικό
 menu-browser = Περιηγητής
@@ -424,8 +423,6 @@ error-unknown-host = Άγνωστος κεντρικός υπολογιστής 
 history-title = Ιστορικό
 
 command-new-app-chat = Νέα συνομιλία { $provider }/{ $model } (Εφαρμογή)
-command-interactive-mode-user = Σκηνή > Διαδραστική λειτουργία > Χρήστης
-command-interactive-mode-player = Σκηνή > Διαδραστική λειτουργία > Παίκτης
 command-minimize-window = Διάταξη > Παράθυρο > Ελαχιστοποίηση
 command-toggle-layout = Διάταξη > Διάταξη > Εναλλαγή διάταξης
 command-close-tab = Διάταξη > Καρτέλα > Κλείσιμο καρτέλας
@@ -694,7 +691,6 @@ command-manage-spaces = Διαχείριση χώρων…
 command-pane-stack-location = τμήμα { $pane } / στοίβα { $stack }
 command-space-pane-stack-location = { $space } / τμήμα { $pane } / στοίβα { $stack }
 command-terminal-path = Τερματικό ({ $path })
-command-group-interactive-mode = Διαδραστική λειτουργία
 command-group-window = Παράθυρο
 command-group-tab = Καρτέλα
 command-group-pane = Τμήμα

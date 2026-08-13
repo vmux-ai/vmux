@@ -372,7 +372,6 @@ schema-language-id = ID ภาษา
 schema-root-markers = ตัวระบุรากโปรเจกต์
 schema-output-directory = ไดเรกทอรีเอาต์พุต
 
-menu-scene = ฉาก
 menu-layout = เค้าโครง
 menu-terminal = เทอร์มินัล
 menu-browser = เบราว์เซอร์
@@ -424,8 +423,6 @@ error-unknown-host = ไม่รู้จักโฮสต์แอป Vmux: {
 history-title = ประวัติ
 
 command-new-app-chat = แชต { $provider }/{ $model } ใหม่ (แอป)
-command-interactive-mode-user = Scene > โหมดโต้ตอบ > ผู้ใช้
-command-interactive-mode-player = Scene > โหมดโต้ตอบ > ผู้เล่น
 command-minimize-window = Layout > หน้าต่าง > ย่อ
 command-toggle-layout = Layout > เลย์เอาต์ > สลับเลย์เอาต์
 command-close-tab = Layout > แท็บ > ปิดแท็บ
@@ -694,7 +691,6 @@ command-manage-spaces = จัดการ Space…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = เทอร์มินัล ({ $path })
-command-group-interactive-mode = โหมดโต้ตอบ
 command-group-window = หน้าต่าง
 command-group-tab = แท็บ
 command-group-pane = Pane

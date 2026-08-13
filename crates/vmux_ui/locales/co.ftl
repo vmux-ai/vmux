@@ -372,7 +372,6 @@ schema-language-id = ID di lingua
 schema-root-markers = Marcatori di radica
 schema-output-directory = Cartulare d'esciuta
 
-menu-scene = Scena
 menu-layout = Dispusizione
 menu-terminal = Tirminale
 menu-browser = Navigatore
@@ -424,8 +423,6 @@ error-unknown-host = Host d’app Vmux scunnisciutu: { $host }
 history-title = Cronulugia
 
 command-new-app-chat = Nova chjachjarata { $provider }/{ $model } (App)
-command-interactive-mode-user = Scena > Modu interattivu > Utente
-command-interactive-mode-player = Scena > Modu interattivu > Lettore
 command-minimize-window = Dispusizione > Finestra > Minimizà
 command-toggle-layout = Dispusizione > Dispusizione > Cambià dispusizione
 command-close-tab = Dispusizione > Scheda > Chjode a scheda
@@ -694,7 +691,6 @@ command-manage-spaces = Gestisce i spazii…
 command-pane-stack-location = riquadru { $pane } / pila { $stack }
 command-space-pane-stack-location = { $space } / riquadru { $pane } / pila { $stack }
 command-terminal-path = Terminale ({ $path })
-command-group-interactive-mode = Modu interattivu
 command-group-window = Finestra
 command-group-tab = Scheda
 command-group-pane = Riquadru

@@ -227,9 +227,7 @@ pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> Strin
 }
 
 fn command_hierarchy_ids(id: &str) -> Option<(&'static str, Option<&'static str>)> {
-    if id.starts_with("interactive_mode_") {
-        Some(("menu-scene", Some("command-group-interactive-mode")))
-    } else if id == "minimize_window" {
+    if id == "minimize_window" {
         Some(("menu-layout", Some("command-group-window")))
     } else if id == "toggle_layout" {
         Some(("menu-layout", Some("menu-layout")))

@@ -372,7 +372,6 @@ schema-language-id = ID-и забон
 schema-root-markers = Нишонгарҳои реша
 schema-output-directory = Директорияи баромад
 
-menu-scene = Саҳна
 menu-layout = Тарҳ
 menu-terminal = Терминал
 menu-browser = Браузер
@@ -424,8 +423,6 @@ error-unknown-host = Мизбони номаълуми барномаи Vmux: { 
 history-title = Таърих
 
 command-new-app-chat = Чати нави { $provider }/{ $model } (Барнома)
-command-interactive-mode-user = Саҳна > Реҷаи интерактивӣ > Корбар
-command-interactive-mode-player = Саҳна > Реҷаи интерактивӣ > Плеер
 command-minimize-window = Тарҳ > Равзана > Пинҳон кардан
 command-toggle-layout = Тарҳ > Тарҳ > Иваз кардани тарҳ
 command-close-tab = Тарҳ > Варақа > Пӯшидани варақа
@@ -694,7 +691,6 @@ command-manage-spaces = Идоракунии фазоҳо…
 command-pane-stack-location = панел { $pane } / стек { $stack }
 command-space-pane-stack-location = { $space } / панел { $pane } / стек { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Реҷаи интерактивӣ
 command-group-window = Равзана
 command-group-tab = Варақа
 command-group-pane = Панел

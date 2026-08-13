@@ -372,7 +372,6 @@ schema-language-id = Хэлний ID
 schema-root-markers = Үндсэн хавтасны тэмдэглэгээнүүд
 schema-output-directory = Гаралтын хавтас
 
-menu-scene = Үзэгдэл
 menu-layout = Байршил
 menu-terminal = Терминал
 menu-browser = Хөтөч
@@ -424,8 +423,6 @@ error-unknown-host = Үл мэдэгдэх Vmux апп хост: { $host }
 history-title = Түүх
 
 command-new-app-chat = Шинэ { $provider }/{ $model } чат (Апп)
-command-interactive-mode-user = Scene > Интерактив горим > Хэрэглэгч
-command-interactive-mode-player = Scene > Интерактив горим > Тоглуулагч
 command-minimize-window = Layout > Цонх > Жижигрүүлэх
 command-toggle-layout = Layout > Layout > Байршил солих
 command-close-tab = Layout > Таб > Табы хаах
@@ -694,7 +691,6 @@ command-manage-spaces = Спэйсүүдийг удирдах…
 command-pane-stack-location = самбар { $pane } / стек { $stack }
 command-space-pane-stack-location = { $space } / самбар { $pane } / стек { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Интерактив горим
 command-group-window = Цонх
 command-group-tab = Таб
 command-group-pane = Самбар

@@ -372,7 +372,6 @@ schema-language-id = ID reo
 schema-root-markers = Ngā tohu pūtake
 schema-output-directory = Kōpaki putanga
 
-menu-scene = Atamira
 menu-layout = Tahora
 menu-terminal = Kāpeka
 menu-browser = Pūtirotiro
@@ -424,8 +423,6 @@ error-unknown-host = Kaihautū taupānga Vmux tē mōhiotia: { $host }
 history-title = Hītori
 
 command-new-app-chat = Kōrerorero { $provider }/{ $model } hōu (Taupānga)
-command-interactive-mode-user = Atamira > Aratau Pāhekoheko > Kaiwhakamahi
-command-interactive-mode-player = Atamira > Aratau Pāhekoheko > Kaitākaro
 command-minimize-window = Tahora > Matapihi > Whakaiti
 command-toggle-layout = Tahora > Tahora > Takahuri Tahora
 command-close-tab = Tahora > Ripa > Katia te Ripa
@@ -694,7 +691,6 @@ command-manage-spaces = Whakahaere wāhi…
 command-pane-stack-location = pihanga { $pane } / tāpae { $stack }
 command-space-pane-stack-location = { $space } / pihanga { $pane } / tāpae { $stack }
 command-terminal-path = Kāpeka ({ $path })
-command-group-interactive-mode = Aratau pāhekoheko
 command-group-window = Matapihi
 command-group-tab = Ripa
 command-group-pane = Pihanga

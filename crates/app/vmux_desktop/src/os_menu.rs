@@ -18,7 +18,6 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands,
     build_native_root_menu, open::OpenCommand,
 };
-use vmux_layout::scene::InteractionMode;
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
 
 /// Wires the native application menu bar, including the bookmark context menu.
@@ -37,7 +36,6 @@ impl Plugin for OsMenuPlugin {
                 (
                     forward_menu_events.in_set(WriteAppCommands),
                     sync_menu_locale,
-                    sync_interactive_mode_menu_items.after(ReadAppCommands),
                     remember_stack_close_commands.after(WriteAppCommands),
                     remember_native_page_open_commands.after(WriteAppCommands),
                     hide_window_on_close_request
@@ -84,25 +82,12 @@ const NATIVE_PAGE_OPEN_CLOSE_SUPPRESSION_WINDOW: std::time::Duration =
 struct OsMenuResource {
     menu: Menu,
     locale: Locale,
-    interactive_mode: Option<InteractiveModeMenuItems>,
     close_window: Option<MenuItem>,
     /// Native `NSMenuItem`s for the Edit menu's standard editing actions
     /// (Undo/Redo/Cut/Copy/Paste/Select All), retained so [`sync_edit_menu_items`]
     /// can enable/disable them per focused pane.
     #[cfg(target_os = "macos")]
     edit_items: Vec<Retained<NSMenuItem>>,
-}
-
-struct InteractiveModeMenuItems {
-    user: MenuItem,
-    player: MenuItem,
-}
-
-impl InteractiveModeMenuItems {
-    fn sync(&self, mode: &InteractionMode) {
-        self.user.set_enabled(*mode != InteractionMode::User);
-        self.player.set_enabled(false);
-    }
 }
 
 fn setup(world: &mut World) {
@@ -114,7 +99,6 @@ fn setup(world: &mut World) {
         .map(|settings| Locale::requested(Some(&settings.appearance.locale)))
         .unwrap_or_else(Locale::preferred);
     localize_root_menu(&menu, &Locale::from(DEFAULT_LOCALE), &locale);
-    let interactive_mode = interactive_mode_menu_items(&menu);
     let close_window = find_menu_item(menu.items(), "app_quit");
 
     #[cfg(target_os = "macos")]
@@ -139,7 +123,6 @@ fn setup(world: &mut World) {
     world.insert_non_send(OsMenuResource {
         menu,
         locale,
-        interactive_mode,
         close_window,
         #[cfg(target_os = "macos")]
         edit_items,
@@ -343,13 +326,6 @@ fn sync_edit_menu_items(
     }
 }
 
-fn interactive_mode_menu_items(menu: &Menu) -> Option<InteractiveModeMenuItems> {
-    Some(InteractiveModeMenuItems {
-        user: find_menu_item(menu.items(), "interactive_mode_user")?,
-        player: find_menu_item(menu.items(), "interactive_mode_player")?,
-    })
-}
-
 fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
     for item in items {
         if item.id().0 == id
@@ -364,24 +340,6 @@ fn find_menu_item(items: Vec<MenuItemKind>, id: &str) -> Option<MenuItem> {
         }
     }
     None
-}
-
-fn sync_interactive_mode_menu_items(
-    menu: Option<NonSend<OsMenuResource>>,
-    mode: Option<Res<InteractionMode>>,
-) {
-    let Some(mode) = mode else {
-        return;
-    };
-    if !mode.is_changed() {
-        return;
-    }
-    let Some(menu) = menu else {
-        return;
-    };
-    if let Some(items) = &menu.interactive_mode {
-        items.sync(&mode);
-    }
 }
 
 fn sync_close_menu_item(
@@ -533,7 +491,6 @@ mod tests {
         assert!(edit_menu_items_enabled(HostFocusIntent::Windowed(
             Entity::PLACEHOLDER
         )));
-        assert!(edit_menu_items_enabled(HostFocusIntent::Unmanaged));
     }
 
     fn test_settings() -> AppSettings {
@@ -563,7 +520,7 @@ mod tests {
     #[test]
     fn root_menu_titles_use_requested_locale() {
         let titles = [
-            "Scene", "Layout", "Terminal", "Browser", "Service", "Bookmark", "Edit",
+            "Layout", "Terminal", "Browser", "Service", "Bookmark", "Edit",
         ]
         .into_iter()
         .filter_map(|title| {
@@ -573,7 +530,6 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "シーン",
                 "レイアウト",
                 "ターミナル",
                 "ブラウザ",
@@ -755,18 +711,5 @@ mod tests {
             app.world().resource::<CloseMenuItemEnabled>().0,
             "showing a window re-enables Close"
         );
-    }
-
-    #[test]
-    fn interactive_mode_menu_disables_selected_mode() {
-        let source = include_str!("os_menu.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("interactive_mode_user"));
-        assert!(source.contains("interactive_mode_player"));
-        assert!(source.contains("set_enabled(*mode != InteractionMode::User)"));
-        assert!(source.contains("self.player.set_enabled(false)"));
     }
 }

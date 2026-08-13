@@ -372,7 +372,6 @@ schema-language-id = የቋንቋ ID
 schema-root-markers = የስር ምልክቶች
 schema-output-directory = የውጤት ማውጫ
 
-menu-scene = ትዕይንት
 menu-layout = አቀማመጥ
 menu-terminal = ተርሚናል
 menu-browser = አሳሽ
@@ -424,8 +423,6 @@ error-unknown-host = ያልታወቀ የVmux መተግበሪያ አስተናጋ�
 history-title = ታሪክ
 
 command-new-app-chat = አዲስ { $provider }/{ $model } ውይይት (መተግበሪያ)
-command-interactive-mode-user = ትዕይንት > ተግባራዊ ሁነታ > ተጠቃሚ
-command-interactive-mode-player = ትዕይንት > ተግባራዊ ሁነታ > ተጫዋች
 command-minimize-window = አቀማመጥ > መስኮት > አሳንስ
 command-toggle-layout = አቀማመጥ > አቀማመጥ > አቀማመጥ ቀይር
 command-close-tab = አቀማመጥ > ትር > ትር ዝጋ
@@ -694,7 +691,6 @@ command-manage-spaces = ቦታዎችን አስተዳድር…
 command-pane-stack-location = ክፍል { $pane } / ቁልል { $stack }
 command-space-pane-stack-location = { $space } / ክፍል { $pane } / ቁልል { $stack }
 command-terminal-path = ተርሚናል ({ $path })
-command-group-interactive-mode = ተግባቢ ሁነታ
 command-group-window = መስኮት
 command-group-tab = ትር
 command-group-pane = ክፍል

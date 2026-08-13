@@ -372,7 +372,6 @@ schema-language-id = ID ngôn ngữ
 schema-root-markers = Dấu mốc gốc
 schema-output-directory = Thư mục đầu ra
 
-menu-scene = Cảnh
 menu-layout = Bố cục
 menu-terminal = Terminal
 menu-browser = Trình duyệt
@@ -424,8 +423,6 @@ error-unknown-host = Máy chủ ứng dụng Vmux không xác định: { $host }
 history-title = Lịch sử
 
 command-new-app-chat = Cuộc trò chuyện { $provider }/{ $model } mới (Ứng dụng)
-command-interactive-mode-user = Cảnh > Chế độ tương tác > Người dùng
-command-interactive-mode-player = Cảnh > Chế độ tương tác > Người chơi
 command-minimize-window = Bố cục > Cửa sổ > Thu nhỏ
 command-toggle-layout = Bố cục > Bố cục > Bật/tắt bố cục
 command-close-tab = Bố cục > Tab > Đóng tab
@@ -694,7 +691,6 @@ command-manage-spaces = Quản lý các không gian…
 command-pane-stack-location = ô { $pane } / ngăn xếp { $stack }
 command-space-pane-stack-location = { $space } / ô { $pane } / ngăn xếp { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Chế độ tương tác
 command-group-window = Cửa sổ
 command-group-tab = Tab
 command-group-pane = Ô

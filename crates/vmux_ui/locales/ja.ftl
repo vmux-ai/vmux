@@ -357,7 +357,6 @@ schema-language-id = 言語 ID
 schema-root-markers = ルートマーカー
 schema-output-directory = 出力ディレクトリ
 
-menu-scene = シーン
 menu-layout = レイアウト
 menu-terminal = ターミナル
 menu-browser = ブラウザ
@@ -409,8 +408,6 @@ error-unknown-host = 不明なVmuxアプリホスト: { $host }
 history-title = 履歴
 
 command-new-app-chat = 新規{ $provider }/{ $model }チャット（アプリ）
-command-interactive-mode-user = Scene > インタラクティブモード > ユーザー
-command-interactive-mode-player = Scene > インタラクティブモード > プレイヤー
 command-minimize-window = Layout > ウィンドウ > 最小化
 command-toggle-layout = Layout > レイアウト > レイアウトを切り替え
 command-close-tab = Layout > タブ > タブを閉じる
@@ -679,7 +676,6 @@ command-manage-spaces = スペースを管理…
 command-pane-stack-location = ペイン { $pane } / スタック { $stack }
 command-space-pane-stack-location = { $space } / ペイン { $pane } / スタック { $stack }
 command-terminal-path = ターミナル ({ $path })
-command-group-interactive-mode = 対話モード
 command-group-window = ウィンドウ
 command-group-tab = タブ
 command-group-pane = ペイン

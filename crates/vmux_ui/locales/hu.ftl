@@ -372,7 +372,6 @@ schema-language-id = Nyelv ID
 schema-root-markers = Gyökérjelölők
 schema-output-directory = Kimeneti könyvtár
 
-menu-scene = Jelenet
 menu-layout = Elrendezés
 menu-terminal = Terminál
 menu-browser = Böngésző
@@ -424,8 +423,6 @@ error-unknown-host = Ismeretlen Vmux-alkalmazásgazda: { $host }
 history-title = Előzmények
 
 command-new-app-chat = Új { $provider }/{ $model } csevegés (Alkalmazás)
-command-interactive-mode-user = Jelenet > Interaktív mód > Felhasználó
-command-interactive-mode-player = Jelenet > Interaktív mód > Lejátszó
 command-minimize-window = Elrendezés > Ablak > Kis méret
 command-toggle-layout = Elrendezés > Elrendezés > Elrendezés váltása
 command-close-tab = Elrendezés > Lap > Lap bezárása
@@ -694,7 +691,6 @@ command-manage-spaces = Terek kezelése…
 command-pane-stack-location = panel { $pane } / verem { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / verem { $stack }
 command-terminal-path = Terminál ({ $path })
-command-group-interactive-mode = Interaktív mód
 command-group-window = Ablak
 command-group-tab = Lap
 command-group-pane = Panel

@@ -372,7 +372,6 @@ schema-language-id = Լեզվի ID
 schema-root-markers = Արմատային նշիչներ
 schema-output-directory = Ելքային պանակ
 
-menu-scene = Տեսարան
 menu-layout = Դասավորություն
 menu-terminal = Տերմինալ
 menu-browser = Դիտարկիչ
@@ -424,8 +423,6 @@ error-unknown-host = Անհայտ Vmux հավելվածի հոսթ՝ { $host }
 history-title = Պատմություն
 
 command-new-app-chat = Նոր { $provider }/{ $model } զրույց (հավելված)
-command-interactive-mode-user = Տեսարան > Ինտերակտիվ ռեժիմ > Օգտատեր
-command-interactive-mode-player = Տեսարան > Ինտերակտիվ ռեժիմ > Խաղացող
 command-minimize-window = Դասավորություն > Պատուհան > Ծալել
 command-toggle-layout = Դասավորություն > Դասավորություն > Փոխարկել դասավորությունը
 command-close-tab = Դասավորություն > Ներդիր > Փակել ներդիրը
@@ -694,7 +691,6 @@ command-manage-spaces = Կառավարել տարածքները…
 command-pane-stack-location = վահանակ { $pane } / շերտ { $stack }
 command-space-pane-stack-location = { $space } / վահանակ { $pane } / շերտ { $stack }
 command-terminal-path = Տերմինալ ({ $path })
-command-group-interactive-mode = Ինտերակտիվ ռեժիմ
 command-group-window = Պատուհան
 command-group-tab = Ներդիր
 command-group-pane = Վահանակ

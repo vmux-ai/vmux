@@ -372,7 +372,6 @@ schema-language-id = ID iaith
 schema-root-markers = Marcwyr gwraidd
 schema-output-directory = Cyfeiriadur allbwn
 
-menu-scene = Golygfa
 menu-layout = Cynllun
 menu-terminal = Terfynell
 menu-browser = Porwr
@@ -424,8 +423,6 @@ error-unknown-host = Gwesteiwr ap Vmux anhysbys: { $host }
 history-title = Hanes
 
 command-new-app-chat = Sgwrs { $provider }/{ $model } newydd (Ap)
-command-interactive-mode-user = Golygfa > Modd Rhyngweithiol > Defnyddiwr
-command-interactive-mode-player = Golygfa > Modd Rhyngweithiol > Chwaraewr
 command-minimize-window = Cynllun > Ffenestr > Lleihau
 command-toggle-layout = Cynllun > Cynllun > Toglo Cynllun
 command-close-tab = Cynllun > Tab > Cau Tab
@@ -694,7 +691,6 @@ command-manage-spaces = Rheoli mannau…
 command-pane-stack-location = cwarel { $pane } / pentwr { $stack }
 command-space-pane-stack-location = { $space } / cwarel { $pane } / pentwr { $stack }
 command-terminal-path = Terfynell ({ $path })
-command-group-interactive-mode = Modd rhyngweithiol
 command-group-window = Ffenestr
 command-group-tab = Tab
 command-group-pane = Cwarel

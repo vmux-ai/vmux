@@ -372,7 +372,6 @@ schema-language-id = Sprooch-ID
 schema-root-markers = Root-Markéierer
 schema-output-directory = Ausgabeverzeechnes
 
-menu-scene = Zeen
 menu-layout = Layout
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Onbekannte Vmux-App-Host: { $host }
 history-title = Verlaf
 
 command-new-app-chat = Neien { $provider }/{ $model }-Chat (App)
-command-interactive-mode-user = Zeen > Interaktive Modus > Benotzer
-command-interactive-mode-player = Zeen > Interaktive Modus > Spiller
 command-minimize-window = Layout > Fënster > Miniméieren
 command-toggle-layout = Layout > Layout > Layout wiesselen
 command-close-tab = Layout > Tab > Tab zoumaachen
@@ -694,7 +691,6 @@ command-manage-spaces = Spacë verwalten…
 command-pane-stack-location = Beräich { $pane } / Stack { $stack }
 command-space-pane-stack-location = { $space } / Beräich { $pane } / Stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktive Modus
 command-group-window = Fënster
 command-group-tab = Tab
 command-group-pane = Beräich

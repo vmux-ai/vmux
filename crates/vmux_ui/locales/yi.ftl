@@ -372,7 +372,6 @@ schema-language-id = שפּראַך־ID
 schema-root-markers = וואָרצל־מאַרקערס
 schema-output-directory = אויסגאַנג־טעקעאָרדנער
 
-menu-scene = סצענע
 menu-layout = אויסלייג
 menu-terminal = טערמינאַל
 menu-browser = בלעטערער
@@ -424,8 +423,6 @@ error-unknown-host = אומבאַקאַנטער Vmux אַפּ־סערווער: {
 history-title = געשיכטע
 
 command-new-app-chat = נײַער { $provider }/{ $model } שמועס (אַפּ)
-command-interactive-mode-user = סצענע > אינטעראַקטיווער מאָדוס > באַניצער
-command-interactive-mode-player = סצענע > אינטעראַקטיווער מאָדוס > שפּילער
 command-minimize-window = אויסלייג > פֿענצטער > מינימיזירן
 command-toggle-layout = אויסלייג > אויסלייג > איבערבײַטן אויסלייג
 command-close-tab = אויסלייג > קוויטל > פֿאַרמאַכן קוויטל
@@ -694,7 +691,6 @@ command-manage-spaces = פֿאַרוואַלטן ספּייסעס…
 command-pane-stack-location = פּאַן { $pane } / סטאַק { $stack }
 command-space-pane-stack-location = { $space } / פּאַן { $pane } / סטאַק { $stack }
 command-terminal-path = טערמינאַל ({ $path })
-command-group-interactive-mode = אינטעראַקטיווער מאָדוס
 command-group-window = פֿענצטער
 command-group-tab = קוויטל
 command-group-pane = פּאַן

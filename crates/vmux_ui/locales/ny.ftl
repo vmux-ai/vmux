@@ -372,7 +372,6 @@ schema-language-id = ID ya chilankhulo
 schema-root-markers = Zizindikiro za muzu
 schema-output-directory = Foda yotulutsa
 
-menu-scene = Malo
 menu-layout = Kapangidwe
 menu-terminal = Malo a malamulo
 menu-browser = Msakatuli
@@ -424,8 +423,6 @@ error-unknown-host = Host ya pulogalamu ya Vmux yosadziwika: { $host }
 history-title = Mbiri
 
 command-new-app-chat = Chat yatsopano ya { $provider }/{ $model } (Pulogalamu)
-command-interactive-mode-user = Chiwonetsero > Njira Yolumikizana > Wogwiritsa
-command-interactive-mode-player = Chiwonetsero > Njira Yolumikizana > Wosewera
 command-minimize-window = Masanjidwe > Zenera > Chepetsani
 command-toggle-layout = Masanjidwe > Masanjidwe > Sinthani Masanjidwe
 command-close-tab = Masanjidwe > Tabu > Tsekani Tabu
@@ -694,7 +691,6 @@ command-manage-spaces = Samalira malo…
 command-pane-stack-location = gawo { $pane } / mulu { $stack }
 command-space-pane-stack-location = { $space } / gawo { $pane } / mulu { $stack }
 command-terminal-path = Teminali ({ $path })
-command-group-interactive-mode = Njira yolumikizirana
 command-group-window = Zenera
 command-group-tab = Tabu
 command-group-pane = Gawo

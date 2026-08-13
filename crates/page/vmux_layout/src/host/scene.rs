@@ -13,8 +13,7 @@ pub struct ScenePlugin;
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<InteractionMode>()
-            .insert_resource(ClearColor(Color::BLACK))
+        app.insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
             .add_systems(PostUpdate, fit_main_camera.after(fit_window_to_screen));
 
@@ -23,50 +22,8 @@ impl Plugin for ScenePlugin {
     }
 }
 
-const TRANSITION_DURATION: f32 = 0.3;
-
 #[derive(Component)]
 pub struct MainCamera;
-
-#[derive(Resource, Default, PartialEq, Eq, Clone, Copy)]
-pub enum InteractionMode {
-    #[default]
-    User,
-    Player,
-}
-
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub enum SceneSystems {
-    CompleteModeTransition,
-}
-
-#[derive(Resource)]
-pub struct CameraHome(pub Transform);
-
-#[derive(Resource)]
-pub struct ModeTransition {
-    pub direction: TransitionDirection,
-    pub timer: Timer,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum TransitionDirection {
-    EnterPlayer,
-    ExitPlayer,
-}
-
-impl ModeTransition {
-    pub fn new(direction: TransitionDirection) -> Self {
-        Self {
-            direction,
-            timer: Timer::from_seconds(TRANSITION_DURATION, TimerMode::Once),
-        }
-    }
-
-    pub fn progress(&self) -> f32 {
-        self.timer.fraction()
-    }
-}
 
 pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>>) {
     let mut projection = OrthographicProjection::default_2d();

@@ -372,7 +372,6 @@ schema-language-id = ID ya lugha
 schema-root-markers = Viashiria vya mzizi
 schema-output-directory = Saraka ya matokeo
 
-menu-scene = Mandhari
 menu-layout = Mpangilio
 menu-terminal = Teminali
 menu-browser = Kivinjari
@@ -424,8 +423,6 @@ error-unknown-host = Mwenyeji wa programu ya Vmux hajulikani: { $host }
 history-title = Historia
 
 command-new-app-chat = Gumzo jipya la { $provider }/{ $model } (Programu)
-command-interactive-mode-user = Mandhari > Hali Shirikishi > Mtumiaji
-command-interactive-mode-player = Mandhari > Hali Shirikishi > Mchezaji
 command-minimize-window = Mpangilio > Dirisha > Punguza
 command-toggle-layout = Mpangilio > Mpangilio > Washa/zima Mpangilio
 command-close-tab = Mpangilio > Kichupo > Funga Kichupo
@@ -694,7 +691,6 @@ command-manage-spaces = Dhibiti nafasi…
 command-pane-stack-location = kidirisha { $pane } / tabaka { $stack }
 command-space-pane-stack-location = { $space } / kidirisha { $pane } / tabaka { $stack }
 command-terminal-path = Terminali ({ $path })
-command-group-interactive-mode = Hali shirikishi
 command-group-window = Dirisha
 command-group-tab = Kichupo
 command-group-pane = Kidirisha

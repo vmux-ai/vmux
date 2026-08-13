@@ -372,7 +372,6 @@ schema-language-id = Taal-ID
 schema-root-markers = Projectrootmarkeringen
 schema-output-directory = Uitvoermap
 
-menu-scene = Scène
 menu-layout = Lay-out
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Onbekende Vmux-apphost: { $host }
 history-title = Geschiedenis
 
 command-new-app-chat = Nieuwe { $provider }/{ $model }-chat (App)
-command-interactive-mode-user = Scène > Interactieve modus > Gebruiker
-command-interactive-mode-player = Scène > Interactieve modus > Speler
 command-minimize-window = Indeling > Venster > Minimaliseer
 command-toggle-layout = Indeling > Indeling > Wissel indeling
 command-close-tab = Indeling > Tabblad > Sluit tabblad
@@ -694,7 +691,6 @@ command-manage-spaces = Spaces beheren…
 command-pane-stack-location = paneel { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / paneel { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interactieve modus
 command-group-window = Venster
 command-group-tab = Tabblad
 command-group-pane = Paneel

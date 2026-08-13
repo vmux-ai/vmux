@@ -2043,7 +2043,6 @@ fn on_pane_select(
 
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn poll_cursor_pane_focus(
-    mode: Res<crate::scene::InteractionMode>,
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
     leaf_panes: Query<
         (Entity, &ComputedNode, &UiGlobalTransform),
@@ -2057,9 +2056,6 @@ fn poll_cursor_pane_focus(
     keys: Res<ButtonInput<KeyCode>>,
     active_drags: Query<(), With<PaneDrag>>,
 ) {
-    if *mode != crate::scene::InteractionMode::User {
-        return;
-    }
     if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
         return;
     }
@@ -2171,7 +2167,6 @@ fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Opti
 
 #[cfg(target_os = "macos")]
 fn apply_pending_hover(
-    mode: Res<crate::scene::InteractionMode>,
     leaf_panes: Query<
         (Entity, &ComputedNode, &UiGlobalTransform),
         (With<Pane>, Without<PaneSplit>),
@@ -2189,9 +2184,6 @@ fn apply_pending_hover(
         return;
     }
     *last_motion_sequence = pointer.motion_sequence;
-    if *mode != crate::scene::InteractionMode::User {
-        return;
-    }
     let target = leaf_panes.iter().find_map(|(entity, node, ui_gt)| {
         let center = ui_gt.transform_point2(Vec2::ZERO);
         let half = node.size * 0.5;
@@ -5217,7 +5209,6 @@ mod tests {
     fn pane_hover_activates_hovered_pane_in_single_update() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::scene::InteractionMode>()
             .init_resource::<PaneHoverIntent>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .add_systems(Update, poll_cursor_pane_focus);

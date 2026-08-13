@@ -372,7 +372,6 @@ schema-language-id = மொழி ID
 schema-root-markers = வேர் குறியீடுகள்
 schema-output-directory = வெளியீட்டு அடைவு
 
-menu-scene = காட்சி
 menu-layout = தளவமைப்பு
 menu-terminal = முனையம்
 menu-browser = உலாவி
@@ -424,8 +423,6 @@ error-unknown-host = தெரியாத Vmux ஆப் ஹோஸ்ட்: { 
 history-title = வரலாறு
 
 command-new-app-chat = புதிய { $provider }/{ $model } அரட்டை (ஆப்)
-command-interactive-mode-user = காட்சி > தொடர்பாடல் முறை > பயனர்
-command-interactive-mode-player = காட்சி > தொடர்பாடல் முறை > இயக்குபவர்
 command-minimize-window = அமைப்பு > சாளரம் > சிறிதாக்கு
 command-toggle-layout = அமைப்பு > அமைப்பு > அமைப்பை மாற்று
 command-close-tab = அமைப்பு > தாவல் > தாவலை மூடு
@@ -694,7 +691,6 @@ command-manage-spaces = ஸ்பேஸ்களை நிர்வகி…
 command-pane-stack-location = பலகம் { $pane } / அடுக்கு { $stack }
 command-space-pane-stack-location = { $space } / பலகம் { $pane } / அடுக்கு { $stack }
 command-terminal-path = டெர்மினல் ({ $path })
-command-group-interactive-mode = ஊடாடும் முறை
 command-group-window = சாளரம்
 command-group-tab = தாவல்
 command-group-pane = பலகம்

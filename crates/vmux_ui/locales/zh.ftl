@@ -372,7 +372,6 @@ schema-language-id = 语言 ID
 schema-root-markers = 根目录标记
 schema-output-directory = 输出目录
 
-menu-scene = 场景
 menu-layout = 布局
 menu-terminal = 终端
 menu-browser = 浏览器
@@ -424,8 +423,6 @@ error-unknown-host = 未知 Vmux 应用主机：{ $host }
 history-title = 历史记录
 
 command-new-app-chat = 新建 { $provider }/{ $model } 聊天（应用）
-command-interactive-mode-user = 场景 > 交互模式 > 用户
-command-interactive-mode-player = 场景 > 交互模式 > 播放器
 command-minimize-window = 布局 > 窗口 > 最小化
 command-toggle-layout = 布局 > 布局 > 切换布局
 command-close-tab = 布局 > 标签页 > 关闭标签页
@@ -694,7 +691,6 @@ command-manage-spaces = 管理空间…
 command-pane-stack-location = 窗格 { $pane } / 堆栈 { $stack }
 command-space-pane-stack-location = { $space } / 窗格 { $pane } / 堆栈 { $stack }
 command-terminal-path = 终端（{ $path }）
-command-group-interactive-mode = 交互模式
 command-group-window = 窗口
 command-group-tab = 标签页
 command-group-pane = 窗格

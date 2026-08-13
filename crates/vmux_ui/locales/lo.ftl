@@ -372,7 +372,6 @@ schema-language-id = ID ພາສາ
 schema-root-markers = ຕົວໝາຍຮາກ
 schema-output-directory = ໄດເຣັກທໍຣີຜົນລັບ
 
-menu-scene = ສາກ
 menu-layout = ເຄົ້າໂຄງ
 menu-terminal = ເທີມິນັນ
 menu-browser = ເບຣົາເຊີ
@@ -424,8 +423,6 @@ error-unknown-host = ໂຮສແອັບ Vmux ທີ່ບໍ່ຮູ້ຈ�
 history-title = ປະຫວັດ
 
 command-new-app-chat = ແຊັດ { $provider }/{ $model } ໃໝ່ (ແອັບ)
-command-interactive-mode-user = ຊີນ > ໂໝດໂຕ້ຕອບ > ຜູ້ໃຊ້
-command-interactive-mode-player = ຊີນ > ໂໝດໂຕ້ຕອບ > ຜູ້ຫຼິ້ນ
 command-minimize-window = ເລຍເອົາຕ໌ > ໜ້າຕ່າງ > ຫຍໍ້ລົງ
 command-toggle-layout = ເລຍເອົາຕ໌ > ເລຍເອົາຕ໌ > ສະຫຼັບເລຍເອົາຕ໌
 command-close-tab = ເລຍເອົາຕ໌ > ແທັບ > ປິດແທັບ
@@ -694,7 +691,6 @@ command-manage-spaces = ຈັດການສະເປດ…
 command-pane-stack-location = ພານ { $pane } / ສະແຕັກ { $stack }
 command-space-pane-stack-location = { $space } / ພານ { $pane } / ສະແຕັກ { $stack }
 command-terminal-path = ເທີມິນັນ ({ $path })
-command-group-interactive-mode = ໂໝດໂຕ້ຕອບ
 command-group-window = ໜ້າຕ່າງ
 command-group-tab = ແທັບ
 command-group-pane = ພານ

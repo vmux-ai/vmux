@@ -372,7 +372,6 @@ schema-language-id = Lingva ID
 schema-root-markers = Radikaj markiloj
 schema-output-directory = Eliga dosierujo
 
-menu-scene = Sceno
 menu-layout = Aranĝo
 menu-terminal = Terminalo
 menu-browser = Retumilo
@@ -424,8 +423,6 @@ error-unknown-host = Nekonata Vmux-aplikaĵa gastiganto: { $host }
 history-title = Historio
 
 command-new-app-chat = Nova { $provider }/{ $model }-babilejo (Aplikaĵo)
-command-interactive-mode-user = Sceno > Interaga reĝimo > Uzanto
-command-interactive-mode-player = Sceno > Interaga reĝimo > Ludanto
 command-minimize-window = Aranĝo > Fenestro > Minimumigi
 command-toggle-layout = Aranĝo > Aranĝo > Baskuligi aranĝon
 command-close-tab = Aranĝo > Langeto > Fermi langeton
@@ -694,7 +691,6 @@ command-manage-spaces = Administri spacojn…
 command-pane-stack-location = panelo { $pane } / stako { $stack }
 command-space-pane-stack-location = { $space } / panelo { $pane } / stako { $stack }
 command-terminal-path = Terminalo ({ $path })
-command-group-interactive-mode = Interaga reĝimo
 command-group-window = Fenestro
 command-group-tab = Langeto
 command-group-pane = Panelo

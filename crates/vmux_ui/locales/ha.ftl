@@ -372,7 +372,6 @@ schema-language-id = ID na harshe
 schema-root-markers = Alamomin tushen aiki
 schema-output-directory = Kundin fitarwa
 
-menu-scene = Fage
 menu-layout = Tsarawa
 menu-terminal = Tasha
 menu-browser = Burauza
@@ -424,8 +423,6 @@ error-unknown-host = Mai masaukin app na Vmux da ba a sani ba: { $host }
 history-title = Tarihi
 
 command-new-app-chat = Sabuwar hira ta { $provider }/{ $model } (App)
-command-interactive-mode-user = Fage > Yanayin hulɗa > Mai amfani
-command-interactive-mode-player = Fage > Yanayin hulɗa > Mai kunnawa
 command-minimize-window = Tsari > Taga > Rage taga
 command-toggle-layout = Tsari > Tsari > Kunna/kashe tsari
 command-close-tab = Tsari > Tab > Rufe tab
@@ -694,7 +691,6 @@ command-manage-spaces = Sarrafa sarari…
 command-pane-stack-location = fanni { $pane } / tari { $stack }
 command-space-pane-stack-location = { $space } / fanni { $pane } / tari { $stack }
 command-terminal-path = Tasha ({ $path })
-command-group-interactive-mode = Yanayin Mu'amala
 command-group-window = Taga
 command-group-tab = Shafi
 command-group-pane = Fanni

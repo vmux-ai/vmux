@@ -372,7 +372,6 @@ schema-language-id = ID-ga luqadda
 schema-root-markers = Calaamadaha xididka
 schema-output-directory = Galka wax-soo-saarka
 
-menu-scene = Muuqaal
 menu-layout = Habayn
 menu-terminal = Terminal
 menu-browser = Biraawsar
@@ -424,8 +423,6 @@ error-unknown-host = Martigeliye app Vmux oo aan la aqoon: { $host }
 history-title = Taariikh
 
 command-new-app-chat = Wadahadal cusub { $provider }/{ $model } (App)
-command-interactive-mode-user = Muuqaal > Habka Isdhexgalka > Isticmaale
-command-interactive-mode-player = Muuqaal > Habka Isdhexgalka > Ciyaaryahan
 command-minimize-window = Habayn > Daaqad > Yaree
 command-toggle-layout = Habayn > Habayn > Beddel habaynta
 command-close-tab = Habayn > Tab > Xir tabka
@@ -694,7 +691,6 @@ command-manage-spaces = Maamul goobaha…
 command-pane-stack-location = daaqad-qayb { $pane } / lakab { $stack }
 command-space-pane-stack-location = { $space } / daaqad-qayb { $pane } / lakab { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Habka is-dhexgalka
 command-group-window = Daaqad
 command-group-tab = Tab
 command-group-pane = Daaqad-qayb

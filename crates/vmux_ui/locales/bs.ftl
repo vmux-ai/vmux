@@ -372,7 +372,6 @@ schema-language-id = ID jezika
 schema-root-markers = Oznake korijena
 schema-output-directory = Izlazni direktorij
 
-menu-scene = Scena
 menu-layout = Raspored
 menu-terminal = Terminal
 menu-browser = Preglednik
@@ -424,8 +423,6 @@ error-unknown-host = Nepoznat host Vmux aplikacije: { $host }
 history-title = Historija
 
 command-new-app-chat = Novi chat { $provider }/{ $model } (aplikacija)
-command-interactive-mode-user = Scena > Interaktivni način > Korisnik
-command-interactive-mode-player = Scena > Interaktivni način > Player
 command-minimize-window = Raspored > Prozor > Minimiziraj
 command-toggle-layout = Raspored > Raspored > Prebaci raspored
 command-close-tab = Raspored > Kartica > Zatvori karticu
@@ -694,7 +691,6 @@ command-manage-spaces = Upravljaj prostorima…
 command-pane-stack-location = okno { $pane } / stog { $stack }
 command-space-pane-stack-location = { $space } / okno { $pane } / stog { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktivni način
 command-group-window = Prozor
 command-group-tab = Kartica
 command-group-pane = Okno

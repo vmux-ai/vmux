@@ -372,7 +372,6 @@ schema-language-id = Tungumáls-ID
 schema-root-markers = Rótarmerki
 schema-output-directory = Úttaksmappa
 
-menu-scene = Sena
 menu-layout = Skipulag
 menu-terminal = Útstöð
 menu-browser = Vafri
@@ -424,8 +423,6 @@ error-unknown-host = Óþekktur hýsill Vmux-forrits: { $host }
 history-title = Ferill
 
 command-new-app-chat = Nýtt spjall með { $provider }/{ $model } (forrit)
-command-interactive-mode-user = Sena > Gagnvirkur hamur > Notandi
-command-interactive-mode-player = Sena > Gagnvirkur hamur > Spilari
 command-minimize-window = Útlit > Gluggi > Minnka
 command-toggle-layout = Útlit > Útlit > Víxla útliti
 command-close-tab = Útlit > Flipi > Loka flipa
@@ -694,7 +691,6 @@ command-manage-spaces = Stjórna vinnusvæðum…
 command-pane-stack-location = svæði { $pane } / stafli { $stack }
 command-space-pane-stack-location = { $space } / svæði { $pane } / stafli { $stack }
 command-terminal-path = Skjáhermir ({ $path })
-command-group-interactive-mode = Gagnvirk stilling
 command-group-window = Gluggi
 command-group-tab = Flipi
 command-group-pane = Svæði

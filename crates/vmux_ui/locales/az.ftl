@@ -372,7 +372,6 @@ schema-language-id = Dil ID
 schema-root-markers = Kök markerləri
 schema-output-directory = Çıxış qovluğu
 
-menu-scene = Səhnə
 menu-layout = Düzən
 menu-terminal = Terminal
 menu-browser = Brauzer
@@ -424,8 +423,6 @@ error-unknown-host = Naməlum Vmux tətbiq hostu: { $host }
 history-title = Tarixçə
 
 command-new-app-chat = Yeni { $provider }/{ $model } söhbəti (Tətbiq)
-command-interactive-mode-user = Səhnə > İnteraktiv rejim > İstifadəçi
-command-interactive-mode-player = Səhnə > İnteraktiv rejim > Oynadıcı
 command-minimize-window = Düzən > Pəncərə > Kiçilt
 command-toggle-layout = Düzən > Düzən > Düzəni dəyiş
 command-close-tab = Düzən > Vərəq > Vərəqi bağla
@@ -694,7 +691,6 @@ command-manage-spaces = Məkanları idarə et…
 command-pane-stack-location = panel { $pane } / qat { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / qat { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = İnteraktiv rejim
 command-group-window = Pəncərə
 command-group-tab = Vərəq
 command-group-pane = Panel

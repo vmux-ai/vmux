@@ -372,7 +372,6 @@ schema-language-id = زبان ID
 schema-root-markers = روٹ نشانیاں
 schema-output-directory = آؤٹ پٹ ڈائریکٹری
 
-menu-scene = منظر
 menu-layout = لے آؤٹ
 menu-terminal = ٹرمینل
 menu-browser = براؤزر
@@ -424,8 +423,6 @@ error-unknown-host = نامعلوم Vmux ایپ ہوسٹ: { $host }
 history-title = سرگزشت
 
 command-new-app-chat = نئی { $provider }/{ $model } چیٹ (ایپ)
-command-interactive-mode-user = منظر > تعاملی موڈ > صارف
-command-interactive-mode-player = منظر > تعاملی موڈ > پلیئر
 command-minimize-window = لے آؤٹ > ونڈو > چھوٹی کریں
 command-toggle-layout = لے آؤٹ > لے آؤٹ > لے آؤٹ بدلیں
 command-close-tab = لے آؤٹ > ٹیب > ٹیب بند کریں
@@ -694,7 +691,6 @@ command-manage-spaces = اسپیسز کا نظم کریں…
 command-pane-stack-location = پین { $pane } / اسٹیک { $stack }
 command-space-pane-stack-location = { $space } / پین { $pane } / اسٹیک { $stack }
 command-terminal-path = ٹرمینل ({ $path })
-command-group-interactive-mode = انٹرایکٹو موڈ
 command-group-window = ونڈو
 command-group-tab = ٹیب
 command-group-pane = پین

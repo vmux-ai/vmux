@@ -372,7 +372,6 @@ schema-language-id = ٻولي ID
 schema-root-markers = روٽ نشان
 schema-output-directory = آئوٽ پُٽ ڊائريڪٽري
 
-menu-scene = منظر
 menu-layout = ترتيب
 menu-terminal = ٽرمينل
 menu-browser = برائوزر
@@ -424,8 +423,6 @@ error-unknown-host = اڻڄاتل Vmux ايپ هوسٽ: { $host }
 history-title = تاريخ
 
 command-new-app-chat = نئين { $provider }/{ $model } چيٽ (ايپ)
-command-interactive-mode-user = منظر > انٽرايڪٽو موڊ > يوزر
-command-interactive-mode-player = منظر > انٽرايڪٽو موڊ > پليئر
 command-minimize-window = لي آئوٽ > ونڊو > ننڍي ڪريو
 command-toggle-layout = لي آئوٽ > لي آئوٽ > لي آئوٽ ٽوگل ڪريو
 command-close-tab = لي آئوٽ > ٽيب > ٽيب بند ڪريو
@@ -694,7 +691,6 @@ command-manage-spaces = اسپيسز سنڀاليو…
 command-pane-stack-location = پين { $pane } / اسٽيڪ { $stack }
 command-space-pane-stack-location = { $space } / پين { $pane } / اسٽيڪ { $stack }
 command-terminal-path = ٽرمينل ({ $path })
-command-group-interactive-mode = تعاملي موڊ
 command-group-window = ونڊو
 command-group-tab = ٽيب
 command-group-pane = پين

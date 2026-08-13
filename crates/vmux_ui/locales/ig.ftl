@@ -372,7 +372,6 @@ schema-language-id = ID asụsụ
 schema-root-markers = Akara mgbọrọgwụ
 schema-output-directory = Ndekọ mmepụta
 
-menu-scene = Ihe ngosi
 menu-layout = Nhazi
 menu-terminal = Teminalụ
 menu-browser = Nchọgharị
@@ -424,8 +423,6 @@ error-unknown-host = A maghị onye nnabata ngwa Vmux: { $host }
 history-title = Akụkọ
 
 command-new-app-chat = Mkparịta ụka { $provider }/{ $model } ọhụrụ (Ngwa)
-command-interactive-mode-user = Scene > Ọnọdụ mmekọrịta > Onye ọrụ
-command-interactive-mode-player = Scene > Ọnọdụ mmekọrịta > Onye ọkpụkpọ
 command-minimize-window = Layout > Windo > Belata
 command-toggle-layout = Layout > Nhazi > Gbanye/gbanyụọ nhazi
 command-close-tab = Layout > Taabụ > Mechie taabụ
@@ -694,7 +691,6 @@ command-manage-spaces = Jikwaa oghere…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Ọnọdụ mmekọrịta
 command-group-window = Windo
 command-group-tab = Taabụ
 command-group-pane = Pane

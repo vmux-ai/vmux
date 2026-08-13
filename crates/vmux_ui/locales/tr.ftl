@@ -372,7 +372,6 @@ schema-language-id = Dil ID
 schema-root-markers = Kök işaretçileri
 schema-output-directory = Çıktı dizini
 
-menu-scene = Sahne
 menu-layout = Yerleşim
 menu-terminal = Terminal
 menu-browser = Tarayıcı
@@ -424,8 +423,6 @@ error-unknown-host = Bilinmeyen Vmux uygulama ana makinesi: { $host }
 history-title = Geçmiş
 
 command-new-app-chat = Yeni { $provider }/{ $model } sohbeti (Uygulama)
-command-interactive-mode-user = Sahne > Etkileşimli Mod > Kullanıcı
-command-interactive-mode-player = Sahne > Etkileşimli Mod > Oyuncu
 command-minimize-window = Yerleşim > Pencere > Simge durumuna küçült
 command-toggle-layout = Yerleşim > Yerleşim > Yerleşimi değiştir
 command-close-tab = Yerleşim > Sekme > Sekmeyi kapat
@@ -694,7 +691,6 @@ command-manage-spaces = Alanları yönet…
 command-pane-stack-location = bölme { $pane } / yığın { $stack }
 command-space-pane-stack-location = { $space } / bölme { $pane } / yığın { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Etkileşimli Mod
 command-group-window = Pencere
 command-group-tab = Sekme
 command-group-pane = Bölme

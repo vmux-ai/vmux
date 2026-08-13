@@ -82,7 +82,6 @@ pub(crate) type LayoutKeyboardCapture = Or<(
     With<CommandBarPanelActive>,
 )>;
 fn sync_keyboard_target(
-    mode: Res<vmux_layout::scene::InteractionMode>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
@@ -120,17 +119,6 @@ fn sync_keyboard_target(
         return;
     }
 
-    // In Player mode, only sync when a pane has been clicked (Focused sub-state).
-    // In Roaming (no CefKeyboardTarget on any pane browser), skip sync to prevent
-    // re-assigning the target to the previously active pane.
-    if *mode == vmux_layout::scene::InteractionMode::Player {
-        let has_pane_target = content_q
-            .iter()
-            .any(|(e, has_kb)| has_kb && !status_q.contains(e) && !side_sheet_q.contains(e));
-        if !has_pane_target {
-            return;
-        }
-    }
     let active_stack_opt = focus.stack;
     let Some(active_stack_entity) = active_stack_opt else {
         return;
@@ -1131,7 +1119,6 @@ fn pane_count_for_browser(
 fn sync_webview_pane_corner_clip(
     settings: Res<AppSettings>,
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
-    mode: Res<vmux_layout::scene::InteractionMode>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
     tabs: Query<
         (
@@ -1174,10 +1161,7 @@ fn sync_webview_pane_corner_clip(
             &leaf_panes,
         )
         .unwrap_or(1);
-        let corner_mode = if *mode == vmux_layout::scene::InteractionMode::Player
-            || layout_hidden.0
-            || pane_count > 1
-        {
+        let corner_mode = if layout_hidden.0 || pane_count > 1 {
             0.0
         } else {
             1.0
@@ -1722,7 +1706,6 @@ mod tests {
     fn open_command_bar_is_exclusive_cef_keyboard_target() {
         let mut app = App::new();
         app.add_plugins(vmux_layout::LayoutContractPlugin)
-            .insert_resource(vmux_layout::scene::InteractionMode::User)
             .insert_resource(CefSuppressKeyboardInput(true))
             .add_systems(Update, sync_keyboard_target);
         let page = app.world_mut().spawn((Browser, CefKeyboardTarget)).id();
@@ -1823,54 +1806,11 @@ mod tests {
     }
 
     #[test]
-    fn player_osr_pane_clip_uses_alpha_to_coverage_for_rounded_corners() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_app_settings_with_radius(12.0))
-            .insert_resource(vmux_layout::toggle::LayoutHidden(false))
-            .insert_resource(vmux_layout::scene::InteractionMode::Player)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, sync_webview_pane_corner_clip);
-
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
-            .add(WebviewExtendStandardMaterial::default());
-        let tab = app.world_mut().spawn(vmux_layout::tab::Tab::default()).id();
-        let pane = app.world_mut().spawn((Pane, ChildOf(tab))).id();
-        let stack = app
-            .world_mut()
-            .spawn((Stack::default(), ChildOf(pane)))
-            .id();
-        app.world_mut().spawn((
-            Browser,
-            WebviewSize(Vec2::new(320.0, 240.0)),
-            WebviewMaterialHandle(handle.clone()),
-            ChildOf(stack),
-        ));
-
-        app.update();
-
-        let material = app
-            .world()
-            .resource::<Assets<WebviewExtendStandardMaterial>>()
-            .get(&handle)
-            .expect("webview material");
-
-        assert_eq!(
-            material.extension.pane_corner_clip,
-            Vec4::new(12.0, 320.0, 240.0, 0.0)
-        );
-        assert_eq!(material.base.alpha_mode, AlphaMode::AlphaToCoverage);
-    }
-
-    #[test]
     fn layout_cef_shell_keeps_blend_material() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_app_settings_with_radius(12.0))
             .insert_resource(vmux_layout::toggle::LayoutHidden(false))
-            .insert_resource(vmux_layout::scene::InteractionMode::Player)
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, sync_webview_pane_corner_clip);
 

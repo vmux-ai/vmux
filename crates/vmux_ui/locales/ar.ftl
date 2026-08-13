@@ -372,7 +372,6 @@ schema-language-id = ID اللغة
 schema-root-markers = علامات الجذر
 schema-output-directory = دليل الإخراج
 
-menu-scene = مشهد
 menu-layout = التخطيط
 menu-terminal = الطرفية
 menu-browser = المتصفح
@@ -424,8 +423,6 @@ error-unknown-host = مضيف تطبيق Vmux غير معروف: { $host }
 history-title = السجل
 
 command-new-app-chat = محادثة { $provider }/{ $model } جديدة (تطبيق)
-command-interactive-mode-user = المشهد > الوضع التفاعلي > المستخدم
-command-interactive-mode-player = المشهد > الوضع التفاعلي > المشغّل
 command-minimize-window = التخطيط > النافذة > تصغير
 command-toggle-layout = التخطيط > التخطيط > تبديل التخطيط
 command-close-tab = التخطيط > علامة التبويب > إغلاق علامة التبويب
@@ -694,7 +691,6 @@ command-manage-spaces = إدارة المساحات…
 command-pane-stack-location = الجزء { $pane } / المكدس { $stack }
 command-space-pane-stack-location = { $space } / الجزء { $pane } / المكدس { $stack }
 command-terminal-path = الطرفية ({ $path })
-command-group-interactive-mode = الوضع التفاعلي
 command-group-window = النافذة
 command-group-tab = علامة التبويب
 command-group-pane = الجزء

@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy_cef_core::prelude::WebviewDirtyRect;
 use vmux_layout::cef::LayoutCef;
-use vmux_layout::scene::InteractionMode;
 
 pub(crate) struct GlassPlugin;
 
@@ -231,10 +230,6 @@ fn ensure_window_active_after_reveal(
     }
 }
 
-fn glass_backdrop_visible(mode: InteractionMode) -> bool {
-    mode == InteractionMode::User
-}
-
 /// Toggle native macOS fullscreen when the `ToggleFullscreen` command fires (Ctrl+Cmd+F).
 /// vmux hides the native window buttons, so this is the entry point into/out of fullscreen.
 fn handle_toggle_fullscreen_command(
@@ -256,7 +251,6 @@ fn handle_toggle_fullscreen_command(
 
 fn sync_window_glass_visibility(
     mut state: NonSendMut<GlassState>,
-    mode: Res<InteractionMode>,
     mut clear_color: ResMut<ClearColor>,
     mut window_q: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     terminal_focus_q: Query<
@@ -319,7 +313,7 @@ fn sync_window_glass_visibility(
         return;
     }
 
-    let visible = glass_backdrop_visible(*mode) && !fullscreen;
+    let visible = !fullscreen;
     if let (Some(backdrop_window), Some(parent_window)) =
         (&state._backdrop_window, &state._parent_window)
     {
@@ -694,22 +688,6 @@ fn register_native_overlay_layer(
     if should_schedule {
         schedule_native_overlay_present();
     }
-}
-
-fn unregister_native_overlay_layer(entity: Entity) {
-    let mut state = NATIVE_OVERLAY_PRESENT_STATE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    state.layers.remove(&entity);
-    state.held.remove(&entity);
-    state.swapchains.remove(&entity);
-    state.source_textures.remove(&entity);
-    state.in_flight.remove(&entity);
-    drop(state);
-    NATIVE_OVERLAY_MAILBOX
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .remove(&entity);
 }
 
 fn create_metal_overlay_context() -> Option<MetalOverlayContext> {
@@ -1153,25 +1131,12 @@ fn sync_layout_overlay(
     layout_e_q: Query<Entity, With<LayoutCef>>,
     window_q: Query<Entity, With<bevy::window::PrimaryWindow>>,
     windows: Query<&bevy::window::Window>,
-    mode: Res<InteractionMode>,
     mut overlay_frames: ResMut<bevy_cef::prelude::NativeOverlayFrames>,
 ) {
     use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
     use objc2_app_kit::{NSColor, NSView};
     use objc2_quartz_core::{CAAutoresizingMask, CALayer};
 
-    if *mode != InteractionMode::User {
-        for layout_e in &layout_e_q {
-            unregister_native_overlay_layer(layout_e);
-        }
-        if state.shown {
-            if let Some(layer) = &state.layer {
-                layer.setHidden(true);
-            }
-            state.shown = false;
-        }
-        return;
-    }
     let Some(_mtm) = MainThreadMarker::new() else {
         return;
     };
@@ -1326,13 +1291,6 @@ fn sync_command_bar_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_layout::scene::InteractionMode;
-
-    #[test]
-    fn glass_backdrop_is_hidden_in_player_mode() {
-        assert!(!glass_backdrop_visible(InteractionMode::Player));
-        assert!(glass_backdrop_visible(InteractionMode::User));
-    }
 
     #[test]
     fn glass_install_does_not_reveal_window() {

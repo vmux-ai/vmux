@@ -372,7 +372,6 @@ schema-language-id = ID gagana
 schema-root-markers = Fa'ailoga a'a
 schema-output-directory = Pusa faila o taunu'uga
 
-menu-scene = Va'aiga
 menu-layout = Fa'atulagaga
 menu-terminal = Pusa fa'atonu
 menu-browser = Su'esu'e
@@ -424,8 +423,6 @@ error-unknown-host = E lē iloa le talimalo o le app Vmux: { $host }
 history-title = Talafa‘asolopito
 
 command-new-app-chat = Talanoaga fou { $provider }/{ $model } (App)
-command-interactive-mode-user = Scene > Faiga Fegalegaleai > Tagata fa‘aaogā
-command-interactive-mode-player = Scene > Faiga Fegalegaleai > Ta‘alo
 command-minimize-window = Layout > Fa‘amalama > Fa‘aitiiti
 command-toggle-layout = Layout > Layout > Fesuia‘i Layout
 command-close-tab = Layout > Tab > Tapuni Tab
@@ -694,7 +691,6 @@ command-manage-spaces = Pulea avanoa…
 command-pane-stack-location = vaega { $pane } / faaputuga { $stack }
 command-space-pane-stack-location = { $space } / vaega { $pane } / faaputuga { $stack }
 command-terminal-path = Temina ({ $path })
-command-group-interactive-mode = Faiga fegalegaleaʻi
 command-group-window = Faamalama
 command-group-tab = Laupepa
 command-group-pane = Vaega

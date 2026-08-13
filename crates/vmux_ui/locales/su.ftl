@@ -372,7 +372,6 @@ schema-language-id = ID basa
 schema-root-markers = Pananda akar
 schema-output-directory = Diréktori kaluaran
 
-menu-scene = Adegan
 menu-layout = Tata perenah
 menu-terminal = Terminal
 menu-browser = Panyungsi
@@ -424,8 +423,6 @@ error-unknown-host = Host aplikasi Vmux teu dikenal: { $host }
 history-title = Riwayat
 
 command-new-app-chat = Chat { $provider }/{ $model } anyar (Aplikasi)
-command-interactive-mode-user = Adegan > Modeu Interaktif > Pamaké
-command-interactive-mode-player = Adegan > Modeu Interaktif > Pamaén
 command-minimize-window = Tata Letak > Jandéla > Leutikan
 command-toggle-layout = Tata Letak > Tata Letak > Togél Tata Letak
 command-close-tab = Tata Letak > Tab > Tutup Tab
@@ -694,7 +691,6 @@ command-manage-spaces = Atur space…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Modeu Interaktif
 command-group-window = Jandéla
 command-group-tab = Tab
 command-group-pane = Pane

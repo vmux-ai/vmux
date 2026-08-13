@@ -372,7 +372,6 @@ schema-language-id = Sprog-ID
 schema-root-markers = Rodmarkører
 schema-output-directory = Outputmappe
 
-menu-scene = Scene
 menu-layout = Layout
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Ukendt Vmux-appvært: { $host }
 history-title = Historik
 
 command-new-app-chat = Ny { $provider }/{ $model }-chat (app)
-command-interactive-mode-user = Scene > Interaktiv tilstand > Bruger
-command-interactive-mode-player = Scene > Interaktiv tilstand > Afspiller
 command-minimize-window = Layout > Vindue > Minimer
 command-toggle-layout = Layout > Layout > Skift layout
 command-close-tab = Layout > Fane > Luk fane
@@ -694,7 +691,6 @@ command-manage-spaces = Administrer spaces…
 command-pane-stack-location = rude { $pane } / stak { $stack }
 command-space-pane-stack-location = { $space } / rude { $pane } / stak { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiv tilstand
 command-group-window = Vindue
 command-group-tab = Fane
 command-group-pane = Rude

@@ -372,7 +372,6 @@ schema-language-id = ဘာသာစကား ID
 schema-root-markers = Root marker များ
 schema-output-directory = ထုတ်လွှတ်ရာ ဖိုလ်ဒါ
 
-menu-scene = မြင်ကွင်း
 menu-layout = အပြင်အဆင်
 menu-terminal = Terminal
 menu-browser = ဘရောက်ဇာ
@@ -424,8 +423,6 @@ error-unknown-host = မသိသော Vmux အက်ပ် host: { $host }
 history-title = မှတ်တမ်း
 
 command-new-app-chat = { $provider }/{ $model } ချတ်အသစ် (အက်ပ်)
-command-interactive-mode-user = မြင်ကွင်း > အပြန်အလှန်မုဒ် > အသုံးပြုသူ
-command-interactive-mode-player = မြင်ကွင်း > အပြန်အလှန်မုဒ် > Player
 command-minimize-window = အပြင်အဆင် > ဝင်းဒိုး > အနိမ့်ချ
 command-toggle-layout = အပြင်အဆင် > အပြင်အဆင် > အပြင်အဆင် ပြောင်းဖွင့်/ပိတ်
 command-close-tab = အပြင်အဆင် > တက်ဘ် > တက်ဘ်ပိတ်
@@ -694,7 +691,6 @@ command-manage-spaces = စပေ့စ်များကို စီမံရ�
 command-pane-stack-location = အကန့် { $pane } / အထပ် { $stack }
 command-space-pane-stack-location = { $space } / အကန့် { $pane } / အထပ် { $stack }
 command-terminal-path = တာမီနယ် ({ $path })
-command-group-interactive-mode = အပြန်အလှန်သုံး မုဒ်
 command-group-window = ပြတင်းပေါက်
 command-group-tab = တက်ဘ်
 command-group-pane = အကန့်

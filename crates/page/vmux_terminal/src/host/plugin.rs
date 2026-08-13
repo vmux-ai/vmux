@@ -1899,7 +1899,6 @@ fn handle_terminal_keyboard(
     >,
     mut capture_q: Query<(Entity, &ProcessId, &mut PromptCapture), With<Terminal>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<vmux_layout::scene::InteractionMode>,
     input: Res<ButtonInput<KeyCode>>,
     chord_state: Res<vmux_command::shortcut::ChordState>,
     service: Option<Res<ServiceClient>>,
@@ -1916,7 +1915,6 @@ fn handle_terminal_keyboard(
         terminals
             .iter()
             .map(|(pid, child_of)| (child_of.get(), *pid)),
-        *mode,
     );
 
     if target_processes.is_empty() {
@@ -2354,7 +2352,6 @@ fn resolve_terminal_input_targets(
     any_keyboard_target_active: bool,
     focused_stack: Option<Entity>,
     terminal_ids_by_stack: impl IntoIterator<Item = (Entity, ProcessId)>,
-    mode: vmux_layout::scene::InteractionMode,
 ) -> Vec<ProcessId> {
     let targeted: Vec<(Entity, ProcessId)> = targeted_terminal_ids_by_stack.into_iter().collect();
     let focused = focused_stack.and_then(|focused_stack| {
@@ -2374,12 +2371,10 @@ fn resolve_terminal_input_targets(
                 return focused;
             }
         }
-        if mode == vmux_layout::scene::InteractionMode::User
-            && let Some(focused) = focused
-        {
+        if let Some(focused) = focused {
             return focused;
         }
-        if mode == vmux_layout::scene::InteractionMode::User && focused_stack.is_some() {
+        if focused_stack.is_some() {
             return Vec::new();
         }
         return targeted
@@ -2387,7 +2382,7 @@ fn resolve_terminal_input_targets(
             .map(|(_, process_id)| process_id)
             .collect();
     }
-    if any_keyboard_target_active || mode != vmux_layout::scene::InteractionMode::User {
+    if any_keyboard_target_active {
         return Vec::new();
     }
     focused.unwrap_or_default()
@@ -3560,7 +3555,6 @@ fn handle_terminal_copy_mode_command(
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     terminals: Query<(&ProcessId, &ChildOf), (With<Terminal>, Without<ProcessExited>)>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    mode: Res<vmux_layout::scene::InteractionMode>,
     service: Option<Res<ServiceClient>>,
     mut local_copy_mode: ResMut<LocalCopyModeState>,
 ) {
@@ -3577,7 +3571,6 @@ fn handle_terminal_copy_mode_command(
         terminals
             .iter()
             .map(|(pid, child_of)| (child_of.get(), *pid)),
-        *mode,
     );
     let active_process_id = target_processes.first().copied();
     for cmd in er.read() {
@@ -4373,13 +4366,7 @@ mod tests {
         let stack = Entity::from_bits(1);
         let process_id = process_id(7);
 
-        let targets = resolve_terminal_input_targets(
-            [],
-            false,
-            Some(stack),
-            [(stack, process_id)],
-            vmux_layout::scene::InteractionMode::User,
-        );
+        let targets = resolve_terminal_input_targets([], false, Some(stack), [(stack, process_id)]);
 
         assert_eq!(targets, vec![process_id]);
     }
@@ -4388,13 +4375,8 @@ mod tests {
     fn terminal_input_targets_do_not_steal_input_from_non_terminal_target() {
         let stack = Entity::from_bits(1);
 
-        let targets = resolve_terminal_input_targets(
-            [],
-            true,
-            Some(stack),
-            [(stack, process_id(7))],
-            vmux_layout::scene::InteractionMode::User,
-        );
+        let targets =
+            resolve_terminal_input_targets([], true, Some(stack), [(stack, process_id(7))]);
 
         assert!(targets.is_empty());
     }
@@ -4411,7 +4393,6 @@ mod tests {
             true,
             Some(focused_stack),
             [(stale_stack, stale_pid), (focused_stack, focused_pid)],
-            vmux_layout::scene::InteractionMode::User,
         );
 
         assert_eq!(targets, vec![focused_pid]);
@@ -4429,7 +4410,6 @@ mod tests {
             true,
             Some(focused_stack),
             [(stale_stack, stale_pid), (focused_stack, focused_pid)],
-            vmux_layout::scene::InteractionMode::User,
         );
 
         assert_eq!(targets, vec![focused_pid]);
@@ -4446,7 +4426,6 @@ mod tests {
             true,
             Some(focused_stack),
             [(stale_stack, stale_pid)],
-            vmux_layout::scene::InteractionMode::User,
         );
 
         assert!(targets.is_empty());

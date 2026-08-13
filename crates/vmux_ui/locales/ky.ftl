@@ -372,7 +372,6 @@ schema-language-id = Тил ID
 schema-root-markers = Тамыр маркерлери
 schema-output-directory = Чыгаруу каталогу
 
-menu-scene = Сцена
 menu-layout = Макет
 menu-terminal = Терминал
 menu-browser = Браузер
@@ -424,8 +423,6 @@ error-unknown-host = Белгисиз Vmux колдонмо хосту: { $host 
 history-title = Таржымал
 
 command-new-app-chat = Жаңы { $provider }/{ $model } чаты (Колдонмо)
-command-interactive-mode-user = Сцена > Интерактивдүү режим > Колдонуучу
-command-interactive-mode-player = Сцена > Интерактивдүү режим > Ойноткуч
 command-minimize-window = Макет > Терезе > Кичирейтүү
 command-toggle-layout = Макет > Макет > Макетти которуу
 command-close-tab = Макет > Өтмөк > Өтмөктү жабуу
@@ -694,7 +691,6 @@ command-manage-spaces = Мейкиндиктерди башкаруу…
 command-pane-stack-location = панель { $pane } / стек { $stack }
 command-space-pane-stack-location = { $space } / панель { $pane } / стек { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Интерактивдүү режим
 command-group-window = Терезе
 command-group-tab = Өтмөк
 command-group-pane = Панель

@@ -372,7 +372,6 @@ schema-language-id = Keele ID
 schema-root-markers = Juurmarkerid
 schema-output-directory = Väljundkataloog
 
-menu-scene = Stseen
 menu-layout = Paigutus
 menu-terminal = Terminal
 menu-browser = Brauser
@@ -424,8 +423,6 @@ error-unknown-host = Tundmatu Vmuxi rakenduse host: { $host }
 history-title = Ajalugu
 
 command-new-app-chat = Uus { $provider }/{ $model } vestlus (rakendus)
-command-interactive-mode-user = Scene > Interaktiivne režiim > Kasutaja
-command-interactive-mode-player = Scene > Interaktiivne režiim > Mängija
 command-minimize-window = Layout > Aken > Minimeeri
 command-toggle-layout = Layout > Paigutus > Lülita paigutust
 command-close-tab = Layout > Vahekaart > Sulge vahekaart
@@ -694,7 +691,6 @@ command-manage-spaces = Halda ruume…
 command-pane-stack-location = paan { $pane } / virn { $stack }
 command-space-pane-stack-location = { $space } / paan { $pane } / virn { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiivne režiim
 command-group-window = Aken
 command-group-tab = Vahekaart
 command-group-pane = Paan

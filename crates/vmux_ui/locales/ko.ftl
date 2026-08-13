@@ -372,7 +372,6 @@ schema-language-id = 언어 ID
 schema-root-markers = 루트 마커
 schema-output-directory = 출력 디렉터리
 
-menu-scene = 장면
 menu-layout = 레이아웃
 menu-terminal = 터미널
 menu-browser = 브라우저
@@ -424,8 +423,6 @@ error-unknown-host = 알 수 없는 Vmux 앱 호스트: { $host }
 history-title = 방문 기록
 
 command-new-app-chat = 새 { $provider }/{ $model } 채팅(앱)
-command-interactive-mode-user = Scene > 대화형 모드 > 사용자
-command-interactive-mode-player = Scene > 대화형 모드 > 플레이어
 command-minimize-window = Layout > 윈도우 > 최소화
 command-toggle-layout = Layout > 레이아웃 > 레이아웃 전환
 command-close-tab = Layout > 탭 > 탭 닫기
@@ -694,7 +691,6 @@ command-manage-spaces = 스페이스 관리…
 command-pane-stack-location = 패널 { $pane } / 스택 { $stack }
 command-space-pane-stack-location = { $space } / 패널 { $pane } / 스택 { $stack }
 command-terminal-path = 터미널({ $path })
-command-group-interactive-mode = 대화형 모드
 command-group-window = 창
 command-group-tab = 탭
 command-group-pane = 패널

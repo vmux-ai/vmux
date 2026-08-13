@@ -372,7 +372,6 @@ schema-language-id = Тіл ID
 schema-root-markers = Түбір маркерлері
 schema-output-directory = Шығыс қалтасы
 
-menu-scene = Көрініс
 menu-layout = Орналасу
 menu-terminal = Терминал
 menu-browser = Браузер
@@ -424,8 +423,6 @@ error-unknown-host = Белгісіз Vmux қолданба хосты: { $host 
 history-title = Тарих
 
 command-new-app-chat = Жаңа { $provider }/{ $model } чаты (қолданба)
-command-interactive-mode-user = Сахна > Интерактив режим > Пайдаланушы
-command-interactive-mode-player = Сахна > Интерактив режим > Ойнатқыш
 command-minimize-window = Орналасу > Терезе > Жию
 command-toggle-layout = Орналасу > Орналасу > Орналасуды ауыстыру
 command-close-tab = Орналасу > Қойынды > Қойындыны жабу
@@ -694,7 +691,6 @@ command-manage-spaces = Кеңістіктерді басқару…
 command-pane-stack-location = панель { $pane } / қабат { $stack }
 command-space-pane-stack-location = { $space } / панель { $pane } / қабат { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Интерактивті режим
 command-group-window = Терезе
 command-group-tab = Қойынды
 command-group-pane = Панель
