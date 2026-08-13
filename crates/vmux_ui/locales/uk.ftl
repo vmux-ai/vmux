@@ -798,3 +798,6 @@ mobile-error-connection-dropped = З’єднання з вашим Mac розі
 mobile-error-connection-closed = Ваш Mac закрив з’єднання.
 mobile-error-address-invalid = Недійсна адреса для сполучення.
 mobile-error-address-no-port = В адресі для сполучення немає порту.
+mobile-qr-denied = Vmux не може використати камеру. Увімкніть її в Параметрах, щоб відсканувати QR-код, або поверніться назад і вставте посилання для сполучення.
+mobile-qr-open-settings = Відкрити Параметри
+mobile-qr-session-error = Камера зупинилася. Спробуйте ще раз або вставте посилання для сполучення.

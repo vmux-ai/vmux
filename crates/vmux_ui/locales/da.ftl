@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Forbindelsen til din Mac gik tabt.
 mobile-error-connection-closed = Din Mac lukkede forbindelsen.
 mobile-error-address-invalid = Den parringsadresse er ugyldig.
 mobile-error-address-no-port = Den parringsadresse har ingen port.
+mobile-qr-denied = Vmux kan ikke bruge kameraet. Slå det til i Indstillinger for at scanne QR-koden, eller gå tilbage og indsæt parringslinket i stedet.
+mobile-qr-open-settings = Åbn Indstillinger
+mobile-qr-session-error = Kameraet stoppede. Prøv igen, eller indsæt parringslinket i stedet.

@@ -5,38 +5,59 @@ mod platform {
     use std::ptr;
     use std::sync::{LazyLock, Mutex};
 
+    use block2::RcBlock;
     use dioxus::mobile::tao::platform::ios::WindowExtIOS;
     use dispatch2::DispatchQueue;
     use objc2::rc::Retained;
-    use objc2::runtime::{NSObjectProtocol, ProtocolObject};
+    use objc2::runtime::{Bool, NSObjectProtocol, ProtocolObject};
     use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_av_foundation::{
-        AVCaptureDevice, AVCaptureDeviceInput, AVCaptureMetadataOutput,
-        AVCaptureMetadataOutputObjectsDelegate, AVCaptureSession, AVCaptureVideoPreviewLayer,
+        AVAuthorizationStatus, AVCaptureDevice, AVCaptureDeviceInput, AVCaptureMetadataOutput,
+        AVCaptureMetadataOutputObjectsDelegate, AVCaptureSession,
+        AVCaptureSessionRuntimeErrorNotification, AVCaptureVideoPreviewLayer,
         AVLayerVideoGravityResizeAspectFill, AVMediaTypeVideo, AVMetadataMachineReadableCodeObject,
         AVMetadataObject, AVMetadataObjectTypeQRCode,
     };
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-    use objc2_foundation::{NSArray, NSString};
+    use objc2_foundation::{
+        NSArray, NSDictionary, NSNotification, NSNotificationCenter, NSString, NSURL,
+    };
     use objc2_ui_kit::{
-        NSTextAlignment, UIButton, UIButtonType, UIColor, UIControlEvents, UIControlState, UIFont,
-        UILabel, UIModalPresentationStyle, UIViewController,
+        NSTextAlignment, UIApplication, UIApplicationOpenSettingsURLString, UIButton, UIButtonType,
+        UIColor, UIControlEvents, UIControlState, UIFont, UILabel, UIModalPresentationStyle,
+        UIViewController,
     };
     use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
     thread_local! {
         static ROOT_CONTROLLER: Cell<*mut UIViewController> = const { Cell::new(ptr::null_mut()) };
         static ACTIVE: Cell<bool> = const { Cell::new(false) };
+        /// Set the moment a permission prompt goes up, before any controller exists.
+        ///
+        /// `ACTIVE` cannot cover this: `requestAccessForMediaType` returns immediately and answers
+        /// on another queue, so between the tap and the answer there is nothing presented and a
+        /// second tap would raise a second prompt.
+        static REQUESTING: Cell<bool> = const { Cell::new(false) };
     }
 
     static RESULTS: LazyLock<Mutex<VecDeque<Result<String, String>>>> =
         LazyLock::new(|| Mutex::new(VecDeque::new()));
 
+    /// The live scanner and the denied-permission screen are the same controller.
+    ///
+    /// They share the modal, the title and the cancel button; only the capture half differs, and
+    /// there is nothing to capture when the camera was refused.
     struct ScannerIvars {
-        session: Retained<AVCaptureSession>,
-        preview: Retained<AVCaptureVideoPreviewLayer>,
+        capture: Option<Capture>,
         title: Retained<UILabel>,
         cancel: Retained<UIButton>,
+        /// Shown only when the camera was refused.
+        settings: Retained<UIButton>,
+    }
+
+    struct Capture {
+        session: Retained<AVCaptureSession>,
+        preview: Retained<AVCaptureVideoPreviewLayer>,
     }
 
     define_class!(
@@ -54,7 +75,10 @@ mod platform {
                 }
                 let Some(view) = self.view() else { return };
                 view.setBackgroundColor(Some(&UIColor::blackColor()));
-                view.layer().addSublayer(&self.ivars().preview);
+                match &self.ivars().capture {
+                    Some(capture) => view.layer().addSublayer(&capture.preview),
+                    None => view.addSubview(&self.ivars().settings),
+                }
                 view.addSubview(&self.ivars().title);
                 view.addSubview(&self.ivars().cancel);
             }
@@ -67,20 +91,66 @@ mod platform {
                 let Some(view) = self.view() else { return };
                 let bounds = view.bounds();
                 let safe = view.safeAreaInsets();
-                self.ivars().preview.setFrame(bounds);
+                let width = (bounds.size.width - 64.0).max(0.0);
+                if let Some(capture) = &self.ivars().capture {
+                    capture.preview.setFrame(bounds);
+                }
+                // The refusal needs room to explain itself, so it gets the middle of the screen
+                // rather than the strip a scanning hint sits in.
+                let title_top = if self.ivars().capture.is_some() {
+                    safe.top + 54.0
+                } else {
+                    (bounds.size.height * 0.32).max(safe.top + 54.0)
+                };
+                let title_height = if self.ivars().capture.is_some() {
+                    56.0
+                } else {
+                    140.0
+                };
                 self.ivars().title.setFrame(CGRect::new(
-                    CGPoint::new(32.0, safe.top + 54.0),
-                    CGSize::new((bounds.size.width - 64.0).max(0.0), 56.0),
+                    CGPoint::new(32.0, title_top),
+                    CGSize::new(width, title_height),
                 ));
                 self.ivars().cancel.setFrame(CGRect::new(
                     CGPoint::new(18.0, safe.top + 8.0),
                     CGSize::new(76.0, 40.0),
                 ));
+                if self.ivars().capture.is_none() {
+                    self.ivars().settings.setFrame(CGRect::new(
+                        CGPoint::new(32.0, title_top + title_height + 24.0),
+                        CGSize::new(width, 48.0),
+                    ));
+                }
             }
 
             #[unsafe(method(cancel))]
             fn cancel(&self) {
                 self.close(None);
+            }
+
+            #[unsafe(method(openSettings))]
+            fn open_settings(&self) {
+                let Some(marker) = MainThreadMarker::new() else {
+                    return;
+                };
+                let Some(url) = (unsafe { NSURL::URLWithString(UIApplicationOpenSettingsURLString) })
+                else {
+                    return;
+                };
+                unsafe {
+                    UIApplication::sharedApplication(marker)
+                        .openURL_options_completionHandler(&url, &NSDictionary::new(), None);
+                }
+                // Leaving for Settings means coming back to a fresh authorization status, which
+                // only the next open() can act on.
+                self.close(None);
+            }
+
+            /// The session can fail after it started — the camera is taken by another app, or the
+            /// hardware is interrupted. Without this the preview freezes and says nothing.
+            #[unsafe(method(sessionRuntimeError:))]
+            fn session_runtime_error(&self, _notification: &NSNotification) {
+                self.close(Some(Err(translate("mobile-qr-session-error"))));
             }
         }
 
@@ -112,17 +182,19 @@ mod platform {
     impl ScannerController {
         fn new(
             marker: MainThreadMarker,
-            session: Retained<AVCaptureSession>,
-            preview: Retained<AVCaptureVideoPreviewLayer>,
+            capture: Option<Capture>,
+            message: &str,
         ) -> Retained<Self> {
+            let denied = capture.is_none();
+
             let title = UILabel::initWithFrame(UILabel::alloc(marker), CGRect::ZERO);
-            title.setText(Some(&NSString::from_str(&translate("mobile-qr-title"))));
+            title.setText(Some(&NSString::from_str(message)));
             unsafe {
                 title.setTextColor(Some(&UIColor::whiteColor()));
                 title.setFont(Some(&UIFont::boldSystemFontOfSize(17.0)));
             }
             title.setTextAlignment(NSTextAlignment(1));
-            title.setNumberOfLines(2);
+            title.setNumberOfLines(if denied { 0 } else { 2 });
 
             let cancel = UIButton::buttonWithType(UIButtonType::System, marker);
             cancel.setTitle_forState(
@@ -133,11 +205,20 @@ mod platform {
             cancel.setBackgroundColor(Some(&UIColor::colorWithWhite_alpha(0.0, 0.45)));
             cancel.layer().setCornerRadius(16.0);
 
+            let settings = UIButton::buttonWithType(UIButtonType::System, marker);
+            settings.setTitle_forState(
+                Some(&NSString::from_str(&translate("mobile-qr-open-settings"))),
+                UIControlState::Normal,
+            );
+            settings.setTitleColor_forState(Some(&UIColor::blackColor()), UIControlState::Normal);
+            settings.setBackgroundColor(Some(&UIColor::whiteColor()));
+            settings.layer().setCornerRadius(16.0);
+
             let this = Self::alloc(marker).set_ivars(ScannerIvars {
-                session,
-                preview,
+                capture,
                 title,
                 cancel,
+                settings,
             });
             let this: Retained<Self> = unsafe { msg_send![super(this), init] };
             unsafe {
@@ -146,6 +227,19 @@ mod platform {
                     sel!(cancel),
                     UIControlEvents::TouchUpInside,
                 );
+                this.ivars().settings.addTarget_action_forControlEvents(
+                    Some(&this),
+                    sel!(openSettings),
+                    UIControlEvents::TouchUpInside,
+                );
+                if let Some(capture) = &this.ivars().capture {
+                    NSNotificationCenter::defaultCenter().addObserver_selector_name_object(
+                        &this,
+                        sel!(sessionRuntimeError:),
+                        Some(AVCaptureSessionRuntimeErrorNotification),
+                        Some(&capture.session),
+                    );
+                }
             }
             this
         }
@@ -154,8 +248,11 @@ mod platform {
             if !ACTIVE.replace(false) {
                 return;
             }
-            unsafe {
-                self.ivars().session.stopRunning();
+            if let Some(capture) = &self.ivars().capture {
+                unsafe {
+                    NSNotificationCenter::defaultCenter().removeObserver(self);
+                    capture.session.stopRunning();
+                }
             }
             if let Some(result) = result {
                 RESULTS
@@ -172,11 +269,69 @@ mod platform {
     }
 
     pub fn open() -> Result<(), String> {
-        if ACTIVE.get() {
+        if ACTIVE.get() || REQUESTING.get() {
             return Ok(());
         }
         let marker = MainThreadMarker::new()
             .ok_or_else(|| "QR scanner must be opened from the main thread.".to_string())?;
+        let media_type =
+            unsafe { AVMediaTypeVideo }.ok_or_else(|| translate("mobile-qr-camera-unavailable"))?;
+
+        // Nothing below asks the system for the camera, so without this the session builds and
+        // starts against a device that will never deliver frames — a black screen with no reason
+        // given. Reviewers deny permissions as a matter of course.
+        match unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) } {
+            AVAuthorizationStatus::Authorized => present(marker),
+            AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
+                present_denied(marker)
+            }
+            // NotDetermined, and anything a later iOS adds: ask, then act on the answer.
+            _ => {
+                REQUESTING.set(true);
+                let handler = RcBlock::new(move |granted: Bool| {
+                    // The completion runs on an arbitrary queue; every UIKit call below needs the
+                    // main one.
+                    DispatchQueue::main().exec_async(move || {
+                        REQUESTING.set(false);
+                        let Some(marker) = MainThreadMarker::new() else {
+                            return;
+                        };
+                        let outcome = if granted.as_bool() {
+                            present(marker)
+                        } else {
+                            present_denied(marker)
+                        };
+                        if let Err(message) = outcome {
+                            RESULTS
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .push_back(Err(message));
+                        }
+                    });
+                });
+                unsafe {
+                    AVCaptureDevice::requestAccessForMediaType_completionHandler(
+                        media_type, &handler,
+                    );
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The screen a refusal gets: what happened, how to undo it, and a way back to the manual link.
+    fn present_denied(marker: MainThreadMarker) -> Result<(), String> {
+        let root = ROOT_CONTROLLER
+            .with(|pointer| unsafe { Retained::retain(pointer.get()) })
+            .ok_or_else(|| translate("mobile-qr-unavailable"))?;
+        let controller = ScannerController::new(marker, None, &translate("mobile-qr-denied"));
+        controller.setModalPresentationStyle(UIModalPresentationStyle::FullScreen);
+        ACTIVE.set(true);
+        root.presentViewController_animated_completion(&controller, true, None);
+        Ok(())
+    }
+
+    fn present(marker: MainThreadMarker) -> Result<(), String> {
         let root = ROOT_CONTROLLER
             .with(|pointer| unsafe { Retained::retain(pointer.get()) })
             .ok_or_else(|| translate("mobile-qr-unavailable"))?;
@@ -214,7 +369,14 @@ mod platform {
                 preview.setVideoGravity(gravity);
             }
         }
-        let controller = ScannerController::new(marker, session.clone(), preview);
+        let controller = ScannerController::new(
+            marker,
+            Some(Capture {
+                session: session.clone(),
+                preview,
+            }),
+            &translate("mobile-qr-title"),
+        );
         unsafe {
             output.setMetadataObjectsDelegate_queue(
                 Some(ProtocolObject::from_ref(&*controller)),

@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Mac’ыгыз белән тоташу өзе�
 mobile-error-connection-closed = Mac’ыгыз тоташуны япты.
 mobile-error-address-invalid = Парлау адресы дөрес түгел.
 mobile-error-address-no-port = Парлау адресында порт юк.
+mobile-qr-denied = Vmux камераны куллана алмый. QR-кодны сканерлау өчен аны Settings’та кабызыгыз яки артка кайтып парлау сылтамасын куегыз.
+mobile-qr-open-settings = Settings’ны ачу
+mobile-qr-session-error = Камера туктады. Кабат карап карагыз яки парлау сылтамасын куегыз.

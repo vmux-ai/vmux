@@ -798,3 +798,6 @@ mobile-error-connection-dropped = თქვენს Mac-თან კავშ�
 mobile-error-connection-closed = თქვენმა Mac-მა კავშირი დახურა.
 mobile-error-address-invalid = ეს დაწყვილების მისამართი არასწორია.
 mobile-error-address-no-port = ამ დაწყვილების მისამართს პორტი არ აქვს.
+mobile-qr-denied = Vmux ვერ იყენებს კამერას. ჩართეთ ის პარამეტრებში QR კოდის დასასკანირებლად, ან დაბრუნდით უკან და ამის ნაცვლად ჩასვით დაწყვილების ბმული.
+mobile-qr-open-settings = პარამეტრების გახსნა
+mobile-qr-session-error = კამერა გაჩერდა. სცადეთ ხელახლა, ან ამის ნაცვლად ჩასვით დაწყვილების ბმული.

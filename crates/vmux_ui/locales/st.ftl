@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Kgokahano le Mac ya hao e kgaohile.
 mobile-error-connection-closed = Mac ya hao e kwetse kgokahano.
 mobile-error-address-invalid = Aterese eo ya ho kopanya ha e nepahala.
 mobile-error-address-no-port = Aterese eo ya ho kopanya ha e na port.
+mobile-qr-denied = Vmux e ke ke ya sebedisa khamera. E bulele ho Settings hore o skene khoutu ya QR, kapa o khutlele morao mme o momahanye sehokelo sa ho kopanya.
+mobile-qr-open-settings = Bula Settings
+mobile-qr-session-error = Khamera e emisitse. Leka hape, kapa o momahanye sehokelo sa ho kopanya.

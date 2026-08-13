@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Ìsopọ̀ sí Mac rẹ ti já.
 mobile-error-connection-closed = Mac rẹ ti pa ìsopọ̀ náà.
 mobile-error-address-invalid = Àdírẹ́sì ìsopọ̀ yẹn kò tọ́.
 mobile-error-address-no-port = Àdírẹ́sì ìsopọ̀ yẹn kò ní port.
+mobile-qr-denied = Vmux kò lè lo kámẹ́rà. Tan án ní Settings láti ṣàyẹ̀wò kóòdù QR, tàbí padà sẹ́yìn kí o sì lẹ̀ ọ̀nà ìsopọ̀ mọ́.
+mobile-qr-open-settings = Ṣí Settings
+mobile-qr-session-error = Kámẹ́rà dúró. Gbìyànjú lẹ́ẹ̀kansi, tàbí lẹ̀ ọ̀nà ìsopọ̀ mọ́.

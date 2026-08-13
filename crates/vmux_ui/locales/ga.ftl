@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Cailleadh an ceangal le do Mac.
 mobile-error-connection-closed = Dhún do Mac an ceangal.
 mobile-error-address-invalid = Tá an seoladh péireála sin neamhbhailí.
 mobile-error-address-no-port = Níl port sa seoladh péireála sin.
+mobile-qr-denied = Ní féidir le Vmux an ceamara a úsáid. Cuir ar siúl é i Socruithe chun an cód QR a scanadh, nó fill ar ais agus greamaigh an nasc péireála ina áit.
+mobile-qr-open-settings = Oscail Socruithe
+mobile-qr-session-error = Stop an ceamara. Bain triail eile as, nó greamaigh an nasc péireála ina áit.

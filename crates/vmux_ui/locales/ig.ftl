@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Njikọ na Mac gị adaala.
 mobile-error-connection-closed = Mac gị mechiri njikọ ahụ.
 mobile-error-address-invalid = Adreesị njikọta ahụ ezighi ezi.
 mobile-error-address-no-port = Adreesị njikọta ahụ enweghị port.
+mobile-qr-denied = Vmux enweghị ike iji igwefoto. Gbanye ya na Ntọala iji nyochaa koodu QR, ma ọ bụ laghachi azụ tinye njikọ njikọta kama.
+mobile-qr-open-settings = Mepee Ntọala
+mobile-qr-session-error = Igwefoto kwụsịrị. Nwaa ọzọ, ma ọ bụ tinye njikọ njikọta kama.

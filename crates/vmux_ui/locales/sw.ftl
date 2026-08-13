@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Muunganisho na Mac yako umekatika.
 mobile-error-connection-closed = Mac yako imefunga muunganisho.
 mobile-error-address-invalid = Anwani hiyo ya kuoanisha si sahihi.
 mobile-error-address-no-port = Anwani hiyo ya kuoanisha haina poti.
+mobile-qr-denied = Vmux haiwezi kutumia kamera. Iwashe katika Settings ili kuchanganua msimbo wa QR, au urudi nyuma na ubandike kiungo cha kuoanisha.
+mobile-qr-open-settings = Fungua Settings
+mobile-qr-session-error = Kamera imesimama. Jaribu tena, au ubandike kiungo cha kuoanisha.

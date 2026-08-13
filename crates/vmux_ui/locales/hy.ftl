@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Ձեր Mac-ի հետ կապը խզվեց:
 mobile-error-connection-closed = Ձեր Mac-ը փակեց կապը:
 mobile-error-address-invalid = Այդ զուգակցման հասցեն վավեր չէ:
 mobile-error-address-no-port = Այդ զուգակցման հասցեում port չկա:
+mobile-qr-denied = Vmux-ը չի կարող օգտագործել տեսախցիկը: Միացրեք այն Կարգավորումներում՝ QR կոդը սկանավորելու համար, կամ վերադարձեք և փոխարենը տեղադրեք զուգակցման հղումը:
+mobile-qr-open-settings = Բացել Կարգավորումները
+mobile-qr-session-error = Տեսախցիկը դադարեց: Փորձեք նորից կամ փոխարենը տեղադրեք զուգակցման հղումը:

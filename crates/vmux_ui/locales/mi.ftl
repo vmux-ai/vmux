@@ -798,3 +798,6 @@ mobile-error-connection-dropped = Kua motu te tūhonotanga ki tō Mac.
 mobile-error-connection-closed = Kua katia e tō Mac te tūhonotanga.
 mobile-error-address-invalid = He muhu te wāhitau tūhono.
 mobile-error-address-no-port = Kāore he tauranga i te wāhitau tūhono.
+mobile-qr-denied = Kāore e taea e Vmux te whakamahi i te kāmera. Whakahohea i roto i Settings kia taea ai te matawai i te QR code, hoki rānei ki muri ka whakapiri i te hono tūhono.
+mobile-qr-open-settings = Huakina Settings
+mobile-qr-session-error = Kua mutu te kāmera. Ngana anō, whakapirihia rānei te hono tūhono.
