@@ -235,9 +235,11 @@ impl QuicApi {
             .open_bi()
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
+        // The desktop does not read this — it admits on the token alone — so it names the pairing
+        // rather than the phone, which is the only identity either end shares.
         let hello = AuthenticatedHello {
             hello: ClientHello {
-                device_id: self.endpoint.device_id.clone(),
+                device_id: self.endpoint.desktop.clone(),
             },
             token: self.endpoint.token.clone(),
         };
