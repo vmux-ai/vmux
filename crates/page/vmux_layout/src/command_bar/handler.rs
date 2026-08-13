@@ -1288,11 +1288,14 @@ fn on_command_bar_action(
         .as_deref()
         .map(|locale| locale.0.clone())
         .unwrap_or_else(Locale::preferred);
-    match evt.action.as_str() {
-        "prompt" => {
-            let prompt = evt.value.trim();
-            let attachments = evt
-                .attachments
+    match evt {
+        CommandBarActionEvent::Prompt {
+            text,
+            target_url,
+            attachments: submitted,
+        } => {
+            let prompt = text.trim();
+            let attachments = submitted
                 .iter()
                 .filter(|attachment| !attachment.path.is_empty())
                 .map(|attachment| vmux_wire::protocol::AgentAttachment {
@@ -1305,7 +1308,7 @@ fn on_command_bar_action(
             if !prompt.is_empty() || !attachments.is_empty() {
                 let focused = queries.focused_stack();
                 if let Some(stack) = empty_stack.or(focused)
-                    && let Some(url) = resource_params.p2().prompt_url(evt.target_url.as_deref())
+                    && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
                         && crate::start::supports_inline_agent_transition(&url)
@@ -1333,21 +1336,19 @@ fn on_command_bar_action(
                 }
             }
         }
-        "open" => {
-            let expanded = if evt.value.starts_with('~') {
+        CommandBarActionEvent::Open { value, open } => {
+            let expanded = if value.starts_with('~') {
                 std::env::var("HOME")
                     .ok()
-                    .map(|h| {
-                        std::path::PathBuf::from(h).join(evt.value[1..].trim_start_matches('/'))
-                    })
-                    .unwrap_or_else(|| std::path::PathBuf::from(&evt.value))
-            } else if evt.value.starts_with('/') {
-                std::path::PathBuf::from(&evt.value)
+                    .map(|h| std::path::PathBuf::from(h).join(value[1..].trim_start_matches('/')))
+                    .unwrap_or_else(|| std::path::PathBuf::from(&value))
+            } else if value.starts_with('/') {
+                std::path::PathBuf::from(&value)
             } else {
                 std::env::var("HOME")
                     .ok()
-                    .map(|h| std::path::PathBuf::from(h).join(&evt.value))
-                    .unwrap_or_else(|| std::path::PathBuf::from(&evt.value))
+                    .map(|h| std::path::PathBuf::from(h).join(value))
+                    .unwrap_or_else(|| std::path::PathBuf::from(&value))
             };
             let is_path = expanded.exists();
 
@@ -1376,10 +1377,10 @@ fn on_command_bar_action(
                 }
             } else {
                 let url = normalize_url(
-                    &evt.value,
+                    value,
                     search_engine.map(|setting| setting.0).unwrap_or_default(),
                 );
-                let inline_transition = if matches!(evt.target, None | Some(OpenTarget::InPlace))
+                let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
                     && crate::start::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
@@ -1419,7 +1420,7 @@ fn on_command_bar_action(
                     new_stack_ctx.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
-                    let target = evt.target;
+                    let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
                     issued.write(vmux_command::CommandIssued {
@@ -1430,30 +1431,30 @@ fn on_command_bar_action(
                 }
             }
         }
-        "terminal" => {
-            let known_terminal = running_terminals.get(&evt.value).copied();
+        CommandBarActionEvent::Terminal { value } => {
+            let known_terminal = running_terminals.get(value).copied();
             if let Some(entity) = known_terminal {
                 focus_pane_entity(entity, &mut commands, &queries.child_of_q);
                 new_stack_ctx.stack = None;
                 new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
             } else {
-                if evt.value.starts_with(&terminal_page_url) {
-                    bevy::log::warn!("no terminal pane for {}; spawning new", evt.value);
+                if value.starts_with(&terminal_page_url) {
+                    bevy::log::warn!("no terminal pane for {}; spawning new", value);
                 }
-                let cwd = if evt.value.is_empty() || evt.value.contains("://") {
+                let cwd = if value.is_empty() || value.contains("://") {
                     None
                 } else {
-                    let expanded = if evt.value.starts_with("~/") {
+                    let expanded = if value.starts_with("~/") {
                         std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(&evt.value[2..]))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
-                    } else if evt.value.starts_with('/') {
-                        std::path::PathBuf::from(&evt.value)
+                            .map(|h| std::path::PathBuf::from(h).join(&value[2..]))
+                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
+                    } else if value.starts_with('/') {
+                        std::path::PathBuf::from(&value)
                     } else {
                         std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(&evt.value))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&evt.value))
+                            .map(|h| std::path::PathBuf::from(h).join(value))
+                            .unwrap_or_else(|_| std::path::PathBuf::from(&value))
                     };
                     Some(expanded)
                 };
@@ -1503,11 +1504,11 @@ fn on_command_bar_action(
                 }
             } // end reattach else
         }
-        "command" => {
+        CommandBarActionEvent::Command { id, open } => {
             let is_contributed = resource_params
                 .p2()
                 .commands()
-                .any(|command| command.id == evt.value);
+                .any(|command| &command.id == id);
             if is_contributed {
                 let pane = match empty_stack {
                     Some(_) => None,
@@ -1523,13 +1524,13 @@ fn on_command_bar_action(
                 }
                 if empty_stack.is_some() || pane.is_some() {
                     chosen_writer.write(crate::ContributedCommandChosen {
-                        id: evt.value.clone(),
+                        id: id.clone(),
                         stack: empty_stack,
                         pane,
                     });
                     custom_keyboard_restore = true;
                 }
-            } else if let Some(url) = resource_params.p2().page_url(&evt.value) {
+            } else if let Some(url) = resource_params.p2().page_url(id) {
                 if let Some(stack_e) = empty_stack {
                     writer_params.p1().write(PageOpenRequest {
                         target: PageOpenTarget::Stack(stack_e),
@@ -1540,7 +1541,7 @@ fn on_command_bar_action(
                     new_stack_ctx.previous_stack = None;
                     empty_stack = None;
                 } else {
-                    let target = evt.target;
+                    let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
                     issued.write(vmux_command::CommandIssued {
@@ -1550,7 +1551,7 @@ fn on_command_bar_action(
                     writer_params.p0().write(cmd);
                 }
                 custom_keyboard_restore = true;
-            } else if let Some(cmd) = match_command(&evt.value) {
+            } else if let Some(cmd) = match_command(id) {
                 issued.write(vmux_command::CommandIssued {
                     caller,
                     command: cmd.clone(),
@@ -1564,14 +1565,14 @@ fn on_command_bar_action(
                 new_stack_ctx.previous_stack = None;
             }
         }
-        "space" => {
+        CommandBarActionEvent::Space { id } => {
             custom_keyboard_restore = true;
-            if !evt.value.is_empty() {
+            if !id.is_empty() {
                 commands.trigger(BinReceive {
                     webview,
                     payload: SpaceCommandEvent {
                         command: "attach".to_string(),
-                        space_id: Some(evt.value.clone()),
+                        space_id: Some(id.clone()),
                         name: None,
                     },
                 });
@@ -1582,19 +1583,14 @@ fn on_command_bar_action(
                 new_stack_ctx.previous_stack = None;
             }
         }
-        "switch_tab" => {
+        CommandBarActionEvent::SwitchTab { pane, index } => {
             // Despawn empty tab if in new-tab mode
             if let Some(stack_e) = empty_stack {
                 commands.entity(stack_e).despawn();
                 new_stack_ctx.stack = None;
                 new_stack_ctx.previous_stack = None;
             }
-            if let Some((pane_bits, tab_idx)) = evt.value.split_once(':')
-                && let (Ok(pane_id), Ok(tab_index)) =
-                    (pane_bits.parse::<u64>(), tab_idx.parse::<usize>())
-                && let Some(target_pane) =
-                    queries.leaf_panes.iter().find(|e| e.to_bits() == pane_id)
-            {
+            if let Some(target_pane) = queries.leaf_panes.iter().find(|e| e.to_bits() == *pane) {
                 let target_stack = {
                     let stack_q = stack_params.p0();
                     queries
@@ -1602,10 +1598,7 @@ fn on_command_bar_action(
                         .get(target_pane)
                         .ok()
                         .and_then(|children| {
-                            children
-                                .iter()
-                                .filter(|&e| stack_q.contains(e))
-                                .nth(tab_index)
+                            children.iter().filter(|&e| stack_q.contains(e)).nth(*index)
                         })
                 };
                 // Activate the whole chain (stack -> pane -> tab -> space), not just the
@@ -1618,8 +1611,7 @@ fn on_command_bar_action(
                 }
             }
         }
-        _ => {
-            // "dismiss" and unknown actions
+        CommandBarActionEvent::Dismiss => {
             if let Some(stack_e) = empty_stack {
                 let stack_q = stack_params.p0();
                 let closed_tab = close_tab_if_only_pending_stack(
@@ -1829,13 +1821,7 @@ fn reveal_command_bar(
             commands.entity(entity).remove::<PendingCommandBarReveal>();
             commands.trigger(BinReceive::<CommandBarActionEvent> {
                 webview: entity,
-                payload: CommandBarActionEvent {
-                    action: "dismiss".to_string(),
-                    value: String::new(),
-                    target: None,
-                    target_url: None,
-                    attachments: Vec::new(),
-                },
+                payload: CommandBarActionEvent::Dismiss,
             });
             continue;
         }
@@ -2876,13 +2862,7 @@ mod tests {
         app.world_mut()
             .trigger(BinReceive::<CommandBarActionEvent> {
                 webview: modal,
-                payload: CommandBarActionEvent {
-                    action: "dismiss".to_string(),
-                    value: String::new(),
-                    target: None,
-                    target_url: None,
-                    attachments: Vec::new(),
-                },
+                payload: CommandBarActionEvent::Dismiss,
             });
         app.world_mut().flush();
 

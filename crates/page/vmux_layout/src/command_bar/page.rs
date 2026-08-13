@@ -3,13 +3,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::command_bar::palette::{CommandPalette, PaletteVariant, emit_action};
+use crate::command_bar::palette::{CommandPalette, PaletteVariant};
 use crate::command_bar::size::CommandBarSizeEmissionState;
 use crate::command_bar::style::{command_bar_root_class, command_bar_shell_class};
 use dioxus::prelude::*;
 use vmux_command::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarOpenEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, OpenId,
+    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarOpenEvent, CommandBarReadyEvent,
+    CommandBarRenderedEvent, CommandBarSizeEvent, OpenId,
 };
 use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::hooks::{send, use_listener, use_theme};
@@ -128,7 +128,7 @@ fn dismiss_command_bar(is_open: Signal<bool>) {
     if !is_open() {
         return;
     }
-    emit_action("dismiss", "");
+    let _ = send(&CommandBarActionEvent::Dismiss);
 }
 
 /// Dismiss the command bar when a pointer goes down anywhere outside its shell.

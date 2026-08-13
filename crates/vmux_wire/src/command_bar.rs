@@ -319,13 +319,82 @@ pub struct CommandBarCommandEntry {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct CommandBarActionEvent {
-    pub action: String,
-    pub value: String,
-    pub target: Option<crate::open_target::OpenTarget>,
-    /// Which prompt target the user picked, when they picked one explicitly.
-    pub target_url: Option<String>,
-    pub attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
+/// What the user chose in the command bar.
+///
+/// One variant per kind of row, carrying only what that kind means. This was five fields and a
+/// string tag, where `attachments` and `target_url` meant something to prompts alone and nothing
+/// checked that the sender and the host agreed on the tag.
+pub enum CommandBarActionEvent {
+    /// Send a prompt to a page that accepts one.
+    ///
+    /// Carries no [`OpenTarget`](crate::open_target::OpenTarget): a prompt goes to the stack the
+    /// command bar opened or the focused one, and never to a target the user picked. The struct
+    /// this replaced carried the field for every action, so the palette filled one in here and the
+    /// host had always ignored it.
+    Prompt {
+        text: String,
+        /// The prompt target the user picked, when they picked one explicitly.
+        target_url: Option<String>,
+        attachments: Vec<crate::prompt_media::ChatSubmitAttachment>,
+    },
+    /// Open a url, a path on disk, or a search for what was typed.
+    Open {
+        value: String,
+        open: Option<crate::open_target::OpenTarget>,
+    },
+    /// Go to the terminal already running this row, or start one.
+    ///
+    /// The value is either a terminal page url or a directory to start in. Which one it is is
+    /// `vmux_terminal`'s to answer, through `CommandBarTerminalsSnapshot::running`.
+    Terminal { value: String },
+    /// Run a command, claim a contributed row, or open a page named by id.
+    Command {
+        id: String,
+        open: Option<crate::open_target::OpenTarget>,
+    },
+    /// Attach a space.
+    Space { id: String },
+    /// Focus a tab already open in a pane.
+    ///
+    /// Typed rather than a `"{pane}:{index}"` string, so a malformed pair cannot reach the host.
+    SwitchTab { pane: u64, index: usize },
+    /// Close the command bar without doing anything.
+    Dismiss,
+}
+
+impl CommandBarActionEvent {
+    /// Open what the user typed or picked, in the target they asked for.
+    pub fn open(value: &str, open: Option<crate::open_target::OpenTarget>) -> Self {
+        Self::Open {
+            value: value.to_string(),
+            open,
+        }
+    }
+
+    /// Send a prompt, with whatever the composer had attached.
+    ///
+    /// An empty `target_url` means the user picked no target, which is not the same as picking one
+    /// that happens to be blank — the host falls back to the preferred page only for `None`.
+    pub fn prompt(
+        text: &str,
+        target_url: &str,
+        attachments: &[crate::prompt_media::ChatAttachment],
+    ) -> Self {
+        let mut submitted = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            submitted.push(crate::prompt_media::ChatSubmitAttachment {
+                path: attachment.path.clone(),
+                name: attachment.name.clone(),
+                mime_type: attachment.mime_type.clone(),
+                size: attachment.size,
+            });
+        }
+        Self::Prompt {
+            text: text.to_string(),
+            target_url: (!target_url.is_empty()).then(|| target_url.to_string()),
+            attachments: submitted,
+        }
+    }
 }
 
 #[derive(

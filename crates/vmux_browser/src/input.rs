@@ -256,13 +256,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
         ) {
             commands.trigger(BinReceive::<CommandBarActionEvent> {
                 webview: modal_e,
-                payload: CommandBarActionEvent {
-                    action: "dismiss".to_string(),
-                    value: String::new(),
-                    target: None,
-                    target_url: None,
-                    attachments: Vec::new(),
-                },
+                payload: CommandBarActionEvent::Dismiss,
             });
             break;
         }
@@ -281,13 +275,7 @@ fn dismiss_command_bar_from_native_monitor(
     };
     commands.trigger(BinReceive::<CommandBarActionEvent> {
         webview: modal_e,
-        payload: CommandBarActionEvent {
-            action: "dismiss".to_string(),
-            value: String::new(),
-            target: None,
-            target_url: None,
-            attachments: Vec::new(),
-        },
+        payload: CommandBarActionEvent::Dismiss,
     });
 }
 
