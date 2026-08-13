@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 
 mod credentials;
+mod demo;
 mod native_transition;
 mod page_host;
 mod qr_scanner;
@@ -699,14 +700,17 @@ fn AppBody() -> Element {
     native_transition::install(&dioxus::mobile::window());
     qr_scanner::install(&dioxus::mobile::window());
     let mut auth = use_signal(|| AuthState::Loading);
+    // Kept out of AuthState so the pairing invariants stay about credentials only. Demo mode is a
+    // view over canned data, not a third kind of pairing.
+    let mut demo = use_signal(|| false);
     let mut pair_url = use_signal(String::new);
     let mut error = use_signal(String::new);
     let mut api = use_signal(|| None::<Api>);
     let mut sessions = use_signal(Vec::<RemoteSession>::new);
     let mut agents = use_signal(Vec::<RemoteAgent>::new);
     let selected_agent = use_signal(|| Option::<String>::None);
-    let current = use_signal(|| None::<RemoteSession>);
-    let room = use_signal(MobileRoomProjection::default);
+    let mut current = use_signal(|| None::<RemoteSession>);
+    let mut room = use_signal(MobileRoomProjection::default);
     let live_delta = use_signal(String::new);
     let status = use_signal(|| RemoteStatus::Idle);
     let mut approval = use_signal(|| None::<RemoteApproval>);
@@ -987,9 +991,10 @@ fn AppBody() -> Element {
     if current().is_none() {
         return rsx! {
             MobileStartPage {
-                paired: auth() == AuthState::Paired,
+                paired: demo() || auth() == AuthState::Paired,
+                demo: demo(),
                 reachable: reachable(),
-                sessions: sessions(),
+                sessions: if demo() { demo::sessions() } else { sessions() },
                 agents: agents(),
                 draft: new_chat_draft(),
                 error: new_chat_error(),
@@ -1029,6 +1034,10 @@ fn AppBody() -> Element {
                     Some(url),
                 ),
                 on_open: move |session| {
+                    if demo() {
+                        open_demo_session(session, current, room, status);
+                        return;
+                    }
                     let Some(client) = api() else { return };
                     open_session(
                         client,
@@ -1053,6 +1062,12 @@ fn AppBody() -> Element {
                     }
                 },
                 on_disconnect: move |_| {
+                    if demo() {
+                        demo.set(false);
+                        current.set(None);
+                        room.set(MobileRoomProjection::default());
+                        return;
+                    }
                     credentials::StoredCredentials::clear();
                     stream_generation.set(stream_generation().wrapping_add(1));
                     api.set(None);
@@ -1060,6 +1075,10 @@ fn AppBody() -> Element {
                     auth.set(AuthState::Unpaired);
                 },
                 on_open_team: move |_| team_open.set(true),
+                on_demo: move |_| {
+                    error.set(String::new());
+                    demo.set(true);
+                },
             }
         };
     }
@@ -1486,6 +1505,8 @@ fn AppBody() -> Element {
 #[derive(Props, Clone, PartialEq)]
 struct MobileStartPageProps {
     paired: bool,
+    /// Showing canned data, with no Mac behind it.
+    demo: bool,
     reachable: bool,
     sessions: Vec<RemoteSession>,
     agents: Vec<RemoteAgent>,
@@ -1504,6 +1525,7 @@ struct MobileStartPageProps {
     on_scan: EventHandler<()>,
     on_disconnect: EventHandler<()>,
     on_open_team: EventHandler<()>,
+    on_demo: EventHandler<()>,
 }
 
 #[component]
@@ -1523,20 +1545,24 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                 span { class: "text-sm font-semibold tracking-tight text-foreground", "Vmux" }
                 span { class: if props.paired { "ml-auto flex items-center gap-1.5 rounded-full border border-success/20 bg-success/[0.08] px-2.5 py-1 text-[10px] font-medium text-success" } else { "ml-auto flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-[10px] font-medium text-muted-foreground" },
                     span { class: if props.paired { "h-1.5 w-1.5 rounded-full bg-success" } else { "h-1.5 w-1.5 rounded-full bg-muted-foreground" } }
-                    {if props.reachable { translate("mobile-status-connected") } else if props.paired { translate("mobile-status-reaching") } else { translate("mobile-status-disconnected") }}
+                    {if props.demo { translate("mobile-status-demo") } else if props.reachable { translate("mobile-status-connected") } else if props.paired { translate("mobile-status-reaching") } else { translate("mobile-status-disconnected") }}
                 }
-                if props.paired {
+                // No Team in demo mode: page_host::install only runs once an Api exists, so the
+                // page would be dead.
+                if props.paired && !props.demo {
                     button {
                         class: "ml-2 rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_open_team.call(()),
                         {translate("mobile-start-team")}
                     }
+                }
+                if props.paired {
                     button {
                         class: "rounded-lg px-2 py-1 text-xs text-muted-foreground active:bg-accent",
                         r#type: "button",
                         onclick: move |_| props.on_disconnect.call(()),
-                        {translate("mobile-pair-disconnect")}
+                        {if props.demo { translate("mobile-demo-exit") } else { translate("mobile-pair-disconnect") }}
                     }
                 }
             }
@@ -1628,6 +1654,7 @@ fn MobileStartPage(props: MobileStartPageProps) -> Element {
                             on_value: props.on_pair_value,
                             on_pair: props.on_pair,
                             on_scan: props.on_scan,
+                            on_demo: props.on_demo,
                         }
                     }
                 }
@@ -1657,6 +1684,7 @@ struct PairCardProps {
     on_value: EventHandler<String>,
     on_pair: EventHandler<()>,
     on_scan: EventHandler<()>,
+    on_demo: EventHandler<()>,
 }
 
 #[component]
@@ -1697,6 +1725,12 @@ fn PairCard(props: PairCardProps) -> Element {
                 r#type: "button",
                 onclick: move |_| show_link.set(!show_link()),
                 {if show_link() { translate("mobile-pair-hide-link") } else { translate("mobile-pair-show-link") }}
+            }
+            button {
+                class: "mx-auto mt-1 block rounded-lg px-3 py-2 text-xs font-medium text-muted-foreground active:bg-accent active:text-accent-foreground",
+                r#type: "button",
+                onclick: move |_| props.on_demo.call(()),
+                {translate("mobile-demo-open")}
             }
             if show_link() {
                 form {
@@ -1853,6 +1887,22 @@ fn chat_block(block: AssistantBlock) -> ChatBlock {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Open the canned session.
+///
+/// Same visible steps as `open_session` minus the subscribe loop: there is no connection to
+/// subscribe to, and the transcript is complete the moment it is set.
+fn open_demo_session(
+    session: RemoteSession,
+    mut current: Signal<Option<RemoteSession>>,
+    mut room: Signal<MobileRoomProjection>,
+    mut status: Signal<RemoteStatus>,
+) {
+    native_transition::NativeSheet::open();
+    status.set(session.status.clone());
+    current.set(Some(session));
+    room.set(demo::room());
+}
+
 fn open_session(
     api: Api,
     session: RemoteSession,
