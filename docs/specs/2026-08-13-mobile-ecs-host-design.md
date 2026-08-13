@@ -120,6 +120,14 @@ So adding a capability is adding a plugin, not editing a central `match`, and `U
 
 A device capability owns its slice whole, per the by-feature split rule: `CameraPlugin` holds permission state, the `AVCaptureSession` and the scan result together. Because the World is on the main thread, its systems call UIKit directly — the `dispatch2` hop `qr_scanner.rs` needs today goes away along with `RESULTS`, `ACTIVE` and `REQUESTING`.
 
+### A registration outlives the scope that made it
+
+Today `listen` spawns a Dioxus task bound to the subscribing component, so the subscription dies with the page and nothing accumulates. A registration held in the World has no such owner, which raises two separate questions with two different answers.
+
+**Delivery into a dead scope is already prevented, and not by anything mobile.** `use_listener` wraps the callback in a `GuardedListener` and deactivates it from `use_drop` (`hooks/use_listener.rs:21-23`); `GuardedListener::call` returns `false` once deactivated (`listener_guard.rs:62`). The desktop relies on this too. Nothing here needs to be invented.
+
+**Reclamation does have to be added.** A registration the World keeps forever is a leak even when it is inert, so `PostUpdate` drops any whose `call` returned `false`. That returned bool is the prune signal and there is no need for a subscription token on top of it — which is fortunate, because `PageHost::listen` returns `Result<(), EventListenerError>` and cannot hand one back without changing the CEF side too.
+
 ## What does not move
 
 Sessions execute on the Mac or a cloud host. The phone's World owns device state and a projection; it never owns a PTY, an ACP process or a provider stream.
@@ -133,11 +141,19 @@ Each stage ships on its own.
 1. **Delete the duplicate projection.** Depend on `vmux_service` from `vmux_mobile`, call `group_turns_tail`, delete `main.rs:1743-1861`. No ECS. Landed with this spec.
 2. **Give the phone a `World`.** `MinimalPlugins`, the wake-driven pump, nothing in it. Answer the `Reflect`-on-iOS question first. Record idle CPU and battery — the baseline every later stage is judged against.
 3. **Move the QUIC client in.** `Api` becomes a resource, the subscribe loop at `main.rs:1888` becomes a system draining into components, and `AppBody`'s session signals become reads. This stage owns the connection and the projection across a suspend, so it carries the resume criteria below and cannot land without them.
-4. **Make `PageHost` real.** `send` queues, `listen` registers, `PostUpdate` pushes. `TEAM_EVENT` stops polling and `POLL_INTERVAL_MS` goes.
+4. **Make `PageHost` real.** `send` queues, `listen` registers, `PostUpdate` pushes and prunes. Moving the roster poll into a system is this stage; deleting it is not — see below.
 5. **Camera as a capability.** Port the QR scanner onto `CameraPlugin`, preserving VMX-132's denied-permission behaviour.
 6. **Retire the rest of `AppBody`.** Composer, media, pairing.
 
 Stages 1 and 2 are independent of each other. Stage 3 is where behaviour can actually regress, and is the one to land alone.
+
+### `TEAM_EVENT` cannot stop polling in stage 4
+
+The roster is the one event id the phone serves today, and it serves it by re-reading `api.team()` every three seconds and diffing the snapshot (`page_host.rs:44-71`). Deleting `POLL_INTERVAL_MS` needs something to push instead, and there is nothing: `StreamKind` is `Control` and `SessionEvents` only (`vmux_remote/src/quic.rs:67-72`), so every push route in the protocol is scoped to one session.
+
+VMX-140 moved the roster into the service, so the state to push exists. What is missing is a stream to push it down — a `StreamKind::WorkspaceEvents`, opened client-side like `subscribe(sid)` because the relay only routes streams the client opened, carrying the roster and anything else that is not per-session.
+
+Until that lands, stage 4 moves the poll into a system and stops there. That is still worth doing — one owner instead of one task per subscriber, and change detection in one place — but a stage that deletes the poll without replacing it makes `listen(TEAM_EVENT, …)` go quiet, which is the failure this note exists to prevent.
 
 ### Suspend and resume, which stage 3 must preserve
 
