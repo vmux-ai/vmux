@@ -38,7 +38,7 @@ fn on_webview_ready_send_theme(
 ) {
     let entity = trigger.event().webview;
     webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
-    if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+    if browsers.can_emit_to(&entity) {
         let payload = theme_event(&settings);
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
     }
@@ -90,7 +90,7 @@ pub(crate) fn sync_appearance_to_cef(
     let Some(browsers) = browsers else { return };
     let payload = theme_event(&settings);
     for entity in &ready {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));
         }
     }

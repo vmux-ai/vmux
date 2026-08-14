@@ -194,7 +194,7 @@ fn emit_knowledge_tree(
     if state.revision == *last_revision && !page_ready.is_changed() {
         return;
     }
-    if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+    if !browsers.can_emit_to(&entity) {
         return;
     }
     commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -212,7 +212,7 @@ fn on_knowledge_search(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+    if !browsers.can_emit_to(&webview) {
         return;
     }
     let query = trigger.event().payload.query.trim().to_string();
@@ -240,7 +240,7 @@ fn on_knowledge_create(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+    if !browsers.can_emit_to(&webview) {
         return;
     }
     let request = &trigger.event().payload;

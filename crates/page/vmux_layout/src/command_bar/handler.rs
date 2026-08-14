@@ -1869,7 +1869,7 @@ fn retry_pending_command_bar_open(
             last_emit.remove(&entity);
             continue;
         }
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         if last_emit
@@ -1916,7 +1916,7 @@ fn on_path_complete_request(
     let Ok(modal_e) = modal_q.single() else {
         return;
     };
-    if !browsers.has_browser(modal_e) || !browsers.host_emit_ready(&modal_e) {
+    if !browsers.can_emit_to(&modal_e) {
         return;
     }
 

@@ -8,7 +8,7 @@ use crate::browser_process::client_handler::{
 use crate::prelude::*;
 use async_channel::Sender;
 use bevy::input::ButtonState;
-use bevy::platform::collections::HashMap;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy_remote::BrpMessage;
 #[cfg(target_os = "macos")]
@@ -269,6 +269,9 @@ pub struct Browsers {
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
     color_scheme: CefColorMode,
+    /// Webviews whose page is served by some other engine, and which therefore have no entry in
+    /// [`Self::browsers`] yet are perfectly able to receive a host event.
+    externally_hosted: HashSet<Entity>,
 }
 
 impl Default for Browsers {
@@ -283,6 +286,7 @@ impl Default for Browsers {
             accel_receiver,
             shared_disk_context: None,
             color_scheme: CefColorMode::default(),
+            externally_hosted: HashSet::default(),
         }
     }
 }
@@ -590,6 +594,25 @@ impl Browsers {
         self.browsers
             .get(webview)
             .is_some_and(|b| b.client.main_frame().is_some())
+    }
+
+    /// `true` when a host event aimed at `webview` will reach a page.
+    ///
+    /// Callers used to spell this `has_browser(e) && host_emit_ready(&e)`, which quietly assumed
+    /// CEF was the only thing that could be showing a page. It is not: a webview handed to another
+    /// engine has no [`WebviewBrowser`] and still receives, so the question has to be asked by
+    /// name rather than reconstructed from CEF's bookkeeping at every call site.
+    #[inline]
+    pub fn can_emit_to(&self, webview: &Entity) -> bool {
+        self.externally_hosted.contains(webview) || self.host_emit_ready(webview)
+    }
+
+    /// Declare that `webview`'s page is served by another engine.
+    ///
+    /// Only affects [`Self::can_emit_to`]. Everything else CEF owns stays false for this entity,
+    /// so input forwarding, sizing and teardown correctly do nothing.
+    pub fn set_externally_hosted(&mut self, webview: Entity) {
+        self.externally_hosted.insert(webview);
     }
 
     /// `WasHidden` for a windowed browser is driven by its native view, not by OSR bookkeeping.

@@ -216,8 +216,11 @@ impl Plugin for BinIpcRawEventPlugin {
     }
 }
 
+/// Public because CEF's client handler is no longer the only producer: the wry-hosted layout
+/// decodes the same envelope out of a string IPC body and pushes onto this channel, so that both
+/// engines land in one `BinReceive` path rather than each growing a routing layer.
 #[derive(Resource)]
-pub(crate) struct BinIpcEventRawSender(pub Sender<BinIpcEventRaw>);
+pub struct BinIpcEventRawSender(pub Sender<BinIpcEventRaw>);
 
 #[derive(Resource)]
 pub(crate) struct BinIpcEventRawReceiver(pub Receiver<BinIpcEventRaw>);

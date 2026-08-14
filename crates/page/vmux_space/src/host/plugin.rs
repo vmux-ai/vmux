@@ -268,7 +268,7 @@ fn broadcast_spaces_to_views(
     let body = ron::ser::to_string(&payload).unwrap_or_default();
     let body_changed = body != *last_body;
     for entity in pending_spaces.iter().chain(pending_cef.iter()) {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -280,7 +280,7 @@ fn broadcast_spaces_to_views(
     }
     if body_changed {
         for entity in sent_spaces.iter().chain(sent_cef.iter()) {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(

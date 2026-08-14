@@ -360,7 +360,7 @@ fn sync_live_start_pages(
             if !url.starts_with(START_PAGE_URL) {
                 return None;
             }
-            if !browsers.has_browser(e) || !browsers.host_emit_ready(&e) {
+            if !browsers.can_emit_to(&e) {
                 return None;
             }
             let focus_requested = should_focus_start_sync(
