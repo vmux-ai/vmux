@@ -141,6 +141,10 @@ version = "0.3"
 default-features = false
 features = [
     "std",
+    "NSApplication",
+    "NSButton",
+    "NSControl",
+    "NSPanel",
     "NSView",
     "NSResponder",
     "NSGraphics",
