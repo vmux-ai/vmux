@@ -532,7 +532,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_core_pipeline",
         "bevy_sprite",
         "bevy_ui",
-        "bevy_ui_render",
         "bevy_image",
         "bevy_scene",
         "bevy_picking",

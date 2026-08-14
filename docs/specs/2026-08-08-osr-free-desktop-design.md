@@ -92,6 +92,26 @@ it positions native surfaces.
 header becomes a strip at the top and the side sheet a strip at the left. Because the rectangles do
 not overlap, AppKit hit-testing resolves them with no help from us.
 
+> **Corrected 2026-08-14. The paragraph above prescribes more work than the goal needs.** Disjoint
+> rectangles are one way to let AppKit resolve hit-testing, not the only one. A *single* full-window
+> layout view placed **behind** the panes resolves it by the same rule — the topmost view under the
+> cursor gets the event, so panes win inside their rects and the layout wins in the gaps. No strips,
+> no second surface, no page split, and `page.rs` keeps the flexbox it already has.
+>
+> It sits above the panes today only because it is transparent glass, which is what forced the
+> `CALayer` overlay, the full-window canvas, and the `pointer-events-none` / `pointer-events-auto`
+> shim that re-enables the mouse on exactly two rectangles. Once glass is dropped and the view is
+> opaque it can go to the back, and that shim goes with it.
+>
+> What blocks it is popovers, not geometry. `page.rs` renders `LayoutContextMenu`,
+> `ContextMenuContent` and `SideSheetContextMenuContent`, and the side sheet carries
+> `overflow-visible` precisely so menus escape their own bounds and spill over the panes. Behind the
+> panes, every one of those renders behind them.
+>
+> So *Popovers to child windows* is not step 4 — it is the step straight after the command bar, and
+> *Header and side sheet to sibling views* disappears entirely. Corrected order in
+> [VMX-167](https://linear.app/vmux/issue/VMX-167/unify-input-on-the-key-claim-model).
+
 **Floating surfaces are child `NSWindow`s** — the command bar, context menus, dropdowns, tooltips. A
 child window may be transparent, carries a real shadow, and can extend past the parent window's
 bounds. That is what a menu needs and what an opaque sibling view cannot provide, and it is how

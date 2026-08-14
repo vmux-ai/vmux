@@ -521,6 +521,47 @@ pub fn is_linked_worktree(dir: &Path) -> bool {
     git_dir != common_dir
 }
 
+/// A worktree that has been checked to belong to the expected repository and branch.
+pub struct ValidatedLinkedWorkspace {
+    pub cwd: PathBuf,
+    pub workspace_cwd: PathBuf,
+    pub checkout: CheckoutInfo,
+}
+
+/// Check that `cwd` is a linked worktree of the same repository as `workspace_cwd`, sitting on
+/// `branch`.
+pub fn validate_linked_workspace(
+    cwd: &Path,
+    workspace_cwd: &Path,
+    branch: &str,
+) -> Result<ValidatedLinkedWorkspace, String> {
+    let cwd = cwd
+        .canonicalize()
+        .map_err(|error| format!("invalid worktree directory: {error}"))?;
+    let workspace_cwd = workspace_cwd
+        .canonicalize()
+        .map_err(|error| format!("invalid project directory: {error}"))?;
+    let checkout = checkout_info(&cwd).map_err(|error| error.0)?;
+    let workspace = checkout_info(&workspace_cwd).map_err(|error| error.0)?;
+    if checkout.common_dir != workspace.common_dir {
+        return Err("worktree belongs to a different repository".to_string());
+    }
+    if !is_linked_worktree(&cwd) {
+        return Err("worktree directory is not a linked worktree".to_string());
+    }
+    let actual_branch = head_ref(&checkout.root).map_err(|error| error.0)?;
+    if actual_branch != branch {
+        return Err(format!(
+            "worktree is on branch {actual_branch}, expected {branch}"
+        ));
+    }
+    Ok(ValidatedLinkedWorkspace {
+        cwd,
+        workspace_cwd,
+        checkout,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

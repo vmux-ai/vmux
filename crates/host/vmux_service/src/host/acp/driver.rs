@@ -226,7 +226,7 @@ impl AcpShared {
     }
 
     fn publish_workspace_change(&self, name: &str, branch: &str, cwd: &str, workspace_cwd: &str) {
-        let Ok(validated) = vmux_layout::worktree::validate_linked_workspace(
+        let Ok(validated) = vmux_git::worktree::validate_linked_workspace(
             Path::new(cwd),
             Path::new(workspace_cwd),
             branch,

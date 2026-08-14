@@ -277,8 +277,11 @@ jobs:
           fi
           echo "control ok: vmux_desktop links bevy_cef"
 
-          # vmux_service joins this list once VMX-142 lands. It reaches bevy_cef today through
-          # vmux_core directly and through vmux_layout -> vmux_command.
+          # vmux_service still reaches bevy_cef through vmux_core and vmux_git, both of which it
+          # depends on for other reasons and both of which pull the page IPC transport
+          # (BinEventEmitterPlugin, BinReceive) the server never uses. Cutting that needs a
+          # feature split in those two crates; the client-only assertion below is the half of
+          # VMX-142 that does not.
           for pkg in vmux_session; do
             if links_cef "$pkg"; then
               echo "::error::$pkg links bevy_cef:"
@@ -286,6 +289,65 @@ jobs:
               exit 1
             fi
             echo "ok: $pkg does not link bevy_cef"
+          done
+
+      # A server has no business linking the UI component library, the tiling tree, or a page.
+      # Server versus client is a crate distinction rather than a cfg one: `cfg(host)` is true in
+      # both processes and enforces nothing, whereas a crate edge cannot come back without a
+      # manifest change this job can see.
+      - name: The server links no client-only crate
+        run: |
+          set -euo pipefail
+
+          # Pinned to the host target on purpose. vmux_service also compiles as a page for
+          # wasm and iOS, and that half depends on vmux_ui legitimately; an untargeted query
+          # sees every cfg section at once and reports it. The claim is about the server.
+          #
+          # `cargo tree --target` exits 0 whether or not it found anything and prints "nothing
+          # to print" to stderr, so unlike the untargeted query above, stdout is the only signal.
+          #
+          # Which makes discarding stderr a trap: a query that fails outright — a stale lockfile
+          # under --locked is the easy way in — also produces empty stdout, and an assertion
+          # reading "empty" as "clean" passes precisely when it has stopped working. Status and
+          # stdout are separate answers to separate questions, so keep them apart.
+          # Three outcomes, not two, and only the third is a broken query:
+          #   exit 101 + "did not match any packages"  crate is nowhere in the graph — clean
+          #   exit 0   + empty stdout                  crate resolves but nothing reaches it — clean
+          #   exit 0   + stdout                        linked
+          # Anything else — a stale lockfile under --locked is the easy way in — means the query
+          # itself failed, and that must fail the job rather than read as clean.
+          out=$(mktemp)
+          err=$(mktemp)
+
+          query() {
+            local status
+            set +e
+            cargo tree --locked --target x86_64-unknown-linux-gnu -p "$1" -i "$2" >"$out" 2>"$err"
+            status=$?
+            set -e
+            if [ "$status" -ne 0 ] && ! grep -q 'did not match any packages' "$err"; then
+              echo "::error::cargo tree failed for $1 -i $2, so this job proved nothing:"
+              cat "$err" >&2
+              exit 1
+            fi
+            [ "$status" -eq 0 ] || : >"$out"
+          }
+
+          query vmux_desktop vmux_ui
+          if [ ! -s "$out" ]; then
+            echo "::error::positive control failed: vmux_ui not found in vmux_desktop, so this job is asserting nothing"
+            exit 1
+          fi
+          echo "control ok: vmux_desktop links vmux_ui"
+
+          for pkg in vmux_ui vmux_layout vmux_editor vmux_terminal vmux_browser; do
+            query vmux_service "$pkg"
+            if [ -s "$out" ]; then
+              echo "::error::vmux_service links client-only crate $pkg:"
+              cat "$out"
+              exit 1
+            fi
+            echo "ok: vmux_service does not link $pkg"
           done
 
       # The graph is not the build. Feature unification across a workspace invocation can supply
