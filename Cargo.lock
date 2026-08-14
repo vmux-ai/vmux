@@ -11562,7 +11562,7 @@ dependencies = [
  "uuid",
  "vmux_client",
  "vmux_core",
- "vmux_layout",
+ "vmux_git",
  "vmux_remote",
  "vmux_ui",
  "vmux_wire",

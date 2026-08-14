@@ -262,8 +262,8 @@ fn apply_acp_agent_info(
 
 fn validate_acp_workspace(
     event: &vmux_service::agent_events::PageAgentWorkspaceChanged,
-) -> Result<vmux_layout::worktree::ValidatedLinkedWorkspace, String> {
-    vmux_layout::worktree::validate_linked_workspace(
+) -> Result<vmux_git::worktree::ValidatedLinkedWorkspace, String> {
+    vmux_git::worktree::validate_linked_workspace(
         std::path::Path::new(&event.cwd),
         std::path::Path::new(&event.workspace_cwd),
         &event.branch,

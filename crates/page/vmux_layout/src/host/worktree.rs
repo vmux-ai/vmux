@@ -214,44 +214,6 @@ fn canonical_execution_dir(checkout_root: &Path, relative_dir: &Path) -> Result<
     Ok(execution_dir)
 }
 
-pub struct ValidatedLinkedWorkspace {
-    pub cwd: PathBuf,
-    pub workspace_cwd: PathBuf,
-    pub checkout: CheckoutInfo,
-}
-
-pub fn validate_linked_workspace(
-    cwd: &Path,
-    workspace_cwd: &Path,
-    branch: &str,
-) -> Result<ValidatedLinkedWorkspace, String> {
-    let cwd = cwd
-        .canonicalize()
-        .map_err(|error| format!("invalid worktree directory: {error}"))?;
-    let workspace_cwd = workspace_cwd
-        .canonicalize()
-        .map_err(|error| format!("invalid project directory: {error}"))?;
-    let checkout = worktree::checkout_info(&cwd).map_err(|error| error.0)?;
-    let workspace = worktree::checkout_info(&workspace_cwd).map_err(|error| error.0)?;
-    if checkout.common_dir != workspace.common_dir {
-        return Err("worktree belongs to a different repository".to_string());
-    }
-    if !worktree::is_linked_worktree(&cwd) {
-        return Err("worktree directory is not a linked worktree".to_string());
-    }
-    let actual_branch = worktree::head_ref(&checkout.root).map_err(|error| error.0)?;
-    if actual_branch != branch {
-        return Err(format!(
-            "worktree is on branch {actual_branch}, expected {branch}"
-        ));
-    }
-    Ok(ValidatedLinkedWorkspace {
-        cwd,
-        workspace_cwd,
-        checkout,
-    })
-}
-
 fn plan_worktree(
     checkout: &CheckoutInfo,
     managed_root: &Path,

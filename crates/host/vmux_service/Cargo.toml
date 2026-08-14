@@ -44,7 +44,7 @@ crossbeam-channel = "0.5"
 futures-util = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 vmux_core = { path = "../../vmux_core" }
-vmux_layout = { path = "../../page/vmux_layout" }
+vmux_git = { path = "../../vmux_git" }
 vmux_client = { path = "../vmux_client" }
 agent-client-protocol = "1.0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
