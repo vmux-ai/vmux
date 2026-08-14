@@ -372,7 +372,6 @@ schema-language-id = ID y’ururimi
 schema-root-markers = Ibimenyetso by’umuzi
 schema-output-directory = Ububiko bw’ibisohoka
 
-menu-scene = Igice
 menu-layout = Imiterere
 menu-terminal = Teriminali
 menu-browser = Mucukumbuzi
@@ -424,8 +423,6 @@ error-unknown-host = Uwakiriye porogaramu ya Vmux ntazwi: { $host }
 history-title = Amateka
 
 command-new-app-chat = Ikiganiro gishya cya { $provider }/{ $model } (Porogaramu)
-command-interactive-mode-user = Igice > Uburyo bw’imikoranire > Umukoresha
-command-interactive-mode-player = Igice > Uburyo bw’imikoranire > Umukinnyi
 command-minimize-window = Imiterere > Idirishya > Kugabanya
 command-toggle-layout = Imiterere > Imiterere > Guhindura imiterere
 command-close-tab = Imiterere > Tab > Gufunga tab
@@ -694,7 +691,6 @@ command-manage-spaces = Gucunga imyanya…
 command-pane-stack-location = igice { $pane } / urwego { $stack }
 command-space-pane-stack-location = { $space } / igice { $pane } / urwego { $stack }
 command-terminal-path = Terminali ({ $path })
-command-group-interactive-mode = Uburyo bw’imikoranire
 command-group-window = Idirishya
 command-group-tab = Agafishi
 command-group-pane = Igice

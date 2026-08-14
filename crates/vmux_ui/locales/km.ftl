@@ -372,7 +372,6 @@ schema-language-id = ID ភាសា
 schema-root-markers = សញ្ញាសម្គាល់ឫស
 schema-output-directory = ថតលទ្ធផល
 
-menu-scene = ឈុត
 menu-layout = ប្លង់
 menu-terminal = Terminal
 menu-browser = កម្មវិធីរុករក
@@ -424,8 +423,6 @@ error-unknown-host = មិនស្គាល់ម៉ាស៊ីនកម្�
 history-title = ប្រវត្តិ
 
 command-new-app-chat = ការជជែក { $provider }/{ $model } ថ្មី (កម្មវិធី)
-command-interactive-mode-user = Scene > របៀបអន្តរកម្ម > អ្នកប្រើ
-command-interactive-mode-player = Scene > របៀបអន្តរកម្ម > អ្នកលេង
 command-minimize-window = Layout > បង្អួច > បង្រួម
 command-toggle-layout = Layout > ប្លង់ > បិទ/បើកប្លង់
 command-close-tab = Layout > ផ្ទាំង > បិទផ្ទាំង
@@ -694,7 +691,6 @@ command-manage-spaces = គ្រប់គ្រង Space…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = របៀបអន្តរកម្ម
 command-group-window = បង្អួច
 command-group-tab = ថេប
 command-group-pane = Pane

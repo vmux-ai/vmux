@@ -372,7 +372,6 @@ schema-language-id = Valodas ID
 schema-root-markers = Saknes marķieri
 schema-output-directory = Izvades direktorijs
 
-menu-scene = Aina
 menu-layout = Izkārtojums
 menu-terminal = Terminālis
 menu-browser = Pārlūks
@@ -424,8 +423,6 @@ error-unknown-host = Nezināms Vmux lietotnes resursdators: { $host }
 history-title = Vēsture
 
 command-new-app-chat = Jauna { $provider }/{ $model } tērzēšana (lietotne)
-command-interactive-mode-user = Aina > Interaktīvais režīms > Lietotājs
-command-interactive-mode-player = Aina > Interaktīvais režīms > Atskaņotājs
 command-minimize-window = Izkārtojums > Logs > Minimizēt
 command-toggle-layout = Izkārtojums > Izkārtojums > Pārslēgt izkārtojumu
 command-close-tab = Izkārtojums > Cilne > Aizvērt cilni
@@ -694,7 +691,6 @@ command-manage-spaces = Pārvaldīt telpas…
 command-pane-stack-location = panelis { $pane } / steks { $stack }
 command-space-pane-stack-location = { $space } / panelis { $pane } / steks { $stack }
 command-terminal-path = Terminālis ({ $path })
-command-group-interactive-mode = Interaktīvais režīms
 command-group-window = Logs
 command-group-tab = Cilne
 command-group-pane = Panelis

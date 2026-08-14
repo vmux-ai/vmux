@@ -372,7 +372,6 @@ schema-language-id = ID мовы
 schema-root-markers = Маркеры кораня
 schema-output-directory = Каталог вываду
 
-menu-scene = Сцэна
 menu-layout = Макет
 menu-terminal = Тэрмінал
 menu-browser = Браўзер
@@ -424,8 +423,6 @@ error-unknown-host = Невядомы хост праграмы Vmux: { $host }
 history-title = Гісторыя
 
 command-new-app-chat = Новы чат { $provider }/{ $model } (Праграма)
-command-interactive-mode-user = Сцэна > Інтэрактыўны рэжым > Карыстальнік
-command-interactive-mode-player = Сцэна > Інтэрактыўны рэжым > Прайгравальнік
 command-minimize-window = Макет > Акно > Згарнуць
 command-toggle-layout = Макет > Макет > Пераключыць макет
 command-close-tab = Макет > Укладка > Закрыць укладку
@@ -694,7 +691,6 @@ command-manage-spaces = Кіраваць прасторамі…
 command-pane-stack-location = панэль { $pane } / стос { $stack }
 command-space-pane-stack-location = { $space } / панэль { $pane } / стос { $stack }
 command-terminal-path = Тэрмінал ({ $path })
-command-group-interactive-mode = Інтэрактыўны рэжым
 command-group-window = Акно
 command-group-tab = Укладка
 command-group-pane = Панэль

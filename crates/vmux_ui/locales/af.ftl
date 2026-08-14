@@ -372,7 +372,6 @@ schema-language-id = Taal-ID
 schema-root-markers = Wortelmerkers
 schema-output-directory = Uitvoermap
 
-menu-scene = Toneel
 menu-layout = Uitleg
 menu-terminal = Terminal
 menu-browser = Blaaier
@@ -424,8 +423,6 @@ error-unknown-host = Onbekende Vmux-programgasheer: { $host }
 history-title = Geskiedenis
 
 command-new-app-chat = Nuwe { $provider }/{ $model }-klets (Program)
-command-interactive-mode-user = Toneel > Interaktiewe modus > Gebruiker
-command-interactive-mode-player = Toneel > Interaktiewe modus > Speler
 command-minimize-window = Uitleg > Venster > Minimaliseer
 command-toggle-layout = Uitleg > Uitleg > Wissel uitleg
 command-close-tab = Uitleg > Oortjie > Maak oortjie toe
@@ -694,7 +691,6 @@ command-manage-spaces = Bestuur spaces…
 command-pane-stack-location = pane { $pane } / stapel { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stapel { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiewe modus
 command-group-window = Venster
 command-group-tab = Oortjie
 command-group-pane = Paneel

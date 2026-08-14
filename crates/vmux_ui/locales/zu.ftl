@@ -372,7 +372,6 @@ schema-language-id = ID yolimi
 schema-root-markers = Omaka bempande
 schema-output-directory = Ifolda yokukhipha
 
-menu-scene = Isigcawu
 menu-layout = Isakhiwo
 menu-terminal = Itheminali
 menu-browser = Isiphequluli
@@ -424,8 +423,6 @@ error-unknown-host = Umsingathi wohlelo lokusebenza lwe-Vmux ongaziwa: { $host }
 history-title = Umlando
 
 command-new-app-chat = Ingxoxo entsha ye-{ $provider }/{ $model } (Uhlelo lokusebenza)
-command-interactive-mode-user = Isigcawu > Imodi yokuxhumana > Umsebenzisi
-command-interactive-mode-player = Isigcawu > Imodi yokuxhumana > Umdlali
 command-minimize-window = Isakhiwo > Iwindi > Nciphisa
 command-toggle-layout = Isakhiwo > Isakhiwo > Guqula isakhiwo
 command-close-tab = Isakhiwo > Ithebhu > Vala ithebhu
@@ -694,7 +691,6 @@ command-manage-spaces = Phatha izikhala…
 command-pane-stack-location = ifasitelana { $pane } / isitaki { $stack }
 command-space-pane-stack-location = { $space } / ifasitelana { $pane } / isitaki { $stack }
 command-terminal-path = Itheminali ({ $path })
-command-group-interactive-mode = Imodi Yokusebenzisana
 command-group-window = Iwindi
 command-group-tab = Ithebhu
 command-group-pane = Ifasitelana

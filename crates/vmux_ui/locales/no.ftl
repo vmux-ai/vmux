@@ -372,7 +372,6 @@ schema-language-id = Språk-ID
 schema-root-markers = Rotmarkører
 schema-output-directory = Utdatamappe
 
-menu-scene = Scene
 menu-layout = Oppsett
 menu-terminal = Terminal
 menu-browser = Nettleser
@@ -424,8 +423,6 @@ error-unknown-host = Ukjent Vmux-appvert: { $host }
 history-title = Historikk
 
 command-new-app-chat = Ny { $provider }/{ $model }-chat (app)
-command-interactive-mode-user = Scene > Interaktiv modus > Bruker
-command-interactive-mode-player = Scene > Interaktiv modus > Spiller
 command-minimize-window = Layout > Vindu > Minimer
 command-toggle-layout = Layout > Layout > Slå layout av/på
 command-close-tab = Layout > Fane > Lukk fane
@@ -694,7 +691,6 @@ command-manage-spaces = Administrer spaces…
 command-pane-stack-location = panel { $pane } / stakk { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / stakk { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiv modus
 command-group-window = Vindu
 command-group-tab = Fane
 command-group-pane = Panel

@@ -372,7 +372,6 @@ schema-language-id = Language ID
 schema-root-markers = Cov cim cag
 schema-output-directory = Nplaub tshev tso tawm
 
-menu-scene = Xwm
 menu-layout = Kev teeb
 menu-terminal = Chaw txib
 menu-browser = Chaw saib web
@@ -424,8 +423,6 @@ error-unknown-host = Tsis paub tus tswv app Vmux: { $host }
 history-title = Keeb kwm
 
 command-new-app-chat = Chat tshiab { $provider }/{ $model } (App)
-command-interactive-mode-user = Scene > Hom sib tham > Neeg siv
-command-interactive-mode-player = Scene > Hom sib tham > Player
 command-minimize-window = Layout > Qhov rais > Muab me
 command-toggle-layout = Layout > Layout > Qhib/kaw Layout
 command-close-tab = Layout > Tab > Kaw Tab
@@ -694,7 +691,6 @@ command-manage-spaces = Tswj cov chaw…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Hom sib tham
 command-group-window = Qhov rai
 command-group-tab = Tab
 command-group-pane = Pane

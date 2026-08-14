@@ -372,7 +372,6 @@ schema-language-id = Til ID
 schema-root-markers = Ildiz belgilari
 schema-output-directory = Chiqish katalogi
 
-menu-scene = Sahna
 menu-layout = Tartib
 menu-terminal = Terminal
 menu-browser = Brauzer
@@ -424,8 +423,6 @@ error-unknown-host = Noma’lum Vmux ilova hosti: { $host }
 history-title = Tarix
 
 command-new-app-chat = Yangi { $provider }/{ $model } chati (Ilova)
-command-interactive-mode-user = Sahna > Interaktiv rejim > Foydalanuvchi
-command-interactive-mode-player = Sahna > Interaktiv rejim > Ijrochi
 command-minimize-window = Maket > Oyna > Kichraytirish
 command-toggle-layout = Maket > Maket > Maketni almashtirish
 command-close-tab = Maket > Varaq > Varaqni yopish
@@ -694,7 +691,6 @@ command-manage-spaces = Speyslarni boshqarish…
 command-pane-stack-location = panel { $pane } / stek { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / stek { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiv rejim
 command-group-window = Oyna
 command-group-tab = Varaq
 command-group-pane = Panel

@@ -372,7 +372,6 @@ schema-language-id = Language ID
 schema-root-markers = סמני שורש
 schema-output-directory = תיקיית פלט
 
-menu-scene = סצנה
 menu-layout = פריסה
 menu-terminal = מסוף
 menu-browser = דפדפן
@@ -424,8 +423,6 @@ error-unknown-host = מארח אפליקציית Vmux לא מוכר: { $host }
 history-title = היסטוריה
 
 command-new-app-chat = צ׳אט חדש עם { $provider }/{ $model } (אפליקציה)
-command-interactive-mode-user = סצנה > מצב אינטראקטיבי > משתמש
-command-interactive-mode-player = סצנה > מצב אינטראקטיבי > נגן
 command-minimize-window = פריסה > חלון > מזעור
 command-toggle-layout = פריסה > פריסה > החלפת פריסה
 command-close-tab = פריסה > לשונית > סגירת לשונית
@@ -694,7 +691,6 @@ command-manage-spaces = ניהול מרחבים…
 command-pane-stack-location = חלונית { $pane } / ערימה { $stack }
 command-space-pane-stack-location = { $space } / חלונית { $pane } / ערימה { $stack }
 command-terminal-path = מסוף ({ $path })
-command-group-interactive-mode = מצב אינטראקטיבי
 command-group-window = חלון
 command-group-tab = כרטיסייה
 command-group-pane = חלונית

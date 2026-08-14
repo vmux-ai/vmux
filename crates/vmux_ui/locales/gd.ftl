@@ -372,7 +372,6 @@ schema-language-id = ID cànain
 schema-root-markers = Comharran freumha
 schema-output-directory = Eòlaire toraidh
 
-menu-scene = Sealladh
 menu-layout = Co-dhealbh
 menu-terminal = Tèirmineal
 menu-browser = Brabhsair
@@ -424,8 +423,6 @@ error-unknown-host = Òstair aplacaid Vmux neo-aithnichte: { $host }
 history-title = Eachdraidh
 
 command-new-app-chat = Cabadaich ùr { $provider }/{ $model } (Aplacaid)
-command-interactive-mode-user = Sealladh > Modh eadar-ghnìomhach > Cleachdaiche
-command-interactive-mode-player = Sealladh > Modh eadar-ghnìomhach > Cluicheadair
 command-minimize-window = Cruth > Uinneag > Lùghdaich
 command-toggle-layout = Cruth > Cruth > Toglaich an cruth
 command-close-tab = Cruth > Taba > Dùin an taba
@@ -694,7 +691,6 @@ command-manage-spaces = Stiùirich àiteachan…
 command-pane-stack-location = leòsan { $pane } / stac { $stack }
 command-space-pane-stack-location = { $space } / leòsan { $pane } / stac { $stack }
 command-terminal-path = Tèirmineal ({ $path })
-command-group-interactive-mode = Modh eadar-ghnìomhach
 command-group-window = Uinneag
 command-group-tab = Taba
 command-group-pane = Leòsan

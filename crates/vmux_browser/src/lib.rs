@@ -216,13 +216,11 @@ enum BrowserSystems {
 fn configure_cef_backend_sync(app: &mut App) -> &mut App {
     app.configure_sets(
         Update,
-        BrowserSystems::SyncCefBackend
-            .after(vmux_layout::scene::SceneSystems::CompleteModeTransition)
-            .before(CefSystems::CreateAndResize),
+        BrowserSystems::SyncCefBackend.before(CefSystems::CreateAndResize),
     )
     .add_systems(
         Update,
-        sync_cef_backend_for_interaction_mode
+        sync_cef_backend
             .in_set(BrowserSystems::SyncCefBackend)
             .after(PageOpenSet::Fallback)
             .after(spawn_popup_stacks),
@@ -402,8 +400,8 @@ fn tab_of(
     }
 }
 
-fn webview_should_use_windowed(mode: vmux_layout::scene::InteractionMode) -> bool {
-    cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User
+fn webview_should_use_windowed() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn transform_near(a: &Transform, b: &Transform) -> bool {
@@ -463,11 +461,8 @@ fn camera_supports_windowed_webviews(world: &mut World) -> bool {
     transform_near(&camera, &expected)
 }
 
-fn windowed_backend_should_use_windowed(
-    world: &mut World,
-    mode: vmux_layout::scene::InteractionMode,
-) -> bool {
-    if !webview_should_use_windowed(mode) {
+fn windowed_backend_should_use_windowed(world: &mut World) -> bool {
+    if !webview_should_use_windowed() {
         clear_windowed_backend_camera_state(world);
         return false;
     }
@@ -497,15 +492,10 @@ fn windowed_backend_should_use_windowed(
 /// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
 /// transparent areas.
 fn sync_layout_mesh_visibility(
-    mode: Res<vmux_layout::scene::InteractionMode>,
     layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
     mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
-    let want_alpha = if *mode == vmux_layout::scene::InteractionMode::User {
-        0.0
-    } else {
-        1.0
-    };
+    let want_alpha = 0.0;
     for mat_handle in &layout_q {
         let Some(mut material) = materials.get_mut(mat_handle.id()) else {
             continue;
@@ -519,12 +509,8 @@ fn sync_layout_mesh_visibility(
     }
 }
 
-fn sync_cef_backend_for_interaction_mode(world: &mut World) {
-    let mode = world
-        .get_resource::<vmux_layout::scene::InteractionMode>()
-        .copied()
-        .unwrap_or_default();
-    let base_windowed = windowed_backend_should_use_windowed(world, mode);
+fn sync_cef_backend(world: &mut World) {
+    let base_windowed = windowed_backend_should_use_windowed(world);
     let mut query = world.query_filtered::<(
         Entity,
         Has<LayoutCef>,
@@ -539,14 +525,9 @@ fn sync_cef_backend_for_interaction_mode(world: &mut World) {
     // text field, so it needs the OSR path that input injection actually reaches.
     let target_windowed =
         |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
-    let target_native_overlay = |is_layout: bool, is_modal: bool| {
-        cfg!(target_os = "macos")
-            && mode == vmux_layout::scene::InteractionMode::User
-            && (is_layout || is_modal)
-    };
-    let target_native_direct_overlay = |is_layout: bool| {
-        cfg!(target_os = "macos") && mode == vmux_layout::scene::InteractionMode::User && is_layout
-    };
+    let target_native_overlay =
+        |is_layout: bool, is_modal: bool| cfg!(target_os = "macos") && (is_layout || is_modal);
+    let target_native_direct_overlay = |is_layout: bool| cfg!(target_os = "macos") && is_layout;
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
@@ -1387,14 +1368,10 @@ mod tests {
         assert_eq!(effective_title(None, "def"), "def");
     }
 
-    fn layout_material_after_mode(
-        mode: vmux_layout::scene::InteractionMode,
-        initial_alpha: f32,
-    ) -> WebviewExtendStandardMaterial {
+    fn layout_material(initial_alpha: f32) -> WebviewExtendStandardMaterial {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .insert_resource(mode)
             .add_systems(Update, sync_layout_mesh_visibility);
         let mut material = WebviewExtendStandardMaterial::default();
         material.base.alpha_mode = AlphaMode::Blend;
@@ -1416,29 +1393,14 @@ mod tests {
     }
 
     #[test]
-    fn user_mode_hides_layout_mesh_behind_native_overlay() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::User, 1.0);
+    fn layout_mesh_hides_behind_the_native_overlay() {
+        let mat = layout_material(1.0);
         assert_eq!(
             mat.base.base_color.alpha(),
             0.0,
-            "User mode presents layout chrome through the native accelerated overlay"
+            "layout chrome is presented through the native accelerated overlay"
         );
         assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
-    }
-
-    #[test]
-    fn player_mode_makes_layout_mesh_visible_and_transparent() {
-        let mat = layout_material_after_mode(vmux_layout::scene::InteractionMode::Player, 0.0);
-        assert_eq!(
-            mat.base.base_color.alpha(),
-            1.0,
-            "Player mode renders the layout via the mesh, so it must be visible"
-        );
-        assert_eq!(
-            mat.base.alpha_mode,
-            AlphaMode::Blend,
-            "Player uses straight alpha so pages show through the layout's transparent areas"
-        );
     }
 
     #[test]
@@ -1603,24 +1565,13 @@ mod tests {
 
     #[test]
     fn browser_mode_uses_windowed_webviews_on_macos() {
-        assert_eq!(
-            webview_should_use_windowed(vmux_layout::scene::InteractionMode::User),
-            cfg!(target_os = "macos")
-        );
-    }
-
-    #[test]
-    fn player_mode_uses_osr_webviews() {
-        assert!(!webview_should_use_windowed(
-            vmux_layout::scene::InteractionMode::Player
-        ));
+        assert_eq!(webview_should_use_windowed(), cfg!(target_os = "macos"));
     }
 
     #[test]
     fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
 
         let layout = app
             .world_mut()
@@ -1639,7 +1590,7 @@ mod tests {
             .spawn((Browser, Terminal, WebviewSource::new("vmux://terminal/")))
             .id();
 
-        sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(layout).is_none());
         assert_eq!(
@@ -1673,10 +1624,9 @@ mod tests {
     }
 
     #[test]
-    fn user_player_user_backend_round_trip() {
+    fn backend_keeps_layout_osr_and_pages_windowed() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
         let window = Window {
             resolution: (800, 600).into(),
             ..default()
@@ -1699,11 +1649,7 @@ mod tests {
             .spawn((Browser, WebviewSource::new("https://example.com/")))
             .id();
 
-        sync_cef_backend_for_interaction_mode(app.world_mut());
-        app.insert_resource(vmux_layout::scene::InteractionMode::Player);
-        sync_cef_backend_for_interaction_mode(app.world_mut());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
-        sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(layout).is_none());
         assert_eq!(
@@ -1736,7 +1682,6 @@ mod tests {
     fn browser_mode_disables_windowed_pages_when_camera_is_off_axis() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
         app.world_mut().spawn((
             Window {
                 resolution: (800, 600).into(),
@@ -1757,8 +1702,8 @@ mod tests {
             ))
             .id();
 
-        sync_cef_backend_for_interaction_mode(app.world_mut());
-        sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend(app.world_mut());
+        sync_cef_backend(app.world_mut());
 
         assert!(app.world().get::<WebviewWindowed>(page).is_none());
     }
@@ -1767,7 +1712,6 @@ mod tests {
     fn browser_mode_keeps_windowed_pages_for_first_resize_camera_mismatch() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
         let old_window = Window {
             resolution: (800, 600).into(),
             ..default()
@@ -1792,7 +1736,7 @@ mod tests {
             ))
             .id();
 
-        sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend(app.world_mut());
 
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
@@ -1804,7 +1748,6 @@ mod tests {
     fn browser_mode_keeps_windowed_pages_when_camera_is_home() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::User);
         let window = Window {
             resolution: (800, 600).into(),
             ..default()
@@ -1818,92 +1761,11 @@ mod tests {
             .spawn((Browser, WebviewSource::new("https://example.com/")))
             .id();
 
-        sync_cef_backend_for_interaction_mode(app.world_mut());
+        sync_cef_backend(app.world_mut());
 
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
-        );
-    }
-
-    #[test]
-    fn player_mode_marks_every_cef_surface_osr() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        app.insert_resource(vmux_layout::scene::InteractionMode::Player);
-
-        let layout = app
-            .world_mut()
-            .spawn((
-                Browser,
-                LayoutCef,
-                WebviewWindowed,
-                WebviewSource::new("vmux://layout/"),
-            ))
-            .id();
-        let modal = app
-            .world_mut()
-            .spawn((
-                Browser,
-                Modal,
-                WebviewWindowed,
-                WebviewSource::new("vmux://command-bar/"),
-            ))
-            .id();
-        let page = app
-            .world_mut()
-            .spawn((
-                Browser,
-                WebviewWindowed,
-                WebviewSource::new("https://example.com/"),
-            ))
-            .id();
-
-        sync_cef_backend_for_interaction_mode(app.world_mut());
-
-        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
-        assert!(app.world().get::<WebviewWindowed>(page).is_none());
-    }
-
-    #[derive(Resource, Default)]
-    struct ObservedBackendMode(Option<vmux_layout::scene::InteractionMode>);
-
-    fn finish_exit_for_backend_sync_test(mut mode: ResMut<vmux_layout::scene::InteractionMode>) {
-        *mode = vmux_layout::scene::InteractionMode::User;
-    }
-
-    fn observe_backend_sync_mode(
-        mode: Res<vmux_layout::scene::InteractionMode>,
-        mut observed: ResMut<ObservedBackendMode>,
-    ) {
-        observed.0 = Some(*mode);
-    }
-
-    #[test]
-    fn backend_sync_runs_after_exit_transition_completion() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        configure_cef_backend_sync(&mut app)
-            .insert_resource(vmux_layout::scene::InteractionMode::Player)
-            .init_resource::<ObservedBackendMode>()
-            .add_systems(
-                Update,
-                finish_exit_for_backend_sync_test
-                    .in_set(vmux_layout::scene::SceneSystems::CompleteModeTransition),
-            )
-            .add_systems(
-                Update,
-                observe_backend_sync_mode
-                    .in_set(BrowserSystems::SyncCefBackend)
-                    .before(sync_cef_backend_for_interaction_mode),
-            );
-
-        app.update();
-
-        assert!(
-            app.world().resource::<ObservedBackendMode>().0
-                == Some(vmux_layout::scene::InteractionMode::User)
         );
     }
 

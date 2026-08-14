@@ -3,7 +3,6 @@ use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
 use vmux_layout::Header;
 use vmux_layout::command_bar::state::CommandBarState;
-use vmux_layout::scene::InteractionMode;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
 use vmux_layout::window::Modal;
@@ -47,12 +46,10 @@ impl Plugin for HostFocusPlugin {
 /// because a focused web page's `NSView` otherwise keeps it and blacks out the host keyboard.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostFocusIntent {
-    /// Not in User mode — leave focus untouched (OSR/Player path owns it).
-    #[default]
-    Unmanaged,
     /// Active page is a windowed web page; give this webview native first-responder.
     Windowed(Entity),
     /// Active page is a terminal, or there is none — the winit host window must own first-responder.
+    #[default]
     WinitHost,
 }
 
@@ -67,7 +64,6 @@ pub(crate) fn host_focus_intent(
 }
 
 pub(crate) fn compute_host_focus_intent(
-    mode: Res<InteractionMode>,
     focus: Res<FocusedStack>,
     child_of_q: Query<&ChildOf>,
     content_q: Query<Entity, (With<Browser>, Without<Header>, Without<SideSheet>)>,
@@ -106,8 +102,6 @@ pub(crate) fn compute_host_focus_intent(
         } else {
             HostFocusIntent::WinitHost
         }
-    } else if *mode != InteractionMode::User {
-        HostFocusIntent::Unmanaged
     } else if !layout_keyboard_q.is_empty() {
         HostFocusIntent::WinitHost
     } else {
@@ -180,7 +174,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<HostFocusIntent>()
-            .insert_resource(InteractionMode::User)
             .insert_resource(FocusedStack::default())
             .add_systems(Update, compute_host_focus_intent);
         app
@@ -463,23 +456,9 @@ mod tests {
         let mut focused = Some(Entity::from_bits(1));
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Unmanaged, false, None, &mut focused),
+            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused),
             None
         );
         assert_eq!(focused, None);
-    }
-
-    #[test]
-    fn player_mode_is_unmanaged() {
-        let mut app = app();
-        let stack = app.world_mut().spawn_empty().id();
-        app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.insert_resource(InteractionMode::Player);
-        app.insert_resource(FocusedStack {
-            stack: Some(stack),
-            ..default()
-        });
-        app.update();
-        assert_eq!(intent(&app), HostFocusIntent::Unmanaged);
     }
 }

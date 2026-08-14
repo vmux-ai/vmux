@@ -372,7 +372,6 @@ schema-language-id = ಭಾಷಾ ID
 schema-root-markers = ರೂಟ್ ಗುರುತುಗಳು
 schema-output-directory = ಔಟ್‌ಪುಟ್ ಡೈರೆಕ್ಟರಿ
 
-menu-scene = ದೃಶ್ಯ
 menu-layout = ವಿನ್ಯಾಸ
 menu-terminal = ಟರ್ಮಿನಲ್
 menu-browser = ಬ್ರೌಸರ್
@@ -424,8 +423,6 @@ error-unknown-host = ತಿಳಿಯದ Vmux ಆ್ಯಪ್ ಹೋಸ್ಟ್:
 history-title = ಇತಿಹಾಸ
 
 command-new-app-chat = ಹೊಸ { $provider }/{ $model } ಚಾಟ್ (ಆ್ಯಪ್)
-command-interactive-mode-user = ದೃಶ್ಯ > ಪರಸ್ಪರ ಕ್ರಿಯೆಯ ಮೋಡ್ > ಬಳಕೆದಾರ
-command-interactive-mode-player = ದೃಶ್ಯ > ಪರಸ್ಪರ ಕ್ರಿಯೆಯ ಮೋಡ್ > ಪ್ಲೇಯರ್
 command-minimize-window = ಲೇಔಟ್ > ವಿಂಡೋ > ಮಿನಿಮೈಸ್
 command-toggle-layout = ಲೇಔಟ್ > ಲೇಔಟ್ > ಲೇಔಟ್ ಟಾಗಲ್
 command-close-tab = ಲೇಔಟ್ > ಟ್ಯಾಬ್ > ಟ್ಯಾಬ್ ಮುಚ್ಚಿ
@@ -694,7 +691,6 @@ command-manage-spaces = ಸ್ಪೇಸ್‌ಗಳನ್ನು ನಿರ್ವ�
 command-pane-stack-location = ಪೇನ್ { $pane } / ಸ್ಟ್ಯಾಕ್ { $stack }
 command-space-pane-stack-location = { $space } / ಪೇನ್ { $pane } / ಸ್ಟ್ಯಾಕ್ { $stack }
 command-terminal-path = ಟರ್ಮಿನಲ್ ({ $path })
-command-group-interactive-mode = ಸಂವಾದಾತ್ಮಕ ಮೋಡ್
 command-group-window = ವಿಂಡೋ
 command-group-tab = ಟ್ಯಾಬ್
 command-group-pane = ಪೇನ್

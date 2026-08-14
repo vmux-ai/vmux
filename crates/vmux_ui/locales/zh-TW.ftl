@@ -372,7 +372,6 @@ schema-language-id = 語言 ID
 schema-root-markers = 根目錄標記檔
 schema-output-directory = 輸出目錄
 
-menu-scene = 場景
 menu-layout = 版面配置
 menu-terminal = 終端機
 menu-browser = 瀏覽器
@@ -424,8 +423,6 @@ error-unknown-host = 未知的 Vmux app 主機：{ $host }
 history-title = 歷史記錄
 
 command-new-app-chat = 新增 { $provider }/{ $model } 聊天（App）
-command-interactive-mode-user = 場景 > 互動模式 > 使用者
-command-interactive-mode-player = 場景 > 互動模式 > 玩家
 command-minimize-window = 佈局 > 視窗 > 最小化
 command-toggle-layout = 佈局 > 佈局 > 切換佈局
 command-close-tab = 佈局 > 分頁 > 關閉分頁
@@ -694,7 +691,6 @@ command-manage-spaces = 管理工作區…
 command-pane-stack-location = 窗格 { $pane } / 堆疊 { $stack }
 command-space-pane-stack-location = { $space } / 窗格 { $pane } / 堆疊 { $stack }
 command-terminal-path = 終端機（{ $path }）
-command-group-interactive-mode = 互動模式
 command-group-window = 視窗
 command-group-tab = 分頁
 command-group-pane = 窗格

@@ -372,7 +372,6 @@ schema-language-id = Kielen ID
 schema-root-markers = Juurimerkit
 schema-output-directory = Tulostehakemisto
 
-menu-scene = Näkymä
 menu-layout = Asettelu
 menu-terminal = Pääte
 menu-browser = Selain
@@ -424,8 +423,6 @@ error-unknown-host = Tuntematon Vmux-sovellusisäntä: { $host }
 history-title = Historia
 
 command-new-app-chat = Uusi { $provider }/{ $model } -keskustelu (sovellus)
-command-interactive-mode-user = Scene > Vuorovaikutustila > Käyttäjä
-command-interactive-mode-player = Scene > Vuorovaikutustila > Pelaaja
 command-minimize-window = Layout > Ikkuna > Pienennä
 command-toggle-layout = Layout > Asettelu > Vaihda asettelua
 command-close-tab = Layout > Välilehti > Sulje välilehti
@@ -694,7 +691,6 @@ command-manage-spaces = Hallitse tiloja…
 command-pane-stack-location = paneeli { $pane } / pino { $stack }
 command-space-pane-stack-location = { $space } / paneeli { $pane } / pino { $stack }
 command-terminal-path = Pääte ({ $path })
-command-group-interactive-mode = Vuorovaikutteinen tila
 command-group-window = Ikkuna
 command-group-tab = Välilehti
 command-group-pane = Paneeli

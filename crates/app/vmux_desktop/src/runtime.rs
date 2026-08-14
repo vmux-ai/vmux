@@ -24,7 +24,6 @@ use bevy_cef_core::prelude::{
 };
 use std::time::Duration;
 
-use vmux_layout::scene::InteractionMode;
 #[cfg(feature = "tray")]
 use vmux_terminal as terminal;
 #[cfg(feature = "tray")]
@@ -43,8 +42,7 @@ impl Plugin for RuntimePlugin {
             .add_systems(
                 Update,
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
-            )
-            .add_systems(Last, keep_awake_while_player_active);
+            );
     }
 
     fn finish(&self, app: &mut App) {
@@ -112,23 +110,22 @@ pub enum LifecycleEvent {
 /// hover and scroll then use explicit monitor wakes instead of rendering once per raw macOS pointer
 /// event. During live resize the 16ms timer caps rendering near 60Hz.
 pub(crate) fn foreground_winit_settings(
-    player: bool,
     live_resize: bool,
     native_pointer_inside: bool,
 ) -> WinitSettings {
     let focused_mode = if live_resize {
         UpdateMode::Reactive {
             wait: Duration::from_millis(16),
-            react_to_device_events: player,
+            react_to_device_events: false,
             react_to_user_events: true,
             react_to_window_events: false,
         }
     } else {
         UpdateMode::Reactive {
             wait: FOCUSED_FRAME_INTERVAL,
-            react_to_device_events: player,
+            react_to_device_events: false,
             react_to_user_events: true,
-            react_to_window_events: player || !native_pointer_inside,
+            react_to_window_events: !native_pointer_inside,
         }
     };
     WinitSettings {
@@ -147,7 +144,6 @@ fn hidden_winit_settings() -> WinitSettings {
 fn sync_winit_power_mode(
     mut settings: ResMut<WinitSettings>,
     wake_policy: Option<Res<MessageLoopWakePolicy>>,
-    mode: Res<InteractionMode>,
     windows: Query<&Window>,
     monitors: Query<&Monitor>,
 ) {
@@ -159,11 +155,7 @@ fn sync_winit_power_mode(
     let next = if all_hidden {
         hidden_winit_settings()
     } else {
-        foreground_winit_settings(
-            *mode == InteractionMode::Player,
-            live_resize,
-            native_pointer_inside,
-        )
+        foreground_winit_settings(live_resize, native_pointer_inside)
     };
     if settings.focused_mode != next.focused_mode || settings.unfocused_mode != next.unfocused_mode
     {
@@ -212,31 +204,6 @@ fn keep_awake_while_revealing(
     pending: Query<(), With<vmux_layout::PendingWebviewReveal>>,
 ) {
     if pending.is_empty() {
-        return;
-    }
-    if let Some(proxy) = proxy {
-        let _ = (**proxy).send_event(WinitUserEvent::WakeUp);
-    }
-}
-
-fn player_frame_should_wake(
-    mode: InteractionMode,
-    transition_active: bool,
-    window_active: bool,
-) -> bool {
-    window_active && (mode == InteractionMode::Player || transition_active)
-}
-
-fn keep_awake_while_player_active(
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-    mode: Res<InteractionMode>,
-    transition: Option<Res<vmux_layout::scene::ModeTransition>>,
-    windows: Query<&Window>,
-) {
-    let window_active = windows
-        .iter()
-        .any(|window| window.visible && window.focused);
-    if !player_frame_should_wake(*mode, transition.is_some(), window_active) {
         return;
     }
     if let Some(proxy) = proxy {
@@ -351,47 +318,6 @@ mod tests {
     }
 
     #[test]
-    fn player_frame_demand_only_runs_for_player_or_transition() {
-        assert!(!player_frame_should_wake(
-            InteractionMode::User,
-            false,
-            true
-        ));
-        assert!(player_frame_should_wake(
-            InteractionMode::Player,
-            false,
-            true
-        ));
-        assert!(player_frame_should_wake(InteractionMode::User, true, true));
-        assert!(player_frame_should_wake(
-            InteractionMode::Player,
-            true,
-            true
-        ));
-        assert!(!player_frame_should_wake(
-            InteractionMode::Player,
-            false,
-            false
-        ));
-        assert!(!player_frame_should_wake(
-            InteractionMode::User,
-            true,
-            false
-        ));
-    }
-
-    #[test]
-    fn player_frame_demand_runs_in_last() {
-        let plugin_build = include_str!("runtime.rs")
-            .split("impl Plugin for RuntimePlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
-
-        assert!(plugin_build.contains(".add_systems(Last, keep_awake_while_player_active)"));
-    }
-
-    #[test]
     fn command_bar_wake_covers_defer_and_active_reveal() {
         assert!(command_bar_should_wake(true, false));
         assert!(command_bar_should_wake(false, true));
@@ -478,7 +404,7 @@ mod tests {
 
     #[test]
     fn foreground_power_mode_is_reactive_when_focused() {
-        let settings = foreground_winit_settings(false, false, false);
+        let settings = foreground_winit_settings(false, false);
 
         let UpdateMode::Reactive {
             wait,
@@ -509,26 +435,14 @@ mod tests {
             wait: resize_wait,
             react_to_window_events: resize_window,
             ..
-        } = foreground_winit_settings(false, true, false).focused_mode
+        } = foreground_winit_settings(true, false).focused_mode
         else {
             panic!("focused mode must be Reactive");
         };
         assert_eq!(resize_wait, Duration::from_millis(16));
         assert!(!resize_window);
 
-        let player = foreground_winit_settings(true, false, false);
-        let UpdateMode::Reactive {
-            react_to_device_events: player_device,
-            react_to_window_events: player_window,
-            ..
-        } = player.focused_mode
-        else {
-            panic!("focused mode must be Reactive");
-        };
-        assert!(player_device);
-        assert!(player_window);
-
-        let layout_hover = foreground_winit_settings(false, false, true);
+        let layout_hover = foreground_winit_settings(false, true);
         let UpdateMode::Reactive {
             react_to_window_events: layout_window,
             ..

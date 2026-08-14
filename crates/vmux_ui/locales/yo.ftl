@@ -372,7 +372,6 @@ schema-language-id = ID èdè
 schema-root-markers = Àwọn àmì gbòngbo
 schema-output-directory = Àpò àbájáde
 
-menu-scene = Ìran
 menu-layout = Ìṣètò
 menu-terminal = Tẹ́míńà
 menu-browser = Aṣàwákiri
@@ -424,8 +423,6 @@ error-unknown-host = Olùgbàlejò app Vmux tí a kò mọ̀: { $host }
 history-title = Ìtàn
 
 command-new-app-chat = Ìfọ̀rọ̀wérọ̀ { $provider }/{ $model } tuntun (App)
-command-interactive-mode-user = Ìran > Móòdù ìbáṣepọ̀ > Olùmúlò
-command-interactive-mode-player = Ìran > Móòdù ìbáṣepọ̀ > Ẹlẹ́rọ
 command-minimize-window = Ìtòlẹ́sẹẹsẹ > Fèrèsé > Kó kéré
 command-toggle-layout = Ìtòlẹ́sẹẹsẹ > Ìtòlẹ́sẹẹsẹ > Yí ìtòlẹ́sẹẹsẹ padà
 command-close-tab = Ìtòlẹ́sẹẹsẹ > Taabu > Pa taabu
@@ -694,7 +691,6 @@ command-manage-spaces = Ṣàkóso àwọn ààyè…
 command-pane-stack-location = pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }
 command-space-pane-stack-location = { $space } / pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }
 command-terminal-path = Tẹ́mìnà ({ $path })
-command-group-interactive-mode = Móòdù ìbáṣepọ̀
 command-group-window = Fèrèsé
 command-group-tab = Táàbù
 command-group-pane = Pẹ́ẹ̀nù

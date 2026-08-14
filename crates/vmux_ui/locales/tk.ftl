@@ -372,7 +372,6 @@ schema-language-id = Dil ID
 schema-root-markers = Kök belgileri
 schema-output-directory = Çykyş katalogy
 
-menu-scene = Sahna
 menu-layout = Ýerleşim
 menu-terminal = Terminal
 menu-browser = Brauzer
@@ -424,8 +423,6 @@ error-unknown-host = Näbelli Vmux programma hosty: { $host }
 history-title = Taryh
 
 command-new-app-chat = Täze { $provider }/{ $model } söhbeti (Programma)
-command-interactive-mode-user = Scene > Interaktiw režim > Ulanyjy
-command-interactive-mode-player = Scene > Interaktiw režim > Oýunçy
 command-minimize-window = Layout > Penjire > Kiçelt
 command-toggle-layout = Layout > Düzüliş > Düzülişi çalyş
 command-close-tab = Layout > Salgyt > Salgyty ýap
@@ -694,7 +691,6 @@ command-manage-spaces = Giňişlikleri dolandyr…
 command-pane-stack-location = panel { $pane } / gatlak { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / gatlak { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktiw tertip
 command-group-window = Penjire
 command-group-tab = Salgyt
 command-group-pane = Panel

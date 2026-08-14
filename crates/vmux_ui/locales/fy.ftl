@@ -372,7 +372,6 @@ schema-language-id = Taal-ID
 schema-root-markers = Root-markearders
 schema-output-directory = Utfiermap
 
-menu-scene = Sêne
 menu-layout = Yndieling
 menu-terminal = Terminal
 menu-browser = Blêder
@@ -424,8 +423,6 @@ error-unknown-host = Unbekende Vmux-apphost: { $host }
 history-title = Skiednis
 
 command-new-app-chat = Nij { $provider }/{ $model }-petear (App)
-command-interactive-mode-user = Sêne > Ynteraktive modus > Brûker
-command-interactive-mode-player = Sêne > Ynteraktive modus > Spiler
 command-minimize-window = Yndieling > Finster > Minimalisearje
 command-toggle-layout = Yndieling > Yndieling > Yndieling wikselje
 command-close-tab = Yndieling > Ljepper > Ljepper slute
@@ -694,7 +691,6 @@ command-manage-spaces = Romten beheare…
 command-pane-stack-location = finsterdiel { $pane } / steapel { $stack }
 command-space-pane-stack-location = { $space } / finsterdiel { $pane } / steapel { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Ynteraktive modus
 command-group-window = Finster
 command-group-tab = Ljepper
 command-group-pane = Finsterdiel

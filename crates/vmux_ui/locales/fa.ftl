@@ -372,7 +372,6 @@ schema-language-id = ID زبان
 schema-root-markers = نشانگرهای ریشه
 schema-output-directory = پوشهٔ خروجی
 
-menu-scene = صحنه
 menu-layout = چیدمان
 menu-terminal = پایانه
 menu-browser = مرورگر
@@ -424,8 +423,6 @@ error-unknown-host = میزبان برنامهٔ Vmux ناشناخته است: {
 history-title = تاریخچه
 
 command-new-app-chat = گفت‌وگوی جدید { $provider }/{ $model } (برنامه)
-command-interactive-mode-user = Scene > حالت تعاملی > کاربر
-command-interactive-mode-player = Scene > حالت تعاملی > پخش‌کننده
 command-minimize-window = Layout > پنجره > کوچک‌سازی
 command-toggle-layout = Layout > چیدمان > تغییر چیدمان
 command-close-tab = Layout > زبانه > بستن زبانه
@@ -694,7 +691,6 @@ command-manage-spaces = مدیریت فضاها…
 command-pane-stack-location = پنل { $pane } / پشته { $stack }
 command-space-pane-stack-location = { $space } / پنل { $pane } / پشته { $stack }
 command-terminal-path = ترمینال ({ $path })
-command-group-interactive-mode = حالت تعاملی
 command-group-window = پنجره
 command-group-tab = زبانه
 command-group-pane = پنل

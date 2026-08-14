@@ -372,7 +372,6 @@ schema-language-id = Language ID
 schema-root-markers = Mga root marker
 schema-output-directory = Output directory
 
-menu-scene = Eksena
 menu-layout = Ayos
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Hindi kilalang host ng Vmux app: { $host }
 history-title = History
 
 command-new-app-chat = Bagong chat sa { $provider }/{ $model } (App)
-command-interactive-mode-user = Scene > Interactive Mode > User
-command-interactive-mode-player = Scene > Interactive Mode > Player
 command-minimize-window = Layout > Window > I-minimize
 command-toggle-layout = Layout > Layout > I-toggle ang Layout
 command-close-tab = Layout > Tab > Isara ang Tab
@@ -694,7 +691,6 @@ command-manage-spaces = Pamahalaan ang mga espasyo…
 command-pane-stack-location = panel { $pane } / salansan { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / salansan { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Interaktibong Mode
 command-group-window = Bintana
 command-group-tab = Tab
 command-group-pane = Panel

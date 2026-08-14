@@ -372,7 +372,6 @@ schema-language-id = ID на език
 schema-root-markers = Маркери за корен
 schema-output-directory = Изходна директория
 
-menu-scene = Сцена
 menu-layout = Оформление
 menu-terminal = Терминал
 menu-browser = Браузър
@@ -424,8 +423,6 @@ error-unknown-host = Неизвестен хост на приложение Vmu
 history-title = История
 
 command-new-app-chat = Нов чат с { $provider }/{ $model } (приложение)
-command-interactive-mode-user = Сцена > Интерактивен режим > Потребител
-command-interactive-mode-player = Сцена > Интерактивен режим > Изпълнител
 command-minimize-window = Оформление > Прозорец > Минимизирай
 command-toggle-layout = Оформление > Оформление > Превключи оформлението
 command-close-tab = Оформление > Раздел > Затвори раздела
@@ -694,7 +691,6 @@ command-manage-spaces = Управление на пространствата�
 command-pane-stack-location = панел { $pane } / стек { $stack }
 command-space-pane-stack-location = { $space } / панел { $pane } / стек { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Интерактивен режим
 command-group-window = Прозорец
 command-group-tab = Раздел
 command-group-pane = Панел

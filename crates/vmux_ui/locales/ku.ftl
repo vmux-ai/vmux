@@ -372,7 +372,6 @@ schema-language-id = ID ya ziman
 schema-root-markers = Nîşankerên rehê
 schema-output-directory = Peldanka deranê
 
-menu-scene = Dîmen
 menu-layout = Rêzkirin
 menu-terminal = Termînal
 menu-browser = Gerok
@@ -424,8 +423,6 @@ error-unknown-host = خانەخوێی نەناسراوی ئەپی Vmux: { $host 
 history-title = مێژوو
 
 command-new-app-chat = چاتی نوێی { $provider }/{ $model } (ئەپ)
-command-interactive-mode-user = دیمەن > دۆخی کارلێکی > بەکارهێنەر
-command-interactive-mode-player = دیمەن > دۆخی کارلێکی > یاریزان
 command-minimize-window = ڕێکخستن > پەنجەرە > بچووککردنەوە
 command-toggle-layout = ڕێکخستن > ڕێکخستن > گۆڕینی ڕێکخستن
 command-close-tab = ڕێکخستن > تاب > داخستنی تاب
@@ -694,7 +691,6 @@ command-manage-spaces = بەڕێوەبردنی فەزاكان…
 command-pane-stack-location = پەین { $pane } / ستاك { $stack }
 command-space-pane-stack-location = { $space } / پەین { $pane } / ستاك { $stack }
 command-terminal-path = تێرمیناڵ ({ $path })
-command-group-interactive-mode = دۆخی کارلێکی
 command-group-window = پەنجەرە
 command-group-tab = تاب
 command-group-pane = پەین

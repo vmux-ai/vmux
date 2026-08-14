@@ -372,7 +372,6 @@ schema-language-id = ID ʻōlelo
 schema-root-markers = Nā māka mole
 schema-output-directory = Papa kuhikuhi hoʻopuka
 
-menu-scene = Hiʻohiʻona
 menu-layout = Hoʻonohonoho
 menu-terminal = Kahua kauoha
 menu-browser = Mea huli pūnaewele
@@ -424,8 +423,6 @@ error-unknown-host = Mea hoʻokipa polokalamu Vmux ʻike ʻole ʻia: { $host }
 history-title = Mōʻaukala
 
 command-new-app-chat = Kamaʻilio { $provider }/{ $model } hou (Polokalamu)
-command-interactive-mode-user = Kahua > ʻAno pilina > Mea hoʻohana
-command-interactive-mode-player = Kahua > ʻAno pilina > Mea pāʻani
 command-minimize-window = Hoʻonohonoho > Puka aniani > Hoʻēmi
 command-toggle-layout = Hoʻonohonoho > Hoʻonohonoho > Hoʻololi hoʻonohonoho
 command-close-tab = Hoʻonohonoho > ʻAoʻao kau > Pani ʻaoʻao kau
@@ -694,7 +691,6 @@ command-manage-spaces = Hoʻokele i nā space…
 command-pane-stack-location = pane { $pane } / stack { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / stack { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = ʻAno launa
 command-group-window = Puka aniani
 command-group-tab = Kapu
 command-group-pane = Pane

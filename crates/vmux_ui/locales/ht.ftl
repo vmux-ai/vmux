@@ -372,7 +372,6 @@ schema-language-id = ID lang
 schema-root-markers = Makè rasin yo
 schema-output-directory = Anyè sòti
 
-menu-scene = Sèn
 menu-layout = Dispozisyon
 menu-terminal = Tèminal
 menu-browser = Navigatè
@@ -424,8 +423,6 @@ error-unknown-host = Òt aplikasyon Vmux enkoni: { $host }
 history-title = Istorik
 
 command-new-app-chat = Nouvo chat { $provider }/{ $model } (Aplikasyon)
-command-interactive-mode-user = Sèn > Mòd entèraktif > Itilizatè
-command-interactive-mode-player = Sèn > Mòd entèraktif > Jwè
 command-minimize-window = Dispozisyon > Fenèt > Minimize
 command-toggle-layout = Dispozisyon > Dispozisyon > Chanje dispozisyon
 command-close-tab = Dispozisyon > Onglè > Fèmen onglè
@@ -694,7 +691,6 @@ command-manage-spaces = Jere espas yo…
 command-pane-stack-location = panèl { $pane } / pil { $stack }
 command-space-pane-stack-location = { $space } / panèl { $pane } / pil { $stack }
 command-terminal-path = Tèminal ({ $path })
-command-group-interactive-mode = Mòd entèraktif
 command-group-window = Fenèt
 command-group-tab = Onglè
 command-group-pane = Panèl

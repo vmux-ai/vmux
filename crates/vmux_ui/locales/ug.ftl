@@ -372,7 +372,6 @@ schema-language-id = تىل ID
 schema-root-markers = يىلتىز بەلگىلىرى
 schema-output-directory = چىقىرىش مۇندەرىجىسى
 
-menu-scene = كۆرۈنۈش
 menu-layout = ئورۇنلاشتۇرۇش
 menu-terminal = تېرمىنال
 menu-browser = توركۆرگۈچ
@@ -424,8 +423,6 @@ error-unknown-host = نامەلۇم Vmux ئەپ مۇلازىمېتىرى: { $hos
 history-title = تارىخ
 
 command-new-app-chat = يېڭى { $provider }/{ $model } سۆھبىتى (ئەپ)
-command-interactive-mode-user = كۆرۈنۈش > ئۆزئارا ھالەت > ئىشلەتكۈچى
-command-interactive-mode-player = كۆرۈنۈش > ئۆزئارا ھالەت > قويغۇچى
 command-minimize-window = ئورۇنلاشتۇرۇش > كۆزنەك > كىچىكلەت
 command-toggle-layout = ئورۇنلاشتۇرۇش > ئورۇنلاشتۇرۇش > ئورۇنلاشتۇرۇشنى ئالماشتۇر
 command-close-tab = ئورۇنلاشتۇرۇش > بەتكۈچ > بەتكۈچنى ياپ
@@ -694,7 +691,6 @@ command-manage-spaces = بوشلۇقلارنى باشقۇرۇش…
 command-pane-stack-location = كۆزنەكچە { $pane } / دۆۋە { $stack }
 command-space-pane-stack-location = { $space } / كۆزنەكچە { $pane } / دۆۋە { $stack }
 command-terminal-path = تېرمىنال ({ $path })
-command-group-interactive-mode = ئۆزئارا تەسىرلىشىش ھالىتى
 command-group-window = كۆزنەك
 command-group-tab = بەتكۈچ
 command-group-pane = كۆزنەكچە

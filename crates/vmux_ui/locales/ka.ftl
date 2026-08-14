@@ -372,7 +372,6 @@ schema-language-id = ენის ID
 schema-root-markers = ძირის ნიშნულები
 schema-output-directory = გამოტანის საქაღალდე
 
-menu-scene = სცენა
 menu-layout = განლაგება
 menu-terminal = ტერმინალი
 menu-browser = ბრაუზერი
@@ -424,8 +423,6 @@ error-unknown-host = უცნობი Vmux აპის ჰოსტი: { $ho
 history-title = ისტორია
 
 command-new-app-chat = ახალი { $provider }/{ $model } ჩატი (აპი)
-command-interactive-mode-user = სცენა > ინტერაქტიული რეჟიმი > მომხმარებელი
-command-interactive-mode-player = სცენა > ინტერაქტიული რეჟიმი > მოთამაშე
 command-minimize-window = განლაგება > ფანჯარა > ჩაკეცვა
 command-toggle-layout = განლაგება > განლაგება > განლაგების გადართვა
 command-close-tab = განლაგება > ჩანართი > ჩანართის დახურვა
@@ -694,7 +691,6 @@ command-manage-spaces = სივრცეების მართვა…
 command-pane-stack-location = პანელი { $pane } / სტეკი { $stack }
 command-space-pane-stack-location = { $space } / პანელი { $pane } / სტეკი { $stack }
 command-terminal-path = ტერმინალი ({ $path })
-command-group-interactive-mode = ინტერაქტიული რეჟიმი
 command-group-window = ფანჯარა
 command-group-tab = ჩანართი
 command-group-pane = პანელი

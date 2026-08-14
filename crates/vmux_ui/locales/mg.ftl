@@ -372,7 +372,6 @@ schema-language-id = ID fiteny
 schema-root-markers = Mari-paka
 schema-output-directory = Lahatahiry vokatra
 
-menu-scene = Seho
 menu-layout = Firafitra
 menu-terminal = Terminal
 menu-browser = Mpizaha tranonkala
@@ -424,8 +423,6 @@ error-unknown-host = Mpampiantrano rindranasa Vmux tsy fantatra: { $host }
 history-title = Tantara
 
 command-new-app-chat = Resaka { $provider }/{ $model } vaovao (Rindranasa)
-command-interactive-mode-user = Sehatra > Fomba ifandraisana > Mpampiasa
-command-interactive-mode-player = Sehatra > Fomba ifandraisana > Mpilalao
 command-minimize-window = Fandaminana > Varavarankely > Ahena
 command-toggle-layout = Fandaminana > Fandaminana > Avadika fandaminana
 command-close-tab = Fandaminana > Kiheba > Akatona kiheba
@@ -694,7 +691,6 @@ command-manage-spaces = Tantano ny habaka…
 command-pane-stack-location = tontonana { $pane } / antontany { $stack }
 command-space-pane-stack-location = { $space } / tontonana { $pane } / antontany { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Fomba ifandraisana
 command-group-window = Varavarankely
 command-group-tab = Kiheba
 command-group-pane = Tontonana

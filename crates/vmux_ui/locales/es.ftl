@@ -372,7 +372,6 @@ schema-language-id = ID de lenguaje
 schema-root-markers = Marcadores de raíz
 schema-output-directory = Directorio de salida
 
-menu-scene = Escena
 menu-layout = Disposición
 menu-terminal = Terminal
 menu-browser = Navegador
@@ -424,8 +423,6 @@ error-unknown-host = Host de app de Vmux desconocido: { $host }
 history-title = Historial
 
 command-new-app-chat = Nuevo chat de { $provider }/{ $model } (App)
-command-interactive-mode-user = Escena > Modo interactivo > Usuario
-command-interactive-mode-player = Escena > Modo interactivo > Reproductor
 command-minimize-window = Disposición > Ventana > Minimizar
 command-toggle-layout = Disposición > Disposición > Alternar disposición
 command-close-tab = Disposición > Pestaña > Cerrar pestaña
@@ -694,7 +691,6 @@ command-manage-spaces = Gestionar espacios…
 command-pane-stack-location = panel { $pane } / pila { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / pila { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Modo interactivo
 command-group-window = Ventana
 command-group-tab = Pestaña
 command-group-pane = Panel

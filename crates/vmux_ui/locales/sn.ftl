@@ -372,7 +372,6 @@ schema-language-id = ID yemutauro
 schema-root-markers = Zviratidzo zvemudzi
 schema-output-directory = Dhairekitori rezvinobuda
 
-menu-scene = Chiitiko
 menu-layout = Marongerwo
 menu-terminal = Teminali
 menu-browser = Bhurawuza
@@ -424,8 +423,6 @@ error-unknown-host = Mugamuchiri weapp yeVmux asingazivikanwe: { $host }
 history-title = Nhoroondo
 
 command-new-app-chat = Chat itsva ye{ $provider }/{ $model } (App)
-command-interactive-mode-user = Chiitiko > Modhi yekudyidzana > Mushandisi
-command-interactive-mode-player = Chiitiko > Modhi yekudyidzana > Mutambi
 command-minimize-window = Kurongeka > Hwindo > Deredza
 command-toggle-layout = Kurongeka > Kurongeka > Chinja kurongeka
 command-close-tab = Kurongeka > Tebhu > Vhara tebhu
@@ -694,7 +691,6 @@ command-manage-spaces = Ronga nzvimbo…
 command-pane-stack-location = pani { $pane } / staki { $stack }
 command-space-pane-stack-location = { $space } / pani { $pane } / staki { $stack }
 command-terminal-path = Teminali ({ $path })
-command-group-interactive-mode = Maitiro ekudyidzana
 command-group-window = Hwindo
 command-group-tab = Tebhu
 command-group-pane = Pani

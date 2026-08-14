@@ -372,7 +372,6 @@ schema-language-id = Kalbos ID
 schema-root-markers = Šaknies žymekliai
 schema-output-directory = Išvesties katalogas
 
-menu-scene = Scena
 menu-layout = Išdėstymas
 menu-terminal = Terminalas
 menu-browser = Naršyklė
@@ -424,8 +423,6 @@ error-unknown-host = Nežinomas Vmux programos serveris: { $host }
 history-title = Istorija
 
 command-new-app-chat = Naujas { $provider }/{ $model } pokalbis (programa)
-command-interactive-mode-user = Scena > Interaktyvus režimas > Naudotojas
-command-interactive-mode-player = Scena > Interaktyvus režimas > Leistuvas
 command-minimize-window = Išdėstymas > Langas > Sumažinti
 command-toggle-layout = Išdėstymas > Išdėstymas > Perjungti išdėstymą
 command-close-tab = Išdėstymas > Kortelė > Uždaryti kortelę
@@ -694,7 +691,6 @@ command-manage-spaces = Tvarkyti erdves…
 command-pane-stack-location = polangis { $pane } / dėklas { $stack }
 command-space-pane-stack-location = { $space } / polangis { $pane } / dėklas { $stack }
 command-terminal-path = Terminalas ({ $path })
-command-group-interactive-mode = Interaktyvusis režimas
 command-group-window = Langas
 command-group-tab = Kortelė
 command-group-pane = Polangis

@@ -4,8 +4,6 @@
 //! Only the macOS runtime drives these, but they are compiled under `test` on every
 //! platform so CI exercises them away from AppKit.
 
-use vmux_layout::scene::InteractionMode;
-
 pub(super) fn windowed_pointer_inside_after_event(
     pointer_position_changed: bool,
     previous: bool,
@@ -25,13 +23,8 @@ pub(super) fn native_scroll_should_wake(
     layout_pointer_inside || !sampled_over_windowed_page
 }
 
-pub(super) fn render_frame_should_run(
-    mode: InteractionMode,
-    transition_active: bool,
-    live_resize: bool,
-    visible_windowed_page: bool,
-) -> bool {
-    mode == InteractionMode::Player || transition_active || live_resize || !visible_windowed_page
+pub(super) fn render_frame_should_run(live_resize: bool, visible_windowed_page: bool) -> bool {
+    live_resize || !visible_windowed_page
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -197,37 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn user_mode_skips_bevy_render_when_native_page_is_visible() {
-        assert!(!render_frame_should_run(
-            InteractionMode::User,
-            false,
-            false,
-            true,
-        ));
-        assert!(render_frame_should_run(
-            InteractionMode::Player,
-            false,
-            false,
-            true,
-        ));
-        assert!(render_frame_should_run(
-            InteractionMode::User,
-            true,
-            false,
-            true,
-        ));
-        assert!(render_frame_should_run(
-            InteractionMode::User,
-            false,
-            true,
-            true,
-        ));
-        assert!(render_frame_should_run(
-            InteractionMode::User,
-            false,
-            false,
-            false,
-        ));
+    fn bevy_render_is_skipped_only_while_a_native_page_covers_it() {
+        assert!(!render_frame_should_run(false, true));
+        assert!(render_frame_should_run(true, true));
+        assert!(render_frame_should_run(false, false));
     }
 
     #[test]

@@ -372,7 +372,6 @@ schema-language-id = Тел ID
 schema-root-markers = Тамыр маркерлары
 schema-output-directory = Чыгыш каталогы
 
-menu-scene = Сәхнә
 menu-layout = Урнашу
 menu-terminal = Терминал
 menu-browser = Браузер
@@ -424,8 +423,6 @@ error-unknown-host = Билгесез Vmux кушымта хосты: { $host }
 history-title = Тарих
 
 command-new-app-chat = Яңа { $provider }/{ $model } чаты (кушымта)
-command-interactive-mode-user = Сцена > Интерактив режим > Кулланучы
-command-interactive-mode-player = Сцена > Интерактив режим > Уенчы
 command-minimize-window = Макет > Тәрәзә > Кечерәйтү
 command-toggle-layout = Макет > Макет > Макетны күчерү
 command-close-tab = Макет > Өстәмә бит > Өстәмә битне ябу
@@ -694,7 +691,6 @@ command-manage-spaces = Аралыклар белән идарә итү…
 command-pane-stack-location = панель { $pane } / катлам { $stack }
 command-space-pane-stack-location = { $space } / панель { $pane } / катлам { $stack }
 command-terminal-path = Терминал ({ $path })
-command-group-interactive-mode = Интерактив режим
 command-group-window = Тәрәзә
 command-group-tab = Кыстыргыч
 command-group-pane = Панель

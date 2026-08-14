@@ -740,7 +740,6 @@ mod tests {
     fn setup_window_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .insert_resource(crate::scene::InteractionMode::User)
             .insert_resource(test_settings(8.0))
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WindowMaterial>>()

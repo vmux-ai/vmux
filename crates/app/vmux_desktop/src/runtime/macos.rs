@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef::prelude::WebviewWindowed;
-use vmux_layout::scene::InteractionMode;
 use vmux_layout::{cef::LayoutCef, window::Modal};
 
 use super::RenderFrameDemand;
@@ -69,7 +68,6 @@ fn activate_primary_window_on_startup(
 }
 
 fn grab_key_window_on_pane_hover(
-    intent: Res<vmux_browser::HostFocusIntent>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     panes: Query<
         (&ComputedNode, &bevy::ui::UiGlobalTransform),
@@ -96,9 +94,6 @@ fn grab_key_window_on_pane_hover(
             && pointer.position_px.y <= max.y
     });
     if !over_pane {
-        return;
-    }
-    if *intent == vmux_browser::HostFocusIntent::Unmanaged {
         return;
     }
     let Ok(window_entity) = primary_window.single() else {
@@ -693,8 +688,6 @@ fn native_pointer_button(
 }
 
 fn sync_render_frame_demand(
-    mode: Res<InteractionMode>,
-    transition: Option<Res<vmux_layout::scene::ModeTransition>>,
     pages: Query<
         &Transform,
         (
@@ -708,8 +701,6 @@ fn sync_render_frame_demand(
 ) {
     let visible_windowed_page = pages.iter().any(|transform| transform.scale.x > 1.0e-3);
     demand.0 = render_frame_should_run(
-        *mode,
-        transition.is_some(),
         IN_LIVE_RESIZE.load(Ordering::Relaxed),
         visible_windowed_page,
     );

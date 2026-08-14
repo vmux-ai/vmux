@@ -372,7 +372,6 @@ schema-language-id = ID de llenguatge
 schema-root-markers = Marcadors d'arrel
 schema-output-directory = Directori de sortida
 
-menu-scene = Escena
 menu-layout = Disposició
 menu-terminal = Terminal
 menu-browser = Navegador
@@ -424,8 +423,6 @@ error-unknown-host = Amfitrió d’app de Vmux desconegut: { $host }
 history-title = Historial
 
 command-new-app-chat = Xat nou amb { $provider }/{ $model } (app)
-command-interactive-mode-user = Escena > Mode interactiu > Usuari
-command-interactive-mode-player = Escena > Mode interactiu > Reproductor
 command-minimize-window = Disposició > Finestra > Minimitza
 command-toggle-layout = Disposició > Disposició > Commuta la disposició
 command-close-tab = Disposició > Pestanya > Tanca la pestanya
@@ -694,7 +691,6 @@ command-manage-spaces = Gestiona els espais…
 command-pane-stack-location = subfinestra { $pane } / pila { $stack }
 command-space-pane-stack-location = { $space } / subfinestra { $pane } / pila { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Mode interactiu
 command-group-window = Finestra
 command-group-tab = Pestanya
 command-group-pane = Subfinestra

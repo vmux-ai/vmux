@@ -15,9 +15,6 @@ pub fn build_native_root_menu(menu: &mut muda::Menu) -> Result<(), muda::Error> 
 
 #[derive(Message, OsMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, PartialEq, Eq)]
 pub enum AppCommand {
-    #[menu(label = "Scene")]
-    Scene(SceneCommand),
-
     #[menu(label = "Layout")]
     #[mcp(skip)]
     Layout(LayoutCommand),
@@ -599,29 +596,6 @@ pub enum ToggleLayoutCommand {
     Toggle,
 }
 
-#[derive(
-    OsSubMenuGroup, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq,
-)]
-pub enum SceneCommand {
-    #[menu(label = "Interactive Mode")]
-    InteractiveMode(SceneInteractiveModeCommand),
-}
-
-#[derive(
-    OsSubMenu, DefaultShortcuts, CommandBar, McpTool, Debug, Clone, Copy, PartialEq, Eq, Default,
-)]
-pub enum SceneInteractiveModeCommand {
-    #[default]
-    #[menu(id = "interactive_mode_user", label = "User")]
-    User,
-    #[menu(id = "interactive_mode_player", label = "Player")]
-    Player,
-    #[menu(id = "toggle_player_mode", label = "Toggle Player Mode", hidden)]
-    #[shortcut(chord = "Ctrl+g, Enter")]
-    #[mcp(skip)]
-    Toggle,
-}
-
 #[allow(dead_code)]
 #[derive(OsSubMenu, DefaultShortcuts, CommandBar, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowCommand {
@@ -1109,29 +1083,5 @@ mod tests {
             AppCommand::from_menu_id("space_open"),
             Some(AppCommand::Layout(LayoutCommand::Space(SpaceCommand::Open)))
         );
-    }
-
-    #[test]
-    fn scene_interactive_mode_menu_ids_resolve() {
-        assert_eq!(
-            AppCommand::from_menu_id("interactive_mode_user").map(|cmd| format!("{cmd:?}")),
-            Some("Scene(InteractiveMode(User))".to_string())
-        );
-        assert_eq!(
-            AppCommand::from_menu_id("interactive_mode_player").map(|cmd| format!("{cmd:?}")),
-            Some("Scene(InteractiveMode(Player))".to_string())
-        );
-    }
-
-    #[test]
-    fn scene_menu_nests_interactive_mode_selector() {
-        let source = include_str!("command.rs")
-            .split("#[cfg(test)]")
-            .next()
-            .expect("production source");
-
-        assert!(source.contains("#[menu(label = \"Interactive Mode\")]"));
-        assert!(source.contains("interactive_mode_user"));
-        assert!(source.contains("interactive_mode_player"));
     }
 }

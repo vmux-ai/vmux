@@ -372,7 +372,6 @@ schema-language-id = ID e gjuhës
 schema-root-markers = Shënues rrënje
 schema-output-directory = Drejtoria e daljes
 
-menu-scene = Skena
 menu-layout = Paraqitja
 menu-terminal = Terminali
 menu-browser = Shfletuesi
@@ -424,8 +423,6 @@ error-unknown-host = Host i panjohur aplikacioni Vmux: { $host }
 history-title = Historiku
 
 command-new-app-chat = Bisedë e re me { $provider }/{ $model } (Aplikacion)
-command-interactive-mode-user = Skena > Modaliteti interaktiv > Përdorues
-command-interactive-mode-player = Skena > Modaliteti interaktiv > Luajtës
 command-minimize-window = Paraqitja > Dritarja > Minimizoj
 command-toggle-layout = Paraqitja > Paraqitja > Ndërro paraqitjen
 command-close-tab = Paraqitja > Skeda > Mbyll skedën
@@ -694,7 +691,6 @@ command-manage-spaces = Menaxho hapësirat…
 command-pane-stack-location = paneli { $pane } / stiva { $stack }
 command-space-pane-stack-location = { $space } / paneli { $pane } / stiva { $stack }
 command-terminal-path = Terminali ({ $path })
-command-group-interactive-mode = Modaliteti ndërveprues
 command-group-window = Dritarja
 command-group-tab = Skeda
 command-group-pane = Paneli

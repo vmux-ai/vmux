@@ -372,7 +372,6 @@ schema-language-id = ID linguae
 schema-root-markers = Notae radicis
 schema-output-directory = Directorium exitus
 
-menu-scene = Scaena
 menu-layout = Dispositio
 menu-terminal = Terminale
 menu-browser = Navigator
@@ -424,8 +423,6 @@ error-unknown-host = Hospes app Vmux ignotus: { $host }
 history-title = Historia
 
 command-new-app-chat = Novum colloquium { $provider }/{ $model } (App)
-command-interactive-mode-user = Scaena > Modus interactorius > Usor
-command-interactive-mode-player = Scaena > Modus interactorius > Lusor
 command-minimize-window = Dispositio > Fenestra > Minuere
 command-toggle-layout = Dispositio > Dispositio > Mutare dispositionem
 command-close-tab = Dispositio > Tabula > Claudere tabulam
@@ -694,7 +691,6 @@ command-manage-spaces = Spatia administrare…
 command-pane-stack-location = area { $pane } / strues { $stack }
 command-space-pane-stack-location = { $space } / area { $pane } / strues { $stack }
 command-terminal-path = Terminale ({ $path })
-command-group-interactive-mode = Modus interactivus
 command-group-window = Fenestra
 command-group-tab = Tabula
 command-group-pane = Area

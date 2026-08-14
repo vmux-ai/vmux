@@ -372,7 +372,6 @@ schema-language-id = ID teanga
 schema-root-markers = Marcóirí fréimhe
 schema-output-directory = Comhadlann aschuir
 
-menu-scene = Radharc
 menu-layout = Leagan Amach
 menu-terminal = Teirminéal
 menu-browser = Brabhsálaí
@@ -424,8 +423,6 @@ error-unknown-host = Óstríomhaire aipe Vmux anaithnid: { $host }
 history-title = Stair
 
 command-new-app-chat = Comhrá nua { $provider }/{ $model } (Aip)
-command-interactive-mode-user = Radharc > Mód Idirghníomhach > Úsáideoir
-command-interactive-mode-player = Radharc > Mód Idirghníomhach > Imreoir
 command-minimize-window = Leagan Amach > Fuinneog > Íoslaghdaigh
 command-toggle-layout = Leagan Amach > Leagan Amach > Scoránaigh Leagan Amach
 command-close-tab = Leagan Amach > Cluaisín > Dún Cluaisín
@@ -694,7 +691,6 @@ command-manage-spaces = Bainistigh spásanna…
 command-pane-stack-location = pána { $pane } / cruach { $stack }
 command-space-pane-stack-location = { $space } / pána { $pane } / cruach { $stack }
 command-terminal-path = Teirminéal ({ $path })
-command-group-interactive-mode = Mód Idirghníomhach
 command-group-window = Fuinneog
 command-group-tab = Cluaisín
 command-group-pane = Pána

@@ -372,7 +372,6 @@ schema-language-id = ID tal-lingwa
 schema-root-markers = Markaturi tal-għerq
 schema-output-directory = Direttorju tal-ħruġ
 
-menu-scene = Xena
 menu-layout = Tqassim
 menu-terminal = Terminal
 menu-browser = Browser
@@ -424,8 +423,6 @@ error-unknown-host = Host tal-app Vmux mhux magħruf: { $host }
 history-title = Storja
 
 command-new-app-chat = Chat ġdida ta’ { $provider }/{ $model } (App)
-command-interactive-mode-user = Xena > Modalità interattiva > Utent
-command-interactive-mode-player = Xena > Modalità interattiva > Player
 command-minimize-window = Tqassim > Tieqa > Imminimizza
 command-toggle-layout = Tqassim > Tqassim > Aqleb it-tqassim
 command-close-tab = Tqassim > Tab > Agħlaq it-tab
@@ -694,7 +691,6 @@ command-manage-spaces = Immaniġġja l-ispazji…
 command-pane-stack-location = żona { $pane } / saff { $stack }
 command-space-pane-stack-location = { $space } / żona { $pane } / saff { $stack }
 command-terminal-path = Terminal ({ $path })
-command-group-interactive-mode = Modalità interattiva
 command-group-window = Tieqa
 command-group-tab = Tab
 command-group-pane = Żona

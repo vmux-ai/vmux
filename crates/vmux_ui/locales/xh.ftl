@@ -372,7 +372,6 @@ schema-language-id = ID yolwimi
 schema-root-markers = Iimpawu zengcambu
 schema-output-directory = Ifolda yemveliso
 
-menu-scene = Umboniso
 menu-layout = Ubeko
 menu-terminal = Itheminali
 menu-browser = Isikhangeli
@@ -424,8 +423,6 @@ error-unknown-host = Umamkeli we-app ye-Vmux ongaziwayo: { $host }
 history-title = Imbali
 
 command-new-app-chat = Incoko entsha ye-{ $provider }/{ $model } (App)
-command-interactive-mode-user = Umboniso > Imo yokusebenzisana > Umsebenzisi
-command-interactive-mode-player = Umboniso > Imo yokusebenzisana > Umdlali
 command-minimize-window = Uyilo > Ifestile > Nciphisa
 command-toggle-layout = Uyilo > Uyilo > Tshintsha uyilo
 command-close-tab = Uyilo > Ithebhu > Vala ithebhu
@@ -694,7 +691,6 @@ command-manage-spaces = Lawula izithuba…
 command-pane-stack-location = ipheyini { $pane } / istaki { $stack }
 command-space-pane-stack-location = { $space } / ipheyini { $pane } / istaki { $stack }
 command-terminal-path = Itheminali ({ $path })
-command-group-interactive-mode = Imo yonxibelelwano
 command-group-window = Ifestile
 command-group-tab = Ithebhu
 command-group-pane = Ipheyini

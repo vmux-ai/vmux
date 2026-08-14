@@ -86,7 +86,7 @@ impl Plugin for VmuxPlugin {
             ..default()
         };
 
-        let winit_settings = runtime::foreground_winit_settings(false, false, false);
+        let winit_settings = runtime::foreground_winit_settings(false, false);
         app.insert_resource(winit_settings).add_plugins((
             VmuxCorePlugins,
             DefaultPlugins

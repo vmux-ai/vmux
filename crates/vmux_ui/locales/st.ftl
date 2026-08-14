@@ -372,7 +372,6 @@ schema-language-id = ID ya puo
 schema-root-markers = Matshwao a motso
 schema-output-directory = Foldara ya tlhahiso
 
-menu-scene = Sebaka
 menu-layout = Tlhophiso
 menu-terminal = Theminale
 menu-browser = Sebatli
@@ -424,8 +423,6 @@ error-unknown-host = Moamohedi wa app ya Vmux ha a tsejwe: { $host }
 history-title = Nalane
 
 command-new-app-chat = Puisano e ntjha ya { $provider }/{ $model } (App)
-command-interactive-mode-user = Scene > Mokgwa wa puisano > Mosebedisi
-command-interactive-mode-player = Scene > Mokgwa wa puisano > Sebapadi
 command-minimize-window = Layout > Fensetere > Nyenyefatsa
 command-toggle-layout = Layout > Moralo > Fetola moralo
 command-close-tab = Layout > Thebe > Kwala thebe
@@ -694,7 +691,6 @@ command-manage-spaces = Laola libaka…
 command-pane-stack-location = pane { $pane } / mokgobo { $stack }
 command-space-pane-stack-location = { $space } / pane { $pane } / mokgobo { $stack }
 command-terminal-path = Theminale ({ $path })
-command-group-interactive-mode = Mokgwa wa tshebedisano
 command-group-window = Fensetere
 command-group-tab = Thebo
 command-group-pane = Pane

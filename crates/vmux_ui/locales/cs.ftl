@@ -372,7 +372,6 @@ schema-language-id = ID jazyka
 schema-root-markers = Značky kořene
 schema-output-directory = Výstupní adresář
 
-menu-scene = Scéna
 menu-layout = Rozvržení
 menu-terminal = Terminál
 menu-browser = Prohlížeč
@@ -424,8 +423,6 @@ error-unknown-host = Neznámý hostitel aplikace Vmux: { $host }
 history-title = Historie
 
 command-new-app-chat = Nový chat { $provider }/{ $model } (aplikace)
-command-interactive-mode-user = Scéna > Interaktivní režim > Uživatel
-command-interactive-mode-player = Scéna > Interaktivní režim > Hráč
 command-minimize-window = Rozvržení > Okno > Minimalizovat
 command-toggle-layout = Rozvržení > Rozvržení > Přepnout rozvržení
 command-close-tab = Rozvržení > Panel > Zavřít panel
@@ -694,7 +691,6 @@ command-manage-spaces = Spravovat prostory…
 command-pane-stack-location = panel { $pane } / vrstva { $stack }
 command-space-pane-stack-location = { $space } / panel { $pane } / vrstva { $stack }
 command-terminal-path = Terminál ({ $path })
-command-group-interactive-mode = Interaktivní režim
 command-group-window = Okno
 command-group-tab = Karta
 command-group-pane = Panel

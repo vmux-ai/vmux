@@ -372,7 +372,6 @@ schema-language-id = Hizkuntza-ID
 schema-root-markers = Erro-markatzaileak
 schema-output-directory = Irteera-direktorioa
 
-menu-scene = Eszena
 menu-layout = Diseinua
 menu-terminal = Terminala
 menu-browser = Nabigatzailea
@@ -424,8 +423,6 @@ error-unknown-host = Vmux aplikazio-ostalari ezezaguna: { $host }
 history-title = Historia
 
 command-new-app-chat = { $provider }/{ $model } txat berria (aplikazioa)
-command-interactive-mode-user = Eszena > Modu interaktiboa > Erabiltzailea
-command-interactive-mode-player = Eszena > Modu interaktiboa > Erreproduzitzailea
 command-minimize-window = Diseinua > Leihoa > Minimizatu
 command-toggle-layout = Diseinua > Diseinua > Txandakatu diseinua
 command-close-tab = Diseinua > Fitxa > Itxi fitxa
@@ -694,7 +691,6 @@ command-manage-spaces = Kudeatu espazioak…
 command-pane-stack-location = panela { $pane } / pila { $stack }
 command-space-pane-stack-location = { $space } / panela { $pane } / pila { $stack }
 command-terminal-path = Terminala ({ $path })
-command-group-interactive-mode = Modu interaktiboa
 command-group-window = Leihoa
 command-group-tab = Fitxa
 command-group-pane = Panela

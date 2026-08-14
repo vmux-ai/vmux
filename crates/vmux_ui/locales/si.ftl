@@ -372,7 +372,6 @@ schema-language-id = භාෂා ID
 schema-root-markers = මූල සලකුණු
 schema-output-directory = ප්‍රතිදාන නාමාවලිය
 
-menu-scene = දර්ශනය
 menu-layout = සැකැස්ම
 menu-terminal = ටර්මිනලය
 menu-browser = බ්‍රවුසරය
@@ -424,8 +423,6 @@ error-unknown-host = නොදන්නා Vmux යෙදුම් සත්ක�
 history-title = ඉතිහාසය
 
 command-new-app-chat = නව { $provider }/{ $model } කතාබහ (යෙදුම)
-command-interactive-mode-user = දර්ශනය > අන්තර්ක්‍රියාකාරී ප්‍රකාරය > පරිශීලක
-command-interactive-mode-player = දර්ශනය > අන්තර්ක්‍රියාකාරී ප්‍රකාරය > ධාවක
 command-minimize-window = සැකසුම > කවුළුව > කුඩා කරන්න
 command-toggle-layout = සැකසුම > සැකසුම > සැකසුම මාරු කරන්න
 command-close-tab = සැකසුම > ටැබය > ටැබය වසන්න
@@ -694,7 +691,6 @@ command-manage-spaces = අවකාශ කළමනාකරණය කරන්
 command-pane-stack-location = පැනලය { $pane } / ස්ටැක් { $stack }
 command-space-pane-stack-location = { $space } / පැනලය { $pane } / ස්ටැක් { $stack }
 command-terminal-path = ටර්මිනලය ({ $path })
-command-group-interactive-mode = අන්තර්ක්‍රියාකාරී ප්‍රකාරය
 command-group-window = කවුළුව
 command-group-tab = ටැබය
 command-group-pane = පැනලය
