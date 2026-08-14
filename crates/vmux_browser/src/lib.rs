@@ -519,14 +519,9 @@ fn sync_cef_backend(world: &mut World) {
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
-    // The command bar stays OSR. A windowed CEF child view never receives DOM input here: real
-    // `NSEvent`s are dropped even when it holds first responder, and `send_key_event` forwarding is
-    // a windowless API that produces no DOM key events. The bar is the one surface hosting a real
-    // text field, so it needs the OSR path that input injection actually reaches.
-    let target_windowed =
-        |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
+    let target_windowed = |is_layout: bool, _is_modal: bool| base_windowed && !is_layout;
     let target_native_overlay =
-        |is_layout: bool, is_modal: bool| cfg!(target_os = "macos") && (is_layout || is_modal);
+        |is_layout: bool, _is_modal: bool| cfg!(target_os = "macos") && is_layout;
     let target_native_direct_overlay = |is_layout: bool| cfg!(target_os = "macos") && is_layout;
     let mut recreate = Vec::new();
     {
@@ -1567,7 +1562,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mode_keeps_layout_and_modal_osr_and_windows_pages_on_macos() {
+    fn only_the_layout_stays_osr_on_macos() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
 
@@ -1606,15 +1601,15 @@ mod tests {
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(terminal).is_some(),
             cfg!(target_os = "macos")
         );
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")
@@ -1660,16 +1655,16 @@ mod tests {
                 .is_some(),
             cfg!(target_os = "macos")
         );
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert_eq!(
+            app.world().get::<WebviewWindowed>(modal).is_some(),
+            cfg!(target_os = "macos")
+        );
         assert!(
             app.world()
                 .get::<WebviewNativeDirectOverlay>(modal)
                 .is_none()
         );
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
+        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
         assert_eq!(
             app.world().get::<WebviewWindowed>(page).is_some(),
             cfg!(target_os = "macos")

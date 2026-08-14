@@ -16,10 +16,7 @@ impl Plugin for ShortcutPlugin {
             .add_systems(Update, process_key_input.in_set(WriteAppCommands));
 
         #[cfg(target_os = "macos")]
-        app.add_plugins((
-            crate::native_keyboard::NativeKeyboardPlugin,
-            crate::event_tap::EventTapPlugin,
-        ));
+        app.add_plugins(crate::native_keyboard::NativeKeyboardPlugin);
     }
 }
 

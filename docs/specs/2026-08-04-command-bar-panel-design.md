@@ -9,6 +9,17 @@ keyboard focus is negotiated across three systems, its clickable area is a recta
 static and hit-tested on the AppKit thread, and its stacking is split between `zPosition` for
 painting and subview order for input.
 
+> **Retracted 2026-08-14. The paragraph below is wrong.** A windowed CEF child view *does* receive
+> DOM input here: opening `vmux://command-bar/` as an ordinary page in a pane produces exactly that,
+> running exactly this page, and it types. What actually failed was the `Modal`-specific plumbing
+> this design was built on, and the retest that appeared to confirm the failure exercised that same
+> bespoke path — so it reproduced the bug instead of testing the claim. The real cause is narrower
+> and is only half stated below: holding `CefKeyboardTarget` on a *windowed* browser makes bevy_cef
+> forward the key through `send_key_event`, so the host swallows the keystroke into a windowless API
+> that does nothing, and the surface looks focused while being deaf. See
+> [`2026-08-08-osr-free-desktop-design.md`](2026-08-08-osr-free-desktop-design.md), *Correction: the
+> windowed path was never broken*. Everything downstream of this paragraph inherits the error.
+
 An attempt to convert it to a native windowed `NSView` failed for a reason worth recording: a
 windowed CEF child view inside the winit-owned window never receives DOM input here. Both delivery
 paths were tested with the view frontmost, hit-tested, correctly sized, not `WasHidden`,

@@ -213,16 +213,21 @@ pub struct WebviewBrowser {
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
     /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
     ///
-    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal).
-    /// `send_key_event` is a windowless API and produces no DOM key events, and a windowed child
-    /// view here never receives usable `NSEvent`s either — so a surface hosting a real DOM text
-    /// field cannot be windowed. That is why the command bar stays OSR.
+    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal), because
+    /// `send_key_event` is a windowless API and produces no DOM key events. It does not follow that
+    /// a DOM text field cannot be windowed — this doc-comment used to say so, and it was wrong. A
+    /// windowed child view does receive usable `NSEvent`s; letting AppKit deliver them is how a page
+    /// in a pane types today. The trap is the combination: forward through `CefKeyboardTarget` to a
+    /// windowed browser and the keystroke lands in a call that does nothing.
+    /// See docs/specs/2026-08-08-osr-free-desktop-design.md.
     windowed: bool,
     allow_native_focus: bool,
     webview_popup_sender: WebviewPopupSenderInner,
     texture_wake: Option<TextureWake>,
     #[cfg(target_os = "macos")]
     native_liquid_glass: Option<objc2::rc::Retained<objc2_app_kit::NSGlassEffectView>>,
+    #[cfg(target_os = "macos")]
+    child_window: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSPanel>>>,
     #[cfg(all(target_os = "macos", feature = "native-video-overlay"))]
     media_overlay: RefCell<Option<MediaOverlay>>,
     #[cfg(target_os = "macos")]
@@ -281,6 +286,32 @@ impl Default for Browsers {
         }
     }
 }
+
+#[cfg(target_os = "macos")]
+objc2::define_class!(
+    /// A borderless floating panel that is allowed to become the key window.
+    ///
+    /// `NSWindow` refuses key status to borderless windows, so `makeKeyWindow` is a silent no-op
+    /// and the hosted document never receives a keystroke — they go to whatever window is key
+    /// instead. Titling the window would restore key eligibility but brings back a titlebar, a
+    /// frame taller than its content, and standard buttons AppKit keeps re-showing.
+    #[unsafe(super(objc2_app_kit::NSPanel, objc2_app_kit::NSWindow, objc2_app_kit::NSResponder, objc2::runtime::NSObject))]
+    #[thread_kind = objc2::MainThreadOnly]
+    #[name = "VmuxFloatingSurfacePanel"]
+    pub struct FloatingSurfacePanel;
+
+    impl FloatingSurfacePanel {
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            false
+        }
+    }
+);
 
 impl Browsers {
     #[allow(clippy::too_many_arguments)]
@@ -503,6 +534,8 @@ impl Browsers {
         #[cfg(target_os = "macos")]
         let native_liquid_glass = native_liquid_glass.flatten();
         let webview_browser = WebviewBrowser {
+            #[cfg(target_os = "macos")]
+            child_window: std::cell::RefCell::new(None),
             host,
             client: browser,
             size,
@@ -1669,6 +1702,226 @@ impl Browsers {
     /// `addSubview:positioned:relativeTo:` removes and re-inserts the view, which drops the
     /// compositor surface Chromium is drawing into and silently clears first responder. Callers
     /// run this every frame, so it must no-op when the view is already frontmost.
+    #[cfg(target_os = "macos")]
+    /// Re-host a windowed browser's view in a chromeless child `NSWindow`.
+    ///
+    /// Chromium keeps painting and keeps receiving DOM input from a child window, verified
+    /// 2026-08-08 — see `docs/specs/2026-08-08-osr-free-desktop-design.md`. This is what a floating
+    /// surface needs: a child window can be transparent, carries a real shadow, and is not clipped
+    /// by the parent's bounds, none of which a sibling view offers.
+    ///
+    /// The window must be titled with a hidden titlebar rather than borderless — `canBecomeKey` is
+    /// false for a borderless window, so it never takes keyboard focus.
+    ///
+    /// `x`/`y` are in the parent window's content coordinates, top-left origin, logical points.
+    #[cfg(target_os = "macos")]
+    pub fn host_in_child_window(
+        &self,
+        webview: &Entity,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> bool {
+        use objc2::MainThreadMarker;
+        use objc2::MainThreadOnly;
+        use objc2_app_kit::{
+            NSAutoresizingMaskOptions, NSBackingStoreType, NSColor, NSPanel, NSView,
+            NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
+        };
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+        let Some(mtm) = MainThreadMarker::new() else {
+            return false;
+        };
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        if !browser.windowed {
+            return false;
+        }
+        let handle = browser.host.window_handle();
+        if handle.is_null() {
+            return false;
+        }
+        let cef_view: &NSView = unsafe { &*handle.cast::<NSView>() };
+        let existing = browser.child_window.borrow().clone();
+        // Once the view has been reparented, `cef_view.window()` is the child — using it as the
+        // frame of reference would offset the child by `x`/`y` again on every call and walk it off
+        // the screen. The real parent is the one the child was attached to.
+        let parent_window = match existing.as_ref() {
+            Some(child) => child.parentWindow(),
+            None => cef_view.window(),
+        };
+        let Some(parent_window) = parent_window else {
+            return false;
+        };
+        let child = match existing {
+            Some(window) => window,
+            None => {
+                // An `NSPanel` with `NonactivatingPanel`, not a window. A plain borderless window
+                // returns false from `canBecomeKeyWindow`, so `makeKeyWindow` silently does
+                // nothing and the document never takes focus; a titled one brings a titlebar —
+                // hence a frame taller than its content — and standard buttons AppKit keeps
+                // re-showing. `FloatingSurfacePanel` overrides the former and keeps the latter
+                // from ever existing.
+                let window: objc2::rc::Retained<NSPanel> = {
+                    let this = FloatingSurfacePanel::alloc(mtm);
+                    let panel: objc2::rc::Retained<FloatingSurfacePanel> = unsafe {
+                        objc2::msg_send![
+                            this,
+                            initWithContentRect: NSRect::new(
+                                NSPoint::new(0.0, 0.0),
+                                NSSize::new(width, height),
+                            ),
+                            styleMask: NSWindowStyleMask::Borderless
+                                | NSWindowStyleMask::NonactivatingPanel,
+                            backing: NSBackingStoreType::Buffered,
+                            defer: false,
+                        ]
+                    };
+                    objc2::rc::Retained::into_super(panel)
+                };
+                window.setFloatingPanel(true);
+                window.setBecomesKeyOnlyIfNeeded(false);
+                window.setMovableByWindowBackground(true);
+                window.setOpaque(false);
+                window.setBackgroundColor(Some(&NSColor::clearColor()));
+                window.setHasShadow(true);
+                unsafe { window.setReleasedWhenClosed(false) };
+                window.setCollectionBehavior(
+                    NSWindowCollectionBehavior::FullScreenAuxiliary
+                        | NSWindowCollectionBehavior::Transient,
+                );
+                if let Some(content) = window.contentView() {
+                    content.setWantsLayer(true);
+                }
+                unsafe {
+                    parent_window.addChildWindow_ordered(&window, NSWindowOrderingMode::Above)
+                };
+                *browser.child_window.borrow_mut() = Some(window.clone());
+                window
+            }
+        };
+
+        // Parent content coordinates are top-left origin; NSWindow frames are screen coordinates
+        // with a bottom-left origin.
+        let parent_frame = parent_window.frame();
+        let content_height = parent_window
+            .contentView()
+            .map(|view| view.frame().size.height)
+            .unwrap_or(parent_frame.size.height);
+        let origin = NSPoint::new(
+            parent_frame.origin.x + x,
+            parent_frame.origin.y + (content_height - y - height),
+        );
+        let target_frame = NSRect::new(origin, NSSize::new(width, height));
+        let current = child.frame();
+        let moved = (current.origin.x - target_frame.origin.x).abs() > 0.5
+            || (current.origin.y - target_frame.origin.y).abs() > 0.5
+            || (current.size.width - target_frame.size.width).abs() > 0.5
+            || (current.size.height - target_frame.size.height).abs() > 0.5;
+        if moved {
+            child.setFrame_display(target_frame, true);
+        }
+
+        if let Some(content) = child.contentView() {
+            if !cef_view.isDescendantOf(&content) {
+                cef_view.removeFromSuperview();
+                content.addSubview(cef_view);
+            }
+            // Track the content view's real bounds rather than the requested size: a titled
+            // window's content is shorter than its frame, so computing this by hand leaves the web
+            // view smaller than the window and the background showing around it. Autoresizing keeps
+            // it correct through later resizes.
+            let bounds = content.bounds();
+            cef_view.setAutoresizingMask(
+                NSAutoresizingMaskOptions::ViewWidthSizable
+                    | NSAutoresizingMaskOptions::ViewHeightSizable,
+            );
+            let f = cef_view.frame();
+            if (f.origin.x - bounds.origin.x).abs() > 0.5
+                || (f.origin.y - bounds.origin.y).abs() > 0.5
+                || (f.size.width - bounds.size.width).abs() > 0.5
+                || (f.size.height - bounds.size.height).abs() > 0.5
+            {
+                cef_view.setFrame(bounds);
+            }
+        }
+        if !child.isVisible() {
+            child.orderFront(None);
+        }
+        if !child.isKeyWindow() {
+            child.makeKeyWindow();
+        }
+        // The standard buttons are not created until the window is first displayed, so hiding them
+        // at construction time is a no-op and they show through the chromeless surface.
+        true
+    }
+
+    /// Make the child panel the key window if it is not already.
+    ///
+    /// First responder inside the panel is not enough: AppKit delivers keys to the *key window*,
+    /// so anything that takes key back — activation, a pane hover grab — silently steals typing.
+    /// The check makes this cheap enough to call every frame.
+    #[cfg(target_os = "macos")]
+    pub fn ensure_child_window_key(&self, webview: &Entity) -> bool {
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        let child = browser.child_window.borrow().clone();
+        let Some(child) = child else {
+            return false;
+        };
+        // Only while our own app is active. AppKit correctly resigns key when the user switches
+        // apps, and re-taking it every frame captures their typing system-wide.
+        let active = objc2_foundation::MainThreadMarker::new()
+            .is_some_and(|mtm| objc2_app_kit::NSApplication::sharedApplication(mtm).isActive());
+        if !active || !child.isVisible() || child.isKeyWindow() {
+            return false;
+        }
+        child.makeKeyWindow();
+        true
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn ensure_child_window_key(&self, _: &Entity) -> bool {
+        false
+    }
+
+    /// Order the child window out, returning key status to the parent.
+    ///
+    /// The window and the view inside it are kept, so reopening is a reposition rather than a
+    /// rebuild — a browser teardown per open is what the old reveal handshake existed to paper over.
+    #[cfg(target_os = "macos")]
+    pub fn hide_child_window(&self, webview: &Entity) -> bool {
+        let Some(browser) = self.browsers.get(webview) else {
+            return false;
+        };
+        let child = browser.child_window.borrow().clone();
+        let Some(child) = child else {
+            return false;
+        };
+        if !child.isVisible() {
+            return false;
+        }
+        if let Some(parent) = child.parentWindow() {
+            parent.makeKeyWindow();
+        }
+        child.orderOut(None);
+        true
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn hide_child_window(&self, _: &Entity) -> bool {
+        false
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn host_in_child_window(&self, _: &Entity, _: f64, _: f64, _: f64, _: f64) -> bool {
+        false
+    }
+
     #[cfg(target_os = "macos")]
     pub fn raise_windowed_to_front(&self, webview: &Entity) {
         use objc2::ClassType;
