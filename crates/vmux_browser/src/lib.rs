@@ -519,10 +519,13 @@ fn sync_cef_backend(world: &mut World) {
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
     let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
-    // The command bar stays OSR. A windowed CEF child view never receives DOM input here: real
-    // `NSEvent`s are dropped even when it holds first responder, and `send_key_event` forwarding is
-    // a windowless API that produces no DOM key events. The bar is the one surface hosting a real
-    // text field, so it needs the OSR path that input injection actually reaches.
+    // The command bar stays OSR because the `Modal` plumbing around it assumes so, not because a
+    // windowed view cannot type. It can: `vmux://command-bar/` opened as an ordinary page in a pane
+    // is a windowed CEF view running this same page, and it accepts keyboard input. What breaks a
+    // windowed bar is the host holding `CefKeyboardTarget` on it — bevy_cef then forwards the key
+    // through `send_key_event`, a windowless API that produces no DOM event, so the keystroke is
+    // swallowed and the surface looks focused while being deaf. See
+    // docs/specs/2026-08-08-osr-free-desktop-design.md.
     let target_windowed =
         |is_layout: bool, is_modal: bool| base_windowed && !is_layout && !is_modal;
     let target_native_overlay =

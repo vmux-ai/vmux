@@ -213,10 +213,13 @@ pub struct WebviewBrowser {
     /// the macOS first responder, stealing keyboard from winit so Bevy shortcuts die, so windowed
     /// browsers are normally left unfocused and fed through `CefKeyboardTarget` forwarding.
     ///
-    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal).
-    /// `send_key_event` is a windowless API and produces no DOM key events, and a windowed child
-    /// view here never receives usable `NSEvent`s either — so a surface hosting a real DOM text
-    /// field cannot be windowed. That is why the command bar stays OSR.
+    /// That forwarding only reaches code consuming keys in Rust (the editor, the terminal), because
+    /// `send_key_event` is a windowless API and produces no DOM key events. It does not follow that
+    /// a DOM text field cannot be windowed — this doc-comment used to say so, and it was wrong. A
+    /// windowed child view does receive usable `NSEvent`s; letting AppKit deliver them is how a page
+    /// in a pane types today. The trap is the combination: forward through `CefKeyboardTarget` to a
+    /// windowed browser and the keystroke lands in a call that does nothing.
+    /// See docs/specs/2026-08-08-osr-free-desktop-design.md.
     windowed: bool,
     allow_native_focus: bool,
     webview_popup_sender: WebviewPopupSenderInner,
