@@ -58,10 +58,7 @@ impl Plugin for SettingsViewPlugin {
 pub struct Settings;
 
 impl Settings {
-    pub fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> impl Bundle {
+    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
         (
             (
                 Self,
@@ -74,10 +71,6 @@ impl Settings {
                     icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
             ),
             (
                 WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -106,10 +99,9 @@ impl WarmPage for Settings {
 
     fn spawn(
         commands: &mut Commands,
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) -> Entity {
-        commands.spawn(Settings::new(meshes, webview_mt)).id()
+        commands.spawn(Settings::new(webview_mt)).id()
     }
 }
 
@@ -929,7 +921,6 @@ mod page_open_tests {
     fn settings_page_open_spawns_marker_and_handles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
@@ -962,7 +953,6 @@ mod page_open_tests {
     fn settings_page_open_dedupes_per_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();

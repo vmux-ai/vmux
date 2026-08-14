@@ -530,7 +530,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_window",
         "bevy_render",
         "bevy_core_pipeline",
-        "bevy_mesh",
         "bevy_sprite",
         "bevy_ui",
         "bevy_ui_render",

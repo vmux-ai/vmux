@@ -100,7 +100,6 @@ pub(crate) fn apply_cef_state_to_meta(
 
 impl Browser {
     pub fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
         url: &str,
     ) -> impl Bundle {
@@ -117,7 +116,6 @@ impl Browser {
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
-            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
@@ -136,7 +134,6 @@ impl Browser {
     }
 
     pub fn new_with_title(
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
         url: &str,
         title: &str,
@@ -154,7 +151,6 @@ impl Browser {
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
-            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
@@ -173,7 +169,6 @@ impl Browser {
     }
 
     pub fn new_error(
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
         source_url: &str,
         display_url: &str,
@@ -192,7 +187,6 @@ impl Browser {
             },
             WebviewSource::new(source_url),
             ResolvedWebviewUri(source_url.to_string()),
-            Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
@@ -213,7 +207,6 @@ impl Browser {
 
 pub fn layout_cef_bundle(
     host_window: Entity,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     (
@@ -235,7 +228,6 @@ pub fn layout_cef_bundle(
         },
         ZIndex(2),
         WebviewSource::new(LAYOUT_PAGE_URL),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
         WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(1280.0, 720.0)),
         Transform::default(),
@@ -376,30 +368,23 @@ mod tests {
 
     fn build_test_cef(
         mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
         mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) {
         let host = commands.spawn_empty().id();
-        commands.spawn(layout_cef_bundle(host, &mut meshes, &mut webview_mt));
+        commands.spawn(layout_cef_bundle(host, &mut webview_mt));
     }
 
     fn build_test_page(
         mut commands: Commands,
-        mut meshes: ResMut<Assets<Mesh>>,
         mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) {
-        commands.spawn(Browser::new(
-            &mut meshes,
-            &mut webview_mt,
-            "https://example.com",
-        ));
+        commands.spawn(Browser::new(&mut webview_mt, "https://example.com"));
     }
 
     #[test]
     fn layout_cef_uses_manual_pointer_routing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_cef);
         app.update();
@@ -417,7 +402,6 @@ mod tests {
     fn page_cef_uses_opaque_dark_initial_background() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_page);
         app.update();
@@ -439,7 +423,6 @@ mod tests {
     fn page_cef_allows_native_first_responder() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_page);
         app.update();

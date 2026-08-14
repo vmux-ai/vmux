@@ -722,7 +722,6 @@ mod tests {
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings())
-        .init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
@@ -790,7 +789,6 @@ mod tests {
         .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
         .insert_resource(FocusedStack::default())
         .insert_resource(test_settings())
-        .init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
         let pane = app.world_mut().spawn(Pane).id();

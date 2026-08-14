@@ -507,7 +507,6 @@ fn path_from_files_url(url: &str) -> Option<PathBuf> {
 fn new_file_view_bundle(
     url: &str,
     path: PathBuf,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> impl Bundle {
     let title = path
@@ -537,10 +536,6 @@ fn new_file_view_bundle(
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
-            Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                Vec3::Z,
-                Vec2::splat(0.5),
-            ))),
         ),
         (
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -563,11 +558,10 @@ fn new_file_view_bundle(
 
 pub fn restore_file_view_bundle(
     url: &str,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Option<impl Bundle> {
     let path = path_from_files_url(url)?;
-    Some(new_file_view_bundle(url, path, meshes, webview_mt))
+    Some(new_file_view_bundle(url, path, webview_mt))
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -582,7 +576,6 @@ pub fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
@@ -613,7 +606,7 @@ pub fn handle_file_page_open(
         clear_stack_children(task.stack, &children_q, &mut commands);
         let view = commands
             .spawn((
-                new_file_view_bundle(&clean_url, path, &mut meshes, &mut webview_mt),
+                new_file_view_bundle(&clean_url, path, &mut webview_mt),
                 ChildOf(task.stack),
             ))
             .id();
@@ -4617,7 +4610,6 @@ mod page_open_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_file_page_open);
         app

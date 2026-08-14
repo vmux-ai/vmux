@@ -15,10 +15,7 @@ fn is_debug_url(url: &str) -> bool {
 pub struct DebugView;
 
 impl DebugView {
-    pub fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> impl Bundle {
+    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
         (
             (
                 Self,
@@ -31,10 +28,6 @@ impl DebugView {
                     icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
             ),
             (
                 WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -62,7 +55,6 @@ pub fn handle_debug_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
@@ -80,10 +72,7 @@ pub fn handle_debug_page_open(
             icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
-        commands.spawn((
-            DebugView::new(&mut meshes, &mut webview_mt),
-            ChildOf(task.stack),
-        ));
+        commands.spawn((DebugView::new(&mut webview_mt), ChildOf(task.stack)));
         commands.entity(entity).insert(PageOpenHandled);
     }
 }
