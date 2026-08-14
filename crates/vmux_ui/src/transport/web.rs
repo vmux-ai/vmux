@@ -1,4 +1,9 @@
-//! The wasm frontend: a page inside a CEF browser, reaching the Bevy process.
+//! The wasm frontend: a page inside a browser engine, reaching the Bevy process.
+//!
+//! Two engines host these pages and the page half must not know which. CEF injects `window.cef`;
+//! the wry host injects `window.vmuxWry` carrying the same two verbs, because a page that had to
+//! learn a second protocol would make the engine a build-time choice rather than a runtime one.
+//! [`HostBridge`] resolves whichever is present, and nothing below it is engine-specific.
 //!
 //! The framing is asymmetric and load-bearing. Page→host sends one [`BinIpcEnvelope`] whose id the
 //! Bevy side matches with `bin_ipc_event_id::<E>()`; host→page arrives as a bare `ArrayBuffer`
@@ -20,12 +25,12 @@ use crate::transport::event_listener::EventListenerError;
 use crate::transport::{BytesListener, HostPayload, PageHost};
 
 impl Host {
-    /// The CEF bridge, assumed when no host installs one — which is every desktop page.
+    /// The injected bridge, assumed when no host installs one — which is every desktop page.
     pub(crate) fn fallback() -> Option<&'static dyn PageHost> {
-        Some(&CefHost)
+        Some(&WebHost)
     }
 
-    /// Retry until the CEF bridge is injected.
+    /// Retry until the bridge is injected.
     ///
     /// Only wasm needs this: the bridge appears asynchronously after the page loads, whereas a
     /// native host installs its transport before the first page mounts.
@@ -83,27 +88,27 @@ impl Host {
     }
 }
 
-pub struct CefHost;
+pub struct WebHost;
 
-impl PageHost for CefHost {
+impl PageHost for WebHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         use js_sys::{ArrayBuffer, Uint8Array};
 
-        let cef = window_cef()?;
-        let emit_fn = cef_bin_emit_fn(&cef)?;
+        let bridge = HostBridge::resolve()?;
+        let emit_fn = bridge.bin_emit()?;
 
         let envelope = BinIpcEnvelope::new(id, bytes);
         let buffer = ArrayBuffer::new(envelope.as_bytes().len() as u32);
         let view = Uint8Array::new(&buffer);
         view.copy_from(envelope.as_bytes());
 
-        let _ = emit_fn.call1(&cef, &buffer.into());
+        let _ = emit_fn.call1(&bridge.0, &buffer.into());
         Ok(())
     }
 
     fn listen(&self, id: &str, mut on_bytes: BytesListener) -> Result<(), EventListenerError> {
-        let cef = window_cef()?;
-        let listen_fn = cef_bin_listen_fn(&cef)?;
+        let bridge = HostBridge::resolve()?;
+        let listen_fn = bridge.bin_listen()?;
 
         let closure = Closure::wrap(Box::new(move |e: JsValue| {
             if let Some(bytes) = js_value_bytes(&e) {
@@ -112,9 +117,53 @@ impl PageHost for CefHost {
         }) as Box<dyn FnMut(JsValue)>);
 
         let cb = closure.as_ref().unchecked_ref();
-        let _ = listen_fn.call2(&cef, &JsValue::from_str(id), cb);
+        let _ = listen_fn.call2(&bridge.0, &JsValue::from_str(id), cb);
         closure.forget();
         Ok(())
+    }
+}
+
+/// The object a page finds on `window` to reach whatever is hosting it.
+///
+/// Resolved per call rather than cached, because CEF injects its global asynchronously after the
+/// page loads — [`Host::schedule_listener_retry`] is the wait, and a cached miss would outlive it.
+struct HostBridge(JsValue);
+
+impl HostBridge {
+    /// Tried in order, so a page inside CEF keeps talking to CEF even if the wry shim is present.
+    const GLOBALS: [&'static str; 2] = ["cef", "vmuxWry"];
+
+    fn resolve() -> Result<Self, EventListenerError> {
+        let Some(win) = window() else {
+            return Err(EventListenerError::NoWindow);
+        };
+        for global in Self::GLOBALS {
+            let Ok(bridge) = js_sys::Reflect::get(&win, &JsValue::from_str(global)) else {
+                continue;
+            };
+            if bridge.is_null() || bridge.is_undefined() {
+                continue;
+            }
+            return Ok(Self(bridge));
+        }
+        Err(EventListenerError::NoHostBridge)
+    }
+
+    fn bin_emit(&self) -> Result<Function, EventListenerError> {
+        let Ok(emit) = js_sys::Reflect::get(&self.0, &JsValue::from_str("binEmit")) else {
+            return Err(EventListenerError::NoEmitMethod);
+        };
+        emit.dyn_into::<Function>()
+            .map_err(|_| EventListenerError::EmitNotCallable)
+    }
+
+    fn bin_listen(&self) -> Result<Function, EventListenerError> {
+        let Ok(listen) = js_sys::Reflect::get(&self.0, &JsValue::from_str("binListen")) else {
+            return Err(EventListenerError::NoListenMethod);
+        };
+        listen
+            .dyn_into::<Function>()
+            .map_err(|_| EventListenerError::ListenNotCallable)
     }
 }
 
@@ -143,34 +192,4 @@ pub fn js_value_bytes(value: &JsValue) -> Option<Vec<u8>> {
     let mut bytes = vec![0u8; view.length() as usize];
     view.copy_to(&mut bytes);
     Some(bytes)
-}
-
-fn window_cef() -> Result<JsValue, EventListenerError> {
-    let Some(win) = window() else {
-        return Err(EventListenerError::NoWindow);
-    };
-    let Ok(cef) = js_sys::Reflect::get(&win, &JsValue::from_str("cef")) else {
-        return Err(EventListenerError::NoCefGlobal);
-    };
-    if cef.is_null() || cef.is_undefined() {
-        return Err(EventListenerError::CefNotInjected);
-    }
-    Ok(cef)
-}
-
-fn cef_bin_emit_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
-    let Ok(emit) = js_sys::Reflect::get(cef, &JsValue::from_str("binEmit")) else {
-        return Err(EventListenerError::NoEmitMethod);
-    };
-    emit.dyn_into::<Function>()
-        .map_err(|_| EventListenerError::EmitNotCallable)
-}
-
-fn cef_bin_listen_fn(cef: &JsValue) -> Result<Function, EventListenerError> {
-    let Ok(listen) = js_sys::Reflect::get(cef, &JsValue::from_str("binListen")) else {
-        return Err(EventListenerError::NoListenMethod);
-    };
-    listen
-        .dyn_into::<Function>()
-        .map_err(|_| EventListenerError::ListenNotCallable)
 }

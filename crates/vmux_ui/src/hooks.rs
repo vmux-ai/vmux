@@ -32,7 +32,7 @@ pub use crate::transport::event_listener::{
 };
 
 #[cfg(web)]
-pub use crate::transport::cef::decode_bin_host_emit_js;
+pub use crate::transport::web::decode_bin_host_emit_js;
 
 #[cfg(web)]
 pub use crate::key_stroke::WebKey;
