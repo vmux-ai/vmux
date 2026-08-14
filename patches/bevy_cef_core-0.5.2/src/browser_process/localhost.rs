@@ -168,7 +168,13 @@ pub(crate) fn asset_load_path_from_request_url_with(
     }
 }
 
-pub(crate) fn asset_load_path_from_request_url(url: &str) -> String {
+/// Map a request URL onto the asset path that answers it.
+///
+/// Public because the CEF scheme handler is no longer the only caller: a `WKWebView` hosted by wry
+/// serves the same `vmux://` pages through the same [`CefRequest`] channel, and the two have to
+/// agree on this exactly. A second copy would be a second set of rules for which URLs are SPA
+/// routes and which are files.
+pub fn asset_load_path_from_request_url(url: &str) -> String {
     asset_load_path_from_request_url_with(url, resolved_cef_embedded_page_config().as_ref())
 }
 

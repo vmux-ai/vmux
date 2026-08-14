@@ -330,7 +330,7 @@ fn setup(
         ChildOf(root),
     ));
 
-    commands.spawn((layout_cef_bundle(pw, &mut webview_mt), ChildOf(root)));
+    commands.spawn((layout_cef_bundle(pw), ChildOf(root)));
 }
 
 fn request_default_layout(
@@ -831,8 +831,12 @@ mod tests {
         );
     }
 
+    /// A windowed CEF browser paints an opaque root on macOS and the layout is the one page that
+    /// must be see-through, so wry serves it instead. Handing the entity a `WebviewSource` again
+    /// is all it would take to undo that silently: it resolves to `ResolvedWebviewUri`, which is
+    /// the only thing CEF waits for before going and creating a browser.
     #[test]
-    fn layout_uses_transparent_osr_surface() {
+    fn layout_shell_never_asks_cef_for_a_browser() {
         let mut app = setup_window_app();
         app.update();
 
@@ -841,27 +845,12 @@ mod tests {
             .query_filtered::<Entity, With<LayoutCef>>()
             .single(app.world())
             .expect("layout shell");
+
+        assert!(app.world().get::<WebviewSource>(layout_shell).is_none());
         assert!(
             app.world()
-                .get::<WebviewOpaqueWindowedBackground>(layout_shell)
+                .get::<ResolvedWebviewUri>(layout_shell)
                 .is_none()
-        );
-        assert!(app.world().get::<WebviewWindowed>(layout_shell).is_none());
-        assert!(
-            app.world()
-                .get::<WebviewTransparent>(layout_shell)
-                .is_some()
-        );
-        assert!(
-            app.world()
-                .get::<WebviewNativeOverlay>(layout_shell)
-                .is_none()
-        );
-        assert_eq!(
-            app.world()
-                .get::<WebviewMaxFrameRate>(layout_shell)
-                .map(|rate| rate.0),
-            Some(30)
         );
     }
 

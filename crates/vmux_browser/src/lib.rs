@@ -17,11 +17,11 @@ mod present;
 
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
+mod layout_view;
 mod page_open;
 mod page_state;
 mod scroll;
 mod snapshot;
-mod wry_probe;
 pub use host_focus::HostFocusIntent;
 
 pub use native_bridge::NativeBridge;
@@ -117,7 +117,7 @@ impl Plugin for BrowserPlugin {
         )
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
-            wry_probe::WryProbePlugin,
+            layout_view::LayoutViewPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
