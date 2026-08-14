@@ -41,10 +41,13 @@ impl AgentPromptTarget {
     ///
     /// The snapshot records recency; turning it into the launcher's order is the contributing
     /// crate's business, and this is the part of it that needs no knowledge of what an agent is.
+    ///
+    /// A url appearing twice keeps its first rank, since that is the more recent one and the later
+    /// occurrence would otherwise push the agent down the launcher.
     pub fn recency_ranks(targets: &[Self]) -> HashMap<String, usize> {
         let mut ranks = HashMap::new();
         for (rank, target) in targets.iter().enumerate() {
-            ranks.insert(target.url(), rank);
+            ranks.entry(target.url()).or_insert(rank);
         }
         ranks
     }

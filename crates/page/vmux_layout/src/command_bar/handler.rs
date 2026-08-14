@@ -1582,7 +1582,6 @@ fn on_command_bar_action(
             }
         }
         CommandBarActionEvent::SwitchTab { pane, index } => {
-            // Despawn empty tab if in new-tab mode
             if let Some(stack_e) = empty_stack {
                 commands.entity(stack_e).despawn();
                 new_stack_ctx.stack = None;
