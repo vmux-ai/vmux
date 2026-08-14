@@ -140,7 +140,6 @@ pub(crate) fn attach_cef_page_requests(
     mut reader: MessageReader<CefPageAttachRequest>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
@@ -151,7 +150,6 @@ pub(crate) fn attach_cef_page_requests(
             request.bg_color.clone(),
             &children_q,
             &mut commands,
-            &mut meshes,
             &mut webview_mt,
         );
     }
@@ -169,7 +167,6 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
     >,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task, error, deferred_once) in &mut tasks {
@@ -181,7 +178,6 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 &error.message,
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             commands.entity(entity).insert(PageOpenHandled);
@@ -193,7 +189,6 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 &task.url,
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             commands.entity(entity).insert(PageOpenHandled);
@@ -209,7 +204,6 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 "",
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             commands.entity(entity).insert((
@@ -226,7 +220,6 @@ pub(crate) fn handle_unclaimed_page_open_tasks(
                 None,
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             commands.entity(entity).insert(PageOpenHandled);

@@ -481,7 +481,6 @@ fn spawn_layout_requested_content(
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
@@ -497,12 +496,7 @@ fn spawn_layout_requested_content(
                 };
                 let terminal = commands
                     .spawn((
-                        new_terminal_bundle_with_cwd(
-                            &mut meshes,
-                            &mut webview_mt,
-                            &settings,
-                            cwd.as_deref(),
-                        ),
+                        new_terminal_bundle_with_cwd(&mut webview_mt, &settings, cwd.as_deref()),
                         ChildOf(*stack),
                     ))
                     .id();
@@ -523,7 +517,6 @@ fn handle_terminal_page_open(
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
@@ -539,7 +532,6 @@ fn handle_terminal_page_open(
                 &settings,
                 &active_space,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             ) {
                 Ok(()) => {
@@ -562,7 +554,6 @@ fn open_terminal_page(
     settings: &AppSettings,
     active_space: &vmux_space::spaces::ActiveSpace,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(&task.url)
@@ -609,7 +600,7 @@ fn open_terminal_page(
     });
     let terminal = commands
         .spawn((
-            new_terminal_bundle_with_cwd(meshes, webview_mt, settings, cwd.as_deref()),
+            new_terminal_bundle_with_cwd(webview_mt, settings, cwd.as_deref()),
             ChildOf(task.stack),
         ))
         .id();
@@ -628,7 +619,6 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 fn respond_terminal_spawn(
     mut reader: MessageReader<TerminalSpawnRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: Res<AppSettings>,
     child_of_q: Query<&ChildOf>,
@@ -636,7 +626,6 @@ fn respond_terminal_spawn(
     for req in reader.read() {
         let term_e = commands
             .spawn(new_terminal_bundle_with_cwd(
-                &mut meshes,
                 &mut webview_mt,
                 &settings,
                 req.cwd.as_deref(),
@@ -678,24 +667,21 @@ fn service_wake_callback(app: &App) -> Option<ServiceWake> {
 }
 
 pub fn new_terminal_bundle(
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
 ) -> impl Bundle {
-    new_terminal_bundle_with_cwd(meshes, webview_mt, settings, None)
+    new_terminal_bundle_with_cwd(webview_mt, settings, None)
 }
 
 pub fn new_terminal_bundle_with_cwd(
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
 ) -> impl Bundle {
-    new_terminal_bundle_with_cwd_and_shell(meshes, webview_mt, settings, cwd, None)
+    new_terminal_bundle_with_cwd_and_shell(webview_mt, settings, cwd, None)
 }
 
 fn new_terminal_bundle_with_cwd_and_shell(
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
@@ -740,10 +726,6 @@ fn new_terminal_bundle_with_cwd_and_shell(
             },
             WebviewSource::new(TERMINAL_PAGE_URL),
             ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
-            Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                Vec3::Z,
-                Vec2::splat(0.5),
-            ))),
         ),
         (
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -769,7 +751,6 @@ pub fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
@@ -799,7 +780,6 @@ pub fn respond_terminal_stack_spawn(
         let terminal = commands
             .spawn((
                 new_terminal_bundle_with_cwd_and_shell(
-                    &mut meshes,
                     &mut webview_mt,
                     &settings,
                     request.cwd.as_deref(),
@@ -824,7 +804,6 @@ pub fn respond_terminal_stack_spawn(
 }
 
 pub fn reattach_terminal_bundle(
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     process_id: ProcessId,
 ) -> impl Bundle {
@@ -843,10 +822,6 @@ pub fn reattach_terminal_bundle(
             },
             WebviewSource::new(TERMINAL_PAGE_URL),
             ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
-            Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                Vec3::Z,
-                Vec2::splat(0.5),
-            ))),
         ),
         (
             WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -3985,7 +3960,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<TerminalStackSpawnRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, respond_terminal_stack_spawn);
 
@@ -4021,7 +3995,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .init_resource::<vmux_space::spaces::ActiveSpace>()
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
@@ -4069,7 +4042,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
@@ -4100,7 +4072,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
@@ -4142,7 +4113,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
@@ -4193,7 +4163,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
@@ -4248,7 +4217,6 @@ mod tests {
             .add_message::<LayoutSpawnRequest>()
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, spawn_layout_requested_content);
 

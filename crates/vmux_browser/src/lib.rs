@@ -1107,7 +1107,6 @@ fn attach_cef_page_to_stack(
     bg_color: Option<String>,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Entity {
     clear_stack_children(stack, children_q, commands);
@@ -1119,7 +1118,7 @@ fn attach_cef_page_to_stack(
     });
     let browser = commands
         .spawn((
-            Browser::new_with_title(meshes, webview_mt, url, title),
+            Browser::new_with_title(webview_mt, url, title),
             ChildOf(stack),
         ))
         .id();
@@ -1134,7 +1133,6 @@ fn attach_error_page_to_stack(
     message: &str,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
     webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let source = error_page_source(title, message, display_url);
@@ -1146,7 +1144,7 @@ fn attach_error_page_to_stack(
     });
     let browser = commands
         .spawn((
-            Browser::new_error(meshes, webview_mt, &source, display_url, title),
+            Browser::new_error(webview_mt, &source, display_url, title),
             ChildOf(stack),
         ))
         .id();
@@ -1985,7 +1983,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .init_resource::<CapturedNavigateUrls>();
 
@@ -2038,7 +2035,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2093,7 +2089,6 @@ mod tests {
             app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2151,7 +2146,6 @@ mod tests {
             app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2204,7 +2198,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane_a = app.world_mut().spawn(Pane).id();
@@ -2252,7 +2245,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2301,7 +2293,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane_a = app.world_mut().spawn(Pane).id();
@@ -2354,7 +2345,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2403,7 +2393,6 @@ mod tests {
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2461,7 +2450,6 @@ mod tests {
                 ))
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2509,7 +2497,6 @@ mod tests {
                 ))
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<Mesh>>()
                 .init_resource::<Assets<WebviewExtendStandardMaterial>>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -2574,7 +2561,6 @@ mod tests {
                 Update,
                 capture_page_open_requests.after(vmux_command::ReadAppCommands),
             )
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<CapturedNavigateUrls>()
             .init_resource::<CapturedPageOpenRequests>()

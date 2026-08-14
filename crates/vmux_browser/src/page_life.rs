@@ -60,7 +60,6 @@ pub(crate) fn spawn_popup_stacks(
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     while let Ok(ev) = popup_rx.0.try_recv() {
@@ -85,7 +84,7 @@ pub(crate) fn spawn_popup_stacks(
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
         commands.spawn((
-            Browser::new(&mut meshes, &mut webview_mt, &ev.target_url),
+            Browser::new(&mut webview_mt, &ev.target_url),
             ChildOf(new_stack),
         ));
     }
