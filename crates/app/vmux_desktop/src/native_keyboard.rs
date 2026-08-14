@@ -68,12 +68,12 @@ fn is_command_bar_dismiss_combo(combo: &KeyCombo) -> bool {
             && !combo.modifiers.super_key)
 }
 
-pub(crate) enum KeyAction {
+enum KeyAction {
     Consume(Option<AppCommand>),
     PassThrough,
 }
 
-pub(crate) fn decide(
+fn decide(
     map: &Keymap,
     pending: &mut Option<(KeyCombo, Instant)>,
     combo: KeyCombo,
@@ -108,7 +108,7 @@ pub(crate) fn decide(
     KeyAction::PassThrough
 }
 
-pub(crate) fn classify(combo: KeyCombo) -> KeyAction {
+fn classify(combo: KeyCombo) -> KeyAction {
     if is_command_bar_dismiss_combo(&combo) && vmux_browser::request_native_command_bar_dismiss() {
         return KeyAction::Consume(None);
     }
@@ -122,10 +122,6 @@ pub(crate) fn classify(combo: KeyCombo) -> KeyAction {
     };
     let mut pending = PENDING_PREFIX.lock();
     decide(map, &mut pending, combo, Instant::now())
-}
-
-pub(crate) fn push_command(cmd: AppCommand) {
-    PENDING_COMMANDS.lock().push(cmd);
 }
 
 fn handle_key_action(
@@ -156,7 +152,7 @@ fn translate(key_code: u16, flags: NSEventModifierFlags) -> Option<KeyCombo> {
     Some(KeyCombo { key, modifiers })
 }
 
-pub(crate) fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
+fn key_code_from_vk(vk: u16) -> Option<KeyCode> {
     let key = match vk {
         0x00 => KeyCode::KeyA,
         0x01 => KeyCode::KeyS,

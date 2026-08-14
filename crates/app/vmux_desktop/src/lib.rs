@@ -22,8 +22,6 @@ mod capture_output;
 ))]
 mod disabled_features;
 mod display;
-#[cfg(target_os = "macos")]
-mod event_tap;
 #[cfg(all(target_os = "macos", feature = "native-glass"))]
 mod glass;
 mod key_claim;
