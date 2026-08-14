@@ -14,8 +14,10 @@ use parking_lot::Mutex;
 use std::sync::LazyLock;
 #[cfg(target_os = "macos")]
 use vmux_browser::HostFocusIntent;
+#[cfg(target_os = "macos")]
+use vmux_command::ReadAppCommands;
 use vmux_command::{
-    AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, StackCommand, WriteAppCommands,
+    AppCommand, BrowserCommand, LayoutCommand, StackCommand, WriteAppCommands,
     build_native_root_menu, open::OpenCommand,
 };
 use vmux_ui::i18n::{DEFAULT_LOCALE, Locale};
