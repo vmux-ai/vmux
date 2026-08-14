@@ -40,7 +40,7 @@ The disproof is direct: opening `vmux://command-bar/` as an ordinary page in a p
 windowed CEF view running the same page, and it accepts keyboard input normally. Browser creation
 parameters are identical to a working editor pane —
 
-```
+```text
 command-bar  windowed=true  bg=None              allow_native_focus=true  fps=120
 editor pane  windowed=true  bg=Some(4280361252)  allow_native_focus=true  fps=120
 ```

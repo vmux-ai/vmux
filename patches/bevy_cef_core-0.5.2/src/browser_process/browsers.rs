@@ -1922,6 +1922,7 @@ impl Browsers {
         false
     }
 
+    #[cfg(target_os = "macos")]
     pub fn raise_windowed_to_front(&self, webview: &Entity) {
         use objc2::ClassType;
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
