@@ -62,7 +62,6 @@ fn respond_process_stack_spawn(
     mut reader: MessageReader<ProcessStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
@@ -98,12 +97,7 @@ fn respond_process_stack_spawn(
         };
         let term = commands
             .spawn((
-                new_terminal_bundle_with_cwd(
-                    &mut meshes,
-                    &mut webview_mt,
-                    &settings,
-                    Some(&request.cwd),
-                ),
+                new_terminal_bundle_with_cwd(&mut webview_mt, &settings, Some(&request.cwd)),
                 ChildOf(stack),
             ))
             .id();
@@ -169,7 +163,6 @@ pub(super) fn handle_spawn_agent_requests(
     exec_override: Option<Res<AgentExecutableOverride>>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for req in reader.read() {
@@ -182,7 +175,6 @@ pub(super) fn handle_spawn_agent_requests(
                 message,
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             continue;
@@ -193,7 +185,6 @@ pub(super) fn handle_spawn_agent_requests(
                 req.stack,
                 &children_q,
                 &mut commands,
-                &mut meshes,
                 &mut webview_mt,
             );
             continue;
@@ -214,12 +205,7 @@ pub(super) fn handle_spawn_agent_requests(
                 clear_stack_children(req.stack, &children_q, &mut commands);
                 let terminal = commands
                     .spawn((
-                        new_terminal_bundle_with_cwd(
-                            &mut meshes,
-                            &mut webview_mt,
-                            &settings,
-                            Some(&req.cwd),
-                        ),
+                        new_terminal_bundle_with_cwd(&mut webview_mt, &settings, Some(&req.cwd)),
                         ChildOf(req.stack),
                     ))
                     .id();
@@ -267,7 +253,6 @@ pub(super) fn handle_spawn_agent_requests(
                     &e,
                     &children_q,
                     &mut commands,
-                    &mut meshes,
                     &mut webview_mt,
                 );
             }
@@ -278,7 +263,6 @@ pub(super) fn handle_spawn_agent_requests(
 fn respond_page_agent_attach(
     mut reader: MessageReader<PageAgentAttachRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
     kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
@@ -294,7 +278,6 @@ fn respond_page_agent_attach(
             &req.model,
             &req.sid,
             &mut commands,
-            &mut meshes,
             &mut webview_mt,
             idx,
             &kind_q,
@@ -305,7 +288,6 @@ fn respond_page_agent_attach(
 fn respond_page_agent_spawn_stack(
     mut reader: MessageReader<PageAgentSpawnStackRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
     kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
@@ -328,7 +310,6 @@ fn respond_page_agent_spawn_stack(
             &req.model,
             &req.sid,
             &mut commands,
-            &mut meshes,
             &mut webview_mt,
             idx,
             &kind_q,
@@ -339,7 +320,6 @@ fn respond_page_agent_spawn_stack(
 fn respond_page_agent_spawn_default(
     mut reader: MessageReader<PageAgentSpawnDefaultRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
     kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
@@ -369,7 +349,6 @@ fn respond_page_agent_spawn_default(
             p.default_model,
             &sid,
             &mut commands,
-            &mut meshes,
             &mut webview_mt,
             idx,
             &kind_q,
@@ -388,7 +367,6 @@ fn respond_page_agent_spawn_default(
 fn respond_page_agent_attach_default(
     mut reader: MessageReader<PageAgentAttachDefaultRequest>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: Option<Res<crate::client::page::strategy_index::PageStrategyIndex>>,
     kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
@@ -411,7 +389,6 @@ fn respond_page_agent_attach_default(
             p.default_model,
             &sid,
             &mut commands,
-            &mut meshes,
             &mut webview_mt,
             idx,
             &kind_q,

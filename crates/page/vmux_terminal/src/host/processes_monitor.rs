@@ -58,10 +58,7 @@ impl Plugin for ProcessesMonitorPlugin {
 pub struct ProcessesMonitor;
 
 impl ProcessesMonitor {
-    pub fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> impl Bundle {
+    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
         (
             (
                 Self,
@@ -74,10 +71,6 @@ impl ProcessesMonitor {
                     icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
             ),
             (
                 WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -106,12 +99,9 @@ impl WarmPage for ProcessesMonitor {
 
     fn spawn(
         commands: &mut Commands,
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) -> Entity {
-        commands
-            .spawn(ProcessesMonitor::new(meshes, webview_mt))
-            .id()
+        commands.spawn(ProcessesMonitor::new(webview_mt)).id()
     }
 }
 
@@ -322,7 +312,6 @@ fn on_process_navigate(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
 ) {
@@ -361,7 +350,7 @@ fn on_process_navigate(
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
     commands.spawn((
-        reattach_terminal_bundle(&mut meshes, &mut webview_mt, process_id),
+        reattach_terminal_bundle(&mut webview_mt, process_id),
         ChildOf(tab),
     ));
 }

@@ -27,10 +27,7 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
 pub struct Spaces;
 
 impl Spaces {
-    pub fn new(
-        meshes: &mut ResMut<Assets<Mesh>>,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> impl Bundle {
+    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
         (
             (
                 Self,
@@ -43,10 +40,6 @@ impl Spaces {
                     icon: vmux_core::PageIcon::None,
                     bg_color: None,
                 },
-                Mesh3d(meshes.add(bevy::math::primitives::Plane3d::new(
-                    Vec3::Z,
-                    Vec2::splat(0.5),
-                ))),
             ),
             (
                 WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
@@ -75,10 +68,9 @@ impl WarmPage for Spaces {
 
     fn spawn(
         commands: &mut Commands,
-        meshes: &mut ResMut<Assets<Mesh>>,
         webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     ) -> Entity {
-        commands.spawn(Spaces::new(meshes, webview_mt)).id()
+        commands.spawn(Spaces::new(webview_mt)).id()
     }
 }
 

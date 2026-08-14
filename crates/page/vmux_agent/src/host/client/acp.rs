@@ -993,7 +993,6 @@ fn apply_acp_terminal_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PlacementCtx,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
 ) {
@@ -1021,7 +1020,7 @@ fn apply_acp_terminal_created(
             .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))
             .id();
         commands.spawn((
-            reattach_terminal_bundle(&mut meshes, &mut webview_mt, ev.process_id),
+            reattach_terminal_bundle(&mut webview_mt, ev.process_id),
             vmux_terminal::RetainOnProcessExit,
             ChildOf(tab),
         ));
@@ -1450,7 +1449,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         let matching = app
             .world_mut()
@@ -1514,7 +1512,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         let matching = app
             .world_mut()
@@ -1682,7 +1679,6 @@ mod tests {
         let mut app = App::new();
         app.add_message::<PageAgentAcpTerminalCreated>()
             .add_systems(Update, apply_acp_terminal_created)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         let tab = app.world_mut().spawn(tab_bundle()).id();
         let pane = app
@@ -1894,7 +1890,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
             .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn(AcpSession {
             agent_id: "vibe-acp".to_string(),

@@ -164,7 +164,6 @@ fn setup(
     main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
-    mut meshes: ResMut<Assets<Mesh>>,
     mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
@@ -322,7 +321,6 @@ fn setup(
         },
         ZIndex(3),
         WebviewSource::new(COMMAND_BAR_PAGE_URL),
-        Mesh3d(meshes.add(Plane3d::new(Vec3::Z, Vec2::splat(0.5)))),
         WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
         Transform::default(),
@@ -332,10 +330,7 @@ fn setup(
         ChildOf(root),
     ));
 
-    commands.spawn((
-        layout_cef_bundle(pw, &mut meshes, &mut webview_mt),
-        ChildOf(root),
-    ));
+    commands.spawn((layout_cef_bundle(pw, &mut webview_mt), ChildOf(root)));
 }
 
 fn request_default_layout(
@@ -741,7 +736,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings(8.0))
-            .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<WindowMaterial>>()
             .init_resource::<Assets<WebviewExtendStandardMaterial>>();
         app.world_mut().spawn((
