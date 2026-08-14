@@ -48,7 +48,13 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSView",
     "NSWindow",
 ] }
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+] }
 raw-window-handle = "0.6"
+wry = { version = "0.53", features = ["transparent"] }
 
 [dev-dependencies]
 async-channel = "2"
