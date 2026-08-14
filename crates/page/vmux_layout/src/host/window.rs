@@ -302,12 +302,12 @@ fn setup(
             Modal,
             HostWindow(pw),
             Browser,
-            // OSR, composited as a native overlay above the windowed pages. The page paints its
-            // own themed shell through the transparent surface.
-            WebviewTransparent,
-            WebviewNativeLiquidGlass,
+            // An ordinary windowed surface, framed by the shared `sync_windowed_frames` and
+            // focused by the shared route. It is offscreen rendering that forced the host to
+            // inject its keystrokes; a native view is handed them by AppKit instead.
+            WebviewWindowed,
             WebviewWindowedNativeFocus,
-            bevy_cef::prelude::WebviewNativeOverlay,
+            WebviewOpaqueWindowedBackground,
             bevy_cef::prelude::CefIgnorePinchZoom,
         ),
         Node {
@@ -804,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_modal_backend_is_mode_driven() {
+    fn command_bar_spawns_as_a_windowed_surface() {
         let mut app = setup_window_app();
         app.update();
 
@@ -814,7 +814,21 @@ mod tests {
             .single(app.world())
             .expect("modal");
 
-        assert!(app.world().get::<WebviewWindowed>(modal).is_none());
+        assert!(app.world().get::<WebviewWindowed>(modal).is_some());
+        assert!(
+            app.world()
+                .get::<bevy_cef::prelude::WebviewNativeOverlay>(modal)
+                .is_none()
+        );
+        // A windowed CEF view cannot be transparent, so the glass shell goes with the
+        // overlay it was composited through.
+        assert!(app.world().get::<WebviewTransparent>(modal).is_none());
+        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_none());
+        assert!(
+            app.world()
+                .get::<WebviewOpaqueWindowedBackground>(modal)
+                .is_some()
+        );
     }
 
     #[test]
@@ -827,12 +841,6 @@ mod tests {
             .query_filtered::<Entity, With<LayoutCef>>()
             .single(app.world())
             .expect("layout shell");
-        let modal = app
-            .world_mut()
-            .query_filtered::<Entity, With<Modal>>()
-            .single(app.world())
-            .expect("modal");
-
         assert!(
             app.world()
                 .get::<WebviewOpaqueWindowedBackground>(layout_shell)
@@ -855,14 +863,6 @@ mod tests {
                 .map(|rate| rate.0),
             Some(30)
         );
-        // The modal renders OSR through a transparent surface, so no opaque background override.
-        assert!(app.world().get::<WebviewTransparent>(modal).is_some());
-        assert!(
-            app.world()
-                .get::<WebviewOpaqueWindowedBackground>(modal)
-                .is_none()
-        );
-        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_some());
     }
 
     #[test]
