@@ -535,8 +535,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_ui_render",
         "bevy_image",
         "bevy_scene",
-        "bevy_state",
-        "bevy_input_focus",
         "bevy_picking",
         "sprite_picking",
         "ui_picking",
