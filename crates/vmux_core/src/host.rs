@@ -16,6 +16,7 @@ pub mod browser;
 pub mod extension;
 pub mod host_spawn;
 pub mod notify;
+pub mod overlay;
 pub mod page;
 pub mod page_open;
 pub mod profile;
@@ -27,6 +28,7 @@ pub use archive::{
 };
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
+pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask, PendingPrompt, PendingPromptAttachments,

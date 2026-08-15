@@ -6,7 +6,6 @@
 
 use crate::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use crate::command_bar::panel::CommandBarPanelActive;
-use crate::command_bar::state::CommandBarState;
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
@@ -16,7 +15,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_command::CommandBar;
+use vmux_core::overlay::{OverlayState, WindowOverlay};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -78,7 +77,7 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<CommandBar>>,
+    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<WindowOverlay>>,
     layout_keyboard_q: Query<Entity, (With<LayoutCef>, LayoutKeyboardCapture)>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
@@ -167,7 +166,7 @@ fn sync_children_to_ui(
             &mut WebviewSize,
             Option<&Header>,
             Option<&SideSheet>,
-            Option<&CommandBar>,
+            Option<&WindowOverlay>,
             Option<&Visibility>,
             Option<&HistorySwipeVisualOffset>,
             Has<PendingWebviewReveal>,
@@ -402,7 +401,7 @@ pub(crate) fn sync_windowed_frames(
             With<Browser>,
             With<WebviewWindowed>,
             Without<LayoutCef>,
-            Without<CommandBar>,
+            Without<WindowOverlay>,
         ),
     >,
     child_of_q: Query<&ChildOf>,
@@ -770,7 +769,7 @@ pub(crate) fn sync_windowed_command_bar(
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
-        With<CommandBar>,
+        With<WindowOverlay>,
     >,
     native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
@@ -785,7 +784,7 @@ pub(crate) fn sync_windowed_command_bar(
         *was_open = false;
         return;
     };
-    let state = CommandBarState::from_modal(node.display, *visibility, has_keyboard_target);
+    let state = OverlayState::of(node.display, *visibility, has_keyboard_target);
     let open = state.is_shown();
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
@@ -914,7 +913,7 @@ pub(crate) fn sync_windowed_command_bar(
 #[cfg(target_os = "macos")]
 fn flush_native_command_bar_pointer_events(
     browsers: NonSend<Browsers>,
-    modal_q: Query<Entity, (With<CommandBar>, With<WebviewWindowed>)>,
+    modal_q: Query<Entity, (With<WindowOverlay>, With<WebviewWindowed>)>,
 ) {
     let Ok(entity) = modal_q.single() else {
         return;
@@ -952,7 +951,7 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed
 
 fn sync_cef_webview_resize_after_ui(
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<CommandBar>)>,
+    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<WindowOverlay>)>,
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -1029,7 +1028,7 @@ fn sync_osr_webview_focus(
             Option<&ComputedNode>,
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
-            Has<CommandBar>,
+            Has<WindowOverlay>,
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
             Has<LayoutCef>,
@@ -1594,7 +1593,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Browser,
-                CommandBar,
+                WindowOverlay,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -1891,7 +1890,7 @@ mod tests {
 
     #[test]
     fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
-        let revealing = CommandBarState::from_modal(Display::Flex, Visibility::Hidden, true);
+        let revealing = OverlayState::of(Display::Flex, Visibility::Hidden, true);
 
         assert!(revealing.owns_input());
         assert!(!revealing.is_shown());

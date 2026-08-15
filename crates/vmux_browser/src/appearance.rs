@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use vmux_command::CommandBar;
+use vmux_core::overlay::WindowOverlay;
 use vmux_core::page::PageReady;
 use vmux_layout::LayoutCef;
 
@@ -32,7 +32,7 @@ fn on_webview_ready_send_theme(
     browsers: NonSend<Browsers>,
     settings: Res<AppSettings>,
     cef_q: Query<(), With<LayoutCef>>,
-    modal_q: Query<(), With<CommandBar>>,
+    modal_q: Query<(), With<WindowOverlay>>,
     mut zoom_q: Query<&mut bevy_cef::prelude::ZoomLevel>,
     mut commands: Commands,
 ) {

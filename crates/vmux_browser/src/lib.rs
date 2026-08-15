@@ -1128,7 +1128,7 @@ mod error_page_source_tests {
 mod tests {
     use super::*;
     use crate::appearance::sync_appearance_to_cef;
-    use vmux_command::CommandBar;
+    use vmux_core::overlay::WindowOverlay;
 
     #[test]
     fn cef_disables_bfcache_for_extension_ports() {
@@ -1414,7 +1414,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Browser,
-                CommandBar,
+                WindowOverlay,
                 WebviewSource::new("vmux://command-bar/"),
             ))
             .id();

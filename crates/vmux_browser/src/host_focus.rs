@@ -1,8 +1,7 @@
-use crate::command_bar::state::CommandBarState;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
-use vmux_command::CommandBar;
+use vmux_core::overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 use vmux_layout::Header;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
@@ -39,18 +38,18 @@ impl Plugin for HostFocusPlugin {
     }
 }
 
-fn page_owns_escape(terminal_focused: bool, command_bar_open: bool) -> bool {
-    terminal_focused || command_bar_open
+fn page_owns_escape(terminal_focused: bool, overlay_open: bool) -> bool {
+    terminal_focused || overlay_open
 }
 
 /// Publishes whether a page will answer Escape itself, for the native key monitor to read.
 fn publish_native_page_owns_escape(
     terminal_focus_q: Query<(), (With<Terminal>, With<CefKeyboardTarget>)>,
-    modal_q: crate::command_bar::state::CommandBarStateQuery,
+    overlay_q: OverlayStateQuery,
 ) {
     crate::set_native_page_owns_escape(page_owns_escape(
         !terminal_focus_q.is_empty(),
-        crate::command_bar::handler::is_command_bar_open(&modal_q),
+        OverlayState::of_any(&overlay_q).owns_input(),
     ));
 }
 
@@ -92,7 +91,7 @@ pub(crate) fn compute_host_focus_intent(
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
         ),
-        With<CommandBar>,
+        With<WindowOverlay>,
     >,
     layout_keyboard_q: Query<(), (With<Browser>, crate::present::LayoutKeyboardCapture)>,
     mut intent: ResMut<HostFocusIntent>,
@@ -101,7 +100,7 @@ pub(crate) fn compute_host_focus_intent(
         modal_q
             .iter()
             .find_map(|(entity, node, visibility, keyboard_target, windowed)| {
-                CommandBarState::from_modal(
+                OverlayState::of(
                     node.display,
                     visibility.copied().unwrap_or_default(),
                     keyboard_target,
@@ -238,7 +237,7 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((
-            CommandBar,
+            WindowOverlay,
             Node {
                 display: Display::Flex,
                 ..default()
@@ -263,7 +262,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                CommandBar,
+                WindowOverlay,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -292,7 +291,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                CommandBar,
+                WindowOverlay,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -318,7 +317,7 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((
-            CommandBar,
+            WindowOverlay,
             Node {
                 display: Display::Flex,
                 ..default()

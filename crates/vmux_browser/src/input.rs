@@ -5,7 +5,6 @@
 //! before any click is delivered against it, and a click that lands outside the command bar has
 //! to dismiss it rather than reach the page underneath.
 
-use crate::command_bar::state::CommandBarStateQuery;
 use bevy::{
     ecs::relationship::Relationship,
     input::{
@@ -18,8 +17,9 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
-use vmux_command::CommandBar;
 use vmux_command::event::CommandBarActionEvent;
+use vmux_core::overlay::WindowOverlay;
+use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
 
@@ -58,9 +58,9 @@ impl Plugin for InputPlugin {
 
 fn log_command_bar_keyboard_input(
     mut events: MessageReader<KeyboardInput>,
-    modal_q: CommandBarStateQuery,
+    overlay_q: OverlayStateQuery,
 ) {
-    if !crate::command_bar::handler::is_command_bar_open(&modal_q) {
+    if !OverlayState::of_any(&overlay_q).owns_input() {
         return;
     }
     for event in events.read() {
@@ -75,7 +75,7 @@ fn sync_layout_cef_pointer_target(
     layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut commands: Commands,
 ) {
     let Ok((layout, has_target)) = layout_q.single() else {
@@ -129,7 +129,7 @@ fn forward_layout_cef_cursor_move(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut was_in_region: Local<bool>,
 ) {
     if suppress.0 || !modal_pointer_targets.is_empty() {
@@ -162,7 +162,7 @@ fn forward_layout_cef_mouse_button(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
     mut captured: Local<bool>,
 ) {
     if suppress.0 || !modal_pointer_targets.is_empty() {
@@ -220,7 +220,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
     mut events: MessageReader<MouseButtonInput>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    modal_q: Query<(Entity, Option<&HostWindow>), (With<CommandBar>, With<WebviewWindowed>)>,
+    modal_q: Query<(Entity, Option<&HostWindow>), (With<WindowOverlay>, With<WebviewWindowed>)>,
     mut commands: Commands,
 ) {
     let Ok((modal_e, host_window)) = modal_q.single() else {
@@ -265,7 +265,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
 }
 
 fn dismiss_command_bar_from_native_monitor(
-    modal_q: Query<Entity, With<CommandBar>>,
+    modal_q: Query<Entity, With<WindowOverlay>>,
     mut commands: Commands,
 ) {
     if !take_native_command_bar_dismiss_requested() {
