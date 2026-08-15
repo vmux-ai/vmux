@@ -20,6 +20,9 @@ use vmux_command::event::{
     CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
     PathEntry, SearchEngine, SearchEngineSetting,
 };
+use vmux_command::event::{
+    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
+};
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
@@ -38,9 +41,6 @@ use vmux_core::{
 };
 use vmux_history::{LastActivatedAt, now_millis};
 use vmux_layout::cef::{Browser, LayoutCef};
-use vmux_layout::event::{
-    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
-};
 use vmux_layout::{
     Header,
     pane::{Pane, PaneSplit},
