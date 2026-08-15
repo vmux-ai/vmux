@@ -1,11 +1,9 @@
-#[cfg(target_os = "macos")]
 use bevy::prelude::*;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::os::raw::c_int;
-#[cfg(any(target_os = "macos", test))]
 use std::sync::Arc;
 
 /// Inline dirty-rectangle storage for CEF paints.
