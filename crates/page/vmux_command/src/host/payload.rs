@@ -21,9 +21,6 @@ pub struct CommandBarEntry {
     pub shortcut: String,
 }
 
-/// Built-in command rows plus whatever other crates contributed, already named.
-///
-/// `superseded` names commands a registered page stands in for, whose rows the page entry replaces.
 /// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
 /// bar and the home launcher, from the current snapshots and gathered tabs.
 #[allow(clippy::too_many_arguments)]
@@ -112,6 +109,9 @@ pub fn build_command_bar_open_payload(
     )
 }
 
+/// Built-in command rows plus whatever other crates contributed, already named.
+///
+/// `superseded` names commands a registered page stands in for, whose rows the page entry replaces.
 pub fn command_list(
     locale: &Locale,
     contributed: Vec<CommandBarEntry>,

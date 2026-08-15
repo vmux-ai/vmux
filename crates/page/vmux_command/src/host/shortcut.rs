@@ -356,7 +356,10 @@ impl KeyCombo {
         })
     }
 
-    /// Escape with no modifier held.
+    /// Escape held with no chord modifier — Ctrl, Alt or Command.
+    ///
+    /// Shift is deliberately allowed: nothing binds Shift-Escape, and a user who has not let go of
+    /// Shift still means Escape.
     pub fn is_bare_escape(&self) -> bool {
         self.key == KeyCode::Escape
             && !self.modifiers.ctrl
