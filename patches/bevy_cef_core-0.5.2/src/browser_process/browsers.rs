@@ -263,8 +263,6 @@ pub struct Browsers {
     browsers: HashMap<Entity, WebviewBrowser>,
     sender: TextureSender,
     receiver: TextureReceiver,
-    accel_sender: AcceleratedSender,
-    accel_receiver: AcceleratedReceiver,
     /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
@@ -277,13 +275,10 @@ pub struct Browsers {
 impl Default for Browsers {
     fn default() -> Self {
         let (sender, receiver) = TextureMailbox::channel();
-        let (accel_sender, accel_receiver) = AcceleratedMailbox::channel();
         Browsers {
             browsers: HashMap::default(),
             sender,
             receiver,
-            accel_sender,
-            accel_receiver,
             shared_disk_context: None,
             color_scheme: CefColorMode::default(),
             externally_hosted: HashSet::default(),
@@ -337,7 +332,6 @@ impl Browsers {
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
-        accelerated_presenter: Option<AcceleratedFramePresenter>,
         initialize_scripts: &[String],
         _window_handle: Option<RawWindowHandle>,
         disk_profile_root: Option<&str>,
@@ -378,7 +372,6 @@ impl Browsers {
             media_permission_sender,
             webview_popup_sender.clone(),
             texture_wake.clone(),
-            accelerated_presenter,
             !allow_native_focus,
         );
 
@@ -2084,7 +2077,6 @@ impl Browsers {
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
         self.sender.discard(*webview);
-        self.accel_sender.discard(*webview);
         if let Some(browser) = self.browsers.remove(webview) {
             info!(
                 "cef_close_browser webview={webview:?} windowed={}",
@@ -2124,11 +2116,6 @@ impl Browsers {
             };
             browser.host.invalidate(ty);
         }
-    }
-
-    #[inline]
-    pub fn drain_accelerated_frames(&self) -> Vec<AcceleratedFrame> {
-        self.accel_receiver.drain()
     }
 
     /// Shows the DevTools for the specified webview.
@@ -2545,15 +2532,12 @@ impl Browsers {
         media_permission_sender: MediaPermissionSenderInner,
         webview_popup_sender: WebviewPopupSenderInner,
         texture_wake: Option<TextureWake>,
-        accelerated_presenter: Option<AcceleratedFramePresenter>,
         cancel_native_focus: bool,
     ) -> Client {
         let client = ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
             self.sender.clone(),
-            self.accel_sender.clone(),
             texture_wake.clone(),
-            accelerated_presenter,
             size.clone(),
             device_scale.clone(),
         ))

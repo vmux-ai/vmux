@@ -2,9 +2,8 @@ use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
 use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
-    WebviewMaxFrameRate, WebviewNativeDirectOverlay, WebviewNativeLiquidGlass,
-    WebviewOpaqueWindowedBackground, WebviewSize, WebviewSource, WebviewTransparent,
-    WebviewWindowed, WebviewWindowedNativeFocus,
+    WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize,
+    WebviewSource, WebviewTransparent, WebviewWindowed, WebviewWindowedNativeFocus,
 };
 use crate::cursor_icon::SystemCursorIconSender;
 use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingStateSender};
@@ -27,9 +26,6 @@ use std::time::{Duration, Instant};
 
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
-
-#[derive(Resource, Clone, Default)]
-pub struct NativeOverlayPresenter(pub Option<AcceleratedFramePresenter>);
 
 #[derive(Resource, Clone)]
 struct TextureWakeMinInterval(Arc<AtomicU64>);
@@ -127,7 +123,6 @@ impl Plugin for WebviewPlugin {
         app.register_type::<RequestShowDevTool>()
             .init_resource::<CefDiskProfileRoot>()
             .init_non_send::<Browsers>()
-            .init_resource::<NativeOverlayPresenter>()
             .insert_resource(TextureWakeCallback(texture_wake))
             .insert_resource(texture_wake_policy)
             .add_systems(
@@ -269,7 +264,7 @@ fn create_webview(
         Option<Res<crate::common::CefShutdownState>>,
     ),
     popup_sender: Res<WebviewPopupSender>,
-    render_callbacks: (Res<TextureWakeCallback>, Res<NativeOverlayPresenter>),
+    render_callbacks: Res<TextureWakeCallback>,
     webviews: Query<
         (
             Entity,
@@ -284,7 +279,6 @@ fn create_webview(
             Has<WebviewNativeLiquidGlass>,
             Has<WebviewOpaqueWindowedBackground>,
             Has<WebviewWindowedNativeFocus>,
-            Has<WebviewNativeDirectOverlay>,
         ),
         With<ResolvedWebviewUri>,
     >,
@@ -309,7 +303,6 @@ fn create_webview(
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
-            native_direct_overlay,
         ) in
             webviews.iter()
         {
@@ -374,10 +367,7 @@ fn create_webview(
                 cef_senders.0.0.clone(),
                 cef_senders.1.0.clone(),
                 popup_sender.0.clone(),
-                render_callbacks.0.0.clone(),
-                native_direct_overlay
-                    .then(|| render_callbacks.1.0.clone())
-                    .flatten(),
+                render_callbacks.0.clone(),
                 &initialize_scripts,
                 host_window,
                 cef_settings.0.0.as_deref(),

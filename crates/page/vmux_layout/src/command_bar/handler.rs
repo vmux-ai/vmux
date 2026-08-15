@@ -22,7 +22,7 @@ use bevy::{
     picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
+use bevy_cef_core::prelude::webview_debug_log;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
@@ -106,9 +106,7 @@ impl Plugin for CommandBarInputPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (mark_command_bar_painted, reveal_command_bar)
-                    .chain()
-                    .after(UiSystems::Layout),
+                reveal_command_bar.chain().after(UiSystems::Layout),
             );
     }
 }
@@ -118,9 +116,6 @@ struct CommandBarReady;
 
 #[derive(Component)]
 struct CommandBarRenderedOpen(OpenId);
-
-#[derive(Component)]
-struct CommandBarPaintedOpen(OpenId);
 
 #[derive(Component)]
 struct CommandBarOpenedOnce;
@@ -353,7 +348,6 @@ fn next_command_bar_reveal_frames(
     frames: u8,
     open_id: OpenId,
     rendered_open_id: Option<OpenId>,
-    _painted_open_id: Option<OpenId>,
 ) -> Option<u8> {
     if !open_id.is_open() {
         return Some(frames);
@@ -377,7 +371,6 @@ fn next_command_bar_reveal_frames_for_backend(
     frames: u8,
     open_id: OpenId,
     rendered_open_id: Option<OpenId>,
-    painted_open_id: Option<OpenId>,
     has_native_size: bool,
 ) -> Option<u8> {
     if (native_windowed || native_overlay)
@@ -386,7 +379,7 @@ fn next_command_bar_reveal_frames_for_backend(
     {
         return Some(frames.saturating_add(1));
     }
-    next_command_bar_reveal_frames(frames, open_id, rendered_open_id, painted_open_id)
+    next_command_bar_reveal_frames(frames, open_id, rendered_open_id)
 }
 
 fn native_command_bar_reveal_timed_out(
@@ -1650,7 +1643,6 @@ fn on_command_bar_action(
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
-            .remove::<CommandBarPaintedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
@@ -1768,7 +1760,6 @@ fn deferred_dismiss_modal(
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
-            .remove::<CommandBarPaintedOpen>()
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
@@ -1782,7 +1773,6 @@ fn reveal_command_bar(
             &mut Visibility,
             &mut PendingCommandBarReveal,
             Option<&CommandBarRenderedOpen>,
-            Option<&CommandBarPaintedOpen>,
             Option<&CommandBarNativeSize>,
             Has<WebviewWindowed>,
             Has<WebviewNativeOverlay>,
@@ -1790,19 +1780,10 @@ fn reveal_command_bar(
         With<Modal>,
     >,
 ) {
-    for (
-        entity,
-        mut vis,
-        mut pending,
-        rendered,
-        painted,
-        native_size,
-        native_windowed,
-        native_overlay,
-    ) in &mut query
+    for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
+        &mut query
     {
         let rendered_open_id = rendered.map(|rendered| rendered.0);
-        let painted_open_id = painted.map(|painted| painted.0);
         let elapsed = pending
             .started_at
             .map(|started_at| started_at.elapsed())
@@ -1828,7 +1809,6 @@ fn reveal_command_bar(
             pending.frames,
             pending.open_id,
             rendered_open_id,
-            painted_open_id,
             native_size.is_some(),
         ) {
             Some(frames) => pending.frames = frames,
@@ -1885,24 +1865,6 @@ fn retry_pending_command_bar_open(
         ));
         pending.started_at.get_or_insert(now);
         last_emit.insert(entity, now);
-    }
-}
-
-fn mark_command_bar_painted(
-    mut commands: Commands,
-    mut textures: MessageReader<RenderTextureMessage>,
-    query: Query<&PendingCommandBarReveal, With<Modal>>,
-) {
-    for texture in textures.read() {
-        let Ok(pending) = query.get(texture.webview) else {
-            continue;
-        };
-        if !pending.open_id.is_open() {
-            continue;
-        }
-        commands
-            .entity(texture.webview)
-            .insert(CommandBarPaintedOpen(pending.open_id));
     }
 }
 
@@ -2079,7 +2041,7 @@ mod tests {
         let retry_fn = source
             .split("fn retry_pending_command_bar_open")
             .nth(1)
-            .and_then(|tail| tail.split("fn mark_command_bar_painted").next())
+            .and_then(|tail| tail.split("fn reveal_command_bar").next())
             .unwrap_or_default();
 
         assert!(retry_fn.contains("BinHostEmitEvent::from_bytes"));
@@ -2192,36 +2154,27 @@ mod tests {
 
     #[test]
     fn command_bar_reveal_waits_for_matching_open_id() {
+        assert_eq!(next_command_bar_reveal_frames(1, OpenId(7), None), Some(2));
         assert_eq!(
-            next_command_bar_reveal_frames(1, OpenId(7), None, None),
+            next_command_bar_reveal_frames(1, OpenId(7), Some(OpenId(6))),
             Some(2)
         );
         assert_eq!(
-            next_command_bar_reveal_frames(1, OpenId(7), Some(OpenId(6)), Some(OpenId(7))),
-            Some(2)
-        );
-        assert_eq!(
-            next_command_bar_reveal_frames(0, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
+            next_command_bar_reveal_frames(0, OpenId(7), Some(OpenId(7))),
             Some(1)
         );
         assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
             None
         );
     }
 
     #[test]
     fn command_bar_reveal_falls_back_when_rendered_event_is_missing() {
+        assert_eq!(next_command_bar_reveal_frames(0, OpenId(7), None), Some(1));
+        assert_eq!(next_command_bar_reveal_frames(10, OpenId(7), None), None);
         assert_eq!(
-            next_command_bar_reveal_frames(0, OpenId(7), None, None),
-            Some(1)
-        );
-        assert_eq!(
-            next_command_bar_reveal_frames(10, OpenId(7), None, None),
-            None
-        );
-        assert_eq!(
-            next_command_bar_reveal_frames(10, OpenId(7), Some(OpenId(6)), Some(OpenId(7))),
+            next_command_bar_reveal_frames(10, OpenId(7), Some(OpenId(6))),
             None
         );
     }
@@ -2229,11 +2182,11 @@ mod tests {
     #[test]
     fn command_bar_reveal_does_not_require_texture_after_rendered_event() {
         assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), None),
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
             None
         );
         assert_eq!(
-            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7)), Some(OpenId(7))),
+            next_command_bar_reveal_frames(2, OpenId(7), Some(OpenId(7))),
             None
         );
     }
@@ -2241,15 +2194,7 @@ mod tests {
     #[test]
     fn native_command_bar_waits_for_size_and_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(
-                true,
-                false,
-                10,
-                OpenId(7),
-                None,
-                None,
-                true
-            ),
+            next_command_bar_reveal_frames_for_backend(true, false, 10, OpenId(7), None, true),
             Some(11)
         );
         assert_eq!(
@@ -2259,8 +2204,7 @@ mod tests {
                 10,
                 OpenId(7),
                 Some(OpenId(7)),
-                None,
-                false,
+                false
             ),
             Some(11)
         );
@@ -2271,8 +2215,7 @@ mod tests {
                 2,
                 OpenId(7),
                 Some(OpenId(7)),
-                None,
-                true,
+                true
             ),
             None
         );
@@ -2325,15 +2268,7 @@ mod tests {
     #[test]
     fn native_overlay_waits_for_rendered_ack() {
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(
-                false,
-                true,
-                10,
-                OpenId(7),
-                None,
-                None,
-                false,
-            ),
+            next_command_bar_reveal_frames_for_backend(false, true, 10, OpenId(7), None, false),
             Some(11)
         );
         assert_eq!(
@@ -2343,8 +2278,7 @@ mod tests {
                 2,
                 OpenId(7),
                 Some(OpenId(7)),
-                None,
-                false,
+                false
             ),
             None
         );
@@ -2430,68 +2364,8 @@ mod tests {
             Some(&pending)
         ));
         assert_eq!(
-            next_command_bar_reveal_frames_for_backend(true, false, 0, OpenId(7), None, None, true),
+            next_command_bar_reveal_frames_for_backend(true, false, 0, OpenId(7), None, true),
             Some(1)
-        );
-    }
-
-    #[test]
-    fn command_bar_paint_before_rendered_ack_still_allows_reveal() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<RenderTextureMessage>()
-            .add_systems(
-                Update,
-                (mark_command_bar_painted, reveal_command_bar).chain(),
-            );
-
-        let modal = app
-            .world_mut()
-            .spawn((
-                Modal,
-                Visibility::Hidden,
-                PendingCommandBarReveal {
-                    frames: 2,
-                    open_id: OpenId(7),
-                    payload: Some(b"payload".to_vec()),
-                    started_at: Some(Instant::now()),
-                },
-            ))
-            .id();
-        app.world_mut()
-            .resource_mut::<Messages<RenderTextureMessage>>()
-            .write(RenderTextureMessage {
-                webview: modal,
-                ty: bevy_cef_core::prelude::RenderPaintElementType::View,
-                width: 1,
-                height: 1,
-                patches: std::sync::Arc::new(
-                    [bevy_cef_core::prelude::WebviewPaintPatch {
-                        rect: bevy_cef_core::prelude::WebviewDirtyRect {
-                            x: 0,
-                            y: 0,
-                            width: 1,
-                            height: 1,
-                        },
-                        buffer: std::sync::Arc::new(vec![0, 0, 0, 255]),
-                    }]
-                    .into_iter()
-                    .collect(),
-                ),
-                dirty: Default::default(),
-            });
-
-        app.update();
-        app.world_mut()
-            .entity_mut(modal)
-            .insert(CommandBarRenderedOpen(OpenId(7)));
-        app.update();
-
-        assert!(app.world().get::<CommandBarPaintedOpen>(modal).is_some());
-        assert!(app.world().get::<PendingCommandBarReveal>(modal).is_none());
-        assert_eq!(
-            app.world().get::<Visibility>(modal),
-            Some(&Visibility::Inherited)
         );
     }
 
@@ -2867,7 +2741,6 @@ mod tests {
         let display_after_close = app.world().get::<Node>(modal).unwrap().display;
         let has_kb_after_close = app.world().get::<CefKeyboardTarget>(modal).is_some();
         let has_rendered_after_close = app.world().get::<CommandBarRenderedOpen>(modal).is_some();
-        let has_painted_after_close = app.world().get::<CommandBarPaintedOpen>(modal).is_some();
         let has_pending_after_close = app.world().get::<PendingCommandBarReveal>(modal).is_some();
 
         assert_eq!(
@@ -2887,10 +2760,6 @@ mod tests {
         assert!(
             !has_rendered_after_close,
             "CommandBarRenderedOpen should be cleared after dismiss"
-        );
-        assert!(
-            !has_painted_after_close,
-            "CommandBarPaintedOpen should be cleared after dismiss"
         );
         assert!(
             !has_pending_after_close,

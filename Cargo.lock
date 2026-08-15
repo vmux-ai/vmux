@@ -2335,24 +2335,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89442ad338365f6a9a32f5595a734860921133a9aad6f9adb0af5624a9121597"
 dependencies = [
  "anyhow",
- "ash",
  "cargo_metadata",
  "cef-dll-sys",
  "clap",
- "libc",
  "libloading 0.9.0",
  "objc2 0.6.4",
- "objc2-foundation 0.3.2",
- "objc2-io-surface",
- "objc2-metal 0.3.2",
  "plist",
  "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "tracing",
- "wgpu",
- "windows 0.62.2",
  "windows-sys 0.61.2",
 ]
 
@@ -4795,17 +4787,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gl_generator"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a95dfc23a2b4a9a2f5ab41d194f8bfda3cabec42af4e39f08c339eb2a0c124d"
-dependencies = [
- "khronos_api",
- "log",
- "xml-rs",
-]
-
-[[package]]
 name = "glam"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4926,27 +4907,6 @@ dependencies = [
  "serde_json",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "glow"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
-dependencies = [
- "js-sys",
- "slotmap",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
-name = "glutin_wgl_sys"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c4ee00b289aba7a9e5306d57c2d05499b2e5dc427f84ac708bd2c090212cf3e"
-dependencies = [
- "gl_generator",
 ]
 
 [[package]]
@@ -5853,23 +5813,6 @@ dependencies = [
  "serde",
  "unicode-segmentation",
 ]
-
-[[package]]
-name = "khronos-egl"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
-dependencies = [
- "libc",
- "libloading 0.8.9",
- "pkg-config",
-]
-
-[[package]]
-name = "khronos_api"
-version = "3.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "konst"
@@ -7158,10 +7101,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.11.1",
- "libc",
  "objc2 0.6.4",
  "objc2-core-foundation",
- "objc2-foundation 0.3.2",
 ]
 
 [[package]]
@@ -7196,9 +7137,7 @@ checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
 dependencies = [
  "bitflags 2.11.1",
  "block2 0.6.2",
- "dispatch2",
  "objc2 0.6.4",
- "objc2-core-foundation",
  "objc2-foundation 0.3.2",
  "objc2-io-surface",
 ]
@@ -11831,7 +11770,6 @@ checksum = "d8eab23fefc9e41f8e841df4a9c707e8a8c4ed26e944ef69297184de2785e3be"
 dependencies = [
  "dlib",
  "log",
- "once_cell",
  "pkg-config",
 ]
 
@@ -12006,18 +11944,13 @@ dependencies = [
  "cfg_aliases 0.2.1",
  "document-features",
  "hashbrown 0.16.1",
- "js-sys",
  "log",
  "naga",
- "parking_lot",
  "portable-atomic",
  "profiling",
  "raw-window-handle 0.6.2",
  "smallvec",
  "static_assertions",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
  "wgpu-core",
  "wgpu-hal",
  "wgpu-types",
@@ -12049,7 +11982,6 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "wgpu-core-deps-apple",
- "wgpu-core-deps-emscripten",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
  "wgpu-naga-bridge",
@@ -12061,15 +11993,6 @@ name = "wgpu-core-deps-apple"
 version = "29.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62e51b5447e144b3dbba4feb01f80f4fa21696fa0cd99afb2c3df1affd6fdb28"
-dependencies = [
- "wgpu-hal",
-]
-
-[[package]]
-name = "wgpu-core-deps-emscripten"
-version = "29.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01e09be551dc939498bdd5f6b2c66e55ab275dad25825267a08605a80fc9f0af"
 dependencies = [
  "wgpu-hal",
 ]
@@ -12098,18 +12021,13 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "cfg_aliases 0.2.1",
- "glow",
- "glutin_wgl_sys",
  "gpu-allocator",
  "gpu-descriptor",
  "hashbrown 0.16.1",
- "js-sys",
- "khronos-egl",
  "libc",
  "libloading 0.8.9",
  "log",
  "naga",
- "ndk-sys",
  "objc2 0.6.4",
  "objc2-core-foundation",
  "objc2-foundation 0.3.2",
@@ -12127,14 +12045,10 @@ dependencies = [
  "renderdoc-sys",
  "smallvec",
  "thiserror 2.0.18",
- "wasm-bindgen",
- "wayland-sys",
- "web-sys",
  "wgpu-naga-bridge",
  "wgpu-types",
  "windows 0.62.2",
  "windows-core 0.62.2",
- "windows-result 0.4.1",
 ]
 
 [[package]]
@@ -13025,12 +12939,6 @@ name = "xkeysym"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
-
-[[package]]
-name = "xml-rs"
-version = "0.8.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xxhash-rust"

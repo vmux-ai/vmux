@@ -12,7 +12,7 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
+use bevy_cef_core::prelude::webview_debug_log;
 use std::sync::atomic::Ordering;
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -60,7 +60,6 @@ impl Plugin for PresentPlugin {
                 apply_repaint_nudge,
                 sync_cef_webview_resize_after_ui,
                 sync_osr_webview_focus,
-                flush_pending_osr_textures,
             )
                 .chain()
                 .after(UiSystems::Layout),
@@ -1272,15 +1271,6 @@ fn should_show_osr_webview(
         return true;
     }
     stack_is_active || stack_is_previous_new_stack
-}
-
-fn flush_pending_osr_textures(
-    mut ew: MessageWriter<RenderTextureMessage>,
-    browsers: NonSend<Browsers>,
-) {
-    for texture in browsers.drain_render_textures() {
-        ew.write(texture);
-    }
 }
 
 #[cfg(test)]

@@ -1,18 +1,13 @@
 #[cfg(target_os = "macos")]
-use super::keepalive::{IoSurfaceKeepAlive, RealIoSurfaceOps};
 use bevy::prelude::*;
-use cef::osr_texture_import::SharedTextureHandle;
 use cef::rc::{Rc, RcImpl};
 use cef::*;
 use cef_dll_sys::cef_paint_element_type_t;
 use smallvec::SmallVec;
-use std::any::Any;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::os::raw::c_int;
-use std::sync::atomic::AtomicBool;
 #[cfg(any(target_os = "macos", test))]
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 /// Inline dirty-rectangle storage for CEF paints.
@@ -21,7 +16,6 @@ pub type WebviewDirtyRects = SmallVec<[WebviewDirtyRect; 8]>;
 pub type WebviewPaintPatches = SmallVec<[WebviewPaintPatch; 4]>;
 
 pub type TextureWake = Arc<dyn Fn() + Send + Sync + 'static>;
-pub type AcceleratedFramePresenter = Arc<dyn Fn(AcceleratedFrame) + Send + Sync + 'static>;
 
 /// The texture structure passed from [`CefRenderHandler::OnPaint`](https://cef-builds.spotifycdn.com/docs/106.1/classCefRenderHandler.html#a6547d5c9dd472e6b84706dc81d3f1741).
 #[derive(Debug, Clone, PartialEq, Message)]
@@ -84,20 +78,6 @@ fn webview_dirty_rects(rects: Option<&[cef::Rect]>, width: u32, height: u32) -> 
         width,
         height,
     )
-}
-
-#[cfg(any(target_os = "macos", test))]
-fn accelerated_dirty_rects(
-    first_paint: &AtomicBool,
-    rects: Option<&[cef::Rect]>,
-    width: u32,
-    height: u32,
-) -> WebviewDirtyRects {
-    if first_paint.swap(false, Ordering::AcqRel) {
-        WebviewDirtyRects::new()
-    } else {
-        webview_dirty_rects(rects, width, height)
-    }
 }
 
 fn dirty_rect_union(left: WebviewDirtyRect, right: WebviewDirtyRect) -> Option<WebviewDirtyRect> {
@@ -380,102 +360,6 @@ fn copy_paint_patches(
         .collect()
 }
 
-pub struct SendSharedTextureHandle(pub SharedTextureHandle);
-unsafe impl Send for SendSharedTextureHandle {}
-unsafe impl Sync for SendSharedTextureHandle {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AcceleratedPixelFormat {
-    Rgba8,
-    Bgra8,
-}
-
-pub struct AcceleratedFrame {
-    pub webview: Entity,
-    pub ty: RenderPaintElementType,
-    pub width: u32,
-    pub height: u32,
-    pub format: AcceleratedPixelFormat,
-    pub handle: SendSharedTextureHandle,
-    /// Raw `IOSurfaceRef` (as `usize`) backing this frame, kept alive by `keepalive`. Lets a native
-    /// overlay set it directly as a `CALayer`'s `contents` instead of importing into a GPU texture.
-    pub io_surface: usize,
-    pub keepalive: Arc<dyn Any + Send + Sync>,
-    pub dirty: WebviewDirtyRects,
-}
-
-#[derive(Default)]
-struct AcceleratedMailboxState {
-    pending: HashMap<PaintFrameKey, (u64, AcceleratedFrame)>,
-    next_sequence: u64,
-}
-
-/// Latest accelerated paint per webview and paint element.
-#[derive(Clone, Default)]
-pub struct AcceleratedMailbox(Arc<Mutex<AcceleratedMailboxState>>);
-
-pub type AcceleratedSender = AcceleratedMailbox;
-pub type AcceleratedReceiver = AcceleratedMailbox;
-
-impl AcceleratedMailbox {
-    /// Create producer and consumer handles for one mailbox.
-    pub fn channel() -> (AcceleratedSender, AcceleratedReceiver) {
-        let mailbox = Self::default();
-        (mailbox.clone(), mailbox)
-    }
-
-    /// Replace the pending frame and return whether the mailbox became non-empty for its key.
-    pub fn publish(&self, mut frame: AcceleratedFrame) -> bool {
-        let key = PaintFrameKey {
-            webview: frame.webview,
-            ty: frame.ty,
-        };
-        let mut state = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((_, previous)) = state.pending.get(&key) {
-            frame.dirty = coalesce_webview_dirty_rects(
-                frame.width,
-                frame.height,
-                &previous.dirty,
-                &frame.dirty,
-                previous.width == frame.width
-                    && previous.height == frame.height
-                    && previous.format == frame.format
-                    && previous.io_surface == frame.io_surface,
-            );
-        }
-        state.next_sequence = state.next_sequence.wrapping_add(1);
-        let sequence = state.next_sequence;
-        state.pending.insert(key, (sequence, frame)).is_none()
-    }
-
-    /// Drain all latest pending frames.
-    pub fn drain(&self) -> Vec<AcceleratedFrame> {
-        let mut state = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut frames = state
-            .pending
-            .drain()
-            .map(|(_, frame)| frame)
-            .collect::<Vec<_>>();
-        frames.sort_unstable_by_key(|(sequence, _)| *sequence);
-        frames.into_iter().map(|(_, frame)| frame).collect()
-    }
-
-    /// Remove pending state for a closed webview.
-    pub fn discard(&self, webview: Entity) {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .pending
-            .retain(|key, _| key.webview != webview);
-    }
-}
-
 pub type SharedViewSize = std::rc::Rc<Cell<Vec2>>;
 
 /// Window / backing-store scale passed to CEF as [`ScreenInfo::device_scale_factor`].
@@ -488,10 +372,7 @@ pub struct RenderHandlerBuilder {
     object: *mut RcImpl<sys::cef_render_handler_t, Self>,
     webview: Entity,
     texture_sender: TextureSender,
-    accel_sender: AcceleratedSender,
     texture_wake: Option<TextureWake>,
-    accelerated_presenter: Option<AcceleratedFramePresenter>,
-    first_accelerated_paint: Arc<AtomicBool>,
     size: SharedViewSize,
     device_scale: SharedDeviceScaleFactor,
 }
@@ -500,9 +381,7 @@ impl RenderHandlerBuilder {
     pub fn build(
         webview: Entity,
         texture_sender: TextureSender,
-        accel_sender: AcceleratedSender,
         texture_wake: Option<TextureWake>,
-        accelerated_presenter: Option<AcceleratedFramePresenter>,
         size: SharedViewSize,
         device_scale: SharedDeviceScaleFactor,
     ) -> RenderHandler {
@@ -510,10 +389,7 @@ impl RenderHandlerBuilder {
             object: std::ptr::null_mut(),
             webview,
             texture_sender,
-            accel_sender,
             texture_wake,
-            accelerated_presenter,
-            first_accelerated_paint: Arc::new(AtomicBool::new(true)),
             size,
             device_scale,
         })
@@ -546,10 +422,7 @@ impl Clone for RenderHandlerBuilder {
             object,
             webview: self.webview,
             texture_sender: self.texture_sender.clone(),
-            accel_sender: self.accel_sender.clone(),
             texture_wake: self.texture_wake.clone(),
-            accelerated_presenter: self.accelerated_presenter.clone(),
-            first_accelerated_paint: Arc::clone(&self.first_accelerated_paint),
             size: self.size.clone(),
             device_scale: self.device_scale.clone(),
         }
@@ -606,66 +479,6 @@ impl ImplRenderHandler for RenderHandlerBuilder {
             && let Some(wake) = self.texture_wake.as_ref()
         {
             wake();
-        }
-    }
-
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
-    fn on_accelerated_paint(
-        &self,
-        _browser: Option<&mut Browser>,
-        type_: PaintElementType,
-        dirty_rects: Option<&[cef::Rect]>,
-        info: Option<&AcceleratedPaintInfo>,
-    ) {
-        #[cfg(target_os = "macos")]
-        {
-            let Some(info) = info else {
-                return;
-            };
-            let ty = match type_.as_ref() {
-                cef_paint_element_type_t::PET_POPUP => RenderPaintElementType::Popup,
-                _ => RenderPaintElementType::View,
-            };
-            let width = info.extra.coded_size.width as u32;
-            let height = info.extra.coded_size.height as u32;
-            let keepalive: Arc<dyn Any + Send + Sync> =
-                Arc::new(IoSurfaceKeepAlive::<RealIoSurfaceOps>::retain(
-                    info.shared_texture_io_surface,
-                ));
-            let io_surface = info.shared_texture_io_surface as usize;
-            let frame = AcceleratedFrame {
-                webview: self.webview,
-                ty,
-                width,
-                height,
-                format: if info.format == ColorType::RGBA_8888 {
-                    AcceleratedPixelFormat::Rgba8
-                } else {
-                    AcceleratedPixelFormat::Bgra8
-                },
-                handle: SendSharedTextureHandle(SharedTextureHandle::new(info)),
-                io_surface,
-                keepalive,
-                dirty: accelerated_dirty_rects(
-                    &self.first_accelerated_paint,
-                    dirty_rects,
-                    width,
-                    height,
-                ),
-            };
-            if let Some(presenter) = self.accelerated_presenter.as_ref() {
-                presenter(frame);
-            } else {
-                if self.accel_sender.publish(frame)
-                    && let Some(wake) = self.texture_wake.as_ref()
-                {
-                    wake();
-                }
-            }
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (type_, dirty_rects, info);
         }
     }
 
@@ -779,114 +592,5 @@ mod tests {
         let frames = rx.drain();
         assert!(frames[0].dirty.is_empty());
         assert_eq!(frames[0].patches[0].buffer.len(), latest.len());
-    }
-
-    #[test]
-    fn accelerated_native_presenter_bypasses_bevy_wake() {
-        let source = include_str!("renderer_handler.rs");
-        let callback = source
-            .split("fn on_accelerated_paint")
-            .nth(1)
-            .and_then(|tail| tail.split("fn get_raw").next())
-            .unwrap_or_default();
-
-        assert!(callback.contains("presenter(frame)"));
-        assert!(callback.contains("else {"));
-        assert!(callback.contains("self.accel_sender.publish(frame)"));
-        assert!(callback.contains("wake()"));
-    }
-
-    #[test]
-    fn dirty_rects_are_clamped_to_surface_bounds() {
-        let rects = [
-            cef::Rect {
-                x: -5,
-                y: 0,
-                width: 10,
-                height: 10,
-            },
-            cef::Rect {
-                x: 90,
-                y: 90,
-                width: 20,
-                height: 20,
-            },
-        ];
-        let dirty = webview_dirty_rects(Some(&rects), 100, 100);
-        assert_eq!(
-            dirty.as_slice(),
-            &[
-                WebviewDirtyRect {
-                    x: 0,
-                    y: 0,
-                    width: 5,
-                    height: 10,
-                },
-                WebviewDirtyRect {
-                    x: 90,
-                    y: 90,
-                    width: 10,
-                    height: 10,
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn missing_dirty_rects_mean_full_frame() {
-        assert!(webview_dirty_rects(None, 100, 100).is_empty());
-    }
-
-    #[test]
-    fn first_accelerated_paint_uploads_the_complete_surface() {
-        let first_paint = AtomicBool::new(true);
-        let rects = [cef::Rect {
-            x: 10,
-            y: 10,
-            width: 20,
-            height: 20,
-        }];
-
-        assert!(accelerated_dirty_rects(&first_paint, Some(&rects), 100, 100).is_empty());
-        assert_eq!(
-            accelerated_dirty_rects(&first_paint, Some(&rects), 100, 100).as_slice(),
-            &[WebviewDirtyRect {
-                x: 10,
-                y: 10,
-                width: 20,
-                height: 20,
-            }]
-        );
-    }
-
-    #[test]
-    fn overlapping_dirty_rects_are_merged() {
-        let dirty = optimize_webview_dirty_rects(
-            [
-                WebviewDirtyRect {
-                    x: 10,
-                    y: 10,
-                    width: 10,
-                    height: 10,
-                },
-                WebviewDirtyRect {
-                    x: 15,
-                    y: 15,
-                    width: 10,
-                    height: 10,
-                },
-            ],
-            100,
-            100,
-        );
-        assert_eq!(
-            dirty.as_slice(),
-            &[WebviewDirtyRect {
-                x: 10,
-                y: 10,
-                width: 15,
-                height: 15,
-            }]
-        );
     }
 }
