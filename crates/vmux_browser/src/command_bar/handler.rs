@@ -1,7 +1,9 @@
 use std::time::{Duration, Instant};
 use vmux_command::CommandBar;
 use vmux_command::build_command_bar_open_payload;
-use vmux_core::launcher::PendingStackAbandoned;
+use vmux_core::launcher::{
+    FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
+};
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
@@ -39,7 +41,6 @@ use vmux_layout::cef::{Browser, LayoutCef};
 use vmux_layout::event::{
     CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
 };
-use vmux_layout::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
 use vmux_layout::{
     Header,
     pane::{Pane, PaneSplit},
@@ -60,6 +61,8 @@ impl Plugin for CommandBarInputPlugin {
         app.init_resource::<NewStackContext>()
             .add_message::<vmux_core::ContributedCommandChosen>()
             .add_message::<PendingStackAbandoned>()
+            .add_message::<FocusLauncherInput>()
+            .add_message::<InlineTransitionRequested>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -496,6 +499,23 @@ fn command_bar_cancel_pending_stack_for_active_open(
     Some((stack, previous_stack))
 }
 
+/// The pages that host a launcher of their own, and the way to hand one the caret.
+#[derive(SystemParam)]
+struct LauncherHosts<'w, 's> {
+    pages: Query<'w, 's, (), With<HostsLauncher>>,
+    focus: MessageWriter<'w, FocusLauncherInput>,
+}
+
+impl LauncherHosts<'_, '_> {
+    fn hosts_one(&self, webview: Entity) -> bool {
+        self.pages.contains(webview)
+    }
+
+    fn focus(&mut self, webview: Entity) {
+        self.focus.write(FocusLauncherInput { webview });
+    }
+}
+
 fn command_bar_should_focus_start(
     is_new_stack: bool,
     space_switch: bool,
@@ -520,6 +540,7 @@ fn handle_open_command_bar(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     browser_meta: Query<&PageMetadata, With<Browser>>,
+    mut launcher_hosts: LauncherHosts,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
         Entity,
@@ -673,15 +694,10 @@ fn handle_open_command_bar(
             active_stack
         });
         let start_browser = active_stack.and_then(|stack| {
-            all_children.get(stack).ok().and_then(|children| {
-                children.iter().find_map(|e| {
-                    browser_meta
-                        .get(e)
-                        .ok()
-                        .filter(|meta| meta.url == vmux_layout::start::START_PAGE_URL)
-                        .map(|_| e)
-                })
-            })
+            all_children
+                .get(stack)
+                .ok()
+                .and_then(|children| children.iter().find(|e| launcher_hosts.hosts_one(*e)))
         });
         if command_bar_should_focus_start(
             is_new_stack,
@@ -690,11 +706,7 @@ fn handle_open_command_bar(
             replace_active_stack,
         ) && let Some(browser_e) = start_browser
         {
-            commands.trigger(BinHostEmitEvent::from_rkyv(
-                browser_e,
-                START_FOCUS_INPUT_EVENT,
-                &StartFocusInput,
-            ));
+            launcher_hosts.focus(browser_e);
             return;
         }
     }
@@ -803,7 +815,7 @@ struct CommandBarActionQueries<'w, 's> {
             Without<CommandBar>,
         ),
     >,
-    webview_sources: Query<'w, 's, &'static WebviewSource>,
+    launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
 }
 
 impl CommandBarActionQueries<'_, '_> {
@@ -835,23 +847,11 @@ impl CommandBarActionQueries<'_, '_> {
 
     /// The stack holding the start page that raised this action, which can transition in place.
     fn inline_transition_stack(&self, webview: Entity) -> Option<Entity> {
-        let WebviewSource::Url(url) = self.webview_sources.get(webview).ok()? else {
-            return None;
-        };
-        if !url.starts_with(vmux_layout::start::START_PAGE_URL) {
+        if !self.launcher_hosts.contains(webview) {
             return None;
         }
         self.child_of_q.get(webview).ok().map(|parent| parent.0)
     }
-}
-
-fn mark_inline_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
-    commands
-        .entity(stack)
-        .insert(vmux_layout::start::StartInlineTransition { webview });
-    commands
-        .entity(webview)
-        .insert(vmux_layout::start::StartInlineTransitionView);
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -920,6 +920,7 @@ fn on_command_bar_action(
     )>,
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
     mut abandoned_writer: MessageWriter<PendingStackAbandoned>,
+    mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -962,9 +963,9 @@ fn on_command_bar_action(
                     && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
-                        && vmux_layout::start::supports_inline_agent_transition(&url)
+                        && vmux_wire::agent::supports_inline_agent_transition(&url)
                     {
-                        mark_inline_transition(stack, webview, &mut commands);
+                        inline_transition.write(InlineTransitionRequested { stack, webview });
                     }
                     commands
                         .entity(stack)
@@ -1032,10 +1033,10 @@ fn on_command_bar_action(
                     search_engine.map(|setting| setting.0).unwrap_or_default(),
                 );
                 let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
-                    && vmux_layout::start::supports_inline_agent_transition(&url)
+                    && vmux_wire::agent::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
-                    mark_inline_transition(stack, webview, &mut commands);
+                    inline_transition.write(InlineTransitionRequested { stack, webview });
                     true
                 } else {
                     false
@@ -2054,6 +2055,9 @@ mod tests {
         let mut app = App::new();
         app.add_message::<AppCommand>()
             .add_message::<PageOpenRequest>()
+            .add_message::<FocusLauncherInput>()
+            .add_message::<InlineTransitionRequested>()
+            .add_message::<PendingStackAbandoned>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
@@ -2274,6 +2278,9 @@ mod tests {
             .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin)
             .add_message::<TerminalSpawnRequest>()
+            .add_message::<FocusLauncherInput>()
+            .add_message::<InlineTransitionRequested>()
+            .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<vmux_layout::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()

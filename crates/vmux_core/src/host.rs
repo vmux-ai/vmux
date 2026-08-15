@@ -28,7 +28,10 @@ pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
-pub use launcher::{ContributedCommandChosen, PendingStackAbandoned};
+pub use launcher::{
+    ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,
+    PendingStackAbandoned,
+};
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 pub use page_open::{

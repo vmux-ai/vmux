@@ -22,6 +22,34 @@ pub struct ContributedCommandChosen {
     pub pane: Option<Entity>,
 }
 
+/// A page that hosts a launcher of its own.
+///
+/// The start page carries this. Two things follow from it, and both used to be decided by
+/// comparing the page's URL against `vmux://start/` from outside: the launcher shortcut focuses
+/// this page's input rather than opening a second launcher over it, and picking something the page
+/// can become morphs it in place rather than opening a page beside it.
+///
+/// Asking for the capability means the command bar never learns which page this is, and a second
+/// page that wants the same behaviour needs no change to the bar.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct HostsLauncher;
+
+/// Put the caret in the launcher this page hosts, rather than opening one over it.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct FocusLauncherInput {
+    pub webview: Entity,
+}
+
+/// The page in `stack` can become what was just picked, so it should morph rather than be replaced.
+///
+/// What "morph" means belongs to the page — the launcher only reports that the opportunity is
+/// there, having checked the target is something the page can turn into.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct InlineTransitionRequested {
+    pub stack: Entity,
+    pub webview: Entity,
+}
+
 /// The launcher was dismissed without ever using the empty stack it was opened on.
 ///
 /// Disposing of it is the workspace's business, and more than a despawn: opening the launcher with
