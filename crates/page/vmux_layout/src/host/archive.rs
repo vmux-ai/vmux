@@ -9,7 +9,7 @@ use bevy::window::PrimaryWindow;
 use bevy_cef::prelude::HostWindow;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, StackCommand};
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
-use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest};
+use vmux_core::terminal::{TerminalLaunch, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, PageArchiveRequest,
     PageMetadata, PageOpenRequest, PageOpenTarget, PaneStep, SplitAxis, now_millis,
@@ -625,7 +625,8 @@ fn reopen_page_content(page: &ArchivedPage, stack: Entity, commands: &mut Comman
             .map(PathBuf::from);
         let request = TerminalSpawnRequest {
             cwd,
-            target_stack: Some(stack),
+            target: TerminalSpawnTarget::Stack(stack),
+            metadata: None,
         };
         commands.queue(move |world: &mut World| {
             world.write_message(request);
@@ -1688,11 +1689,11 @@ mod tests {
         mut captured: ResMut<CapturedTerminalSpawnTargets>,
     ) {
         for request in reader.read() {
-            captured.0.push(
-                request
-                    .target_stack
-                    .is_some_and(|stack| stacks.contains(stack)),
-            );
+            let restored_into_a_real_stack = match request.target {
+                TerminalSpawnTarget::Stack(stack) => stacks.contains(stack),
+                _ => false,
+            };
+            captured.0.push(restored_into_a_real_stack);
         }
     }
 
@@ -1990,7 +1991,7 @@ mod tests {
             .collect();
         assert_eq!(spawns.len(), 1);
         assert_eq!(spawns[0].cwd, Some(PathBuf::from("/work")));
-        assert!(spawns[0].target_stack.is_some());
+        assert!(matches!(spawns[0].target, TerminalSpawnTarget::Stack(_)));
     }
 
     fn drain_agent_spawns(app: &mut App) -> Vec<SpawnAgentInStackRequest> {

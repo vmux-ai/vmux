@@ -30,7 +30,7 @@ use vmux_command::{
 };
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
-use vmux_core::terminal::{Terminal, TerminalSpawnRequest};
+use vmux_core::terminal::{Terminal, TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
@@ -1010,17 +1010,17 @@ fn on_command_bar_action(
                     expanded.parent().unwrap_or(&expanded)
                 };
                 if let Some(stack_e) = empty_stack {
-                    commands.entity(stack_e).insert(PageMetadata {
-                        url: terminal_page_url.clone(),
-                        title: locale.translate_with(
-                            "command-terminal-path",
-                            &[("path", TranslationValue::String(&dir.display().to_string()))],
-                        ),
-                        ..default()
-                    });
                     writer_params.p2().write(TerminalSpawnRequest {
                         cwd: Some(dir.to_path_buf()),
-                        target_stack: Some(stack_e),
+                        target: TerminalSpawnTarget::Stack(stack_e),
+                        metadata: Some(PageMetadata {
+                            url: terminal_page_url.clone(),
+                            title: locale.translate_with(
+                                "command-terminal-path",
+                                &[("path", TranslationValue::String(&dir.display().to_string()))],
+                            ),
+                            ..default()
+                        }),
                     });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
@@ -1110,14 +1110,14 @@ fn on_command_bar_action(
                     Some(expanded)
                 };
                 if let Some(stack_e) = empty_stack {
-                    commands.entity(stack_e).insert(PageMetadata {
-                        url: terminal_page_url.clone(),
-                        title: locale.translate("command-terminal"),
-                        ..default()
-                    });
                     writer_params.p2().write(TerminalSpawnRequest {
                         cwd: cwd.clone(),
-                        target_stack: Some(stack_e),
+                        target: TerminalSpawnTarget::Stack(stack_e),
+                        metadata: Some(PageMetadata {
+                            url: terminal_page_url.clone(),
+                            title: locale.translate("command-terminal"),
+                            ..default()
+                        }),
                     });
                     new_stack_ctx.stack = None;
                     new_stack_ctx.previous_stack = None;
@@ -1125,21 +1125,14 @@ fn on_command_bar_action(
                 } else {
                     let active_pane_opt = queries.focused_pane();
                     if let Some(pane_e) = active_pane_opt {
-                        let stack_e = commands
-                            .spawn((
-                                vmux_layout::stack::stack_bundle(),
-                                LastActivatedAt::now(),
-                                ChildOf(pane_e),
-                            ))
-                            .id();
-                        commands.entity(stack_e).insert(PageMetadata {
-                            url: terminal_page_url.clone(),
-                            title: locale.translate("command-terminal"),
-                            ..default()
-                        });
                         writer_params.p2().write(TerminalSpawnRequest {
                             cwd: cwd.clone(),
-                            target_stack: Some(stack_e),
+                            target: TerminalSpawnTarget::NewStackInPane(pane_e),
+                            metadata: Some(PageMetadata {
+                                url: terminal_page_url.clone(),
+                                title: locale.translate("command-terminal"),
+                                ..default()
+                            }),
                         });
                     } else {
                         let cmd =

@@ -28,10 +28,25 @@ pub enum TerminalKind {
     Codex,
 }
 
+/// Where a spawning terminal should land.
+///
+/// `NewStackInPane` exists so a caller that has a pane but no stack does not have to build one:
+/// making a stack is workspace shape, and a launcher asking for a terminal has no business
+/// knowing how one is assembled.
+#[derive(Debug, Clone, Copy)]
+pub enum TerminalSpawnTarget {
+    Stack(Entity),
+    NewStackInPane(Entity),
+    /// Left unparented for the caller to place.
+    Detached,
+}
+
 #[derive(Message, Debug, Clone)]
 pub struct TerminalSpawnRequest {
     pub cwd: Option<std::path::PathBuf>,
-    pub target_stack: Option<Entity>,
+    pub target: TerminalSpawnTarget,
+    /// Shown in the tab strip until the terminal reports a title of its own.
+    pub metadata: Option<crate::PageMetadata>,
 }
 
 #[derive(Message, Debug, Clone)]

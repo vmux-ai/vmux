@@ -18,7 +18,9 @@ use vmux_command::{
 };
 use vmux_core::input::KeyStroke;
 use vmux_core::page::PageReady;
-use vmux_core::terminal::{ProcessesMonitorSpawnRequest, TerminalSpawnRequest};
+use vmux_core::terminal::{
+    ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
+};
 use vmux_core::{
     OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
@@ -623,12 +625,24 @@ fn respond_terminal_spawn(
             .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
             .id();
         commands.entity(term_e).insert(CefKeyboardTarget);
-        if let Some(stack_e) = req.target_stack {
-            commands.entity(term_e).insert(ChildOf(stack_e));
-            commands.entity(stack_e).insert(LastActivatedAt::now());
-            if let Ok(parent) = child_of_q.get(stack_e) {
-                commands.entity(parent.0).insert(LastActivatedAt::now());
-            }
+        let stack_e = match req.target {
+            TerminalSpawnTarget::Detached => continue,
+            TerminalSpawnTarget::Stack(stack) => stack,
+            TerminalSpawnTarget::NewStackInPane(pane) => commands
+                .spawn((
+                    vmux_layout::stack::stack_bundle(),
+                    LastActivatedAt::now(),
+                    ChildOf(pane),
+                ))
+                .id(),
+        };
+        if let Some(metadata) = req.metadata.clone() {
+            commands.entity(stack_e).insert(metadata);
+        }
+        commands.entity(term_e).insert(ChildOf(stack_e));
+        commands.entity(stack_e).insert(LastActivatedAt::now());
+        if let Ok(parent) = child_of_q.get(stack_e) {
+            commands.entity(parent.0).insert(LastActivatedAt::now());
         }
     }
 }
