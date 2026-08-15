@@ -7,6 +7,7 @@ use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
+use vmux_core::NodeRect;
 use vmux_setting::AppSettings;
 
 /// Captures still screenshots for the agent, off the command flush so a screenshot request
@@ -64,11 +65,7 @@ fn resolve_crop(
     let mut entity = Entity::from_bits(bits);
     for _ in 0..8 {
         if let Ok((computed, gt)) = node_q.get(entity) {
-            let size = computed.size;
-            let center = gt.transform_point2(Vec2::ZERO);
-            return Some(crop_rect_from_node(
-                center.x, center.y, size.x, size.y, img_w, img_h,
-            ));
+            return Some(CropRect::of(NodeRect::of(computed, gt), img_w, img_h));
         }
         entity = child_of_q.get(entity).ok()?.get();
     }
@@ -160,25 +157,19 @@ pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
     )
 }
 
-pub(crate) fn crop_rect_from_node(
-    center_x: f32,
-    center_y: f32,
-    size_x: f32,
-    size_y: f32,
-    img_w: u32,
-    img_h: u32,
-) -> CropRect {
-    let left = (center_x - size_x * 0.5).round().max(0.0) as u32;
-    let top = (center_y - size_y * 0.5).round().max(0.0) as u32;
-    let left = left.min(img_w.saturating_sub(1));
-    let top = top.min(img_h.saturating_sub(1));
-    let w = (size_x.round().max(1.0) as u32).min(img_w - left);
-    let h = (size_y.round().max(1.0) as u32).min(img_h - top);
-    CropRect {
-        x: left,
-        y: top,
-        w,
-        h,
+impl CropRect {
+    pub(crate) fn of(rect: NodeRect, img_w: u32, img_h: u32) -> Self {
+        let min = rect.min();
+        let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
+        let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
+        let w = (rect.size.x.round().max(1.0) as u32).min(img_w - left);
+        let h = (rect.size.y.round().max(1.0) as u32).min(img_h - top);
+        Self {
+            x: left,
+            y: top,
+            w,
+            h,
+        }
     }
 }
 
@@ -219,7 +210,15 @@ mod tests {
 
     #[test]
     fn crop_rect_clamps_to_image() {
-        let r = crop_rect_from_node(100.0, 100.0, 80.0, 60.0, 1000, 1000);
+        let r = CropRect::of(
+            NodeRect {
+                size: Vec2::new(80.0, 60.0),
+                center: Vec2::new(100.0, 100.0),
+                ..default()
+            },
+            1000,
+            1000,
+        );
         assert_eq!(
             r,
             CropRect {
@@ -230,7 +229,15 @@ mod tests {
             }
         );
 
-        let r = crop_rect_from_node(990.0, 990.0, 40.0, 40.0, 1000, 1000);
+        let r = CropRect::of(
+            NodeRect {
+                size: Vec2::splat(40.0),
+                center: Vec2::splat(990.0),
+                ..default()
+            },
+            1000,
+            1000,
+        );
         assert_eq!(
             r,
             CropRect {

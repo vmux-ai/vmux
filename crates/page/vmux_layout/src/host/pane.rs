@@ -22,7 +22,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
 };
-use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_core::{NodeRect, PageOpenRequest, PageOpenTarget, PageOpenTask};
 use vmux_history::LastActivatedAt;
 
 pub struct PanePlugin;
@@ -1990,8 +1990,7 @@ fn on_pane_select(
         let Ok((cur_node, cur_gt)) = pane_pos_q.get(current) else {
             continue;
         };
-        let cur_center = cur_gt.transform_point2(Vec2::ZERO);
-        let cur_size = cur_node.size;
+        let cur = NodeRect::of(cur_node, cur_gt);
 
         let mut candidates: Vec<Entity> = Vec::new();
         for &pane in &panes {
@@ -2001,27 +2000,17 @@ fn on_pane_select(
             let Ok((tgt_node, gt)) = pane_pos_q.get(pane) else {
                 continue;
             };
-            let center = gt.transform_point2(Vec2::ZERO);
-            let tgt_size = tgt_node.size;
-            let delta = center - cur_center;
+            let tgt = NodeRect::of(tgt_node, gt);
 
-            let along = delta.dot(direction);
+            let along = (tgt.center - cur.center).dot(direction);
             if along <= 0.0 {
                 continue;
             }
 
             let overlaps = if direction.x.abs() > 0.5 {
-                let cur_min = cur_center.y - cur_size.y * 0.5;
-                let cur_max = cur_center.y + cur_size.y * 0.5;
-                let tgt_min = center.y - tgt_size.y * 0.5;
-                let tgt_max = center.y + tgt_size.y * 0.5;
-                cur_min.max(tgt_min) < cur_max.min(tgt_max)
+                cur.overlaps_rows(tgt)
             } else {
-                let cur_min = cur_center.x - cur_size.x * 0.5;
-                let cur_max = cur_center.x + cur_size.x * 0.5;
-                let tgt_min = center.x - tgt_size.x * 0.5;
-                let tgt_max = center.x + tgt_size.x * 0.5;
-                cur_min.max(tgt_min) < cur_max.min(tgt_max)
+                cur.overlaps_columns(tgt)
             };
             if !overlaps {
                 continue;
@@ -2076,11 +2065,7 @@ fn poll_cursor_pane_focus(
 
     let mut hovered_pane: Option<Entity> = None;
     for (entity, node, ui_gt) in &leaf_panes {
-        let center = ui_gt.transform_point2(Vec2::ZERO);
-        let half = node.size * 0.5;
-        let min = center - half;
-        let max = center + half;
-        if cursor.x >= min.x && cursor.x <= max.x && cursor.y >= min.y && cursor.y <= max.y {
+        if NodeRect::of(node, ui_gt).contains(cursor) {
             hovered_pane = Some(entity);
             break;
         }
@@ -2184,17 +2169,13 @@ fn apply_pending_hover(
         return;
     }
     *last_motion_sequence = pointer.motion_sequence;
-    let target = leaf_panes.iter().find_map(|(entity, node, ui_gt)| {
-        let center = ui_gt.transform_point2(Vec2::ZERO);
-        let half = node.size * 0.5;
-        let min = center - half;
-        let max = center + half;
-        (pointer.position_px.x >= min.x
-            && pointer.position_px.x <= max.x
-            && pointer.position_px.y >= min.y
-            && pointer.position_px.y <= max.y)
-            .then_some(entity)
-    });
+    let mut target = None;
+    for (entity, node, ui_gt) in leaf_panes.iter() {
+        if NodeRect::of(node, ui_gt).contains(pointer.position_px) {
+            target = Some(entity);
+            break;
+        }
+    }
     let Some(target) = target else {
         return;
     };
@@ -2223,13 +2204,13 @@ fn warp_cursor_to_active_pane(
     let Ok((node, ui_gt)) = pane_ui_q.get(target) else {
         return;
     };
-    if node.size.x <= 0.0 || node.size.y <= 0.0 {
+    let rect = NodeRect::of(node, ui_gt);
+    if rect.is_empty() {
         return;
     }
     pending.target = None;
-    let center = ui_gt.transform_point2(Vec2::ZERO);
     if let Ok(mut window) = windows.single_mut() {
-        window.set_physical_cursor_position(Some(center.as_dvec2()));
+        window.set_physical_cursor_position(Some(rect.center.as_dvec2()));
     }
 }
 
@@ -2306,23 +2287,21 @@ fn pane_gap_drag_resize(
                 continue;
             };
 
-            let center_a = gt_a.transform_point2(Vec2::ZERO);
-            let center_b = gt_b.transform_point2(Vec2::ZERO);
-            let half_a = node_a.size * 0.5;
-            let half_b = node_b.size * 0.5;
+            let a = NodeRect::of(node_a, gt_a);
+            let b = NodeRect::of(node_b, gt_b);
 
             let (gap_min, gap_max, cross_min, cross_max) = match split.direction {
                 PaneSplitDirection::Row => (
-                    center_a.x + half_a.x,
-                    center_b.x - half_b.x,
-                    (center_a.y - half_a.y).min(center_b.y - half_b.y),
-                    (center_a.y + half_a.y).max(center_b.y + half_b.y),
+                    a.max().x,
+                    b.min().x,
+                    a.min().y.min(b.min().y),
+                    a.max().y.max(b.max().y),
                 ),
                 PaneSplitDirection::Column => (
-                    center_a.y + half_a.y,
-                    center_b.y - half_b.y,
-                    (center_a.x - half_a.x).min(center_b.x - half_b.x),
-                    (center_a.x + half_a.x).max(center_b.x + half_b.x),
+                    a.max().y,
+                    b.min().y,
+                    a.min().x.min(b.min().x),
+                    a.max().x.max(b.max().x),
                 ),
             };
 

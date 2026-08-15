@@ -17,6 +17,7 @@ use bevy::{
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_command::event::LAYOUT_COMMAND_BAR_OPEN_EVENT;
+use vmux_core::NodeRect;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
@@ -36,7 +37,7 @@ use crate::{
     CefPointerRegionQuery, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutHoverRefreshState,
     LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout, WindowedHoverRefreshState,
     native_layout_activity_active, native_left_mouse_down, reset_layout_cef_hover,
-    set_native_layout_activity, windowed_hover_refresh_frame, windowed_hover_refresh_position,
+    set_native_layout_activity,
 };
 pub(crate) struct FrameRatePlugin;
 
@@ -102,8 +103,7 @@ fn refresh_layout_cef_hover(
     {
         if pointer_capture {
             NativeLayout::set_pointer_regions([CefPointerHitRect {
-                center: Vec2::new(window.width() * 0.5, window.height() * 0.5),
-                size: Vec2::new(window.width(), window.height()),
+                rect: vmux_core::NodeRect::from_origin(Vec2::new(window.width(), window.height())),
                 interactive: true,
             }
             .physical(scale)]);
@@ -221,11 +221,12 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     };
-    let Some(frame) = windowed_hover_refresh_frame(computed, ui_gt) else {
+    let frame = NodeRect::of(computed, ui_gt);
+    if frame.is_empty() {
         *state = WindowedHoverRefreshState::default();
         return;
-    };
-    let Some(position) = windowed_hover_refresh_position(cursor_px, frame) else {
+    }
+    let Some(position) = frame.local_point(cursor_px) else {
         *state = WindowedHoverRefreshState::default();
         return;
     };
