@@ -220,7 +220,7 @@ fn push_remote_state_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
     let payload = RemoteStateEvent {

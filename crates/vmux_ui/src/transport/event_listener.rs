@@ -11,8 +11,9 @@ const PAGE_READY_BIN_EVENT_ID: &str = "vmux-page-ready";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventListenerError {
     NoWindow,
-    NoCefGlobal,
-    CefNotInjected,
+    /// No engine has injected its bridge yet. On wasm this is normal until the page finishes
+    /// loading, which is why [`crate::transport::Host::schedule_listener_retry`] exists.
+    NoHostBridge,
     NoListenMethod,
     ListenNotCallable,
     NoEmitMethod,
@@ -29,12 +30,11 @@ impl fmt::Display for EventListenerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::NoWindow => "no `window`",
-            Self::NoCefGlobal => "no `window.cef` property",
-            Self::CefNotInjected => "`window.cef` not ready",
-            Self::NoListenMethod => "no `cef.binListen`",
-            Self::ListenNotCallable => "`cef.binListen` is not a function",
-            Self::NoEmitMethod => "no `cef.binEmit`",
-            Self::EmitNotCallable => "`cef.binEmit` is not a function",
+            Self::NoHostBridge => "neither `window.cef` nor `window.vmuxWry` is injected",
+            Self::NoListenMethod => "no `binListen` on the host bridge",
+            Self::ListenNotCallable => "`binListen` is not a function",
+            Self::NoEmitMethod => "no `binEmit` on the host bridge",
+            Self::EmitNotCallable => "`binEmit` is not a function",
             Self::SerializePayload => "failed to serialize emit payload",
             Self::NoHost => "no page host installed",
             Self::Unsupported => "the host has no route for this event",

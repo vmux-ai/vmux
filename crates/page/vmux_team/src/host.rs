@@ -327,7 +327,7 @@ fn emit_team(
     let body_changed = body != *last;
 
     for entity in pending_layout.iter().chain(pending_team.iter()) {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));
@@ -335,7 +335,7 @@ fn emit_team(
     }
     if body_changed {
         for entity in sent_layout.iter().chain(sent_team.iter()) {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(entity, TEAM_EVENT, &payload));

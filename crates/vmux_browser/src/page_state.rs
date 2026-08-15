@@ -72,7 +72,7 @@ fn push_layout_state_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
     let window_padding = window_q
@@ -146,7 +146,7 @@ fn push_stacks_host_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
     let active_pane = focus.pane;
@@ -230,7 +230,7 @@ fn push_pane_tree_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
 
@@ -346,7 +346,7 @@ fn push_tab_boundary_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
     let boundary = focus.tab.and_then(|tab_e| {
@@ -439,7 +439,7 @@ fn push_bookmarks_host_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
 
@@ -533,7 +533,7 @@ fn push_tabs_host_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
 
@@ -606,7 +606,7 @@ fn push_update_notice_emit(
     let Ok((cef_e, page_ready)) = cef_q.single() else {
         return;
     };
-    if !browsers.has_browser(cef_e) || !browsers.host_emit_ready(&cef_e) {
+    if !browsers.can_emit_to(&cef_e) {
         return;
     }
     if !should_emit_update(&state, &last, page_ready.is_changed()) {

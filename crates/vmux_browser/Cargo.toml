@@ -12,6 +12,7 @@ conformance = []
 path = "src/lib.rs"
 
 [dependencies]
+async-channel = "2"
 base64 = "0.22"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
@@ -44,11 +45,18 @@ vmux_ui = { path = "../vmux_ui", default-features = false }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", default-features = false, features = [
     "std",
+    "NSAppearance",
     "NSResponder",
     "NSView",
     "NSWindow",
 ] }
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+] }
 raw-window-handle = "0.6"
+wry = { version = "0.53", features = ["transparent"] }
 
 [dev-dependencies]
 async-channel = "2"

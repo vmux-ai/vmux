@@ -611,7 +611,7 @@ fn drain_tool_actions(
             success,
             message,
         };
-        if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
+        if browsers.can_emit_to(&task.target) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 task.target,
                 TOOL_ACTION_RESULT_EVENT,
@@ -635,7 +635,7 @@ fn drain_vault_actions(
 ) {
     for (entity, mut task) in &mut tasks {
         while let Ok(progress) = task.progress.get_mut().try_recv() {
-            if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
+            if browsers.can_emit_to(&task.target) {
                 app_commands.write(AppCommand::Browser(BrowserCommand::Open(
                     OpenCommand::InNewStack {
                         url: Some(progress.url.clone()),
@@ -672,7 +672,7 @@ fn drain_vault_actions(
                 continue;
             }
         }
-        if browsers.has_browser(task.target) && browsers.host_emit_ready(&task.target) {
+        if browsers.can_emit_to(&task.target) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 task.target,
                 VAULT_ACTION_RESULT_EVENT,
@@ -698,8 +698,7 @@ fn emit_tools_snapshot(
     }
     if let Ok((entity, page_ready)) = layout.single()
         && (*layout_revision != state.revision || page_ready.is_changed())
-        && browsers.has_browser(entity)
-        && browsers.host_emit_ready(&entity)
+        && browsers.can_emit_to(&entity)
     {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             entity,

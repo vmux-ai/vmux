@@ -101,11 +101,11 @@ thread_local! {
 }
 
 pub mod bin_ipc_envelope;
-#[cfg(web)]
-pub mod cef;
 pub mod event_listener;
 #[cfg(not(web))]
 mod native;
+#[cfg(web)]
+pub mod web;
 
 #[cfg(test)]
 mod tests {

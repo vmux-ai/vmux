@@ -2,8 +2,6 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 
-use crate::event::LAYOUT_PAGE_URL;
-
 pub struct LayoutCefPlugin;
 
 impl Plugin for LayoutCefPlugin {
@@ -14,8 +12,6 @@ impl Plugin for LayoutCefPlugin {
         app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
     }
 }
-
-const LAYOUT_OSR_MAX_FRAME_RATE: i32 = 30;
 
 #[derive(Component)]
 pub struct Browser;
@@ -205,19 +201,21 @@ impl Browser {
     }
 }
 
-pub fn layout_cef_bundle(
-    host_window: Entity,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) -> impl Bundle {
+/// The layout's entity, carrying no CEF browser.
+///
+/// Everything CEF needs to serve a page — `Browser`, `WebviewSource`, the material, the size — is
+/// deliberately absent, because a windowed CEF browser cannot be transparent on macOS
+/// ([CEF #2315]) and the layout is the one page that must be. A wry `WKWebView` serves it instead.
+///
+/// The entity itself stays, and keeps its name: every host system in this crate queries
+/// `With<LayoutCef>`, and the page still receives host events under this id — `can_emit_to` is
+/// what decouples that from CEF owning a browser.
+///
+/// [CEF #2315]: https://bitbucket.org/chromiumembedded/cef/issues/2315
+pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
-        (
-            LayoutCef,
-            Browser,
-            HostWindow(host_window),
-            WebviewTransparent,
-            WebviewMaxFrameRate(LAYOUT_OSR_MAX_FRAME_RATE),
-            bevy_cef::prelude::CefIgnorePinchZoom,
-        ),
+        LayoutCef,
+        HostWindow(host_window),
         Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
@@ -227,9 +225,6 @@ pub fn layout_cef_bundle(
             ..default()
         },
         ZIndex(2),
-        WebviewSource::new(LAYOUT_PAGE_URL),
-        WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
-        WebviewSize(Vec2::new(1280.0, 720.0)),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Inherited,
@@ -366,12 +361,9 @@ mod apply_cef_state_tests {
 mod tests {
     use super::*;
 
-    fn build_test_cef(
-        mut commands: Commands,
-        mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) {
+    fn build_test_cef(mut commands: Commands) {
         let host = commands.spawn_empty().id();
-        commands.spawn(layout_cef_bundle(host, &mut webview_mt));
+        commands.spawn(layout_cef_bundle(host));
     }
 
     fn build_test_page(

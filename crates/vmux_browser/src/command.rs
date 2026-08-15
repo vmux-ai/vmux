@@ -218,7 +218,7 @@ fn on_reload_notify_header(
 ) {
     let Some(cef) = cef else { return };
     let cef_e = *cef;
-    if browsers.has_browser(cef_e) && browsers.host_emit_ready(&cef_e) {
+    if browsers.can_emit_to(&cef_e) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             cef_e,
             RELOAD_EVENT,
@@ -235,7 +235,7 @@ fn on_hard_reload_notify_header(
 ) {
     let Some(cef) = cef else { return };
     let cef_e = *cef;
-    if browsers.has_browser(cef_e) && browsers.host_emit_ready(&cef_e) {
+    if browsers.can_emit_to(&cef_e) {
         commands.trigger(BinHostEmitEvent::from_rkyv(
             cef_e,
             RELOAD_EVENT,
