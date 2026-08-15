@@ -176,7 +176,7 @@ fn spawn_layout_view(world: &mut World) {
     match built {
         None => report_waiting("primary window has no winit window yet"),
         Some(Ok(webview)) => {
-            raise_above_panes(&webview);
+            raise_above_window_layers(&webview);
             world
                 .non_send_mut::<Browsers>()
                 .set_externally_hosted(layout);
@@ -437,14 +437,15 @@ const WRY_HOST_SHIM: &str = r#"
 })();
 "#;
 
-/// Keep the chrome painted over the panes.
+/// Keep the chrome above the other layers in this window.
 ///
-/// Other webviews composite as layers carrying their own `zPosition`, and subview order cannot beat
-/// a `zPosition` — only another one can. Nothing here decides *input* order, which is why the panes
-/// currently receive none: a `WKWebView` is a real `NSView` and hit-tests wherever it covers, where
-/// the CEF layout was a `CALayer` and hit-tested nowhere at all.
+/// Not the panes — those are windowed CEF browsers living in child `NSWindow`s of their own, which
+/// no ordering here can reach and none is wanted: a pane sits above the chrome and takes the clicks
+/// that land on it, which is the arrangement. What this beats is inside the main window, where
+/// `sync_layout_overlay` still parents a `CALayer` at `zPosition` 100 and subview order cannot
+/// outrank a `zPosition` — only another one can.
 #[cfg(target_os = "macos")]
-fn raise_above_panes(webview: &wry::WebView) {
+fn raise_above_window_layers(webview: &wry::WebView) {
     use objc2_app_kit::NSView;
     use wry::WebViewExtMacOS;
 
