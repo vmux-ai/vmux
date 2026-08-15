@@ -261,15 +261,22 @@ const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
 
 /// One request in, one response out, then the stream closes.
 ///
-/// The stream kind leads so the peer can route without decoding, and so a client that opens the
-/// wrong kind is told rather than left waiting.
+/// Every way this can fail resets the stream with a reason rather than dropping it. A dropped
+/// stream finishes clean and empty, which is exactly what a subscription to a session that does
+/// not exist looks like — so a peer could not tell "no such session" from "I could not read what
+/// you sent". Resetting is also per-stream: one bad request must not take the connection, which
+/// is what `connection.close` would do.
 async fn dispatch_control(
     state: super::server::RemoteState,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
 ) {
-    let Ok(frame) = CONTROL.accept(&mut recv).await else {
-        return;
+    let frame = match CONTROL.accept(&mut recv).await {
+        Ok(frame) => frame,
+        Err(error) => {
+            refuse(&mut send, &mut recv, Rejection::from(error));
+            return;
+        }
     };
     // Must stay ahead of the decode below: rejecting a foreign type afterwards would mean the
     // decoder had already run on bytes this handler was never addressed by.
@@ -280,11 +287,13 @@ async fn dispatch_control(
                 ?unserved,
                 "remote quic: stream refused, unserved message type"
             );
+            refuse(&mut send, &mut recv, Rejection::Malformed);
             return;
         }
     }
 
     let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body) else {
+        refuse(&mut send, &mut recv, Rejection::Malformed);
         return;
     };
 
@@ -295,12 +304,23 @@ async fn dispatch_control(
 
     let response = dispatch::dispatch(&state, request).await;
     let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+        refuse(&mut send, &mut recv, Rejection::Malformed);
         return;
     };
     let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
     if CONTROL.open(&mut send, &frame).await.is_ok() {
         let _ = send.finish();
     }
+}
+
+/// Turn one stream away with a reason, leaving the connection alone.
+///
+/// `stop` as well as `reset` so the peer stops writing a request nothing will read, rather than
+/// filling its send window against a stream that has already been answered.
+fn refuse(send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, rejection: Rejection) {
+    let code = quinn::VarInt::from(rejection.close_code().as_u32());
+    let _ = send.reset(code);
+    let _ = recv.stop(code);
 }
 
 /// Push a session's events until the client goes away.
@@ -702,12 +722,16 @@ mod live {
         )
         .await;
 
-        let served = matches!(&answered, Ok(Ok(bytes)) if !bytes.is_empty());
+        assert!(answered.is_ok(), "it must not hang, got {answered:?}");
+        let Ok(read) = answered else {
+            unreachable!("checked above")
+        };
         assert!(
-            !served,
-            "a foreign message type must not be served as a control request, got {answered:?}"
+            read.is_err(),
+            "a refused stream must reset, not finish clean — a clean empty finish is what a \
+             subscription to a session that does not exist looks like, so the peer could not \
+             tell the two apart. Got {read:?}"
         );
-        assert!(answered.is_ok(), "and it must not hang, got {answered:?}");
     }
 
     #[tokio::test]
