@@ -55,10 +55,11 @@ fn discard_abandoned_pending_stacks(
             &stack_q,
             &mut commands,
         );
-        if closed_tab {
-            continue;
+        // Only the despawn is conditional. Closing the tab takes the stack with it, but it does
+        // not put the keyboard back, and the pane the launcher came from still wants it.
+        if !closed_tab {
+            commands.entity(event.stack).despawn();
         }
-        commands.entity(event.stack).despawn();
         let Some(previous) = event.previous_stack else {
             continue;
         };

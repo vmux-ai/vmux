@@ -532,6 +532,7 @@ fn handle_open_command_bar(
     browser_meta: Query<&PageMetadata, With<WebviewSource>>,
     focus: Res<CommandBarWorkspaceSnapshot>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
+    mut abandoned: MessageWriter<PendingStackAbandoned>,
     mut launcher_hosts: LauncherHosts,
     child_of_q: Query<&ChildOf>,
     contributions: Contributions,
@@ -581,7 +582,10 @@ fn handle_open_command_bar(
         command_bar_cancel_pending_stack_for_active_open(&mut pending_launch, replace_active_stack)
     };
     if let Some((stack, previous_stack)) = canceled_pending_stack {
-        commands.entity(stack).despawn();
+        abandoned.write(PendingStackAbandoned {
+            stack,
+            previous_stack,
+        });
         if let Some(previous_stack) = previous_stack {
             active_stack_override = Some(previous_stack);
             focus_pane_entity(previous_stack, &mut commands, &child_of_q);
@@ -593,10 +597,10 @@ fn handle_open_command_bar(
         let mut pending_launch = snapshot_params.p1();
         // Discard empty tab created by a previous Cmd+T
         if let Some(stack_e) = pending_launch.stack.take() {
-            commands.entity(stack_e).despawn();
-            if let Some(prev) = pending_launch.previous_stack.take() {
-                restore_keyboard.write(RestoreKeyboardToStack { stack: prev });
-            }
+            abandoned.write(PendingStackAbandoned {
+                stack: stack_e,
+                previous_stack: pending_launch.previous_stack.take(),
+            });
         } else {
             if let Some(stack) = focus.stack {
                 restore_keyboard.write(RestoreKeyboardToStack { stack });
@@ -1096,7 +1100,10 @@ fn on_command_bar_action(
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
@@ -1114,14 +1121,20 @@ fn on_command_bar_action(
                 });
             }
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
         }
         CommandBarActionEvent::SwitchTab { pane, index } => {
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
@@ -2025,7 +2038,15 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
         );
-        assert!(app.world().get_entity(pending).is_err());
+        // Disposal is the workspace's: closing the tab the stack was staged in, and putting the
+        // keyboard back, are things only it can do. The bar's part is reporting that it walked away.
+        let abandoned: Vec<Entity> = app
+            .world_mut()
+            .resource_mut::<Messages<PendingStackAbandoned>>()
+            .drain()
+            .map(|event| event.stack)
+            .collect();
+        assert_eq!(abandoned, vec![pending]);
         let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.stack.is_none());
         assert!(!ctx.needs_open);
