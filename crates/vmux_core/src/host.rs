@@ -23,6 +23,7 @@ pub mod page_open;
 pub mod profile;
 pub mod team;
 pub mod terminal;
+pub mod workspace;
 
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
@@ -38,3 +39,4 @@ pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
+pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};

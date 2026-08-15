@@ -15,6 +15,7 @@ use std::time::Instant;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_core::Order;
+pub use vmux_core::workspace::TabCommandSet;
 use vmux_history::LastActivatedAt;
 
 impl Plugin for TabPlugin {
@@ -51,9 +52,6 @@ impl Plugin for TabPlugin {
 }
 
 pub struct TabPlugin;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TabCommandSet;
 
 #[derive(Message, Clone, Copy)]
 pub struct CloseTabRequest {
