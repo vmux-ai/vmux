@@ -393,7 +393,7 @@ pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<crate::NewStackContext>,
+    mut new_stack_ctx: ResMut<crate::PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
     spaces: Query<(), With<crate::space::Space>>,
@@ -791,7 +791,7 @@ mod tests {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -820,7 +820,7 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<crate::NewStackContext>();
+        let ctx = app.world().resource::<crate::PendingLaunch>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
     }
@@ -831,7 +831,7 @@ mod tests {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -866,7 +866,7 @@ mod tests {
         let _home = HomeEnvGuard::use_temp_home("default-tab-no-workspace");
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -895,7 +895,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -930,7 +930,7 @@ mod tests {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -985,7 +985,7 @@ mod tests {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
@@ -1038,7 +1038,7 @@ mod tests {
         let startup_dir = tempfile::tempdir().unwrap();
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()

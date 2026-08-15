@@ -182,7 +182,7 @@ fn sync_children_to_ui(
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
-    new_stack_ctx: Res<vmux_layout::NewStackContext>,
+    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
@@ -258,7 +258,7 @@ fn sync_children_to_ui(
         // Keep rendering the previous tab behind while a new empty tab
         // (without CEF content) is pending in the command bar flow.
         let is_previous_stack =
-            new_stack_ctx.stack.is_some() && new_stack_ctx.previous_stack == Some(parent);
+            pending_launch.stack.is_some() && pending_launch.previous_stack == Some(parent);
 
         let is_inactive_stack =
             parent != glass_entity && !is_cef_ui && !is_active_stack && !is_previous_stack;
@@ -1040,7 +1040,7 @@ fn sync_osr_webview_focus(
     >,
     primary_window: Single<&Window, With<PrimaryWindow>>,
     focus: Res<vmux_layout::stack::FocusedStack>,
-    new_stack_ctx: Res<vmux_layout::NewStackContext>,
+    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_children_q: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -1149,8 +1149,8 @@ fn sync_osr_webview_focus(
                         active_stack_in_pane(pane, &pane_children_q, &tab_ts) == Some(parent);
                     // Keep previous tab's webview visible while an empty new tab is
                     // pending (user is picking content in the command bar).
-                    is_prev = new_stack_ctx.stack.is_some()
-                        && new_stack_ctx.previous_stack == Some(parent);
+                    is_prev = pending_launch.stack.is_some()
+                        && pending_launch.previous_stack == Some(parent);
                 }
             }
         }

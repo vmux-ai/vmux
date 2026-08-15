@@ -138,7 +138,7 @@ fn push_stacks_host_emit(
     >,
     stack_q: Query<(), With<Stack>>,
     zoomed_q: Query<(), With<vmux_layout::pane::Zoomed>>,
-    new_stack_ctx: Res<vmux_layout::NewStackContext>,
+    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     mut last: Local<String>,
@@ -181,7 +181,7 @@ fn push_stacks_host_emit(
             });
         }
     }
-    if should_emit_new_stack_placeholder(new_stack_ctx.stack, active_stack_opt, &rows) {
+    if should_emit_new_stack_placeholder(pending_launch.stack, active_stack_opt, &rows) {
         rows.retain(|r| !r.is_active);
         rows.push(StackRow {
             title: "New Stack".to_string(),
@@ -213,7 +213,7 @@ fn push_pane_tree_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    new_stack_ctx: Res<vmux_layout::NewStackContext>,
+    pending_launch: Res<vmux_core::launcher::PendingLaunch>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     tab_q: Query<(), With<Tab>>,
     tab_sections: Query<&SideSheetSectionsExpanded, With<Tab>>,
@@ -262,7 +262,7 @@ fn push_pane_tree_emit(
                 if let Ok(stack_kids) = stack_children.get(child) {
                     for browser_e in stack_kids.iter() {
                         if let Ok((meta, loading, osc)) = browser_meta.get(browser_e) {
-                            let is_new_stack = new_stack_ctx.stack == Some(child)
+                            let is_new_stack = pending_launch.stack == Some(child)
                                 && (meta.url.is_empty() || meta.url == "about:blank");
                             stacks.push(StackNode {
                                 title: if is_new_stack {

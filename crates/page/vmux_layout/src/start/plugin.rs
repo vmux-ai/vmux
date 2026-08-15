@@ -26,6 +26,7 @@ use crate::tab::{Tab, TabWorkspace, TabWorktree};
 use crate::window::VmuxWindow;
 use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 use vmux_command::build_command_bar_open_payload;
+use vmux_core::launcher::{FocusLauncherInput, HostsLauncher, InlineTransitionRequested};
 
 /// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
 /// and answers [`StartDataRequest`] with the shared command-bar payload.
@@ -34,6 +35,16 @@ pub struct StartPlugin;
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::start::PAGE_MANIFEST);
+        app.add_message::<FocusLauncherInput>()
+            .add_message::<InlineTransitionRequested>()
+            .add_systems(
+                Update,
+                (
+                    mark_start_pages_as_launcher_hosts,
+                    focus_start_input_on_request,
+                    begin_requested_inline_transition,
+                ),
+            );
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
@@ -640,6 +651,55 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
         for child in children.iter() {
             commands.entity(child).try_despawn();
         }
+    }
+}
+
+/// Claims [`HostsLauncher`] for every start webview, so the command bar can ask what a page can do
+/// instead of comparing its URL.
+fn mark_start_pages_as_launcher_hosts(
+    starts: Query<(Entity, &WebviewSource), Without<HostsLauncher>>,
+    mut commands: Commands,
+) {
+    for (entity, source) in starts.iter() {
+        let WebviewSource::Url(url) = source else {
+            continue;
+        };
+        if url.starts_with(START_PAGE_URL) {
+            commands.entity(entity).insert(HostsLauncher);
+        }
+    }
+}
+
+fn focus_start_input_on_request(
+    mut requests: MessageReader<FocusLauncherInput>,
+    starts: Query<(), With<HostsLauncher>>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        if !starts.contains(request.webview) {
+            continue;
+        }
+        commands.trigger(BinHostEmitEvent::from_rkyv(
+            request.webview,
+            crate::start::event::START_FOCUS_INPUT_EVENT,
+            &crate::start::event::StartFocusInput,
+        ));
+    }
+}
+
+fn begin_requested_inline_transition(
+    mut requests: MessageReader<InlineTransitionRequested>,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        commands
+            .entity(request.stack)
+            .insert(crate::start::StartInlineTransition {
+                webview: request.webview,
+            });
+        commands
+            .entity(request.webview)
+            .insert(crate::start::StartInlineTransitionView);
     }
 }
 

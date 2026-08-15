@@ -15,6 +15,7 @@ pub mod archive;
 pub mod browser;
 pub mod extension;
 pub mod host_spawn;
+pub mod launcher;
 pub mod notify;
 pub mod overlay;
 pub mod page;
@@ -27,6 +28,10 @@ pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
+pub use launcher::{
+    ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,
+    PendingLaunch, PendingStackAbandoned,
+};
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
 pub use page_open::{

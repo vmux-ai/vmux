@@ -18,6 +18,7 @@ pub mod debug;
 pub mod native_pointer;
 pub mod overlay_adopt;
 pub mod pane;
+pub mod pending_stack;
 pub mod placement;
 pub mod plugin;
 pub mod profile;
@@ -50,6 +51,8 @@ pub use header::Header;
 pub use pane::{OpenBesideRequest, handle_open_beside_requests};
 pub use plugin::LayoutPlugin;
 pub use stack::CloseStackRequest;
+pub use vmux_core::ContributedCommandChosen;
+pub use vmux_core::launcher::PendingLaunch;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
@@ -93,14 +96,6 @@ pub enum LayoutStartupSet {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout"]
 pub struct Open;
-
-#[derive(Resource, Default)]
-pub struct NewStackContext {
-    pub stack: Option<Entity>,
-    pub previous_stack: Option<Entity>,
-    pub needs_open: bool,
-    pub dismiss_modal: bool,
-}
 
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;
@@ -149,18 +144,6 @@ pub struct TabLayoutSpawnRequest {
     pub content: TabLayoutSpawnContent,
     pub clear_pending_stack: bool,
     pub focus: bool,
-}
-
-/// A command-bar row contributed through `CommandBarContributions` was chosen.
-///
-/// The command bar does not know what the row means — whoever published the id answers this.
-/// `stack` is the empty stack the bar was opened on; when there is none, `pane` is the focused
-/// pane to spawn into. Exactly one of the two is set.
-#[derive(Message, Clone, Debug)]
-pub struct ContributedCommandChosen {
-    pub id: String,
-    pub stack: Option<Entity>,
-    pub pane: Option<Entity>,
 }
 
 /// Open `url` in a new focused tab in the active space.
