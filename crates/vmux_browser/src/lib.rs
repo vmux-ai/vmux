@@ -1107,7 +1107,7 @@ mod error_page_source_tests {
 mod tests {
     use super::*;
     use crate::appearance::sync_appearance_to_cef;
-    use vmux_layout::window::Modal;
+    use vmux_command::CommandBar;
 
     #[test]
     fn cef_disables_bfcache_for_extension_ports() {
@@ -1391,7 +1391,11 @@ mod tests {
             .id();
         let modal = app
             .world_mut()
-            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
+            .spawn((
+                Browser,
+                CommandBar,
+                WebviewSource::new("vmux://command-bar/"),
+            ))
             .id();
 
         sync_cef_backend(app.world_mut());

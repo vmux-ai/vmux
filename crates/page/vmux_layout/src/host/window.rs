@@ -20,6 +20,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
+use vmux_command::CommandBar;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
@@ -138,9 +139,6 @@ pub struct Main;
 
 #[derive(Component)]
 pub struct MainColumn;
-
-#[derive(Component)]
-pub struct Modal;
 
 #[derive(Component)]
 pub struct WindowSurface;
@@ -298,7 +296,7 @@ fn setup(
 
     commands.spawn((
         (
-            Modal,
+            CommandBar,
             HostWindow(pw),
             Browser,
             // An ordinary windowed surface, framed by the shared `sync_windowed_frames` and
@@ -806,7 +804,7 @@ mod tests {
 
         let modal = app
             .world_mut()
-            .query_filtered::<Entity, With<Modal>>()
+            .query_filtered::<Entity, With<CommandBar>>()
             .single(app.world())
             .expect("modal");
 
@@ -857,7 +855,7 @@ mod tests {
 
         let modal = app
             .world_mut()
-            .query_filtered::<Entity, With<Modal>>()
+            .query_filtered::<Entity, With<CommandBar>>()
             .single(app.world())
             .expect("modal");
 

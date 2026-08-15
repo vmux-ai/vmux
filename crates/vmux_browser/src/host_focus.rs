@@ -1,11 +1,11 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
+use vmux_command::CommandBar;
 use vmux_layout::Header;
 use vmux_layout::command_bar::state::CommandBarState;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
-use vmux_layout::window::Modal;
 use vmux_terminal::Terminal;
 
 use crate::Browser;
@@ -76,7 +76,7 @@ pub(crate) fn compute_host_focus_intent(
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     layout_keyboard_q: Query<(), (With<Browser>, crate::present::LayoutKeyboardCapture)>,
     mut intent: ResMut<HostFocusIntent>,
@@ -222,7 +222,7 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((
-            Modal,
+            CommandBar,
             Node {
                 display: Display::Flex,
                 ..default()
@@ -247,7 +247,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -276,7 +276,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -302,7 +302,7 @@ mod tests {
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
         app.world_mut().spawn((
-            Modal,
+            CommandBar,
             Node {
                 display: Display::Flex,
                 ..default()

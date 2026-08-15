@@ -30,7 +30,7 @@ pub mod page_key;
 pub mod shortcut;
 pub mod snapshot;
 
-pub use bundle::COMMAND_BAR_PAGE_URL;
+pub use bundle::{COMMAND_BAR_PAGE_URL, CommandBar};
 pub use command::*;
 pub use issued::{CommandIssued, CommandIssuer};
 pub use open::*;

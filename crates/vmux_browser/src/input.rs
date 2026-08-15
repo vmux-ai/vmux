@@ -17,10 +17,11 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
+use vmux_command::CommandBar;
 use vmux_command::event::CommandBarActionEvent;
 use vmux_layout::Browser;
+use vmux_layout::LayoutCef;
 use vmux_layout::command_bar::state::CommandBarStateQuery;
-use vmux_layout::{LayoutCef, window::Modal};
 
 use crate::{
     CefPointerRegionQuery, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
@@ -74,7 +75,7 @@ fn sync_layout_cef_pointer_target(
     layout_q: Query<(Entity, Has<CefPointerTarget>), With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
     mut commands: Commands,
 ) {
     let Ok((layout, has_target)) = layout_q.single() else {
@@ -128,7 +129,7 @@ fn forward_layout_cef_cursor_move(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
     mut was_in_region: Local<bool>,
 ) {
     if suppress.0 || !modal_pointer_targets.is_empty() {
@@ -161,7 +162,7 @@ fn forward_layout_cef_mouse_button(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
     mut captured: Local<bool>,
 ) {
     if suppress.0 || !modal_pointer_targets.is_empty() {
@@ -219,7 +220,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
     mut events: MessageReader<MouseButtonInput>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    modal_q: Query<(Entity, Option<&HostWindow>), (With<Modal>, With<WebviewWindowed>)>,
+    modal_q: Query<(Entity, Option<&HostWindow>), (With<CommandBar>, With<WebviewWindowed>)>,
     mut commands: Commands,
 ) {
     let Ok((modal_e, host_window)) = modal_q.single() else {
@@ -264,7 +265,7 @@ fn dismiss_windowed_command_bar_on_outside_click(
 }
 
 fn dismiss_command_bar_from_native_monitor(
-    modal_q: Query<Entity, With<Modal>>,
+    modal_q: Query<Entity, With<CommandBar>>,
     mut commands: Commands,
 ) {
     if !take_native_command_bar_dismiss_requested() {

@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::CefKeyboardTarget;
-
-use crate::window::Modal;
+use vmux_command::CommandBar;
 
 /// Authoritative command bar lifecycle state.
 ///
@@ -51,7 +50,7 @@ impl CommandBarState {
 }
 
 pub type CommandBarStateQuery<'w, 's> =
-    Query<'w, 's, (&'static Node, &'static Visibility, Has<CefKeyboardTarget>), With<Modal>>;
+    Query<'w, 's, (&'static Node, &'static Visibility, Has<CefKeyboardTarget>), With<CommandBar>>;
 
 pub fn command_bar_state(modal_q: &CommandBarStateQuery) -> CommandBarState {
     modal_q

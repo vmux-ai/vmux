@@ -1,5 +1,6 @@
 pub(crate) use crate::NewStackContext;
 use std::time::{Duration, Instant};
+use vmux_command::CommandBar;
 
 use crate::cef::{Browser, LayoutCef};
 use crate::command_bar::panel::CommandBarPanelActive;
@@ -15,7 +16,7 @@ use crate::{
     side_sheet::SideSheet,
     stack::{ActiveTabParam, Stack, collect_leaf_panes, focused_stack},
     tab::Tab,
-    window::{Main, Modal},
+    window::Main,
 };
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
@@ -314,7 +315,7 @@ fn prewarm_command_bar_modal(
             Has<PendingCommandBarReveal>,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
 ) {
     let Ok((
@@ -636,7 +637,7 @@ fn handle_open_command_bar(
             With<Browser>,
             Without<Header>,
             Without<SideSheet>,
-            Without<Modal>,
+            Without<CommandBar>,
         ),
     >,
     contributions: Contributions,
@@ -1127,7 +1128,7 @@ struct CommandBarActionQueries<'w, 's> {
             With<Browser>,
             Without<Header>,
             Without<SideSheet>,
-            Without<Modal>,
+            Without<CommandBar>,
         ),
     >,
     webview_sources: Query<'w, 's, &'static WebviewSource>,
@@ -1223,7 +1224,7 @@ fn on_command_bar_action(
             &mut Visibility,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     queries: CommandBarActionQueries,
     mut stack_params: ParamSet<(
@@ -1728,7 +1729,7 @@ fn deferred_dismiss_modal(
             &mut Visibility,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     mut commands: Commands,
 ) {
@@ -1763,7 +1764,7 @@ fn reveal_command_bar(
             Has<WebviewWindowed>,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
 ) {
     for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
@@ -1816,7 +1817,7 @@ fn retry_pending_command_bar_open(
             Option<&CommandBarRenderedOpen>,
             Has<CommandBarRecreating>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     mut last_emit: Local<std::collections::HashMap<Entity, Instant>>,
 ) {
@@ -1855,7 +1856,7 @@ fn retry_pending_command_bar_open(
 
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
-    modal_q: Query<Entity, With<Modal>>,
+    modal_q: Query<Entity, With<CommandBar>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -2050,7 +2051,7 @@ mod tests {
             .init_resource::<CapturedCommandBarOpen>()
             .add_systems(Update, capture_command_bar_open);
         app.world_mut().spawn((
-            Modal,
+            CommandBar,
             Node {
                 display: Display::Flex,
                 ..default()
@@ -2083,7 +2084,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::None,
                     ..default()
@@ -2116,7 +2117,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 CommandBarReady,
                 Node {
                     display: Display::None,
@@ -2277,7 +2278,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
@@ -2306,7 +2307,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
@@ -2704,7 +2705,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::Flex,
                     ..default()

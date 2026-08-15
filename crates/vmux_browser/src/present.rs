@@ -13,6 +13,7 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
+use vmux_command::CommandBar;
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_layout::Browser;
@@ -26,9 +27,7 @@ use vmux_layout::{
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     tab::Tab,
-    window::{
-        Modal, VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET,
-    },
+    window::{VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET},
 };
 
 use vmux_setting::AppSettings;
@@ -79,7 +78,7 @@ fn sync_keyboard_target(
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
-    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<Modal>>,
+    modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<CommandBar>>,
     layout_keyboard_q: Query<Entity, (With<LayoutCef>, LayoutKeyboardCapture)>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
@@ -168,7 +167,7 @@ fn sync_children_to_ui(
             &mut WebviewSize,
             Option<&Header>,
             Option<&SideSheet>,
-            Option<&Modal>,
+            Option<&CommandBar>,
             Option<&Visibility>,
             Option<&HistorySwipeVisualOffset>,
             Has<PendingWebviewReveal>,
@@ -403,7 +402,7 @@ pub(crate) fn sync_windowed_frames(
             With<Browser>,
             With<WebviewWindowed>,
             Without<LayoutCef>,
-            Without<Modal>,
+            Without<CommandBar>,
         ),
     >,
     child_of_q: Query<&ChildOf>,
@@ -771,7 +770,7 @@ pub(crate) fn sync_windowed_command_bar(
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     native_size_changed: Query<(), Changed<CommandBarNativeSize>>,
     windows: Query<&Window>,
@@ -915,7 +914,7 @@ pub(crate) fn sync_windowed_command_bar(
 #[cfg(target_os = "macos")]
 fn flush_native_command_bar_pointer_events(
     browsers: NonSend<Browsers>,
-    modal_q: Query<Entity, (With<Modal>, With<WebviewWindowed>)>,
+    modal_q: Query<Entity, (With<CommandBar>, With<WebviewWindowed>)>,
 ) {
     let Ok(entity) = modal_q.single() else {
         return;
@@ -953,7 +952,7 @@ fn apply_repaint_nudge(browsers: NonSend<Browsers>, ready: Query<Entity, Changed
 
 fn sync_cef_webview_resize_after_ui(
     browsers: NonSend<Browsers>,
-    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<Modal>)>,
+    webviews: Query<(Entity, &WebviewSize), (With<Browser>, Without<CommandBar>)>,
     host_window: Query<&HostWindow>,
     windows: Query<&Window>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -1030,7 +1029,7 @@ fn sync_osr_webview_focus(
             Option<&ComputedNode>,
             Has<PendingWebviewReveal>,
             Has<PendingCommandBarReveal>,
-            Has<Modal>,
+            Has<CommandBar>,
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
             Has<LayoutCef>,
@@ -1594,7 +1593,7 @@ mod tests {
             .world_mut()
             .spawn((
                 Browser,
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::Flex,
                     ..default()
