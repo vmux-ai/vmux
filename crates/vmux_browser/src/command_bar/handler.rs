@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 use vmux_command::CommandBar;
 use vmux_command::build_command_bar_open_payload;
+use vmux_core::launcher::PendingStackAbandoned;
 pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
@@ -44,7 +45,6 @@ use vmux_layout::{
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{ActiveTabParam, Stack, focused_stack},
-    tab::Tab,
     window::Main,
 };
 use vmux_ui::i18n::{Locale, TranslationValue};
@@ -58,7 +58,8 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .add_message::<vmux_layout::ContributedCommandChosen>()
+            .add_message::<vmux_core::ContributedCommandChosen>()
+            .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -784,7 +785,6 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
 
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
-    tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
     active_tab_param: ActiveTabParam<'w, 's>,
     all_children: Query<'w, 's, &'static Children>,
     leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
@@ -918,7 +918,8 @@ fn on_command_bar_action(
         MessageWriter<PageOpenRequest>,
         MessageWriter<TerminalSpawnRequest>,
     )>,
-    mut chosen_writer: MessageWriter<vmux_layout::ContributedCommandChosen>,
+    mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
+    mut abandoned_writer: MessageWriter<PendingStackAbandoned>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -1041,7 +1042,7 @@ fn on_command_bar_action(
                 };
                 if !inline_transition && resource_params.p2().claims_url(&url) {
                     if let Some(stack_e) = empty_stack {
-                        chosen_writer.write(vmux_layout::ContributedCommandChosen {
+                        chosen_writer.write(vmux_core::ContributedCommandChosen {
                             id: url.clone(),
                             stack: Some(stack_e),
                             pane: None,
@@ -1052,7 +1053,7 @@ fn on_command_bar_action(
                     } else {
                         let active_pane_opt = queries.focused_pane();
                         if let Some(pane_e) = active_pane_opt {
-                            chosen_writer.write(vmux_layout::ContributedCommandChosen {
+                            chosen_writer.write(vmux_core::ContributedCommandChosen {
                                 id: url.clone(),
                                 stack: None,
                                 pane: Some(pane_e),
@@ -1173,7 +1174,7 @@ fn on_command_bar_action(
                     new_stack_ctx.previous_stack = None;
                 }
                 if empty_stack.is_some() || pane.is_some() {
-                    chosen_writer.write(vmux_layout::ContributedCommandChosen {
+                    chosen_writer.write(vmux_core::ContributedCommandChosen {
                         id: id.clone(),
                         stack: empty_stack,
                         pane,
@@ -1262,31 +1263,11 @@ fn on_command_bar_action(
         }
         CommandBarActionEvent::Dismiss => {
             if let Some(stack_e) = empty_stack {
-                let stack_q = stack_params.p0();
-                let closed_tab = close_tab_if_only_pending_stack(
-                    stack_e,
-                    &queries.tab_q,
-                    &queries.child_of_q,
-                    &queries.all_children,
-                    &stack_q,
-                    &mut commands,
-                );
-                if !closed_tab {
-                    commands.entity(stack_e).despawn();
-                }
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 new_stack_ctx.stack = None;
-                if !closed_tab {
-                    // Restore keyboard to previous tab's browser
-                    if let Some(prev) = previous_stack
-                        && let Ok(children) = queries.all_children.get(prev)
-                    {
-                        for child in children.iter() {
-                            if queries.content_browsers.contains(child) {
-                                commands.entity(child).try_insert(CefKeyboardTarget);
-                            }
-                        }
-                    }
-                }
                 new_stack_ctx.previous_stack = None;
                 custom_keyboard_restore = true;
             }
@@ -1321,75 +1302,6 @@ fn on_command_bar_action(
             }
         }
     }
-}
-
-fn close_tab_if_only_pending_stack(
-    stack: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-    child_of_q: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-    stack_q: &Query<Entity, With<Stack>>,
-    commands: &mut Commands,
-) -> bool {
-    let Some(tab) = ancestor_tab(stack, tab_q, child_of_q) else {
-        return false;
-    };
-    if entity_tree_contains_stack_other_than(tab, stack, all_children, stack_q) {
-        return false;
-    }
-    let siblings = sibling_tabs(tab, tab_q, child_of_q, all_children);
-    if siblings.len() <= 1 {
-        return false;
-    }
-    if let Some(next) = vmux_layout::tab::pick_after_close(tab, &siblings) {
-        commands.entity(next).insert(LastActivatedAt::now());
-    }
-    commands.entity(tab).despawn();
-    true
-}
-
-fn ancestor_tab(
-    entity: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-    child_of_q: &Query<&ChildOf>,
-) -> Option<Entity> {
-    let mut current = entity;
-    while let Ok(parent) = child_of_q.get(current).map(Relationship::get) {
-        if tab_q.get(parent).is_ok() {
-            return Some(parent);
-        }
-        current = parent;
-    }
-    None
-}
-
-fn entity_tree_contains_stack_other_than(
-    entity: Entity,
-    ignored_stack: Entity,
-    all_children: &Query<&Children>,
-    stack_q: &Query<Entity, With<Stack>>,
-) -> bool {
-    (stack_q.contains(entity) && entity != ignored_stack)
-        || all_children.get(entity).is_ok_and(|children| {
-            children.iter().any(|child| {
-                entity_tree_contains_stack_other_than(child, ignored_stack, all_children, stack_q)
-            })
-        })
-}
-
-fn sibling_tabs(
-    tab: Entity,
-    tab_q: &Query<(Entity, &LastActivatedAt), With<Tab>>,
-    child_of_q: &Query<&ChildOf>,
-    all_children: &Query<&Children>,
-) -> Vec<Entity> {
-    let Ok(parent) = child_of_q.get(tab).map(Relationship::get) else {
-        return vec![tab];
-    };
-    let Ok(children) = all_children.get(parent) else {
-        return vec![tab];
-    };
-    children.iter().filter(|e| tab_q.get(*e).is_ok()).collect()
 }
 
 fn deferred_dismiss_modal(

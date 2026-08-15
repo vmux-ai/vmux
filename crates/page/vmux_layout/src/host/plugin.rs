@@ -82,6 +82,7 @@ impl Plugin for LayoutPlugin {
                 BookmarkPlugin,
                 LayoutCefPlugin,
                 crate::overlay_adopt::OverlayAdoptPlugin,
+                crate::pending_stack::PendingStackPlugin,
             ));
     }
 }
