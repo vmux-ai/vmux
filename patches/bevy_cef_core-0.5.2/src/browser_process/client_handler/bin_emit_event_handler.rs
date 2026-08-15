@@ -99,12 +99,6 @@ impl ProcessMessageHandler for BinEmitEventHandler {
         } else {
             (id, payload)
         };
-        crate::util::webview_debug_log(format!(
-            "browser bin_js_emit entity={:?} id={} payload_len={}",
-            self.webview,
-            id,
-            payload.len()
-        ));
         let _ = self.sender.send_blocking(BinIpcEventRaw {
             webview: self.webview,
             host,

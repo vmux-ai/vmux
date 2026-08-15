@@ -12,7 +12,6 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{RenderTextureMessage, webview_debug_log};
 use std::sync::atomic::Ordering;
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -60,7 +59,6 @@ impl Plugin for PresentPlugin {
                 apply_repaint_nudge,
                 sync_cef_webview_resize_after_ui,
                 sync_osr_webview_focus,
-                flush_pending_osr_textures,
             )
                 .chain()
                 .after(UiSystems::Layout),
@@ -996,10 +994,6 @@ fn sync_cef_webview_resize_after_ui(
             continue;
         }
         browsers.resize(&entity, size.0, device_scale_factor);
-        webview_debug_log(format!(
-            "resize entity={entity:?} size={:?} scale={device_scale_factor} force={force}",
-            size.0
-        ));
         pushed_any = true;
         if let Some(entry) = last_entries.iter_mut().find(|(k, _, _)| *k == key) {
             entry.1 = size.0;
@@ -1122,16 +1116,8 @@ fn sync_osr_webview_focus(
     let active = layout_keyboard_target
         .or_else(|| choose_osr_active_webview(modal_keyboard_target, active_stack, ready[0]));
 
-    if !window_visible {
+    if !window_visible || !window_focused {
         if last_active.is_some() || *last_ready_set != *ready {
-            webview_debug_log(format!("osr focus window_hidden ready={ready:?}"));
-            browsers.sync_osr_focus_to_active_pane(None, &[]);
-            *last_active = None;
-            last_ready_set.clone_from(&ready);
-        }
-    } else if !window_focused {
-        if last_active.is_some() || *last_ready_set != *ready {
-            webview_debug_log(format!("osr focus window_unfocused ready={ready:?}"));
             browsers.sync_osr_focus_to_active_pane(None, &[]);
             *last_active = None;
             last_ready_set.clone_from(&ready);
@@ -1146,10 +1132,6 @@ fn sync_osr_webview_focus(
             |e| layout_shells.contains(&e),
         );
         auxiliary.extend(next_auxiliary);
-        webview_debug_log(format!(
-            "osr focus active={active:?} auxiliary={:?} ready={ready:?}",
-            auxiliary.as_slice()
-        ));
         browsers.sync_osr_focus_to_active_pane(active, auxiliary.as_slice());
         *last_active = active;
         last_ready_set.clone_from(&ready);
@@ -1274,18 +1256,79 @@ fn should_show_osr_webview(
     stack_is_active || stack_is_previous_new_stack
 }
 
-fn flush_pending_osr_textures(
-    mut ew: MessageWriter<RenderTextureMessage>,
-    browsers: NonSend<Browsers>,
-) {
-    for texture in browsers.drain_render_textures() {
-        ew.write(texture);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bevy UI is the only thing computing geometry for the native views: `sync_windowed_frames`
+    /// turns `ComputedNode` + `UiGlobalTransform` into the frame of a pane's child window, and a
+    /// zero size there means the pane is never positioned and never appears.
+    ///
+    /// `bevy_ui` needs a camera for viewport dimensions, and dropping the render stack removed
+    /// everything that used to populate that camera's target size. This asserts the layout pass
+    /// still resolves a real rectangle without it.
+    ///
+    /// The `target_info` written below is what `sync_camera_render_target` writes in the app, so
+    /// the two have to move together: this test stops meaning anything if that system changes
+    /// where the size comes from.
+    #[test]
+    fn percentage_ui_resolves_once_the_camera_knows_its_render_target() {
+        use bevy::ui::UiPlugin;
+
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(bevy::asset::AssetPlugin::default())
+            .add_plugins(bevy::window::WindowPlugin::default())
+            .add_plugins(bevy::image::ImagePlugin::default())
+            .add_plugins(bevy::text::TextPlugin)
+            .add_plugins(bevy::sprite::SpritePlugin)
+            .init_asset::<bevy::mesh::Mesh>()
+            .add_plugins(bevy::input::InputPlugin)
+            .add_plugins(bevy::a11y::AccessibilityPlugin)
+            .add_plugins(bevy::picking::DefaultPickingPlugins)
+            .add_plugins(UiPlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (1200, 800).into(),
+                ..default()
+            },
+            bevy::window::PrimaryWindow,
+        ));
+        let camera = app.world_mut().spawn(bevy::camera::Camera2d).id();
+        app.world_mut()
+            .entity_mut(camera)
+            .get_mut::<bevy::camera::Camera>()
+            .expect("Camera2d requires Camera")
+            .computed
+            .target_info = Some(bevy::camera::RenderTargetInfo {
+            physical_size: bevy::math::UVec2::new(1200, 800),
+            scale_factor: 1.0,
+        });
+        let node = app
+            .world_mut()
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                bevy::ui::UiTargetCamera(camera),
+            ))
+            .id();
+
+        app.update();
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedNode>(node)
+            .expect("ComputedNode should exist after the UI layout pass");
+        assert!(
+            computed.size.x > 0.0 && computed.size.y > 0.0,
+            "UI layout produced a zero size ({:?}); native views would never be positioned",
+            computed.size
+        );
+    }
 
     /// The precedence the doc comment states, and the reason it exists: a pane can be the
     /// user's focus and an agent's active pane at once, and the user's ring has to win or they

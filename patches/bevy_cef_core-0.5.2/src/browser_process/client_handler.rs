@@ -255,26 +255,17 @@ impl ImplClient for ClientHandlerBuilder {
             let url = frame.url().into_string();
             let is_snapshot_result = name == crate::prelude::PROCESS_MESSAGE_SNAPSHOT_RESULT;
             if !is_snapshot_result && !crate::util::ipc_allowed_browser(&url) {
-                crate::util::webview_debug_log(format!(
-                    "ipc: dropped inbound '{name}' from untrusted url={url}"
-                ));
                 return 1;
             }
             if !is_snapshot_result
                 && crate::util::is_bridge_allowed_origin(&url)
                 && name != crate::prelude::PROCESS_MESSAGE_JS_EMIT
             {
-                crate::util::webview_debug_log(format!(
-                    "ipc: dropped non-emit '{name}' from bridge origin url={url}"
-                ));
                 return 1;
             }
             if name == crate::prelude::PROCESS_MESSAGE_BRP
                 && crate::util::embedded_page_host_of(&url).as_deref() != Some("debug")
             {
-                crate::util::webview_debug_log(format!(
-                    "ipc: dropped BRP from non-debug url={url}"
-                ));
                 return 1;
             }
             if let Some(handler) = self

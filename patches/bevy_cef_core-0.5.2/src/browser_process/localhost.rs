@@ -20,10 +20,7 @@ use std::os::raw::c_int;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::util::{
-    CefEmbeddedPageConfig, VAULT_PASSKEY_ORIGIN, resolved_cef_embedded_page_config,
-    webview_debug_log,
-};
+use crate::util::{CefEmbeddedPageConfig, VAULT_PASSKEY_ORIGIN, resolved_cef_embedded_page_config};
 
 /// Map navigated custom-scheme URLs to a Bevy [`AssetServer`] load path.
 ///
@@ -353,7 +350,6 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
         if let Some(media_path) = crate::util::raw_media_request(&url) {
             let headers_responser = self.headers.clone();
             let data_responser = self.data.clone();
-            webview_debug_log(format!("scheme raw-media open url={url} range={range:?}"));
             IoTaskPool::get()
                 .spawn(async move {
                     let resp = crate::util::build_raw_media_response(&media_path, &range);
@@ -374,7 +370,6 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
             return 1;
         }
         let uri = asset_load_path_from_request_url(&url);
-        webview_debug_log(format!("scheme open url={url} uri={uri} range={range:?}"));
         let requester = self.requester.clone();
         let headers_responser = self.headers.clone();
         let data_responser = self.data.clone();
@@ -388,12 +383,6 @@ impl ImplResourceHandler for LocalResourceHandlerBuilder {
                     })
                     .await;
                 let response = rx.recv().await.unwrap_or_default();
-                webview_debug_log(format!(
-                    "scheme response uri={uri} status={} mime={} len={}",
-                    response.status_code,
-                    response.mime_type,
-                    response.data.len()
-                ));
                 headers_responser.lock().unwrap().prepare(&response, &range);
                 data_responser
                     .lock()

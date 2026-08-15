@@ -6,7 +6,7 @@ use bevy::{
     },
 };
 use bevy_cef::prelude::BinReceive;
-use bevy_cef_core::prelude::{CefEmbeddedHost, webview_debug_log};
+use bevy_cef_core::prelude::CefEmbeddedHost;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
@@ -88,7 +88,6 @@ pub struct PageEmbedSet;
 pub struct PageReady {}
 
 pub fn mark_webview_page_ready(trigger: On<BinReceive<PageReady>>, mut commands: Commands) {
-    webview_debug_log(format!("PageReady entity={:?}", trigger.event().webview));
     commands
         .entity(trigger.event().webview)
         .insert(trigger.event().payload);
@@ -195,11 +194,6 @@ fn embed_dir_recursive(
                 embedded_path = prefix.join(&embedded_path);
             }
             let bytes = std::fs::read(&p)?;
-            webview_debug_log(format!(
-                "embed asset source={} embedded={}",
-                p.display(),
-                embedded_path.display()
-            ));
             reg.insert_asset(p, embedded_path.as_path(), bytes);
         }
     }

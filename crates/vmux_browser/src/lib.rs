@@ -40,7 +40,7 @@ use bevy::{
     ui::UiGlobalTransform,
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig, webview_debug_log};
+use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -128,7 +128,6 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         let cef_command_line = cef_command_line_config();
         configure_cef_backend_sync(app)
             .insert_resource(crate::extensions::load::PreparedExtensions(
@@ -409,17 +408,16 @@ fn sync_cef_backend(world: &mut World) {
     let mut query = world.query_filtered::<(
         Entity,
         Has<WebviewNativeOverlay>,
-        Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<(Entity, bool, bool)> = query.iter(world).collect();
+    let entities: Vec<(Entity, bool)> = query.iter(world).collect();
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &(entity, native_overlay, direct_overlay) in &entities {
+        for &(entity, native_overlay) in &entities {
             let stale_backend = browsers
                 .is_windowed(&entity)
                 .is_some_and(|windowed| !windowed);
-            let stale_overlay = browsers.has_browser(entity) && (native_overlay || direct_overlay);
+            let stale_overlay = browsers.has_browser(entity) && native_overlay;
             if stale_backend || stale_overlay {
                 recreate.push(entity);
             }
@@ -431,12 +429,10 @@ fn sync_cef_backend(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for (entity, native_overlay, direct_overlay) in entities {
+    for (entity, native_overlay) in entities {
         let needs_recreate = recreate.contains(&entity);
-        let settled = world.get::<WebviewWindowed>(entity).is_some()
-            && !native_overlay
-            && !direct_overlay
-            && !needs_recreate;
+        let settled =
+            world.get::<WebviewWindowed>(entity).is_some() && !native_overlay && !needs_recreate;
         if settled {
             continue;
         }
@@ -445,8 +441,7 @@ fn sync_cef_backend(world: &mut World) {
         };
         entity_mut
             .insert(WebviewWindowed)
-            .remove::<WebviewNativeOverlay>()
-            .remove::<WebviewNativeDirectOverlay>();
+            .remove::<WebviewNativeOverlay>();
         if needs_recreate {
             entity_mut
                 .remove::<PageReady>()
@@ -1404,11 +1399,6 @@ mod tests {
         for entity in [page, modal] {
             assert!(app.world().get::<WebviewWindowed>(entity).is_some());
             assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
-            assert!(
-                app.world()
-                    .get::<WebviewNativeDirectOverlay>(entity)
-                    .is_none()
-            );
         }
     }
 

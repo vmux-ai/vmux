@@ -78,7 +78,6 @@ default-features = false
 
 [dependencies.cef]
 version = "148.2.0"
-features = ["accelerated_osr"]
 
 [dependencies.rkyv]
 workspace = true

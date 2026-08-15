@@ -418,10 +418,7 @@ mod tests {
         let sync = source
             .split("fn sync_window_glass_visibility")
             .nth(1)
-            .and_then(|tail| {
-                tail.split("#[derive(Default)]\nstruct LayoutOverlay")
-                    .next()
-            })
+            .and_then(|tail| tail.split("fn primary_content_view_ptr").next())
             .unwrap_or_default();
 
         assert!(sync.contains("backdrop_window.setFrame_display(parent_window.frame(), false)"));
@@ -560,7 +557,7 @@ mod tests {
         let func = source
             .split("fn keep_window_surface_layer_transparent")
             .nth(1)
-            .and_then(|tail| tail.split("fn sync_layout_overlay").next())
+            .and_then(|tail| tail.split("#[cfg(test)]").next())
             .unwrap_or_default();
 
         assert!(func.contains("layer.setOpaque(false)"));

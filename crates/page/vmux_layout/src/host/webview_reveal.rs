@@ -7,7 +7,6 @@
 
 use bevy::{prelude::*, ui::UiSystems};
 use bevy_cef::prelude::WebviewSource;
-use bevy_cef_core::prelude::webview_debug_log;
 
 use crate::window::VmuxWindow;
 
@@ -39,7 +38,6 @@ fn on_webview_added(
     if root.contains(entity) {
         return;
     }
-    webview_debug_log(format!("webview added entity={entity:?}"));
     commands
         .entity(entity)
         .insert((Visibility::Hidden, PendingWebviewReveal(0)));
@@ -58,9 +56,6 @@ fn reveal_webviews(
         if webview_reveal_ready(source, false, pending.0) {
             *vis = Visibility::Inherited;
             commands.entity(entity).remove::<PendingWebviewReveal>();
-            webview_debug_log(format!(
-                "webview reveal entity={entity:?} source={source:?}"
-            ));
         } else {
             pending.0 += 1;
         }

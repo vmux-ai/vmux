@@ -39,7 +39,6 @@ repository = "https://github.com/not-elm/bevy_cef"
 [features]
 browser-process = [
     "dep:async-channel",
-    "cef/accelerated_osr",
     "dep:bevy",
     "dep:bevy_remote",
     "dep:bevy_winit",
@@ -164,7 +163,7 @@ optional = true
 [target.'cfg(target_os = "macos")'.dependencies.objc2-quartz-core]
 version = "0.3"
 default-features = false
-features = ["std", "CALayer", "CAShapeLayer", "objc2-core-graphics"]
+features = ["std", "CALayer", "CAShapeLayer", "objc2-core-graphics", "objc2-core-foundation"]
 optional = true
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2-core-graphics]

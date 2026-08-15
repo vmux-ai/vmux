@@ -5,7 +5,6 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::webview_debug_log;
 use vmux_core::page::PageReady;
 use vmux_layout::{LayoutCef, window::Modal};
 
@@ -37,7 +36,6 @@ fn on_webview_ready_send_theme(
     mut commands: Commands,
 ) {
     let entity = trigger.event().webview;
-    webview_debug_log(format!("on_webview_ready_send_theme entity={entity:?}"));
     if browsers.can_emit_to(&entity) {
         let payload = theme_event(&settings);
         commands.trigger(BinHostEmitEvent::from_rkyv(entity, THEME_EVENT, &payload));

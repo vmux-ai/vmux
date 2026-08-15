@@ -347,7 +347,6 @@ fn package_builds_cef_helper_separately_without_lto() {
     assert!(core_manifest.contains("default = [\"browser-process\"]"));
     for dependency in [
         "dep:async-channel",
-        "cef/accelerated_osr",
         "dep:bevy",
         "dep:bevy_remote",
         "dep:bevy_winit",
@@ -525,10 +524,8 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_window",
         "bevy_ui",
         "bevy_image",
-        "bevy_scene",
         "bevy_picking",
         "ui_picking",
-        "custom_cursor",
         "reflect_auto_register",
         "https",
         "x11",
