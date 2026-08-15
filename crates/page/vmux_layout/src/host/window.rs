@@ -392,7 +392,7 @@ pub fn spawn_tab_scaffold_in_space(
 pub fn spawn_requested_tab_layouts(
     mut reader: MessageReader<TabLayoutSpawnRequest>,
     settings: Res<LayoutSettings>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<crate::PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut focus: Option<ResMut<crate::stack::FocusedStack>>,
@@ -996,7 +996,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .insert_resource(crate::settings::EffectiveStartupUrl(
+            .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://agent/vibe/".to_string(),
             ))
             .add_systems(
@@ -1049,7 +1049,7 @@ mod tests {
                 side_sheet: crate::settings::SideSheetSettings::default(),
                 focus_ring: crate::settings::FocusRingSettings::default(),
             })
-            .insert_resource(crate::settings::EffectiveStartupUrl(
+            .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://agent/vibe/".to_string(),
             ))
             .add_systems(

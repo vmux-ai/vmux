@@ -2519,7 +2519,7 @@ mod tests {
         #[test]
         fn in_place_with_none_url_uses_startup_setting() {
             let mut app = build_app();
-            app.insert_resource(vmux_layout::settings::EffectiveStartupUrl(
+            app.insert_resource(vmux_core::EffectiveStartupUrl(
                 "https://startup.example".into(),
             ));
             build_focused_stack(&mut app);

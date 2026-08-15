@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
+pub use vmux_command::settings::ResolvedLocale;
+pub use vmux_core::EffectiveStartupUrl;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Resource)]
 pub struct LayoutSettings {
@@ -23,19 +25,7 @@ pub struct ConfirmCloseSettings {
 }
 
 #[derive(Resource, Clone, Debug, Default)]
-pub struct EffectiveStartupUrl(pub String);
-
-#[derive(Resource, Clone, Debug, Default)]
 pub struct EffectiveStartupDir(pub Option<(Entity, Option<std::path::PathBuf>)>);
-
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedLocale(pub vmux_ui::i18n::Locale);
-
-impl Default for ResolvedLocale {
-    fn default() -> Self {
-        Self(vmux_ui::i18n::Locale::preferred())
-    }
-}
 
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct EffectiveStartupDirSet;
