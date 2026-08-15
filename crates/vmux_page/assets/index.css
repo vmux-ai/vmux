@@ -3,6 +3,7 @@
 @source "../src";
 @source "../../page/vmux_agent/src";
 @source "../../page/vmux_chat/src";
+@source "../../page/vmux_command/src";
 @source "../../page/vmux_editor/src";
 @source "../../page/vmux_history/src";
 @source "../../page/vmux_layout/src";
