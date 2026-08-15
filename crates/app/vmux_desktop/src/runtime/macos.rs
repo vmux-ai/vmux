@@ -459,7 +459,7 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         if event_type == NSEventType::LeftMouseDown
             && let Some((x_px, y_px)) = location
         {
-            vmux_browser::request_native_command_bar_dismiss_for_mouse_down(x_px, y_px);
+            vmux_browser::request_native_dismiss_for_mouse_down(x_px, y_px);
         }
         if motion {
             let interval = if event_type == NSEventType::MouseMoved {

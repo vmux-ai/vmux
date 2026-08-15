@@ -31,6 +31,7 @@ pub mod toggle;
 pub mod unit;
 pub mod warm_page;
 pub mod window;
+pub mod workspace_snapshot;
 pub mod worktree;
 
 mod header;
@@ -50,8 +51,6 @@ pub use plugin::LayoutPlugin;
 pub use stack::CloseStackRequest;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
-
-pub use crate::command_bar::handler::PendingCommandBarReveal;
 
 pub const LAYOUT_PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageManifest {
     host: "layout",

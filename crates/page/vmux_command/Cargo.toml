@@ -24,6 +24,7 @@ vmux_wire = { path = "../../vmux_wire" }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 bevy = { workspace = true }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
 bevy_cef = { workspace = true }
 bevy_ecs = { workspace = true }
 muda = "0.19"

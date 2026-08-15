@@ -4,6 +4,7 @@
 
 mod appearance;
 mod command;
+pub mod command_bar;
 mod extensions;
 mod frame_rate;
 mod host_focus;
@@ -15,6 +16,7 @@ mod native_layout;
 mod navigation;
 mod present;
 
+use crate::command_bar::panel::CommandBarPanelActive;
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 mod layout_view;
@@ -32,6 +34,7 @@ pub use native_layout::NativeLayout;
 #[cfg(target_os = "macos")]
 pub use native_layout::NativeLayoutPointerMoveResult;
 
+use crate::command_bar::handler::PendingCommandBarReveal;
 use bevy::{
     ecs::relationship::Relationship,
     input::{ButtonState, mouse::MouseButton},
@@ -50,13 +53,11 @@ use vmux_core::{
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
-use vmux_layout::command_bar::handler::PendingCommandBarReveal;
 use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    command_bar::panel::CommandBarPanelActive,
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HeaderCommandEvent, StackRow,
     },
@@ -114,6 +115,10 @@ impl Plugin for BrowserPlugin {
         )
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
+            command_bar::handler::CommandBarInputPlugin,
+            command_bar::key::CommandBarKeyPlugin,
+            command_bar::panel::CommandBarPanelPlugin,
+            command_bar::wake::CommandBarWakePlugin,
             layout_view::LayoutViewPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
@@ -637,6 +642,7 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
+static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
@@ -644,8 +650,18 @@ fn native_command_bar_route() -> CommandBarRoute {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-pub fn native_command_bar_is_open() -> bool {
-    native_command_bar_route().owns_input
+pub(crate) fn set_native_page_owns_escape(owns: bool) {
+    NATIVE_PAGE_OWNS_ESCAPE.store(owns, Ordering::Relaxed);
+}
+
+/// Whether a page surface will answer Escape itself, so the host must not read it as a request to
+/// leave fullscreen. True while a terminal holds the keyboard — it forwards Escape to the PTY —
+/// and while the command bar owns input.
+///
+/// Read from the `NSEvent` monitor, which runs on the AppKit thread ahead of the ECS, hence the
+/// static rather than a resource.
+pub fn native_page_owns_escape() -> bool {
+    NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {
@@ -679,7 +695,12 @@ fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: V
         && cursor.y <= frame.top_px + frame.height_px
 }
 
-pub fn request_native_command_bar_dismiss() -> bool {
+/// Offers a native keystroke to whichever page surface wants to close on it, and reports whether
+/// one took it. The host consumes the key when this is true.
+pub fn request_native_dismiss(combo: &vmux_command::shortcut::KeyCombo) -> bool {
+    if !combo.dismisses_command_bar() {
+        return false;
+    }
     if !native_command_bar_route().owns_input {
         return false;
     }
@@ -687,7 +708,7 @@ pub fn request_native_command_bar_dismiss() -> bool {
     true
 }
 
-pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
+pub fn request_native_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
     if !x_px.is_finite() || !y_px.is_finite() {
         return false;
     }
@@ -1107,7 +1128,7 @@ mod error_page_source_tests {
 mod tests {
     use super::*;
     use crate::appearance::sync_appearance_to_cef;
-    use vmux_layout::window::Modal;
+    use vmux_command::CommandBar;
 
     #[test]
     fn cef_disables_bfcache_for_extension_ports() {
@@ -1391,7 +1412,11 @@ mod tests {
             .id();
         let modal = app
             .world_mut()
-            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
+            .spawn((
+                Browser,
+                CommandBar,
+                WebviewSource::new("vmux://command-bar/"),
+            ))
             .id();
 
         sync_cef_backend(app.world_mut());

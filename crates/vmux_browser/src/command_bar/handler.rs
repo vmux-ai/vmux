@@ -1,32 +1,21 @@
-pub(crate) use crate::NewStackContext;
 use std::time::{Duration, Instant};
+use vmux_command::CommandBar;
+use vmux_command::build_command_bar_open_payload;
+pub(crate) use vmux_layout::NewStackContext;
+use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
-use crate::cef::{Browser, LayoutCef};
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
-use crate::event::{
-    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
-};
-use crate::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
-use crate::{
-    Header,
-    pane::{Pane, PaneSplit},
-    side_sheet::SideSheet,
-    stack::{ActiveTabParam, Stack, collect_leaf_panes, focused_stack},
-    tab::Tab,
-    window::{Main, Modal},
-};
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
     picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
 use vmux_command::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
-    CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
-    CommandBarSpace, CommandBarTab, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest,
-    PathCompleteResponse, PathEntry, SearchEngine, SearchEngineSetting,
+    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
+    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
+    PathEntry, SearchEngine, SearchEngineSetting,
 };
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
@@ -45,9 +34,22 @@ use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_history::{LastActivatedAt, now_millis};
+use vmux_layout::cef::{Browser, LayoutCef};
+use vmux_layout::event::{
+    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
+};
+use vmux_layout::start::event::{START_FOCUS_INPUT_EVENT, StartFocusInput};
+use vmux_layout::{
+    Header,
+    pane::{Pane, PaneSplit},
+    side_sheet::SideSheet,
+    stack::{ActiveTabParam, Stack, focused_stack},
+    tab::Tab,
+    window::Main,
+};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
-use crate::settings::ResolvedLocale;
+use vmux_layout::settings::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -56,7 +58,7 @@ pub(crate) struct CommandBarInputPlugin;
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NewStackContext>()
-            .add_message::<crate::ContributedCommandChosen>()
+            .add_message::<vmux_layout::ContributedCommandChosen>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -85,8 +87,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(crate::tab::TabCommandSet)
-                    .after(crate::stack::StackCommandSet),
+                    .after(vmux_layout::tab::TabCommandSet)
+                    .after(vmux_layout::stack::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -101,7 +103,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(crate::stack::ComputeFocusSet),
+                    .before(vmux_layout::stack::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -153,118 +155,6 @@ const COMMAND_BAR_REVEAL_FALLBACK_FRAMES: u8 = 10;
 const COMMAND_BAR_NATIVE_REVEAL_TIMEOUT: Duration = Duration::from_secs(2);
 const COMMAND_BAR_OPEN_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
-pub struct CommandBarEntry {
-    pub id: String,
-    pub name: String,
-    pub shortcut: String,
-}
-
-/// Built-in command rows plus whatever other crates contributed, already named.
-///
-/// `superseded` names commands a registered page stands in for, whose rows the page entry replaces.
-pub fn command_list(
-    locale: &Locale,
-    contributed: Vec<CommandBarEntry>,
-    superseded: &[&str],
-) -> Vec<CommandBarEntry> {
-    let mut entries = Vec::new();
-    for (id, name, shortcut) in AppCommand::command_bar_entries() {
-        if superseded.contains(&id) {
-            continue;
-        }
-        entries.push(CommandBarEntry {
-            id: id.to_string(),
-            name: localized_command_name(locale.as_str(), id, name),
-            shortcut: shortcut.to_string(),
-        });
-    }
-    entries.extend(contributed);
-    entries
-}
-
-/// Resolve a command-bar menu path for the requested locale.
-///
-/// Takes a raw tag rather than a [`Locale`] because the macOS menu bar in `vmux_desktop` calls it
-/// with the tag it already threads through its own menu state.
-pub fn localized_command_name(locale: &str, id: &str, fallback: String) -> String {
-    let locale = Locale::from(locale);
-    let message_id = format!("command-{}", id.replace('_', "-"));
-    let translated = locale.translate(&message_id);
-    if translated == message_id {
-        return fallback;
-    }
-    let Some((root_id, group_id)) = command_hierarchy_ids(id) else {
-        return translated;
-    };
-    let mut segments = translated
-        .split(" > ")
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    if segments.is_empty() {
-        return translated;
-    }
-    segments[0] = locale.translate(root_id);
-    if let Some(group_id) = group_id
-        && segments.len() > 2
-    {
-        segments[1] = locale.translate(group_id);
-    }
-    segments.join(" > ")
-}
-
-fn command_hierarchy_ids(id: &str) -> Option<(&'static str, Option<&'static str>)> {
-    if id == "minimize_window" {
-        Some(("menu-layout", Some("command-group-window")))
-    } else if id == "toggle_layout" {
-        Some(("menu-layout", Some("menu-layout")))
-    } else if matches!(
-        id,
-        "close_tab" | "new_task" | "next_tab" | "prev_tab" | "rename_tab"
-    ) || id.starts_with("tab_select_")
-    {
-        Some(("menu-layout", Some("command-group-tab")))
-    } else if id.starts_with("open_in_") {
-        Some(("menu-browser", Some("command-group-open")))
-    } else if id.contains("pane") {
-        Some(("menu-layout", Some("command-group-pane")))
-    } else if id.starts_with("stack_") {
-        Some(("menu-layout", Some("command-group-stack")))
-    } else if id == "space_open" {
-        Some(("menu-layout", Some("command-group-space")))
-    } else if id.starts_with("terminal_") {
-        Some(("menu-terminal", None))
-    } else if matches!(
-        id,
-        "browser_prev_page" | "browser_next_page" | "browser_reload" | "browser_hard_reload"
-    ) {
-        Some(("menu-browser", Some("command-group-navigation")))
-    } else if matches!(
-        id,
-        "browser_zoom_in" | "browser_zoom_out" | "browser_zoom_reset" | "browser_dev_tools"
-    ) {
-        Some(("menu-browser", Some("command-group-view")))
-    } else if id.starts_with("browser_open_") {
-        Some(("menu-browser", Some("command-group-bar")))
-    } else if id == "service_open" {
-        Some(("menu-service", None))
-    } else if id.starts_with("bookmark_") {
-        Some(("menu-bookmark", None))
-    } else {
-        None
-    }
-}
-
-/// Display string for a command's shortcut, looked up by menu id. Used to show
-/// a page's keybinding (e.g. History) on its page entry after the command itself
-/// is hidden from the command list.
-fn command_shortcut(id: &str) -> String {
-    AppCommand::command_bar_entries()
-        .into_iter()
-        .find(|(entry_id, _, _)| *entry_id == id)
-        .map(|(_, _, shortcut)| shortcut.to_string())
-        .unwrap_or_default()
-}
-
 pub fn match_command(id: &str) -> Option<AppCommand> {
     AppCommand::from_menu_id(id)
 }
@@ -314,7 +204,7 @@ fn prewarm_command_bar_modal(
             Has<PendingCommandBarReveal>,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
 ) {
     let Ok((
@@ -636,14 +526,14 @@ fn handle_open_command_bar(
             With<Browser>,
             Without<Header>,
             Without<SideSheet>,
-            Without<Modal>,
+            Without<CommandBar>,
         ),
     >,
     contributions: Contributions,
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         ResMut<NewStackContext>,
-        Option<Res<crate::settings::EffectiveStartupUrl>>,
+        Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
         Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
@@ -787,7 +677,7 @@ fn handle_open_command_bar(
                     browser_meta
                         .get(e)
                         .ok()
-                        .filter(|meta| meta.url == crate::start::START_PAGE_URL)
+                        .filter(|meta| meta.url == vmux_layout::start::START_PAGE_URL)
                         .map(|_| e)
                 })
             })
@@ -892,223 +782,6 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
     ));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn command_bar_open_payload(
-    open_id: OpenId,
-    native_windowed: bool,
-    space_name: String,
-    url: String,
-    spaces: Vec<CommandBarSpace>,
-    tabs: Vec<CommandBarTab>,
-    commands: Vec<CommandBarCommandEntry>,
-    target: Option<vmux_command::open_target::OpenTarget>,
-    pages: Vec<CommandBarPage>,
-    work_dirs: Vec<vmux_command::event::CommandBarWorkDir>,
-    recent_files: Vec<vmux_command::event::CommandBarRecentFile>,
-    search_engines: Vec<SearchEngine>,
-) -> CommandBarOpenEvent {
-    CommandBarOpenEvent {
-        open_id,
-        native_windowed,
-        url,
-        space_name,
-        spaces,
-        tabs,
-        commands,
-        pages,
-        work_dirs,
-        recent_files,
-        search_engines,
-        prompt_context: default(),
-        target,
-        space_switch: false,
-    }
-}
-
-#[derive(SystemParam)]
-/// Bundled ECS queries for walking the active tab's panes/stacks into command-bar tab entries.
-pub(crate) struct TabGatherParams<'w, 's> {
-    pub active_tab: ActiveTabParam<'w, 's>,
-    pub all_children: Query<'w, 's, &'static Children>,
-    pub leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pub pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
-    pub pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    pub stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
-    pub stack_q: Query<'w, 's, Entity, With<Stack>>,
-    pub browser_meta: Query<'w, 's, &'static PageMetadata, With<Browser>>,
-    pub child_of_q: Query<'w, 's, &'static ChildOf>,
-}
-
-/// Collect the active tab's open stacks as [`CommandBarTab`] entries, shared by the
-/// command-bar modal and the home launcher.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn gather_command_bar_tabs(
-    active_tab: Option<Entity>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: &Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: &Query<&Children, With<Pane>>,
-    stack_ts: &Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_q: &Query<Entity, With<Stack>>,
-    browser_meta: &Query<&PageMetadata, With<Browser>>,
-    child_of_q: &Query<&ChildOf>,
-    space_name: &str,
-    locale: &Locale,
-) -> Vec<CommandBarTab> {
-    let mut bar_tabs = Vec::new();
-    let Some(active_tab_e) = active_tab else {
-        return bar_tabs;
-    };
-    let (_, _, active_stack) = focused_stack(
-        active_tab,
-        all_children,
-        leaf_panes,
-        pane_ts,
-        pane_children,
-        stack_ts,
-    );
-    let active_pane = active_stack.and_then(|t| child_of_q.get(t).ok().map(|co| co.get()));
-    let mut tab_panes = Vec::new();
-    collect_leaf_panes(active_tab_e, all_children, leaf_panes, &mut tab_panes);
-    for (pane_pos, &pane_e) in tab_panes.iter().enumerate() {
-        let is_active_pane = active_pane == Some(pane_e);
-        let Ok(children) = pane_children.get(pane_e) else {
-            continue;
-        };
-        let mut tab_index = 0usize;
-        for child in children.iter() {
-            if !stack_q.contains(child) {
-                continue;
-            }
-            let stack_is_active = active_stack == Some(child) && is_active_pane;
-            let pane_number = pane_pos as i64 + 1;
-            let stack_number = tab_index as i64 + 1;
-            let location = if space_name.is_empty() {
-                locale.translate_with(
-                    "command-pane-stack-location",
-                    &[
-                        ("pane", TranslationValue::Number(pane_number)),
-                        ("stack", TranslationValue::Number(stack_number)),
-                    ],
-                )
-            } else {
-                locale.translate_with(
-                    "command-space-pane-stack-location",
-                    &[
-                        ("space", TranslationValue::String(space_name)),
-                        ("pane", TranslationValue::Number(pane_number)),
-                        ("stack", TranslationValue::Number(stack_number)),
-                    ],
-                )
-            };
-            if let Ok(tab_kids) = all_children.get(child) {
-                for browser_e in tab_kids.iter() {
-                    if let Ok(meta) = browser_meta.get(browser_e) {
-                        bar_tabs.push(CommandBarTab {
-                            title: meta.title.clone(),
-                            url: meta.url.clone(),
-                            pane_id: pane_e.to_bits(),
-                            tab_index: tab_index as u32,
-                            is_active: stack_is_active,
-                            location: location.clone(),
-                        });
-                    }
-                }
-            }
-            tab_index += 1;
-        }
-    }
-    bar_tabs
-}
-
-/// Assemble a [`CommandBarOpenEvent`] (pages, commands, spaces, tabs) for the command
-/// bar and the home launcher, from the current snapshots and gathered tabs.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn build_command_bar_open_payload(
-    open_id: OpenId,
-    native_windowed: bool,
-    space_name: String,
-    url: String,
-    spaces_snapshot: &CommandBarSpacesSnapshot,
-    contributions: &Contributions,
-    pages_snapshot: &CommandBarPagesSnapshot,
-    work_snapshot: &vmux_command::snapshot::CommandBarWorkSnapshot,
-    locale: &Locale,
-    active_stack_count: usize,
-    tabs: Vec<CommandBarTab>,
-    target: Option<OpenTarget>,
-) -> CommandBarOpenEvent {
-    let mut contributed = Vec::new();
-    for command in contributions.commands() {
-        let args: Vec<(&str, TranslationValue<'_>)> = command
-            .args
-            .iter()
-            .map(|(name, value)| (name.as_str(), TranslationValue::String(value)))
-            .collect();
-        contributed.push(CommandBarEntry {
-            id: command.id.clone(),
-            name: locale.translate_with(&command.message_id, &args),
-            shortcut: String::new(),
-        });
-    }
-    let mut pages = Vec::with_capacity(pages_snapshot.pages.len());
-    let mut superseded = Vec::new();
-    for entry in &pages_snapshot.pages {
-        let mut page = entry.page.clone();
-        if let Some(message_id) = entry.title_message_id {
-            page.title = locale.translate(message_id);
-        }
-        if let Some(command_id) = entry.replaces_command {
-            page.shortcut = command_shortcut(command_id);
-            superseded.push(command_id);
-        }
-        pages.push(page);
-    }
-    for entry in contributions.pages() {
-        pages.push(entry.page.clone());
-    }
-    let commands: Vec<CommandBarCommandEntry> = command_list(locale, contributed, &superseded)
-        .into_iter()
-        .map(|e| CommandBarCommandEntry {
-            id: e.id,
-            name: e.name,
-            shortcut: e.shortcut,
-        })
-        .collect();
-    let spaces = spaces_snapshot
-        .spaces
-        .iter()
-        .map(|s| {
-            let is_active = s.id == spaces_snapshot.active_space_id;
-            CommandBarSpace {
-                id: s.id.clone(),
-                name: s.name.clone(),
-                profile: s.profile.clone(),
-                is_active,
-                tab_count: if is_active {
-                    active_stack_count as u32
-                } else {
-                    0
-                },
-            }
-        })
-        .collect();
-    command_bar_open_payload(
-        open_id,
-        native_windowed,
-        space_name,
-        url,
-        spaces,
-        tabs,
-        commands,
-        target,
-        pages,
-        work_snapshot.work_dirs.clone(),
-        work_snapshot.recent_files.clone(),
-        work_snapshot.search_engines.clone(),
-    )
-}
-
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
     tab_q: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Tab>>,
@@ -1127,7 +800,7 @@ struct CommandBarActionQueries<'w, 's> {
             With<Browser>,
             Without<Header>,
             Without<SideSheet>,
-            Without<Modal>,
+            Without<CommandBar>,
         ),
     >,
     webview_sources: Query<'w, 's, &'static WebviewSource>,
@@ -1165,7 +838,7 @@ impl CommandBarActionQueries<'_, '_> {
         let WebviewSource::Url(url) = self.webview_sources.get(webview).ok()? else {
             return None;
         };
-        if !url.starts_with(crate::start::START_PAGE_URL) {
+        if !url.starts_with(vmux_layout::start::START_PAGE_URL) {
             return None;
         }
         self.child_of_q.get(webview).ok().map(|parent| parent.0)
@@ -1175,10 +848,10 @@ impl CommandBarActionQueries<'_, '_> {
 fn mark_inline_transition(stack: Entity, webview: Entity, commands: &mut Commands) {
     commands
         .entity(stack)
-        .insert(crate::start::StartInlineTransition { webview });
+        .insert(vmux_layout::start::StartInlineTransition { webview });
     commands
         .entity(webview)
-        .insert(crate::start::StartInlineTransitionView);
+        .insert(vmux_layout::start::StartInlineTransitionView);
 }
 
 fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
@@ -1223,14 +896,14 @@ fn on_command_bar_action(
             &mut Visibility,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     queries: CommandBarActionQueries,
     mut stack_params: ParamSet<(
         Query<Entity, With<Stack>>,
         Query<Entity, With<Main>>,
         Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<crate::stack::FocusedStack>>,
+        Option<ResMut<vmux_layout::stack::FocusedStack>>,
         Query<(), With<Terminal>>,
     )>,
     mut resource_params: ParamSet<(
@@ -1245,7 +918,7 @@ fn on_command_bar_action(
         MessageWriter<PageOpenRequest>,
         MessageWriter<TerminalSpawnRequest>,
     )>,
-    mut chosen_writer: MessageWriter<crate::ContributedCommandChosen>,
+    mut chosen_writer: MessageWriter<vmux_layout::ContributedCommandChosen>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -1288,7 +961,7 @@ fn on_command_bar_action(
                     && let Some(url) = resource_params.p2().prompt_url(target_url.as_deref())
                 {
                     if inline_transition_stack == Some(stack)
-                        && crate::start::supports_inline_agent_transition(&url)
+                        && vmux_layout::start::supports_inline_agent_transition(&url)
                     {
                         mark_inline_transition(stack, webview, &mut commands);
                     }
@@ -1358,7 +1031,7 @@ fn on_command_bar_action(
                     search_engine.map(|setting| setting.0).unwrap_or_default(),
                 );
                 let inline_transition = if matches!(open, None | Some(OpenTarget::InPlace))
-                    && crate::start::supports_inline_agent_transition(&url)
+                    && vmux_layout::start::supports_inline_agent_transition(&url)
                     && let Some(stack) = inline_transition_stack
                 {
                     mark_inline_transition(stack, webview, &mut commands);
@@ -1368,7 +1041,7 @@ fn on_command_bar_action(
                 };
                 if !inline_transition && resource_params.p2().claims_url(&url) {
                     if let Some(stack_e) = empty_stack {
-                        chosen_writer.write(crate::ContributedCommandChosen {
+                        chosen_writer.write(vmux_layout::ContributedCommandChosen {
                             id: url.clone(),
                             stack: Some(stack_e),
                             pane: None,
@@ -1379,7 +1052,7 @@ fn on_command_bar_action(
                     } else {
                         let active_pane_opt = queries.focused_pane();
                         if let Some(pane_e) = active_pane_opt {
-                            chosen_writer.write(crate::ContributedCommandChosen {
+                            chosen_writer.write(vmux_layout::ContributedCommandChosen {
                                 id: url.clone(),
                                 stack: None,
                                 pane: Some(pane_e),
@@ -1453,7 +1126,7 @@ fn on_command_bar_action(
                     if let Some(pane_e) = active_pane_opt {
                         let stack_e = commands
                             .spawn((
-                                crate::stack::stack_bundle(),
+                                vmux_layout::stack::stack_bundle(),
                                 LastActivatedAt::now(),
                                 ChildOf(pane_e),
                             ))
@@ -1500,7 +1173,7 @@ fn on_command_bar_action(
                     new_stack_ctx.previous_stack = None;
                 }
                 if empty_stack.is_some() || pane.is_some() {
-                    chosen_writer.write(crate::ContributedCommandChosen {
+                    chosen_writer.write(vmux_layout::ContributedCommandChosen {
                         id: id.clone(),
                         stack: empty_stack,
                         pane,
@@ -1668,7 +1341,7 @@ fn close_tab_if_only_pending_stack(
     if siblings.len() <= 1 {
         return false;
     }
-    if let Some(next) = crate::tab::pick_after_close(tab, &siblings) {
+    if let Some(next) = vmux_layout::tab::pick_after_close(tab, &siblings) {
         commands.entity(next).insert(LastActivatedAt::now());
     }
     commands.entity(tab).despawn();
@@ -1728,7 +1401,7 @@ fn deferred_dismiss_modal(
             &mut Visibility,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     mut commands: Commands,
 ) {
@@ -1763,7 +1436,7 @@ fn reveal_command_bar(
             Has<WebviewWindowed>,
             Has<WebviewNativeOverlay>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
 ) {
     for (entity, mut vis, mut pending, rendered, native_size, native_windowed, native_overlay) in
@@ -1816,7 +1489,7 @@ fn retry_pending_command_bar_open(
             Option<&CommandBarRenderedOpen>,
             Has<CommandBarRecreating>,
         ),
-        With<Modal>,
+        With<CommandBar>,
     >,
     mut last_emit: Local<std::collections::HashMap<Entity, Instant>>,
 ) {
@@ -1855,7 +1528,7 @@ fn retry_pending_command_bar_open(
 
 fn on_path_complete_request(
     trigger: On<BinReceive<PathCompleteRequest>>,
-    modal_q: Query<Entity, With<Modal>>,
+    modal_q: Query<Entity, With<CommandBar>>,
     browsers: NonSend<Browsers>,
     mut commands: Commands,
 ) {
@@ -1950,8 +1623,10 @@ mod tests {
     use crate::command_bar::state::CommandBarState;
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
+    use vmux_command::event::CommandBarOpenEvent;
     use vmux_command::event::CommandBarSpace;
     use vmux_command::{CommandPlugin, ReadAppCommands};
+    use vmux_command::{command_bar_open_payload, localized_command_name};
 
     #[test]
     fn build_payload_includes_commands_and_target() {
@@ -2050,7 +1725,7 @@ mod tests {
             .init_resource::<CapturedCommandBarOpen>()
             .add_systems(Update, capture_command_bar_open);
         app.world_mut().spawn((
-            Modal,
+            CommandBar,
             Node {
                 display: Display::Flex,
                 ..default()
@@ -2083,7 +1758,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::None,
                     ..default()
@@ -2116,7 +1791,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 CommandBarReady,
                 Node {
                     display: Display::None,
@@ -2277,7 +1952,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
@@ -2306,7 +1981,7 @@ mod tests {
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 WebviewWindowed,
                 Visibility::Hidden,
                 PendingCommandBarReveal {
@@ -2691,20 +2366,20 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(crate::stack::StackPlugin)
+            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin)
             .add_message::<TerminalSpawnRequest>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
-            .add_message::<crate::LayoutSpawnRequest>()
+            .add_message::<vmux_layout::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .init_resource::<crate::pane::PendingCursorWarp>()
+            .init_resource::<vmux_layout::pane::PendingCursorWarp>()
             .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
 
         let modal = app
             .world_mut()
             .spawn((
-                Modal,
+                CommandBar,
                 Node {
                     display: Display::Flex,
                     ..default()
@@ -2794,7 +2469,7 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(crate::stack::StackPlugin)
+            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -2803,11 +2478,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(crate::stack::StackCommandSet.intern())
+            .get_key(vmux_layout::stack::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(crate::stack::StackCommandSet.intern())
+            .systems_in_set(vmux_layout::stack::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()

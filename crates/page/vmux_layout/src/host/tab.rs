@@ -350,7 +350,7 @@ pub fn active_tab_siblings(
         .collect::<Vec<_>>()
 }
 
-pub(crate) fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
+pub fn pick_after_close(active: Entity, siblings: &[Entity]) -> Option<Entity> {
     if siblings.len() <= 1 {
         return None;
     }

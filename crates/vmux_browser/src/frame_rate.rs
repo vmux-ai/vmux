@@ -4,6 +4,7 @@
 //! the hover state and the frame rate describe the frame that just happened rather than the one
 //! before it. The webview idles slowly and bursts back to full rate when the host emits to it.
 
+use crate::command_bar::state::CommandBarStateQuery;
 use bevy::{
     input::{
         keyboard::KeyboardInput,
@@ -16,13 +17,12 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
+use vmux_command::CommandBar;
 use vmux_layout::Browser;
-use vmux_layout::command_bar::state::CommandBarStateQuery;
 use vmux_layout::{
     Header, LayoutCef,
     event::{LAYOUT_COMMAND_BAR_OPEN_EVENT, STACKS_EVENT, TABS_EVENT},
     side_sheet::SideSheet,
-    window::Modal,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -64,7 +64,7 @@ fn refresh_layout_cef_hover(
     layout_q: Query<Entity, With<LayoutCef>>,
     pointer_capture_q: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
     cef_regions: CefPointerRegionQuery<'_, '_>,
-    modal_pointer_targets: Query<(), (With<Modal>, With<CefPointerTarget>)>,
+    modal_pointer_targets: Query<(), (With<CommandBar>, With<CefPointerTarget>)>,
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
@@ -181,14 +181,14 @@ fn refresh_active_windowed_hover(
             With<WebviewWindowed>,
             With<CefKeyboardTarget>,
             Without<LayoutCef>,
-            Without<Modal>,
+            Without<CommandBar>,
             Without<Header>,
             Without<SideSheet>,
         ),
     >,
     mut state: Local<WindowedHoverRefreshState>,
 ) {
-    if vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+    if crate::command_bar::handler::is_command_bar_open(&modal_q) {
         *state = WindowedHoverRefreshState::default();
         return;
     }

@@ -356,6 +356,30 @@ impl KeyCombo {
         })
     }
 
+    /// Escape held with no chord modifier — Ctrl, Alt or Command.
+    ///
+    /// Shift is deliberately allowed: nothing binds Shift-Escape, and a user who has not let go of
+    /// Shift still means Escape.
+    pub fn is_bare_escape(&self) -> bool {
+        self.key == KeyCode::Escape
+            && !self.modifiers.ctrl
+            && !self.modifiers.alt
+            && !self.modifiers.super_key
+    }
+
+    /// True for the two combos that close the command bar: bare Escape, and Ctrl-C.
+    ///
+    /// The bar is the only surface that answers Ctrl-C this way, so the pairing belongs here
+    /// rather than in whichever key monitor happens to ask.
+    pub fn dismisses_command_bar(&self) -> bool {
+        self.is_bare_escape()
+            || (self.key == KeyCode::KeyC
+                && self.modifiers.ctrl
+                && !self.modifiers.shift
+                && !self.modifiers.alt
+                && !self.modifiers.super_key)
+    }
+
     /// This combo as a claim a page can test, or `None` when the page decides it without asking.
     ///
     /// The excluded case is exactly [`KeyCombo::is_text_input`]: a printable key held with nothing
@@ -622,6 +646,49 @@ mod tests {
 
     fn context(keys: &[&str]) -> KeyContext {
         keys.iter().map(|key| key.to_string()).collect()
+    }
+
+    fn combo_with(key: KeyCode, modifiers: Modifiers) -> KeyCombo {
+        KeyCombo { key, modifiers }
+    }
+
+    #[test]
+    fn bare_escape_is_escape_with_no_modifier_but_shift() {
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let super_key = Modifiers {
+            super_key: true,
+            ..Default::default()
+        };
+
+        assert!(combo(KeyCode::Escape).is_bare_escape());
+        assert!(combo_with(KeyCode::Escape, shift).is_bare_escape());
+        assert!(!combo_with(KeyCode::Escape, ctrl).is_bare_escape());
+        assert!(!combo_with(KeyCode::Escape, super_key).is_bare_escape());
+        assert!(!combo(KeyCode::KeyH).is_bare_escape());
+    }
+
+    #[test]
+    fn command_bar_dismisses_on_escape_and_ctrl_c_only() {
+        let ctrl = Modifiers {
+            ctrl: true,
+            ..Default::default()
+        };
+        let super_key = Modifiers {
+            super_key: true,
+            ..Default::default()
+        };
+
+        assert!(combo(KeyCode::Escape).dismisses_command_bar());
+        assert!(combo_with(KeyCode::KeyC, ctrl).dismisses_command_bar());
+        assert!(!combo(KeyCode::KeyC).dismisses_command_bar());
+        assert!(!combo_with(KeyCode::KeyC, super_key).dismisses_command_bar());
     }
 
     /// The point of putting bindings in a settings file: rebinding a key that already has a
