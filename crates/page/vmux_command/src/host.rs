@@ -28,6 +28,7 @@ pub mod issued;
 pub mod open;
 pub mod page_key;
 pub mod payload;
+pub mod settings;
 pub mod shortcut;
 pub mod snapshot;
 pub mod surface;
@@ -41,4 +42,5 @@ pub use payload::{
     CommandBarEntry, build_command_bar_open_payload, command_bar_open_payload, command_list,
     localized_command_name,
 };
+pub use settings::ResolvedLocale;
 pub use snapshot::*;

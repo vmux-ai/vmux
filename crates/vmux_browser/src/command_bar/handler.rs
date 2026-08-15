@@ -44,7 +44,7 @@ use vmux_layout::cef::{Browser, LayoutCef};
 use vmux_layout::{Header, side_sheet::SideSheet};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
-use vmux_layout::settings::ResolvedLocale;
+use vmux_command::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -545,7 +545,7 @@ fn handle_open_command_bar(
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         ResMut<PendingLaunch>,
-        Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+        Option<Res<vmux_core::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
         Res<vmux_command::snapshot::CommandBarWorkSnapshot>,

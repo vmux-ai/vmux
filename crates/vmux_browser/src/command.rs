@@ -57,7 +57,7 @@ fn handle_browser_commands(
     mut zoom_q: Query<&mut ZoomLevel, With<Browser>>,
     mut meta_q: Query<&mut PageMetadata, With<Browser>>,
     terminal_q: Query<(), With<Terminal>>,
-    effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     host_spawn: Res<HostSpawnRegistry>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut font_size_writer: MessageWriter<vmux_terminal::TerminalFontSizeCommand>,
