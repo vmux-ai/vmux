@@ -1,6 +1,6 @@
+use crate::event::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
+use crate::snapshot::CommandBarWorkSnapshot;
 use bevy::prelude::*;
-use vmux_command::event::{CommandBarRecentFile, CommandBarWorkDir, SearchEngine};
-use vmux_command::snapshot::CommandBarWorkSnapshot;
 use vmux_core::terminal::{Terminal, TerminalLaunch};
 use vmux_core::{LastVisitedAt, PageMetadata, Url, VisitCount};
 use vmux_history::LastActivatedAt;

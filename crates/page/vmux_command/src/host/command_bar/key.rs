@@ -4,14 +4,14 @@
 //! `command-bar`, hands over whatever the core claimed, and waits to be told what the press meant.
 //! This is the return leg — the only part of a command bar shortcut that lives on the host.
 //!
-//! It reads [`CommandIssued`] rather than [`vmux_command::AppCommand`] because it has to answer
+//! It reads [`CommandIssued`] rather than [`crate::AppCommand`] because it has to answer
 //! *that* page. A broadcast command names no webview, and with two palettes on screen the wrong
 //! one would move its selection.
 
+use crate::event::{COMMAND_BAR_KEY_EVENT, CommandBarKey};
+use crate::{AppCommand, CommandIssued, ReadAppCommands};
 use bevy::prelude::*;
 use bevy_cef::prelude::BinHostEmitEvent;
-use vmux_command::event::{COMMAND_BAR_KEY_EVENT, CommandBarKey};
-use vmux_command::{AppCommand, CommandIssued, ReadAppCommands};
 
 pub(crate) struct CommandBarKeyPlugin;
 
@@ -37,7 +37,7 @@ fn echo_key_command(mut issued: MessageReader<CommandIssued>, mut commands: Comm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vmux_command::CommandBarKeyCommand;
+    use crate::CommandBarKeyCommand;
 
     /// What the plugin pushed back to a page, which is its only observable.
     #[derive(Resource, Default)]
@@ -112,7 +112,7 @@ mod tests {
         Echo::issue(
             &mut app,
             caller,
-            AppCommand::Terminal(vmux_command::TerminalCommand::Clear),
+            AppCommand::Terminal(crate::TerminalCommand::Clear),
         );
 
         assert!(app.world().resource::<Echoed>().0.is_empty());

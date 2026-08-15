@@ -1,6 +1,6 @@
+use crate::CommandBar;
+use crate::build_command_bar_open_payload;
 use std::time::{Duration, Instant};
-use vmux_command::CommandBar;
-use vmux_command::build_command_bar_open_payload;
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
@@ -10,29 +10,29 @@ use vmux_core::launcher::{
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
+use crate::event::{
+    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
+    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
+    PathEntry, SearchEngine, SearchEngineSetting,
+};
+use crate::event::{
+    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
+};
+use crate::open::OpenCommand;
+use crate::open_target::OpenTarget;
+use crate::snapshot::{
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
+};
+use crate::{
+    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
+    SpaceCommand, StackCommand,
+};
 use bevy::{
     ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*,
     ui::UiSystems,
 };
 use bevy_cef::prelude::*;
-use vmux_command::event::{
-    COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
-    CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
-    PathEntry, SearchEngine, SearchEngineSetting,
-};
-use vmux_command::event::{
-    CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
-};
-use vmux_command::open::OpenCommand;
-use vmux_command::open_target::OpenTarget;
-use vmux_command::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
-    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
-};
-use vmux_command::{
-    AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
-    SpaceCommand, StackCommand,
-};
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
 use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
@@ -42,7 +42,7 @@ use vmux_core::{
 use vmux_history::{LastActivatedAt, now_millis};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
-use vmux_command::ResolvedLocale;
+use crate::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -541,7 +541,7 @@ fn handle_open_command_bar(
         Option<Res<vmux_core::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
-        Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
+        Res<crate::snapshot::CommandBarWorkSnapshot>,
         Option<Res<ResolvedLocale>>,
     )>,
     mut commands: Commands,
@@ -682,9 +682,9 @@ fn handle_open_command_bar(
     let bar_tabs = focus.tabs.clone();
 
     let target = if replace_active_stack {
-        Some(vmux_command::open_target::OpenTarget::InPlace)
+        Some(crate::open_target::OpenTarget::InPlace)
     } else if is_new_stack {
-        Some(vmux_command::open_target::OpenTarget::InNewStack)
+        Some(crate::open_target::OpenTarget::InNewStack)
     } else {
         None
     };
@@ -771,11 +771,11 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    if vmux_command::event::is_data_uri(value)
-        || (value.contains("://") && vmux_command::event::looks_like_url(value))
+    if crate::event::is_data_uri(value)
+        || (value.contains("://") && crate::event::looks_like_url(value))
     {
         value.to_string()
-    } else if vmux_command::event::looks_like_url(value) {
+    } else if crate::event::looks_like_url(value) {
         format!("https://{}", value)
     } else {
         search_engine.search_url(value)
@@ -812,7 +812,7 @@ fn on_command_bar_action(
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut issued: MessageWriter<crate::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -966,7 +966,7 @@ fn on_command_bar_action(
                     let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(vmux_command::CommandIssued {
+                    issued.write(crate::CommandIssued {
                         caller,
                         command: cmd.clone(),
                     });
@@ -1031,7 +1031,7 @@ fn on_command_bar_action(
                             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
                                 url: Some("vmux://terminal/".into()),
                             }));
-                        issued.write(vmux_command::CommandIssued {
+                        issued.write(crate::CommandIssued {
                             caller,
                             command: cmd.clone(),
                         });
@@ -1080,7 +1080,7 @@ fn on_command_bar_action(
                     let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(vmux_command::CommandIssued {
+                    issued.write(crate::CommandIssued {
                         caller,
                         command: cmd.clone(),
                     });
@@ -1088,7 +1088,7 @@ fn on_command_bar_action(
                 }
                 custom_keyboard_restore = true;
             } else if let Some(cmd) = match_command(id) {
-                issued.write(vmux_command::CommandIssued {
+                issued.write(crate::CommandIssued {
                     caller,
                     command: cmd.clone(),
                 });
@@ -1388,12 +1388,12 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::CommandBarOpenEvent;
+    use crate::event::CommandBarSpace;
+    use crate::{CommandPlugin, ReadAppCommands};
+    use crate::{command_bar_open_payload, localized_command_name};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::event::CommandBarOpenEvent;
-    use vmux_command::event::CommandBarSpace;
-    use vmux_command::{CommandPlugin, ReadAppCommands};
-    use vmux_command::{command_bar_open_payload, localized_command_name};
     use vmux_core::overlay::OverlayState;
 
     #[test]
@@ -1409,7 +1409,7 @@ mod tests {
                     &CommandBarSpacesSnapshot::default(),
                     &contributions,
                     &CommandBarPagesSnapshot::default(),
-                    &vmux_command::snapshot::CommandBarWorkSnapshot::default(),
+                    &crate::snapshot::CommandBarWorkSnapshot::default(),
                     &Locale::from("en-US"),
                     0,
                     Vec::new(),
@@ -1925,7 +1925,7 @@ mod tests {
             .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
+            .init_resource::<crate::snapshot::CommandBarWorkSnapshot>()
             .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
@@ -2140,7 +2140,6 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin)
             .add_message::<TerminalSpawnRequest>()
             .add_message::<FocusLauncherInput>()
@@ -2149,10 +2148,8 @@ mod tests {
             .add_message::<RestoreKeyboardToStack>()
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
-            .add_message::<vmux_layout::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .init_resource::<vmux_layout::pane::PendingCursorWarp>()
             .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
 
         let modal = app
@@ -2248,7 +2245,6 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -2341,7 +2337,7 @@ mod tests {
 
     #[test]
     fn build_open_command_in_pane_target() {
-        use vmux_command::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+        use crate::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
         let cmd = build_open_command(
             Some(OpenTarget::InPane {
                 direction: PaneDirection::Right,

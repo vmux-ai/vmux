@@ -24,6 +24,7 @@ pub use plugin::CommandPlugin;
 
 pub mod bundle;
 pub mod command;
+pub mod command_bar;
 pub mod issued;
 pub mod open;
 pub mod page_key;

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
-use vmux_command::event::CommandBarPanelActiveEvent;
+use crate::event::CommandBarPanelActiveEvent;
 
 pub struct CommandBarPanelPlugin;
 
