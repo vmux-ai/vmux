@@ -11,7 +11,7 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::CefKeyboardTarget;
-use vmux_core::launcher::{PendingStackAbandoned, StackInPaneChosen};
+use vmux_core::launcher::{PendingStackAbandoned, RestoreKeyboardToStack, StackInPaneChosen};
 use vmux_history::LastActivatedAt;
 
 use crate::cef::Browser;
@@ -24,9 +24,14 @@ impl Plugin for PendingStackPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<PendingStackAbandoned>()
             .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_systems(
                 Update,
-                (discard_abandoned_pending_stacks, focus_chosen_stack_in_pane)
+                (
+                    discard_abandoned_pending_stacks,
+                    focus_chosen_stack_in_pane,
+                    restore_keyboard_to_stack,
+                )
                     .before(crate::stack::ComputeFocusSet),
             );
     }
@@ -62,6 +67,32 @@ fn discard_abandoned_pending_stacks(
         };
         for child in children.iter() {
             if content_browsers.contains(child) {
+                commands.entity(child).try_insert(CefKeyboardTarget);
+            }
+        }
+    }
+}
+
+/// Hands the keyboard to the content page in a stack, skipping the header and side sheet.
+fn restore_keyboard_to_stack(
+    mut requests: MessageReader<RestoreKeyboardToStack>,
+    all_children: Query<&Children>,
+    content_pages: Query<
+        Entity,
+        (
+            With<Browser>,
+            Without<crate::Header>,
+            Without<crate::side_sheet::SideSheet>,
+        ),
+    >,
+    mut commands: Commands,
+) {
+    for request in requests.read() {
+        let Ok(children) = all_children.get(request.stack) else {
+            continue;
+        };
+        for child in children.iter() {
+            if content_pages.contains(child) {
                 commands.entity(child).try_insert(CefKeyboardTarget);
             }
         }
