@@ -4,6 +4,7 @@
 
 mod appearance;
 mod command;
+pub mod command_bar;
 mod extensions;
 mod frame_rate;
 mod host_focus;
@@ -15,6 +16,7 @@ mod native_layout;
 mod navigation;
 mod present;
 
+use crate::command_bar::panel::CommandBarPanelActive;
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 mod layout_view;
@@ -32,6 +34,7 @@ pub use native_layout::NativeLayout;
 #[cfg(target_os = "macos")]
 pub use native_layout::NativeLayoutPointerMoveResult;
 
+use crate::command_bar::handler::PendingCommandBarReveal;
 use bevy::{
     ecs::relationship::Relationship,
     input::{ButtonState, mouse::MouseButton},
@@ -50,13 +53,11 @@ use vmux_core::{
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
-use vmux_layout::command_bar::handler::PendingCommandBarReveal;
 use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    command_bar::panel::CommandBarPanelActive,
     event::{
         DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HeaderCommandEvent, StackRow,
     },
@@ -114,6 +115,9 @@ impl Plugin for BrowserPlugin {
         )
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
+            command_bar::handler::CommandBarInputPlugin,
+            command_bar::key::CommandBarKeyPlugin,
+            command_bar::panel::CommandBarPanelPlugin,
             layout_view::LayoutViewPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,

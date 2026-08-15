@@ -247,7 +247,7 @@ fn sync_window_glass_visibility(
             With<bevy_cef::prelude::CefKeyboardTarget>,
         ),
     >,
-    modal_open_q: vmux_layout::command_bar::state::CommandBarStateQuery,
+    modal_open_q: vmux_browser::command_bar::state::CommandBarStateQuery,
     mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
 ) {
     use objc2::ClassType;
@@ -284,7 +284,7 @@ fn sync_window_glass_visibility(
     }
 
     let terminal_focused = !terminal_focus_q.is_empty();
-    let command_bar_open = vmux_layout::command_bar::handler::is_command_bar_open(&modal_open_q);
+    let command_bar_open = vmux_browser::command_bar::handler::is_command_bar_open(&modal_open_q);
     crate::native_keyboard::set_escape_exits_fullscreen(
         fullscreen && !terminal_focused && !command_bar_open,
     );

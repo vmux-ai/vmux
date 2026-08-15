@@ -173,12 +173,12 @@ fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
 fn keep_awake_while_command_bar_opening(
     proxy: Option<Res<EventLoopProxyWrapper>>,
     new_stack_ctx: Option<Res<vmux_layout::NewStackContext>>,
-    pending: Query<&vmux_layout::PendingCommandBarReveal>,
+    pending: Query<&vmux_browser::command_bar::handler::PendingCommandBarReveal>,
 ) {
     let needs_open = new_stack_ctx.map(|ctx| ctx.needs_open).unwrap_or(false);
     let has_active_reveal = pending
         .iter()
-        .any(vmux_layout::PendingCommandBarReveal::is_active);
+        .any(vmux_browser::command_bar::handler::PendingCommandBarReveal::is_active);
     if !command_bar_should_wake(needs_open, has_active_reveal) {
         return;
     }

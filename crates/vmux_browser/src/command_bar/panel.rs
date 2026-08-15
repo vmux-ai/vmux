@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
-use crate::event::CommandBarPanelActiveEvent;
+use vmux_layout::event::CommandBarPanelActiveEvent;
 
 pub struct CommandBarPanelPlugin;
 
@@ -16,7 +16,7 @@ impl Plugin for CommandBarPanelPlugin {
 
 /// The command bar panel in the layout page holds a focused DOM field.
 ///
-/// Sits on the `LayoutCef` webview entity, exactly like [`crate::bookmark::BookmarkTextInputActive`],
+/// Sits on the `LayoutCef` webview entity, exactly like [`vmux_layout::bookmark::BookmarkTextInputActive`],
 /// and feeds the same "the layout page owns the keyboard" rule: `CefKeyboardTarget` moves to the
 /// layout shell, OSR focus follows it, and AppKit first responder stays with winit so keys route
 /// winit -> Bevy -> `send_key_event` -> the focused element.

@@ -162,11 +162,7 @@ fn localize_menu_items(items: Vec<MenuItemKind>, previous_locale: &Locale, local
                     .split_once('\t')
                     .map(|(_, suffix)| format!("\t{suffix}"))
                     .unwrap_or_default();
-                let localized = vmux_layout::command_bar::handler::localized_command_name(
-                    locale.as_str(),
-                    &id,
-                    current,
-                );
+                let localized = vmux_command::localized_command_name(locale.as_str(), &id, current);
                 let leaf = localized.rsplit(" > ").next().unwrap_or(&localized);
                 menu_item.set_text(format!("{leaf}{suffix}"));
             }

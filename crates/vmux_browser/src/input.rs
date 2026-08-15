@@ -5,6 +5,7 @@
 //! before any click is delivered against it, and a click that lands outside the command bar has
 //! to dismiss it rather than reach the page underneath.
 
+use crate::command_bar::state::CommandBarStateQuery;
 use bevy::{
     ecs::relationship::Relationship,
     input::{
@@ -21,7 +22,6 @@ use vmux_command::CommandBar;
 use vmux_command::event::CommandBarActionEvent;
 use vmux_layout::Browser;
 use vmux_layout::LayoutCef;
-use vmux_layout::command_bar::state::CommandBarStateQuery;
 
 use crate::{
     CefPointerRegionQuery, LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE,
@@ -60,7 +60,7 @@ fn log_command_bar_keyboard_input(
     mut events: MessageReader<KeyboardInput>,
     modal_q: CommandBarStateQuery,
 ) {
-    if !vmux_layout::command_bar::handler::is_command_bar_open(&modal_q) {
+    if !crate::command_bar::handler::is_command_bar_open(&modal_q) {
         return;
     }
     for event in events.read() {

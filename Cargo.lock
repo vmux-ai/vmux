@@ -10817,6 +10817,7 @@ dependencies = [
  "polling",
  "raw-window-handle 0.6.2",
  "reqwest",
+ "rkyv",
  "ron 0.8.1",
  "serde",
  "serde_json",
@@ -10836,6 +10837,7 @@ dependencies = [
  "vmux_space",
  "vmux_terminal",
  "vmux_ui",
+ "vmux_wire",
  "wry",
  "zip",
 ]

@@ -1,9 +1,9 @@
+use crate::command_bar::state::CommandBarState;
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use bevy_cef::prelude::{Browsers, CefKeyboardTarget, WebviewWindowed};
 use vmux_command::CommandBar;
 use vmux_layout::Header;
-use vmux_layout::command_bar::state::CommandBarState;
 use vmux_layout::side_sheet::SideSheet;
 use vmux_layout::stack::FocusedStack;
 use vmux_terminal::Terminal;

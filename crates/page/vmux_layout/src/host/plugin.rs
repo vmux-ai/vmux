@@ -6,9 +6,6 @@ use crate::active_panes::ActivePanesPlugin;
 use crate::archive::ArchivePlugin;
 use crate::bookmark::BookmarkPlugin;
 use crate::cef::LayoutCefPlugin;
-use crate::command_bar::handler::CommandBarInputPlugin;
-use crate::command_bar::key::CommandBarKeyPlugin;
-use crate::command_bar::panel::CommandBarPanelPlugin;
 use crate::contract::LayoutContractPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
@@ -78,14 +75,11 @@ impl Plugin for LayoutPlugin {
                 WorktreePlugin,
             ))
             .add_plugins((
-                CommandBarInputPlugin,
                 TogglePlugin,
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
                 BookmarkPlugin,
-                CommandBarPanelPlugin,
-                CommandBarKeyPlugin,
                 LayoutCefPlugin,
             ));
     }

@@ -16,9 +16,6 @@ use vmux_core::{
 use vmux_ui::i18n::Locale;
 
 use crate::cef::Browser;
-use crate::command_bar::handler::{
-    TabGatherParams, build_command_bar_open_payload, gather_command_bar_tabs,
-};
 use crate::settings::ResolvedLocale;
 use crate::start::START_PAGE_URL;
 use crate::start::event::{
@@ -27,6 +24,8 @@ use crate::start::event::{
 };
 use crate::tab::{Tab, TabWorkspace, TabWorktree};
 use crate::window::VmuxWindow;
+use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
+use vmux_command::build_command_bar_open_payload;
 
 /// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
 /// and answers [`StartDataRequest`] with the shared command-bar payload.
