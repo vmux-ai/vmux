@@ -1,12 +1,6 @@
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
-use bevy_cef_core::prelude::WebviewDirtyRect;
-use vmux_layout::cef::LayoutCef;
 
 pub(crate) struct GlassPlugin;
 

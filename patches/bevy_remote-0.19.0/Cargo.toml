@@ -40,7 +40,6 @@ bevy_render = ["dep:bevy_render"]
 default = [
     "http",
     "bevy_asset",
-    "bevy_render",
 ]
 http = [
     "dep:async-io",

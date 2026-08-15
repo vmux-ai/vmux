@@ -6,7 +6,6 @@
 
 use bevy::{
     ecs::relationship::Relationship,
-    material::AlphaMode,
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
     window::{PrimaryWindow, WindowResized},
@@ -320,16 +319,6 @@ fn sync_children_to_ui(
         if webview_size.0 != dip {
             webview_size.0 = dip;
         }
-    }
-}
-
-fn webview_content_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
-    if alpha < 1.0 {
-        AlphaMode::Blend
-    } else if radius > 0.0 {
-        AlphaMode::AlphaToCoverage
-    } else {
-        AlphaMode::Opaque
     }
 }
 
@@ -1036,30 +1025,6 @@ fn windowed_reconcile_should_wake(
     within_startup_grace: bool,
 ) -> bool {
     pushed_any || (awaiting_create && within_startup_grace)
-}
-
-/// Walks up from a browser entity to find its enclosing Tab, then counts
-/// leaf panes under that tab. Returns None if the parent chain doesn't
-/// reach a Tab.
-fn pane_count_for_browser(
-    browser_e: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<(), With<Tab>>,
-    _pane_q: &Query<(), With<Pane>>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Option<usize> {
-    let mut cur = browser_e;
-    let tab = loop {
-        let parent = child_of_q.get(cur).ok()?.get();
-        if tab_q.get(parent).is_ok() {
-            break parent;
-        }
-        cur = parent;
-    };
-    let mut leaves = Vec::new();
-    collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
-    Some(leaves.len())
 }
 
 fn sync_osr_webview_focus(

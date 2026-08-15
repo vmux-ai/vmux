@@ -5,7 +5,6 @@
 //! handler that claims a page always runs before the fallback that would open it blindly.
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
-use bevy_cef::prelude::*;
 use vmux_core::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,

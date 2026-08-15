@@ -25,9 +25,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-mod history_swipe;
-mod pinch_zoom;
-
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
 

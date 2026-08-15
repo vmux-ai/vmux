@@ -23,10 +23,6 @@ pub(super) fn native_scroll_should_wake(
     layout_pointer_inside || !sampled_over_windowed_page
 }
 
-pub(super) fn render_frame_should_run(live_resize: bool, visible_windowed_page: bool) -> bool {
-    live_resize || !visible_windowed_page
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct NativeWindowFrame {
     pub(super) x: f64,
@@ -187,13 +183,6 @@ mod tests {
                 height: 120.0,
             }
         );
-    }
-
-    #[test]
-    fn bevy_render_is_skipped_only_while_a_native_page_covers_it() {
-        assert!(!render_frame_should_run(false, true));
-        assert!(render_frame_should_run(true, true));
-        assert!(render_frame_should_run(false, false));
     }
 
     #[test]
