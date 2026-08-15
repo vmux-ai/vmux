@@ -16,12 +16,13 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
+use vmux_command::event::LAYOUT_COMMAND_BAR_OPEN_EVENT;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
 use vmux_layout::{
     Header, LayoutCef,
-    event::{LAYOUT_COMMAND_BAR_OPEN_EVENT, STACKS_EVENT, TABS_EVENT},
+    event::{STACKS_EVENT, TABS_EVENT},
     side_sheet::SideSheet,
 };
 
