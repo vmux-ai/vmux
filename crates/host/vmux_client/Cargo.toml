@@ -12,6 +12,7 @@ tokio = { workspace = true }
 tracing = "0.1"
 url = { workspace = true }
 vmux_profile = { path = "../../vmux_profile" }
+vmux_remote = { path = "../vmux_remote" }
 vmux_wire = { path = "../../vmux_wire" }
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -10887,6 +10887,7 @@ dependencies = [
  "tracing",
  "url",
  "vmux_profile",
+ "vmux_remote",
  "vmux_wire",
 ]
 
