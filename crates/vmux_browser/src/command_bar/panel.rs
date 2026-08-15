@@ -16,7 +16,7 @@ impl Plugin for CommandBarPanelPlugin {
 
 /// The command bar panel in the layout page holds a focused DOM field.
 ///
-/// Sits on the `LayoutCef` webview entity, exactly like [`vmux_layout::bookmark::BookmarkTextInputActive`],
+/// Sits on the webview that renders the panel, exactly like the bookmark field's own active marker,
 /// and feeds the same "the layout page owns the keyboard" rule: `CefKeyboardTarget` moves to the
 /// layout shell, OSR focus follows it, and AppKit first responder stays with winit so keys route
 /// winit -> Bevy -> `send_key_event` -> the focused element.

@@ -199,6 +199,7 @@ impl Browser {
 pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
         LayoutCef,
+        vmux_core::launcher::RendersLauncherPanel,
         HostWindow(host_window),
         Node {
             width: Val::Percent(100.0),

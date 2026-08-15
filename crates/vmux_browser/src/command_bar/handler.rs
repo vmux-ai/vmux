@@ -4,15 +4,15 @@ use vmux_command::build_command_bar_open_payload;
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
-    StackInPaneChosen,
+    RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
 
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use bevy::{
-    ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
-    picking::Pickable, prelude::*, ui::UiSystems,
+    ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*,
+    ui::UiSystems,
 };
 use bevy_cef::prelude::*;
 use vmux_command::event::{
@@ -40,8 +40,6 @@ use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_history::{LastActivatedAt, now_millis};
-use vmux_layout::cef::{Browser, LayoutCef};
-use vmux_layout::{Header, side_sheet::SideSheet};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use vmux_command::ResolvedLocale;
@@ -58,6 +56,7 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -526,21 +525,15 @@ fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
 
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
-    layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<LayoutCef>>,
+    layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<RendersLauncherPanel>>,
     all_children: Query<&Children>,
-    browser_meta: Query<&PageMetadata, With<Browser>>,
+    // Filtered to webviews because a stack carries `PageMetadata` of its own; only the page
+    // showing inside it answers "what is open here".
+    browser_meta: Query<&PageMetadata, With<WebviewSource>>,
     focus: Res<CommandBarWorkspaceSnapshot>,
+    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut launcher_hosts: LauncherHosts,
     child_of_q: Query<&ChildOf>,
-    content_browsers: Query<
-        Entity,
-        (
-            With<Browser>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<CommandBar>,
-        ),
-    >,
     contributions: Contributions,
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
@@ -601,28 +594,12 @@ fn handle_open_command_bar(
         // Discard empty tab created by a previous Cmd+T
         if let Some(stack_e) = pending_launch.stack.take() {
             commands.entity(stack_e).despawn();
-            if let Some(prev) = pending_launch.previous_stack.take()
-                && let Ok(children) = all_children.get(prev)
-            {
-                for child in children.iter() {
-                    if content_browsers.contains(child) {
-                        commands.entity(child).try_insert(CefKeyboardTarget);
-                    }
-                }
+            if let Some(prev) = pending_launch.previous_stack.take() {
+                restore_keyboard.write(RestoreKeyboardToStack { stack: prev });
             }
         } else {
-            let active_stack = focus.stack;
-            if let Some(tab) = active_stack {
-                for browser_e in &content_browsers {
-                    let is_child = child_of_q
-                        .get(browser_e)
-                        .ok()
-                        .map(|co| co.get() == tab)
-                        .unwrap_or(false);
-                    if is_child {
-                        commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                    }
-                }
+            if let Some(stack) = focus.stack {
+                restore_keyboard.write(RestoreKeyboardToStack { stack });
             }
         }
         pending_launch.needs_open = false;
@@ -749,17 +726,6 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
     child_of_q: Query<'w, 's, &'static ChildOf>,
-    content_browsers: Query<
-        'w,
-        's,
-        Entity,
-        (
-            With<Browser>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<CommandBar>,
-        ),
-    >,
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
     focus: Res<'w, CommandBarWorkspaceSnapshot>,
 }
@@ -845,6 +811,7 @@ fn on_command_bar_action(
     mut abandoned_writer: MessageWriter<PendingStackAbandoned>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
     mut stack_chosen: MessageWriter<StackInPaneChosen>,
+    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -1188,21 +1155,8 @@ fn on_command_bar_action(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if !custom_keyboard_restore {
-        let active_stack = queries.focused_stack();
-        if let Some(tab) = active_stack {
-            for browser_e in &queries.content_browsers {
-                let is_child = queries
-                    .child_of_q
-                    .get(browser_e)
-                    .ok()
-                    .map(|co| co.get() == tab)
-                    .unwrap_or(false);
-                if is_child {
-                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                }
-            }
-        }
+    if !custom_keyboard_restore && let Some(stack) = queries.focused_stack() {
+        restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }
 
@@ -1966,6 +1920,7 @@ mod tests {
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<PendingStackAbandoned>()
             .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
@@ -2009,7 +1964,7 @@ mod tests {
     #[test]
     fn opening_the_command_bar_pushes_the_payload_to_the_layout_page() {
         let mut app = panel_app();
-        let layout = app.world_mut().spawn(LayoutCef).id();
+        let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
         send(
             &mut app,
@@ -2029,7 +1984,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
         send(
@@ -2051,7 +2006,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
         let pending = app.world_mut().spawn_empty().id();
         app.insert_resource(PendingLaunch {
@@ -2083,7 +2038,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
         send(
@@ -2101,7 +2056,7 @@ mod tests {
     #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
         let mut app = panel_app();
-        app.world_mut().spawn(LayoutCef);
+        app.world_mut().spawn(RendersLauncherPanel);
 
         send(
             &mut app,
@@ -2191,6 +2146,7 @@ mod tests {
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<vmux_layout::LayoutSpawnRequest>()
