@@ -15,6 +15,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
     StackCommand,
 };
+pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
@@ -57,11 +58,6 @@ pub struct FocusedStack {
     pub stack: Option<Entity>,
 }
 
-/// System set for `compute_focused_stack`. Systems that read `Res<FocusedStack>`
-/// should be ordered `.after(ComputeFocusSet)` in `Update`.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ComputeFocusSet;
-
 /// Marker: tab is waiting for close confirmation dialog.
 #[derive(Component)]
 pub struct PendingStackClose;
@@ -76,10 +72,6 @@ pub struct CloseConfirmed;
 pub struct CloseStackRequest {
     pub stack: Entity,
 }
-
-/// System set for `handle_stack_commands`.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StackCommandSet;
 
 fn handle_close_stack_requests(
     mut reader: MessageReader<CloseStackRequest>,

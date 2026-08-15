@@ -91,8 +91,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(vmux_layout::tab::TabCommandSet)
-                    .after(vmux_layout::stack::StackCommandSet),
+                    .after(vmux_core::workspace::TabCommandSet)
+                    .after(vmux_core::workspace::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -107,7 +107,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(vmux_layout::stack::ComputeFocusSet),
+                    .before(vmux_core::workspace::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -2390,11 +2390,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(vmux_layout::stack::StackCommandSet.intern())
+            .get_key(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(vmux_layout::stack::StackCommandSet.intern())
+            .systems_in_set(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()
