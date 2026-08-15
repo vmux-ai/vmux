@@ -240,14 +240,6 @@ fn sync_window_glass_visibility(
     mut state: NonSendMut<GlassState>,
     mut clear_color: ResMut<ClearColor>,
     mut window_q: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
-    terminal_focus_q: Query<
-        (),
-        (
-            With<vmux_terminal::Terminal>,
-            With<bevy_cef::prelude::CefKeyboardTarget>,
-        ),
-    >,
-    modal_open_q: vmux_browser::command_bar::state::CommandBarStateQuery,
     mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
 ) {
     use objc2::ClassType;
@@ -283,11 +275,7 @@ fn sync_window_glass_visibility(
         clear_color.0 = want_clear;
     }
 
-    let terminal_focused = !terminal_focus_q.is_empty();
-    let command_bar_open = vmux_browser::command_bar::handler::is_command_bar_open(&modal_open_q);
-    crate::native_keyboard::set_escape_exits_fullscreen(
-        fullscreen && !terminal_focused && !command_bar_open,
-    );
+    crate::native_keyboard::set_window_fullscreen(fullscreen);
 
     if crate::native_keyboard::take_exit_fullscreen_request() {
         if native_fullscreen {

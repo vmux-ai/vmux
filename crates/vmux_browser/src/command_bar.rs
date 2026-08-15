@@ -10,4 +10,5 @@ pub mod handler;
 pub mod key;
 pub mod panel;
 pub mod state;
+pub mod wake;
 pub mod work_snapshot;

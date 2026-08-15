@@ -35,7 +35,7 @@ static PENDING_PREFIX: LazyLock<Mutex<Option<(KeyCombo, Instant)>>> =
 static PENDING_COMMANDS: LazyLock<Mutex<Vec<AppCommand>>> =
     LazyLock::new(|| Mutex::new(Vec::new()));
 
-static ESC_EXITS_FULLSCREEN: AtomicBool = AtomicBool::new(false);
+static WINDOW_FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static EXIT_FULLSCREEN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn set_shortcut_map(map: Keymap) {
@@ -43,8 +43,8 @@ pub(crate) fn set_shortcut_map(map: Keymap) {
 }
 
 #[cfg(feature = "native-glass")]
-pub(crate) fn set_escape_exits_fullscreen(value: bool) {
-    ESC_EXITS_FULLSCREEN.store(value, Ordering::Relaxed);
+pub(crate) fn set_window_fullscreen(value: bool) {
+    WINDOW_FULLSCREEN.store(value, Ordering::Relaxed);
 }
 
 #[cfg(feature = "native-glass")]
@@ -52,20 +52,12 @@ pub(crate) fn take_exit_fullscreen_request() -> bool {
     EXIT_FULLSCREEN_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
-fn is_bare_escape(combo: &KeyCombo) -> bool {
-    combo.key == KeyCode::Escape
-        && !combo.modifiers.ctrl
-        && !combo.modifiers.alt
-        && !combo.modifiers.super_key
-}
-
-fn is_command_bar_dismiss_combo(combo: &KeyCombo) -> bool {
-    is_bare_escape(combo)
-        || (combo.key == KeyCode::KeyC
-            && combo.modifiers.ctrl
-            && !combo.modifiers.shift
-            && !combo.modifiers.alt
-            && !combo.modifiers.super_key)
+/// Escape leaves fullscreen only when no page surface wants it — a focused terminal sends it to
+/// the PTY, and an open command bar closes on it.
+fn escape_exits_fullscreen(combo: &KeyCombo) -> bool {
+    combo.is_bare_escape()
+        && WINDOW_FULLSCREEN.load(Ordering::Relaxed)
+        && !vmux_browser::native_page_owns_escape()
 }
 
 enum KeyAction {
@@ -109,10 +101,10 @@ fn decide(
 }
 
 fn classify(combo: KeyCombo) -> KeyAction {
-    if is_command_bar_dismiss_combo(&combo) && vmux_browser::request_native_command_bar_dismiss() {
+    if vmux_browser::request_native_dismiss(&combo) {
         return KeyAction::Consume(None);
     }
-    if is_bare_escape(&combo) && ESC_EXITS_FULLSCREEN.load(Ordering::Relaxed) {
+    if escape_exits_fullscreen(&combo) {
         EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
         return KeyAction::Consume(None);
     }
@@ -333,22 +325,6 @@ mod tests {
             _ => panic!("expected SelectLeft"),
         }
         assert!(pending.is_none());
-    }
-
-    #[test]
-    fn bare_escape_detected_only_without_modifiers() {
-        assert!(is_bare_escape(&combo(KeyCode::Escape, false)));
-        assert!(!is_bare_escape(&combo(KeyCode::Escape, true)));
-        assert!(!is_bare_escape(&super_combo(KeyCode::Escape)));
-        assert!(!is_bare_escape(&combo(KeyCode::KeyH, false)));
-    }
-
-    #[test]
-    fn command_bar_dismiss_accepts_escape_and_ctrl_c() {
-        assert!(is_command_bar_dismiss_combo(&combo(KeyCode::Escape, false)));
-        assert!(is_command_bar_dismiss_combo(&combo(KeyCode::KeyC, true)));
-        assert!(!is_command_bar_dismiss_combo(&combo(KeyCode::KeyC, false)));
-        assert!(!is_command_bar_dismiss_combo(&super_combo(KeyCode::KeyC)));
     }
 
     #[test]

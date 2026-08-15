@@ -1393,10 +1393,11 @@ mod tests {
     use crate::tests::test_app_settings_with_radius;
     use crate::{
         command_bar_windowed_click_should_dismiss, native_command_bar_route,
-        request_native_command_bar_dismiss, request_native_command_bar_dismiss_for_mouse_down,
+        request_native_dismiss, request_native_dismiss_for_mouse_down,
         take_native_command_bar_dismiss_requested,
     };
     use bevy::input::ButtonState;
+    use vmux_command::shortcut::KeyCombo;
 
     #[test]
     fn osr_webview_hides_when_window_is_hidden() {
@@ -1858,30 +1859,32 @@ mod tests {
         // A frame published by a bar that no longer owns input must not turn an unrelated click
         // into a dismiss.
         publish_native_command_bar_route(false, Some(frame), 1.0);
-        assert!(!request_native_command_bar_dismiss_for_mouse_down(
-            90.0, 60.0
-        ));
+        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
         assert!(!take_native_command_bar_dismiss_requested());
 
         publish_native_command_bar_route(true, Some(frame), 1.0);
-        assert!(!request_native_command_bar_dismiss_for_mouse_down(
-            120.0, 60.0
-        ));
+        assert!(!request_native_dismiss_for_mouse_down(120.0, 60.0));
         assert!(!take_native_command_bar_dismiss_requested());
-        assert!(request_native_command_bar_dismiss_for_mouse_down(
-            90.0, 60.0
-        ));
+        assert!(request_native_dismiss_for_mouse_down(90.0, 60.0));
         assert!(take_native_command_bar_dismiss_requested());
         assert!(!take_native_command_bar_dismiss_requested());
 
         // Revealing: owns input, but no rectangle is on screen to click outside of yet.
         publish_native_command_bar_route(true, None, 1.0);
-        assert!(!request_native_command_bar_dismiss_for_mouse_down(
-            90.0, 60.0
-        ));
+        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
+
+        // A key the bar does not close on is left for the keymap even while it owns input.
+        assert!(!request_native_dismiss(&KeyCombo {
+            key: bevy::input::keyboard::KeyCode::KeyJ,
+            modifiers: Default::default(),
+        }));
+        assert!(!take_native_command_bar_dismiss_requested());
 
         // Closing drops a dismiss that was requested while open.
-        assert!(request_native_command_bar_dismiss());
+        assert!(request_native_dismiss(&KeyCombo {
+            key: bevy::input::keyboard::KeyCode::Escape,
+            modifiers: Default::default(),
+        }));
         publish_native_command_bar_route(false, None, 1.0);
         assert!(!take_native_command_bar_dismiss_requested());
     }

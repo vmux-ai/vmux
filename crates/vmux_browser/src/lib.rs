@@ -118,6 +118,7 @@ impl Plugin for BrowserPlugin {
             command_bar::handler::CommandBarInputPlugin,
             command_bar::key::CommandBarKeyPlugin,
             command_bar::panel::CommandBarPanelPlugin,
+            command_bar::wake::CommandBarWakePlugin,
             layout_view::LayoutViewPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
@@ -641,6 +642,7 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
 static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
+static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
@@ -648,8 +650,18 @@ fn native_command_bar_route() -> CommandBarRoute {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-pub fn native_command_bar_is_open() -> bool {
-    native_command_bar_route().owns_input
+pub(crate) fn set_native_page_owns_escape(owns: bool) {
+    NATIVE_PAGE_OWNS_ESCAPE.store(owns, Ordering::Relaxed);
+}
+
+/// Whether a page surface will answer Escape itself, so the host must not read it as a request to
+/// leave fullscreen. True while a terminal holds the keyboard — it forwards Escape to the PTY —
+/// and while the command bar owns input.
+///
+/// Read from the `NSEvent` monitor, which runs on the AppKit thread ahead of the ECS, hence the
+/// static rather than a resource.
+pub fn native_page_owns_escape() -> bool {
+    NATIVE_PAGE_OWNS_ESCAPE.load(Ordering::Relaxed)
 }
 
 pub fn set_native_left_mouse_down(down: bool) {
@@ -683,7 +695,12 @@ fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: V
         && cursor.y <= frame.top_px + frame.height_px
 }
 
-pub fn request_native_command_bar_dismiss() -> bool {
+/// Offers a native keystroke to whichever page surface wants to close on it, and reports whether
+/// one took it. The host consumes the key when this is true.
+pub fn request_native_dismiss(combo: &vmux_command::shortcut::KeyCombo) -> bool {
+    if !combo.dismisses_command_bar() {
+        return false;
+    }
     if !native_command_bar_route().owns_input {
         return false;
     }
@@ -691,7 +708,7 @@ pub fn request_native_command_bar_dismiss() -> bool {
     true
 }
 
-pub fn request_native_command_bar_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
+pub fn request_native_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
     if !x_px.is_finite() || !y_px.is_finite() {
         return false;
     }
