@@ -39,7 +39,7 @@ use bevy_cef_core::prelude::{
 use vmux_setting::AppSettings;
 
 #[cfg(target_os = "macos")]
-use crate::LayoutCef;
+use vmux_layout::LayoutCef;
 
 #[cfg(target_os = "macos")]
 use vmux_layout::event::LAYOUT_PAGE_URL;

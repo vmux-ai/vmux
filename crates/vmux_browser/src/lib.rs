@@ -54,7 +54,7 @@ use vmux_layout::command_bar::handler::PendingCommandBarReveal;
 use vmux_layout::event::{RemoteCommandEvent, RemoteCopyEvent, SideSheetCommandEvent};
 pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
-    Header, LayoutCef, Open, PendingWebviewReveal, UpdateState,
+    Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
     command_bar::panel::CommandBarPanelActive,
     event::{
