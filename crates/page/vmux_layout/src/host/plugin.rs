@@ -81,6 +81,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
+                crate::workspace_snapshot_publish::WorkspaceSnapshotPlugin,
                 crate::overlay_adopt::OverlayAdoptPlugin,
                 crate::pending_stack::PendingStackPlugin,
             ));

@@ -4,15 +4,15 @@ use vmux_command::build_command_bar_open_payload;
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
+    StackInPaneChosen,
 };
-use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
 use bevy::{
     ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
-    picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
+    picking::Pickable, prelude::*, ui::UiSystems,
 };
 use bevy_cef::prelude::*;
 use vmux_command::event::{
@@ -26,8 +26,8 @@ use vmux_command::event::{
 use vmux_command::open::OpenCommand;
 use vmux_command::open_target::OpenTarget;
 use vmux_command::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, Contributions,
-    WriteCommandBarSnapshots,
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
 };
 use vmux_command::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
@@ -35,19 +35,13 @@ use vmux_command::{
 };
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
-use vmux_core::terminal::{Terminal, TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_history::{LastActivatedAt, now_millis};
 use vmux_layout::cef::{Browser, LayoutCef};
-use vmux_layout::{
-    Header,
-    pane::{Pane, PaneSplit},
-    side_sheet::SideSheet,
-    stack::{ActiveTabParam, Stack, focused_stack},
-    window::Main,
-};
+use vmux_layout::{Header, side_sheet::SideSheet};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use vmux_layout::settings::ResolvedLocale;
@@ -63,6 +57,7 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<PendingStackAbandoned>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -532,14 +527,9 @@ fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
     layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<LayoutCef>>,
-    active_tab_param: ActiveTabParam,
     all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_q: Query<Entity, With<Stack>>,
     browser_meta: Query<&PageMetadata, With<Browser>>,
+    focus: Res<CommandBarWorkspaceSnapshot>,
     mut launcher_hosts: LauncherHosts,
     child_of_q: Query<&ChildOf>,
     content_browsers: Query<
@@ -566,7 +556,7 @@ fn handle_open_command_bar(
     let Ok((layout_e, is_open)) = layout_q.single() else {
         return;
     };
-    let active_stack_count = stack_q.iter().count();
+    let active_stack_count = focus.stack_count;
     let spaces_snapshot = snapshot_params.p0().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
     let startup_url = snapshot_params.p2().map(|url| url.0.clone());
@@ -621,14 +611,7 @@ fn handle_open_command_bar(
                 }
             }
         } else {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
+            let active_stack = focus.stack;
             if let Some(tab) = active_stack {
                 for browser_e in &content_browsers {
                     let is_child = child_of_q
@@ -682,17 +665,7 @@ fn handle_open_command_bar(
     let is_new_stack = snapshot_params.p1().stack.is_some();
 
     if !is_new_stack {
-        let active_stack = active_stack_override.or_else(|| {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
-            active_stack
-        });
+        let active_stack = active_stack_override.or(focus.stack);
         let start_browser = active_stack.and_then(|stack| {
             all_children
                 .get(stack)
@@ -717,17 +690,7 @@ fn handle_open_command_bar(
     } else if is_new_stack {
         String::new()
     } else {
-        let active_stack = active_stack_override.or_else(|| {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
-            active_stack
-        });
+        let active_stack = active_stack_override.or(focus.stack);
         active_stack
             .and_then(|tab| {
                 let Ok(children) = all_children.get(tab) else {
@@ -739,19 +702,7 @@ fn handle_open_command_bar(
             .unwrap_or_default()
     };
 
-    let bar_tabs = gather_command_bar_tabs(
-        active_tab_param.get(),
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-        &stack_q,
-        &browser_meta,
-        &child_of_q,
-        &space_name,
-        &locale,
-    );
+    let bar_tabs = focus.tabs.clone();
 
     let target = if replace_active_stack {
         Some(vmux_command::open_target::OpenTarget::InPlace)
@@ -797,12 +748,6 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
 
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
-    active_tab_param: ActiveTabParam<'w, 's>,
-    all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     child_of_q: Query<'w, 's, &'static ChildOf>,
     content_browsers: Query<
         'w,
@@ -816,33 +761,18 @@ struct CommandBarActionQueries<'w, 's> {
         ),
     >,
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
+    focus: Res<'w, CommandBarWorkspaceSnapshot>,
 }
 
 impl CommandBarActionQueries<'_, '_> {
     /// The stack an action lands in when the command bar did not open an empty one for it.
     fn focused_stack(&self) -> Option<Entity> {
-        let (_, _, stack) = focused_stack(
-            self.active_tab_param.get(),
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
-        stack
+        self.focus.stack
     }
 
     /// The pane an action lands in when there is no stack to put it in.
     fn focused_pane(&self) -> Option<Entity> {
-        let (_, pane, _) = focused_stack(
-            self.active_tab_param.get(),
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
-        pane
+        self.focus.pane
     }
 
     /// The stack holding the start page that raised this action, which can transition in place.
@@ -899,13 +829,6 @@ fn on_command_bar_action(
         With<CommandBar>,
     >,
     queries: CommandBarActionQueries,
-    mut stack_params: ParamSet<(
-        Query<Entity, With<Stack>>,
-        Query<Entity, With<Main>>,
-        Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<vmux_layout::stack::FocusedStack>>,
-        Query<(), With<Terminal>>,
-    )>,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
@@ -921,6 +844,7 @@ fn on_command_bar_action(
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
     mut abandoned_writer: MessageWriter<PendingStackAbandoned>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
+    mut stack_chosen: MessageWriter<StackInPaneChosen>,
     mut issued: MessageWriter<vmux_command::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
@@ -1234,26 +1158,10 @@ fn on_command_bar_action(
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
-            if let Some(target_pane) = queries.leaf_panes.iter().find(|e| e.to_bits() == *pane) {
-                let target_stack = {
-                    let stack_q = stack_params.p0();
-                    queries
-                        .pane_children
-                        .get(target_pane)
-                        .ok()
-                        .and_then(|children| {
-                            children.iter().filter(|&e| stack_q.contains(e)).nth(*index)
-                        })
-                };
-                // Activate the whole chain (stack -> pane -> tab -> space), not just the
-                // pane/stack, so switching to a page in another tab actually moves the
-                // active-tab marker (ensure_active_tab derives Active from LastActivatedAt).
-                if let Some(target_stack) = target_stack {
-                    focus_pane_entity(target_stack, &mut commands, &queries.child_of_q);
-                } else {
-                    focus_pane_entity(target_pane, &mut commands, &queries.child_of_q);
-                }
-            }
+            stack_chosen.write(StackInPaneChosen {
+                pane_bits: *pane,
+                index: *index,
+            });
         }
         CommandBarActionEvent::Dismiss => {
             if let Some(stack_e) = empty_stack {
@@ -2057,7 +1965,9 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
             .add_message::<PendingStackAbandoned>()
+            .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
@@ -2280,6 +2190,7 @@ mod tests {
             .add_message::<TerminalSpawnRequest>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
             .add_message::<vmux_layout::LayoutSpawnRequest>()

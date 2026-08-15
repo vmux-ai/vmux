@@ -15,6 +15,7 @@ pub struct CommandBarSnapshotPlugin;
 impl Plugin for CommandBarSnapshotPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CommandBarAgentsSnapshot>()
+            .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarTerminalsSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
@@ -25,6 +26,23 @@ impl Plugin for CommandBarSnapshotPlugin {
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct WriteCommandBarSnapshots;
+
+/// The workspace as the launcher needs to see it.
+///
+/// Both halves come from the same walk of panes and stacks by last-activated time — where a choice
+/// would land, and the open tabs to list. That walk is the shape of the workspace and none of the
+/// launcher's business, so whoever owns it publishes the answer and the launcher reads it.
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub struct CommandBarWorkspaceSnapshot {
+    /// The stack a choice lands in when the launcher did not open onto one of its own.
+    pub stack: Option<Entity>,
+    /// The pane a choice lands in when there is no stack to put it in.
+    pub pane: Option<Entity>,
+    /// The active tab's open stacks, already in wire shape.
+    pub tabs: Vec<vmux_wire::command_bar::CommandBarTab>,
+    /// How many stacks exist in total, which decides whether the launcher offers "close".
+    pub stack_count: usize,
+}
 
 #[derive(Resource, Default, Clone, Debug)]
 pub struct CommandBarAgentsSnapshot {
