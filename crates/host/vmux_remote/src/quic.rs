@@ -20,12 +20,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::DeviceId;
 
-/// ALPN identifier offered during the TLS handshake, and the only compatibility gate there is.
+/// ALPN identifier offered during the TLS handshake, and the gate on what the conversation
+/// *means*.
 ///
 /// Bumping it rejects an incompatible peer during the QUIC handshake, before a single application
-/// byte is exchanged. There is deliberately no second version field in the hellos: one gate that
-/// always runs beats two that can disagree, and rkyv's positional variants mean a mismatched peer
-/// has to be refused outright rather than negotiated with.
+/// byte is exchanged. Nothing after it negotiates: rkyv encodes enum variants positionally, so a
+/// peer several releases behind must be refused outright rather than talked down to some common
+/// version. No application message carries a capability list or a version of its own.
+///
+/// It is not the only gate, and the doc here used to claim it was. [`HELLO_VERSION`] answers the
+/// narrower question of how to *read* a hello, which is a different question from what the hello
+/// then means — see its own note.
 pub const ALPN: &[u8] = b"vmux/2";
 
 /// ALPN a liveness probe negotiates instead of [`ALPN`].
