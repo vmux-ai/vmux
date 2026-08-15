@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{CefKeyboardTarget, CefSystems, WebviewExtendStandardMaterial};
+use bevy_cef::prelude::{CefKeyboardTarget, CefSystems};
 use vmux_core::page::{PageReady, PrewarmPage};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 
@@ -43,10 +43,7 @@ pub trait WarmPage: Component {
     const TITLE: &'static str;
     const POOL_SIZE: usize = 1;
 
-    fn spawn(
-        commands: &mut Commands,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> Entity;
+    fn spawn(commands: &mut Commands) -> Entity;
 }
 
 /// Prewarms a page after the layout shell is ready and claims warm webviews on open.
@@ -121,7 +118,6 @@ fn handle_registered_page_open(
     spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let pages: HashMap<&str, &PrewarmPage> = pages.iter().map(|page| (page.url, page)).collect();
     let mut available: HashMap<&str, Vec<Entity>> = HashMap::new();
@@ -148,11 +144,7 @@ fn handle_registered_page_open(
                     .remove::<WarmPageSpare>();
             } else {
                 let webview = commands
-                    .spawn(crate::cef::Browser::new_with_title(
-                        &mut webview_mt,
-                        page.url,
-                        page.title,
-                    ))
+                    .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
                     .id();
                 commands
                     .entity(webview)
@@ -170,7 +162,6 @@ fn maintain_registered_page_pools(
     layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
     spares: Query<&WarmPageSpare>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut budget: ResMut<WarmPageSpawnBudget>,
 ) {
     if layout_ready.is_empty() {
@@ -190,11 +181,7 @@ fn maintain_registered_page_pools(
                 return;
             }
             let webview = commands
-                .spawn(crate::cef::Browser::new_with_title(
-                    &mut webview_mt,
-                    page.url,
-                    page.title,
-                ))
+                .spawn(crate::cef::Browser::new_with_title(page.url, page.title))
                 .id();
             commands
                 .entity(webview)
@@ -208,7 +195,6 @@ fn handle_warm_page_open<M: WarmPage>(
     spares: Query<(Entity, &WarmPageSpare), With<PageReady>>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let mut available: Vec<Entity> = spares
         .iter()
@@ -233,7 +219,7 @@ fn handle_warm_page_open<M: WarmPage>(
                     .insert((ChildOf(task.stack), CefKeyboardTarget))
                     .remove::<WarmPageSpare>();
             } else {
-                let page = M::spawn(&mut commands, &mut webview_mt);
+                let page = M::spawn(&mut commands);
                 commands
                     .entity(page)
                     .insert((ChildOf(task.stack), CefKeyboardTarget));
@@ -249,7 +235,6 @@ fn maintain_warm_page_pool<M: WarmPage>(
     layout_ready: Query<(), (With<LayoutCef>, With<PageReady>)>,
     spares: Query<&WarmPageSpare>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut budget: ResMut<WarmPageSpawnBudget>,
 ) {
     if layout_ready.is_empty() || M::POOL_SIZE == 0 {
@@ -264,7 +249,7 @@ fn maintain_warm_page_pool<M: WarmPage>(
         if !budget.take() {
             return;
         }
-        let page = M::spawn(&mut commands, &mut webview_mt);
+        let page = M::spawn(&mut commands);
         commands
             .entity(page)
             .insert((WarmPageSpare { url: M::URL }, ChildOf(node)));
@@ -321,15 +306,9 @@ mod tests {
         const TITLE: &'static str = "Test";
         const POOL_SIZE: usize = 1;
 
-        fn spawn(
-            commands: &mut Commands,
-            webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        ) -> Entity {
+        fn spawn(commands: &mut Commands) -> Entity {
             commands
-                .spawn((
-                    TestPage,
-                    Browser::new_with_title(webview_mt, Self::URL, Self::TITLE),
-                ))
+                .spawn((TestPage, Browser::new_with_title(Self::URL, Self::TITLE)))
                 .id()
         }
     }
@@ -337,7 +316,6 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_warm_page_open::<TestPage>);
         app
     }
@@ -399,7 +377,6 @@ mod tests {
     fn pool_waits_for_layout_then_fills() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<WarmPageSpawnBudget>()
             .add_systems(Update, maintain_warm_page_pool::<TestPage>);
         app.world_mut().spawn(VmuxWindow);
@@ -428,7 +405,6 @@ mod tests {
     fn registered_page_claims_ready_spare() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_registered_page_open);
         app.world_mut().spawn(PrewarmPage {
             host: "history",
@@ -472,7 +448,6 @@ mod tests {
     fn registered_page_without_pool_opens_cold() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_registered_page_open);
         app.world_mut().spawn(PrewarmPage {
             host: "history",
@@ -507,7 +482,6 @@ mod tests {
     fn registered_pools_fill_for_every_page() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<WarmPageSpawnBudget>()
             .add_systems(Update, maintain_registered_page_pools);
         app.world_mut().spawn(VmuxWindow);

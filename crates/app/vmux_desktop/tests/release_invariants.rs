@@ -178,16 +178,11 @@ fi
 fn cef_wheel_forwarding_rejects_invalid_events() {
     let source =
         include_str!("../../../../patches/bevy_cef_core-0.5.2/src/browser_process/browsers.rs");
-    let sprite_source =
-        include_str!("../../../../patches/bevy_cef-0.5.2/src/webview/webview_sprite.rs");
 
     assert!(source.contains("fn cef_mouse_wheel_event"));
     assert!(source.contains("!position.is_finite() || !delta.is_finite()"));
     assert!(source.contains("delta_x == 0 && delta_y == 0"));
     assert!(source.contains("MAX_CEF_WHEEL_DELTA"));
-    assert!(sprite_source.contains("With<CefPointerTarget>"));
-    assert!(sprite_source.contains("Without<WebviewWindowed>"));
-    assert!(sprite_source.contains("let use_targets = webviews_targeted.iter().next().is_some()"));
 }
 
 #[test]

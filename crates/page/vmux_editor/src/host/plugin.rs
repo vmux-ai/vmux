@@ -504,11 +504,7 @@ fn path_from_files_url(url: &str) -> Option<PathBuf> {
     path.is_absolute().then_some(path)
 }
 
-fn new_file_view_bundle(
-    url: &str,
-    path: PathBuf,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) -> impl Bundle {
+fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
     let title = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -538,7 +534,6 @@ fn new_file_view_bundle(
             ResolvedWebviewUri(url.to_string()),
         ),
         (
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -556,12 +551,9 @@ fn new_file_view_bundle(
     )
 }
 
-pub fn restore_file_view_bundle(
-    url: &str,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-) -> Option<impl Bundle> {
+pub fn restore_file_view_bundle(url: &str) -> Option<impl Bundle> {
     let path = path_from_files_url(url)?;
-    Some(new_file_view_bundle(url, path, webview_mt))
+    Some(new_file_view_bundle(url, path))
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -576,7 +568,6 @@ pub fn handle_file_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut record_writer: MessageWriter<vmux_core::event::RecordVisitRequest>,
 ) {
     for (entity, task) in &tasks {
@@ -605,10 +596,7 @@ pub fn handle_file_page_open(
         let pending = parse_goto_fragment(&task.url);
         clear_stack_children(task.stack, &children_q, &mut commands);
         let view = commands
-            .spawn((
-                new_file_view_bundle(&clean_url, path, &mut webview_mt),
-                ChildOf(task.stack),
-            ))
+            .spawn((new_file_view_bundle(&clean_url, path), ChildOf(task.stack)))
             .id();
         if let Some(pg) = pending {
             commands.entity(view).insert(pg);
@@ -4610,7 +4598,6 @@ mod page_open_tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<vmux_core::event::RecordVisitRequest>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_file_page_open);
         app
     }

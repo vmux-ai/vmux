@@ -27,7 +27,7 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
 pub struct Spaces;
 
 impl Spaces {
-    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
+    pub fn new() -> impl Bundle {
         (
             (
                 Self,
@@ -42,7 +42,6 @@ impl Spaces {
                 },
             ),
             (
-                WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -66,11 +65,8 @@ impl WarmPage for Spaces {
     const URL: &'static str = SPACES_PAGE_URL;
     const TITLE: &'static str = "Spaces";
 
-    fn spawn(
-        commands: &mut Commands,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> Entity {
-        commands.spawn(Spaces::new(webview_mt)).id()
+    fn spawn(commands: &mut Commands) -> Entity {
+        commands.spawn(Spaces::new()).id()
     }
 }
 

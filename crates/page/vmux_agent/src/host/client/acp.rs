@@ -4,7 +4,6 @@
 //! `consume_page_agent_stream` system (ACP reuses the Page stream messages).
 
 use bevy::prelude::*;
-use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use crossbeam_channel::{Receiver, Sender};
 use vmux_core::{LastActivatedAt, event::InstallPhase};
 use vmux_layout::event::TERMINAL_PAGE_URL;
@@ -993,7 +992,6 @@ fn apply_acp_terminal_created(
     mut reader: MessageReader<vmux_service::agent_events::PageAgentAcpTerminalCreated>,
     sessions: Query<(Entity, &AcpSession)>,
     ctx: PlacementCtx,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
 ) {
     let mut split_batch = std::collections::HashSet::new();
@@ -1020,7 +1018,7 @@ fn apply_acp_terminal_created(
             .spawn((stack_bundle(), LastActivatedAt(0), ChildOf(target_pane)))
             .id();
         commands.spawn((
-            reattach_terminal_bundle(&mut webview_mt, ev.process_id),
+            reattach_terminal_bundle(ev.process_id),
             vmux_terminal::RetainOnProcessExit,
             ChildOf(tab),
         ));
@@ -1448,8 +1446,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            .add_plugins(AcpAgentPlugin);
         let matching = app
             .world_mut()
             .spawn((
@@ -1511,8 +1508,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            .add_plugins(AcpAgentPlugin);
         let matching = app
             .world_mut()
             .spawn(AcpSession {
@@ -1678,8 +1674,7 @@ mod tests {
 
         let mut app = App::new();
         app.add_message::<PageAgentAcpTerminalCreated>()
-            .add_systems(Update, apply_acp_terminal_created)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            .add_systems(Update, apply_acp_terminal_created);
         let tab = app.world_mut().spawn(tab_bundle()).id();
         let pane = app
             .world_mut()
@@ -1889,8 +1884,7 @@ mod tests {
     fn plugin_builds_and_runs_without_panic() {
         let mut app = App::new();
         app.add_plugins(bevy::app::TaskPoolPlugin::default())
-            .add_plugins(AcpAgentPlugin)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            .add_plugins(AcpAgentPlugin);
         app.world_mut().spawn(AcpSession {
             agent_id: "vibe-acp".to_string(),
             sid: "s1".to_string(),

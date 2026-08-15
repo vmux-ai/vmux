@@ -690,7 +690,6 @@ mod tests {
     use super::*;
     use crate::host::AgentSessionPlugin;
     use crate::host::test_support::test_settings;
-    use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_service::protocol::ProcessId;
     use vmux_terminal::Terminal;
 
@@ -721,8 +720,7 @@ mod tests {
         .add_message::<vmux_space::SpaceCommandRequest>()
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .insert_resource(FocusedStack::default())
-        .insert_resource(test_settings())
-        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        .insert_resource(test_settings());
 
         let mut agent_value = serde_json::to_value(vmux_setting::AgentSettings::default()).unwrap();
         agent_value["allow_run_placement_override"] = serde_json::json!(true);
@@ -788,8 +786,7 @@ mod tests {
         .add_message::<vmux_history::query::HistoryOpenIntent>()
         .add_systems(Update, vmux_terminal::handle_terminal_send_requests)
         .insert_resource(FocusedStack::default())
-        .insert_resource(test_settings())
-        .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        .insert_resource(test_settings());
 
         let pane = app.world_mut().spawn(Pane).id();
         let stack = app

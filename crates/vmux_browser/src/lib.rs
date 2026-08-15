@@ -969,7 +969,6 @@ fn attach_cef_page_to_stack(
     bg_color: Option<String>,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Entity {
     clear_stack_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
@@ -979,10 +978,7 @@ fn attach_cef_page_to_stack(
         ..default()
     });
     let browser = commands
-        .spawn((
-            Browser::new_with_title(webview_mt, url, title),
-            ChildOf(stack),
-        ))
+        .spawn((Browser::new_with_title(url, title), ChildOf(stack)))
         .id();
     commands.entity(browser).insert(CefKeyboardTarget);
     browser
@@ -995,7 +991,6 @@ fn attach_error_page_to_stack(
     message: &str,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let source = error_page_source(title, message, display_url);
     clear_stack_children(stack, children_q, commands);
@@ -1006,7 +1001,7 @@ fn attach_error_page_to_stack(
     });
     let browser = commands
         .spawn((
-            Browser::new_error(webview_mt, &source, display_url, title),
+            Browser::new_error(&source, display_url, title),
             ChildOf(stack),
         ))
         .id();
@@ -1511,7 +1506,6 @@ mod tests {
         use crate::{Browser, PendingNavSnapshots};
         use bevy::ecs::relationship::Relationship;
         use bevy::prelude::*;
-        use bevy_cef::prelude::WebviewExtendStandardMaterial;
         use vmux_agent::events::AgentCommandRequest;
         use vmux_agent::host::AgentSessionPlugin;
         use vmux_agent::strategy::AgentStrategies;
@@ -1633,7 +1627,6 @@ mod tests {
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
                 .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .init_resource::<CapturedNavigateUrls>();
 
             let pane = app.world_mut().spawn(Pane).id();
@@ -1684,8 +1677,7 @@ mod tests {
             ));
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
 
@@ -1738,8 +1730,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             let first_stack = app
@@ -1795,8 +1786,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             let first_stack = app
@@ -1847,8 +1837,7 @@ mod tests {
             ));
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane_a = app.world_mut().spawn(Pane).id();
             let pane_b = app.world_mut().spawn(Pane).id();
@@ -1894,8 +1883,7 @@ mod tests {
             ));
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -1942,8 +1930,7 @@ mod tests {
             ));
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane_a = app.world_mut().spawn(Pane).id();
             let pane_b = app.world_mut().spawn(Pane).id();
@@ -1994,8 +1981,7 @@ mod tests {
             ));
             app.init_resource::<AgentStrategies>()
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2042,8 +2028,7 @@ mod tests {
             let mut app = App::new();
             app.add_plugins((MinimalPlugins, vmux_command::CommandPlugin, ConsumerPlugin));
             app.insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             let stack = app
@@ -2099,8 +2084,7 @@ mod tests {
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Claude, true)]),
                 ))
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2146,8 +2130,7 @@ mod tests {
                     std::collections::HashMap::from([(vmux_core::agent::AgentKind::Codex, true)]),
                 ))
                 .insert_resource(FocusedStack::default())
-                .insert_resource(test_settings())
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+                .insert_resource(test_settings());
 
             let pane = app.world_mut().spawn(Pane).id();
             app.world_mut().resource_mut::<FocusedStack>().pane = Some(pane);
@@ -2181,7 +2164,7 @@ mod tests {
     mod open_in_place_flow {
         use bevy::ecs::message::Messages;
         use bevy::prelude::*;
-        use bevy_cef::prelude::{RequestNavigate, WebviewExtendStandardMaterial};
+        use bevy_cef::prelude::RequestNavigate;
         use vmux_command::open::OpenCommand;
         use vmux_command::{AppCommand, BrowserCommand, BrowserViewCommand};
         use vmux_core::{PageOpenRequest, PageOpenTarget};
@@ -2211,7 +2194,6 @@ mod tests {
                 Update,
                 capture_page_open_requests.after(vmux_command::ReadAppCommands),
             )
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<CapturedNavigateUrls>()
             .init_resource::<CapturedPageOpenRequests>()
             .add_observer(

@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use bevy_cef::prelude::{CefKeyboardTarget, WebviewExtendStandardMaterial};
+use bevy_cef::prelude::CefKeyboardTarget;
 use vmux_core::agent::{AgentKind, SpawnAgentInStackRequest};
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_service::protocol::AgentAttachment;
@@ -297,7 +297,6 @@ fn handle_agent_page_open(
     kind_q: Query<&crate::client::page::strategy_components::StrategyKind>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
@@ -365,7 +364,6 @@ fn handle_agent_page_open(
             &kind_q,
             &mut spawn_agent,
             &mut commands,
-            &mut webview_mt,
             &default_cwd,
             &settings.agent.acp,
             catalog.as_deref(),
@@ -395,7 +393,6 @@ fn handle_swap_stack_session(
     children_q: Query<&Children>,
     mut spawn_agent: MessageWriter<SpawnAgentInStackRequest>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for ev in reader.read() {
         let target = match crate::AgentUrl::parse(&ev.target_url) {
@@ -496,7 +493,6 @@ fn handle_swap_stack_session(
                     icon.as_deref(),
                     sid.as_deref(),
                     &mut commands,
-                    &mut webview_mt,
                 );
                 if let Some((imported, pending)) = imported {
                     commands.entity(ev.stack).insert((imported, pending));
@@ -521,7 +517,6 @@ fn handle_agent_page_open_task(
     kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
     spawn_agent: &mut MessageWriter<SpawnAgentInStackRequest>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     default_cwd: &std::path::Path,
     acp_configs: &[vmux_setting::AcpAgentConfig],
     catalog: Option<&crate::client::acp::AcpCatalog>,
@@ -530,7 +525,7 @@ fn handle_agent_page_open_task(
         .into_iter()
         .find(|k| task.url == k.setup_url())
     {
-        attach_cli_setup_to_stack(kind, task.stack, children_q, commands, webview_mt);
+        attach_cli_setup_to_stack(kind, task.stack, children_q, commands);
         return Ok(());
     }
     match crate::AgentUrl::parse(&task.url) {
@@ -550,7 +545,6 @@ fn handle_agent_page_open_task(
                 &sid,
                 transition_webview,
                 commands,
-                webview_mt,
                 idx,
                 kind_q,
             )
@@ -575,7 +569,6 @@ fn handle_agent_page_open_task(
                 &sid,
                 transition_webview,
                 commands,
-                webview_mt,
                 idx,
                 kind_q,
             )
@@ -671,7 +664,6 @@ fn handle_agent_page_open_task(
                 sid.as_deref(),
                 transition_webview,
                 commands,
-                webview_mt,
             );
             insert_initial_prompt_queue(task.stack, initial_prompt, initial_attachments, commands);
             Ok(())
@@ -760,7 +752,6 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     message: &str,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     clear_stack_children(stack, children_q, commands);
     let title = "Agent failed to start";
@@ -780,7 +771,7 @@ pub(crate) fn attach_agent_spawn_error_to_stack(
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(webview_mt, &data_url, title),
+            vmux_layout::Browser::new_with_title(&data_url, title),
             ChildOf(stack),
         ))
         .id();
@@ -792,7 +783,6 @@ pub(crate) fn attach_cli_setup_to_stack(
     stack: Entity,
     children_q: &Query<&Children>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     clear_stack_children(stack, children_q, commands);
     commands
@@ -808,7 +798,7 @@ pub(crate) fn attach_cli_setup_to_stack(
     });
     let browser = commands
         .spawn((
-            vmux_layout::Browser::new_with_title(webview_mt, &url, &title),
+            vmux_layout::Browser::new_with_title(&url, &title),
             ChildOf(stack),
         ))
         .id();
@@ -854,7 +844,6 @@ mod tests {
             .add_message::<vmux_core::agent::SwapStackSession>()
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_swap_stack_session);
         app
     }
@@ -1009,7 +998,6 @@ mod tests {
                 (AgentKind::Vibe, false),
             ])))
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (handle_agent_page_open, handle_spawn_agent_requests).chain(),
@@ -1061,7 +1049,6 @@ mod tests {
                     (kind, false),
                 ])))
                 .insert_resource(settings)
-                .init_resource::<Assets<WebviewExtendStandardMaterial>>()
                 .add_systems(
                     Update,
                     (handle_agent_page_open, handle_spawn_agent_requests).chain(),
@@ -1111,7 +1098,6 @@ mod tests {
                     distribution: Distribution::default(),
                 }],
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
 
         let stack = app
@@ -1146,7 +1132,6 @@ mod tests {
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(AgentStrategies::default())
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
 
         let stack = app
@@ -1181,7 +1166,6 @@ mod tests {
             .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
                 managed_root.path().to_path_buf(),
             ))
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
@@ -1282,7 +1266,6 @@ mod tests {
             .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
                 managed_root.path().to_path_buf(),
             ))
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
@@ -1346,7 +1329,6 @@ mod tests {
             .insert_resource(vmux_layout::worktree::ManagedWorktreeRoot(
                 managed_root.path().to_path_buf(),
             ))
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
@@ -1436,7 +1418,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
@@ -1490,7 +1471,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
@@ -1548,7 +1528,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
@@ -1643,7 +1622,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (prepare_agent_tab_worktrees, handle_agent_page_open).chain(),
@@ -1725,7 +1703,6 @@ mod tests {
                     profile: "Personal".into(),
                 },
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
 
         let stack = app
@@ -1786,7 +1763,6 @@ mod tests {
                     profile: "Personal".into(),
                 },
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let space = app
             .world_mut()
@@ -1835,7 +1811,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
@@ -1875,7 +1850,6 @@ mod tests {
                 (AgentKind::Codex, true),
             ])))
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_spawn_agent_requests);
         let stack = app
             .world_mut()
@@ -1930,7 +1904,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let stack = app
             .world_mut()
@@ -1989,7 +1962,6 @@ mod tests {
                     profile: "Personal".into(),
                 },
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
 
         let tab = app
@@ -2035,7 +2007,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(settings)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
         let tab = app
             .world_mut()
@@ -2075,7 +2046,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_agent_page_open);
 
         let stack = app

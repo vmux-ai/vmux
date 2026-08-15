@@ -60,7 +60,6 @@ pub(crate) fn spawn_popup_stacks(
     stack_q: Query<(), With<Stack>>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     while let Ok(ev) = popup_rx.0.try_recv() {
         if ev.target_url.is_empty() {
@@ -83,10 +82,7 @@ pub(crate) fn spawn_popup_stacks(
         let new_stack = commands
             .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
             .id();
-        commands.spawn((
-            Browser::new(&mut webview_mt, &ev.target_url),
-            ChildOf(new_stack),
-        ));
+        commands.spawn((Browser::new(&ev.target_url), ChildOf(new_stack)));
     }
 }
 
