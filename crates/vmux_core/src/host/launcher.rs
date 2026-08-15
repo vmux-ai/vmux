@@ -66,6 +66,18 @@ pub struct InlineTransitionRequested {
     pub webview: Entity,
 }
 
+/// Bring the nth stack of a pane to the front.
+///
+/// The launcher lists open stacks and reports which row was picked. Resolving that to an entity
+/// means walking the pane's children in order and activating the whole chain up to the space, so
+/// the workspace does it.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct StackInPaneChosen {
+    /// The pane, as `Entity::to_bits` - what the page had to send it as.
+    pub pane_bits: u64,
+    pub index: usize,
+}
+
 /// The launcher was dismissed without ever using the empty stack it was opened on.
 ///
 /// Disposing of it is the workspace's business, and more than a despawn: opening the launcher with
