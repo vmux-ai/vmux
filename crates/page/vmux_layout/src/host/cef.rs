@@ -7,7 +7,6 @@ pub struct LayoutCefPlugin;
 impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
-        app.world_mut().spawn(crate::COMMAND_BAR_PAGE_MANIFEST);
         app.world_mut().spawn(crate::DEBUG_PAGE_MANIFEST);
         app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
     }

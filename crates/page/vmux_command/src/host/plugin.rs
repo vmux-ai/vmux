@@ -4,6 +4,7 @@ use crate::command::{AppCommand, ReadAppCommands, WriteAppCommands};
 use crate::issued::CommandIssued;
 use crate::page_key::PageKeyPlugin;
 use crate::snapshot::{CommandBarSnapshotPlugin, WriteCommandBarSnapshots};
+use crate::surface::CommandBarSurfacePlugin;
 use vmux_core::team::{Profile, User};
 
 /// Wires the command protocol: the command messages, the command-bar snapshot resources,
@@ -16,19 +17,23 @@ pub struct CommandPlugin;
 
 impl Plugin for CommandPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((PageKeyPlugin, CommandBarSnapshotPlugin))
-            .add_message::<AppCommand>()
-            .add_message::<CommandIssued>()
-            .configure_sets(
-                Update,
-                (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
-            )
-            .add_systems(
-                Update,
-                log_app_commands
-                    .after(WriteAppCommands)
-                    .before(ReadAppCommands),
-            );
+        app.add_plugins((
+            PageKeyPlugin,
+            CommandBarSnapshotPlugin,
+            CommandBarSurfacePlugin,
+        ))
+        .add_message::<AppCommand>()
+        .add_message::<CommandIssued>()
+        .configure_sets(
+            Update,
+            (WriteAppCommands, WriteCommandBarSnapshots, ReadAppCommands).chain(),
+        )
+        .add_systems(
+            Update,
+            log_app_commands
+                .after(WriteAppCommands)
+                .before(ReadAppCommands),
+        );
     }
 }
 

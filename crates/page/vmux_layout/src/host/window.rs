@@ -1,7 +1,6 @@
-use crate::event::COMMAND_BAR_PAGE_URL;
 use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
-    cef::{Browser, layout_cef_bundle},
+    cef::layout_cef_bundle,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
     scene::MainCamera,
     settings::LayoutSettings,
@@ -12,7 +11,6 @@ use crate::{
 };
 use bevy::{
     asset::Asset,
-    picking::Pickable,
     prelude::*,
     ui::{FlexDirection, UiTargetCamera},
     window::PrimaryWindow,
@@ -20,7 +18,6 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
-use vmux_command::CommandBar;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
@@ -291,39 +288,6 @@ fn setup(
             display: Display::None,
             ..default()
         },
-        ChildOf(root),
-    ));
-
-    commands.spawn((
-        (
-            CommandBar,
-            vmux_core::overlay::WindowOverlay,
-            HostWindow(pw),
-            Browser,
-            // An ordinary windowed surface, framed by the shared `sync_windowed_frames` and
-            // focused by the shared route. It is offscreen rendering that forced the host to
-            // inject its keystrokes; a native view is handed them by AppKit instead.
-            WebviewWindowed,
-            WebviewWindowedNativeFocus,
-            WebviewOpaqueWindowedBackground,
-            bevy_cef::prelude::CefIgnorePinchZoom,
-        ),
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            position_type: PositionType::Absolute,
-            left: Val::Px(0.0),
-            top: Val::Px(0.0),
-            display: Display::None,
-            ..default()
-        },
-        ZIndex(3),
-        WebviewSource::new(COMMAND_BAR_PAGE_URL),
-        WebviewSize(Vec2::new(800.0, 600.0)),
-        Transform::default(),
-        GlobalTransform::default(),
-        Visibility::Hidden,
-        Pickable::IGNORE,
         ChildOf(root),
     ));
 
@@ -798,34 +762,6 @@ mod tests {
         assert_eq!(node.column_gap, Val::Px(crate::event::PANE_GAP_PX));
     }
 
-    #[test]
-    fn command_bar_spawns_as_a_windowed_surface() {
-        let mut app = setup_window_app();
-        app.update();
-
-        let modal = app
-            .world_mut()
-            .query_filtered::<Entity, With<CommandBar>>()
-            .single(app.world())
-            .expect("modal");
-
-        assert!(app.world().get::<WebviewWindowed>(modal).is_some());
-        assert!(
-            app.world()
-                .get::<bevy_cef::prelude::WebviewNativeOverlay>(modal)
-                .is_none()
-        );
-        // A windowed CEF view cannot be transparent, so the glass shell goes with the
-        // overlay it was composited through.
-        assert!(app.world().get::<WebviewTransparent>(modal).is_none());
-        assert!(app.world().get::<WebviewNativeLiquidGlass>(modal).is_none());
-        assert!(
-            app.world()
-                .get::<WebviewOpaqueWindowedBackground>(modal)
-                .is_some()
-        );
-    }
-
     /// A windowed CEF browser paints an opaque root on macOS and the layout is the one page that
     /// must be see-through, so wry serves it instead. Handing the entity a `WebviewSource` again
     /// is all it would take to undo that silently: it resolves to `ResolvedWebviewUri`, which is
@@ -846,24 +782,6 @@ mod tests {
             app.world()
                 .get::<ResolvedWebviewUri>(layout_shell)
                 .is_none()
-        );
-    }
-
-    #[test]
-    fn command_bar_modal_allows_windowed_native_focus() {
-        let mut app = setup_window_app();
-        app.update();
-
-        let modal = app
-            .world_mut()
-            .query_filtered::<Entity, With<CommandBar>>()
-            .single(app.world())
-            .expect("modal");
-
-        assert!(
-            app.world()
-                .get::<WebviewWindowedNativeFocus>(modal)
-                .is_some()
         );
     }
 
