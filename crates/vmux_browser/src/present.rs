@@ -1267,6 +1267,10 @@ mod tests {
     /// `bevy_ui` needs a camera for viewport dimensions, and dropping the render stack removed
     /// everything that used to populate that camera's target size. This asserts the layout pass
     /// still resolves a real rectangle without it.
+    ///
+    /// The `target_info` written below is what `sync_camera_render_target` writes in the app, so
+    /// the two have to move together: this test stops meaning anything if that system changes
+    /// where the size comes from.
     #[test]
     fn percentage_ui_resolves_once_the_camera_knows_its_render_target() {
         use bevy::ui::UiPlugin;
@@ -1291,7 +1295,6 @@ mod tests {
             bevy::window::PrimaryWindow,
         ));
         let camera = app.world_mut().spawn(bevy::camera::Camera2d).id();
-        // What `sync_camera_render_target` does in the app, and what `bevy_render` used to.
         app.world_mut()
             .entity_mut(camera)
             .get_mut::<bevy::camera::Camera>()
