@@ -1,5 +1,5 @@
 use crate::{
-    CloseRequiresConfirmation, NewStackContext,
+    CloseRequiresConfirmation, PendingLaunch,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     settings::{ConfirmCloseSettings, LayoutSettings},
     stack::{
@@ -561,7 +561,7 @@ pub fn first_stack_in_pane(
 struct PaneStartupContext<'w> {
     effective: Option<Res<'w, crate::settings::EffectiveStartupUrl>>,
     requests: MessageWriter<'w, PageOpenRequest>,
-    new_stack_ctx: ResMut<'w, NewStackContext>,
+    new_stack_ctx: ResMut<'w, PendingLaunch>,
 }
 
 impl PaneStartupContext<'_> {
@@ -1005,7 +1005,7 @@ pub fn handle_open_beside_requests(
     rc: ResolverCtx,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut spawn_counter: ResMut<SpawnCounter>,
 ) {
     let mut split_this_batch: std::collections::HashSet<Entity> = std::collections::HashSet::new();
@@ -1394,7 +1394,7 @@ fn spawn_beside_stack(
     target_pane: Entity,
     req: &OpenBesideRequest,
     commands: &mut Commands,
-    new_stack_ctx: &mut NewStackContext,
+    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
     spawn_counter: &mut SpawnCounter,
     seq_q: &Query<&SpawnSeq>,
@@ -1806,7 +1806,7 @@ fn handle_open_in_pane(
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut pending_warp: ResMut<PendingCursorWarp>,
 ) {
     for cmd in reader.read() {
@@ -1926,7 +1926,7 @@ fn open_or_prompt_stack(
     stack: Entity,
     url: Option<String>,
     request_id: Option<[u8; 16]>,
-    new_stack_ctx: &mut NewStackContext,
+    new_stack_ctx: &mut PendingLaunch,
     page_open_requests: &mut MessageWriter<PageOpenRequest>,
 ) {
     if let Some(url) = url {
@@ -1954,7 +1954,7 @@ fn on_pane_select(
     pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for cmd in reader.read() {
@@ -2686,7 +2686,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
 
@@ -2749,7 +2749,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
 
@@ -2845,7 +2845,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
         app
@@ -4515,7 +4515,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -4603,7 +4603,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -4685,7 +4685,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_systems(Update, on_pane_select.in_set(WriteAppCommands));
 
         let _window = app.world_mut().spawn(PrimaryWindow).id();
@@ -4764,7 +4764,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
@@ -4813,7 +4813,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
@@ -4914,7 +4914,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .add_message::<PageOpenRequest>()
             .insert_resource(test_settings())
@@ -5046,7 +5046,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
@@ -5113,7 +5113,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
@@ -5179,7 +5179,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
@@ -5368,7 +5368,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
@@ -5445,7 +5445,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
             .init_resource::<PendingCursorWarp>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<ConfirmCloseSettings>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_zoom_command.in_set(WriteAppCommands));
@@ -5676,7 +5676,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<crate::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<InPaneCollectedSpawns>()
             .insert_resource(test_settings())
@@ -5986,7 +5986,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
@@ -6020,7 +6020,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
@@ -6057,7 +6057,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<OpenBesideRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_systems(Update, handle_open_beside_requests);
         let tab = app.world_mut().spawn(crate::tab::tab_bundle()).id();
@@ -6221,7 +6221,7 @@ mod tests {
         assert!(app.world().get::<PaneSplit>(pane).is_some());
         let collected = app.world().resource::<InPaneCollectedSpawns>();
         assert!(collected.0.is_empty());
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
     }

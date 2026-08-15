@@ -30,7 +30,7 @@ pub use archive::{
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 pub use launcher::{
     ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,
-    PendingStackAbandoned,
+    PendingLaunch, PendingStackAbandoned,
 };
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};

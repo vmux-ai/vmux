@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 use vmux_command::CommandBar;
 use vmux_command::build_command_bar_open_payload;
+pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
 };
-pub(crate) use vmux_layout::NewStackContext;
 use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
 use crate::command_bar::panel::CommandBarPanelActive;
@@ -58,7 +58,7 @@ pub(crate) struct CommandBarInputPlugin;
 
 impl Plugin for CommandBarInputPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<NewStackContext>()
+        app.init_resource::<PendingLaunch>()
             .add_message::<vmux_core::ContributedCommandChosen>()
             .add_message::<PendingStackAbandoned>()
             .add_message::<FocusLauncherInput>()
@@ -452,17 +452,17 @@ fn command_bar_open_request(
 }
 
 fn pending_stack_startup_url_request(
-    new_stack_ctx: &mut NewStackContext,
+    pending_launch: &mut PendingLaunch,
     startup_url: Option<&str>,
 ) -> Option<PageOpenRequest> {
-    if !new_stack_ctx.needs_open {
+    if !pending_launch.needs_open {
         return None;
     }
-    let stack = new_stack_ctx.stack?;
+    let stack = pending_launch.stack?;
     let url = startup_url.filter(|url| !url.is_empty())?;
-    new_stack_ctx.stack = None;
-    new_stack_ctx.previous_stack = None;
-    new_stack_ctx.needs_open = false;
+    pending_launch.stack = None;
+    pending_launch.previous_stack = None;
+    pending_launch.needs_open = false;
     Some(PageOpenRequest {
         target: PageOpenTarget::Stack(stack),
         url: url.to_string(),
@@ -471,15 +471,15 @@ fn pending_stack_startup_url_request(
 }
 
 fn command_bar_should_open_pending_stack(
-    new_stack_ctx: &mut NewStackContext,
+    pending_launch: &mut PendingLaunch,
     explicit_toggle: bool,
 ) -> bool {
     if explicit_toggle {
-        new_stack_ctx.needs_open = false;
+        pending_launch.needs_open = false;
         return false;
     }
-    if new_stack_ctx.needs_open {
-        new_stack_ctx.needs_open = false;
+    if pending_launch.needs_open {
+        pending_launch.needs_open = false;
         true
     } else {
         false
@@ -487,15 +487,15 @@ fn command_bar_should_open_pending_stack(
 }
 
 fn command_bar_cancel_pending_stack_for_active_open(
-    new_stack_ctx: &mut NewStackContext,
+    pending_launch: &mut PendingLaunch,
     replace_active_stack: bool,
 ) -> Option<(Entity, Option<Entity>)> {
     if !replace_active_stack {
         return None;
     }
-    new_stack_ctx.needs_open = false;
-    let previous_stack = new_stack_ctx.previous_stack.take();
-    let stack = new_stack_ctx.stack.take()?;
+    pending_launch.needs_open = false;
+    let previous_stack = pending_launch.previous_stack.take();
+    let stack = pending_launch.stack.take()?;
     Some((stack, previous_stack))
 }
 
@@ -554,7 +554,7 @@ fn handle_open_command_bar(
     contributions: Contributions,
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
-        ResMut<NewStackContext>,
+        ResMut<PendingLaunch>,
         Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
@@ -594,8 +594,8 @@ fn handle_open_command_bar(
 
     let mut active_stack_override = None;
     let canceled_pending_stack = {
-        let mut new_stack_ctx = snapshot_params.p1();
-        command_bar_cancel_pending_stack_for_active_open(&mut new_stack_ctx, replace_active_stack)
+        let mut pending_launch = snapshot_params.p1();
+        command_bar_cancel_pending_stack_for_active_open(&mut pending_launch, replace_active_stack)
     };
     if let Some((stack, previous_stack)) = canceled_pending_stack {
         commands.entity(stack).despawn();
@@ -607,11 +607,11 @@ fn handle_open_command_bar(
 
     if (should_dismiss || toggle_closes) && is_open {
         close_command_bar_panel(layout_e, &mut commands);
-        let mut new_stack_ctx = snapshot_params.p1();
+        let mut pending_launch = snapshot_params.p1();
         // Discard empty tab created by a previous Cmd+T
-        if let Some(stack_e) = new_stack_ctx.stack.take() {
+        if let Some(stack_e) = pending_launch.stack.take() {
             commands.entity(stack_e).despawn();
-            if let Some(prev) = new_stack_ctx.previous_stack.take()
+            if let Some(prev) = pending_launch.previous_stack.take()
                 && let Ok(children) = all_children.get(prev)
             {
                 for child in children.iter() {
@@ -642,7 +642,7 @@ fn handle_open_command_bar(
                 }
             }
         }
-        new_stack_ctx.needs_open = false;
+        pending_launch.needs_open = false;
         return;
     }
 
@@ -655,8 +655,8 @@ fn handle_open_command_bar(
     }
 
     let startup_request = {
-        let mut new_stack_ctx = snapshot_params.p1();
-        pending_stack_startup_url_request(&mut new_stack_ctx, startup_url.as_deref())
+        let mut pending_launch = snapshot_params.p1();
+        pending_stack_startup_url_request(&mut pending_launch, startup_url.as_deref())
     };
     if let Some(request) = startup_request {
         snapshot_params.p3().write(request);
@@ -664,8 +664,8 @@ fn handle_open_command_bar(
     }
 
     let should_open_pending_stack = {
-        let mut new_stack_ctx = snapshot_params.p1();
-        command_bar_should_open_pending_stack(&mut new_stack_ctx, should_toggle)
+        let mut pending_launch = snapshot_params.p1();
+        command_bar_should_open_pending_stack(&mut pending_launch, should_toggle)
     };
     if should_open_pending_stack {
         should_open = true;
@@ -912,7 +912,7 @@ fn on_command_bar_action(
         Contributions,
         Option<Res<ResolvedLocale>>,
     )>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut pending_launch: ResMut<PendingLaunch>,
     mut writer_params: ParamSet<(
         MessageWriter<AppCommand>,
         MessageWriter<PageOpenRequest>,
@@ -931,8 +931,8 @@ fn on_command_bar_action(
     let terminals_snapshot = resource_params.p1().clone();
     let terminal_page_url = terminals_snapshot.terminal_page_url.clone();
     let running_terminals = terminals_snapshot.running.clone();
-    let mut empty_stack = new_stack_ctx.stack;
-    let previous_stack = new_stack_ctx.previous_stack;
+    let mut empty_stack = pending_launch.stack;
+    let previous_stack = pending_launch.previous_stack;
     let mut custom_keyboard_restore = false;
     let inline_transition_stack = queries.inline_transition_stack(webview);
     let locale = resource_params
@@ -982,8 +982,8 @@ fn on_command_bar_action(
                         url,
                         request_id: None,
                     });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                     custom_keyboard_restore = true;
                 }
             }
@@ -1023,8 +1023,8 @@ fn on_command_bar_action(
                             ..default()
                         }),
                     });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                     custom_keyboard_restore = true;
                 }
             } else {
@@ -1048,8 +1048,8 @@ fn on_command_bar_action(
                             stack: Some(stack_e),
                             pane: None,
                         });
-                        new_stack_ctx.stack = None;
-                        new_stack_ctx.previous_stack = None;
+                        pending_launch.stack = None;
+                        pending_launch.previous_stack = None;
                         custom_keyboard_restore = true;
                     } else {
                         let active_pane_opt = queries.focused_pane();
@@ -1068,8 +1068,8 @@ fn on_command_bar_action(
                         url,
                         request_id: None,
                     });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
                     let target = *open;
@@ -1087,8 +1087,8 @@ fn on_command_bar_action(
             let known_terminal = running_terminals.get(value).copied();
             if let Some(entity) = known_terminal {
                 focus_pane_entity(entity, &mut commands, &queries.child_of_q);
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
+                pending_launch.stack = None;
+                pending_launch.previous_stack = None;
                 custom_keyboard_restore = true;
             } else {
                 if value.starts_with(&terminal_page_url) {
@@ -1120,8 +1120,8 @@ fn on_command_bar_action(
                             ..default()
                         }),
                     });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                     custom_keyboard_restore = true;
                 } else {
                     let active_pane_opt = queries.focused_pane();
@@ -1164,8 +1164,8 @@ fn on_command_bar_action(
                     if let Ok(parent) = queries.child_of_q.get(stack_e) {
                         commands.entity(parent.0).insert(LastActivatedAt::now());
                     }
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                 }
                 if empty_stack.is_some() || pane.is_some() {
                     chosen_writer.write(vmux_core::ContributedCommandChosen {
@@ -1182,8 +1182,8 @@ fn on_command_bar_action(
                         url,
                         request_id: None,
                     });
-                    new_stack_ctx.stack = None;
-                    new_stack_ctx.previous_stack = None;
+                    pending_launch.stack = None;
+                    pending_launch.previous_stack = None;
                     empty_stack = None;
                 } else {
                     let target = *open;
@@ -1206,8 +1206,8 @@ fn on_command_bar_action(
             // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(stack_e) = empty_stack {
                 commands.entity(stack_e).despawn();
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
+                pending_launch.stack = None;
+                pending_launch.previous_stack = None;
             }
         }
         CommandBarActionEvent::Space { id } => {
@@ -1224,15 +1224,15 @@ fn on_command_bar_action(
             }
             if let Some(stack_e) = empty_stack {
                 commands.entity(stack_e).despawn();
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
+                pending_launch.stack = None;
+                pending_launch.previous_stack = None;
             }
         }
         CommandBarActionEvent::SwitchTab { pane, index } => {
             if let Some(stack_e) = empty_stack {
                 commands.entity(stack_e).despawn();
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
+                pending_launch.stack = None;
+                pending_launch.previous_stack = None;
             }
             if let Some(target_pane) = queries.leaf_panes.iter().find(|e| e.to_bits() == *pane) {
                 let target_stack = {
@@ -1261,8 +1261,8 @@ fn on_command_bar_action(
                     stack: stack_e,
                     previous_stack,
                 });
-                new_stack_ctx.stack = None;
-                new_stack_ctx.previous_stack = None;
+                pending_launch.stack = None;
+                pending_launch.previous_stack = None;
                 custom_keyboard_restore = true;
             }
         }
@@ -1299,7 +1299,7 @@ fn on_command_bar_action(
 }
 
 fn deferred_dismiss_modal(
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut pending_launch: ResMut<PendingLaunch>,
     mut modal_q: Query<
         (
             Entity,
@@ -1311,10 +1311,10 @@ fn deferred_dismiss_modal(
     >,
     mut commands: Commands,
 ) {
-    if !new_stack_ctx.dismiss_modal {
+    if !pending_launch.dismiss_modal {
         return;
     }
-    new_stack_ctx.dismiss_modal = false;
+    pending_launch.dismiss_modal = false;
     if let Ok((modal_e, mut modal_node, mut modal_vis, native_overlay)) = modal_q.single_mut()
         && modal_node.display != Display::None
     {
@@ -2061,7 +2061,7 @@ mod tests {
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
             .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
             .add_systems(Update, handle_open_command_bar);
@@ -2144,7 +2144,7 @@ mod tests {
             .spawn((LayoutCef, CommandBarPanelActive))
             .id();
         let pending = app.world_mut().spawn_empty().id();
-        app.insert_resource(NewStackContext {
+        app.insert_resource(PendingLaunch {
             stack: Some(pending),
             previous_stack: None,
             needs_open: true,
@@ -2161,7 +2161,7 @@ mod tests {
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
         );
         assert!(app.world().get_entity(pending).is_err());
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.stack.is_none());
         assert!(!ctx.needs_open);
     }
@@ -2208,7 +2208,7 @@ mod tests {
         let request = command_bar_open_request([AppCommand::Browser(BrowserCommand::Bar(
             BrowserBarCommand::OpenPageInCommandBar,
         ))]);
-        let mut ctx = NewStackContext {
+        let mut ctx = PendingLaunch {
             stack: Some(pending_stack),
             previous_stack: Some(previous_stack),
             needs_open: true,
@@ -2232,7 +2232,7 @@ mod tests {
     fn pending_stack_with_startup_url_dispatches_url_request() {
         let stack = Entity::from_bits(7);
         let previous_stack = Entity::from_bits(6);
-        let mut ctx = NewStackContext {
+        let mut ctx = PendingLaunch {
             stack: Some(stack),
             previous_stack: Some(previous_stack),
             needs_open: true,
@@ -2255,7 +2255,7 @@ mod tests {
     #[test]
     fn pending_stack_without_startup_url_keeps_prompt_pending() {
         let stack = Entity::from_bits(7);
-        let mut ctx = NewStackContext {
+        let mut ctx = PendingLaunch {
             stack: Some(stack),
             previous_stack: None,
             needs_open: true,

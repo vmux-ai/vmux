@@ -20,8 +20,8 @@ use crate::stack::{CloseStackRequest, FocusedStack};
 use crate::worktree::TabDirectoryObserved;
 use crate::{
     BrowserGoBackRequest, BrowserGoForwardRequest, BrowserNavigateRequest,
-    ContributedCommandChosen, ExtensionInstallRequest, NewStackContext, NewTabRequest,
-    OpenInNewStackRequest,
+    ContributedCommandChosen, ExtensionInstallRequest, NewTabRequest, OpenInNewStackRequest,
+    PendingLaunch,
 };
 
 /// Registers every layout message and resource that crates outside `vmux_layout` send, read or
@@ -44,7 +44,7 @@ impl Plugin for LayoutContractPlugin {
             .init_resource::<EffectiveStartupDir>()
             .init_resource::<EffectiveStartupUrl>()
             .init_resource::<FocusedStack>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<SpawnCounter>()
             .add_message::<ActivatePane>()
             .add_message::<BookmarkOp>()

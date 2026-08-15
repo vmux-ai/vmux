@@ -1,6 +1,6 @@
 use crate::event::SERVICES_PAGE_URL;
 use crate::{
-    NewStackContext,
+    PendingLaunch,
     host::swap::{find_kind_index, resolve_next, resolve_prev, swap_siblings},
     pane::{Pane, PaneSplit, PendingCursorWarp, first_leaf_descendant, first_stack_in_pane},
     tab::{CloseTabRequest, Tab},
@@ -86,7 +86,7 @@ fn handle_close_stack_requests(
     child_of_q: Query<&ChildOf>,
     pane_children: Query<&Children, With<Pane>>,
     stack_q: Query<Entity, With<Stack>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut commands: Commands,
 ) {
     for req in reader.read() {
@@ -262,7 +262,7 @@ fn handle_stack_commands(
     split_dir_q: Query<&PaneSplit>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
 
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut close_tab_requests: MessageWriter<CloseTabRequest>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -652,7 +652,7 @@ pub fn open_startup_url_if_no_stacks(
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
     effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
-    mut new_stack_ctx: ResMut<NewStackContext>,
+    mut new_stack_ctx: ResMut<PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
 ) {
@@ -730,7 +730,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<CloseStackRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_systems(Update, handle_close_stack_requests);
 
         let tab = app
@@ -764,7 +764,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<CloseStackRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_systems(Update, handle_close_stack_requests);
 
         let tab = app
@@ -843,7 +843,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<crate::tab::LastTabCloseAt>()
             .init_resource::<FocusedStack>()
@@ -950,7 +950,7 @@ mod tests {
             app.world().get::<Tab>(replacement_tab).unwrap().startup_dir,
             None
         );
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.needs_open);
         assert!(ctx.stack.is_some());
         assert_eq!(ctx.previous_stack, None);
@@ -979,7 +979,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
@@ -1034,7 +1034,7 @@ mod tests {
         assert!(app.world().get_entity(remaining_tab).is_ok());
         assert!(app.world().get::<LastActivatedAt>(remaining_tab).unwrap().0 > 1);
 
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
     }
@@ -1046,7 +1046,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<crate::TabLayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
@@ -1102,7 +1102,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
@@ -1155,8 +1155,8 @@ mod tests {
             Some(split)
         );
         assert!(!app.world().entity(split).contains::<PaneSplit>());
-        assert_eq!(app.world().resource::<NewStackContext>().stack, None);
-        assert!(!app.world().resource::<NewStackContext>().needs_open);
+        assert_eq!(app.world().resource::<PendingLaunch>().stack, None);
+        assert!(!app.world().resource::<PendingLaunch>().needs_open);
     }
 
     #[test]
@@ -1165,7 +1165,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .insert_resource(crate::settings::EffectiveStartupUrl(
@@ -1257,7 +1257,7 @@ mod tests {
     fn empty_active_pane_opens_command_bar_even_when_other_tabs_have_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1283,7 +1283,7 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         let Some(new_stack) = ctx.stack else {
             panic!("expected empty active pane to get pending stack");
         };
@@ -1298,7 +1298,7 @@ mod tests {
     fn empty_active_pane_does_not_open_command_bar_when_tab_has_stacks() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1320,7 +1320,7 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
     }
@@ -1329,7 +1329,7 @@ mod tests {
     fn active_empty_stack_does_not_reopen_command_bar() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .add_message::<PageOpenRequest>()
             .add_systems(Update, open_startup_url_if_no_stacks);
 
@@ -1348,7 +1348,7 @@ mod tests {
 
         app.update();
 
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert_ne!(ctx.stack, Some(stack));
         assert!(!ctx.needs_open);
     }
@@ -1370,7 +1370,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
-            .init_resource::<NewStackContext>()
+            .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()
@@ -1417,7 +1417,7 @@ mod tests {
 
         assert!(app.world().get_entity(original_stack).is_ok());
         assert!(app.world().get_entity(tab).is_ok());
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert_eq!(ctx.stack, None);
         assert!(!ctx.needs_open);
 
@@ -1489,7 +1489,7 @@ mod tests {
             collected.0.is_empty(),
             "no spawn request until URL is provided"
         );
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         let queued = ctx.stack.expect("an empty stack should be queued");
         assert_eq!(
             app.world().get::<ChildOf>(queued).map(Relationship::get),

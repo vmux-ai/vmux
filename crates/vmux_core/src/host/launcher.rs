@@ -22,6 +22,22 @@ pub struct ContributedCommandChosen {
     pub pane: Option<Entity>,
 }
 
+/// An empty stack waiting for a launcher to fill it, and what to undo if it never does.
+///
+/// The workspace stages this when a launcher is about to open onto fresh space - Cmd+T, or Cmd+K
+/// on an empty pane - and the launcher consumes it. Both sides need it, so it belongs to neither:
+/// the workspace cannot depend on the launcher, and the launcher must not depend on the workspace.
+#[derive(Resource, Default, Debug)]
+pub struct PendingLaunch {
+    /// The empty stack staged for whatever the user picks.
+    pub stack: Option<Entity>,
+    /// Where focus was beforehand, to go back to on dismiss.
+    pub previous_stack: Option<Entity>,
+    /// The launcher has been asked to open and has not managed it yet.
+    pub needs_open: bool,
+    pub dismiss_modal: bool,
+}
+
 /// A page that hosts a launcher of its own.
 ///
 /// The start page carries this. Two things follow from it, and both used to be decided by

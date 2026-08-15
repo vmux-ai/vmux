@@ -26,7 +26,7 @@ fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
 }
 
 /// The bar opens across several reactive frames: the first shortcut may defer
-/// (`NewStackContext::needs_open`) until the webview is ready, then a reveal
+/// (`PendingLaunch::needs_open`) until the webview is ready, then a reveal
 /// (`PendingCommandBarReveal`) waits for the rendered/sized ack. Without an explicit wake the loop
 /// idles after the keystroke and the open stalls until the next input — the user has to press
 /// Cmd+K/Cmd+L twice. Runs after `ReadAppCommands` so a `needs_open` set this frame is observed.
@@ -34,10 +34,10 @@ fn command_bar_should_wake(needs_open: bool, has_active_reveal: bool) -> bool {
 /// `open_id == 0` (inactive), so we stop waking.
 fn keep_awake_while_command_bar_opening(
     proxy: Option<Res<EventLoopProxyWrapper>>,
-    new_stack_ctx: Option<Res<vmux_layout::NewStackContext>>,
+    pending_launch: Option<Res<vmux_core::launcher::PendingLaunch>>,
     pending: Query<&PendingCommandBarReveal>,
 ) {
-    let needs_open = new_stack_ctx.map(|ctx| ctx.needs_open).unwrap_or(false);
+    let needs_open = pending_launch.map(|ctx| ctx.needs_open).unwrap_or(false);
     let has_active_reveal = pending.iter().any(PendingCommandBarReveal::is_active);
     if !command_bar_should_wake(needs_open, has_active_reveal) {
         return;

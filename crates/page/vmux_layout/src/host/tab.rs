@@ -463,7 +463,7 @@ fn tab_target(id: Option<&str>, tabs: impl IntoIterator<Item = Entity>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::NewStackContext;
+    use crate::PendingLaunch;
     use crate::settings::{
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
@@ -704,7 +704,7 @@ mod tests {
             .add_message::<CloseTabRequest>()
             .add_message::<PageOpenRequest>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
-            .init_resource::<crate::NewStackContext>()
+            .init_resource::<crate::PendingLaunch>()
             .insert_resource(test_settings())
             .init_resource::<CollectedSpawns>()
             .add_systems(
@@ -830,7 +830,7 @@ mod tests {
 
         let collected = app.world().resource::<CollectedSpawns>();
         assert!(collected.0.is_empty(), "expected no spawn request");
-        let ctx = app.world().resource::<NewStackContext>();
+        let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.stack.is_some());
         assert!(ctx.needs_open);
     }

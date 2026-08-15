@@ -52,6 +52,7 @@ pub use pane::{OpenBesideRequest, handle_open_beside_requests};
 pub use plugin::LayoutPlugin;
 pub use stack::CloseStackRequest;
 pub use vmux_core::ContributedCommandChosen;
+pub use vmux_core::launcher::PendingLaunch;
 pub use webview_reveal::PendingWebviewReveal;
 pub use window::fit_window_to_screen;
 
@@ -95,14 +96,6 @@ pub enum LayoutStartupSet {
 #[reflect(Component)]
 #[type_path = "vmux_desktop::layout"]
 pub struct Open;
-
-#[derive(Resource, Default)]
-pub struct NewStackContext {
-    pub stack: Option<Entity>,
-    pub previous_stack: Option<Entity>,
-    pub needs_open: bool,
-    pub dismiss_modal: bool,
-}
 
 #[derive(Component)]
 pub struct CloseRequiresConfirmation;
