@@ -16,17 +16,23 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use vmux_remote::DeviceId;
 use vmux_remote::PeerRole;
+use vmux_remote::framing::{Frame, FrameStream};
 use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
-use vmux_remote::quic::{
-    ClientHello, CloseCode, RelayAccepted, RelayHello, ServerHello, StreamKind, decode_hello,
-    encode_hello,
-};
+use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType, RelaySetup};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_wire::protocol::{AgentAction, SharedEvent, SharedFailure, SharedMessage, SharedResponse};
 
 /// Matches the daemon's cap on a control response.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+/// Frames on a setup exchange, either leg. The same bound both ways: the desktop caps what it
+/// reads from this phone identically, and two directions of one exchange disagreeing on how much
+/// they will accept is a difference nobody would notice until a message grew.
+const SETUP: FrameStream = FrameStream::new(16 * 1024);
+
+/// Frames on a control or subscription stream.
+const CONTROL: FrameStream = FrameStream::new(MAX_RESPONSE_BYTES);
 
 /// What went wrong, in the terms a page needs to decide whether to retry.
 #[derive(Debug)]
@@ -266,27 +272,27 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         // The desktop does not read this — it admits on the token alone — so it names the pairing
         // rather than the phone, which is the only identity either end shares.
-        let hello = AuthenticatedHello {
-            hello: ClientHello {
-                device_id: self.endpoint.desktop.clone(),
-            },
+        let setup = ClientSetup {
+            device_id: self.endpoint.desktop.clone(),
             token: self.endpoint.token.clone(),
         };
-        let bytes =
-            encode_hello(&hello).map_err(|error| QuicError::Transport(error.to_string()))?;
-        send.write_all(&bytes)
+        let frame = Frame::json(MessageType::CLIENT_SETUP, &setup)
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        SETUP
+            .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let answer = recv
-            .read_to_end(64 * 1024)
+        // The answer carries nothing; reading a well-formed one of the right type is the accept
+        // signal. A refusal arrives as a close code, which is what `from_close` turns into advice.
+        SETUP
+            .accept(&mut recv)
             .await
+            .map_err(|_| QuicError::from_close(&connection))?
+            .read_json::<Accepted>(MessageType::SESSION_ACCEPTED)
             .map_err(|_| QuicError::from_close(&connection))?;
-        // The answer carries nothing; reading a well-formed one is the accept signal. A refusal
-        // arrives as a close code instead, which is what `from_close` turns into advice.
-        decode_hello::<ServerHello>(&answer).map_err(|_| QuicError::from_close(&connection))?;
         Ok(Dialled {
             connection,
             _relay: relay_endpoint,
@@ -303,24 +309,26 @@ impl QuicApi {
             .open_bi()
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        let hello = RelayHello {
+        let setup = RelaySetup {
             device_id: self.endpoint.desktop.clone(),
             role: PeerRole::Client,
             token: self.endpoint.token.clone(),
         };
-        let bytes =
-            encode_hello(&hello).map_err(|error| QuicError::Transport(error.to_string()))?;
-        send.write_all(&bytes)
+        let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        SETUP
+            .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let answer = recv
-            .read_to_end(16 * 1024)
+        SETUP
+            .accept(&mut recv)
             .await
+            .map_err(|_| QuicError::from_close(control))?
+            .read_json::<Accepted>(MessageType::RELAY_ACCEPTED)
             .map_err(|_| QuicError::from_close(control))?;
-        decode_hello::<RelayAccepted>(&answer).map_err(|_| QuicError::from_close(control))?;
         Ok(())
     }
 
@@ -337,18 +345,20 @@ impl QuicApi {
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
         let request = SharedMessage::agent(sid, AgentAction::Attach);
-        let mut frame = vec![StreamKind::SessionEvents.as_byte()];
-        frame.extend_from_slice(
-            &rkyv::to_bytes::<rkyv::rancor::Error>(&request)
-                .map_err(|error| QuicError::Transport(error.to_string()))?,
-        );
-        send.write_all(&frame)
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&request)
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        let frame = Frame::new(MessageType::SESSION_EVENTS, body.to_vec());
+        CONTROL
+            .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        Ok(Subscription { recv })
+        Ok(Subscription {
+            recv,
+            opened: false,
+        })
     }
 
     /// One request, one response, on its own stream.
@@ -359,24 +369,24 @@ impl QuicApi {
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let mut frame = vec![StreamKind::Control.as_byte()];
-        frame.extend_from_slice(
-            &rkyv::to_bytes::<rkyv::rancor::Error>(&message)
-                .map_err(|error| QuicError::Transport(error.to_string()))?,
-        );
-        send.write_all(&frame)
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&message)
+            .map_err(|error| QuicError::Transport(error.to_string()))?;
+        let frame = Frame::new(MessageType::CONTROL_REQUEST, body.to_vec());
+        CONTROL
+            .open(&mut send, &frame)
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         send.finish()
             .map_err(|error| QuicError::Transport(error.to_string()))?;
 
-        let bytes = recv
-            .read_to_end(MAX_RESPONSE_BYTES)
+        let answer = CONTROL
+            .accept(&mut recv)
             .await
             .map_err(|_| QuicError::from_close(&connection))?;
-        // Copied so rkyv sees an aligned buffer.
-        let bytes = bytes.to_vec();
-        let response = rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(&bytes)
+        let body = answer
+            .body_of(MessageType::CONTROL_RESPONSE)
+            .map_err(|_| QuicError::from_close(&connection))?;
+        let response = rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(body)
             .map_err(|error| QuicError::Transport(error.to_string()))?;
         match response {
             SharedResponse::Failed(failure) => Err(QuicError::Refused(failure)),
@@ -388,32 +398,25 @@ impl QuicApi {
 /// A live session subscription. Yields events until the desktop closes the stream.
 pub struct Subscription {
     recv: quinn::RecvStream,
+    /// Whether the desktop's half of this stream has announced its version yet.
+    opened: bool,
 }
 
 impl Subscription {
     /// The next event, or `None` once the desktop is done sending.
     ///
-    /// Events are length-prefixed because many share one stream; a control response is not,
-    /// because it is the only thing on its own.
+    /// The desktop announces its half of the stream on the first event, so the version is read
+    /// once and every event after it is just another frame.
     pub async fn next(&mut self) -> Option<SharedEvent> {
-        let mut length = [0u8; 4];
-        self.recv.read_exact(&mut length).await.ok()?;
-        let length = u32::from_le_bytes(length) as usize;
-        if length > MAX_RESPONSE_BYTES {
-            return None;
-        }
-        let mut body = vec![0u8; length];
-        self.recv.read_exact(&mut body).await.ok()?;
-        rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(&body).ok()
+        let frame = if self.opened {
+            CONTROL.next(&mut self.recv).await.ok()??
+        } else {
+            self.opened = true;
+            CONTROL.accept(&mut self.recv).await.ok()?
+        };
+        let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
+        rkyv::from_bytes::<SharedEvent, rkyv::rancor::Error>(body).ok()
     }
-}
-
-/// The hello carries the bearer token, since QUIC has no headers.
-#[derive(serde::Deserialize, serde::Serialize)]
-struct AuthenticatedHello {
-    #[serde(flatten)]
-    hello: ClientHello,
-    token: String,
 }
 
 #[cfg(test)]

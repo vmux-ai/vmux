@@ -1,12 +1,12 @@
-//! Connection setup for the QUIC link.
+//! What the messages on a QUIC link are, and which number names each one.
 //!
-//! Everything here is parsed *before* the two peers have agreed on a protocol version, which is
-//! why none of it is rkyv: rkyv encodes enum variants positionally, so a peer several releases
-//! behind would misread a reordered variant rather than notice the mismatch. The hello is a fixed
-//! byte layout that any version can read far enough to decide whether to keep talking.
+//! How they are framed is [`crate::framing`]. What they mean is here.
 //!
-//! Application frames after the hello are rkyv, length-prefixed by the same codec the local unix
-//! socket uses.
+//! The setup messages are JSON rather than rkyv because they are parsed *before* the two peers
+//! have agreed on anything: rkyv encodes enum variants positionally, so a peer several releases
+//! behind would misread a reordered variant rather than notice the mismatch, where serde skips a
+//! field it does not know. Session traffic after the setup is rkyv, which is faster and by then
+//! safe.
 
 /// Endpoint construction and certificate pinning. Absent on wasm, which has no UDP socket.
 #[cfg(not(web))]
@@ -28,8 +28,8 @@ use crate::DeviceId;
 /// peer several releases behind must be refused outright rather than talked down to some common
 /// version. No application message carries a capability list or a version of its own.
 ///
-/// It is not the only gate, and the doc here used to claim it was. [`HELLO_VERSION`] answers the
-/// narrower question of how to *read* a hello, which is a different question from what the hello
+/// It is not the only gate, and the doc here used to claim it was. [`FRAME_VERSION`] answers the
+/// narrower question of how to *read* a frame, which is a different question from what the frame
 /// then means — see its own note.
 pub const ALPN: &[u8] = b"vmux/2";
 
@@ -41,63 +41,98 @@ pub const ALPN: &[u8] = b"vmux/2";
 /// probe that spoke [`ALPN`] would have to invent a device id and leave a registration behind.
 pub const PROBE_ALPN: &[u8] = b"vmux-probe/1";
 
-/// Leading bytes of every connection, so a mis-dialled port fails loudly rather than as a decode
-/// error hundreds of bytes later.
-pub const HELLO_MAGIC: [u8; 5] = *b"VMUXQ";
-
-/// Layout version of the hello envelope. Bumping it changes how to *read* a hello, where bumping
-/// [`ALPN`] says the conversation after it means something different.
-pub const HELLO_VERSION: u8 = 1;
-
-/// First application frame a client sends.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ClientHello {
-    pub device_id: DeviceId,
-}
-
-/// The desktop's answer to a [`ClientHello`].
+/// Layout version, sent once at the head of every stream.
 ///
-/// The accept signal, and nothing else: a client that reads a well-formed answer was admitted,
-/// where a refusal arrives as a connection close carrying a [`CloseCode`]. Empty on purpose —
-/// a capability list and a version were both carried here for a while and neither was ever read.
-/// Serde ignores unknown fields, so a field can be added the day something needs one.
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ServerHello {}
+/// Bumping it changes how to *read* a frame, where bumping [`ALPN`] says the conversation means
+/// something different. Two gates rather than one because they answer different questions and a
+/// layout can change without the vocabulary doing so — which is exactly what version 2 was: the
+/// magic and the untyped envelope went, and a message type arrived.
+///
+/// Per stream rather than per connection. One byte is cheap, and the alternative is a reader that
+/// cannot make sense of a stream without first consulting connection state it may not hold.
+pub const FRAME_VERSION: u8 = 2;
 
-/// What a QUIC stream carries, written as its first byte so the peer can dispatch without
-/// decoding the payload — and so the relay can route without decoding it at all.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[repr(u8)]
-pub enum StreamKind {
-    /// Bidirectional request/response. One frame each way, then closed.
-    Control = 0,
-    /// Server to client, one per subscribed session.
-    SessionEvents = 1,
+/// Which conversation a message belongs to, read off the high byte of a [`MessageType`].
+///
+/// Ranges rather than one flat list, because this crate is public and the relay's repo consumes it
+/// through a pin that only advances to `main`. A flat registry would make every new account-service
+/// message need a change here first, just to be allocated a number.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Protocol {
+    /// Framing itself, shared by every leg.
+    Transport,
+    /// A client talking to the desktop that holds its sessions.
+    Session,
+    /// Either peer talking to the relay.
+    Relay,
+    /// A device talking to the account service. Codes are defined in that service, not here.
+    Account,
+    /// A range this build has never heard of.
+    Unknown(u8),
 }
 
-impl StreamKind {
-    pub fn from_byte(byte: u8) -> Option<Self> {
-        match byte {
-            0 => Some(Self::Control),
-            1 => Some(Self::SessionEvents),
-            _ => None,
+/// What a frame carries, as a number on the wire.
+///
+/// The discriminator that makes a frame self-describing. Without one a reader parses whatever it
+/// happens to expect, and serde's tolerance for unknown fields means a message from another leg
+/// decodes cleanly rather than being refused — a relay setup satisfied a session setup exactly
+/// that way, because a shared ALPN meant nothing else separated them either.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct MessageType(pub u16);
+
+impl MessageType {
+    /// A client naming itself to the desktop that holds its sessions.
+    pub const CLIENT_SETUP: Self = Self(0x0100);
+    /// The desktop admitting it.
+    pub const SESSION_ACCEPTED: Self = Self(0x0101);
+    /// One request on a control stream.
+    pub const CONTROL_REQUEST: Self = Self(0x0102);
+    /// Its answer.
+    pub const CONTROL_RESPONSE: Self = Self(0x0103);
+    /// A client asking to be sent a session's events.
+    pub const SESSION_EVENTS: Self = Self(0x0104);
+    /// One of them. Many ride a single stream, which is why frames carry a length.
+    pub const SESSION_EVENT: Self = Self(0x0105);
+
+    /// A peer naming the pair it belongs to, to the relay.
+    pub const RELAY_SETUP: Self = Self(0x0200);
+    /// The relay admitting it.
+    pub const RELAY_ACCEPTED: Self = Self(0x0201);
+
+    pub const fn protocol(self) -> Protocol {
+        match (self.0 >> 8) as u8 {
+            0x00 => Protocol::Transport,
+            0x01 => Protocol::Session,
+            0x02 => Protocol::Relay,
+            0x03 => Protocol::Account,
+            other => Protocol::Unknown(other),
         }
     }
-
-    pub fn as_byte(self) -> u8 {
-        self as u8
-    }
 }
 
-/// One routed unit as the relay sees it: who it is for, which stream it belongs to, and bytes it
-/// does not interpret.
+/// First frame a client sends to a desktop: who it is, and the token that says it may.
+///
+/// The token rides here rather than in a header because QUIC has none. It used to be a second
+/// struct wrapping this one with `#[serde(flatten)]`, declared twice in two crates with nothing
+/// keeping them in step.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Envelope {
+pub struct ClientSetup {
     pub device_id: DeviceId,
-    pub stream_kind: StreamKind,
-    pub payload: Vec<u8>,
+    pub token: String,
 }
+
+/// An admission, carrying nothing.
+///
+/// Both legs answer with this, under their own [`MessageType`] — [`MessageType::SESSION_ACCEPTED`]
+/// and [`MessageType::RELAY_ACCEPTED`] — so the two stay distinguishable on the wire even though
+/// the payload is identical. Reading a well-formed one is the accept signal; a refusal arrives as
+/// a close carrying a [`CloseCode`].
+///
+/// Empty on purpose: a capability list and a version were both carried here for a while and
+/// neither was ever read. Serde ignores unknown fields, so a field can be added the day something
+/// needs one.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct Accepted {}
 
 /// Application close codes, so a disconnect says why.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -110,6 +145,17 @@ pub enum CloseCode {
     RemoteDisabled = 3,
     /// Frame was malformed, oversized, or arrived out of order.
     ProtocolError = 4,
+    /// A phone named a desktop the relay is not holding.
+    ///
+    /// Its own code rather than a normal close, so a phone can tell "not registered yet, retry"
+    /// from "the desktop went away deliberately". A desktop reconnects on a backoff, so this is
+    /// the ordinary answer during a redeploy.
+    NoSuchDesktop = 5,
+    /// The relay, or the desktop, is already carrying as many peers as it will.
+    ///
+    /// Distinct from [`CloseCode::NoSuchDesktop`] because retrying helps with one and not the
+    /// other, and both used to arrive as a clean shutdown.
+    AtCapacity = 6,
 }
 
 impl CloseCode {
@@ -127,124 +173,10 @@ impl CloseCode {
             2 => Some(Self::Unauthorized),
             3 => Some(Self::RemoteDisabled),
             4 => Some(Self::ProtocolError),
+            5 => Some(Self::NoSuchDesktop),
+            6 => Some(Self::AtCapacity),
             _ => None,
         }
-    }
-}
-
-/// Encode a hello frame: magic, layout version, then a length-prefixed JSON body.
-///
-/// JSON rather than rkyv precisely because this frame outlives version agreement — an unknown
-/// field is skipped instead of shifting every byte after it.
-pub fn encode_hello<T: Serialize>(value: &T) -> Result<Vec<u8>, serde_json::Error> {
-    let body = serde_json::to_vec(value)?;
-    let mut out = Vec::with_capacity(HELLO_MAGIC.len() + 1 + 4 + body.len());
-    out.extend_from_slice(&HELLO_MAGIC);
-    out.push(HELLO_VERSION);
-    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
-    out.extend_from_slice(&body);
-    Ok(out)
-}
-
-/// Why a hello frame could not be read.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum HelloError {
-    /// Not a vmux endpoint, or not speaking this transport.
-    BadMagic,
-    /// Hello envelope itself is a layout this build cannot read.
-    UnsupportedHelloVersion(u8),
-    /// Fewer bytes than the declared length.
-    Truncated,
-    /// Envelope read, body did not parse.
-    Malformed,
-}
-
-/// Decode a hello frame, returning the value and how many bytes it consumed.
-pub fn decode_hello<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<(T, usize), HelloError> {
-    let header = HELLO_MAGIC.len() + 1 + 4;
-    if bytes.len() < header {
-        return Err(HelloError::Truncated);
-    }
-    if bytes[..HELLO_MAGIC.len()] != HELLO_MAGIC {
-        return Err(HelloError::BadMagic);
-    }
-    let hello_version = bytes[HELLO_MAGIC.len()];
-    if hello_version != HELLO_VERSION {
-        return Err(HelloError::UnsupportedHelloVersion(hello_version));
-    }
-    let mut length = [0u8; 4];
-    length.copy_from_slice(&bytes[HELLO_MAGIC.len() + 1..header]);
-    let length = u32::from_le_bytes(length) as usize;
-    let end = header + length;
-    if bytes.len() < end {
-        return Err(HelloError::Truncated);
-    }
-    let value = serde_json::from_slice(&bytes[header..end]).map_err(|_| HelloError::Malformed)?;
-    Ok((value, end))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn hello_roundtrips_and_reports_its_length() {
-        let hello = ClientHello {
-            device_id: DeviceId::new("device-1"),
-        };
-        let mut bytes = encode_hello(&hello).unwrap();
-        bytes.extend_from_slice(b"frames follow");
-
-        let (decoded, consumed) = decode_hello::<ClientHello>(&bytes).unwrap();
-
-        assert_eq!(decoded, hello);
-        assert_eq!(&bytes[consumed..], b"frames follow");
-    }
-
-    /// The whole reason the hello is JSON: a client several releases ahead can send a field
-    /// this build has never heard of and still be understood. That tolerance is what lets the
-    /// hello grow later without a version bump, so it is worth a test of its own.
-    #[test]
-    fn an_unknown_field_degrades_instead_of_failing() {
-        let wire = br#"{"device_id":"d","teleportation":true}"#;
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&HELLO_MAGIC);
-        bytes.push(HELLO_VERSION);
-        bytes.extend_from_slice(&(wire.len() as u32).to_le_bytes());
-        bytes.extend_from_slice(wire);
-
-        let (decoded, _) = decode_hello::<ClientHello>(&bytes).unwrap();
-
-        assert_eq!(decoded.device_id, DeviceId::new("d"));
-    }
-
-    #[test]
-    fn a_non_vmux_endpoint_is_rejected_before_parsing() {
-        assert_eq!(
-            decode_hello::<ClientHello>(b"HTTP/1.1 200 OK\r\n\r\n").unwrap_err(),
-            HelloError::BadMagic
-        );
-    }
-
-    #[test]
-    fn a_partial_frame_is_not_mistaken_for_a_complete_one() {
-        let hello = ClientHello {
-            device_id: DeviceId::new("d"),
-        };
-        let bytes = encode_hello(&hello).unwrap();
-
-        assert_eq!(
-            decode_hello::<ClientHello>(&bytes[..bytes.len() - 1]).unwrap_err(),
-            HelloError::Truncated
-        );
-    }
-
-    #[test]
-    fn stream_kind_byte_roundtrips_and_rejects_unknown() {
-        for kind in [StreamKind::Control, StreamKind::SessionEvents] {
-            assert_eq!(StreamKind::from_byte(kind.as_byte()), Some(kind));
-        }
-        assert_eq!(StreamKind::from_byte(200), None);
     }
 }
 
@@ -261,12 +193,12 @@ pub enum PeerRole {
     Client,
 }
 
-/// First frame on a connection to the relay.
+/// First frame a peer sends to the relay.
 ///
 /// Deliberately the only thing the relay parses. Everything after it is opaque bytes copied
 /// between two peers — the relay routes on `device_id` and never learns what it moved.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RelayHello {
+pub struct RelaySetup {
     /// The desktop being named, whichever end is speaking: its own id from a
     /// [`PeerRole::Desktop`], the id of the desktop it wants from a [`PeerRole::Client`].
     ///
@@ -276,11 +208,3 @@ pub struct RelayHello {
     /// Proves both ends belong to the same pairing. The relay compares, it does not mint.
     pub token: String,
 }
-
-/// The relay's answer to a hello it admitted.
-///
-/// Carries nothing, and exists for the ordering alone: a desktop must not offer a pairing link
-/// for a registration the relay has not taken, and a phone must not tunnel into a pairing it has
-/// not matched. Both only need to know the hello was accepted.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RelayAccepted {}
