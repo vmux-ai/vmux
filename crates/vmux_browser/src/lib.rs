@@ -40,7 +40,7 @@ use bevy::{
     ui::UiGlobalTransform,
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig, webview_debug_log};
+use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -128,7 +128,6 @@ impl Plugin for BrowserPlugin {
                 .map(PageManifest::embedded_host)
                 .collect(),
         );
-        webview_debug_log(format!("BrowserPlugin embedded_hosts={embedded_hosts:?}"));
         let cef_command_line = cef_command_line_config();
         configure_cef_backend_sync(app)
             .insert_resource(crate::extensions::load::PreparedExtensions(

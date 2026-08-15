@@ -45,12 +45,6 @@ impl Plugin for BinHostEmitPlugin {
 }
 
 fn bin_host_emit(trigger: On<BinHostEmitEvent>, browsers: NonSend<Browsers>) {
-    webview_debug_log(format!(
-        "bin_host_emit entity={:?} id={} payload_len={}",
-        trigger.webview,
-        trigger.id,
-        trigger.payload.len()
-    ));
     browsers.emit_event_bytes(&trigger.webview, trigger.id.clone(), &trigger.payload);
 }
 

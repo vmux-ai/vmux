@@ -9,12 +9,6 @@ fn main() {
     #[cfg(not(target_os = "macos"))]
     early_exit_if_subprocess();
 
-    bevy_cef_core::prelude::reset_webview_debug_log();
-    bevy_cef_core::prelude::webview_debug_log(format!(
-        "vmux start exe={:?}",
-        std::env::current_exe().ok()
-    ));
-
     println!(
         "\n\
          \x1b[36m \x1b[1m\\              /\x1b[0m\x1b[36m  |\\            /|  |        |  \\      /\x1b[0m\n\

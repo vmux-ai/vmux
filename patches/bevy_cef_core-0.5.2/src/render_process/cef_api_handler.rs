@@ -151,7 +151,6 @@ impl CefApiHandler {
             && let Some(arg) = v8_value_to_json(arg)
             && let Ok(arg) = serde_json::to_string(&arg)
         {
-            crate::util::webview_debug_log(format!("render cef.emit payload_len={}", arg.len()));
             arguments_list.set_string(0, Some(&arg.as_str().into()));
             frame.send_process_message(
                 ProcessId::from(cef_process_id_t::PID_BROWSER),
@@ -193,10 +192,6 @@ impl CefApiHandler {
             }
             let len = arg.array_buffer_byte_length();
             if len == 0 {
-                crate::util::webview_debug_log(format!(
-                    "render cef.binEmit id={} payload_len=0 (no binary arg)",
-                    id
-                ));
                 frame.send_process_message(
                     ProcessId::from(cef_process_id_t::PID_BROWSER),
                     Some(&mut process),
@@ -214,10 +209,6 @@ impl CefApiHandler {
             if let Some(mut binary) = binary_value_create(Some(&bytes)) {
                 let binary_index = if id.is_empty() { 0 } else { 1 };
                 arguments_list.set_binary(binary_index, Some(&mut binary));
-                crate::util::webview_debug_log(format!(
-                    "render cef.binEmit id={} payload_len={len}",
-                    id
-                ));
                 frame.send_process_message(
                     ProcessId::from(cef_process_id_t::PID_BROWSER),
                     Some(&mut process),
@@ -248,7 +239,6 @@ impl CefApiHandler {
                 (browser.identifier(), id.string_value().into_string()),
                 callback.clone(),
             );
-            crate::util::webview_debug_log("render cef.listen registered");
         }
         1
     }

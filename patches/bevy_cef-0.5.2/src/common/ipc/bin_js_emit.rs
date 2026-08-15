@@ -190,10 +190,6 @@ fn receive_bin_events<E>(
     for event in &buffer.0 {
         if let Some(payload) = decode_bin_event::<E>(event, id) {
             if !host_allowed(owner_hosts, &event.host) {
-                webview_debug_log(format!(
-                    "ipc: dropped '{}' from host '{}' (owner {:?})",
-                    id, event.host, owner_hosts
-                ));
                 continue;
             }
             commands.trigger(BinReceive {

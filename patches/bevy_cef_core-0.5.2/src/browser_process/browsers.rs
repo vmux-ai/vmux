@@ -261,8 +261,6 @@ struct MediaOverlay {
 
 pub struct Browsers {
     browsers: HashMap<Entity, WebviewBrowser>,
-    sender: TextureSender,
-    receiver: TextureReceiver,
     /// Lazily created when [`Self::create_browser`] is called with a non-empty disk profile root.
     /// Shared by all webviews so multiple panes use one cookie store and avoid conflicting contexts on the same path.
     shared_disk_context: Option<RequestContext>,
@@ -274,11 +272,8 @@ pub struct Browsers {
 
 impl Default for Browsers {
     fn default() -> Self {
-        let (sender, receiver) = TextureMailbox::channel();
         Browsers {
             browsers: HashMap::default(),
-            sender,
-            receiver,
             shared_disk_context: None,
             color_scheme: CefColorMode::default(),
             externally_hosted: HashSet::default(),
@@ -351,10 +346,6 @@ impl Browsers {
             "cef_create_browser webview={webview:?} uri={_uri} size={}x{} scale={device_scale_factor} windowed={windowed} bg={background_color:?} fps={windowless_frame_rate} native_liquid_glass={native_liquid_glass} allow_native_focus={allow_native_focus}",
             webview_size.x, webview_size.y
         );
-        webview_debug_log(format!(
-            "Browsers::create_browser entity={webview:?} uri={_uri} size={webview_size:?} scale={device_scale_factor} disk_profile={} bg={background_color:?} fps={windowless_frame_rate} allow_native_focus={allow_native_focus}",
-            disk_profile_root.is_some_and(|s| !s.trim().is_empty())
-        ));
         let size = Rc::new(Cell::new(webview_size));
         let device_scale = Rc::new(Cell::new(device_scale_factor));
         let mut client = self.client_handler(
@@ -397,9 +388,6 @@ impl Browsers {
                 Some(&HOST_CEF.into()),
                 Some(&mut cef_factory),
             );
-            webview_debug_log(format!(
-                "register_scheme_handler_factory cef://localhost ok={ok_cef}"
-            ));
             assert_eq!(
                 ok_cef, 1,
                 "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
@@ -411,10 +399,6 @@ impl Browsers {
                 None,
                 Some(&mut embedded_factory),
             );
-            webview_debug_log(format!(
-                "register_scheme_handler_factory {}://* ok={ok_embedded}",
-                emb_scheme
-            ));
             assert_eq!(
                 ok_embedded, 1,
                 "cef_register_scheme_handler_factory(embedded page scheme) failed with code {ok_embedded}"
@@ -426,10 +410,6 @@ impl Browsers {
                 None,
                 Some(&mut files_factory),
             );
-            webview_debug_log(format!(
-                "register_scheme_handler_factory {}://* ok={ok_files}",
-                crate::util::FILES_SCHEME
-            ));
             assert_eq!(
                 ok_files, 1,
                 "cef_register_scheme_handler_factory(files scheme) failed with code {ok_files}"
@@ -564,9 +544,6 @@ impl Browsers {
             last_badge: Cell::new(None),
         };
         self.browsers.insert(webview, webview_browser);
-        webview_debug_log(format!(
-            "Browsers::create_browser inserted entity={webview:?}"
-        ));
     }
 
     /// Returns `true` if [`Self::create_browser`] has already succeeded for this webview entity.
@@ -1159,7 +1136,6 @@ impl Browsers {
         let mtm = MainThreadMarker::new()?;
         let handle = host.window_handle();
         if handle.is_null() {
-            webview_debug_log("media_overlay missing host window handle");
             return None;
         }
         let cef_view: &NSView = unsafe { &*handle.cast::<NSView>() };
@@ -1177,7 +1153,6 @@ impl Browsers {
         }
         cef_view.addSubview(view);
         unsafe { player.play() };
-        webview_debug_log("media_overlay attached");
         Some(MediaOverlay {
             view: player_view,
             player,
@@ -1194,20 +1169,17 @@ impl Browsers {
             NSColor, NSGlassEffectView, NSGlassEffectViewStyle, NSView, NSWindowOrderingMode,
         };
         if AnyClass::get(c"NSGlassEffectView").is_none() {
-            webview_debug_log("native_liquid_glass unavailable");
             return None;
         }
         let mtm = MainThreadMarker::new()?;
         let handle = host.window_handle();
         if handle.is_null() {
-            webview_debug_log("native_liquid_glass missing host window handle");
             return None;
         }
         let view: &NSView = unsafe { &*handle.cast::<NSView>() };
         let clear_color = NSColor::clearColor();
         Self::make_view_tree_transparent(view, &clear_color);
         let Some(parent) = (unsafe { view.superview() }) else {
-            webview_debug_log("native_liquid_glass missing parent view");
             return None;
         };
         let frame = view.frame();
@@ -1227,7 +1199,6 @@ impl Browsers {
         view.removeFromSuperview();
         glass.setContentView(Some(view));
         view.setFrame(glass_view.bounds());
-        webview_debug_log("native_liquid_glass attached");
         Some(glass)
     }
 
@@ -2076,7 +2047,6 @@ impl Browsers {
     ///
     /// The browser will be removed from the hash map after closing.
     pub fn close(&mut self, webview: &Entity) {
-        self.sender.discard(*webview);
         if let Some(browser) = self.browsers.remove(webview) {
             info!(
                 "cef_close_browser webview={webview:?} windowed={}",
@@ -2099,22 +2069,6 @@ impl Browsers {
             }
             browser.host.close_browser(true as _);
             debug!("Closed browser with webview: {:?}", webview);
-        }
-    }
-
-    #[inline]
-    pub fn drain_render_textures(&self) -> Vec<RenderTextureMessage> {
-        self.receiver.drain()
-    }
-
-    pub fn request_full_cpu_paint(&self, webview: Entity, ty: RenderPaintElementType) {
-        self.sender.request_full(webview, ty);
-        if let Some(browser) = self.browsers.get(&webview) {
-            let ty = match ty {
-                RenderPaintElementType::View => cef::PaintElementType::VIEW,
-                RenderPaintElementType::Popup => cef::PaintElementType::POPUP,
-            };
-            browser.host.invalidate(ty);
         }
     }
 
@@ -2536,7 +2490,6 @@ impl Browsers {
     ) -> Client {
         let client = ClientHandlerBuilder::new(RenderHandlerBuilder::build(
             webview,
-            self.sender.clone(),
             texture_wake.clone(),
             size.clone(),
             device_scale.clone(),
@@ -3174,7 +3127,7 @@ mod tests {
         let close_fn = implementation
             .split("pub fn close")
             .nth(1)
-            .and_then(|tail| tail.split("pub fn drain_render_textures").next())
+            .and_then(|tail| tail.split("pub fn show_devtool").next())
             .unwrap_or_default();
 
         assert!(close_fn.contains("window_handle"));

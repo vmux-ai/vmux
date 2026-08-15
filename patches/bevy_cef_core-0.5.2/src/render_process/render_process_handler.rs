@@ -106,7 +106,6 @@ impl Clone for RenderProcessHandlerBuilder {
 
 impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
     fn on_web_kit_initialized(&self) {
-        crate::util::webview_debug_log("render on_web_kit_initialized");
         register_cef_api_extension();
         register_extensions_from_command_line();
     }
@@ -125,10 +124,6 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
                 .string(Some(&INIT_SCRIPT_URL_KEY.into()))
                 .into_string();
             let id = browser.identifier();
-            crate::util::webview_debug_log(format!(
-                "render on_browser_created id={id} init_script_len={}",
-                script.len()
-            ));
             INIT_SCRIPTS.lock().unwrap().insert(
                 id,
                 InitScript {
@@ -149,11 +144,6 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
             && let Some(frame) = frame
             && let Some(browser) = browser
         {
-            crate::util::webview_debug_log(format!(
-                "render on_context_created id={} url={}",
-                browser.identifier(),
-                frame.url().into_string()
-            ));
             inject_initialize_scripts(browser, context, frame);
         }
     }
@@ -238,7 +228,6 @@ fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, fra
             Some(&mut exception),
         );
         if result == 0 {
-            crate::util::webview_debug_log(format!("render init_script eval failed id={id}"));
             if let Some(ex) = exception {
                 eprintln!(
                     "bevy_cef: eval failed - message: {}, line: {}, column: {}",
@@ -250,7 +239,6 @@ fn inject_initialize_scripts(browser: &mut Browser, context: &mut V8Context, fra
                 eprintln!("bevy_cef: eval failed with no exception details");
             }
         } else {
-            crate::util::webview_debug_log(format!("render init_script eval ok id={id}"));
         }
         context.exit();
     }
@@ -278,7 +266,6 @@ mod tests {
 }
 
 fn register_cef_api_extension() {
-    crate::util::webview_debug_log("render register_cef_api_extension");
     register_extension(
         Some(&CEF_API_EXTENSION_NAME.into()),
         Some(&CEF_API_EXTENSION_CODE.into()),

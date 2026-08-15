@@ -303,8 +303,7 @@ fn create_webview(
             native_liquid_glass,
             opaque_windowed_background,
             windowed_native_focus,
-        ) in
-            webviews.iter()
+        ) in webviews.iter()
         {
             if browsers.has_browser(entity) {
                 continue;
@@ -337,20 +336,13 @@ fn create_webview(
             if let Some(cap) = max_frame_rate {
                 windowless_frame_rate = windowless_frame_rate.min(cap.0.max(1));
             }
-            let host_window = winit_window
-                .and_then(|w| {
-                    #[allow(deprecated)]
-                    w.raw_window_handle().ok()
-                });
+            let host_window = winit_window.and_then(|w| {
+                #[allow(deprecated)]
+                w.raw_window_handle().ok()
+            });
             if windowed && host_window.is_none() {
                 continue;
             }
-            webview_debug_log(format!(
-                "create_webview entity={entity:?} uri={} size={:?} scale={device_scale_factor} transparent={transparent} host_window={} fps={windowless_frame_rate}",
-                uri.0,
-                size.0,
-                host_window.is_some()
-            ));
             browsers.create_browser(
                 entity,
                 &uri.0,

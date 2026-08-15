@@ -22,7 +22,6 @@ use bevy::{
     picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
-use bevy_cef_core::prelude::webview_debug_log;
 use vmux_command::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarCommandEntry, CommandBarOpenEvent,
     CommandBarPage, CommandBarReadyEvent, CommandBarRenderedEvent, CommandBarSizeEvent,
@@ -433,11 +432,6 @@ fn on_command_bar_rendered(
         &webview,
         "const input = document.getElementById('command-bar-input'); if (input) { input.focus({ preventScroll: true }); }",
     );
-    webview_debug_log(format!(
-        "command_bar rendered entity={:?} open_id={}",
-        webview,
-        trigger.event().payload.open_id.0
-    ));
     commands.entity(webview).insert((
         CommandBarRenderedOpen(trigger.event().payload.open_id),
         CommandBarOpenedOnce,
@@ -460,10 +454,6 @@ fn on_command_bar_size(
         return;
     };
     if !command_bar_size_should_apply(*visibility, pending_reveal) {
-        webview_debug_log(format!(
-            "command_bar size ignored entity={webview:?} visibility={visibility:?} pending={}",
-            pending_reveal.is_some()
-        ));
         return;
     }
     let payload = trigger.event().payload;
@@ -491,10 +481,6 @@ fn on_command_bar_size(
     }) {
         return;
     }
-    webview_debug_log(format!(
-        "command_bar size entity={webview:?} width={} height={}",
-        payload.width, payload.height
-    ));
     commands.entity(webview).insert(CommandBarNativeSize {
         width: payload.width.max(1) as f32,
         height: payload.height.max(1) as f32,
@@ -1815,7 +1801,6 @@ fn reveal_command_bar(
             None => {
                 *vis = Visibility::Inherited;
                 commands.entity(entity).remove::<PendingCommandBarReveal>();
-                webview_debug_log(format!("command_bar reveal entity={entity:?}"));
             }
         }
     }
