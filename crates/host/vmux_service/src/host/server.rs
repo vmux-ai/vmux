@@ -350,7 +350,16 @@ async fn handle_client(
     let mut created_processes: Vec<ProcessId> = Vec::new();
 
     loop {
-        let msg: Option<ClientMessage> = read_message!(&mut reader, ClientMessage)?;
+        // Broken out of rather than propagated: the reap below is what stops a crashed desktop
+        // orphaning PTY children, and `?` here would step over it. A frame cut short is a
+        // disconnect that lost data, so it is reported and then treated as one.
+        let msg: Option<ClientMessage> = match read_message!(&mut reader, ClientMessage) {
+            Ok(msg) => msg,
+            Err(error) => {
+                tracing::warn!(%error, "client stream ended mid-frame");
+                break;
+            }
+        };
         let Some(msg) = msg else {
             break; // client disconnected
         };
@@ -1358,6 +1367,79 @@ mod tests {
         assert!(
             reaped.is_ok(),
             "child pid {pid} still alive after client disconnect — service did not reap it (state: {})",
+            proc_state_label(pid)
+        );
+    }
+
+    /// A desktop that dies mid-write leaves a length prefix promising bytes that never arrive.
+    /// The framing now calls that an error rather than a clean end, so the read loop has to break
+    /// on it instead of propagating — `?` would step over the reap and orphan the PTY child.
+    #[tokio::test]
+    async fn a_client_that_dies_mid_frame_still_has_its_processes_reaped() {
+        use crate::protocol::ClientMessage;
+
+        let dir = std::env::temp_dir().join(format!("vmux-torn-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("torn.sock");
+        let pidfile = dir.join("child.pid");
+        let _ = std::fs::remove_file(&sock);
+        let _ = std::fs::remove_file(&pidfile);
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+
+        let (wake_tx, _wake_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(super::run_server(listener, wake_tx));
+
+        let stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
+        let (r, mut w) = stream.into_split();
+
+        let create = ClientMessage::CreateProcess {
+            process_id: ProcessId::new(),
+            command: "/bin/sh".into(),
+            args: vec![
+                "-c".into(),
+                format!("echo $$ > {}; exec sleep 30", pidfile.display()),
+            ],
+            cwd: dir.display().to_string(),
+            env: vec![],
+            cols: 80,
+            rows: 24,
+        };
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&create).expect("serialize");
+        crate::framing::write_raw_frame(&mut w, &bytes)
+            .await
+            .expect("write create");
+
+        let pid = await_child_pid(&pidfile)
+            .await
+            .expect("child process should report its pid");
+        let identity = proc_identity(pid);
+
+        // A second frame that promises far more than it delivers, then the connection dies.
+        tokio::io::AsyncWriteExt::write_all(&mut w, &1024u32.to_le_bytes())
+            .await
+            .expect("write prefix");
+        tokio::io::AsyncWriteExt::write_all(&mut w, b"only a few bytes")
+            .await
+            .expect("write partial body");
+        drop(w);
+        drop(r);
+
+        let reaped = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while process_alive(pid, &identity) {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+        server.abort();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(
+            reaped.is_ok(),
+            "child pid {pid} survived a torn frame — the read loop propagated instead of reaping (state: {})",
             proc_state_label(pid)
         );
     }

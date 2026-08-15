@@ -6,6 +6,10 @@
 //! [`vmux_wire::room`].
 
 pub mod device;
+/// Length-prefixed frames, for a stream carrying many messages. Absent on wasm, which has no
+/// socket to carry them over.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod framing;
 pub mod quic;
 
 pub use device::DeviceId;
