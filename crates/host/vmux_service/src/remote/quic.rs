@@ -271,9 +271,8 @@ async fn dispatch_control(
     let Ok(frame) = CONTROL.accept(&mut recv).await else {
         return;
     };
-    // The type decides before the body is touched. Handing another leg's payload to a decoder and
-    // rejecting it afterwards would leave the type field decorative — the decoder would already
-    // have run on bytes this handler was never addressed by.
+    // Must stay ahead of the decode below: rejecting a foreign type afterwards would mean the
+    // decoder had already run on bytes this handler was never addressed by.
     match frame.message_type {
         MessageType::CONTROL_REQUEST | MessageType::SESSION_EVENTS => {}
         unserved => {
@@ -285,8 +284,6 @@ async fn dispatch_control(
         }
     }
 
-    // Owned by the frame, so rkyv sees an aligned buffer; the old shape sliced past a leading
-    // byte, which is not aligned.
     let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body) else {
         return;
     };
