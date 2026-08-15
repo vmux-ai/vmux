@@ -150,7 +150,6 @@ mod tests {
         save_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(bevy::scene::ScenePlugin)
             .add_plugins(vmux_core::CorePlugin)
             .add_observer(save_on::<SaveWorld<BookmarkFilter>>);
         save_app.world_mut().spawn((
@@ -191,7 +190,6 @@ mod tests {
         load_app
             .add_plugins(MinimalPlugins)
             .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(bevy::scene::ScenePlugin)
             .add_plugins(vmux_core::CorePlugin)
             .add_observer(load_on::<LoadWorld<BookmarkFilter>>);
         let p2 = path.clone();
