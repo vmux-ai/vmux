@@ -240,8 +240,21 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, view: Option<NonSend<Layou
     }
 }
 
+/// Nothing renders the layout off macOS.
+///
+/// `layout_cef_bundle` dropped its `Browser` on every platform, and only macOS has a replacement,
+/// so this says so once rather than leaving a blank window to be diagnosed. Extending wry here is
+/// plausible — WebKitGTK is its Linux backend — but the transparency this exists for is a macOS
+/// question, and nobody is running the desktop app there today.
 #[cfg(not(target_os = "macos"))]
-fn spawn_layout_view() {}
+fn spawn_layout_view() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !REPORTED.swap(true, Ordering::Relaxed) {
+        warn!("layout_view: the layout has no renderer on this platform, chrome will be missing");
+    }
+}
 
 /// `vmux://` for the wry view, answered by the same Bevy systems that answer it for CEF.
 #[cfg(target_os = "macos")]

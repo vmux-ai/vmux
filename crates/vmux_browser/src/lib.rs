@@ -35,7 +35,6 @@ pub use native_layout::NativeLayoutPointerMoveResult;
 use bevy::{
     ecs::relationship::Relationship,
     input::{ButtonState, mouse::MouseButton},
-    material::AlphaMode,
     picking::pointer::PointerButton,
     prelude::*,
     ui::UiGlobalTransform,
@@ -180,7 +179,6 @@ impl Plugin for BrowserPlugin {
             )
             .add_observer(on_debug_update_ready)
             .add_observer(on_debug_update_clear)
-            .add_systems(Update, sync_layout_mesh_visibility)
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
             .add_systems(
                 Update,
@@ -483,32 +481,6 @@ fn windowed_backend_should_use_windowed(world: &mut World) -> bool {
     let should_keep_windowed = state.mismatch != Some(signature);
     state.mismatch = Some(signature);
     should_keep_windowed
-}
-
-/// The layout renders on the OSR mesh in both modes: a wgpu quad that resizes with the Bevy
-/// frame, so it tracks a live window resize (a native overlay cannot — its frame only updates from a
-/// Bevy schedule the macOS resize loop starves). Keep the material visible.
-///
-/// This drives the material's alpha rather than `Visibility`: the OSR focus pipeline treats a
-/// `Visibility::Hidden` webview as hidden and tells CEF to stop rendering it. Keeping the entity
-/// visible leaves OSR running. Alpha mode stays `Blend` so pages show through the layout's
-/// transparent areas.
-fn sync_layout_mesh_visibility(
-    layout_q: Query<&WebviewMaterialHandle<WebviewExtendStandardMaterial>, With<LayoutCef>>,
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    let want_alpha = 0.0;
-    for mat_handle in &layout_q {
-        let Some(mut material) = materials.get_mut(mat_handle.id()) else {
-            continue;
-        };
-        if material.base.alpha_mode != AlphaMode::Blend {
-            material.base.alpha_mode = AlphaMode::Blend;
-        }
-        if material.base.base_color.alpha() != want_alpha {
-            material.base.base_color.set_alpha(want_alpha);
-        }
-    }
 }
 
 fn sync_cef_backend(world: &mut World) {
@@ -1361,41 +1333,6 @@ mod tests {
             "def"
         );
         assert_eq!(effective_title(None, "def"), "def");
-    }
-
-    fn layout_material(initial_alpha: f32) -> WebviewExtendStandardMaterial {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, sync_layout_mesh_visibility);
-        let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Blend;
-        material.base.base_color.set_alpha(initial_alpha);
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
-            .add(material);
-        app.world_mut()
-            .spawn((LayoutCef, WebviewMaterialHandle(handle.clone())));
-
-        app.update();
-
-        app.world()
-            .resource::<Assets<WebviewExtendStandardMaterial>>()
-            .get(handle.id())
-            .expect("layout material")
-            .clone()
-    }
-
-    #[test]
-    fn layout_mesh_hides_behind_the_native_overlay() {
-        let mat = layout_material(1.0);
-        assert_eq!(
-            mat.base.base_color.alpha(),
-            0.0,
-            "layout chrome is presented through the native accelerated overlay"
-        );
-        assert_eq!(mat.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]
