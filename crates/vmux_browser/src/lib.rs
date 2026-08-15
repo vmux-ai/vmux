@@ -38,7 +38,6 @@ use bevy::{
     picking::pointer::PointerButton,
     prelude::*,
     ui::UiGlobalTransform,
-    window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig, webview_debug_log};
@@ -65,7 +64,6 @@ use vmux_layout::{
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     tab::Tab,
-    window::Modal,
 };
 
 use vmux_setting::AppSettings;
@@ -400,119 +398,29 @@ fn tab_of(
     }
 }
 
-fn webview_should_use_windowed() -> bool {
-    cfg!(target_os = "macos")
-}
-
-fn transform_near(a: &Transform, b: &Transform) -> bool {
-    a.translation.distance(b.translation) < 0.001
-        && a.scale.distance(b.scale) < 0.001
-        && a.rotation.dot(b.rotation).abs() > 0.9999
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct WindowedBackendSignature {
-    width: f32,
-    height: f32,
-    scale: f32,
-}
-
-#[derive(Resource, Default)]
-struct WindowedBackendCameraState {
-    mismatch: Option<WindowedBackendSignature>,
-}
-
-fn windowed_backend_signature(world: &mut World) -> Option<WindowedBackendSignature> {
-    let mut window_q = world.query_filtered::<&Window, With<PrimaryWindow>>();
-    let Ok(window) = window_q.single(world) else {
-        return None;
-    };
-    Some(WindowedBackendSignature {
-        width: window.resolution.width(),
-        height: window.resolution.height(),
-        scale: window.resolution.scale_factor(),
-    })
-}
-
-fn clear_windowed_backend_camera_state(world: &mut World) {
-    if let Some(mut state) = world.get_resource_mut::<WindowedBackendCameraState>() {
-        state.mismatch = None;
-    }
-}
-
-fn camera_supports_windowed_webviews(world: &mut World) -> bool {
-    let expected = {
-        let mut window_q = world.query_filtered::<&Window, With<PrimaryWindow>>();
-        let Ok(window) = window_q.single(world) else {
-            return true;
-        };
-        let height = window.resolution.height().max(1.0);
-        let aspect = window.resolution.width() / height;
-        vmux_layout::scene::frame_main_camera_transform(window, aspect, 0.0)
-    };
-    let camera = {
-        let mut camera_q =
-            world.query_filtered::<&Transform, With<vmux_layout::scene::MainCamera>>();
-        let Ok(camera) = camera_q.single(world) else {
-            return true;
-        };
-        *camera
-    };
-    transform_near(&camera, &expected)
-}
-
-fn windowed_backend_should_use_windowed(world: &mut World) -> bool {
-    if !webview_should_use_windowed() {
-        clear_windowed_backend_camera_state(world);
-        return false;
-    }
-    if camera_supports_windowed_webviews(world) {
-        clear_windowed_backend_camera_state(world);
-        return true;
-    }
-    let Some(signature) = windowed_backend_signature(world) else {
-        clear_windowed_backend_camera_state(world);
-        return true;
-    };
-    if !world.contains_resource::<WindowedBackendCameraState>() {
-        world.insert_resource(WindowedBackendCameraState::default());
-    }
-    let mut state = world.resource_mut::<WindowedBackendCameraState>();
-    let should_keep_windowed = state.mismatch != Some(signature);
-    state.mismatch = Some(signature);
-    should_keep_windowed
-}
-
+/// Every CEF browser is windowed, and the native overlay markers belong to nobody.
+///
+/// Both used to vary. The layout was the one offscreen surface — it carried the overlay markers and
+/// was excluded from `windowed` — and a camera whose transform drifted from the window's would drop
+/// *everything* back to offscreen rendering as a safety net. The layout is served by wry now and
+/// holds no `Browser` at all, so the exception has no subject, and the safety net leads nowhere:
+/// there is no offscreen path left to fall back to.
 fn sync_cef_backend(world: &mut World) {
-    let base_windowed = windowed_backend_should_use_windowed(world);
     let mut query = world.query_filtered::<(
         Entity,
-        Has<LayoutCef>,
-        Has<Modal>,
         Has<WebviewNativeOverlay>,
         Has<WebviewNativeDirectOverlay>,
     ), (With<Browser>, With<WebviewSource>)>();
-    let entities: Vec<(Entity, bool, bool, bool, bool)> = query.iter(world).collect();
-    let target_windowed = |is_layout: bool, _is_modal: bool| base_windowed && !is_layout;
-    let target_native_overlay =
-        |is_layout: bool, _is_modal: bool| cfg!(target_os = "macos") && is_layout;
-    let target_native_direct_overlay = |is_layout: bool| cfg!(target_os = "macos") && is_layout;
+    let entities: Vec<(Entity, bool, bool)> = query.iter(world).collect();
     let mut recreate = Vec::new();
     {
         let browsers = world.non_send::<Browsers>();
-        for &(entity, is_layout, is_modal, actual_native_overlay, actual_direct_overlay) in
-            &entities
-        {
-            let has_browser = browsers.has_browser(entity);
-            let actual_windowed = browsers.is_windowed(&entity);
-            let want_windowed = target_windowed(is_layout, is_modal);
-            let want_native_overlay = target_native_overlay(is_layout, is_modal);
-            let want_native_direct_overlay = target_native_direct_overlay(is_layout);
-            let needs_recreate = actual_windowed.is_some_and(|actual| actual != want_windowed)
-                || has_browser
-                    && (actual_native_overlay != want_native_overlay
-                        || actual_direct_overlay != want_native_direct_overlay);
-            if needs_recreate {
+        for &(entity, native_overlay, direct_overlay) in &entities {
+            let stale_backend = browsers
+                .is_windowed(&entity)
+                .is_some_and(|windowed| !windowed);
+            let stale_overlay = browsers.has_browser(entity) && (native_overlay || direct_overlay);
+            if stale_backend || stale_overlay {
                 recreate.push(entity);
             }
         }
@@ -523,37 +431,22 @@ fn sync_cef_backend(world: &mut World) {
             browsers.close(entity);
         }
     }
-    for (entity, is_layout, is_modal, _, _) in entities {
-        let want_windowed = target_windowed(is_layout, is_modal);
-        let want_native_overlay = target_native_overlay(is_layout, is_modal);
-        let want_native_direct_overlay = target_native_direct_overlay(is_layout);
-        let marker_matches = world.get::<WebviewWindowed>(entity).is_some() == want_windowed;
-        let overlay_matches =
-            world.get::<WebviewNativeOverlay>(entity).is_some() == want_native_overlay;
-        let direct_overlay_matches =
-            world.get::<WebviewNativeDirectOverlay>(entity).is_some() == want_native_direct_overlay;
+    for (entity, native_overlay, direct_overlay) in entities {
         let needs_recreate = recreate.contains(&entity);
-        if marker_matches && overlay_matches && direct_overlay_matches && !needs_recreate {
+        let settled = world.get::<WebviewWindowed>(entity).is_some()
+            && !native_overlay
+            && !direct_overlay
+            && !needs_recreate;
+        if settled {
             continue;
         }
         let Ok(mut entity_mut) = world.get_entity_mut(entity) else {
             continue;
         };
-        if want_windowed {
-            entity_mut.insert(WebviewWindowed);
-        } else {
-            entity_mut.remove::<WebviewWindowed>();
-        }
-        if want_native_overlay {
-            entity_mut.insert(WebviewNativeOverlay);
-        } else {
-            entity_mut.remove::<WebviewNativeOverlay>();
-        }
-        if want_native_direct_overlay {
-            entity_mut.insert(WebviewNativeDirectOverlay);
-        } else {
-            entity_mut.remove::<WebviewNativeDirectOverlay>();
-        }
+        entity_mut
+            .insert(WebviewWindowed)
+            .remove::<WebviewNativeOverlay>()
+            .remove::<WebviewNativeDirectOverlay>();
         if needs_recreate {
             entity_mut
                 .remove::<PageReady>()
@@ -1224,7 +1117,7 @@ mod error_page_source_tests {
 mod tests {
     use super::*;
     use crate::appearance::sync_appearance_to_cef;
-    use vmux_terminal::Terminal;
+    use vmux_layout::window::Modal;
 
     #[test]
     fn cef_disables_bfcache_for_extension_ports() {
@@ -1495,210 +1388,33 @@ mod tests {
         );
     }
 
+    /// Windowed is the only backend. The camera-mismatch fallback that used to drop everything
+    /// back to offscreen rendering is gone, so a browser that failed to be marked windowed would
+    /// render nowhere at all rather than degrading.
     #[test]
-    fn browser_mode_uses_windowed_webviews_on_macos() {
-        assert_eq!(webview_should_use_windowed(), cfg!(target_os = "macos"));
-    }
-
-    #[test]
-    fn only_the_layout_stays_osr_on_macos() {
+    fn every_cef_browser_is_windowed_with_no_overlay_markers() {
         let mut app = App::new();
         app.world_mut().insert_non_send(Browsers::default());
-
-        let layout = app
+        let page = app
             .world_mut()
-            .spawn((Browser, LayoutCef, WebviewSource::new("vmux://layout/")))
+            .spawn((Browser, WebviewSource::new("https://example.com")))
             .id();
         let modal = app
             .world_mut()
             .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
             .id();
-        let page = app
-            .world_mut()
-            .spawn((Browser, WebviewSource::new("https://example.com/")))
-            .id();
-        let terminal = app
-            .world_mut()
-            .spawn((Browser, Terminal, WebviewSource::new("vmux://terminal/")))
-            .id();
 
         sync_cef_backend(app.world_mut());
 
-        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(
-            app.world()
-                .get::<WebviewNativeDirectOverlay>(layout)
-                .is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert!(
-            app.world()
-                .get::<WebviewNativeDirectOverlay>(modal)
-                .is_none()
-        );
-        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(terminal).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(page).is_some(),
-            cfg!(target_os = "macos")
-        );
-    }
-
-    #[test]
-    fn backend_keeps_layout_osr_and_pages_windowed() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        let window = Window {
-            resolution: (800, 600).into(),
-            ..default()
-        };
-        let home = vmux_layout::scene::frame_main_camera_transform(&window, 800.0 / 600.0, 0.0);
-        app.world_mut().spawn((window, PrimaryWindow));
-        app.world_mut()
-            .spawn((vmux_layout::scene::MainCamera, home));
-
-        let layout = app
-            .world_mut()
-            .spawn((Browser, LayoutCef, WebviewSource::new("vmux://layout/")))
-            .id();
-        let modal = app
-            .world_mut()
-            .spawn((Browser, Modal, WebviewSource::new("vmux://command-bar/")))
-            .id();
-        let page = app
-            .world_mut()
-            .spawn((Browser, WebviewSource::new("https://example.com/")))
-            .id();
-
-        sync_cef_backend(app.world_mut());
-
-        assert!(app.world().get::<WebviewWindowed>(layout).is_none());
-        assert_eq!(
-            app.world().get::<WebviewNativeOverlay>(layout).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(
-            app.world()
-                .get::<WebviewNativeDirectOverlay>(layout)
-                .is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(modal).is_some(),
-            cfg!(target_os = "macos")
-        );
-        assert!(
-            app.world()
-                .get::<WebviewNativeDirectOverlay>(modal)
-                .is_none()
-        );
-        assert!(app.world().get::<WebviewNativeOverlay>(modal).is_none());
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(page).is_some(),
-            cfg!(target_os = "macos")
-        );
-    }
-
-    #[test]
-    fn browser_mode_disables_windowed_pages_when_camera_is_off_axis() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        app.world_mut().spawn((
-            Window {
-                resolution: (800, 600).into(),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-        app.world_mut().spawn((
-            vmux_layout::scene::MainCamera,
-            Transform::from_xyz(2.0, 1.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ));
-        let page = app
-            .world_mut()
-            .spawn((
-                Browser,
-                WebviewWindowed,
-                WebviewSource::new("https://example.com/"),
-            ))
-            .id();
-
-        sync_cef_backend(app.world_mut());
-        sync_cef_backend(app.world_mut());
-
-        assert!(app.world().get::<WebviewWindowed>(page).is_none());
-    }
-
-    #[test]
-    fn browser_mode_keeps_windowed_pages_for_first_resize_camera_mismatch() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        let old_window = Window {
-            resolution: (800, 600).into(),
-            ..default()
-        };
-        let stale_home =
-            vmux_layout::scene::frame_main_camera_transform(&old_window, 800.0 / 600.0, 0.0);
-        app.world_mut().spawn((
-            Window {
-                resolution: (1200, 900).into(),
-                ..default()
-            },
-            PrimaryWindow,
-        ));
-        app.world_mut()
-            .spawn((vmux_layout::scene::MainCamera, stale_home));
-        let page = app
-            .world_mut()
-            .spawn((
-                Browser,
-                WebviewWindowed,
-                WebviewSource::new("https://example.com/"),
-            ))
-            .id();
-
-        sync_cef_backend(app.world_mut());
-
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(page).is_some(),
-            cfg!(target_os = "macos")
-        );
-    }
-
-    #[test]
-    fn browser_mode_keeps_windowed_pages_when_camera_is_home() {
-        let mut app = App::new();
-        app.world_mut().insert_non_send(Browsers::default());
-        let window = Window {
-            resolution: (800, 600).into(),
-            ..default()
-        };
-        let home = vmux_layout::scene::frame_main_camera_transform(&window, 800.0 / 600.0, 0.0);
-        app.world_mut().spawn((window, PrimaryWindow));
-        app.world_mut()
-            .spawn((vmux_layout::scene::MainCamera, home));
-        let page = app
-            .world_mut()
-            .spawn((Browser, WebviewSource::new("https://example.com/")))
-            .id();
-
-        sync_cef_backend(app.world_mut());
-
-        assert_eq!(
-            app.world().get::<WebviewWindowed>(page).is_some(),
-            cfg!(target_os = "macos")
-        );
+        for entity in [page, modal] {
+            assert!(app.world().get::<WebviewWindowed>(entity).is_some());
+            assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
+            assert!(
+                app.world()
+                    .get::<WebviewNativeDirectOverlay>(entity)
+                    .is_none()
+            );
+        }
     }
 
     #[test]
