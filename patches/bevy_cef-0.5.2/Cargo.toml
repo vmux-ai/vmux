@@ -40,16 +40,11 @@ repository = "https://github.com/not-elm/bevy_cef"
 [features]
 debug = ["bevy_cef_core/debug"]
 default = []
-pbr = ["bevy/bevy_pbr"]
 serialize = ["bevy/serialize"]
 
 [lib]
 name = "bevy_cef"
 path = "src/lib.rs"
-
-[[example]]
-name = "sprite"
-path = "examples/sprite.rs"
 
 [dependencies.async-channel]
 version = "2.5"
@@ -60,11 +55,8 @@ features = [
     "bevy_log",
     "bevy_window",
     "bevy_asset",
-    "bevy_sprite",
-    "bevy_sprite_render",
     "bevy_winit",
     "bevy_picking",
-    "sprite_picking",
     "x11",
     "wayland",
 ]
@@ -78,13 +70,11 @@ version = "0.19.0"
 default-features = false
 features = [
     "bevy_asset",
-    "bevy_render",
 ]
 
 [dependencies.bevy_picking]
 version = "0.19.0"
 default-features = false
-features = ["mesh_picking"]
 
 [dependencies.cef]
 version = "148.2.0"
@@ -109,11 +99,9 @@ features = [
     "bevy_log",
     "bevy_window",
     "bevy_asset",
-    "bevy_sprite",
     "bevy_winit",
     "bevy_picking",
     "mesh_picking",
-    "sprite_picking",
     "file_watcher",
 ]
 default-features = false

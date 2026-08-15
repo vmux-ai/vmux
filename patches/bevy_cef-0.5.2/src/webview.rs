@@ -11,7 +11,6 @@ use crate::loading_state::{WebviewCommittedNavigationSender, WebviewLoadingState
 use crate::popup_state::WebviewPopupSender;
 use crate::prelude::PreloadScripts;
 use crate::prelude::PrivatePreloadScripts;
-use crate::webview::mesh::MeshWebviewPlugin;
 use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::world::DeferredWorld;
 use bevy::prelude::*;
@@ -25,13 +24,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
-
-mod accelerated_upload;
-mod history_swipe;
-mod mesh;
-mod pinch_zoom;
-mod texture_upload;
-mod webview_sprite;
 
 #[derive(Resource, Clone)]
 struct TextureWakeCallback(Option<TextureWake>);
@@ -65,10 +57,8 @@ fn duration_nanos(duration: Duration) -> u64 {
 }
 
 pub mod prelude {
-    pub use crate::webview::{
-        CefSystems, NativeOverlayPresenter, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin,
-        accelerated_upload::NativeOverlayFrames, mesh::*, texture_upload::WebviewTextureUploads,
-    };
+    pub use crate::common::*;
+    pub use crate::webview::{CefSystems, RequestCloseDevtool, RequestShowDevTool, WebviewPlugin};
 }
 
 /// A Trigger event to request showing the developer tools in a webview.
@@ -140,7 +130,6 @@ impl Plugin for WebviewPlugin {
             .init_resource::<NativeOverlayPresenter>()
             .insert_resource(TextureWakeCallback(texture_wake))
             .insert_resource(texture_wake_policy)
-            .add_plugins((MeshWebviewPlugin,))
             .add_systems(
                 Update,
                 (

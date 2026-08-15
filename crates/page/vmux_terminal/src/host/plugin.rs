@@ -481,7 +481,6 @@ fn spawn_layout_requested_content(
     child_of: Query<&ChildOf>,
     tabs: Query<&vmux_layout::tab::Tab>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
         match request {
@@ -496,7 +495,7 @@ fn spawn_layout_requested_content(
                 };
                 let terminal = commands
                     .spawn((
-                        new_terminal_bundle_with_cwd(&mut webview_mt, &settings, cwd.as_deref()),
+                        new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
                         ChildOf(*stack),
                     ))
                     .id();
@@ -517,7 +516,6 @@ fn handle_terminal_page_open(
     settings: Res<AppSettings>,
     active_space: Res<vmux_space::spaces::ActiveSpace>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
         if task.url == TERMINAL_PAGE_URL.trim_end_matches('/')
@@ -532,7 +530,6 @@ fn handle_terminal_page_open(
                 &settings,
                 &active_space,
                 &mut commands,
-                &mut webview_mt,
             ) {
                 Ok(()) => {
                     commands.entity(entity).insert(PageOpenHandled);
@@ -554,7 +551,6 @@ fn open_terminal_page(
     settings: &AppSettings,
     active_space: &vmux_space::spaces::ActiveSpace,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) -> Result<(), String> {
     let parsed = url::Url::parse(&task.url)
         .map_err(|e| format!("invalid terminal URL '{}': {e}", task.url))?;
@@ -600,7 +596,7 @@ fn open_terminal_page(
     });
     let terminal = commands
         .spawn((
-            new_terminal_bundle_with_cwd(webview_mt, settings, cwd.as_deref()),
+            new_terminal_bundle_with_cwd(settings, cwd.as_deref()),
             ChildOf(task.stack),
         ))
         .id();
@@ -619,17 +615,12 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 fn respond_terminal_spawn(
     mut reader: MessageReader<TerminalSpawnRequest>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: Res<AppSettings>,
     child_of_q: Query<&ChildOf>,
 ) {
     for req in reader.read() {
         let term_e = commands
-            .spawn(new_terminal_bundle_with_cwd(
-                &mut webview_mt,
-                &settings,
-                req.cwd.as_deref(),
-            ))
+            .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
             .id();
         commands.entity(term_e).insert(CefKeyboardTarget);
         if let Some(stack_e) = req.target_stack {
@@ -666,23 +657,18 @@ fn service_wake_callback(app: &App) -> Option<ServiceWake> {
         })
 }
 
-pub fn new_terminal_bundle(
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    settings: &AppSettings,
-) -> impl Bundle {
-    new_terminal_bundle_with_cwd(webview_mt, settings, None)
+pub fn new_terminal_bundle(settings: &AppSettings) -> impl Bundle {
+    new_terminal_bundle_with_cwd(settings, None)
 }
 
 pub fn new_terminal_bundle_with_cwd(
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
 ) -> impl Bundle {
-    new_terminal_bundle_with_cwd_and_shell(webview_mt, settings, cwd, None)
+    new_terminal_bundle_with_cwd_and_shell(settings, cwd, None)
 }
 
 fn new_terminal_bundle_with_cwd_and_shell(
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     settings: &AppSettings,
     cwd: Option<&std::path::Path>,
     shell: Option<&str>,
@@ -728,7 +714,6 @@ fn new_terminal_bundle_with_cwd_and_shell(
             ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
         ),
         (
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),
@@ -751,7 +736,6 @@ pub fn respond_terminal_stack_spawn(
     mut reader: MessageReader<TerminalStackSpawnRequest>,
     settings: Res<AppSettings>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for request in reader.read() {
         let stack_ts = if request.activate {
@@ -780,7 +764,6 @@ pub fn respond_terminal_stack_spawn(
         let terminal = commands
             .spawn((
                 new_terminal_bundle_with_cwd_and_shell(
-                    &mut webview_mt,
                     &settings,
                     request.cwd.as_deref(),
                     request.shell.as_deref(),
@@ -803,10 +786,7 @@ pub fn respond_terminal_stack_spawn(
     }
 }
 
-pub fn reattach_terminal_bundle(
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    process_id: ProcessId,
-) -> impl Bundle {
+pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
     (
         (
             Terminal,
@@ -824,7 +804,6 @@ pub fn reattach_terminal_bundle(
             ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
         ),
         (
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),
@@ -3960,7 +3939,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_message::<TerminalStackSpawnRequest>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, respond_terminal_stack_spawn);
 
         let pane = app.world_mut().spawn_empty().id();
@@ -3995,7 +3973,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .init_resource::<vmux_space::spaces::ActiveSpace>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
         let stack = app
@@ -4042,7 +4019,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
         let stack = app
@@ -4072,7 +4048,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
         let stack = app
@@ -4113,7 +4088,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
         let tab = app
@@ -4163,7 +4137,6 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_terminal_page_open);
 
         let tab = app
@@ -4217,7 +4190,6 @@ mod tests {
             .add_message::<LayoutSpawnRequest>()
             .insert_resource(settings)
             .insert_resource(vmux_space::spaces::ActiveSpace { record })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, spawn_layout_requested_content);
 
         let tab = app

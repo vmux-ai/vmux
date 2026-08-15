@@ -31,7 +31,6 @@ bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
 bevy_ecs = { workspace = true }
 bevy_reflect = { workspace = true }
-bevy_render = "0.19.0"
 libc = "0.2"
 moonshine-save = { workspace = true }
 raw-window-handle = "0.6"

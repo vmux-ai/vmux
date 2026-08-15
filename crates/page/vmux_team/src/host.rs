@@ -58,13 +58,10 @@ impl WarmPage for Team {
     const URL: &'static str = TEAM_PAGE_URL;
     const TITLE: &'static str = "Team";
 
-    fn spawn(
-        commands: &mut Commands,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> Entity {
+    fn spawn(commands: &mut Commands) -> Entity {
         commands
             .spawn((
-                vmux_layout::Browser::new_with_title(webview_mt, Self::URL, Self::TITLE),
+                vmux_layout::Browser::new_with_title(Self::URL, Self::TITLE),
                 Team,
             ))
             .id()
@@ -508,7 +505,6 @@ mod tests {
         use vmux_core::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_plugins(WarmPagePlugin::<Team>::default());
 
         let stack = app.world_mut().spawn(Stack::default()).id();

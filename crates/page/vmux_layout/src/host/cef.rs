@@ -95,10 +95,7 @@ pub(crate) fn apply_cef_state_to_meta(
 }
 
 impl Browser {
-    pub fn new(
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        url: &str,
-    ) -> impl Bundle {
+    pub fn new(url: &str) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
@@ -112,7 +109,6 @@ impl Browser {
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -129,11 +125,7 @@ impl Browser {
         )
     }
 
-    pub fn new_with_title(
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        url: &str,
-        title: &str,
-    ) -> impl Bundle {
+    pub fn new_with_title(url: &str, title: &str) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
@@ -147,7 +139,6 @@ impl Browser {
             },
             WebviewSource::new(url),
             ResolvedWebviewUri(url.to_string()),
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -164,12 +155,7 @@ impl Browser {
         )
     }
 
-    pub fn new_error(
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-        source_url: &str,
-        display_url: &str,
-        title: &str,
-    ) -> impl Bundle {
+    pub fn new_error(source_url: &str, display_url: &str, title: &str) -> impl Bundle {
         (
             Self,
             WebviewWindowed,
@@ -183,7 +169,6 @@ impl Browser {
             },
             WebviewSource::new(source_url),
             ResolvedWebviewUri(source_url.to_string()),
-            WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
             GlobalTransform::default(),
@@ -366,18 +351,14 @@ mod tests {
         commands.spawn(layout_cef_bundle(host));
     }
 
-    fn build_test_page(
-        mut commands: Commands,
-        mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) {
-        commands.spawn(Browser::new(&mut webview_mt, "https://example.com"));
+    fn build_test_page(mut commands: Commands) {
+        commands.spawn(Browser::new("https://example.com"));
     }
 
     #[test]
     fn layout_cef_uses_manual_pointer_routing() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_cef);
         app.update();
 
@@ -394,7 +375,6 @@ mod tests {
     fn page_cef_uses_opaque_dark_initial_background() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_page);
         app.update();
 
@@ -415,7 +395,6 @@ mod tests {
     fn page_cef_allows_native_first_responder() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Startup, build_test_page);
         app.update();
 

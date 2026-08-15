@@ -434,7 +434,6 @@ pub(crate) fn rebuild_space_views(
     settings: Res<AppSettings>,
     mut spawn_agent: MessageWriter<vmux_core::agent::SpawnAgentInStackRequest>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     if tabs_need_view.is_empty()
         && spaces_need_view.is_empty()
@@ -553,7 +552,7 @@ pub(crate) fn rebuild_space_views(
                 .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    vmux_terminal::processes_monitor::ProcessesMonitor::new(&mut webview_mt),
+                    vmux_terminal::processes_monitor::ProcessesMonitor::new(),
                     ChildOf(entity),
                 ));
             } else if meta
@@ -563,7 +562,7 @@ pub(crate) fn rebuild_space_views(
                 let cwd = saved_launch.map(|l| std::path::PathBuf::from(&l.cwd));
                 let term = commands
                     .spawn((
-                        new_terminal_bundle_with_cwd(&mut webview_mt, &settings, cwd.as_deref()),
+                        new_terminal_bundle_with_cwd(&settings, cwd.as_deref()),
                         ChildOf(entity),
                     ))
                     .id();
@@ -606,21 +605,19 @@ pub(crate) fn rebuild_space_views(
                     }
                 }
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
-                commands.spawn((Spaces::new(&mut webview_mt), ChildOf(entity)));
+                commands.spawn((Spaces::new(), ChildOf(entity)));
             } else if meta
                 .url
                 .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
-                commands.spawn((Settings::new(&mut webview_mt), ChildOf(entity)));
+                commands.spawn((Settings::new(), ChildOf(entity)));
             } else if meta.url.starts_with("file:") {
-                if let Some(bundle) =
-                    vmux_editor::restore_file_view_bundle(&meta.url, &mut webview_mt)
-                {
+                if let Some(bundle) = vmux_editor::restore_file_view_bundle(&meta.url) {
                     commands.spawn((bundle, ChildOf(entity)));
                 }
             } else {
                 let browser = commands
-                    .spawn((Browser::new(&mut webview_mt, &meta.url), ChildOf(entity)))
+                    .spawn((Browser::new(&meta.url), ChildOf(entity)))
                     .id();
                 commands.entity(browser).insert(meta.clone());
             }
@@ -1024,7 +1021,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_systems(Update, rebuild_space_views);
@@ -1370,7 +1366,6 @@ mod tests {
             .insert_resource(ActiveSpace {
                 record: vmux_space::model::bootstrap_space_record(),
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_plugins(PersistencePlugin);
 
@@ -1586,7 +1581,6 @@ mod tests {
             .insert_resource(ActiveSpace {
                 record: vmux_space::model::bootstrap_space_record(),
             })
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<vmux_agent::strategy::AgentStrategies>()
             .add_plugins(PersistencePlugin);
         app.world_mut().spawn(Main);

@@ -164,7 +164,6 @@ fn setup(
     main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let m = window.meters();
     let pw = *primary_window;
@@ -321,7 +320,6 @@ fn setup(
         },
         ZIndex(3),
         WebviewSource::new(COMMAND_BAR_PAGE_URL),
-        WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
         WebviewSize(Vec2::new(800.0, 600.0)),
         Transform::default(),
         GlobalTransform::default(),
@@ -659,7 +657,6 @@ mod tests {
     use crate::cef::LayoutCef;
     use bevy::ecs::relationship::Relationship;
     use bevy::window::Monitor;
-    use bevy_cef::prelude::WebviewExtendStandardMaterial;
 
     #[test]
     fn scaffold_builds_tab_pane_stack_under_space() {
@@ -736,8 +733,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(test_settings(8.0))
-            .init_resource::<Assets<WindowMaterial>>()
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+            .init_resource::<Assets<WindowMaterial>>();
         app.world_mut().spawn((
             Window {
                 resolution: (1200, 800).into(),

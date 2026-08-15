@@ -713,7 +713,6 @@ mod tests {
         FocusRingSettings, LayoutSettings, PaneSettings, SideSheetSettings, WindowSettings,
     };
     use bevy::ecs::relationship::Relationship;
-    use bevy_cef::prelude::WebviewExtendStandardMaterial;
     use vmux_command::{CommandPlugin, WriteAppCommands};
 
     fn test_settings() -> LayoutSettings {
@@ -849,7 +848,6 @@ mod tests {
             .init_resource::<crate::tab::LastTabCloseAt>()
             .init_resource::<FocusedStack>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (
@@ -985,7 +983,6 @@ mod tests {
             .init_resource::<PendingCursorWarp>()
             .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (
@@ -1053,7 +1050,6 @@ mod tests {
             .init_resource::<PendingCursorWarp>()
             .init_resource::<crate::tab::LastTabCloseAt>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(
                 Update,
                 (
@@ -1109,7 +1105,6 @@ mod tests {
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let tab = app
@@ -1176,7 +1171,6 @@ mod tests {
             .insert_resource(crate::settings::EffectiveStartupUrl(
                 "vmux://agent/vibe/".to_string(),
             ))
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
 
         let tab = app
@@ -1379,7 +1373,6 @@ mod tests {
             .init_resource::<NewStackContext>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .init_resource::<CollectedSpawns>()
             .add_systems(
                 Update,

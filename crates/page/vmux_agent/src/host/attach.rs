@@ -7,7 +7,6 @@
 use std::path::PathBuf;
 
 use bevy::prelude::*;
-use bevy_cef::prelude::WebviewExtendStandardMaterial;
 use vmux_command::WriteAppCommands;
 use vmux_core::PageMetadata;
 use vmux_core::agent::AgentKind;
@@ -45,12 +44,11 @@ pub fn attach_page_agent_to_stack(
     model: &str,
     sid: &str,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: &crate::client::page::strategy_index::PageStrategyIndex,
     kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Option<()> {
     attach_page_agent_to_stack_with_webview(
-        stack, provider, model, sid, None, commands, webview_mt, idx, kind_q,
+        stack, provider, model, sid, None, commands, idx, kind_q,
     )
 }
 
@@ -62,7 +60,6 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     sid: &str,
     webview: Option<Entity>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
     idx: &crate::client::page::strategy_index::PageStrategyIndex,
     kind_q: &Query<&crate::client::page::strategy_components::StrategyKind>,
 ) -> Option<()> {
@@ -108,7 +105,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
             .remove::<crate::host::chat::ChatSynced>();
     } else {
         commands.spawn((
-            vmux_layout::Browser::new(webview_mt, &url),
+            vmux_layout::Browser::new(&url),
             crate::host::chat::AgentChatView,
             ChildOf(stack),
         ));
@@ -126,10 +123,9 @@ pub fn attach_acp_agent_to_stack(
     icon: Option<&str>,
     resume: Option<&str>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     attach_acp_agent_to_stack_with_webview(
-        stack, agent_id, name, sid, cwd, icon, resume, None, commands, webview_mt,
+        stack, agent_id, name, sid, cwd, icon, resume, None, commands,
     );
 }
 
@@ -144,7 +140,6 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     resume: Option<&str>,
     webview: Option<Entity>,
     commands: &mut Commands,
-    webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let agent_id = crate::acp_install::agent_url_id(agent_id);
     // A resume carries the agent-assigned session id in the url; a fresh open is bare and gets
@@ -200,7 +195,7 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
             .remove::<crate::host::chat::ChatSynced>();
     } else {
         commands.spawn((
-            vmux_layout::Browser::new(webview_mt, &url),
+            vmux_layout::Browser::new(&url),
             crate::host::chat::AgentChatView,
             ChildOf(stack),
             anchor,
@@ -363,27 +358,22 @@ mod tests {
     pub(crate) fn acp_attach_gives_profile_agent_and_icon() {
         use bevy::ecs::system::RunSystemOnce;
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>();
+        app.add_plugins(MinimalPlugins);
         let stack = app.world_mut().spawn_empty().id();
 
         app.world_mut()
-            .run_system_once(
-                move |mut commands: Commands,
-                      mut mt: ResMut<Assets<WebviewExtendStandardMaterial>>| {
-                    attach_acp_agent_to_stack(
-                        stack,
-                        "mistral-vibe",
-                        "Mistral Vibe",
-                        "sid-1",
-                        std::path::Path::new("/tmp"),
-                        Some("https://cdn.example/vibe.svg"),
-                        None,
-                        &mut commands,
-                        &mut mt,
-                    );
-                },
-            )
+            .run_system_once(move |mut commands: Commands| {
+                attach_acp_agent_to_stack(
+                    stack,
+                    "mistral-vibe",
+                    "Mistral Vibe",
+                    "sid-1",
+                    std::path::Path::new("/tmp"),
+                    Some("https://cdn.example/vibe.svg"),
+                    None,
+                    &mut commands,
+                );
+            })
             .unwrap();
 
         let world = app.world();

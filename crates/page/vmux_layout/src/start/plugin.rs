@@ -2,8 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
-    WebviewExtendStandardMaterial, WebviewSource,
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget, WebviewSource,
 };
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
@@ -472,7 +471,6 @@ fn maintain_warm_start_pool(
     vmux_window: Query<Entity, With<VmuxWindow>>,
     spares: Query<(), With<WarmStartSpare>>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     let Ok(window) = vmux_window.single() else {
         return;
@@ -495,7 +493,7 @@ fn maintain_warm_start_pool(
     };
     for _ in spares.iter().count()..WARM_START_POOL_SIZE {
         commands.spawn((
-            Browser::new_with_title(&mut webview_mt, START_PAGE_URL, "Start"),
+            Browser::new_with_title(START_PAGE_URL, "Start"),
             WarmStartSpare,
             ChildOf(node),
         ));
@@ -877,7 +875,6 @@ mod tests {
     fn start_pool_fills_one_ready_slot() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_systems(Update, maintain_warm_start_pool);
         app.world_mut().spawn(VmuxWindow);
         app.update();

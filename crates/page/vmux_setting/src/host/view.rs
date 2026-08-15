@@ -58,7 +58,7 @@ impl Plugin for SettingsViewPlugin {
 pub struct Settings;
 
 impl Settings {
-    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
+    pub fn new() -> impl Bundle {
         (
             (
                 Self,
@@ -73,7 +73,6 @@ impl Settings {
                 },
             ),
             (
-                WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -97,11 +96,8 @@ impl WarmPage for Settings {
     const URL: &'static str = SETTINGS_PAGE_URL;
     const TITLE: &'static str = "Settings";
 
-    fn spawn(
-        commands: &mut Commands,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> Entity {
-        commands.spawn(Settings::new(webview_mt)).id()
+    fn spawn(commands: &mut Commands) -> Entity {
+        commands.spawn(Settings::new()).id()
     }
 }
 
@@ -921,7 +917,6 @@ mod page_open_tests {
     fn settings_page_open_spawns_marker_and_handles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         let claimed = app
@@ -953,7 +948,6 @@ mod page_open_tests {
     fn settings_page_open_dedupes_per_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
             .add_plugins(WarmPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         for _ in 0..2 {

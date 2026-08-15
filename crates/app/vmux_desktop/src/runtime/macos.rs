@@ -9,10 +9,6 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::WebviewWindowed;
-use vmux_layout::{cef::LayoutCef, window::Modal};
-
-use super::RenderFrameDemand;
 
 /// The macOS half of [`super::RuntimePlugin`]: installs the AppKit monitors winit does not own, and gates rendering on demand.
 pub(super) struct RuntimePlatformPlugin;
@@ -21,7 +17,6 @@ impl Plugin for RuntimePlatformPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, activate_app_during_boot)
             .add_systems(Update, grab_key_window_on_pane_hover)
-            .add_systems(Last, sync_render_frame_demand)
             .add_systems(
                 Startup,
                 (
@@ -35,7 +30,7 @@ impl Plugin for RuntimePlatformPlugin {
 
 use super::native::{
     NativeWindowFrame, NativeWindowResizeDrag, native_resize_edges, native_scroll_should_wake,
-    render_frame_should_run, resized_native_window_frame, windowed_pointer_inside_after_event,
+    resized_native_window_frame, windowed_pointer_inside_after_event,
 };
 
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
@@ -685,25 +680,6 @@ fn native_pointer_button(
         NSEventType::OtherMouseDown | NSEventType::OtherMouseUp => Some(PointerButton::Middle),
         _ => None,
     }
-}
-
-fn sync_render_frame_demand(
-    pages: Query<
-        &Transform,
-        (
-            With<vmux_layout::Browser>,
-            With<WebviewWindowed>,
-            Without<LayoutCef>,
-            Without<Modal>,
-        ),
-    >,
-    mut demand: ResMut<RenderFrameDemand>,
-) {
-    let visible_windowed_page = pages.iter().any(|transform| transform.scale.x > 1.0e-3);
-    demand.0 = render_frame_should_run(
-        IN_LIVE_RESIZE.load(Ordering::Relaxed),
-        visible_windowed_page,
-    );
 }
 
 /// Whether an `NSWindow` live-resize drag is in flight.

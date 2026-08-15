@@ -15,7 +15,7 @@ fn is_debug_url(url: &str) -> bool {
 pub struct DebugView;
 
 impl DebugView {
-    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
+    pub fn new() -> impl Bundle {
         (
             (
                 Self,
@@ -30,7 +30,6 @@ impl DebugView {
                 },
             ),
             (
-                WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -55,7 +54,6 @@ pub fn handle_debug_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
     children_q: Query<&Children>,
     mut commands: Commands,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
 ) {
     for (entity, task) in &tasks {
         if !is_debug_url(&task.url) {
@@ -72,7 +70,7 @@ pub fn handle_debug_page_open(
             icon: vmux_core::PageIcon::None,
             bg_color: None,
         });
-        commands.spawn((DebugView::new(&mut webview_mt), ChildOf(task.stack)));
+        commands.spawn((DebugView::new(), ChildOf(task.stack)));
         commands.entity(entity).insert(PageOpenHandled);
     }
 }

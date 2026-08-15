@@ -58,7 +58,7 @@ impl Plugin for ProcessesMonitorPlugin {
 pub struct ProcessesMonitor;
 
 impl ProcessesMonitor {
-    pub fn new(webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>) -> impl Bundle {
+    pub fn new() -> impl Bundle {
         (
             (
                 Self,
@@ -73,7 +73,6 @@ impl ProcessesMonitor {
                 },
             ),
             (
-                WebviewMaterialHandle(webview_mt.add(WebviewExtendStandardMaterial::default())),
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
                 GlobalTransform::default(),
@@ -97,11 +96,8 @@ impl WarmPage for ProcessesMonitor {
     const URL: &'static str = SERVICES_PAGE_URL;
     const TITLE: &'static str = "Background Services";
 
-    fn spawn(
-        commands: &mut Commands,
-        webview_mt: &mut ResMut<Assets<WebviewExtendStandardMaterial>>,
-    ) -> Entity {
-        commands.spawn(ProcessesMonitor::new(webview_mt)).id()
+    fn spawn(commands: &mut Commands) -> Entity {
+        commands.spawn(ProcessesMonitor::new()).id()
     }
 }
 
@@ -312,7 +308,6 @@ fn on_process_navigate(
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut webview_mt: ResMut<Assets<WebviewExtendStandardMaterial>>,
     mut commands: Commands,
 ) {
     let pid = &trigger.event().payload.process_id;
@@ -349,10 +344,7 @@ fn on_process_navigate(
     let tab = commands
         .spawn((stack_bundle(), LastActivatedAt::now(), ChildOf(pane)))
         .id();
-    commands.spawn((
-        reattach_terminal_bundle(&mut webview_mt, process_id),
-        ChildOf(tab),
-    ));
+    commands.spawn((reattach_terminal_bundle(process_id), ChildOf(tab)));
 }
 
 /// Kill a single service-managed process and close the associated terminal tab if any.

@@ -6,7 +6,6 @@
 
 use bevy::{
     ecs::relationship::Relationship,
-    material::AlphaMode,
     prelude::*,
     ui::{UiGlobalTransform, UiSystems},
     window::{PrimaryWindow, WindowResized},
@@ -53,8 +52,6 @@ impl Plugin for PresentPlugin {
             PostUpdate,
             (
                 sync_keyboard_target,
-                sync_windowed_content_mesh_materials,
-                sync_modal_mesh_visibility,
                 sync_children_to_ui,
                 sync_windowed_layout,
                 sync_windowed_frames,
@@ -62,13 +59,11 @@ impl Plugin for PresentPlugin {
                 flush_native_command_bar_pointer_events,
                 apply_repaint_nudge,
                 sync_cef_webview_resize_after_ui,
-                sync_webview_pane_corner_clip,
                 sync_osr_webview_focus,
                 flush_pending_osr_textures,
             )
                 .chain()
-                .after(UiSystems::Layout)
-                .before(render_standard_materials),
+                .after(UiSystems::Layout),
         );
     }
 }
@@ -323,66 +318,6 @@ fn sync_children_to_ui(
         let dip = (size_px * computed.inverse_scale_factor).max(Vec2::splat(1.0));
         if webview_size.0 != dip {
             webview_size.0 = dip;
-        }
-    }
-}
-
-fn set_windowed_content_mesh_material(
-    material: &mut WebviewExtendStandardMaterial,
-    windowed: bool,
-) {
-    let alpha = if windowed { 0.0 } else { 1.0 };
-    material.base.base_color = material.base.base_color.with_alpha(alpha);
-    material.base.alpha_mode =
-        webview_content_alpha_mode(alpha, material.extension.pane_corner_clip.x);
-}
-
-fn webview_content_alpha_mode(alpha: f32, radius: f32) -> AlphaMode {
-    if alpha < 1.0 {
-        AlphaMode::Blend
-    } else if radius > 0.0 {
-        AlphaMode::AlphaToCoverage
-    } else {
-        AlphaMode::Opaque
-    }
-}
-
-fn sync_windowed_content_mesh_materials(
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    browsers: Query<
-        (
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-            Has<WebviewWindowed>,
-        ),
-        (
-            With<Browser>,
-            Without<LayoutCef>,
-            Without<Modal>,
-            Without<Header>,
-            Without<SideSheet>,
-        ),
-    >,
-) {
-    for (handle, windowed) in &browsers {
-        if let Some(mut material) = materials.get_mut(handle.id()) {
-            set_windowed_content_mesh_material(&mut material, windowed);
-        }
-    }
-}
-
-fn sync_modal_mesh_visibility(
-    modal_q: Query<
-        (
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-            Has<WebviewWindowed>,
-        ),
-        With<Modal>,
-    >,
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-) {
-    for (handle, windowed) in &modal_q {
-        if let Some(mut material) = materials.get_mut(handle.id()) {
-            set_windowed_content_mesh_material(&mut material, windowed);
         }
     }
 }
@@ -1092,103 +1027,6 @@ fn windowed_reconcile_should_wake(
     pushed_any || (awaiting_create && within_startup_grace)
 }
 
-/// Walks up from a browser entity to find its enclosing Tab, then counts
-/// leaf panes under that tab. Returns None if the parent chain doesn't
-/// reach a Tab.
-fn pane_count_for_browser(
-    browser_e: Entity,
-    child_of_q: &Query<&ChildOf>,
-    tab_q: &Query<(), With<Tab>>,
-    _pane_q: &Query<(), With<Pane>>,
-    all_children: &Query<&Children>,
-    leaf_panes: &Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) -> Option<usize> {
-    let mut cur = browser_e;
-    let tab = loop {
-        let parent = child_of_q.get(cur).ok()?.get();
-        if tab_q.get(parent).is_ok() {
-            break parent;
-        }
-        cur = parent;
-    };
-    let mut leaves = Vec::new();
-    collect_leaf_panes(tab, all_children, leaf_panes, &mut leaves);
-    Some(leaves.len())
-}
-
-fn sync_webview_pane_corner_clip(
-    settings: Res<AppSettings>,
-    layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
-    mut materials: ResMut<Assets<WebviewExtendStandardMaterial>>,
-    tabs: Query<
-        (
-            Entity,
-            &WebviewSize,
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-        ),
-        (With<Browser>, Without<LayoutCef>, Without<Modal>),
-    >,
-    status: Query<
-        (
-            &WebviewSize,
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-        ),
-        With<Header>,
-    >,
-    side_sheet: Query<
-        (
-            &WebviewSize,
-            &WebviewMaterialHandle<WebviewExtendStandardMaterial>,
-        ),
-        With<SideSheet>,
-    >,
-    child_of_q: Query<&ChildOf>,
-    tab_q: Query<(), With<Tab>>,
-    pane_q: Query<(), With<Pane>>,
-    all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-) {
-    let r = settings.layout.radius;
-    for (browser_e, size, mat_h) in &tabs {
-        let w = size.0.x.max(1.0e-6);
-        let h = size.0.y.max(1.0e-6);
-        let pane_count = pane_count_for_browser(
-            browser_e,
-            &child_of_q,
-            &tab_q,
-            &pane_q,
-            &all_children,
-            &leaf_panes,
-        )
-        .unwrap_or(1);
-        let corner_mode = if layout_hidden.0 || pane_count > 1 {
-            0.0
-        } else {
-            1.0
-        };
-        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, corner_mode);
-            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
-        }
-    }
-    for (size, mat_h) in &status {
-        let w = size.0.x.max(1.0e-6);
-        let h = size.0.y.max(1.0e-6);
-        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
-            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
-        }
-    }
-    for (size, mat_h) in &side_sheet {
-        let w = size.0.x.max(1.0e-6);
-        let h = size.0.y.max(1.0e-6);
-        if let Some(mut mat) = materials.get_mut(mat_h.id()) {
-            mat.extension.pane_corner_clip = Vec4::new(r, w, h, 0.0);
-            mat.base.alpha_mode = webview_content_alpha_mode(mat.base.base_color.alpha(), r);
-        }
-    }
-}
-
 fn sync_osr_webview_focus(
     browsers: NonSend<Browsers>,
     webviews: Query<
@@ -1788,55 +1626,6 @@ mod tests {
             windowed_pages_to_hide(&[page], &[], &[page], &[page]),
             vec![page]
         );
-    }
-
-    #[test]
-    fn windowed_content_mesh_material_is_hidden() {
-        let mut material = WebviewExtendStandardMaterial::default();
-
-        set_windowed_content_mesh_material(&mut material, true);
-
-        assert_eq!(material.base.base_color.alpha(), 0.0);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
-
-        set_windowed_content_mesh_material(&mut material, false);
-
-        assert_eq!(material.base.base_color.alpha(), 1.0);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Opaque);
-    }
-
-    #[test]
-    fn layout_cef_shell_keeps_blend_material() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .insert_resource(test_app_settings_with_radius(12.0))
-            .insert_resource(vmux_layout::toggle::LayoutHidden(false))
-            .init_resource::<Assets<WebviewExtendStandardMaterial>>()
-            .add_systems(Update, sync_webview_pane_corner_clip);
-
-        let mut material = WebviewExtendStandardMaterial::default();
-        material.base.alpha_mode = AlphaMode::Blend;
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<WebviewExtendStandardMaterial>>()
-            .add(material);
-        app.world_mut().spawn((
-            Browser,
-            LayoutCef,
-            WebviewSize(Vec2::new(320.0, 240.0)),
-            WebviewMaterialHandle(handle.clone()),
-        ));
-
-        app.update();
-
-        let material = app
-            .world()
-            .resource::<Assets<WebviewExtendStandardMaterial>>()
-            .get(&handle)
-            .expect("webview material");
-
-        assert_eq!(material.extension.pane_corner_clip, Vec4::ZERO);
-        assert_eq!(material.base.alpha_mode, AlphaMode::Blend);
     }
 
     #[test]

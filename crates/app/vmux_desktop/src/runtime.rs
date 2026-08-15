@@ -14,9 +14,7 @@ use other as platform;
 pub(crate) use macos::ensure_native_window_active;
 
 use bevy::ecs::message::Messages;
-use bevy::ecs::schedule::ScheduleLabel;
 use bevy::prelude::*;
-use bevy::render::{Render, RenderApp, RenderScheduleOrder};
 use bevy::window::{Monitor, Window};
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_cef_core::prelude::{
@@ -35,7 +33,6 @@ impl Plugin for RuntimePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(platform::RuntimePlatformPlugin)
             .add_message::<LifecycleEvent>()
-            .init_resource::<RenderFrameDemand>()
             .add_systems(Update, handle_lifecycle_events)
             .add_systems(Update, sync_winit_power_mode.after(handle_lifecycle_events))
             .add_systems(Update, keep_awake_while_revealing)
@@ -44,55 +41,12 @@ impl Plugin for RuntimePlugin {
                 keep_awake_while_command_bar_opening.after(vmux_command::ReadAppCommands),
             );
     }
-
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        let Some(mut extract) = render_app.take_extract() else {
-            return;
-        };
-        render_app
-            .init_resource::<RenderFrameDemand>()
-            .add_schedule(Schedule::new(DemandedRender))
-            .add_systems(DemandedRender, run_demanded_render);
-        {
-            let mut order = render_app.world_mut().resource_mut::<RenderScheduleOrder>();
-            for label in &mut order.labels {
-                if (**label).eq(&Render) {
-                    *label = DemandedRender.intern();
-                }
-            }
-        }
-        render_app.set_extract(move |main_world, render_world| {
-            let demand = main_world
-                .get_resource::<RenderFrameDemand>()
-                .copied()
-                .unwrap_or_default();
-            render_world.insert_resource(demand);
-            if demand.0 {
-                extract(main_world, render_world);
-            }
-        });
-    }
 }
 
 const FOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const UNFOCUSED_FRAME_INTERVAL: Duration = Duration::from_secs(1);
 const HIDDEN_FRAME_INTERVAL: Duration = Duration::from_secs(60);
 const BACKGROUND_CEF_WAKE_INTERVAL: Duration = Duration::from_secs(1);
-
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-struct RenderFrameDemand(bool);
-
-impl Default for RenderFrameDemand {
-    fn default() -> Self {
-        Self(true)
-    }
-}
-
-#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
-struct DemandedRender;
 
 #[derive(Message, Debug, Clone, Copy)]
 pub enum LifecycleEvent {
@@ -168,12 +122,6 @@ fn sync_winit_power_mode(
             any_focused,
             foreground_cef_wake_interval(monitors.iter().map(|m| m.refresh_rate_millihertz)),
         ));
-    }
-}
-
-fn run_demanded_render(world: &mut World) {
-    if world.resource::<RenderFrameDemand>().0 {
-        world.run_schedule(Render);
     }
 }
 
@@ -287,35 +235,6 @@ fn hide_all_osr_webviews(world: &mut World) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn render_schedule_runs_only_when_demanded() {
-        #[derive(Resource, Default)]
-        struct RenderRuns(usize);
-
-        fn count_render(mut runs: ResMut<RenderRuns>) {
-            runs.0 += 1;
-        }
-
-        let mut world = World::new();
-        world.insert_resource(RenderFrameDemand(false));
-        world.init_resource::<RenderRuns>();
-
-        let mut render = Schedule::new(Render);
-        render.add_systems(count_render);
-        world.add_schedule(render);
-
-        let mut demanded = Schedule::new(DemandedRender);
-        demanded.add_systems(run_demanded_render);
-        world.add_schedule(demanded);
-
-        world.run_schedule(DemandedRender);
-        assert_eq!(world.resource::<RenderRuns>().0, 0);
-
-        world.resource_mut::<RenderFrameDemand>().0 = true;
-        world.run_schedule(DemandedRender);
-        assert_eq!(world.resource::<RenderRuns>().0, 1);
-    }
 
     #[test]
     fn command_bar_wake_covers_defer_and_active_reveal() {
