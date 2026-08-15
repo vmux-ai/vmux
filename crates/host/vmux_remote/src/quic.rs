@@ -256,12 +256,16 @@ pub enum PeerRole {
     Client,
 }
 
-/// First frame on a connection to the relay.
+/// What a peer says first on a connection to the relay, whichever end it is.
+///
+/// Named for the speaker, like [`ClientHello`] and [`ServerHello`] beside it and like the TLS
+/// messages those borrow from. The relay's own word is [`RelayAccepted`]; nothing the relay sends
+/// is a hello.
 ///
 /// Deliberately the only thing the relay parses. Everything after it is opaque bytes copied
 /// between two peers — the relay routes on `device_id` and never learns what it moved.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct RelayHello {
+pub struct PeerHello {
     /// The desktop being named, whichever end is speaking: its own id from a
     /// [`PeerRole::Desktop`], the id of the desktop it wants from a [`PeerRole::Client`].
     ///
@@ -272,7 +276,7 @@ pub struct RelayHello {
     pub token: String,
 }
 
-/// The relay's answer to a hello it admitted.
+/// The relay's answer to a [`PeerHello`] it admitted.
 ///
 /// Carries nothing, and exists for the ordering alone: a desktop must not offer a pairing link
 /// for a registration the relay has not taken, and a phone must not tunnel into a pairing it has

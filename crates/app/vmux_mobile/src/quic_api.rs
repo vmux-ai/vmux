@@ -19,7 +19,7 @@ use vmux_remote::PeerRole;
 use vmux_remote::quic::endpoint::Trust;
 use vmux_remote::quic::tunnel::{DESKTOP_TAG, TunnelSocket, relayed_peer};
 use vmux_remote::quic::{
-    ClientHello, CloseCode, RelayAccepted, RelayHello, ServerHello, StreamKind, decode_hello,
+    ClientHello, CloseCode, PeerHello, RelayAccepted, ServerHello, StreamKind, decode_hello,
     encode_hello,
 };
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
@@ -303,7 +303,7 @@ impl QuicApi {
             .open_bi()
             .await
             .map_err(|error| QuicError::Transport(error.to_string()))?;
-        let hello = RelayHello {
+        let hello = PeerHello {
             device_id: self.endpoint.desktop.clone(),
             role: PeerRole::Client,
             token: self.endpoint.token.clone(),

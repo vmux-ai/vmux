@@ -109,7 +109,7 @@ named that way precisely because it resolves on its own, unlike `NotFound`.
 | page ↔ local client | `window.cef` binEmit/binListen | rkyv; page→host adds a `vmux-bin-ipc-v1` envelope, host→page bare |
 | local client ↔ server | unix socket | `u32`-length-prefixed rkyv frames, 64 MiB cap |
 | remote client ↔ server | QUIC, one bidirectional stream per request | rkyv `SharedMessage` / `SharedResponse`, after a JSON hello |
-| server ↔ relay | QUIC control connection | JSON `RelayHello` / `RelayAccepted`, then opaque DATAGRAM frames |
+| server ↔ relay | QUIC control connection | JSON `PeerHello` / `RelayAccepted`, then opaque DATAGRAM frames |
 
 The last row is the one worth reading twice. Only the hello is the relay's business; everything
 after it is a remote client's own QUIC session in transit.
