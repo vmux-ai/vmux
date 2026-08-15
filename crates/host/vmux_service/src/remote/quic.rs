@@ -271,25 +271,38 @@ async fn dispatch_control(
     let Ok(frame) = CONTROL.accept(&mut recv).await else {
         return;
     };
+    // The type decides before the body is touched. Handing another leg's payload to a decoder and
+    // rejecting it afterwards would leave the type field decorative — the decoder would already
+    // have run on bytes this handler was never addressed by.
+    match frame.message_type {
+        MessageType::CONTROL_REQUEST | MessageType::SESSION_EVENTS => {}
+        unserved => {
+            tracing::debug!(
+                ?unserved,
+                "remote quic: stream refused, unserved message type"
+            );
+            return;
+        }
+    }
+
     // Owned by the frame, so rkyv sees an aligned buffer; the old shape sliced past a leading
     // byte, which is not aligned.
     let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body) else {
         return;
     };
 
-    match frame.message_type {
-        MessageType::CONTROL_REQUEST => {
-            let response = dispatch::dispatch(&state, request).await;
-            let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
-                return;
-            };
-            let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
-            if CONTROL.open(&mut send, &frame).await.is_ok() {
-                let _ = send.finish();
-            }
-        }
-        MessageType::SESSION_EVENTS => stream_session_events(&state, send, request).await,
-        _ => {}
+    if frame.message_type == MessageType::SESSION_EVENTS {
+        stream_session_events(&state, send, request).await;
+        return;
+    }
+
+    let response = dispatch::dispatch(&state, request).await;
+    let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
+        return;
+    };
+    let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
+    if CONTROL.open(&mut send, &frame).await.is_ok() {
+        let _ = send.finish();
     }
 }
 

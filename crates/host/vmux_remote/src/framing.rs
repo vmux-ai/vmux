@@ -51,14 +51,47 @@ impl LengthPrefixed {
         R: AsyncReadExt + Unpin,
     {
         let mut length = [0u8; 4];
-        match reader.read_exact(&mut length).await {
-            Ok(_) => {}
-            Err(error) if Self::peer_gone(&error) => return Ok(None),
-            Err(error) => return Err(error),
+        if !Self::fill_or_end(reader, &mut length).await? {
+            return Ok(None);
         }
         let mut body = vec![0u8; self.length_of(length)?];
         reader.read_exact(&mut body).await?;
         Ok(Some(body))
+    }
+
+    /// Fill `buffer`, saying whether the stream ended instead.
+    ///
+    /// `false` means nothing at all was there, which is how a stream ordinarily ends. Anything
+    /// short of a full buffer is an error, and telling those apart is the entire job: `read_exact`
+    /// reports an empty prefix and a half-written one identically, so using it directly here is
+    /// how a peer that vanished mid-prefix comes back as a clean end of stream.
+    async fn fill_or_end<R>(reader: &mut R, buffer: &mut [u8]) -> std::io::Result<bool>
+    where
+        R: AsyncReadExt + Unpin,
+    {
+        match reader.read(&mut buffer[..1]).await {
+            Ok(0) => return Ok(false),
+            Ok(_) => {}
+            Err(error) if Self::peer_gone(&error) => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        reader.read_exact(&mut buffer[1..]).await?;
+        Ok(true)
+    }
+
+    /// The blocking twin of [`LengthPrefixed::fill_or_end`].
+    fn fill_or_end_blocking<R: std::io::Read>(
+        reader: &mut R,
+        buffer: &mut [u8],
+    ) -> std::io::Result<bool> {
+        match reader.read(&mut buffer[..1]) {
+            Ok(0) => return Ok(false),
+            Ok(_) => {}
+            Err(error) if Self::peer_gone(&error) => return Ok(false),
+            Err(error) => return Err(error),
+        }
+        reader.read_exact(&mut buffer[1..])?;
+        Ok(true)
     }
 
     pub fn write_blocking<W: std::io::Write>(
@@ -78,10 +111,8 @@ impl LengthPrefixed {
         reader: &mut R,
     ) -> std::io::Result<Option<Vec<u8>>> {
         let mut length = [0u8; 4];
-        match reader.read_exact(&mut length) {
-            Ok(_) => {}
-            Err(error) if Self::peer_gone(&error) => return Ok(None),
-            Err(error) => return Err(error),
+        if !Self::fill_or_end_blocking(reader, &mut length)? {
+            return Ok(None);
         }
         let mut body = vec![0u8; self.length_of(length)?];
         reader.read_exact(&mut body)?;
@@ -253,10 +284,8 @@ impl FrameStream {
         R: AsyncReadExt + Unpin,
     {
         let mut message_type = [0u8; 2];
-        match reader.read_exact(&mut message_type).await {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
-            Err(error) => return Err(error.into()),
+        if !LengthPrefixed::fill_or_end(reader, &mut message_type).await? {
+            return Ok(None);
         }
         let Some(body) = self.codec.read(reader).await? else {
             return Err(FrameError::Truncated);
@@ -337,9 +366,36 @@ mod tests {
              got {body_cut:?} and {body_absent:?}"
         );
         assert!(
-            matches!(prefix_cut, Ok(None)),
-            "a prefix cut mid-way is a peer that stopped before promising anything, got \
-             {prefix_cut:?}"
+            prefix_cut.is_err(),
+            "a length prefix cut mid-way lost bytes too — `read_exact` reports an empty prefix \
+             and a half-written one alike, and folding them together is how a peer that vanished \
+             comes back as a clean end. Got {prefix_cut:?}"
+        );
+    }
+
+    /// The same distinction one layer up. A subscription that dies after one byte of a message
+    /// type has lost data; reading that as the desktop finishing is what stops the client
+    /// reconnecting.
+    #[tokio::test]
+    async fn a_message_type_cut_in_half_is_not_a_stream_that_ended() {
+        let stream = FrameStream::new(64 * 1024);
+        let mut wire = Vec::new();
+        stream
+            .open(
+                &mut wire,
+                &Frame::new(MessageType::SESSION_EVENT, b"first".to_vec()),
+            )
+            .await
+            .expect("open");
+        wire.push(0x05);
+
+        let mut reader = wire.as_slice();
+        stream.accept(&mut reader).await.expect("first frame");
+        let after = stream.next(&mut reader).await;
+
+        assert!(
+            matches!(after, Err(FrameError::Truncated)),
+            "half a message type is a truncated frame, not the end of the stream, got {after:?}"
         );
     }
 
