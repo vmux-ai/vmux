@@ -54,6 +54,7 @@ impl Plugin for LayoutViewPlugin {
             Update,
             (
                 resize_layout_view,
+                keep_layout_view_hit_testable,
                 sync_layout_view_color_scheme.run_if(resource_changed::<AppSettings>),
             )
                 .after(spawn_layout_view),
@@ -179,6 +180,7 @@ fn spawn_layout_view(world: &mut World) {
         None => report_waiting("primary window has no winit window yet"),
         Some(Ok(webview)) => {
             raise_above_window_layers(&webview);
+            raise_above_window_views(&webview);
             world
                 .non_send_mut::<Browsers>()
                 .set_externally_hosted(layout);
@@ -192,6 +194,15 @@ fn spawn_layout_view(world: &mut World) {
 }
 
 #[cfg(target_os = "macos")]
+/// Re-asserts the chrome's place in the subview order, which new panes keep taking.
+#[cfg(target_os = "macos")]
+fn keep_layout_view_hit_testable(view: Option<NonSend<LayoutView>>) {
+    let Some(view) = view else {
+        return;
+    };
+    raise_above_window_views(&view.webview);
+}
+
 fn resize_layout_view(
     view: Option<NonSend<LayoutView>>,
     window: Query<&Window, (With<PrimaryWindow>, Changed<Window>)>,
@@ -447,6 +458,34 @@ const WRY_HOST_SHIM: &str = r#"
 /// `sync_layout_overlay` still parents a `CALayer` at `zPosition` 100 and subview order cannot
 /// outrank a `zPosition` — only another one can.
 #[cfg(target_os = "macos")]
+/// Keep the chrome frontmost for hit-testing, not only for compositing.
+///
+/// [`raise_above_window_layers`] orders the *layer*, which is what makes the chrome paint over the
+/// panes. AppKit hit-tests the *subview array* and ignores layer z entirely, so on its own that
+/// leaves the chrome drawn on top with every click landing on the pane behind it. Panes are created
+/// after this view and each one appends a subview, so the order has to be re-asserted rather than
+/// set once.
+fn raise_above_window_views(webview: &wry::WebView) {
+    use objc2_app_kit::{NSView, NSWindowOrderingMode};
+    use wry::WebViewExtMacOS;
+
+    let wk = webview.webview();
+    let view: &NSView = &wk;
+    // SAFETY: the view is alive for as long as the `LayoutView` holding it, and this runs on the
+    // main thread with the window's hierarchy quiescent.
+    let Some(parent) = (unsafe { view.superview() }) else {
+        return;
+    };
+    let subviews = parent.subviews();
+    let already_front = subviews
+        .lastObject()
+        .is_some_and(|last| std::ptr::eq(&*last, view));
+    if already_front {
+        return;
+    }
+    parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+}
+
 fn raise_above_window_layers(webview: &wry::WebView) {
     use objc2_app_kit::NSView;
     use wry::WebViewExtMacOS;
