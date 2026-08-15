@@ -625,24 +625,37 @@ fn respond_terminal_spawn(
             .spawn(new_terminal_bundle_with_cwd(&settings, req.cwd.as_deref()))
             .id();
         commands.entity(term_e).insert(CefKeyboardTarget);
-        let stack_e = match req.target {
+        // `requested_pane` is carried rather than looked up: the `ChildOf` below is a queued
+        // command, so `child_of_q` cannot see the new stack's parent in this same run and the
+        // pane's activation time would never be bumped.
+        let (stack_e, requested_pane) = match req.target {
             TerminalSpawnTarget::Detached => continue,
-            TerminalSpawnTarget::Stack(stack) => stack,
-            TerminalSpawnTarget::NewStackInPane(pane) => commands
-                .spawn((
-                    vmux_layout::stack::stack_bundle(),
-                    LastActivatedAt::now(),
-                    ChildOf(pane),
-                ))
-                .id(),
+            TerminalSpawnTarget::Stack(stack) => (stack, None),
+            TerminalSpawnTarget::NewStackInPane(pane) => (
+                commands
+                    .spawn((
+                        vmux_layout::stack::stack_bundle(),
+                        LastActivatedAt::now(),
+                        ChildOf(pane),
+                    ))
+                    .id(),
+                Some(pane),
+            ),
         };
         if let Some(metadata) = req.metadata.clone() {
             commands.entity(stack_e).insert(metadata);
         }
         commands.entity(term_e).insert(ChildOf(stack_e));
         commands.entity(stack_e).insert(LastActivatedAt::now());
-        if let Ok(parent) = child_of_q.get(stack_e) {
-            commands.entity(parent.0).insert(LastActivatedAt::now());
+        match requested_pane {
+            Some(pane) => {
+                commands.entity(pane).insert(LastActivatedAt::now());
+            }
+            None => {
+                if let Ok(parent) = child_of_q.get(stack_e) {
+                    commands.entity(parent.0).insert(LastActivatedAt::now());
+                }
+            }
         }
     }
 }

@@ -23,6 +23,7 @@ pub mod page_open;
 pub mod profile;
 pub mod team;
 pub mod terminal;
+pub mod workspace;
 
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
@@ -30,7 +31,8 @@ pub use archive::{
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 pub use launcher::{
     ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,
-    PendingLaunch, PendingStackAbandoned,
+    PendingLaunch, PendingStackAbandoned, RendersLauncherPanel, RestoreKeyboardToStack,
+    StackInPaneChosen,
 };
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
 pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
@@ -38,3 +40,4 @@ pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask, PendingPrompt, PendingPromptAttachments,
 };
+pub use workspace::{ComputeFocusSet, StackCommandSet, TabCommandSet};

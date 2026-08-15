@@ -15,6 +15,7 @@ use std::time::Instant;
 use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_core::Order;
+pub use vmux_core::workspace::TabCommandSet;
 use vmux_history::LastActivatedAt;
 
 impl Plugin for TabPlugin {
@@ -51,9 +52,6 @@ impl Plugin for TabPlugin {
 }
 
 pub struct TabPlugin;
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TabCommandSet;
 
 #[derive(Message, Clone, Copy)]
 pub struct CloseTabRequest {
@@ -156,7 +154,7 @@ fn handle_tab_commands(
     primary_window: Single<Entity, With<PrimaryWindow>>,
     child_of_q: Query<&ChildOf>,
     all_children: Query<&Children>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     effective_startup_dir: Option<Res<crate::settings::EffectiveStartupDir>>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
     mut close_requests: MessageWriter<CloseTabRequest>,
@@ -797,7 +795,7 @@ mod tests {
     #[test]
     fn open_in_new_tab_none_url_falls_back_to_startup() {
         let mut app = build_app();
-        app.insert_resource(crate::settings::EffectiveStartupUrl(
+        app.insert_resource(vmux_core::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
         build_main_and_tab(&mut app);

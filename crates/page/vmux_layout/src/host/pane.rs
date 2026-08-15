@@ -559,7 +559,7 @@ pub fn first_stack_in_pane(
 
 #[derive(bevy::ecs::system::SystemParam)]
 struct PaneStartupContext<'w> {
-    effective: Option<Res<'w, crate::settings::EffectiveStartupUrl>>,
+    effective: Option<Res<'w, vmux_core::EffectiveStartupUrl>>,
     requests: MessageWriter<'w, PageOpenRequest>,
     new_stack_ctx: ResMut<'w, PendingLaunch>,
 }
@@ -1803,7 +1803,7 @@ fn handle_open_in_pane(
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
     tab_filter: Query<Entity, With<Stack>>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut commands: Commands,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut new_stack_ctx: ResMut<PendingLaunch>,

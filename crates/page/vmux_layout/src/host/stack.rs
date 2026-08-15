@@ -15,6 +15,7 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, ReadAppCommands, ServiceCommand,
     StackCommand,
 };
+pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
 use vmux_history::LastActivatedAt;
 
@@ -57,11 +58,6 @@ pub struct FocusedStack {
     pub stack: Option<Entity>,
 }
 
-/// System set for `compute_focused_stack`. Systems that read `Res<FocusedStack>`
-/// should be ordered `.after(ComputeFocusSet)` in `Update`.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ComputeFocusSet;
-
 /// Marker: tab is waiting for close confirmation dialog.
 #[derive(Component)]
 pub struct PendingStackClose;
@@ -76,10 +72,6 @@ pub struct CloseConfirmed;
 pub struct CloseStackRequest {
     pub stack: Entity,
 }
-
-/// System set for `handle_stack_commands`.
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StackCommandSet;
 
 fn handle_close_stack_requests(
     mut reader: MessageReader<CloseStackRequest>,
@@ -260,7 +252,7 @@ fn handle_stack_commands(
     stack_q: Query<Entity, With<Stack>>,
     child_of_q: Query<&ChildOf>,
     split_dir_q: Query<&PaneSplit>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
 
     mut new_stack_ctx: ResMut<PendingLaunch>,
     mut close_tab_requests: MessageWriter<CloseTabRequest>,
@@ -651,7 +643,7 @@ pub fn open_startup_url_if_no_stacks(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     closing_primary: Query<(), (With<PrimaryWindow>, With<ClosingWindow>)>,
-    effective_startup_url: Option<Res<crate::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     mut new_stack_ctx: ResMut<PendingLaunch>,
     mut page_open_requests: MessageWriter<PageOpenRequest>,
     mut commands: Commands,
@@ -1168,7 +1160,7 @@ mod tests {
             .init_resource::<PendingLaunch>()
             .init_resource::<PendingCursorWarp>()
             .insert_resource(test_settings())
-            .insert_resource(crate::settings::EffectiveStartupUrl(
+            .insert_resource(vmux_core::EffectiveStartupUrl(
                 "vmux://agent/vibe/".to_string(),
             ))
             .add_systems(Update, handle_stack_commands.in_set(WriteAppCommands));
@@ -1402,7 +1394,7 @@ mod tests {
     #[test]
     fn closing_last_stack_requests_tab_replacement() {
         let mut app = build_app_with_collector();
-        app.insert_resource(crate::settings::EffectiveStartupUrl(
+        app.insert_resource(vmux_core::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
         let (tab, pane, original_stack) = build_hierarchy(&mut app);
@@ -1501,7 +1493,7 @@ mod tests {
     #[test]
     fn in_new_stack_with_no_url_uses_startup_url() {
         let mut app = build_app_with_collector();
-        app.insert_resource(crate::settings::EffectiveStartupUrl(
+        app.insert_resource(vmux_core::EffectiveStartupUrl(
             "https://startup.test".into(),
         ));
         let (_tab, _pane, _stack) = build_hierarchy(&mut app);

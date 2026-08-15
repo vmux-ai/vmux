@@ -88,7 +88,7 @@ pub struct SpaceCommandRequest {
 fn update_effective_startup_url(
     settings: Option<Res<vmux_setting::AppSettings>>,
     active: Option<Res<ActiveSpace>>,
-    mut effective: ResMut<vmux_layout::settings::EffectiveStartupUrl>,
+    mut effective: ResMut<vmux_core::EffectiveStartupUrl>,
 ) {
     let (Some(settings), Some(active)) = (settings, active) else {
         return;
@@ -560,7 +560,7 @@ fn handle_open_in_new_space(
     spaces: SpaceQuery,
     main_q: Query<Entity, With<vmux_layout::window::Main>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    effective_startup_url: Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+    effective_startup_url: Option<Res<vmux_core::EffectiveStartupUrl>>,
     settings: Option<Res<vmux_setting::AppSettings>>,
     mut active_id: ResMut<vmux_layout::space::ActiveSpaceId>,
     mut layout_requests: MessageWriter<TabLayoutSpawnRequest>,
@@ -726,9 +726,7 @@ mod tests {
         app.update();
 
         assert_eq!(
-            app.world()
-                .resource::<vmux_layout::settings::EffectiveStartupUrl>()
-                .0,
+            app.world().resource::<vmux_core::EffectiveStartupUrl>().0,
             "https://work.example"
         );
     }

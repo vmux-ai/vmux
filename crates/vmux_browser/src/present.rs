@@ -4,8 +4,6 @@
 //! render: geometry, visibility, focus and the native frames of windowed webviews all read the
 //! same finished layout, so the order is load-bearing rather than incidental.
 
-use crate::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
-use crate::command_bar::panel::CommandBarPanelActive;
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
@@ -15,6 +13,8 @@ use bevy::{
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
+use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
+use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;

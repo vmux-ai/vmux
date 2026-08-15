@@ -1,6 +1,6 @@
+use crate::CommandBar;
 use bevy::prelude::*;
 use bevy_cef::prelude::CefKeyboardTarget;
-use vmux_command::CommandBar;
 use vmux_core::overlay::OverlayState;
 
 /// The bar's own view of [`OverlayState`], filtered to its entity rather than to any overlay.

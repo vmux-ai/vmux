@@ -66,6 +66,35 @@ pub struct InlineTransitionRequested {
     pub webview: Entity,
 }
 
+/// The webview that renders the launcher panel.
+///
+/// The bar is not always a page of its own: a host page can render the palette inline, and the
+/// payload has to be delivered to that page rather than to a webview of the bar's. Which page it is
+/// is the host's business, so it says so with this and the launcher looks for the capability.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct RendersLauncherPanel;
+
+/// Give the keyboard back to whatever content page is showing in `stack`.
+///
+/// Finding it means knowing which webviews are pages and which are chrome, which is workspace
+/// shape. The launcher only knows that it is done with the keyboard.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct RestoreKeyboardToStack {
+    pub stack: Entity,
+}
+
+/// Bring the nth stack of a pane to the front.
+///
+/// The launcher lists open stacks and reports which row was picked. Resolving that to an entity
+/// means walking the pane's children in order and activating the whole chain up to the space, so
+/// the workspace does it.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct StackInPaneChosen {
+    /// The pane, as `Entity::to_bits` - what the page had to send it as.
+    pub pane_bits: u64,
+    pub index: usize,
+}
+
 /// The launcher was dismissed without ever using the empty stack it was opened on.
 ///
 /// Disposing of it is the workspace's business, and more than a despawn: opening the launcher with

@@ -1,56 +1,48 @@
+use crate::CommandBar;
+use crate::build_command_bar_open_payload;
 use std::time::{Duration, Instant};
-use vmux_command::CommandBar;
-use vmux_command::build_command_bar_open_payload;
 pub(crate) use vmux_core::launcher::PendingLaunch;
 use vmux_core::launcher::{
     FocusLauncherInput, HostsLauncher, InlineTransitionRequested, PendingStackAbandoned,
+    RendersLauncherPanel, RestoreKeyboardToStack, StackInPaneChosen,
 };
-use vmux_layout::workspace_snapshot::gather_command_bar_tabs;
 
 use crate::command_bar::panel::CommandBarPanelActive;
 use crate::command_bar::state::{CommandBarStateQuery, command_bar_state};
 use crate::command_bar::work_snapshot::{update_recent_files_snapshot, update_work_dirs_snapshot};
-use bevy::{
-    ecs::message::MessageReader, ecs::relationship::Relationship, ecs::system::SystemParam,
-    picking::Pickable, prelude::*, ui::UiSystems, window::PrimaryWindow,
-};
-use bevy_cef::prelude::*;
-use vmux_command::event::{
+use crate::event::{
     COMMAND_BAR_OPEN_EVENT, CommandBarActionEvent, CommandBarReadyEvent, CommandBarRenderedEvent,
     CommandBarSizeEvent, OpenId, PATH_COMPLETE_RESPONSE, PathCompleteRequest, PathCompleteResponse,
     PathEntry, SearchEngine, SearchEngineSetting,
 };
-use vmux_command::event::{
+use crate::event::{
     CommandBarPanelCloseEvent, LAYOUT_COMMAND_BAR_CLOSE_EVENT, LAYOUT_COMMAND_BAR_OPEN_EVENT,
 };
-use vmux_command::open::OpenCommand;
-use vmux_command::open_target::OpenTarget;
-use vmux_command::snapshot::{
-    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot, Contributions,
-    WriteCommandBarSnapshots,
+use crate::open::OpenCommand;
+use crate::open_target::OpenTarget;
+use crate::snapshot::{
+    CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarTerminalsSnapshot,
+    CommandBarWorkspaceSnapshot, Contributions, WriteCommandBarSnapshots,
 };
-use vmux_command::{
+use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
+use bevy::{
+    ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*,
+    ui::UiSystems,
+};
+use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
-use vmux_core::terminal::{Terminal, TerminalSpawnRequest, TerminalSpawnTarget};
+use vmux_core::terminal::{TerminalSpawnRequest, TerminalSpawnTarget};
 use vmux_core::{
     PageMetadata, PageOpenRequest, PageOpenTarget, PendingPrompt, PendingPromptAttachments,
 };
 use vmux_history::{LastActivatedAt, now_millis};
-use vmux_layout::cef::{Browser, LayoutCef};
-use vmux_layout::{
-    Header,
-    pane::{Pane, PaneSplit},
-    side_sheet::SideSheet,
-    stack::{ActiveTabParam, Stack, focused_stack},
-    window::Main,
-};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
-use vmux_layout::settings::ResolvedLocale;
+use crate::ResolvedLocale;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -63,6 +55,8 @@ impl Plugin for CommandBarInputPlugin {
             .add_message::<PendingStackAbandoned>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<vmux_core::agent::SpawnAgentInStackRequest>()
             .add_message::<SettingsPageSpawnRequest>()
             .add_message::<SpacesPageSpawnRequest>()
@@ -91,8 +85,8 @@ impl Plugin for CommandBarInputPlugin {
                 handle_open_command_bar
                     .in_set(ReadAppCommands)
                     .after(prewarm_command_bar_modal)
-                    .after(vmux_layout::tab::TabCommandSet)
-                    .after(vmux_layout::stack::StackCommandSet),
+                    .after(vmux_core::workspace::TabCommandSet)
+                    .after(vmux_core::workspace::StackCommandSet),
             )
             .add_systems(
                 Update,
@@ -107,7 +101,7 @@ impl Plugin for CommandBarInputPlugin {
                 Update,
                 deferred_dismiss_modal
                     .after(ReadAppCommands)
-                    .before(vmux_layout::stack::ComputeFocusSet),
+                    .before(vmux_core::workspace::ComputeFocusSet),
             )
             .add_systems(
                 PostUpdate,
@@ -531,34 +525,24 @@ fn command_bar_toggle_should_open(is_open: bool, space_switch: bool) -> bool {
 
 fn handle_open_command_bar(
     mut reader: MessageReader<AppCommand>,
-    layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<LayoutCef>>,
-    active_tab_param: ActiveTabParam,
+    layout_q: Query<(Entity, Has<CommandBarPanelActive>), With<RendersLauncherPanel>>,
     all_children: Query<&Children>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_children: Query<&Children, With<Pane>>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    stack_q: Query<Entity, With<Stack>>,
-    browser_meta: Query<&PageMetadata, With<Browser>>,
+    // Filtered to webviews because a stack carries `PageMetadata` of its own; only the page
+    // showing inside it answers "what is open here".
+    browser_meta: Query<&PageMetadata, With<WebviewSource>>,
+    focus: Res<CommandBarWorkspaceSnapshot>,
+    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
+    mut abandoned: MessageWriter<PendingStackAbandoned>,
     mut launcher_hosts: LauncherHosts,
     child_of_q: Query<&ChildOf>,
-    content_browsers: Query<
-        Entity,
-        (
-            With<Browser>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<CommandBar>,
-        ),
-    >,
     contributions: Contributions,
     mut snapshot_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         ResMut<PendingLaunch>,
-        Option<Res<vmux_layout::settings::EffectiveStartupUrl>>,
+        Option<Res<vmux_core::EffectiveStartupUrl>>,
         MessageWriter<PageOpenRequest>,
         Res<CommandBarPagesSnapshot>,
-        Res<vmux_command::snapshot::CommandBarWorkSnapshot>,
+        Res<crate::snapshot::CommandBarWorkSnapshot>,
         Option<Res<ResolvedLocale>>,
     )>,
     mut commands: Commands,
@@ -566,7 +550,7 @@ fn handle_open_command_bar(
     let Ok((layout_e, is_open)) = layout_q.single() else {
         return;
     };
-    let active_stack_count = stack_q.iter().count();
+    let active_stack_count = focus.stack_count;
     let spaces_snapshot = snapshot_params.p0().clone();
     let space_name = spaces_snapshot.active_space_name.clone();
     let startup_url = snapshot_params.p2().map(|url| url.0.clone());
@@ -598,7 +582,10 @@ fn handle_open_command_bar(
         command_bar_cancel_pending_stack_for_active_open(&mut pending_launch, replace_active_stack)
     };
     if let Some((stack, previous_stack)) = canceled_pending_stack {
-        commands.entity(stack).despawn();
+        abandoned.write(PendingStackAbandoned {
+            stack,
+            previous_stack,
+        });
         if let Some(previous_stack) = previous_stack {
             active_stack_override = Some(previous_stack);
             focus_pane_entity(previous_stack, &mut commands, &child_of_q);
@@ -610,36 +597,13 @@ fn handle_open_command_bar(
         let mut pending_launch = snapshot_params.p1();
         // Discard empty tab created by a previous Cmd+T
         if let Some(stack_e) = pending_launch.stack.take() {
-            commands.entity(stack_e).despawn();
-            if let Some(prev) = pending_launch.previous_stack.take()
-                && let Ok(children) = all_children.get(prev)
-            {
-                for child in children.iter() {
-                    if content_browsers.contains(child) {
-                        commands.entity(child).try_insert(CefKeyboardTarget);
-                    }
-                }
-            }
+            abandoned.write(PendingStackAbandoned {
+                stack: stack_e,
+                previous_stack: pending_launch.previous_stack.take(),
+            });
         } else {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
-            if let Some(tab) = active_stack {
-                for browser_e in &content_browsers {
-                    let is_child = child_of_q
-                        .get(browser_e)
-                        .ok()
-                        .map(|co| co.get() == tab)
-                        .unwrap_or(false);
-                    if is_child {
-                        commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                    }
-                }
+            if let Some(stack) = focus.stack {
+                restore_keyboard.write(RestoreKeyboardToStack { stack });
             }
         }
         pending_launch.needs_open = false;
@@ -682,17 +646,7 @@ fn handle_open_command_bar(
     let is_new_stack = snapshot_params.p1().stack.is_some();
 
     if !is_new_stack {
-        let active_stack = active_stack_override.or_else(|| {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
-            active_stack
-        });
+        let active_stack = active_stack_override.or(focus.stack);
         let start_browser = active_stack.and_then(|stack| {
             all_children
                 .get(stack)
@@ -717,17 +671,7 @@ fn handle_open_command_bar(
     } else if is_new_stack {
         String::new()
     } else {
-        let active_stack = active_stack_override.or_else(|| {
-            let (_, _, active_stack) = focused_stack(
-                active_tab_param.get(),
-                &all_children,
-                &leaf_panes,
-                &pane_ts,
-                &pane_children,
-                &stack_ts,
-            );
-            active_stack
-        });
+        let active_stack = active_stack_override.or(focus.stack);
         active_stack
             .and_then(|tab| {
                 let Ok(children) = all_children.get(tab) else {
@@ -739,24 +683,12 @@ fn handle_open_command_bar(
             .unwrap_or_default()
     };
 
-    let bar_tabs = gather_command_bar_tabs(
-        active_tab_param.get(),
-        &all_children,
-        &leaf_panes,
-        &pane_ts,
-        &pane_children,
-        &stack_ts,
-        &stack_q,
-        &browser_meta,
-        &child_of_q,
-        &space_name,
-        &locale,
-    );
+    let bar_tabs = focus.tabs.clone();
 
     let target = if replace_active_stack {
-        Some(vmux_command::open_target::OpenTarget::InPlace)
+        Some(crate::open_target::OpenTarget::InPlace)
     } else if is_new_stack {
-        Some(vmux_command::open_target::OpenTarget::InNewStack)
+        Some(crate::open_target::OpenTarget::InNewStack)
     } else {
         None
     };
@@ -797,52 +729,20 @@ fn close_command_bar_panel(layout: Entity, commands: &mut Commands) {
 
 #[derive(SystemParam)]
 struct CommandBarActionQueries<'w, 's> {
-    active_tab_param: ActiveTabParam<'w, 's>,
-    all_children: Query<'w, 's, &'static Children>,
-    leaf_panes: Query<'w, 's, Entity, (With<Pane>, Without<PaneSplit>)>,
-    pane_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Pane>>,
-    pane_children: Query<'w, 's, &'static Children, With<Pane>>,
-    stack_ts: Query<'w, 's, (Entity, &'static LastActivatedAt), With<Stack>>,
     child_of_q: Query<'w, 's, &'static ChildOf>,
-    content_browsers: Query<
-        'w,
-        's,
-        Entity,
-        (
-            With<Browser>,
-            Without<Header>,
-            Without<SideSheet>,
-            Without<CommandBar>,
-        ),
-    >,
     launcher_hosts: Query<'w, 's, (), With<HostsLauncher>>,
+    focus: Res<'w, CommandBarWorkspaceSnapshot>,
 }
 
 impl CommandBarActionQueries<'_, '_> {
     /// The stack an action lands in when the command bar did not open an empty one for it.
     fn focused_stack(&self) -> Option<Entity> {
-        let (_, _, stack) = focused_stack(
-            self.active_tab_param.get(),
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
-        stack
+        self.focus.stack
     }
 
     /// The pane an action lands in when there is no stack to put it in.
     fn focused_pane(&self) -> Option<Entity> {
-        let (_, pane, _) = focused_stack(
-            self.active_tab_param.get(),
-            &self.all_children,
-            &self.leaf_panes,
-            &self.pane_ts,
-            &self.pane_children,
-            &self.stack_ts,
-        );
-        pane
+        self.focus.pane
     }
 
     /// The stack holding the start page that raised this action, which can transition in place.
@@ -875,11 +775,11 @@ fn build_open_command(target: Option<OpenTarget>, url: String) -> OpenCommand {
 
 fn normalize_url(value: &str, search_engine: SearchEngine) -> String {
     let value = value.trim();
-    if vmux_command::event::is_data_uri(value)
-        || (value.contains("://") && vmux_command::event::looks_like_url(value))
+    if crate::event::is_data_uri(value)
+        || (value.contains("://") && crate::event::looks_like_url(value))
     {
         value.to_string()
-    } else if vmux_command::event::looks_like_url(value) {
+    } else if crate::event::looks_like_url(value) {
         format!("https://{}", value)
     } else {
         search_engine.search_url(value)
@@ -899,13 +799,6 @@ fn on_command_bar_action(
         With<CommandBar>,
     >,
     queries: CommandBarActionQueries,
-    mut stack_params: ParamSet<(
-        Query<Entity, With<Stack>>,
-        Query<Entity, With<Main>>,
-        Query<Entity, With<PrimaryWindow>>,
-        Option<ResMut<vmux_layout::stack::FocusedStack>>,
-        Query<(), With<Terminal>>,
-    )>,
     mut resource_params: ParamSet<(
         Res<CommandBarSpacesSnapshot>,
         Res<CommandBarTerminalsSnapshot>,
@@ -921,7 +814,9 @@ fn on_command_bar_action(
     mut chosen_writer: MessageWriter<vmux_core::ContributedCommandChosen>,
     mut abandoned_writer: MessageWriter<PendingStackAbandoned>,
     mut inline_transition: MessageWriter<InlineTransitionRequested>,
-    mut issued: MessageWriter<vmux_command::CommandIssued>,
+    mut stack_chosen: MessageWriter<StackInPaneChosen>,
+    mut restore_keyboard: MessageWriter<RestoreKeyboardToStack>,
+    mut issued: MessageWriter<crate::CommandIssued>,
     user_q: Query<Entity, With<vmux_core::team::User>>,
     mut commands: Commands,
 ) {
@@ -1075,7 +970,7 @@ fn on_command_bar_action(
                     let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(vmux_command::CommandIssued {
+                    issued.write(crate::CommandIssued {
                         caller,
                         command: cmd.clone(),
                     });
@@ -1140,7 +1035,7 @@ fn on_command_bar_action(
                             AppCommand::Browser(BrowserCommand::Open(OpenCommand::InNewStack {
                                 url: Some("vmux://terminal/".into()),
                             }));
-                        issued.write(vmux_command::CommandIssued {
+                        issued.write(crate::CommandIssued {
                             caller,
                             command: cmd.clone(),
                         });
@@ -1189,7 +1084,7 @@ fn on_command_bar_action(
                     let target = *open;
                     let cmd =
                         AppCommand::Browser(BrowserCommand::Open(build_open_command(target, url)));
-                    issued.write(vmux_command::CommandIssued {
+                    issued.write(crate::CommandIssued {
                         caller,
                         command: cmd.clone(),
                     });
@@ -1197,7 +1092,7 @@ fn on_command_bar_action(
                 }
                 custom_keyboard_restore = true;
             } else if let Some(cmd) = match_command(id) {
-                issued.write(vmux_command::CommandIssued {
+                issued.write(crate::CommandIssued {
                     caller,
                     command: cmd.clone(),
                 });
@@ -1205,7 +1100,10 @@ fn on_command_bar_action(
             }
             // If in new-tab mode and a command was executed, clean up the empty tab
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
@@ -1223,37 +1121,27 @@ fn on_command_bar_action(
                 });
             }
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
         }
         CommandBarActionEvent::SwitchTab { pane, index } => {
             if let Some(stack_e) = empty_stack {
-                commands.entity(stack_e).despawn();
+                abandoned_writer.write(PendingStackAbandoned {
+                    stack: stack_e,
+                    previous_stack,
+                });
                 pending_launch.stack = None;
                 pending_launch.previous_stack = None;
             }
-            if let Some(target_pane) = queries.leaf_panes.iter().find(|e| e.to_bits() == *pane) {
-                let target_stack = {
-                    let stack_q = stack_params.p0();
-                    queries
-                        .pane_children
-                        .get(target_pane)
-                        .ok()
-                        .and_then(|children| {
-                            children.iter().filter(|&e| stack_q.contains(e)).nth(*index)
-                        })
-                };
-                // Activate the whole chain (stack -> pane -> tab -> space), not just the
-                // pane/stack, so switching to a page in another tab actually moves the
-                // active-tab marker (ensure_active_tab derives Active from LastActivatedAt).
-                if let Some(target_stack) = target_stack {
-                    focus_pane_entity(target_stack, &mut commands, &queries.child_of_q);
-                } else {
-                    focus_pane_entity(target_pane, &mut commands, &queries.child_of_q);
-                }
-            }
+            stack_chosen.write(StackInPaneChosen {
+                pane_bits: *pane,
+                index: *index,
+            });
         }
         CommandBarActionEvent::Dismiss => {
             if let Some(stack_e) = empty_stack {
@@ -1280,21 +1168,8 @@ fn on_command_bar_action(
             .remove::<PendingCommandBarReveal>()
             .remove::<CommandBarRecreating>();
     }
-    if !custom_keyboard_restore {
-        let active_stack = queries.focused_stack();
-        if let Some(tab) = active_stack {
-            for browser_e in &queries.content_browsers {
-                let is_child = queries
-                    .child_of_q
-                    .get(browser_e)
-                    .ok()
-                    .map(|co| co.get() == tab)
-                    .unwrap_or(false);
-                if is_child {
-                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                }
-            }
-        }
+    if !custom_keyboard_restore && let Some(stack) = queries.focused_stack() {
+        restore_keyboard.write(RestoreKeyboardToStack { stack });
     }
 }
 
@@ -1526,12 +1401,12 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event::CommandBarOpenEvent;
+    use crate::event::CommandBarSpace;
+    use crate::{CommandPlugin, ReadAppCommands};
+    use crate::{command_bar_open_payload, localized_command_name};
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
-    use vmux_command::event::CommandBarOpenEvent;
-    use vmux_command::event::CommandBarSpace;
-    use vmux_command::{CommandPlugin, ReadAppCommands};
-    use vmux_command::{command_bar_open_payload, localized_command_name};
     use vmux_core::overlay::OverlayState;
 
     #[test]
@@ -1547,7 +1422,7 @@ mod tests {
                     &CommandBarSpacesSnapshot::default(),
                     &contributions,
                     &CommandBarPagesSnapshot::default(),
-                    &vmux_command::snapshot::CommandBarWorkSnapshot::default(),
+                    &crate::snapshot::CommandBarWorkSnapshot::default(),
                     &Locale::from("en-US"),
                     0,
                     Vec::new(),
@@ -2057,10 +1932,13 @@ mod tests {
             .add_message::<PageOpenRequest>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<PendingStackAbandoned>()
+            .init_resource::<CommandBarWorkspaceSnapshot>()
             .init_resource::<CommandBarSpacesSnapshot>()
             .init_resource::<CommandBarPagesSnapshot>()
-            .init_resource::<vmux_command::snapshot::CommandBarWorkSnapshot>()
+            .init_resource::<crate::snapshot::CommandBarWorkSnapshot>()
             .init_resource::<PendingLaunch>()
             .init_resource::<EmittedToPage>()
             .add_observer(capture_page_emit)
@@ -2099,7 +1977,7 @@ mod tests {
     #[test]
     fn opening_the_command_bar_pushes_the_payload_to_the_layout_page() {
         let mut app = panel_app();
-        let layout = app.world_mut().spawn(LayoutCef).id();
+        let layout = app.world_mut().spawn(RendersLauncherPanel).id();
 
         send(
             &mut app,
@@ -2119,7 +1997,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
         send(
@@ -2141,7 +2019,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
         let pending = app.world_mut().spawn_empty().id();
         app.insert_resource(PendingLaunch {
@@ -2160,7 +2038,15 @@ mod tests {
             emitted_to_page(&app),
             vec![(layout, LAYOUT_COMMAND_BAR_CLOSE_EVENT.to_string())]
         );
-        assert!(app.world().get_entity(pending).is_err());
+        // Disposal is the workspace's: closing the tab the stack was staged in, and putting the
+        // keyboard back, are things only it can do. The bar's part is reporting that it walked away.
+        let abandoned: Vec<Entity> = app
+            .world_mut()
+            .resource_mut::<Messages<PendingStackAbandoned>>()
+            .drain()
+            .map(|event| event.stack)
+            .collect();
+        assert_eq!(abandoned, vec![pending]);
         let ctx = app.world().resource::<PendingLaunch>();
         assert!(ctx.stack.is_none());
         assert!(!ctx.needs_open);
@@ -2173,7 +2059,7 @@ mod tests {
         let mut app = panel_app();
         let layout = app
             .world_mut()
-            .spawn((LayoutCef, CommandBarPanelActive))
+            .spawn((RendersLauncherPanel, CommandBarPanelActive))
             .id();
 
         send(
@@ -2191,7 +2077,7 @@ mod tests {
     #[test]
     fn open_page_in_command_bar_marks_payload_as_in_place_target() {
         let mut app = panel_app();
-        app.world_mut().spawn(LayoutCef);
+        app.world_mut().spawn(RendersLauncherPanel);
 
         send(
             &mut app,
@@ -2275,17 +2161,16 @@ mod tests {
 
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin)
             .add_message::<TerminalSpawnRequest>()
             .add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
+            .add_message::<StackInPaneChosen>()
+            .add_message::<RestoreKeyboardToStack>()
             .add_message::<PendingStackAbandoned>()
             .add_message::<vmux_core::terminal::ProcessesMonitorSpawnRequest>()
-            .add_message::<vmux_layout::LayoutSpawnRequest>()
             .add_message::<PageOpenRequest>()
             .init_resource::<bevy_cef::prelude::BinIpcEventRawBuffer>()
-            .init_resource::<vmux_layout::pane::PendingCursorWarp>()
             .insert_resource(bevy_cef::prelude::CefSuppressKeyboardInput::default());
 
         let modal = app
@@ -2381,7 +2266,6 @@ mod tests {
     fn command_bar_open_runs_after_tab_commands() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
-            .add_plugins(vmux_layout::stack::StackPlugin)
             .add_plugins(CommandBarInputPlugin);
 
         let mut schedules = app.world_mut().remove_resource::<Schedules>().unwrap();
@@ -2390,11 +2274,11 @@ mod tests {
         let graph = update.graph();
         let tab_command_set = graph
             .system_sets
-            .get_key(vmux_layout::stack::StackCommandSet.intern())
+            .get_key(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
         let read_command_systems = graph.systems_in_set(ReadAppCommands.intern()).unwrap();
         let tab_command_systems = graph
-            .systems_in_set(vmux_layout::stack::StackCommandSet.intern())
+            .systems_in_set(vmux_core::workspace::StackCommandSet.intern())
             .unwrap();
         let command_bar_open_system = read_command_systems
             .iter()
@@ -2474,7 +2358,7 @@ mod tests {
 
     #[test]
     fn build_open_command_in_pane_target() {
-        use vmux_command::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
+        use crate::open_target::{PaneDirection, PaneOpenMode, PaneTarget};
         let cmd = build_open_command(
             Some(OpenTarget::InPane {
                 direction: PaneDirection::Right,

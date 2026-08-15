@@ -151,3 +151,10 @@ pub enum TransitionType {
     Redirect,
     Other,
 }
+
+/// The URL a fresh stack opens when nothing else has been asked for.
+///
+/// Resolved once from settings and the active space, then read by everything that has to open
+/// something without being told what.
+#[derive(bevy::prelude::Resource, Clone, Debug, Default)]
+pub struct EffectiveStartupUrl(pub String);
