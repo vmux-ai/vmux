@@ -81,6 +81,7 @@ impl Plugin for LayoutPlugin {
                 PrewarmPagesPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
+                crate::overlay_adopt::OverlayAdoptPlugin,
             ));
     }
 }
