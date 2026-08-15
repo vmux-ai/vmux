@@ -23,7 +23,9 @@
 //! [CEF #2315]: https://bitbucket.org/chromiumembedded/cef/issues/2315
 
 use bevy::prelude::*;
+#[cfg(target_os = "macos")]
 use bevy::window::PrimaryWindow;
+#[cfg(target_os = "macos")]
 use bevy::winit::WINIT_WINDOWS;
 #[cfg(target_os = "macos")]
 use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender};
