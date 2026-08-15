@@ -36,10 +36,29 @@ pub const KEEP_ALIVE_MS: u64 = 10_000;
 ///
 /// The prompt-size check still runs in the dispatcher; this stops a hostile peer from making the
 /// daemon hold the bytes before that check is reached.
+///
+/// This is the *connection's* budget, shared by every stream on it. Per-stream backpressure is
+/// quinn's own `stream_receive_window`, deliberately left at its default: that is well under this
+/// number, so one stream cannot drain the whole connection's allowance before the others get a
+/// turn. An application frame cap sized at or above this constant would undo that, which is why
+/// [`MAX_REQUEST_BYTES`] is a fraction of it rather than its equal.
+///
+/// [`MAX_REQUEST_BYTES`]: https://docs.rs/vmux_service
 pub const RECEIVE_WINDOW: u32 = 8 * 1024 * 1024;
 
 /// Concurrent request streams one peer may open.
 pub const MAX_CONCURRENT_BIDI_STREAMS: u32 = 64;
+
+/// Concurrent unidirectional streams one peer may open, and there are none by design.
+///
+/// Nothing here calls `open_uni`. The session-events stream looks unidirectional but is a bidi
+/// stream the *client* opens, because the relay only routes streams a client opened — a
+/// desktop-initiated one would work on a direct connection and vanish through the relay, a
+/// difference that would not show up until someone tested off their own network.
+///
+/// So a uni stream is something no vmux build sends. Granting a budget for one only buys a stream
+/// nothing will ever drain, holding connection window while it waits.
+pub const MAX_CONCURRENT_UNI_STREAMS: u32 = 0;
 
 /// A self-signed identity for a desktop that no CA will vouch for.
 #[derive(Clone, Debug)]
@@ -312,7 +331,7 @@ fn transport_config() -> Arc<TransportConfig> {
     transport.keep_alive_interval(Some(std::time::Duration::from_millis(KEEP_ALIVE_MS)));
     transport.receive_window(RECEIVE_WINDOW.into());
     transport.max_concurrent_bidi_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
-    transport.max_concurrent_uni_streams(MAX_CONCURRENT_BIDI_STREAMS.into());
+    transport.max_concurrent_uni_streams(MAX_CONCURRENT_UNI_STREAMS.into());
     Arc::new(transport)
 }
 

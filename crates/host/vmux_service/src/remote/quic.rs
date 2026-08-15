@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 
-use vmux_remote::quic::endpoint::SelfSignedIdentity;
+use vmux_remote::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
 use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
@@ -235,9 +235,16 @@ async fn serve(
 
 /// Largest request frame accepted on a control stream.
 ///
-/// Above the prompt cap so an oversized prompt is refused by the dispatcher with a reason, rather
-/// than looking to the client like a broken connection.
-const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+/// Above the prompt cap so an oversized prompt is refused by the dispatcher with a reason rather
+/// than looking to the client like a broken connection — and well below the connection's window,
+/// because nothing a request carries is large. Attachments travel as paths validated against
+/// `$HOME`, never as bytes, so the biggest legitimate request is one full prompt and a handful of
+/// file names.
+///
+/// Derived rather than written out, because the invariant is the *relationship*: this used to be
+/// exactly [`RECEIVE_WINDOW`], so one max-size request could take the whole connection's
+/// allowance and stall the other sixty-three streams behind it.
+const MAX_REQUEST_BYTES: usize = (RECEIVE_WINDOW / 8) as usize;
 
 /// One request in, one response out, then the stream closes.
 ///
