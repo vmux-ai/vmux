@@ -297,6 +297,7 @@ fn setup(
     commands.spawn((
         (
             CommandBar,
+            vmux_core::overlay::WindowOverlay,
             HostWindow(pw),
             Browser,
             // An ordinary windowed surface, framed by the shared `sync_windowed_frames` and

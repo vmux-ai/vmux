@@ -1620,13 +1620,13 @@ fn complete_path(query: &str) -> Vec<PathEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::command_bar::state::CommandBarState;
     use bevy::ecs::schedule::{NodeId, Schedules, SystemSet};
     use bevy::ecs::system::RunSystemOnce;
     use vmux_command::event::CommandBarOpenEvent;
     use vmux_command::event::CommandBarSpace;
     use vmux_command::{CommandPlugin, ReadAppCommands};
     use vmux_command::{command_bar_open_payload, localized_command_name};
+    use vmux_core::overlay::OverlayState;
 
     #[test]
     fn build_payload_includes_commands_and_target() {
@@ -1747,7 +1747,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Inherited);
-        assert!(!CommandBarState::from_modal(node.display, visibility, false).owns_input());
+        assert!(!OverlayState::of(node.display, visibility, false).owns_input());
     }
 
     #[test]
@@ -2448,7 +2448,7 @@ mod tests {
             "CefKeyboardTarget must not return after prewarm"
         );
         assert!(
-            !CommandBarState::from_modal(
+            !OverlayState::of(
                 display_after_prewarm,
                 Visibility::Hidden,
                 has_kb_after_prewarm
