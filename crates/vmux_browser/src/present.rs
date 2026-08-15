@@ -72,13 +72,21 @@ pub(crate) type LayoutKeyboardCapture = Or<(
     With<BookmarkContextMenuActive>,
     With<CommandBarPanelActive>,
 )>;
+
+/// The layout shell, when one of its DOM surfaces holds the keyboard.
+///
+/// Both readers have to name the same entity or the keyboard goes one way and first responder the
+/// other, so they share the filter rather than each spelling it out. `LayoutCef` is the shell
+/// whether or not CEF is behind it — `Browser` left it in the wry migration, which is how these two
+/// last drifted apart.
+pub(crate) type LayoutKeyboardHost = (With<LayoutCef>, LayoutKeyboardCapture);
 fn sync_keyboard_target(
     focus: Res<vmux_layout::stack::FocusedStack>,
     child_of_q: Query<&ChildOf>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     modal_q: Query<(Entity, &Node, Has<CefKeyboardTarget>), With<WindowOverlay>>,
-    layout_keyboard_q: Query<Entity, (With<LayoutCef>, LayoutKeyboardCapture)>,
+    layout_keyboard_q: Query<Entity, LayoutKeyboardHost>,
     content_q: Query<(Entity, Has<CefKeyboardTarget>), With<Browser>>,
     terminal_q: Query<(), With<vmux_terminal::Terminal>>,
     mut suppress: ResMut<bevy_cef::prelude::CefSuppressKeyboardInput>,
@@ -766,6 +774,7 @@ pub(crate) fn sync_windowed_command_bar(
             &Visibility,
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
+            Has<vmux_core::overlay::OverlayShownInline>,
             Option<&HostWindow>,
             Option<&CommandBarNativeSize>,
         ),
@@ -777,14 +786,22 @@ pub(crate) fn sync_windowed_command_bar(
     mut was_open: Local<bool>,
 ) {
     let matched = modal_q.single();
-    let Ok((entity, node, visibility, has_keyboard_target, is_windowed, host_window, native_size)) =
-        matched
+    let Ok((
+        entity,
+        node,
+        visibility,
+        has_keyboard_target,
+        is_windowed,
+        shown_inline,
+        host_window,
+        native_size,
+    )) = matched
     else {
         publish_native_command_bar_route(false, None, 1.0);
         *was_open = false;
         return;
     };
-    let state = OverlayState::of(node.display, *visibility, has_keyboard_target);
+    let state = OverlayState::of(node.display, *visibility, has_keyboard_target, shown_inline);
     let open = state.is_shown();
     let owns_input = state.owns_input();
     let render_hidden = command_bar_windowed_view_should_render_hidden(node.display, *visibility);
@@ -1890,7 +1907,7 @@ mod tests {
 
     #[test]
     fn revealing_command_bar_owns_input_while_its_view_stays_parked() {
-        let revealing = OverlayState::of(Display::Flex, Visibility::Hidden, true);
+        let revealing = OverlayState::of(Display::Flex, Visibility::Hidden, true, false);
 
         assert!(revealing.owns_input());
         assert!(!revealing.is_shown());

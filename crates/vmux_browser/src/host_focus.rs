@@ -63,6 +63,12 @@ fn publish_native_page_owns_escape(
 pub enum HostFocusIntent {
     /// Active page is a windowed web page; give this webview native first-responder.
     Windowed(Entity),
+    /// The layout's own chrome holds the keyboard, and a `WKWebView` of its own draws it.
+    ///
+    /// Distinct from [`Self::WinitHost`] because the two want opposite things. `WinitHost` exists
+    /// so keys reach a terminal by way of winit and Bevy; the chrome is a DOM that must receive
+    /// them natively, and routing them through winit sends them to a CEF browser that is not there.
+    LayoutView,
     /// Active page is a terminal, or there is none — the winit host window must own first-responder.
     #[default]
     WinitHost,
@@ -90,24 +96,25 @@ pub(crate) fn compute_host_focus_intent(
             Option<&Visibility>,
             Has<CefKeyboardTarget>,
             Has<WebviewWindowed>,
+            Has<vmux_core::overlay::OverlayShownInline>,
         ),
         With<WindowOverlay>,
     >,
-    layout_keyboard_q: Query<(), (With<Browser>, crate::present::LayoutKeyboardCapture)>,
+    layout_keyboard_q: Query<(), crate::present::LayoutKeyboardHost>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if let Some((modal, windowed)) =
-        modal_q
-            .iter()
-            .find_map(|(entity, node, visibility, keyboard_target, windowed)| {
-                OverlayState::of(
-                    node.display,
-                    visibility.copied().unwrap_or_default(),
-                    keyboard_target,
-                )
-                .owns_input()
-                .then_some((entity, windowed))
-            }) {
+    let next = if let Some((modal, windowed)) = modal_q.iter().find_map(
+        |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
+            OverlayState::of(
+                node.display,
+                visibility.copied().unwrap_or_default(),
+                keyboard_target,
+                shown_inline,
+            )
+            .owns_input()
+            .then_some((entity, windowed))
+        },
+    ) {
         // A windowed command bar hosts a real DOM text field, so Chromium must receive the
         // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no DOM
         // key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor before the
@@ -118,7 +125,7 @@ pub(crate) fn compute_host_focus_intent(
             HostFocusIntent::WinitHost
         }
     } else if !layout_keyboard_q.is_empty() {
-        HostFocusIntent::WinitHost
+        HostFocusIntent::LayoutView
     } else {
         let active = focus.stack.and_then(|stack| {
             content_q.iter().find(|&webview| {
@@ -145,12 +152,17 @@ fn windowed_focus_action(
     has_browser: bool,
     has_native_focus: Option<bool>,
     focused: &mut Option<Entity>,
+    reclaiming: bool,
 ) -> Option<Entity> {
     match intent {
         HostFocusIntent::Windowed(webview) if has_browser => {
-            let should_focus = has_native_focus
-                .map(|has_focus| !has_focus)
-                .unwrap_or(*focused != Some(webview));
+            // `has_native_focus` is CEF's belief about its own view. AppKit does not tell it when
+            // the chrome takes first responder, so after that it still answers "yes" and the pane
+            // is never re-focused — leaving the keyboard with nobody.
+            let should_focus = reclaiming
+                || has_native_focus
+                    .map(|has_focus| !has_focus)
+                    .unwrap_or(*focused != Some(webview));
             *focused = Some(webview);
             should_focus.then_some(webview)
         }
@@ -165,7 +177,10 @@ pub(crate) fn apply_windowed_host_focus(
     intent: Res<HostFocusIntent>,
     browsers: NonSend<Browsers>,
     mut focused: Local<Option<Entity>>,
+    mut was_layout_view: Local<bool>,
 ) {
+    let reclaiming = *was_layout_view && *intent != HostFocusIntent::LayoutView;
+    *was_layout_view = *intent == HostFocusIntent::LayoutView;
     let (has_browser, has_native_focus) = match *intent {
         HostFocusIntent::Windowed(webview) => (
             browsers.has_browser(webview),
@@ -173,9 +188,13 @@ pub(crate) fn apply_windowed_host_focus(
         ),
         _ => (false, None),
     };
-    if let Some(webview) =
-        windowed_focus_action(*intent, has_browser, has_native_focus, &mut focused)
-    {
+    if let Some(webview) = windowed_focus_action(
+        *intent,
+        has_browser,
+        has_native_focus,
+        &mut focused,
+        reclaiming,
+    ) {
         browsers.set_windowed_focus(&webview, true);
     }
 }
@@ -184,6 +203,7 @@ pub(crate) fn apply_windowed_host_focus(
 mod tests {
     use super::*;
     use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
+    use vmux_layout::cef::LayoutCef;
 
     fn app() -> App {
         let mut app = App::new();
@@ -336,31 +356,32 @@ mod tests {
     }
 
     #[test]
-    fn bookmark_text_input_reclaims_winit_host_focus() {
+    fn bookmark_text_input_gives_the_caret_to_the_layout_view() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().spawn((Browser, BookmarkTextInputActive));
+        app.world_mut().spawn((LayoutCef, BookmarkTextInputActive));
         app.insert_resource(FocusedStack {
             stack: Some(stack),
             ..default()
         });
         app.update();
-        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(intent(&app), HostFocusIntent::LayoutView);
     }
 
     #[test]
-    fn bookmark_context_menu_reclaims_winit_host_focus() {
+    fn bookmark_context_menu_gives_the_caret_to_the_layout_view() {
         let mut app = app();
         let stack = app.world_mut().spawn_empty().id();
         app.world_mut().spawn((Browser, ChildOf(stack)));
-        app.world_mut().spawn((Browser, BookmarkContextMenuActive));
+        app.world_mut()
+            .spawn((LayoutCef, BookmarkContextMenuActive));
         app.insert_resource(FocusedStack {
             stack: Some(stack),
             ..default()
         });
         app.update();
-        assert_eq!(intent(&app), HostFocusIntent::WinitHost);
+        assert_eq!(intent(&app), HostFocusIntent::LayoutView);
     }
 
     #[test]
@@ -369,12 +390,24 @@ mod tests {
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                None,
+                &mut focused,
+                false
+            ),
             Some(webview)
         );
         assert_eq!(focused, Some(webview));
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                None,
+                &mut focused,
+                false
+            ),
             None
         );
         assert_eq!(focused, Some(webview));
@@ -386,7 +419,13 @@ mod tests {
         let mut focused = None;
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                None,
+                &mut focused,
+                false
+            ),
             Some(webview)
         );
         assert_eq!(
@@ -395,12 +434,19 @@ mod tests {
                 false,
                 None,
                 &mut focused,
+                false,
             ),
             None
         );
         assert_eq!(focused, None);
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::Windowed(webview), true, None, &mut focused,),
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                None,
+                &mut focused,
+                false
+            ),
             Some(webview)
         );
     }
@@ -416,6 +462,7 @@ mod tests {
                 true,
                 Some(false),
                 &mut focused,
+                false,
             ),
             Some(webview)
         );
@@ -432,6 +479,7 @@ mod tests {
                 true,
                 Some(true),
                 &mut focused,
+                false,
             ),
             None
         );
@@ -449,10 +497,30 @@ mod tests {
                 true,
                 Some(false),
                 &mut focused,
+                false,
             ),
             Some(next)
         );
         assert_eq!(focused, Some(next));
+    }
+
+    /// CEF keeps answering "I have focus" after the chrome took first responder out from under it,
+    /// so coming back from the chrome has to focus the pane regardless of what CEF believes.
+    #[test]
+    fn leaving_the_layout_view_refocuses_the_pane_despite_cef_claiming_focus() {
+        let webview = Entity::from_bits(1);
+        let mut focused = Some(webview);
+
+        assert_eq!(
+            windowed_focus_action(
+                HostFocusIntent::Windowed(webview),
+                true,
+                Some(true),
+                &mut focused,
+                true,
+            ),
+            Some(webview)
+        );
     }
 
     #[test]
@@ -460,7 +528,7 @@ mod tests {
         let mut focused = Some(Entity::from_bits(1));
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused),
+            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused, false),
             None
         );
         assert_eq!(focused, None);
@@ -471,7 +539,7 @@ mod tests {
         let mut focused = Some(Entity::from_bits(1));
 
         assert_eq!(
-            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused),
+            windowed_focus_action(HostFocusIntent::WinitHost, false, None, &mut focused, false),
             None
         );
         assert_eq!(focused, None);

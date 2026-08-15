@@ -58,6 +58,12 @@ impl Plugin for LayoutViewPlugin {
             )
                 .after(spawn_layout_view),
         );
+        // After the CEF route has had its say, or it re-focuses the pane in the same frame.
+        #[cfg(target_os = "macos")]
+        app.add_systems(
+            PostUpdate,
+            sync_layout_view_focus.after(crate::host_focus::apply_windowed_host_focus),
+        );
         #[cfg(target_os = "macos")]
         app.add_observer(forward_host_emit);
     }
@@ -101,6 +107,31 @@ impl LayoutView {
     /// `sync_appearance_to_cef` drives, so a CEF page's media queries already agreed with the
     /// setting; a `WKWebView` has no such thing and inherits its `NSAppearance` from the window.
     /// Left alone it renders the chrome dark on a dark desktop no matter what the setting says.
+    /// Hand the view AppKit first responder, so its DOM receives keys.
+    ///
+    /// A CEF page is focused through `Browsers::set_windowed_focus` and a terminal wants the
+    /// keyboard on the winit window; neither route can reach a `WKWebView`, so nothing else in the
+    /// app can give this view the responder.
+    fn take_first_responder(&self) {
+        use objc2_app_kit::NSView;
+        use wry::WebViewExtMacOS;
+
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        let Some(window) = view.window() else {
+            return;
+        };
+        let already_holds_it = window
+            .firstResponder()
+            .is_some_and(|current| std::ptr::eq(&*current as *const _ as *const NSView, view));
+        if already_holds_it {
+            return;
+        }
+        if !window.makeFirstResponder(Some(view)) {
+            warn!("layout_view: the window refused first responder, chrome input will not work");
+        }
+    }
+
     fn set_color_scheme(&self, mode: vmux_setting::ColorScheme) {
         use objc2_app_kit::{
             NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua,
@@ -219,6 +250,28 @@ fn sync_layout_view_color_scheme(view: Option<NonSend<LayoutView>>, settings: Re
 ///
 /// `bevy_cef`'s own observer still runs and finds no browser for this entity, so it is this that
 /// carries the payload the rest of the way.
+/// Holds first responder for the layout view while its chrome owns the keyboard.
+///
+/// Runs every frame rather than on the edge, because `apply_winit_host_focus` reclaims for winit on
+/// its own schedule and losing the responder silently looks exactly like never having had it.
+///
+/// Nothing resigns it here: leaving it to nobody is a state the app is never otherwise in, and CEF
+/// then declines to reclaim. The pane takes it back through `set_windowed_focus` instead, which
+/// `apply_windowed_host_focus` forces on the way out of this intent.
+#[cfg(target_os = "macos")]
+fn sync_layout_view_focus(
+    view: Option<NonSend<LayoutView>>,
+    intent: Res<crate::host_focus::HostFocusIntent>,
+) {
+    if *intent != crate::host_focus::HostFocusIntent::LayoutView {
+        return;
+    }
+    let Some(view) = view else {
+        return;
+    };
+    view.take_first_responder();
+}
+
 #[cfg(target_os = "macos")]
 fn forward_host_emit(host_emit: On<BinHostEmitEvent>, view: Option<NonSend<LayoutView>>) {
     use base64::Engine;
