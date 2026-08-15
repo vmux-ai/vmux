@@ -13,4 +13,4 @@ pub mod framing;
 pub mod quic;
 
 pub use device::DeviceId;
-pub use quic::{ClientHello, CloseCode, Envelope, PeerRole, RelayHello, StreamKind};
+pub use quic::{Accepted, ClientSetup, CloseCode, MessageType, PeerRole, Protocol, RelaySetup};

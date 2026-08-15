@@ -8,11 +8,12 @@
 //! `vmux_remote` precisely for being free of domain types. A codec in `vmux_client` would drag
 //! `vmux_wire` and `vmux_profile` behind it, and the relay must stay unable to decode a payload.
 //!
-//! Contrast the *control* frame in [`crate::quic`], which is one message per stream delimited by
-//! the stream's own finish. This is the other shape: many messages, one long-lived stream, so a
-//! boundary has to be written down.
+//! [`Frame`] builds on it: a message type, then a length-prefixed body. One scheme serves every
+//! stream in the transport — a control exchange is one frame and a subscription is many.
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use crate::quic::{FRAME_VERSION, MessageType};
 
 /// A stream of length-prefixed frames, bounded by what one frame may claim.
 ///
@@ -119,6 +120,151 @@ impl LengthPrefixed {
                 | std::io::ErrorKind::ConnectionAborted
                 | std::io::ErrorKind::BrokenPipe
         )
+    }
+}
+
+/// Why a frame could not be read.
+#[derive(Debug)]
+pub enum FrameError {
+    /// The peer frames its streams in a layout this build cannot read.
+    UnsupportedVersion(u8),
+    /// A frame arrived, and it was not the one this reader is waiting for.
+    ///
+    /// The refusal the type field exists to make possible. Without it a reader parses whatever it
+    /// expects, and serde's tolerance for unknown fields means another leg's message decodes
+    /// cleanly instead of being turned away.
+    UnexpectedType(MessageType),
+    /// The stream ended part-way through a frame, so bytes were lost.
+    Truncated,
+    /// Read, but the body was not what its type promised.
+    Malformed,
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for FrameError {
+    fn from(error: std::io::Error) -> Self {
+        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+            return Self::Truncated;
+        }
+        Self::Io(error)
+    }
+}
+
+/// One typed message, as it travels.
+///
+/// A stream announces [`FRAME_VERSION`] once and then carries these. That is the whole framing:
+/// a control exchange writes one and finishes, a subscription writes many, and the same reader
+/// serves both.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    pub message_type: MessageType,
+    pub body: Vec<u8>,
+}
+
+impl Frame {
+    pub fn new(message_type: MessageType, body: Vec<u8>) -> Self {
+        Self { message_type, body }
+    }
+
+    /// A frame carrying `value` as JSON, for the messages parsed before either peer has agreed on
+    /// anything.
+    pub fn json<T: serde::Serialize>(
+        message_type: MessageType,
+        value: &T,
+    ) -> Result<Self, serde_json::Error> {
+        Ok(Self::new(message_type, serde_json::to_vec(value)?))
+    }
+
+    /// The body, once the type has been checked against what the caller is waiting for.
+    ///
+    /// Checked *before* the body is looked at, which is the point: a relay setup satisfies a
+    /// session setup byte for byte, so deciding on the payload is deciding too late.
+    pub fn body_of(&self, want: MessageType) -> Result<&[u8], FrameError> {
+        if self.message_type != want {
+            return Err(FrameError::UnexpectedType(self.message_type));
+        }
+        Ok(&self.body)
+    }
+
+    /// Read this frame's body as JSON, if it is the type expected.
+    pub fn read_json<T: serde::de::DeserializeOwned>(
+        &self,
+        want: MessageType,
+    ) -> Result<T, FrameError> {
+        serde_json::from_slice(self.body_of(want)?).map_err(|_| FrameError::Malformed)
+    }
+}
+
+/// Frames on one stream: a version byte, then any number of [`Frame`]s.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameStream {
+    codec: LengthPrefixed,
+}
+
+impl FrameStream {
+    pub const fn new(max_body_bytes: usize) -> Self {
+        Self {
+            codec: LengthPrefixed::new(max_body_bytes),
+        }
+    }
+
+    /// Announce this build's framing, then write the first frame.
+    pub async fn open<W>(self, writer: &mut W, frame: &Frame) -> std::io::Result<()>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        writer.write_all(&[FRAME_VERSION]).await?;
+        self.send(writer, frame).await
+    }
+
+    /// Write a further frame on a stream already opened.
+    pub async fn send<W>(self, writer: &mut W, frame: &Frame) -> std::io::Result<()>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        writer
+            .write_all(&frame.message_type.0.to_le_bytes())
+            .await?;
+        self.codec.write(writer, &frame.body).await
+    }
+
+    /// Check the peer's framing, then read its first frame.
+    ///
+    /// A version this build cannot read is refused here rather than being carried into a decode
+    /// that would fail somewhere less obvious.
+    pub async fn accept<R>(self, reader: &mut R) -> Result<Frame, FrameError>
+    where
+        R: AsyncReadExt + Unpin,
+    {
+        let mut version = [0u8; 1];
+        reader.read_exact(&mut version).await?;
+        if version[0] != FRAME_VERSION {
+            return Err(FrameError::UnsupportedVersion(version[0]));
+        }
+        match self.next(reader).await? {
+            Some(frame) => Ok(frame),
+            None => Err(FrameError::Truncated),
+        }
+    }
+
+    /// Read a further frame, or `None` once the peer has finished sending.
+    pub async fn next<R>(self, reader: &mut R) -> Result<Option<Frame>, FrameError>
+    where
+        R: AsyncReadExt + Unpin,
+    {
+        let mut message_type = [0u8; 2];
+        match reader.read_exact(&mut message_type).await {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(error) => return Err(error.into()),
+        }
+        let Some(body) = self.codec.read(reader).await? else {
+            return Err(FrameError::Truncated);
+        };
+        Ok(Some(Frame::new(
+            MessageType(u16::from_le_bytes(message_type)),
+            body,
+        )))
     }
 }
 
@@ -230,6 +376,133 @@ mod tests {
             tiny.read(&mut &wire[..4]).await.is_err(),
             "the prefix alone is enough to refuse; the body need never arrive"
         );
+    }
+
+    /// The defect the type field exists to close. A relay setup carries `device_id`, `role` and
+    /// `token`; a client setup carries `device_id` and `token`. Serde ignores the extra field, so
+    /// before there was a type on the wire the first decoded cleanly as the second — and a shared
+    /// ALPN meant nothing at the connection layer separated them either.
+    #[tokio::test]
+    async fn one_legs_setup_is_refused_by_the_other_legs_reader() {
+        use crate::quic::{PeerRole, RelaySetup};
+
+        let stream = FrameStream::new(64 * 1024);
+        let relay_setup = RelaySetup {
+            device_id: crate::DeviceId::new("alpha"),
+            role: PeerRole::Client,
+            token: "a-relay-credential".into(),
+        };
+        let mut wire = Vec::new();
+        stream
+            .open(
+                &mut wire,
+                &Frame::json(MessageType::RELAY_SETUP, &relay_setup).expect("encode"),
+            )
+            .await
+            .expect("write");
+
+        let frame = stream.accept(&mut wire.as_slice()).await.expect("read");
+        let as_session = frame.read_json::<crate::quic::ClientSetup>(MessageType::CLIENT_SETUP);
+
+        assert!(
+            matches!(
+                as_session,
+                Err(FrameError::UnexpectedType(MessageType::RELAY_SETUP))
+            ),
+            "a relay setup must not satisfy a session reader, got {as_session:?}"
+        );
+        assert!(
+            frame
+                .read_json::<RelaySetup>(MessageType::RELAY_SETUP)
+                .is_ok(),
+            "and the reader it was addressed to must still accept it"
+        );
+    }
+
+    /// A stale peer must be told its framing is old, not handed a decode failure that looks like
+    /// corruption. `read_hello` used to collapse both into one answer.
+    #[tokio::test]
+    async fn a_stale_framing_is_refused_as_a_version_rather_than_as_rubbish() {
+        let stream = FrameStream::new(64 * 1024);
+        let mut wire = Vec::new();
+        stream
+            .open(&mut wire, &Frame::new(MessageType::CLIENT_SETUP, vec![]))
+            .await
+            .expect("write");
+        wire[0] = FRAME_VERSION - 1;
+
+        let accepted = stream.accept(&mut wire.as_slice()).await;
+
+        assert!(
+            matches!(accepted, Err(FrameError::UnsupportedVersion(v)) if v == FRAME_VERSION - 1),
+            "got {accepted:?}"
+        );
+    }
+
+    /// One version byte for the stream, one length for each message. This is what lets a
+    /// subscription and a one-shot request share a format.
+    #[tokio::test]
+    async fn a_stream_announces_itself_once_and_then_carries_many_frames() {
+        let stream = FrameStream::new(64 * 1024);
+        let mut wire = Vec::new();
+        stream
+            .open(
+                &mut wire,
+                &Frame::new(MessageType::SESSION_EVENTS, b"attach".to_vec()),
+            )
+            .await
+            .expect("open");
+        for event in [b"first".as_slice(), b"second".as_slice()] {
+            stream
+                .send(
+                    &mut wire,
+                    &Frame::new(MessageType::SESSION_EVENT, event.to_vec()),
+                )
+                .await
+                .expect("send");
+        }
+
+        let mut reader = wire.as_slice();
+        let opened = stream.accept(&mut reader).await.expect("accept");
+        let mut bodies = Vec::new();
+        while let Some(frame) = stream.next(&mut reader).await.expect("next") {
+            bodies.push(
+                frame
+                    .body_of(MessageType::SESSION_EVENT)
+                    .expect("typed")
+                    .to_vec(),
+            );
+        }
+
+        assert_eq!(opened.message_type, MessageType::SESSION_EVENTS);
+        assert_eq!(bodies, vec![b"first".to_vec(), b"second".to_vec()]);
+    }
+
+    /// The reason the setups are JSON: a peer one release ahead can send a field this build has
+    /// never heard of and still be understood, so a message can grow without a version bump.
+    #[tokio::test]
+    async fn an_unknown_field_degrades_instead_of_failing() {
+        let stream = FrameStream::new(64 * 1024);
+        let mut wire = Vec::new();
+        stream
+            .open(
+                &mut wire,
+                &Frame::new(
+                    MessageType::CLIENT_SETUP,
+                    br#"{"device_id":"d","token":"t","teleportation":true}"#.to_vec(),
+                ),
+            )
+            .await
+            .expect("write");
+
+        let setup = stream
+            .accept(&mut wire.as_slice())
+            .await
+            .expect("read")
+            .read_json::<crate::quic::ClientSetup>(MessageType::CLIENT_SETUP)
+            .expect("an unknown field must not stop it parsing");
+
+        assert_eq!(setup.device_id, crate::DeviceId::new("d"));
     }
 
     #[test]

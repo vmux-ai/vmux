@@ -26,9 +26,8 @@ use vmux_remote::quic::endpoint::{RECEIVE_WINDOW, SelfSignedIdentity};
 
 use vmux_wire::protocol::{ServiceMessage, SharedMessage};
 
-use vmux_remote::quic::{
-    ClientHello, CloseCode, ServerHello, StreamKind, decode_hello, encode_hello,
-};
+use vmux_remote::framing::{Frame, FrameError, FrameStream};
+use vmux_remote::quic::{Accepted, ClientSetup, CloseCode, MessageType};
 
 /// How often the kill switch is re-read. Matches the HTTP path's in-stream recheck.
 const REMOTE_STATE_POLL: Duration = Duration::from_secs(1);
@@ -102,6 +101,11 @@ pub enum Rejection {
     Unauthorized,
     RemoteDisabled,
     Malformed,
+    /// The peer frames its streams in a layout this build cannot read.
+    ///
+    /// Distinct from [`Rejection::Malformed`] because it names a build that is merely old rather
+    /// than one sending rubbish, and only one of those is worth a bug report.
+    UnsupportedFraming,
 }
 
 impl Rejection {
@@ -109,7 +113,16 @@ impl Rejection {
         match self {
             Self::Unauthorized => CloseCode::Unauthorized,
             Self::RemoteDisabled => CloseCode::RemoteDisabled,
-            Self::Malformed => CloseCode::ProtocolError,
+            Self::Malformed | Self::UnsupportedFraming => CloseCode::ProtocolError,
+        }
+    }
+}
+
+impl From<FrameError> for Rejection {
+    fn from(error: FrameError) -> Self {
+        match error {
+            FrameError::UnsupportedVersion(_) => Self::UnsupportedFraming,
+            _ => Self::Malformed,
         }
     }
 }
@@ -123,22 +136,14 @@ pub fn admit(
     presented_token: &str,
     expected_token: &str,
     remote_enabled: bool,
-) -> Result<ServerHello, Rejection> {
+) -> Result<Accepted, Rejection> {
     if !remote_enabled {
         return Err(Rejection::RemoteDisabled);
     }
     if !super::server::secure_eq(presented_token, expected_token) {
         return Err(Rejection::Unauthorized);
     }
-    Ok(ServerHello {})
-}
-
-/// The bearer token is carried in the hello rather than a header, since QUIC has none.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct AuthenticatedHello {
-    #[serde(flatten)]
-    pub hello: ClientHello,
-    pub token: String,
+    Ok(Accepted {})
 }
 
 /// Watches the Remote kill switch, for everything whose lifetime it decides.
@@ -168,15 +173,23 @@ pub fn spawn_liveness_watch() -> watch::Receiver<bool> {
     rx
 }
 
-/// Read one hello frame, bounded so an unauthenticated peer cannot buffer without limit.
-pub async fn read_hello(stream: &mut quinn::RecvStream) -> Result<AuthenticatedHello, Rejection> {
-    let bytes = stream
-        .read_to_end(MAX_HELLO_BYTES)
-        .await
-        .map_err(|_| Rejection::Malformed)?;
-    decode_hello::<AuthenticatedHello>(&bytes)
-        .map(|(hello, _)| hello)
-        .map_err(|_| Rejection::Malformed)
+/// Frames on the setup exchange, bounded so an unauthenticated peer cannot buffer without limit.
+const SETUP: FrameStream = FrameStream::new(MAX_HELLO_BYTES);
+
+/// Frames on a control or subscription stream, once the peer has authenticated.
+const CONTROL: FrameStream = FrameStream::new(MAX_REQUEST_BYTES);
+
+/// Read one setup frame, refusing anything that is not one.
+///
+/// A frame addressed to another leg is turned away here rather than decoded: a relay setup
+/// satisfies this message field for field, so the type has to be what decides.
+pub async fn read_setup(stream: &mut quinn::RecvStream) -> Result<ClientSetup, Rejection> {
+    match SETUP.accept(stream).await {
+        Ok(frame) => frame
+            .read_json::<ClientSetup>(MessageType::CLIENT_SETUP)
+            .map_err(Rejection::from),
+        Err(error) => Err(Rejection::from(error)),
+    }
 }
 
 /// Serve one accepted connection: exchange hellos, then dispatch its streams.
@@ -190,13 +203,13 @@ async fn serve(
     let Ok((mut send, mut recv)) = connection.accept_bi().await else {
         return;
     };
-    let admitted = match read_hello(&mut recv).await {
-        Ok(authenticated) => admit(&authenticated.token, &token, *liveness.borrow()),
+    let admitted = match read_setup(&mut recv).await {
+        Ok(setup) => admit(&setup.token, &token, *liveness.borrow()),
         Err(rejection) => Err(rejection),
     };
 
-    let server_hello = match admitted {
-        Ok(server_hello) => server_hello,
+    let accepted = match admitted {
+        Ok(accepted) => accepted,
         Err(rejection) => {
             tracing::info!(?rejection, "remote quic: connection refused");
             connection.close(rejection.close_code().as_u32().into(), b"refused");
@@ -204,11 +217,11 @@ async fn serve(
         }
     };
 
-    let Ok(bytes) = encode_hello(&server_hello) else {
-        connection.close(CloseCode::ProtocolError.as_u32().into(), b"hello");
+    let Ok(frame) = Frame::json(MessageType::SESSION_ACCEPTED, &accepted) else {
+        connection.close(CloseCode::ProtocolError.as_u32().into(), b"setup");
         return;
     };
-    if send.write_all(&bytes).await.is_err() || send.finish().is_err() {
+    if SETUP.open(&mut send, &frame).await.is_err() || send.finish().is_err() {
         return;
     }
     super::server::mark_paired(&paired);
@@ -255,32 +268,28 @@ async fn dispatch_control(
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
 ) {
-    let Ok(bytes) = recv.read_to_end(MAX_REQUEST_BYTES).await else {
+    let Ok(frame) = CONTROL.accept(&mut recv).await else {
         return;
     };
-    let Some((kind, body)) = bytes.split_first() else {
-        return;
-    };
-    let Some(kind) = StreamKind::from_byte(*kind) else {
-        return;
-    };
-    // Copied so rkyv sees an aligned buffer; a slice at a one-byte offset is not.
-    let body = body.to_vec();
-    let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&body) else {
+    // Owned by the frame, so rkyv sees an aligned buffer; the old shape sliced past a leading
+    // byte, which is not aligned.
+    let Ok(request) = rkyv::from_bytes::<SharedMessage, rkyv::rancor::Error>(&frame.body) else {
         return;
     };
 
-    match kind {
-        StreamKind::Control => {
+    match frame.message_type {
+        MessageType::CONTROL_REQUEST => {
             let response = dispatch::dispatch(&state, request).await;
             let Ok(encoded) = rkyv::to_bytes::<rkyv::rancor::Error>(&response) else {
                 return;
             };
-            if send.write_all(&encoded).await.is_ok() {
+            let frame = Frame::new(MessageType::CONTROL_RESPONSE, encoded.to_vec());
+            if CONTROL.open(&mut send, &frame).await.is_ok() {
                 let _ = send.finish();
             }
         }
-        StreamKind::SessionEvents => stream_session_events(&state, send, request).await,
+        MessageType::SESSION_EVENTS => stream_session_events(&state, send, request).await,
+        _ => {}
     }
 }
 
@@ -307,11 +316,15 @@ async fn stream_session_events(
         let _ = send.finish();
         return;
     };
+    // The stream announces its version once, on whichever event goes out first.
+    let mut opened = false;
 
     // Snapshot first, so a client that attaches mid-conversation renders the transcript it
     // missed rather than only what happens next.
     if let Some(snapshot) = session_snapshot(state, &sid).await
-        && write_event(&mut send, &snapshot).await.is_err()
+        && write_event(&mut send, &snapshot, &mut opened)
+            .await
+            .is_err()
     {
         return;
     }
@@ -328,7 +341,7 @@ async fn stream_session_events(
                     Some(event) => event,
                     None => continue,
                 };
-                if write_event(&mut send, &event).await.is_err() {
+                if write_event(&mut send, &event, &mut opened).await.is_err() {
                     return;
                 }
             }
@@ -338,7 +351,10 @@ async fn stream_session_events(
                 let Some(snapshot) = session_snapshot(state, &sid).await else {
                     return;
                 };
-                if write_event(&mut send, &snapshot).await.is_err() {
+                if write_event(&mut send, &snapshot, &mut opened)
+                    .await
+                    .is_err()
+                {
                     return;
                 }
             }
@@ -372,18 +388,24 @@ async fn resolve(
     }
 }
 
-/// Length-prefixed, because unlike a control response there are many of these on one stream and
-/// the reader needs to know where each ends.
+/// One event, framed like everything else.
+///
+/// `opened` says whether this half of the stream has announced its version yet: a subscription
+/// sends many of these, and the version belongs to the stream rather than to each message.
 async fn write_event(
     send: &mut quinn::SendStream,
     event: &vmux_wire::protocol::SharedEvent,
+    opened: &mut bool,
 ) -> Result<(), ()> {
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(event).map_err(|_| ())?;
-    let length = u32::try_from(bytes.len()).map_err(|_| ())?;
-    send.write_all(&length.to_le_bytes())
-        .await
-        .map_err(|_| ())?;
-    send.write_all(&bytes).await.map_err(|_| ())
+    let frame = Frame::new(MessageType::SESSION_EVENT, bytes.to_vec());
+    let written = if *opened {
+        CONTROL.send(send, &frame).await
+    } else {
+        *opened = true;
+        CONTROL.open(send, &frame).await
+    };
+    written.map_err(|_| ())
 }
 
 async fn subscribe(
@@ -563,21 +585,20 @@ mod live {
             .expect("dial")
             .await?;
 
-        let (mut send, mut recv) = connection.open_bi().await.expect("hello stream");
-        let hello = AuthenticatedHello {
-            hello: ClientHello {
-                device_id: DeviceId::new("test-device"),
-            },
+        let (mut send, mut recv) = connection.open_bi().await.expect("setup stream");
+        let setup = ClientSetup {
+            device_id: DeviceId::new("test-device"),
             token: token.to_string(),
         };
-        send.write_all(&encode_hello(&hello).expect("encode"))
-            .await
-            .expect("write hello");
-        send.finish().expect("finish hello");
+        let frame = Frame::json(MessageType::CLIENT_SETUP, &setup).expect("encode");
+        SETUP.open(&mut send, &frame).await.expect("write setup");
+        send.finish().expect("finish setup");
 
-        match recv.read_to_end(64 * 1024).await {
-            Ok(bytes) => {
-                decode_hello::<vmux_remote::quic::ServerHello>(&bytes).expect("server hello");
+        match SETUP.accept(&mut recv).await {
+            Ok(frame) => {
+                frame
+                    .read_json::<Accepted>(MessageType::SESSION_ACCEPTED)
+                    .expect("accepted");
                 Ok(connection)
             }
             Err(_) => Err(connection
@@ -588,24 +609,26 @@ mod live {
 
     async fn request(connection: &quinn::Connection, message: SharedMessage) -> SharedResponse {
         let (mut send, mut recv) = connection.open_bi().await.expect("control stream");
-        let mut frame = vec![StreamKind::Control.as_byte()];
-        frame.extend_from_slice(&rkyv::to_bytes::<rkyv::rancor::Error>(&message).expect("encode"));
-        send.write_all(&frame).await.expect("write request");
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&message).expect("encode");
+        let frame = Frame::new(MessageType::CONTROL_REQUEST, body.to_vec());
+        CONTROL
+            .open(&mut send, &frame)
+            .await
+            .expect("write request");
         send.finish().expect("finish request");
 
-        let bytes = recv.read_to_end(8 * 1024 * 1024).await.expect("response");
-        // Copied so rkyv sees an aligned buffer, for the same reason the production readers do.
-        let bytes = bytes.to_vec();
-        rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(&bytes).expect("decode")
+        let answer = CONTROL.accept(&mut recv).await.expect("response");
+        let body = answer
+            .body_of(MessageType::CONTROL_RESPONSE)
+            .expect("a control stream answers with a control response");
+        rkyv::from_bytes::<SharedResponse, rkyv::rancor::Error>(body).expect("decode")
     }
 
-    /// Read one length-prefixed event off a subscription stream.
+    /// Read the first event off a subscription stream, version byte and all.
     async fn read_event(recv: &mut quinn::RecvStream) -> Option<vmux_wire::protocol::SharedEvent> {
-        let mut length = [0u8; 4];
-        recv.read_exact(&mut length).await.ok()?;
-        let mut body = vec![0u8; u32::from_le_bytes(length) as usize];
-        recv.read_exact(&mut body).await.ok()?;
-        rkyv::from_bytes::<vmux_wire::protocol::SharedEvent, rkyv::rancor::Error>(&body).ok()
+        let frame = CONTROL.accept(recv).await.ok()?;
+        let body = frame.body_of(MessageType::SESSION_EVENT).ok()?;
+        rkyv::from_bytes::<vmux_wire::protocol::SharedEvent, rkyv::rancor::Error>(body).ok()
     }
 
     /// Subscribing to a session that does not exist must close the stream rather than hang.
@@ -618,15 +641,18 @@ mod live {
         let connection = connect(&harness, "correct-token").await.expect("handshake");
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
-        let mut frame = vec![StreamKind::SessionEvents.as_byte()];
-        frame.extend_from_slice(
-            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
-                "ghost",
-                vmux_wire::protocol::AgentAction::Attach,
-            ))
-            .expect("encode"),
-        );
-        send.write_all(&frame).await.expect("write");
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::agent(
+            "ghost",
+            vmux_wire::protocol::AgentAction::Attach,
+        ))
+        .expect("encode");
+        CONTROL
+            .open(
+                &mut send,
+                &Frame::new(MessageType::SESSION_EVENTS, body.to_vec()),
+            )
+            .await
+            .expect("write");
         send.finish().expect("finish");
 
         let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -640,19 +666,24 @@ mod live {
         );
     }
 
-    /// A control request on a subscription stream, or the reverse, must not be silently treated
-    /// as the other. The kind byte is the only thing distinguishing them.
+    /// A well-formed frame carrying a type this handler does not serve must not be answered as if
+    /// it were a control request. The message type is the only thing separating a request from a
+    /// subscription, or from another leg's traffic entirely — which is why it is on the wire.
+    ///
+    /// The body is a perfectly good `ListSessions`, so nothing but the type can refuse it.
     #[tokio::test]
-    async fn an_unknown_stream_kind_is_dropped() {
+    async fn a_frame_of_a_foreign_type_is_not_answered_as_a_control_request() {
         let harness = start("correct-token");
         let connection = connect(&harness, "correct-token").await.expect("handshake");
 
         let (mut send, mut recv) = connection.open_bi().await.expect("stream");
-        let mut frame = vec![200u8];
-        frame.extend_from_slice(
-            &rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::ListSessions).expect("encode"),
-        );
-        send.write_all(&frame).await.expect("write");
+        let body = rkyv::to_bytes::<rkyv::rancor::Error>(&SharedMessage::ListSessions)
+            .expect("encode")
+            .to_vec();
+        CONTROL
+            .open(&mut send, &Frame::new(MessageType(0x0999), body))
+            .await
+            .expect("write");
         send.finish().expect("finish");
 
         let answered = tokio::time::timeout(
@@ -661,10 +692,12 @@ mod live {
         )
         .await;
 
+        let served = matches!(&answered, Ok(Ok(bytes)) if !bytes.is_empty());
         assert!(
-            matches!(answered, Ok(Ok(bytes)) if bytes.is_empty()),
-            "an unrecognised stream kind must not be answered as if it were a control request"
+            !served,
+            "a foreign message type must not be served as a control request, got {answered:?}"
         );
+        assert!(answered.is_ok(), "and it must not hang, got {answered:?}");
     }
 
     #[tokio::test]
@@ -721,7 +754,7 @@ mod tests {
 
     #[test]
     fn a_matching_token_is_admitted() {
-        assert_eq!(admit("secret", "secret", true), Ok(ServerHello {}));
+        assert_eq!(admit("secret", "secret", true), Ok(Accepted {}));
     }
 
     #[test]

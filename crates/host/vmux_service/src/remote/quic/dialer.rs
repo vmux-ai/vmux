@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
+use vmux_remote::framing::{Frame, FrameStream};
 use vmux_remote::quic::endpoint::SelfSignedIdentity;
 use vmux_remote::quic::tunnel::TunnelSocket;
-use vmux_remote::quic::{RelayAccepted, RelayHello, decode_hello, encode_hello};
+use vmux_remote::quic::{Accepted, MessageType, RelaySetup};
 use vmux_remote::{DeviceId, PeerRole};
 
 use super::super::server::RemoteState;
@@ -268,7 +269,10 @@ impl Drop for RegisteredDevice {
     }
 }
 
-/// Send the hello and wait for the relay to admit it.
+/// Frames on the relay setup exchange. Bounded well under anything a setup could need.
+const SETUP: FrameStream = FrameStream::new(16 * 1024);
+
+/// Send the setup and wait for the relay to admit it.
 async fn register(
     control: &quinn::Connection,
     device_id: &DeviceId,
@@ -278,22 +282,24 @@ async fn register(
         .open_bi()
         .await
         .map_err(|error| format!("relay stream: {error}"))?;
-    let hello = RelayHello {
+    let setup = RelaySetup {
         device_id: device_id.clone(),
         role: PeerRole::Desktop,
         token: token.to_string(),
     };
-    let bytes = encode_hello(&hello).map_err(|error| format!("encode hello: {error}"))?;
-    send.write_all(&bytes)
+    let frame = Frame::json(MessageType::RELAY_SETUP, &setup)
+        .map_err(|error| format!("encode setup: {error}"))?;
+    SETUP
+        .open(&mut send, &frame)
         .await
-        .map_err(|error| format!("write hello: {error}"))?;
+        .map_err(|error| format!("write setup: {error}"))?;
     send.finish().map_err(|error| format!("finish: {error}"))?;
 
-    let answer = recv
-        .read_to_end(16 * 1024)
+    SETUP
+        .accept(&mut recv)
         .await
-        .map_err(|error| format!("read acceptance: {error}"))?;
-    decode_hello::<RelayAccepted>(&answer)
+        .map_err(|error| format!("read acceptance: {error:?}"))?
+        .read_json::<Accepted>(MessageType::RELAY_ACCEPTED)
         .map_err(|error| format!("decode acceptance: {error:?}"))?;
     Ok(())
 }
