@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 use bevy_cef::prelude::{BinEventEmitterPlugin, BinReceive};
 
+use crate::CommandBar;
 use crate::event::CommandBarPanelActiveEvent;
+use vmux_core::overlay::OverlayShownInline;
 
 pub struct CommandBarPanelPlugin;
 
@@ -10,7 +12,8 @@ impl Plugin for CommandBarPanelPlugin {
         app.add_plugins(
             BinEventEmitterPlugin::<(CommandBarPanelActiveEvent,)>::for_hosts(&["layout"]),
         )
-        .add_observer(on_command_bar_panel_active);
+        .add_observer(on_command_bar_panel_active)
+        .add_systems(Update, mark_command_bar_shown_inline);
     }
 }
 
@@ -22,6 +25,29 @@ impl Plugin for CommandBarPanelPlugin {
 /// winit -> Bevy -> `send_key_event` -> the focused element.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CommandBarPanelActive;
+
+/// Tells the bar's overlay entity that the panel is its surface right now.
+///
+/// Every question the host asks about the bar is asked of the overlay entity: is it open, does it
+/// own input, should Escape dismiss it. The overlay's own node stays hidden while the panel is up,
+/// so without this each of those answers is wrong about a bar the user is looking at.
+fn mark_command_bar_shown_inline(
+    panel_active: Query<(), With<CommandBarPanelActive>>,
+    bar_q: Query<(Entity, Has<OverlayShownInline>), With<CommandBar>>,
+    mut commands: Commands,
+) {
+    let inline = !panel_active.is_empty();
+    for (bar, marked) in bar_q.iter() {
+        if inline == marked {
+            continue;
+        }
+        if inline {
+            commands.entity(bar).insert(OverlayShownInline);
+        } else {
+            commands.entity(bar).remove::<OverlayShownInline>();
+        }
+    }
+}
 
 fn on_command_bar_panel_active(
     trigger: On<BinReceive<CommandBarPanelActiveEvent>>,
@@ -44,7 +70,8 @@ mod tests {
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_observer(on_command_bar_panel_active);
+            .add_observer(on_command_bar_panel_active)
+            .add_systems(Update, mark_command_bar_shown_inline);
         app
     }
 

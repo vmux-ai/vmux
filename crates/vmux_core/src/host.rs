@@ -35,7 +35,7 @@ pub use launcher::{
     StackInPaneChosen,
 };
 pub use notify::{AgentAttention, AgentDoneUnseen, BellReceived, OsNotify};
-pub use overlay::{OverlayState, OverlayStateQuery, WindowOverlay};
+pub use overlay::{OverlayShownInline, OverlayState, OverlayStateQuery, WindowOverlay};
 pub use page_open::{
     CefPageAttachRequest, PageOpenError, PageOpenHandled, PageOpenId, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask, PendingPrompt, PendingPromptAttachments,
