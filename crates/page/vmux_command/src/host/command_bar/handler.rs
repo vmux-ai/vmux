@@ -1528,7 +1528,7 @@ mod tests {
 
         assert_eq!(node.display, Display::Flex);
         assert_eq!(visibility, Visibility::Inherited);
-        assert!(!OverlayState::of(node.display, visibility, false).owns_input());
+        assert!(!OverlayState::of(node.display, visibility, false, false).owns_input());
     }
 
     #[test]
@@ -2248,7 +2248,8 @@ mod tests {
             !OverlayState::of(
                 display_after_prewarm,
                 Visibility::Hidden,
-                has_kb_after_prewarm
+                has_kb_after_prewarm,
+                false
             )
             .owns_input(),
             "is_command_bar_open must report false after dismiss + prewarm"
