@@ -43,15 +43,15 @@ use vmux_ui::components::prompt_composer::{
     PROMPT_INPUT_ID, PromptComposer, PromptComposerAttachment, focus_prompt_end,
 };
 use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOptions};
-use vmux_ui::dom_listener::DocumentListener;
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
 
+/// The shared command-bar body: input, live-filtered results, file-path completion,
+/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
+/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 #[component]
 pub fn CommandPalette(props: PaletteProps) -> Element {
     let state = props.state;
@@ -291,7 +291,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
             if is_start {
                 focus_prompt_end(PROMPT_INPUT_ID);
             } else {
-                focus_and_install_ctrl_bindings();
+                focus_command_bar_input();
             }
         }
     });
@@ -299,6 +299,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     // `Rc` because `use_hook` clones its value out on every render and a listener must have one
     // owner — two would each try to remove it, and the second removal is the one that silently
     // does nothing.
+    #[cfg(web)]
     use_hook(|| Rc::new(is_start.then(|| start_menu_click_outside(target_menu_open))));
 
     use_effect(move || {
@@ -850,7 +851,11 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     };
     let modal_keydown_q = q.clone();
     let modal_keydown_results = results.clone();
+    let modal_keydown_ghost = ghost_text.clone();
     let modal_keydown = move |e: KeyboardEvent| {
+        if handle_readline_chord(&e, query, &modal_keydown_ghost) {
+            return;
+        }
         let ctrl = e.modifiers().contains(Modifiers::CONTROL);
         if space_switch
             && !ctrl
@@ -1440,21 +1445,9 @@ impl PaletteKeys {
         drop(rows);
         self.query.set(completed.clone());
         self.selected.set(0);
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(COMMAND_BAR_INPUT_ID))
-        else {
-            return;
-        };
-        let input: web_sys::HtmlInputElement = element.unchecked_into();
-        input.set_value(&completed);
         TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(completed.len());
     }
 }
-
-/// The shared command-bar body: input, live-filtered results, file-path completion,
-/// history suggestions, keyboard navigation, and action dispatch. Rendered by both
-/// the Cmd+K modal ([`PaletteVariant::Modal`]) and the start launcher ([`PaletteVariant::Start`]).
 
 /// What the user has typed, and which row is selected.
 struct PaletteInput {
@@ -1620,89 +1613,82 @@ fn select_start_media_entry(
 
 const COMMAND_BAR_INPUT_ID: &str = "command-bar-input";
 
-fn focus_and_install_ctrl_bindings() {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id(COMMAND_BAR_INPUT_ID) else {
-        return;
-    };
-    let input: web_sys::HtmlInputElement = el.unchecked_into();
+/// Claim focus for the query field and offer its contents for overtyping.
+///
+/// The Ctrl chords this used to install as a capture-phase DOM listener are now part of the
+/// field's own `onkeydown` — see [`handle_readline_chord`].
+fn focus_command_bar_input() {
     FocusClaim::new(COMMAND_BAR_INPUT_ID).request();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
-
-    if js_sys::Reflect::get(&input, &JsValue::from_str("_ctrlBound"))
-        .map(|v| v.is_truthy())
-        .unwrap_or(false)
-    {
-        return;
-    }
-    let _ = js_sys::Reflect::set(&input, &JsValue::from_str("_ctrlBound"), &JsValue::TRUE);
-
-    let input2 = input.clone();
-    let closure = Closure::wrap(Box::new(move |e: web_sys::KeyboardEvent| {
-        if handle_plain_meta_a(&e) {
-            return;
-        }
-        if !e.ctrl_key() {
-            return;
-        }
-        let action = match ctrl_key_capture_for_code(&e.code()) {
-            CtrlKeyCapture::Ignore => return,
-            CtrlKeyCapture::PassToDioxus => {
-                e.prevent_default();
-                return;
-            }
-            CtrlKeyCapture::Edit(action) => action,
-        };
-        e.prevent_default();
-        e.stop_immediate_propagation();
-        apply_ctrl_edit(&input2, action);
-    }) as Box<dyn FnMut(web_sys::KeyboardEvent)>);
-
-    let target: &web_sys::EventTarget = input.as_ref();
-    let opts = web_sys::AddEventListenerOptions::new();
-    opts.set_capture(true);
-    let _ = target.add_event_listener_with_callback_and_add_event_listener_options(
-        "keydown",
-        closure.as_ref().unchecked_ref(),
-        &opts,
-    );
-    closure.forget();
 }
 
-/// Run a readline edit against the input, then put the caret where it landed.
+/// Cmd+A and the Ctrl readline chords, offered the key before the field's own handling.
 ///
-/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. What is left
-/// here is writing the value to the element and telling Dioxus afterwards, which is only
-/// necessary because the input is uncontrolled: Dioxus does not see a change it did not make.
-/// Both of those lines go away when it becomes controlled.
-fn apply_ctrl_edit(input: &web_sys::HtmlInputElement, action: CtrlEditAction) {
-    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
-    let value = input.value();
-    let ghost = match action {
-        CtrlEditAction::End => input.get_attribute("data-ghost").unwrap_or_default(),
-        _ => String::new(),
+/// Returns whether the key was consumed.
+///
+/// This was a capture-phase listener on the input element, installed once behind a `_ctrlBound`
+/// latch, because Chromium's macOS readline emulation acts on Ctrl+A/E and the handler had to run
+/// first to preempt it. Dioxus dispatches on the bubble phase, so whether `prevent_default` still
+/// wins that race is the one thing here no test settles — it needs a keyboard.
+fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost: &str) -> bool {
+    if handle_plain_meta_a(event) {
+        return true;
+    }
+    if !event.modifiers().contains(Modifiers::CONTROL) {
+        return false;
+    }
+
+    let action = match ctrl_key_capture_for_code(&event.code().to_string()) {
+        CtrlKeyCapture::Ignore => return false,
+        // Preempt the browser, then let the field's own handler read the same key.
+        CtrlKeyCapture::PassToDioxus => {
+            event.prevent_default();
+            return false;
+        }
+        CtrlKeyCapture::Edit(action) => action,
     };
 
-    let edited = action.apply(&value, caret.position(), &ghost);
-    let changed = edited.value != value;
-    if changed {
-        input.set_value(&edited.value);
+    event.prevent_default();
+    event.stop_propagation();
+    apply_ctrl_edit(&mut query, action, ghost);
+    true
+}
+
+/// Run a readline edit against the query, then put the caret where it landed.
+///
+/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. The value goes
+/// through the signal the field is bound to, so there is nothing to tell Dioxus afterwards — the
+/// element write and the synthetic `input` event that used to follow it existed only because the
+/// field was uncontrolled.
+fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str) {
+    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
+    let value = query.peek().clone();
+    let ghost = match action {
+        CtrlEditAction::End => ghost,
+        _ => "",
+    };
+
+    let edited = action.apply(&value, caret.position(), ghost);
+    if edited.value != value {
+        query.set(edited.value);
     }
     caret.place(edited.caret);
-    if changed {
-        dispatch_input_event(input);
-    }
 }
 
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
 /// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
 /// on the trigger (`#start-agent-selector-trigger`) are left alone.
-fn start_menu_click_outside(mut menu_open: Signal<bool>) -> Option<DocumentListener> {
+//
+// `web` only. `DocumentListener` has a native stub that takes no event, so there is nothing to
+// read a target from; dismissing on an outside pointer natively wants a backdrop element instead.
+// Only the start page installs this, and the start page is not native yet.
+#[cfg(web)]
+fn start_menu_click_outside(
+    mut menu_open: Signal<bool>,
+) -> Option<vmux_ui::dom_listener::DocumentListener> {
+    use vmux_ui::dom_listener::DocumentListener;
+    use wasm_bindgen::JsCast;
+
     DocumentListener::capture("mousedown", move |event| {
         if !menu_open() {
             return;
@@ -1724,21 +1710,18 @@ fn start_menu_click_outside(mut menu_open: Signal<bool>) -> Option<DocumentListe
 }
 
 /// Cmd+A with no other modifier selects the query rather than the page.
-fn handle_plain_meta_a(e: &web_sys::KeyboardEvent) -> bool {
-    if !e.meta_key() || e.ctrl_key() || e.alt_key() || e.shift_key() || e.code() != "KeyA" {
+fn handle_plain_meta_a(event: &KeyboardEvent) -> bool {
+    let modifiers = event.modifiers();
+    let plain_meta = modifiers.contains(Modifiers::META)
+        && !modifiers.contains(Modifiers::CONTROL)
+        && !modifiers.contains(Modifiers::ALT)
+        && !modifiers.contains(Modifiers::SHIFT);
+    if !plain_meta || event.code() != Code::KeyA {
         return false;
     }
-    e.prevent_default();
-    e.stop_immediate_propagation();
+
+    event.prevent_default();
+    event.stop_propagation();
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all();
     true
-}
-
-/// Dispatch a synthetic "input" event so Dioxus picks up value changes.
-fn dispatch_input_event(el: &web_sys::HtmlInputElement) {
-    let init = web_sys::EventInit::new();
-    init.set_bubbles(true);
-    if let Ok(evt) = web_sys::Event::new_with_event_init_dict("input", &init) {
-        let _ = el.dispatch_event(&evt);
-    }
 }

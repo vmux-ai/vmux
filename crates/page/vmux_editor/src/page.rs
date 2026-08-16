@@ -722,7 +722,7 @@ pub fn Page() -> Element {
                     && is_markdown_file(&git_path())
                     && !note_editing()
                 {
-                    let _ = forward_file_key(&e, raw, ed_mode());
+                    let _ = forward_file_key(&e, ed_mode());
                     return;
                 }
                 match mode() {
@@ -1265,7 +1265,7 @@ pub fn Page() -> Element {
                                                     }
                                                     return;
                                                 }
-                                                let _ = forward_file_key(&event, raw, ed_mode());
+                                                let _ = forward_file_key(&event, ed_mode());
                                             },
                                         }
                                         if !note_references().is_empty() {
@@ -1713,7 +1713,7 @@ pub fn Page() -> Element {
                                                 if keys.offer(&e) {
                                                     return;
                                                 }
-                                                let _ = forward_file_key(&e, raw, ed_mode());
+                                                let _ = forward_file_key(&e, ed_mode());
                                             },
                                         }
 
@@ -4184,11 +4184,7 @@ fn send_committed_text() {
     }
 }
 
-fn forward_file_key(
-    event: &Event<KeyboardData>,
-    raw: &web_sys::KeyboardEvent,
-    mode: vmux_core::editor::EditMode,
-) -> bool {
+fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMode) -> bool {
     let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
         return false;
     };
