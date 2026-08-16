@@ -18,13 +18,29 @@ pub struct Insets {
 /// wants a centre, so the corners are derived here rather than at each of the sixteen call sites
 /// that need them — a slipped sign in that arithmetic gives a plausible rectangle in the wrong
 /// place, which neither the type checker nor a test can see.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub struct ComputedNode {
     pub size: Vec2,
     pub center: Vec2,
     pub padding: Insets,
     /// Reciprocal of the render target's scale factor — `0.5` on a Retina display.
     pub inverse_scale_factor: f32,
+}
+
+/// A node that has not been laid out yet is unscaled, not scaled by zero.
+///
+/// Deriving this would leave `inverse_scale_factor` at `0.0`, which is not a neutral value: it
+/// makes [`ComputedNode::scale`] report a million and [`ComputedNode::to_logical`] shrink by the
+/// same. `Node` requires this component, so every node holds the default for at least one frame.
+impl Default for ComputedNode {
+    fn default() -> Self {
+        Self {
+            size: Vec2::ZERO,
+            center: Vec2::ZERO,
+            padding: Insets::default(),
+            inverse_scale_factor: 1.0,
+        }
+    }
 }
 
 impl ComputedNode {
@@ -183,6 +199,17 @@ mod tests {
         };
 
         assert_eq!(rect.padding_box(), Vec2::new(110.0, 60.0));
+    }
+
+    /// A node holds the default until its first layout, so converting one to logical space must be
+    /// a no-op rather than a division by a millionth.
+    #[test]
+    fn an_unscaled_rect_survives_conversion_to_logical() {
+        let rect = ComputedNode::from_origin(Vec2::new(400.0, 300.0));
+
+        assert_eq!(rect.scale(), 1.0);
+        assert_eq!(rect.to_logical(), rect);
+        assert_eq!(rect.min(), Vec2::ZERO);
     }
 
     #[test]
