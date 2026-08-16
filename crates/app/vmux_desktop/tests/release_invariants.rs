@@ -521,7 +521,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_winit",
         "bevy_window",
         "reflect_auto_register",
-        "https",
         "x11",
         "wayland",
     ]
@@ -567,6 +566,7 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
         "ui_picking",
         "bevy_picking",
         "bevy_camera",
+        "https",
     ] {
         assert!(
             !features.contains(feature),

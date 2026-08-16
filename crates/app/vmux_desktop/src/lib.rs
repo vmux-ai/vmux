@@ -53,7 +53,6 @@ mod tray;
 #[cfg(feature = "updater")]
 pub mod updater;
 mod window_state;
-use bevy::asset::io::web::WebAssetPlugin;
 use bevy::prelude::*;
 use bevy::window::{
     CompositeAlphaMode, ExitCondition, MonitorSelection, Window as NativeWindow, WindowPlugin,
@@ -87,16 +86,11 @@ impl Plugin for VmuxPlugin {
         let winit_settings = runtime::foreground_winit_settings(false, false);
         app.insert_resource(winit_settings).add_plugins((
             VmuxCorePlugins,
-            DefaultPlugins
-                .set(WebAssetPlugin {
-                    silence_startup_warning: true,
-                })
-                .set(window_plugin)
-                .set(bevy::log::LogPlugin {
-                    filter: "bevy_camera_controller=warn".into(),
-                    custom_layer: crate::log_forward::file_log_layer,
-                    ..default()
-                }),
+            DefaultPlugins.set(window_plugin).set(bevy::log::LogPlugin {
+                filter: "bevy_camera_controller=warn".into(),
+                custom_layer: crate::log_forward::file_log_layer,
+                ..default()
+            }),
             LayoutPlugin,
             FeaturePlugins,
             BrowserPlugin,
