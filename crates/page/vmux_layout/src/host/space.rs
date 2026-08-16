@@ -244,7 +244,15 @@ mod tests {
             app.world().get::<Node>(active).unwrap().display,
             Display::Flex
         );
+        assert_eq!(
+            *app.world().get::<Visibility>(active).unwrap(),
+            Visibility::Visible
+        );
         assert_eq!(app.world().get::<Node>(bg).unwrap().display, Display::None);
+        assert_eq!(
+            *app.world().get::<Visibility>(bg).unwrap(),
+            Visibility::Hidden
+        );
         assert!(app.world().get_entity(bg).is_ok());
     }
 }
