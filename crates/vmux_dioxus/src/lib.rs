@@ -27,7 +27,9 @@
 mod edit_script;
 mod event_request;
 mod page_dom;
+mod shell;
 
 pub use edit_script::EditScript;
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
 pub use page_dom::{PageComponent, PageDom};
+pub use shell::InterpreterShell;
