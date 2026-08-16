@@ -14,7 +14,7 @@
 //! Nothing here knows what a key *means*. It tests membership and asks the page a yes/no question.
 
 use crate::hooks::use_event::use_event;
-use crate::key_stroke::WebKey;
+use crate::key_stroke::PressedKey;
 use crate::transport::event_listener::send;
 use dioxus::prelude::*;
 use vmux_core::input::{
@@ -60,10 +60,7 @@ impl KeyClaim {
         wanted_locally: impl FnOnce(&KeyStroke) -> bool,
     ) {
         let data = event.data();
-        let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-            return;
-        };
-        let Some(stroke) = WebKey::new(raw).stroke() else {
+        let Some(stroke) = PressedKey::new(&data).stroke() else {
             return;
         };
         if stroke.is_modifier_key() {

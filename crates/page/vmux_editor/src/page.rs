@@ -23,7 +23,7 @@ use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
-use vmux_ui::hooks::{WebKey, send, use_listener, use_theme};
+use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::scroll::ScrollIntoView;
 use wasm_bindgen::JsCast;
@@ -1255,7 +1255,7 @@ pub fn Page() -> Element {
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
                                                     }
-                                                    if let Some(stroke) = WebKey::new(raw).stroke() {
+                                                    if let Some(stroke) = PressedKey::new(&event.data()).stroke() {
                                                         let _ = send(&stroke);
                                                     }
                                                     if keymap() == vmux_core::KeymapKind::Vim {
@@ -4189,7 +4189,7 @@ fn forward_file_key(
     raw: &web_sys::KeyboardEvent,
     mode: vmux_core::editor::EditMode,
 ) -> bool {
-    let Some(stroke) = WebKey::new(raw).stroke() else {
+    let Some(stroke) = PressedKey::new(&event.data()).stroke() else {
         return false;
     };
     if mode.accepts_text() && stroke.is_text_input() {

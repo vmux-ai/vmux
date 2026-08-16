@@ -6,6 +6,12 @@ use dioxus_interpreter_js::MutationState;
 
 use crate::event_request::EventOutcome;
 
+/// A page's root component.
+///
+/// Named rather than spelled `fn() -> Element` inline so a reader of [`PageDom::mount`] sees what
+/// is being asked for, and so the signature does not read as a component itself.
+pub type PageComponent = fn() -> Element;
+
 /// A page whose components run here, rendering into a document owned by something else.
 pub struct PageDom {
     dom: VirtualDom,
@@ -15,7 +21,7 @@ pub struct PageDom {
 
 impl PageDom {
     /// Mount `app` without rendering it. Call [`PageDom::rebuild`] for the first batch.
-    pub fn mount(app: fn() -> Element) -> Self {
+    pub fn mount(app: PageComponent) -> Self {
         Self::install_event_converter();
 
         Self {
@@ -132,6 +138,7 @@ mod tests {
 
     use super::*;
 
+    #[component]
     fn Static() -> Element {
         rsx! { div { "hello" } }
     }
@@ -160,6 +167,7 @@ mod tests {
 
     #[test]
     fn no_further_batch_is_produced_until_the_last_one_is_acknowledged() {
+        #[component]
         fn Counting() -> Element {
             let mut count = use_signal(|| 0);
             rsx! { button { onclick: move |_| count += 1, "{count}" } }
@@ -183,6 +191,7 @@ mod tests {
 
     #[test]
     fn a_handler_that_prevents_the_default_is_reported_to_the_page() {
+        #[component]
         fn Preventing() -> Element {
             rsx! { a { onclick: |event: Event<MouseData>| event.prevent_default(), "link" } }
         }
@@ -198,6 +207,7 @@ mod tests {
 
     #[test]
     fn a_handler_that_does_not_prevent_the_default_lets_the_browser_act() {
+        #[component]
         fn Plain() -> Element {
             rsx! { a { onclick: |_| {}, "link" } }
         }

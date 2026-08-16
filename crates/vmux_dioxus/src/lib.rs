@@ -30,4 +30,4 @@ mod page_dom;
 
 pub use edit_script::EditScript;
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
-pub use page_dom::PageDom;
+pub use page_dom::{PageComponent, PageDom};

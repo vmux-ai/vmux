@@ -31,7 +31,7 @@ mod listener_guard;
 
 pub mod transport;
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod key_stroke;
 
 pub mod list_nav;
