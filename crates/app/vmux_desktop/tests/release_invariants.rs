@@ -521,7 +521,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_winit",
         "bevy_window",
         "bevy_camera",
-        "bevy_image",
         "reflect_auto_register",
         "https",
         "x11",

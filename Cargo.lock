@@ -932,7 +932,6 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "js-sys",
- "notify-debouncer-full",
  "ron 0.12.1",
  "serde",
  "stackfuture",
@@ -1280,7 +1279,6 @@ dependencies = [
  "bevy_log",
  "bevy_math",
  "bevy_mesh",
- "bevy_picking",
  "bevy_platform",
  "bevy_ptr",
  "bevy_reflect",
@@ -1405,30 +1403,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "wgpu-types",
-]
-
-[[package]]
-name = "bevy_picking"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93468ac5937f76be3af763d496f01e899edf6d9c1a1d39a87ae4ce8eba36f78b"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_camera",
- "bevy_derive",
- "bevy_ecs",
- "bevy_input",
- "bevy_math",
- "bevy_mesh",
- "bevy_platform",
- "bevy_reflect",
- "bevy_time",
- "bevy_transform",
- "bevy_window",
- "crossbeam-channel",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -4094,15 +4068,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-id"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
-dependencies = [
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "filedescriptor"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5476,17 +5441,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inotify"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd5b3eaf1a28b758ac0faa5a4254e8ab2705605496f1b1f3fbbc3988ad73d199"
-dependencies = [
- "bitflags 2.11.1",
- "inotify-sys",
- "libc",
-]
-
-[[package]]
 name = "inotify-sys"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6182,7 +6136,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50b7e5b27aa02a74bac8c3f23f448f8d87ff11f92d3aac1a6ed369ee08cc56c1"
 dependencies = [
  "libc",
- "log",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
 ]
@@ -6526,53 +6479,13 @@ dependencies = [
  "crossbeam-channel",
  "filetime",
  "fsevent-sys",
- "inotify 0.9.6",
+ "inotify",
  "kqueue",
  "libc",
  "log",
  "mio 0.8.11",
  "walkdir",
  "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "notify"
-version = "8.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d3d07927151ff8575b7087f245456e549fea62edf0ec4e565a5ee50c8402bc3"
-dependencies = [
- "bitflags 2.11.1",
- "fsevent-sys",
- "inotify 0.11.1",
- "kqueue",
- "libc",
- "log",
- "mio 1.2.0",
- "notify-types",
- "walkdir",
- "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "notify-debouncer-full"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c02b49179cfebc9932238d04d6079912d26de0379328872846118a0fa0dbb302"
-dependencies = [
- "file-id",
- "log",
- "notify 8.2.0",
- "notify-types",
- "walkdir",
-]
-
-[[package]]
-name = "notify-types"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42b8cfee0e339a0337359f3c88165702ac6e600dc01c0cc9579a92d62b08477a"
-dependencies = [
- "bitflags 2.11.1",
 ]
 
 [[package]]
@@ -10628,7 +10541,7 @@ dependencies = [
  "image",
  "js-sys",
  "mockito",
- "notify 6.1.1",
+ "notify",
  "pulldown-cmark",
  "reqwest",
  "rfd 0.15.4",
@@ -10836,7 +10749,7 @@ dependencies = [
  "libc",
  "moonshine-save",
  "muda 0.19.2",
- "notify 6.1.1",
+ "notify",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-av-foundation",
@@ -10898,7 +10811,7 @@ dependencies = [
  "image",
  "js-sys",
  "lsp-types",
- "notify 6.1.1",
+ "notify",
  "percent-encoding",
  "pulldown-cmark",
  "regex",
@@ -10948,7 +10861,7 @@ dependencies = [
  "bevy_ecs",
  "dioxus",
  "libc",
- "notify 6.1.1",
+ "notify",
  "rkyv",
  "serde",
  "similar",
@@ -10984,7 +10897,7 @@ dependencies = [
  "bevy",
  "bevy_cef",
  "bevy_ecs",
- "notify 6.1.1",
+ "notify",
  "rkyv",
  "serde",
  "tempfile",
@@ -11208,7 +11121,7 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
- "notify 6.1.1",
+ "notify",
  "rkyv",
  "ron 0.8.1",
  "serde",

@@ -232,13 +232,6 @@ where
     }
 }
 
-/// Holds the webview surface texture handle for alpha hit-testing.
-///
-/// This component is automatically inserted and updated by the render systems.
-/// It provides material-type-agnostic access to the webview texture.
-#[derive(Component, Debug, Clone)]
-pub struct WebviewSurface(pub Handle<Image>);
-
 /// Analogous to [`CefKeyboardTarget`] but for pointer events (mouse wheel only, for now).
 ///
 /// When **at least one** [`WebviewSource`] entity has this marker, `on_mouse_wheel` only forwards
