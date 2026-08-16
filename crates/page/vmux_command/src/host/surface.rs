@@ -17,6 +17,7 @@ use bevy_cef::prelude::{
 use vmux_core::overlay::WindowOverlay;
 
 use crate::bundle::{COMMAND_BAR_PAGE_URL, CommandBar};
+use vmux_flex::prelude::*;
 
 pub(crate) struct CommandBarSurfacePlugin;
 
@@ -52,7 +53,6 @@ impl CommandBar {
                 display: Display::None,
                 ..default()
             },
-            ZIndex(3),
             WebviewSource::new(COMMAND_BAR_PAGE_URL),
             WebviewSize(Vec2::new(800.0, 600.0)),
             Transform::default(),

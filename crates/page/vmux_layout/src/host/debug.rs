@@ -4,6 +4,7 @@ use bevy_cef::prelude::*;
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenTask};
 
 use crate::cef::Browser;
+use vmux_flex::prelude::*;
 
 pub const DEBUG_PAGE_URL: &str = "vmux://debug/";
 

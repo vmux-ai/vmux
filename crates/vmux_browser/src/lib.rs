@@ -38,7 +38,6 @@ use bevy::{
     input::{ButtonState, mouse::MouseButton},
     picking::pointer::PointerButton,
     prelude::*,
-    ui::UiGlobalTransform,
 };
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
@@ -48,8 +47,7 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadAppCommands;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, NodeRect, OscTitle, PageMetadata, PageOpenRequest,
-    PageOpenSet,
+    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenRequest, PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -67,6 +65,7 @@ use vmux_layout::{
     tab::Tab,
 };
 
+use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 use vmux_ui::i18n::Locale;
 use vmux_ui::theme::ThemeEvent;
@@ -283,6 +282,15 @@ mod accept_language_tests {
     }
 }
 
+type CefPointerRegionRow<'a> = (
+    Option<&'a Header>,
+    Option<&'a SideSheet>,
+    &'a Node,
+    &'a ComputedNode,
+    Option<&'a Visibility>,
+    bool,
+);
+
 type CefPointerRegionQuery<'w, 's> = Query<
     'w,
     's,
@@ -291,7 +299,6 @@ type CefPointerRegionQuery<'w, 's> = Query<
         Option<&'static SideSheet>,
         &'static Node,
         &'static ComputedNode,
-        &'static UiGlobalTransform,
         Option<&'static Visibility>,
         Has<Open>,
     ),
@@ -300,7 +307,7 @@ type CefPointerRegionQuery<'w, 's> = Query<
 
 #[derive(Clone, Copy)]
 struct CefPointerHitRect {
-    rect: NodeRect,
+    rect: ComputedNode,
     interactive: bool,
 }
 
@@ -308,6 +315,18 @@ static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
+    /// A region only takes the pointer while it is a header or sheet that is open, laid out and
+    /// visible — anything else is a rectangle the cursor should fall straight through.
+    fn of(row: CefPointerRegionRow<'_>) -> Self {
+        let (header, side_sheet, node, &rect, visibility, open) = row;
+        let interactive = (header.is_some() || side_sheet.is_some())
+            && open
+            && node.display != Display::None
+            && !matches!(visibility, Some(Visibility::Hidden))
+            && !rect.is_empty();
+        Self { rect, interactive }
+    }
+
     fn contains(self, point: Vec2) -> bool {
         self.interactive && self.rect.contains(point)
     }
@@ -321,33 +340,12 @@ fn native_layout_activity_active() -> bool {
     NATIVE_LAYOUT_ACTIVITY.load(Ordering::Relaxed)
 }
 
-fn cef_pointer_hit_rect(
-    header: Option<&Header>,
-    side_sheet: Option<&SideSheet>,
-    node: &Node,
-    computed: &ComputedNode,
-    transform: &UiGlobalTransform,
-    visibility: Option<&Visibility>,
-    open: bool,
-) -> CefPointerHitRect {
-    let rect = NodeRect::of(computed, transform);
-    let interactive = (header.is_some() || side_sheet.is_some())
-        && open
-        && node.display != Display::None
-        && !matches!(visibility, Some(Visibility::Hidden))
-        && !rect.is_empty();
-    CefPointerHitRect { rect, interactive }
-}
-
 fn cef_pointer_regions_contains(
     cursor_pos: Vec2,
     cef_regions: &CefPointerRegionQuery<'_, '_>,
 ) -> bool {
-    for (header, side_sheet, node, computed, transform, visibility, open) in cef_regions.iter() {
-        let rect = cef_pointer_hit_rect(
-            header, side_sheet, node, computed, transform, visibility, open,
-        );
-        if rect.contains(cursor_pos) {
+    for row in cef_regions.iter() {
+        if CefPointerHitRect::of(row).contains(cursor_pos) {
             return true;
         }
     }
@@ -707,25 +705,22 @@ struct LayoutFixedOffsets {
     height: f32,
 }
 
-fn layout_fixed_offsets_from_computed(
-    computed: &ComputedNode,
-    transform: &UiGlobalTransform,
-    window_width_px: f32,
-) -> Option<LayoutFixedOffsets> {
-    let rect = NodeRect::of(computed, transform);
-    if rect.is_empty() || window_width_px <= 0.0 {
-        return None;
+impl LayoutFixedOffsets {
+    fn of(rect: &ComputedNode, window_width_px: f32) -> Option<Self> {
+        if rect.is_empty() || window_width_px <= 0.0 {
+            return None;
+        }
+
+        let logical = rect.to_logical();
+        let window_width = window_width_px * rect.inverse_scale_factor.max(1.0e-6);
+
+        Some(Self {
+            left: logical.min().x,
+            top: logical.min().y,
+            right: window_width - logical.max().x,
+            height: logical.size.y,
+        })
     }
-
-    let logical = rect.to_logical();
-    let window_width = window_width_px * rect.inverse_scale_factor.max(1.0e-6);
-
-    Some(LayoutFixedOffsets {
-        left: logical.min().x,
-        top: logical.min().y,
-        right: window_width - logical.max().x,
-        height: logical.size.y,
-    })
 }
 
 fn should_emit_new_stack_placeholder(
@@ -1213,7 +1208,7 @@ mod tests {
     /// open one must still catch its own edges.
     #[test]
     fn a_pointer_hits_only_interactive_regions() {
-        let rect = NodeRect::from_origin(Vec2::new(100.0, 40.0));
+        let rect = ComputedNode::from_origin(Vec2::new(100.0, 40.0));
 
         assert!(
             CefPointerHitRect {
@@ -1242,15 +1237,11 @@ mod tests {
     fn layout_fixed_offsets_use_computed_header_rect() {
         let computed = ComputedNode {
             size: Vec2::new(1_544.0, 168.0),
+            center: Vec2::new(788.0, 84.0),
             inverse_scale_factor: 0.5,
             ..default()
         };
-        let transform = UiGlobalTransform::from(bevy::math::Affine2::from_translation(Vec2::new(
-            788.0, 84.0,
-        )));
-
-        let offsets =
-            layout_fixed_offsets_from_computed(&computed, &transform, 1_600.0).expect("offsets");
+        let offsets = LayoutFixedOffsets::of(&computed, 1_600.0).expect("offsets");
 
         assert_eq!(offsets.left, 8.0);
         assert_eq!(offsets.top, 0.0);

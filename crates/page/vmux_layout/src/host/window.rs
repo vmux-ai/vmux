@@ -2,25 +2,19 @@ use crate::{
     Header, LayoutStartupSet, SpaceFilePresent, TabLayoutSpawnContent, TabLayoutSpawnRequest,
     cef::layout_cef_bundle,
     pane::{Pane, PaneSplit, PaneSplitDirection, leaf_pane_bundle, pane_split_gaps},
-    scene::MainCamera,
     settings::LayoutSettings,
     side_sheet::{SideSheet, SideSheetPosition, SideSheetWidth},
     stack::stack_bundle,
     tab::{Tab, tab_bundle},
     unit::WindowExt,
 };
-use bevy::{
-    asset::Asset,
-    prelude::*,
-    ui::{FlexDirection, UiTargetCamera},
-    window::PrimaryWindow,
-    winit::WINIT_WINDOWS,
-};
+use bevy::{asset::Asset, prelude::*, window::PrimaryWindow, winit::WINIT_WINDOWS};
 use bevy_cef::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, WindowCommand};
 use vmux_core::page::PageEmbedSet;
 use vmux_core::{PageOpenRequest, PageOpenSet, PageOpenTarget};
+use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 pub struct WindowLayoutPlugin;
@@ -81,6 +75,8 @@ impl Plugin for WindowLayoutPlugin {
 
 pub const SIDE_SHEET_TOP_PADDING_PX: f32 = 22.0;
 
+/// Below every named layer: what a webview gets when it belongs to none of them.
+pub const WEBVIEW_Z_BASE: f32 = 0.01;
 pub const WEBVIEW_Z_MAIN: f32 = 0.018;
 pub const WEBVIEW_Z_FOCUS_RING: f32 = 0.02;
 pub const WEBVIEW_Z_HEADER: f32 = 0.022;
@@ -89,6 +85,7 @@ pub const WEBVIEW_Z_MODAL: f32 = 0.06;
 pub const WEBVIEW_MESH_DEPTH_BIAS: f32 = 0.0;
 
 const _: () = {
+    assert!(WEBVIEW_Z_BASE < WEBVIEW_Z_MAIN);
     assert!(WEBVIEW_Z_MAIN <= 0.025);
     assert!(WEBVIEW_Z_FOCUS_RING > WEBVIEW_Z_MAIN);
     assert!(WEBVIEW_Z_HEADER <= 0.03);
@@ -125,7 +122,6 @@ struct WindowBundle {
     surface: WindowSurface,
     transform: Transform,
     node: Node,
-    ui_target: UiTargetCamera,
 }
 
 #[derive(Component)]
@@ -156,7 +152,6 @@ pub struct WindowGeometry {
 fn setup(
     window: Single<&Window, With<PrimaryWindow>>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
-    main_camera: Single<Entity, With<MainCamera>>,
     mut commands: Commands,
     settings: Res<LayoutSettings>,
 ) {
@@ -185,7 +180,6 @@ fn setup(
             column_gap: Val::Px(crate::event::PANE_GAP_PX),
             ..default()
         },
-        ui_target: UiTargetCamera(*main_camera),
     });
     let root = root_commands.id();
 
@@ -208,7 +202,6 @@ fn setup(
                 },
                 ..default()
             },
-            ZIndex(2),
             ChildOf(root),
         ))
         .id();
@@ -233,7 +226,6 @@ fn setup(
     commands.spawn((
         Header,
         crate::Open,
-        ZIndex(1),
         Visibility::Inherited,
         Transform::default(),
         GlobalTransform::default(),
@@ -355,7 +347,6 @@ pub fn spawn_tab_scaffold_in_space(
                 direction: PaneSplitDirection::Row,
             },
             HostWindow(primary_window),
-            ZIndex(0),
             Transform::default(),
             GlobalTransform::default(),
             Node {

@@ -2,8 +2,8 @@ use super::Open;
 use crate::settings::LayoutSettings;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
-use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
-use vmux_core::NodeRect;
+use bevy::{prelude::*, window::PrimaryWindow};
+use vmux_flex::prelude::*;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
@@ -14,7 +14,7 @@ impl Plugin for SideSheetLayoutPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    sync_side_sheet_visibility.before(UiSystems::Layout),
+                    sync_side_sheet_visibility.before(LayoutSystems::Layout),
                     sync_window_buttons_visibility,
                 ),
             );
@@ -87,15 +87,7 @@ fn side_sheet_drag_resize(
     windows: Query<&Window, With<PrimaryWindow>>,
 
     mut width_res: ResMut<SideSheetWidth>,
-    sheet_q: Query<
-        (
-            &SideSheetPosition,
-            Has<Open>,
-            &ComputedNode,
-            &UiGlobalTransform,
-        ),
-        With<SideSheet>,
-    >,
+    sheet_q: Query<(&SideSheetPosition, Has<Open>, &ComputedNode), With<SideSheet>>,
     active_drags: Query<(Entity, &SideSheetDrag)>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut side_sheet_q: Query<(&SideSheetPosition, &mut Node), With<SideSheet>>,
@@ -103,7 +95,7 @@ fn side_sheet_drag_resize(
 ) {
     let is_open = sheet_q
         .iter()
-        .any(|(pos, open, _, _)| *pos == SideSheetPosition::Left && open);
+        .any(|(pos, open, _)| *pos == SideSheetPosition::Left && open);
     if !is_open {
         return;
     }
@@ -134,11 +126,10 @@ fn side_sheet_drag_resize(
     }
 
     // Hover detection on right edge of left side sheet
-    for (pos, _, cn, gt) in &sheet_q {
+    for (pos, _, &rect) in &sheet_q {
         if *pos != SideSheetPosition::Left {
             continue;
         }
-        let rect = NodeRect::of(cn, gt);
         let right_edge = rect.max().x;
         let cursor_y = cursor_pos.y;
 

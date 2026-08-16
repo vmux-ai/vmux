@@ -8,6 +8,7 @@ use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageO
 
 use crate::cef::LayoutCef;
 use crate::window::VmuxWindow;
+use vmux_flex::prelude::*;
 
 /// Prewarms plain registered pages that use the standard browser bundle.
 pub struct PrewarmPagesPlugin;

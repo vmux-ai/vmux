@@ -37,6 +37,7 @@ use vmux_setting::{AppSettings, SettingsSaveRequest};
 use crate::event::*;
 use crate::pid::{self, Pid};
 use crate::{ProcessExited, RetainOnProcessExit, Terminal};
+use vmux_flex::prelude::*;
 
 /// Wires the terminal domain: PTY spawning via the background service, terminal/stack/
 /// process-monitor requests, keyboard and mouse forwarding, and snapshot updates.

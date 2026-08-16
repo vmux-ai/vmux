@@ -27,6 +27,7 @@ use crate::window::VmuxWindow;
 use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{FocusLauncherInput, HostsLauncher, InlineTransitionRequested};
+use vmux_flex::prelude::*;
 
 /// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
 /// and answers [`StartDataRequest`] with the shared command-bar payload.

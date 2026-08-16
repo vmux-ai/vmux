@@ -10,6 +10,7 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
+use vmux_flex::prelude::*;
 use vmux_layout::{
     cef::Browser,
     event::SERVICES_PAGE_URL,

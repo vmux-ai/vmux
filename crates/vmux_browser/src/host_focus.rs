@@ -8,6 +8,7 @@ use vmux_layout::stack::FocusedStack;
 use vmux_terminal::Terminal;
 
 use crate::Browser;
+use vmux_flex::prelude::*;
 
 #[cfg(target_os = "macos")]
 #[path = "host_focus/macos.rs"]

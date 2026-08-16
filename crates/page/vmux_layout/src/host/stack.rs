@@ -17,6 +17,7 @@ use vmux_command::{
 };
 pub use vmux_core::workspace::{ComputeFocusSet, StackCommandSet};
 use vmux_core::{PageOpenRequest, PageOpenTarget};
+use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 pub struct StackPlugin;
@@ -43,8 +44,7 @@ impl Plugin for StackPlugin {
                     .after(crate::active::ensure_active_tab)
                     .after(crate::active::ensure_active_stack)
                     .after(crate::active::ensure_active_branch),
-            )
-            .add_systems(PostUpdate, sync_stack_picking);
+            );
     }
 }
 
@@ -237,7 +237,6 @@ pub fn stack_bundle() -> impl Bundle {
             bottom: Val::Px(0.0),
             ..default()
         },
-        ZIndex(0),
     )
 }
 
@@ -607,31 +606,6 @@ fn entity_tree_contains_stack_other_than(
                 entity_tree_contains_stack_other_than(child, ignored_stack, all_children, stack_q)
             })
         })
-}
-
-fn sync_stack_picking(
-    pane_children: Query<&Children, With<Pane>>,
-    leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
-    mut stacks: Query<(Entity, &mut ZIndex), With<Stack>>,
-) {
-    for pane in &leaf_panes {
-        let active = active_stack_in_pane(pane, &pane_children, &stack_ts);
-        if let Ok(children) = pane_children.get(pane) {
-            for child in children.iter() {
-                if let Ok((entity, mut z)) = stacks.get_mut(child) {
-                    let target = if Some(entity) == active {
-                        ZIndex(1)
-                    } else {
-                        ZIndex(0)
-                    };
-                    if *z != target {
-                        *z = target;
-                    }
-                }
-            }
-        }
-    }
 }
 
 pub fn open_startup_url_if_no_stacks(

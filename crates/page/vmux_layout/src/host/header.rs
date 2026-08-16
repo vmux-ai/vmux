@@ -1,12 +1,13 @@
 use super::Open;
 use crate::event::CEF_RESERVED_HEIGHT_PX;
 use bevy::prelude::*;
+use vmux_flex::prelude::*;
 
 impl Plugin for HeaderLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             PostUpdate,
-            sync_header_visibility.before(bevy::ui::UiSystems::Layout),
+            sync_header_visibility.before(LayoutSystems::Layout),
         );
     }
 }

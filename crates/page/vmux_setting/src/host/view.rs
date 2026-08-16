@@ -18,6 +18,7 @@ use crate::event::{
 };
 use crate::schema::{FieldSpec, SectionSpec, SelectOption, SettingsSchema, WidgetKind};
 use crate::{AppSettings, SettingsWriteRequest, apply_settings_update, serialize_settings_to_json};
+use vmux_flex::prelude::*;
 
 /// Wires the settings webview: the warm page, the schema and value broadcasts it renders
 /// from, and the commands it sends back.

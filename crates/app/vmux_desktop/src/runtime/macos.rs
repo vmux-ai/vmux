@@ -32,6 +32,7 @@ use super::native::{
     NativeWindowFrame, NativeWindowResizeDrag, native_resize_edges, native_scroll_should_wake,
     resized_native_window_frame, windowed_pointer_inside_after_event,
 };
+use vmux_flex::prelude::*;
 
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
@@ -65,7 +66,7 @@ fn activate_primary_window_on_startup(
 fn grab_key_window_on_pane_hover(
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     panes: Query<
-        (&ComputedNode, &bevy::ui::UiGlobalTransform),
+        &ComputedNode,
         (
             With<vmux_layout::pane::Pane>,
             Without<vmux_layout::pane::PaneSplit>,
@@ -79,8 +80,8 @@ fn grab_key_window_on_pane_hover(
         return;
     };
     let mut over_pane = false;
-    for (node, transform) in panes.iter() {
-        if vmux_core::NodeRect::of(node, transform).contains(pointer.position_px) {
+    for node in panes.iter() {
+        if node.contains(pointer.position_px) {
             over_pane = true;
             break;
         }

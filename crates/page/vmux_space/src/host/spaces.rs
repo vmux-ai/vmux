@@ -6,6 +6,7 @@ use vmux_layout::warm_page::WarmPage;
 
 use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
+use vmux_flex::prelude::*;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveSpace {

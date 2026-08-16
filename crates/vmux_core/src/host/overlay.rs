@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use bevy_cef::prelude::CefKeyboardTarget;
+use vmux_flex::prelude::*;
 
 /// A page that covers the window rather than sitting in a pane, and owns the keyboard while it is
 /// showing.

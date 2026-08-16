@@ -502,7 +502,7 @@ fn workspace_bevy_features() -> std::collections::BTreeSet<&'static str> {
         .expect("workspace bevy features content")
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(|line| line.trim_end_matches(',').trim_matches('"'))
         .collect()
 }
@@ -522,10 +522,9 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_log",
         "bevy_winit",
         "bevy_window",
-        "bevy_ui",
+        "bevy_camera",
         "bevy_image",
         "bevy_picking",
-        "ui_picking",
         "reflect_auto_register",
         "https",
         "x11",
@@ -568,6 +567,9 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
         "bevy_sprite",
         "bevy_sprite_render",
         "sprite_picking",
+        "bevy_ui",
+        "bevy_ui_render",
+        "ui_picking",
     ] {
         assert!(
             !features.contains(feature),
@@ -577,8 +579,9 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
 }
 
 /// Nothing draws through Bevy any more: every webview is a native view composited by AppKit, and
-/// Bevy UI computes geometry without ever painting it. `bevy_ui` still needs a camera, but
-/// `bevy_camera` is a separate crate from `bevy_render`, so keeping one does not drag in the other.
+/// `vmux_flex` computes geometry over `taffy` without ever painting it. `bevy_camera` stays for
+/// `Visibility`, and it is a separate crate from `bevy_render`, so keeping one does not drag in
+/// the other.
 ///
 /// The allowlist above covers the workspace dependency. It cannot see this route: `bevy_remote` is
 /// vendored, and its own default features used to turn `bevy_render` back on for the whole graph

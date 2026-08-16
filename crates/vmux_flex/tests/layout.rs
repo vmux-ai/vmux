@@ -1,19 +1,16 @@
-//! Proves this engine computes what `bevy_ui` computes, for the styles the shell actually uses.
+//! The geometry this engine is required to produce, frozen while `bevy_ui` was here to vouch for
+//! it.
 //!
-//! `bevy_ui` is a wrapper over the same `taffy` this crate depends on, so agreement should be
-//! exact rather than approximate — every assertion here is `==` on `f32`, and any difference is a
-//! bug in the conversion rather than accumulated error.
+//! Every number in `GOLDEN` and `MUTATION_GOLDEN` was asserted equal to `bevy_ui`'s own output
+//! before it was written down — exactly, not within an epsilon, because `bevy_ui` wraps the same
+//! `taffy` this crate uses. They came out of a different implementation, which is what makes them
+//! an independent oracle rather than a restatement of what this engine happens to do today.
 //!
-//! Both engines run over one world: each entity carries a [`vmux_flex::Node`] and the
-//! `bevy::ui::Node` converted from it, and each writes its own computed component. The conversion
-//! is the one part a reviewer must read, and it is a field-for-field copy on purpose.
-//!
-//! **This test dies with `bevy_ui`.** Once the workspace drops that feature it cannot compile, so
-//! the geometry it produces is frozen into `golden.rs` first — those tables are what keeps the
-//! coverage after the oracle is gone.
+//! Regenerate only by putting the oracle back: re-add the `bevy_ui` feature, restore the
+//! differential harness, and run `emit_golden_tables`. A table edited to match new behaviour
+//! proves nothing.
 
 use bevy::prelude::*;
-use bevy::ui::{ComputedNode as BevyComputed, UiGlobalTransform, UiPlugin, UiTargetCamera};
 use vmux_flex::{
     AlignItems, ComputedNode as FlexComputed, Display, FlexDirection, FlexPlugin, JustifyContent,
     Node as FlexNode, PositionType, UiRect, Val,
@@ -40,69 +37,8 @@ impl TreeSpec {
         self
     }
 
-    /// The conversion to `bevy_ui`'s equivalent style. Total, because this crate's style surface is
-    /// a strict subset — every field maps, and nothing is defaulted away silently.
-    fn to_bevy(node: &FlexNode) -> Node {
-        fn val(value: Val) -> bevy::ui::Val {
-            match value {
-                Val::Auto => bevy::ui::Val::Auto,
-                Val::Px(px) => bevy::ui::Val::Px(px),
-                Val::Percent(percent) => bevy::ui::Val::Percent(percent),
-            }
-        }
-        fn rect(value: UiRect) -> bevy::ui::UiRect {
-            bevy::ui::UiRect {
-                left: val(value.left),
-                right: val(value.right),
-                top: val(value.top),
-                bottom: val(value.bottom),
-            }
-        }
-        Node {
-            display: match node.display {
-                Display::Flex => bevy::ui::Display::Flex,
-                Display::None => bevy::ui::Display::None,
-            },
-            position_type: match node.position_type {
-                PositionType::Relative => bevy::ui::PositionType::Relative,
-                PositionType::Absolute => bevy::ui::PositionType::Absolute,
-            },
-            left: val(node.left),
-            right: val(node.right),
-            top: val(node.top),
-            bottom: val(node.bottom),
-            width: val(node.width),
-            height: val(node.height),
-            min_width: val(node.min_width),
-            min_height: val(node.min_height),
-            padding: rect(node.padding),
-            flex_direction: match node.flex_direction {
-                FlexDirection::Row => bevy::ui::FlexDirection::Row,
-                FlexDirection::Column => bevy::ui::FlexDirection::Column,
-            },
-            flex_grow: node.flex_grow,
-            flex_shrink: node.flex_shrink,
-            flex_basis: val(node.flex_basis),
-            row_gap: val(node.row_gap),
-            column_gap: val(node.column_gap),
-            align_items: match node.align_items {
-                AlignItems::Default => bevy::ui::AlignItems::Default,
-                AlignItems::Stretch => bevy::ui::AlignItems::Stretch,
-            },
-            justify_content: match node.justify_content {
-                JustifyContent::Default => bevy::ui::JustifyContent::Default,
-                JustifyContent::Stretch => bevy::ui::JustifyContent::Stretch,
-            },
-            ..default()
-        }
-    }
-
-    fn spawn(&self, world: &mut World, camera: Entity, parent: Option<Entity>) -> Vec<Labelled> {
-        let mut entity = world.spawn((self.node.clone(), Self::to_bevy(&self.node)));
-        if parent.is_none() {
-            entity.insert(UiTargetCamera(camera));
-        }
-        let id = entity.id();
+    fn spawn(&self, world: &mut World, parent: Option<Entity>) -> Vec<Labelled> {
+        let id = world.spawn(self.node.clone()).id();
         if let Some(parent) = parent {
             world.entity_mut(id).insert(ChildOf(parent));
         }
@@ -111,7 +47,7 @@ impl TreeSpec {
             entity: id,
         }];
         for child in &self.children {
-            out.extend(child.spawn(world, camera, Some(id)));
+            out.extend(child.spawn(world, Some(id)));
         }
         out
     }
@@ -122,10 +58,8 @@ struct Labelled {
     entity: Entity,
 }
 
-/// One world running both engines against the same window.
 struct Harness {
     app: App,
-    camera: Entity,
     nodes: Vec<Labelled>,
 }
 
@@ -133,7 +67,7 @@ impl Harness {
     /// `WindowPlugin` spawns the primary window itself, so the resolution goes in through the
     /// plugin — spawning a second one leaves two `PrimaryWindow`s and every `Single` over them
     /// silently matches nothing.
-    fn app(size: UVec2, scale_factor: f32) -> (App, Entity) {
+    fn app(size: UVec2, scale_factor: f32) -> App {
         let mut resolution = bevy::window::WindowResolution::default();
         resolution.set_scale_factor_override(Some(scale_factor));
         resolution.set_physical_resolution(size.x, size.y);
@@ -148,43 +82,20 @@ impl Harness {
                 }),
                 ..default()
             })
-            .add_plugins(bevy::image::ImagePlugin::default())
-            .add_plugins(bevy::text::TextPlugin)
-            .add_plugins(bevy::sprite::SpritePlugin)
-            .init_asset::<bevy::mesh::Mesh>()
-            .add_plugins(bevy::input::InputPlugin)
-            .add_plugins(bevy::a11y::AccessibilityPlugin)
-            .add_plugins(bevy::picking::DefaultPickingPlugins)
-            .add_plugins(UiPlugin)
             .add_plugins(FlexPlugin);
 
-        let camera = app.world_mut().spawn(bevy::camera::Camera2d).id();
-        app.world_mut()
-            .entity_mut(camera)
-            .get_mut::<bevy::camera::Camera>()
-            .expect("Camera2d requires Camera")
-            .computed
-            .target_info = Some(bevy::camera::RenderTargetInfo {
-            physical_size: size,
-            scale_factor,
-        });
-        (app, camera)
+        app
     }
 
     fn start(spec: &TreeSpec, size: UVec2, scale_factor: f32) -> Self {
-        let (mut app, camera) = Self::app(size, scale_factor);
-        let nodes = spec.spawn(app.world_mut(), camera, None);
-        let mut harness = Self { app, camera, nodes };
+        let mut app = Self::app(size, scale_factor);
+        let nodes = spec.spawn(app.world_mut(), None);
+        let mut harness = Self { app, nodes };
         harness.settle();
         harness
     }
 
-    /// Resize the window *and* the camera's render target.
-    ///
-    /// In the app `sync_camera_render_target` mirrors one into the other. `bevy_ui` reads only the
-    /// camera and this engine reads only the window, so moving one without the other would compare
-    /// two different windows and call the disagreement a bug.
-    fn resize(&mut self, size: UVec2, scale_factor: f32) {
+    fn resize(&mut self, size: UVec2, scale_factor: f32) -> Step {
         let world = self.app.world_mut();
         let mut windows = world.query_filtered::<&mut Window, With<bevy::window::PrimaryWindow>>();
         let mut window = windows.single_mut(world).expect("primary window");
@@ -193,57 +104,12 @@ impl Harness {
             .resolution
             .set_scale_factor_override(Some(scale_factor));
 
-        let camera = self.camera;
-        self.app
-            .world_mut()
-            .entity_mut(camera)
-            .get_mut::<bevy::camera::Camera>()
-            .expect("Camera2d requires Camera")
-            .computed
-            .target_info = Some(bevy::camera::RenderTargetInfo {
-            physical_size: size,
-            scale_factor,
-        });
-
         self.settle();
-        self.compare(&format!("resized to {}x{} @{scale_factor}", size.x, size.y));
+        self.step(&format!("resized to {}x{} @{scale_factor}", size.x, size.y))
     }
 
-    /// `bevy_ui` needs two passes to propagate its render target before layout resolves; this
-    /// engine converges in one. Three is past both.
     fn settle(&mut self) {
-        for _ in 0..3 {
-            self.app.update();
-        }
-    }
-
-    /// Every node's geometry, as this engine and as `bevy_ui` see it.
-    fn compare(&self, case: &str) {
-        for node in &self.nodes {
-            let world = self.app.world();
-            let Some(flex) = world.get::<FlexComputed>(node.entity) else {
-                panic!("{case} / {}: no FlexComputed", node.label);
-            };
-            let bevy_size = world
-                .get::<BevyComputed>(node.entity)
-                .unwrap_or_else(|| panic!("{case} / {}: no bevy ComputedNode", node.label))
-                .size;
-            let bevy_center = world
-                .get::<UiGlobalTransform>(node.entity)
-                .unwrap_or_else(|| panic!("{case} / {}: no UiGlobalTransform", node.label))
-                .transform_point2(Vec2::ZERO);
-
-            assert_eq!(
-                flex.size, bevy_size,
-                "{case} / {}: size disagrees with bevy_ui",
-                node.label
-            );
-            assert_eq!(
-                flex.center, bevy_center,
-                "{case} / {}: centre disagrees with bevy_ui",
-                node.label
-            );
-        }
+        self.app.update();
     }
 
     /// A layout that changes between two quiescent frames resizes a native view every frame.
@@ -261,7 +127,7 @@ impl Harness {
     }
 }
 
-/// Window sizes and scale factors worth crossing every tree with.
+/// The window sizes and scale factors the frozen tables are required to span.
 ///
 /// 1.25 and 1.5 are the load-bearing ones: at 1.0 and 2.0 a `Val::Px` scaled before layout and one
 /// scaled after are both integral, so those factors cannot tell a correct conversion from an
@@ -405,16 +271,6 @@ fn production_frame() -> TreeSpec {
     ))
 }
 
-#[test]
-fn the_production_frame_matches_bevy_ui() {
-    for (size, scale) in TARGETS {
-        let case = format!("frame {}x{} @{scale}", size.x, size.y);
-        let mut harness = Harness::start(&production_frame(), *size, *scale);
-        harness.compare(&case);
-        harness.assert_stable(&case);
-    }
-}
-
 /// Deterministic pane trees. Fractional flex division against taffy's rounding is where a
 /// hand-written case would not think to look.
 fn generated_pane_tree(seed: u64) -> TreeSpec {
@@ -459,19 +315,9 @@ fn generated_pane_tree(seed: u64) -> TreeSpec {
     TreeSpec::new("root", fill()).with(build(&mut rng, depth, "p".to_string(), true))
 }
 
-#[test]
-fn generated_pane_trees_match_bevy_ui() {
-    for seed in 0..50u64 {
-        let (size, scale) = TARGETS[(seed as usize) % TARGETS.len()];
-        let case = format!("seed {seed} @{scale}");
-        let harness = Harness::start(&generated_pane_tree(seed), size, scale);
-        harness.compare(&case);
-    }
-}
-
-#[test]
-fn edge_cases_match_bevy_ui() {
-    let cases: Vec<(&str, TreeSpec, UVec2, f32)> = vec![
+/// Shapes the production frame does not contain but the shell can still produce.
+fn edge_cases() -> Vec<(&'static str, TreeSpec, UVec2, f32)> {
+    vec![
         (
             "one-pixel window",
             TreeSpec::new("root", fill()),
@@ -549,58 +395,29 @@ fn edge_cases_match_bevy_ui() {
             UVec2::new(1280, 800),
             2.0,
         ),
-    ];
-
-    for (case, spec, size, scale) in cases {
-        let mut harness = Harness::start(&spec, size, scale);
-        harness.compare(case);
-        harness.assert_stable(case);
-    }
-}
-
-/// A `Node` whose parent has none is orphaned by `bevy_ui` and never laid out. Reachable here,
-/// because a subtree can be spawned with its components arriving in one command buffer.
-#[test]
-fn a_node_under_a_plain_parent_matches_bevy_ui() {
-    let (mut app, camera) = Harness::app(UVec2::new(1280, 800), 2.0);
-
-    let root = app
-        .world_mut()
-        .spawn((fill(), TreeSpec::to_bevy(&fill()), UiTargetCamera(camera)))
-        .id();
-    let plain = app.world_mut().spawn(ChildOf(root)).id();
-    let buried = app
-        .world_mut()
-        .spawn((leaf(1.0), TreeSpec::to_bevy(&leaf(1.0)), ChildOf(plain)))
-        .id();
-
-    for _ in 0..3 {
-        app.update();
-    }
-
-    let flex = app.world().get::<FlexComputed>(buried).copied();
-    let bevy_size = app
-        .world()
-        .get::<BevyComputed>(buried)
-        .map(|node| node.size);
-    assert_eq!(
-        flex.map(|node| node.size),
-        bevy_size,
-        "a node buried under a plain entity must be laid out the same way, or not at all"
-    );
+    ]
 }
 
 impl Harness {
-    /// Apply an edit, let both engines settle, and require they still agree.
-    fn mutate(&mut self, case: &str, edit: impl FnOnce(&mut World, &[Labelled])) {
+    /// Apply an edit, let layout settle, and record the result.
+    fn mutate(&mut self, case: &str, edit: impl FnOnce(&mut World, &[Labelled])) -> Step {
         let nodes = std::mem::take(&mut self.nodes);
         edit(self.app.world_mut(), &nodes);
         self.nodes = nodes;
         self.settle();
-        // An entity the edit despawned is no longer ours to compare.
+        // An entity the edit despawned is no longer ours to record.
         self.nodes
             .retain(|node| self.app.world().get_entity(node.entity).is_ok());
-        self.compare(case);
+        self.step(case)
+    }
+
+    /// Require the tree to have settled, then record what layout produced.
+    fn step(&mut self, case: &str) -> Step {
+        self.assert_stable(case);
+        Step {
+            label: case.to_string(),
+            rows: self.rows(),
+        }
     }
 
     fn entity(&self, label: &str) -> Entity {
@@ -612,131 +429,96 @@ impl Harness {
     }
 }
 
-/// The static corpus checks the style conversion. This checks the incremental tree sync — adding,
-/// removing, reparenting and restyling after the tree already exists, which is where a stale taffy
-/// node or a missed re-parent would show.
-#[test]
-fn mutation_sequences_match_bevy_ui() {
-    let spec = TreeSpec::new(
-        "root",
-        FlexNode {
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(6.0),
-            ..fill()
-        },
-    )
-    .with(TreeSpec::new("a", leaf(1.0)))
-    .with(TreeSpec::new("b", leaf(1.0)).with(TreeSpec::new("b.child", leaf(1.0))));
-
-    let mut harness = Harness::start(&spec, UVec2::new(1001, 667), 1.25);
-    harness.compare("initial");
-
-    let a = harness.entity("a");
-    let b = harness.entity("b");
-    let b_child = harness.entity("b.child");
-    let root = harness.entity("root");
-
-    harness.mutate("restyle grow", |world, _| {
-        world.entity_mut(a).get_mut::<FlexNode>().unwrap().flex_grow = 2.5;
-        world.entity_mut(a).get_mut::<Node>().unwrap().flex_grow = 2.5;
-    });
-
-    harness.mutate("hide a subtree", |world, _| {
-        world.entity_mut(b).get_mut::<FlexNode>().unwrap().display = Display::None;
-        world.entity_mut(b).get_mut::<Node>().unwrap().display = bevy::ui::Display::None;
-    });
-
-    harness.mutate("show it again", |world, _| {
-        world.entity_mut(b).get_mut::<FlexNode>().unwrap().display = Display::Flex;
-        world.entity_mut(b).get_mut::<Node>().unwrap().display = bevy::ui::Display::Flex;
-    });
-
-    harness.mutate("reparent a subtree", |world, _| {
-        world.entity_mut(b_child).insert(ChildOf(a));
-    });
-
-    harness.mutate("add a child", |world, _| {
-        world.spawn((leaf(1.0), TreeSpec::to_bevy(&leaf(1.0)), ChildOf(root)));
-    });
-
-    // Removing and re-adding `Node` in one frame emits a removal for a live entity; deleting its
-    // taffy node on that signal would strand the entity with stale geometry.
-    harness.mutate("remove and reinsert Node in one frame", |world, _| {
-        world.entity_mut(a).remove::<FlexNode>();
-        world.entity_mut(a).insert(leaf(2.5));
-    });
-
-    harness.mutate("despawn a subtree", |world, _| {
-        world.entity_mut(b).despawn();
-    });
-
-    harness.resize(UVec2::new(1440, 900), 1.25);
-    // A scale-factor change has to restyle every `Val::Px`, not just re-run layout.
-    harness.resize(UVec2::new(1440, 900), 2.0);
+/// One step of [`Harness::mutation_script`]: what the tree looked like after that edit.
+struct Step {
+    label: String,
+    rows: Vec<(String, Vec2, Vec2)>,
 }
 
-/// Writes the golden tables to `/tmp/vmux_flex_golden.rs`, for pasting into this file.
-///
-/// Run deliberately: `cargo test -p vmux_flex --test layout -- --ignored emit_golden --nocapture`.
-/// Every number it writes has just been asserted equal to `bevy_ui` by the cases above, which is
-/// what makes the tables an independent oracle rather than a restatement of this engine.
-#[test]
-#[ignore = "regenerates committed tables; run deliberately"]
-fn emit_golden_tables() {
-    use std::fmt::Write as _;
-
-    let mut out = String::new();
-    let mut emit = |name: &str, spec: &TreeSpec, size: UVec2, scale: f32, out: &mut String| {
-        let harness = Harness::start(spec, size, scale);
-        harness.compare(name);
-        let _ = writeln!(
-            out,
-            "        Golden {{\n            case: {:?},\n            size: UVec2::new({}, {}),\n            scale: {:?},\n            rows: &[",
-            name, size.x, size.y, scale
-        );
-        for node in &harness.nodes {
-            let c = harness
+impl Harness {
+    /// Geometry for every node this harness tracks, in spawn order.
+    fn rows(&self) -> Vec<(String, Vec2, Vec2)> {
+        let mut out = Vec::new();
+        for node in &self.nodes {
+            let computed = self
                 .app
                 .world()
                 .get::<FlexComputed>(node.entity)
                 .expect("computed");
-            let _ = writeln!(
-                out,
-                "                ({:?}, {:?}, {:?}, {:?}, {:?}),",
-                node.label, c.size.x, c.size.y, c.center.x, c.center.y
-            );
+            out.push((node.label.clone(), computed.size, computed.center));
         }
-        let _ = writeln!(out, "            ],\n        }},");
-    };
+        out
+    }
 
-    for (index, (size, scale)) in TARGETS.iter().enumerate() {
-        emit(
-            &format!("frame-{index}"),
-            &production_frame(),
-            *size,
-            *scale,
-            &mut out,
+    /// The edit script whose per-step geometry the golden tables freeze.
+    ///
+    /// The static corpus checks the style conversion; this checks the incremental tree sync —
+    /// adding, removing, reparenting and restyling after the tree already exists, which is where a
+    /// stale taffy node or a missed re-parent would show. The differential test and the golden one
+    /// replay it identically, so the frozen rows keep that coverage once the oracle is gone.
+    fn mutation_script() -> Vec<Step> {
+        let mut steps = Vec::new();
+        let spec = TreeSpec::new(
+            "root",
+            FlexNode {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(6.0),
+                ..fill()
+            },
+        )
+        .with(TreeSpec::new("a", leaf(1.0)))
+        .with(TreeSpec::new("b", leaf(1.0)).with(TreeSpec::new("b.child", leaf(1.0))));
+
+        let mut harness = Harness::start(&spec, UVec2::new(1001, 667), 1.25);
+        steps.push(harness.step("initial"));
+
+        let a = harness.entity("a");
+        let b = harness.entity("b");
+        let b_child = harness.entity("b.child");
+        let root = harness.entity("root");
+
+        steps.push(harness.mutate("restyle grow", |world, _| {
+            world.entity_mut(a).get_mut::<FlexNode>().unwrap().flex_grow = 2.5;
+        }));
+
+        steps.push(harness.mutate("hide a subtree", |world, _| {
+            world.entity_mut(b).get_mut::<FlexNode>().unwrap().display = Display::None;
+        }));
+
+        steps.push(harness.mutate("show it again", |world, _| {
+            world.entity_mut(b).get_mut::<FlexNode>().unwrap().display = Display::Flex;
+        }));
+
+        steps.push(harness.mutate("reparent a subtree", |world, _| {
+            world.entity_mut(b_child).insert(ChildOf(a));
+        }));
+
+        steps.push(harness.mutate("add a child", |world, _| {
+            world.spawn((leaf(1.0), ChildOf(root)));
+        }));
+
+        // Removing and re-adding `Node` in one frame emits a removal for a live entity; deleting
+        // its taffy node on that signal would strand the entity with stale geometry.
+        steps.push(
+            harness.mutate("remove and reinsert Node in one frame", |world, _| {
+                world.entity_mut(a).remove::<FlexNode>();
+                world.entity_mut(a).insert(leaf(2.5));
+            }),
         );
+
+        steps.push(harness.mutate("despawn a subtree", |world, _| {
+            world.entity_mut(b).despawn();
+        }));
+
+        steps.push(harness.resize(UVec2::new(1440, 900), 1.25));
+        // A scale-factor change has to restyle every `Val::Px`, not just re-run layout.
+        steps.push(harness.resize(UVec2::new(1440, 900), 2.0));
+
+        steps
     }
-    for seed in 0..6u64 {
-        let (size, scale) = TARGETS[(seed as usize) % TARGETS.len()];
-        emit(
-            &format!("panes-{seed}"),
-            &generated_pane_tree(seed),
-            size,
-            scale,
-            &mut out,
-        );
-    }
-    std::fs::write("/tmp/vmux_flex_golden.rs", out).expect("write golden");
-    eprintln!("wrote /tmp/vmux_flex_golden.rs");
 }
 
-/// Geometry this engine produced while `bevy_ui` was still present to check it against.
-///
-/// `emit_golden_tables` asserted every number below against `bevy_ui` before writing it, so these
-/// are an independent oracle rather than a restatement of what this engine does today: they came
-/// out of a different implementation, and they outlive the one that vouched for them.
+/// One frozen tree, laid out at one window size and scale factor.
 struct Golden {
     case: &'static str,
     size: UVec2,
@@ -750,7 +532,144 @@ impl Golden {
         match self.case.split_once('-') {
             Some(("frame", _)) => production_frame(),
             Some(("panes", seed)) => generated_pane_tree(seed.parse().expect("seed")),
+            Some(("edge", index)) => {
+                let index: usize = index.parse().expect("index");
+                edge_cases().swap_remove(index).1
+            }
             _ => panic!("unknown golden case {}", self.case),
+        }
+    }
+}
+
+/// One frozen step of [`Harness::mutation_script`].
+struct MutationGolden {
+    step: &'static str,
+    /// (label, size x, size y, centre x, centre y)
+    rows: &'static [(&'static str, f32, f32, f32, f32)],
+}
+
+const MUTATION_GOLDEN: &[MutationGolden] = &[
+    MutationGolden {
+        step: "initial",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 497.0, 667.0, 248.5, 333.5),
+            ("b", 497.0, 667.0, 752.5, 333.5),
+            ("b.child", 497.0, 667.0, 752.5, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "restyle grow",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 710.0, 667.0, 355.0, 333.5),
+            ("b", 284.0, 667.0, 859.0, 333.5),
+            ("b.child", 284.0, 667.0, 859.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "hide a subtree",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 1001.0, 667.0, 500.5, 333.5),
+            ("b", 0.0, 0.0, 0.0, 0.0),
+            ("b.child", 0.0, 0.0, 0.0, 0.0),
+        ],
+    },
+    MutationGolden {
+        step: "show it again",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 710.0, 667.0, 355.0, 333.5),
+            ("b", 284.0, 667.0, 859.0, 333.5),
+            ("b.child", 284.0, 667.0, 859.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "reparent a subtree",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 710.0, 667.0, 355.0, 333.5),
+            ("b", 284.0, 667.0, 859.0, 333.5),
+            ("b.child", 710.0, 667.0, 355.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "add a child",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 548.0, 667.0, 274.0, 333.5),
+            ("b", 219.0, 667.0, 664.5, 333.5),
+            ("b.child", 548.0, 667.0, 274.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "remove and reinsert Node in one frame",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 548.0, 667.0, 274.0, 333.5),
+            ("b", 219.0, 667.0, 664.5, 333.5),
+            ("b.child", 548.0, 667.0, 274.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "despawn a subtree",
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("a", 710.0, 667.0, 355.0, 333.5),
+            ("b.child", 710.0, 667.0, 355.0, 333.5),
+        ],
+    },
+    MutationGolden {
+        step: "resized to 1440x900 @1.25",
+        rows: &[
+            ("root", 1440.0, 900.0, 720.0, 450.0),
+            ("a", 1023.0, 900.0, 511.5, 450.0),
+            ("b.child", 1023.0, 900.0, 511.5, 450.0),
+        ],
+    },
+    MutationGolden {
+        step: "resized to 1440x900 @2",
+        rows: &[
+            ("root", 1440.0, 900.0, 720.0, 450.0),
+            ("a", 1020.0, 900.0, 510.0, 450.0),
+            ("b.child", 1020.0, 900.0, 510.0, 450.0),
+        ],
+    },
+];
+
+#[test]
+fn the_mutation_script_matches_the_frozen_tables() {
+    let steps = Harness::mutation_script();
+    assert_eq!(
+        steps.len(),
+        MUTATION_GOLDEN.len(),
+        "the script changed length; regenerate with emit_golden_tables"
+    );
+    for (step, golden) in steps.iter().zip(MUTATION_GOLDEN) {
+        assert_eq!(step.label, golden.step, "steps drifted out of order");
+        assert_eq!(
+            step.rows.len(),
+            golden.rows.len(),
+            "{}: the tree changed shape",
+            golden.step
+        );
+        for (row, frozen) in step.rows.iter().zip(golden.rows) {
+            assert_eq!(row.0, frozen.0, "{}: labels drifted", golden.step);
+            assert_eq!(
+                row.1,
+                Vec2::new(frozen.1, frozen.2),
+                "{} / {}: size",
+                golden.step,
+                row.0
+            );
+            assert_eq!(
+                row.2,
+                Vec2::new(frozen.3, frozen.4),
+                "{} / {}: centre",
+                golden.step,
+                row.0
+            );
         }
     }
 }
@@ -1130,7 +1049,73 @@ const GOLDEN: &[Golden] = &[
             ("p.3.1.3", 8.0, 595.0, 636.0, 502.5),
         ],
     },
+    Golden {
+        case: "edge-0",
+        size: UVec2::new(1, 1),
+        scale: 1.0,
+        rows: &[("root", 1.0, 1.0, 0.5, 0.5)],
+    },
+    Golden {
+        case: "edge-1",
+        size: UVec2::new(1280, 800),
+        scale: 2.0,
+        rows: &[
+            ("root", 1280.0, 800.0, 640.0, 400.0),
+            ("hidden", 0.0, 0.0, 0.0, 0.0),
+            ("hidden.child", 0.0, 0.0, 0.0, 0.0),
+        ],
+    },
+    Golden {
+        case: "edge-2",
+        size: UVec2::new(1001, 667),
+        scale: 1.5,
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("stack", 1001.0, 667.0, 500.5, 333.5),
+        ],
+    },
+    Golden {
+        case: "edge-3",
+        size: UVec2::new(1440, 900),
+        scale: 1.25,
+        rows: &[
+            ("root", 1440.0, 900.0, 720.0, 450.0),
+            ("sheet", 401.0, 900.0, 1239.5, 450.0),
+        ],
+    },
+    Golden {
+        case: "edge-4",
+        size: UVec2::new(1001, 667),
+        scale: 1.25,
+        rows: &[
+            ("root", 1001.0, 667.0, 500.5, 333.5),
+            ("fixed", 171.0, 667.0, 85.5, 333.5),
+            ("rest", 830.0, 667.0, 586.0, 333.5),
+        ],
+    },
+    Golden {
+        case: "edge-5",
+        size: UVec2::new(1280, 800),
+        scale: 2.0,
+        rows: &[("root", 0.0, 0.0, 0.0, 0.0)],
+    },
 ];
+
+/// Regenerating with a shortened target list would narrow the frozen coverage without failing
+/// anything else, because every table that survived would still match.
+#[test]
+fn the_frozen_tables_span_every_target() {
+    for (size, scale) in TARGETS {
+        assert!(
+            GOLDEN
+                .iter()
+                .any(|golden| golden.size == *size && golden.scale == *scale),
+            "no frozen tree at {}x{} @{scale}",
+            size.x,
+            size.y
+        );
+    }
+}
 
 #[test]
 fn geometry_matches_the_frozen_tables() {
