@@ -10,7 +10,10 @@ use dioxus_interpreter_js::unified_bindings::SLEDGEHAMMER_JS;
 pub struct InterpreterShell {
     root_id: &'static str,
     base_uri: String,
-    stylesheets: Vec<String>,
+    head: String,
+    html_attributes: String,
+    body_class: String,
+    root_class: String,
 }
 
 impl InterpreterShell {
@@ -20,16 +23,37 @@ impl InterpreterShell {
         Self {
             root_id,
             base_uri: base_uri.into().trim_end_matches('/').to_string(),
-            stylesheets: Vec::new(),
+            head: String::new(),
+            html_attributes: String::new(),
+            body_class: String::new(),
+            root_class: String::new(),
         }
     }
 
-    /// Link a stylesheet, in the order added.
+    /// Everything the page needs inside `<head>` — its `<base>`, stylesheets and inline rules.
     ///
-    /// The page's CSS is still fetched over the same scheme the shell came from; only the markup
-    /// stops being the bundle's.
-    pub fn with_stylesheet(mut self, href: impl Into<String>) -> Self {
-        self.stylesheets.push(href.into());
+    /// Taken whole rather than as a list of hrefs because a page's document chrome is the page's
+    /// business: this crate cannot know which sheet must come first, or that the root needs a
+    /// height before flex layout means anything.
+    pub fn with_head(mut self, head: impl Into<String>) -> Self {
+        self.head = head.into();
+        self
+    }
+
+    /// Attributes for `<html>`, verbatim.
+    pub fn with_html_attributes(mut self, attributes: impl Into<String>) -> Self {
+        self.html_attributes = attributes.into();
+        self
+    }
+
+    pub fn with_body_class(mut self, class: impl Into<String>) -> Self {
+        self.body_class = class.into();
+        self
+    }
+
+    /// Classes for the element the page renders into.
+    pub fn with_root_class(mut self, class: impl Into<String>) -> Self {
+        self.root_class = class.into();
         self
     }
 
@@ -37,14 +61,11 @@ impl InterpreterShell {
         let Self {
             root_id,
             base_uri,
-            stylesheets,
+            head,
+            html_attributes,
+            body_class,
+            root_class,
         } = self;
-
-        let mut links = String::new();
-        for href in stylesheets {
-            links.push_str(&format!(r#"<link rel="stylesheet" href="{href}">"#));
-            links.push('\n');
-        }
 
         // `initialize` is a handshake, not a formality: the host must not evaluate an edit batch
         // until the interpreter exists and has been given a root, and `window.onload` is the only
@@ -55,13 +76,14 @@ impl InterpreterShell {
         // retrying against a port nothing is listening on.
         format!(
             r#"<!DOCTYPE html>
-<html>
+<html {html_attributes}>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-{links}</head>
-<body>
-<div id="{root_id}"></div>
+<meta name="viewport" content="width=device-width">
+{head}
+</head>
+<body class="{body_class}">
+<div id="{root_id}" class="{root_class}"></div>
 <script type="module">
 {SLEDGEHAMMER_JS}
 {NATIVE_JS}
@@ -109,20 +131,26 @@ mod tests {
     fn the_root_the_interpreter_is_given_is_the_one_the_document_holds() {
         let shell = InterpreterShell::new("vmux-root", "vmux://layout").html();
 
-        assert!(shell.contains(r#"<div id="vmux-root"></div>"#));
+        assert!(shell.contains(r#"<div id="vmux-root""#));
         assert!(shell.contains(r#"getElementById("vmux-root")"#));
     }
 
     #[test]
-    fn stylesheets_are_linked_in_the_order_they_were_added() {
+    fn the_page_keeps_the_document_chrome_it_was_written_against() {
         let shell = InterpreterShell::new("main", "vmux://layout")
-            .with_stylesheet("/assets/theme.css")
-            .with_stylesheet("/assets/tailwind.css")
+            .with_head(r#"<base href="/"><link rel="stylesheet" href="./assets/index.css">"#)
+            .with_html_attributes(r#"class="h-full""#)
+            .with_body_class("flex h-full")
+            .with_root_class("flex flex-1")
             .html();
 
-        let theme = shell.find("theme.css").expect("theme linked");
-        let tailwind = shell.find("tailwind.css").expect("tailwind linked");
-
-        assert!(theme < tailwind, "cascade order is the caller's to decide");
+        assert!(shell.contains(r#"<base href="/">"#));
+        assert!(shell.contains("./assets/index.css"));
+        assert!(shell.contains(r#"<html class="h-full">"#));
+        assert!(shell.contains(r#"<body class="flex h-full">"#));
+        assert!(
+            shell.contains(r#"<div id="main" class="flex flex-1"></div>"#),
+            "the root carries the page's own layout classes, or nothing it renders has a size"
+        );
     }
 }

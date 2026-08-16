@@ -15,12 +15,18 @@ impl EditScript {
         // `run_from_bytes`, not `rafEdits`: the latter ends in `markEditsFinished`, which sends an
         // acknowledgement over the WebSocket that dioxus-desktop opens and this crate does not, so
         // it would throw on `this.edits` being undefined.
+        //
+        // The acknowledgement still has to happen, over IPC instead. Without it the host never
+        // learns the batch landed, so it withholds every later render — and since Dioxus runs
+        // effects on the pass after the one that mounted them, a page would render once and then
+        // stop, with no hook that registers in an effect ever reaching the host.
         Self(format!(
             r#"(function(){{
 const binary = atob("{encoded}");
 const bytes = new Uint8Array(binary.length);
 for (let i = 0; i < binary.length; i++) {{ bytes[i] = binary.charCodeAt(i); }}
 window.interpreter.run_from_bytes(bytes.buffer);
+window.interpreter.sendIpcMessage("flushed");
 }})();"#
         ))
     }
@@ -65,6 +71,24 @@ mod tests {
         assert!(
             !script.as_str().contains("rafEdits"),
             "rafEdits calls markEditsFinished, which writes to the WebSocket only dioxus-desktop opens"
+        );
+    }
+
+    #[test]
+    fn the_script_reports_the_batch_as_applied() {
+        let script = EditScript::of(&[1, 2, 3]);
+        let applied = script
+            .as_str()
+            .find("run_from_bytes")
+            .expect("the batch is applied");
+        let acknowledged = script
+            .as_str()
+            .find(r#"sendIpcMessage("flushed")"#)
+            .expect("a batch that is never acknowledged stops every render after it");
+
+        assert!(
+            applied < acknowledged,
+            "acknowledging before applying would release the next render against a stale document"
         );
     }
 }

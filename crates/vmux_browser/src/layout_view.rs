@@ -353,9 +353,29 @@ impl VmuxProtocol {
     }
 
     /// The document a natively-hosted page loads: the interpreter, and nothing else.
+    ///
+    /// The chrome below is the bundle's own `index.html` with the wasm removed. It is not
+    /// decoration: without `index.css` nothing has a Tailwind rule, and without the height and
+    /// flex rules on `html`, `body` and the root, a flex child has no box to fill — which renders
+    /// as one icon at its intrinsic size filling the window.
     fn shell_response() -> wry::http::Response<Vec<u8>> {
+        const HEAD: &str = r#"<base href="/"/>
+<title>vmux</title>
+<style>
+html, body { height: 100%; margin: 0; min-height: 0; }
+body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
+</style>
+<link rel="stylesheet" href="./assets/index.css"/>
+<link rel="stylesheet" href="./assets/theme.css"/>"#;
+
         let html = vmux_dioxus::InterpreterShell::new("main", LAYOUT_PAGE_URL)
-            .with_stylesheet("/vmux_ui/assets/theme.css")
+            .with_head(HEAD)
+            .with_html_attributes(r#"lang="en" class="h-full" style="color-scheme: light dark""#)
+            .with_body_class(
+                "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+                 text-foreground antialiased",
+            )
+            .with_root_class("flex min-h-0 min-w-0 flex-1 flex-col")
             .html();
 
         wry::http::Response::builder()
