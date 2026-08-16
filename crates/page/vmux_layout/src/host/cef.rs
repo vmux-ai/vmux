@@ -110,7 +110,6 @@ impl Browser {
             ResolvedWebviewUri(url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -139,7 +138,6 @@ impl Browser {
             ResolvedWebviewUri(url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -168,7 +166,6 @@ impl Browser {
             ResolvedWebviewUri(source_url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -207,7 +204,6 @@ pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
             ..default()
         },
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::Visible,
     )
 }

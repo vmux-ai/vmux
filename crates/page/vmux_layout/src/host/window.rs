@@ -206,7 +206,6 @@ fn setup(
             SideSheetPosition::Left,
             crate::Open,
             Transform::default(),
-            GlobalTransform::default(),
             Visibility::Visible,
             Node {
                 width: Val::Px(crate::event::SIDE_SHEET_WIDTH_PX),
@@ -227,7 +226,6 @@ fn setup(
         .spawn((
             MainColumn,
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),
@@ -245,7 +243,6 @@ fn setup(
         crate::Open,
         Visibility::Visible,
         Transform::default(),
-        GlobalTransform::default(),
         Node {
             height: Val::Px(crate::event::CEF_RESERVED_HEIGHT_PX),
             flex_shrink: 0.0,
@@ -257,7 +254,6 @@ fn setup(
     commands.spawn((
         Main,
         Transform::default(),
-        GlobalTransform::default(),
         Node {
             flex_grow: 1.0,
             min_height: Val::Px(0.0),
@@ -365,7 +361,6 @@ pub fn spawn_tab_scaffold_in_space(
             },
             HostWindow(primary_window),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),

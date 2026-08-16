@@ -124,7 +124,6 @@ pub fn space_view_bundle() -> impl Bundle {
     (
         space_container_node(),
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::default(),
     )
 }

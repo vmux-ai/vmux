@@ -32,7 +32,6 @@ impl DebugView {
             (
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
-                GlobalTransform::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(0.0),

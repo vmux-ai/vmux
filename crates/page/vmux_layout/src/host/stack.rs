@@ -228,7 +228,6 @@ pub fn stack_bundle() -> impl Bundle {
         Stack::default(),
         vmux_core::PageMetadata::default(),
         Transform::default(),
-        GlobalTransform::default(),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(0.0),

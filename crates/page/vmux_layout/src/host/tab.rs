@@ -132,7 +132,6 @@ pub fn tab_bundle() -> impl Bundle {
     (
         Tab::default(),
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::default(),
         Node {
             width: Val::Percent(100.0),
