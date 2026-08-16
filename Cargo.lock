@@ -10818,6 +10818,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_dioxus"
+version = "0.0.30"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-html",
+ "dioxus-interpreter-js",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "vmux_editor"
 version = "0.0.30"
 dependencies = [
