@@ -10,7 +10,6 @@ pub mod calendar;
 pub mod card;
 pub mod checkbox;
 pub mod collapsible;
-#[cfg(web)]
 pub mod context_menu;
 pub mod date_picker;
 pub mod dialog;

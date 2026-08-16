@@ -12,7 +12,6 @@ use crate::event::{
 };
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
-use gloo_timers::future::TimeoutFuture;
 use vmux_command::panel::CommandBarPanel;
 use vmux_core::event::team::{TEAM_EVENT, TeamCommandEvent, TeamEvent, TeamMemberRow};
 use vmux_core::event::{
@@ -35,8 +34,8 @@ use vmux_ui::file_icon::TypeIcon;
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 use vmux_ui::icon::{BuiltinIconView, PageIconView};
+use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
-use wasm_bindgen::{JsCast, closure::Closure};
 
 #[component]
 pub fn Page() -> Element {
@@ -175,16 +174,7 @@ pub fn Page() -> Element {
     );
     let radius_px = state.radius;
     let mut last_scrolled_stack = use_signal(|| None::<(u64, u32)>);
-    use_effect(move || {
-        if let Some(doc) = web_sys::window().and_then(|w| w.document())
-            && let Some(root) = doc.document_element()
-            && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
-        {
-            let _ = html
-                .style()
-                .set_property("--radius", &format!("{radius_px}px"));
-        }
-    });
+    use_effect(move || set_root_radius_px(radius_px));
     use_effect(move || {
         if !layout_state().side_sheet_open {
             return;
@@ -900,7 +890,7 @@ fn RemotePanel(remote: RemoteStateEvent) -> Element {
                                 pairing_generation.set(generation);
                                 show_pairing.set(true);
                                 spawn(async move {
-                                    TimeoutFuture::new(120_000).await;
+                                    sleep_ms(120_000).await;
                                     if pairing_generation() == generation {
                                         show_pairing.set(false);
                                     }
@@ -959,12 +949,7 @@ fn BookmarksSection(
             "data-bookmark-drop": "root",
             class: "glass group relative z-30 mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
             oncontextmenu: move |e: Event<MouseData>| {
-                let data = e.data();
-                let on_card = data
-                    .downcast::<web_sys::MouseEvent>()
-                    .map(|m| m.target() == m.current_target())
-                    .unwrap_or(false);
-                if on_card {
+                if pointer_landed_on_self(&e.data()) {
                     e.prevent_default();
                     request_bookmark_menu();
                 }
@@ -2303,19 +2288,13 @@ fn begin_bookmark_drag(
     }
     set_bookmark_pointer_capture(event, true);
     let coordinates = event.client_coordinates();
-    let rect = bookmark_drag_source(event).map(|source| source.get_bounding_client_rect());
+    let grab = bookmark_grab_offset(event);
     state.set(Some(BookmarkDragState {
         item,
         start_x: coordinates.x,
         start_y: coordinates.y,
-        ghost_offset_x: rect
-            .as_ref()
-            .map(|rect| coordinates.x - rect.left())
-            .unwrap_or(12.0),
-        ghost_offset_y: rect
-            .as_ref()
-            .map(|rect| coordinates.y - rect.top())
-            .unwrap_or(12.0),
+        ghost_offset_x: grab.map(|(x, _)| x).unwrap_or(12.0),
+        ghost_offset_y: grab.map(|(_, y)| y).unwrap_or(12.0),
         active: false,
         target: None,
     }));
@@ -2364,16 +2343,51 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
     }
 }
 
-fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
-    let Some(window) = web_sys::window() else {
-        state.set(None);
-        return;
-    };
-    let callback = Closure::once(move || state.set(None));
-    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
-        Ok(_) => callback.forget(),
-        Err(_) => state.set(None),
+/// Clear the drag one turn late, so the click this pointer-up produces still sees it.
+/// Whether the pointer landed on the element carrying the handler rather than on a descendant.
+///
+/// `web` only: comparing `target` against `currentTarget` needs the platform event, and Dioxus
+/// exposes neither. Answering `false` natively means a right-click on the card does not open its
+/// menu, which is a missing action rather than one fired on the wrong element.
+#[cfg(web)]
+fn pointer_landed_on_self(data: &MouseData) -> bool {
+    data.downcast::<web_sys::MouseEvent>()
+        .map(|mouse| mouse.target() == mouse.current_target())
+        .unwrap_or(false)
+}
+
+#[cfg(not(web))]
+fn pointer_landed_on_self(_data: &MouseData) -> bool {
+    false
+}
+
+/// Publish the corner radius the shell was told to use, as a CSS variable on the document root.
+///
+/// `web` only: the root element belongs to the document, which native page code cannot reach.
+/// `use_theme` writes the same variable through `Host::set_root_radius`, whose native half is
+/// also a no-op, so nothing here is lost that is not already absent.
+#[cfg(web)]
+fn set_root_radius_px(radius: f32) {
+    use wasm_bindgen::JsCast;
+
+    if let Some(document) = web_sys::window().and_then(|window| window.document())
+        && let Some(root) = document.document_element()
+        && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = html
+            .style()
+            .set_property("--radius", &format!("{radius}px"));
     }
+}
+
+#[cfg(not(web))]
+fn set_root_radius_px(_radius: f32) {}
+
+fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
+    spawn(async move {
+        sleep_ms(0).await;
+        state.set(None);
+    });
 }
 
 fn end_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Event<PointerData>) {
@@ -2409,94 +2423,149 @@ fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
     state.set(None);
 }
 
-const BOOKMARK_DRAG_GHOST_ID: &str = "vmux-bookmark-drag-ghost";
+// The drag ghost, and the hit-testing that places it.
+//
+// `web` only, as a unit. Every one of these reaches the document directly — cloning the dragged
+// row into a floating copy, writing inline styles to follow the pointer, capturing the pointer,
+// and asking `elementFromPoint` what is underneath — and none of it has a portable Dioxus form.
+// A native `MountedData` answers `NotSupported`, so there is nothing to measure or move.
+//
+// Natively `bookmark_drag_source` answers `None`, which stops a drag before it starts: bookmarks
+// cannot be reordered by dragging, and everything else about them works. Rendering the ghost as
+// an ordinary element positioned from a signal, with drop targets resolved by `onpointerenter`
+// rather than by hit-testing, is what retires this — it needs a `RenderedElementBacking` first.
+#[cfg(web)]
+mod bookmark_drag_dom {
+    use super::*;
+    use wasm_bindgen::JsCast;
 
-fn bookmark_drag_source(event: &Event<PointerData>) -> Option<web_sys::Element> {
-    let data = event.data();
-    let pointer = data.downcast::<web_sys::PointerEvent>()?;
-    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
-    target.closest("[data-bookmark-drag-source]").ok().flatten()
-}
+    const BOOKMARK_DRAG_GHOST_ID: &str = "vmux-bookmark-drag-ghost";
 
-fn set_bookmark_pointer_capture(event: &Event<PointerData>, capture: bool) {
-    let data = event.data();
-    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-        return;
-    };
-    let Some(element) = bookmark_drag_source(event) else {
-        return;
-    };
-    if capture {
-        let _ = element.set_pointer_capture(pointer.pointer_id());
-    } else {
-        let _ = element.release_pointer_capture(pointer.pointer_id());
+    /// Where inside the dragged row the pointer went down, so the ghost keeps that grip.
+    pub(super) fn bookmark_grab_offset(event: &Event<PointerData>) -> Option<(f64, f64)> {
+        let rect = bookmark_drag_source(event)?.get_bounding_client_rect();
+        let at = event.client_coordinates();
+
+        Some((at.x - rect.left(), at.y - rect.top()))
+    }
+
+    fn bookmark_drag_source(event: &Event<PointerData>) -> Option<web_sys::Element> {
+        let data = event.data();
+        let pointer = data.downcast::<web_sys::PointerEvent>()?;
+        let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
+        target.closest("[data-bookmark-drag-source]").ok().flatten()
+    }
+
+    pub(super) fn set_bookmark_pointer_capture(event: &Event<PointerData>, capture: bool) {
+        let data = event.data();
+        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
+            return;
+        };
+        let Some(element) = bookmark_drag_source(event) else {
+            return;
+        };
+        if capture {
+            let _ = element.set_pointer_capture(pointer.pointer_id());
+        } else {
+            let _ = element.release_pointer_capture(pointer.pointer_id());
+        }
+    }
+
+    pub(super) fn create_bookmark_drag_ghost(event: &Event<PointerData>) {
+        remove_bookmark_drag_ghost();
+        let Some(source) = bookmark_drag_source(event) else {
+            return;
+        };
+        let Ok(node) = source.clone_node_with_deep(true) else {
+            return;
+        };
+        let Ok(ghost) = node.dyn_into::<web_sys::HtmlElement>() else {
+            return;
+        };
+        let rect = source.get_bounding_client_rect();
+        ghost.set_id(BOOKMARK_DRAG_GHOST_ID);
+        let _ = ghost.set_attribute("aria-hidden", "true");
+        let style = ghost.style();
+        let _ = style.set_property("position", "fixed");
+        let _ = style.set_property("z-index", "2000");
+        let _ = style.set_property("pointer-events", "none");
+        let _ = style.set_property("width", &format!("{}px", rect.width()));
+        let _ = style.set_property("height", &format!("{}px", rect.height()));
+        let _ = style.set_property("opacity", "0.92");
+        let _ = style.set_property("margin", "0");
+        let Some(body) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.body())
+        else {
+            return;
+        };
+        let _ = body.append_child(&ghost);
+    }
+
+    pub(super) fn move_bookmark_drag_ghost(left: f64, top: f64) {
+        let Some(ghost) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            return;
+        };
+        let style = ghost.style();
+        let _ = style.set_property("left", &format!("{left}px"));
+        let _ = style.set_property("top", &format!("{top}px"));
+    }
+
+    pub(super) fn remove_bookmark_drag_ghost() {
+        if let Some(ghost) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
+        {
+            ghost.remove();
+        }
+    }
+
+    pub(super) fn bookmark_drop_target_at(
+        event: &Event<PointerData>,
+    ) -> Option<BookmarkDropTarget> {
+        let coordinates = event.client_coordinates();
+        let document = web_sys::window()?.document()?;
+        let element = document.element_from_point(coordinates.x as f32, coordinates.y as f32)?;
+        let target = element.closest("[data-bookmark-drop]").ok().flatten()?;
+        match target.get_attribute("data-bookmark-drop").as_deref() {
+            Some("root") => Some(BookmarkDropTarget::Root),
+            Some(uuid) if !uuid.is_empty() => Some(BookmarkDropTarget::Folder(uuid.to_string())),
+            _ => None,
+        }
     }
 }
 
-fn create_bookmark_drag_ghost(event: &Event<PointerData>) {
-    remove_bookmark_drag_ghost();
-    let Some(source) = bookmark_drag_source(event) else {
-        return;
-    };
-    let Ok(node) = source.clone_node_with_deep(true) else {
-        return;
-    };
-    let Ok(ghost) = node.dyn_into::<web_sys::HtmlElement>() else {
-        return;
-    };
-    let rect = source.get_bounding_client_rect();
-    ghost.set_id(BOOKMARK_DRAG_GHOST_ID);
-    let _ = ghost.set_attribute("aria-hidden", "true");
-    let style = ghost.style();
-    let _ = style.set_property("position", "fixed");
-    let _ = style.set_property("z-index", "2000");
-    let _ = style.set_property("pointer-events", "none");
-    let _ = style.set_property("width", &format!("{}px", rect.width()));
-    let _ = style.set_property("height", &format!("{}px", rect.height()));
-    let _ = style.set_property("opacity", "0.92");
-    let _ = style.set_property("margin", "0");
-    let Some(body) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.body())
-    else {
-        return;
-    };
-    let _ = body.append_child(&ghost);
-}
+#[cfg(not(web))]
+mod bookmark_drag_dom {
+    use super::*;
 
-fn move_bookmark_drag_ghost(left: f64, top: f64) {
-    let Some(ghost) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
-        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-    else {
-        return;
-    };
-    let style = ghost.style();
-    let _ = style.set_property("left", &format!("{left}px"));
-    let _ = style.set_property("top", &format!("{top}px"));
-}
+    pub(super) fn bookmark_grab_offset(_event: &Event<PointerData>) -> Option<(f64, f64)> {
+        None
+    }
 
-fn remove_bookmark_drag_ghost() {
-    if let Some(ghost) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
-    {
-        ghost.remove();
+    pub(super) fn set_bookmark_pointer_capture(_event: &Event<PointerData>, _capture: bool) {}
+
+    pub(super) fn create_bookmark_drag_ghost(_event: &Event<PointerData>) {}
+
+    pub(super) fn move_bookmark_drag_ghost(_left: f64, _top: f64) {}
+
+    pub(super) fn remove_bookmark_drag_ghost() {}
+
+    pub(super) fn bookmark_drop_target_at(
+        _event: &Event<PointerData>,
+    ) -> Option<BookmarkDropTarget> {
+        None
     }
 }
 
-fn bookmark_drop_target_at(event: &Event<PointerData>) -> Option<BookmarkDropTarget> {
-    let coordinates = event.client_coordinates();
-    let document = web_sys::window()?.document()?;
-    let element = document.element_from_point(coordinates.x as f32, coordinates.y as f32)?;
-    let target = element.closest("[data-bookmark-drop]").ok().flatten()?;
-    match target.get_attribute("data-bookmark-drop").as_deref() {
-        Some("root") => Some(BookmarkDropTarget::Root),
-        Some(uuid) if !uuid.is_empty() => Some(BookmarkDropTarget::Folder(uuid.to_string())),
-        _ => None,
-    }
-}
+use bookmark_drag_dom::{
+    bookmark_drop_target_at, bookmark_grab_offset, create_bookmark_drag_ghost,
+    move_bookmark_drag_ghost, remove_bookmark_drag_ghost, set_bookmark_pointer_capture,
+};
 
 fn bookmark_drag_blocks_click(state: Signal<Option<BookmarkDragState>>) -> bool {
     state().is_some_and(|drag| drag.active)
@@ -2572,20 +2641,23 @@ fn BookmarkNameInput(
     }
 }
 
+/// Show the rename field one turn after seeding it, so it mounts with the draft already set.
 fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, name: String) {
     draft.set(name);
-    let Some(window) = web_sys::window() else {
+    spawn(async move {
+        sleep_ms(0).await;
         editing.set(true);
-        return;
-    };
-    let callback = Closure::once(move || editing.set(true));
-    match window.request_animation_frame(callback.as_ref().unchecked_ref()) {
-        Ok(_) => callback.forget(),
-        Err(_) => editing.set(true),
-    }
+    });
 }
 
+/// Focus the rename field and offer its text for overtyping.
+///
+/// `web` only: a native `MountedData` answers `NotSupported`, so the downcast already returned
+/// `None` there. Until a `RenderedElementBacking` exists the field mounts unfocused.
+#[cfg(web)]
 fn focus_and_select_inline_rename(event: Event<MountedData>) {
+    use wasm_bindgen::JsCast;
+
     if let Some(element) = event.downcast::<web_sys::Element>()
         && let Ok(input) = element.clone().dyn_into::<web_sys::HtmlInputElement>()
     {
@@ -2593,6 +2665,9 @@ fn focus_and_select_inline_rename(event: Event<MountedData>) {
         input.select();
     }
 }
+
+#[cfg(not(web))]
+fn focus_and_select_inline_rename(_event: Event<MountedData>) {}
 
 #[component]
 fn BookmarkFolder(

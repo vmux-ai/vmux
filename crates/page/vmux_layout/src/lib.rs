@@ -16,7 +16,7 @@ pub mod debug_page;
 #[cfg(ui)]
 pub mod tools_page;
 
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
 
 // `web`, not `ui`: each of these still reaches the DOM directly and is only ever served into the
