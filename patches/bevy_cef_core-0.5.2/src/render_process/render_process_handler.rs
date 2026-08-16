@@ -20,11 +20,9 @@ const CEF_API_EXTENSION_CODE: &str = r#"
 var cef;
 if (!cef) cef = {};
 (function() {
-  native function __cef_brp();
   native function __cef_emit();
   native function __cef_listen();
   native function __cef_bin_emit();
-  cef.brp = __cef_brp;
   cef.emit = __cef_emit;
   cef.listen = __cef_listen;
   cef.binEmit = __cef_bin_emit;
@@ -32,15 +30,6 @@ if (!cef) cef = {};
 })();
 "#;
 
-#[derive(serde::Deserialize)]
-struct RenderBrpError {
-    message: String,
-}
-
-type RenderBrpResult = Result<serde_json::Value, RenderBrpError>;
-
-pub(crate) static BRP_PROMISES: LazyLock<Mutex<HashMap<String, V8Value>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 /// Listeners are keyed by browser so two embedded pages can register the same event id, and hold
 /// only the callback. A `V8Context` handle is scoped to the callback that produced it — caching one
 /// here made every dispatch after the first silently fail `is_valid()`, so the context is
@@ -58,7 +47,6 @@ static INIT_SCRIPTS: LazyLock<Mutex<HashMap<c_int, InitScript>>> =
 pub const INIT_SCRIPT_KEY: &str = "init_script";
 pub const INIT_SCRIPT_URL_KEY: &str = "init_script_url";
 
-pub const PROCESS_MESSAGE_BRP: &str = "brp";
 pub const PROCESS_MESSAGE_HOST_EMIT: &str = "host-emit";
 pub const PROCESS_MESSAGE_JS_EMIT: &str = "js-emit";
 pub const PROCESS_MESSAGE_BIN_HOST_EMIT: &str = "bin-host-emit";
@@ -182,11 +170,6 @@ impl ImplRenderProcessHandler for RenderProcessHandlerBuilder {
         {
             let browser_id = browser.identifier();
             match message.name().into_string().as_str() {
-                PROCESS_MESSAGE_BRP => {
-                    if let Some(ctx) = frame.v8_context() {
-                        handle_brp_message(message, ctx);
-                    }
-                }
                 PROCESS_MESSAGE_HOST_EMIT => {
                     if let Some(ctx) = frame.v8_context() {
                         handle_listen_message(message, browser_id, ctx);
@@ -271,30 +254,6 @@ fn register_cef_api_extension() {
         Some(&CEF_API_EXTENSION_CODE.into()),
         Some(&mut V8Handler::new(CefApiHandler::default())),
     );
-}
-
-fn handle_brp_message(message: &ProcessMessage, ctx: V8Context) {
-    let Some(argument_list) = message.argument_list() else {
-        return;
-    };
-    let id = argument_list.string(0).into_string();
-    let payload = argument_list.string(1).into_string();
-    let Ok(Some(promise)) = BRP_PROMISES.lock().map(|mut p| p.remove(&id)) else {
-        return;
-    };
-
-    if let Ok(brp_result) = serde_json::from_str::<RenderBrpResult>(&payload) {
-        ctx.enter();
-        match brp_result {
-            Ok(v) => {
-                promise.resolve_promise(json_to_v8(v).as_mut());
-            }
-            Err(e) => {
-                promise.reject_promise(Some(&e.message.as_str().into()));
-            }
-        }
-        ctx.exit();
-    }
 }
 
 fn handle_listen_message(message: &ProcessMessage, browser_id: c_int, mut ctx: V8Context) {

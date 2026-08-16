@@ -64,13 +64,6 @@ default-features = false
 [dependencies.bevy_cef_core]
 version = "0.5.2"
 
-[dependencies.bevy_remote]
-version = "0.19.0"
-default-features = false
-features = [
-    "bevy_asset",
-]
-
 [dependencies.cef]
 version = "148.2.0"
 

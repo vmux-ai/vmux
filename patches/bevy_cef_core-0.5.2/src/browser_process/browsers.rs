@@ -1,4 +1,3 @@
-use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
@@ -10,7 +9,6 @@ use async_channel::Sender;
 use bevy::input::ButtonState;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use bevy_remote::BrpMessage;
 #[cfg(target_os = "macos")]
 use cef::Rect;
 use cef::{
@@ -336,7 +334,6 @@ impl Browsers {
         requester: Requester,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
-        brp_sender: Sender<BrpMessage>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -372,7 +369,6 @@ impl Browsers {
             device_scale.clone(),
             ipc_event_sender,
             bin_ipc_event_sender,
-            brp_sender,
             snapshot_result_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
@@ -2486,7 +2482,6 @@ impl Browsers {
         device_scale: SharedDeviceScaleFactor,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
-        brp_sender: Sender<BrpMessage>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -2532,7 +2527,6 @@ impl Browsers {
             ))
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
             .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
-            .with_message_handler(BrpHandler::new(brp_sender))
             .with_message_handler(SnapshotResultHandler::new(webview, snapshot_result_sender))
             .build()
     }

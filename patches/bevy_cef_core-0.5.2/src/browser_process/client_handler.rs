@@ -1,5 +1,4 @@
 mod bin_emit_event_handler;
-mod brp_handler;
 mod js_emit_event_handler;
 mod snapshot_result_handler;
 
@@ -16,7 +15,6 @@ use cef::{
 use std::os::raw::c_int;
 
 pub use bin_emit_event_handler::{BinEmitEventHandler, BinIpcEventRaw};
-pub use brp_handler::BrpHandler;
 pub use js_emit_event_handler::{IpcEventRaw, JsEmitEventHandler};
 pub use snapshot_result_handler::{SnapshotResultHandler, SnapshotResultRaw};
 
@@ -260,11 +258,6 @@ impl ImplClient for ClientHandlerBuilder {
             if !is_snapshot_result
                 && crate::util::is_bridge_allowed_origin(&url)
                 && name != crate::prelude::PROCESS_MESSAGE_JS_EMIT
-            {
-                return 1;
-            }
-            if name == crate::prelude::PROCESS_MESSAGE_BRP
-                && crate::util::embedded_page_host_of(&url).as_deref() != Some("debug")
             {
                 return 1;
             }

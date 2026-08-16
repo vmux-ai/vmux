@@ -25,7 +25,6 @@ use bevy_cef_core::prelude::{
     CefAcceptLanguageList, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions,
     CommandLineConfig, compile_time_cef_embedded_scheme, try_set_cef_embedded_page_config,
 };
-use bevy_remote::RemotePlugin;
 
 pub mod prelude {
     pub use crate::{
@@ -107,9 +106,6 @@ impl Plugin for CefPlugin {
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
             );
-        if !app.is_plugin_added::<RemotePlugin>() {
-            app.add_plugins(RemotePlugin::default());
-        }
     }
 }
 

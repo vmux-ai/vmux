@@ -348,7 +348,6 @@ fn package_builds_cef_helper_separately_without_lto() {
     for dependency in [
         "dep:async-channel",
         "dep:bevy",
-        "dep:bevy_remote",
         "dep:bevy_winit",
         "dep:raw-window-handle",
         "dep:winit",
@@ -359,7 +358,6 @@ fn package_builds_cef_helper_separately_without_lto() {
     assert!(helper_manifest.contains("default-features = false"));
     assert!(helper_manifest.contains("cef = { version = \"148.2.0\", default-features = false }"));
     assert!(!handler.contains("use bevy::"));
-    assert!(!handler.contains("use bevy_remote::"));
 }
 
 #[test]
@@ -578,27 +576,6 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
     }
 }
 
-/// Nothing draws through Bevy any more: every webview is a native view composited by AppKit, and
-/// `vmux_flex` computes geometry over `taffy` without ever painting it. `bevy_camera` stays for
-/// `Visibility`, and it is a separate crate from `bevy_render`, so keeping one does not drag in
-/// the other.
-///
-/// The allowlist above covers the workspace dependency. It cannot see this route: `bevy_remote` is
-/// vendored, and its own default features used to turn `bevy_render` back on for the whole graph
-/// no matter what any consumer asked for. Feature unification makes that one default enough to
-/// undo the removal, and nothing here uses the render subapp it serves.
-#[test]
-fn patched_bevy_remote_does_not_default_to_the_render_subapp() {
-    let manifest = include_str!("../../../../patches/bevy_remote-0.19.0/Cargo.toml");
-    let start = manifest
-        .find("default = [")
-        .expect("bevy_remote default features");
-    let rest = &manifest[start..];
-    let defaults = &rest[..rest.find(']').expect("terminated default list")];
-
-    assert!(!defaults.contains("bevy_render"));
-}
-
 /// The 3D scene is gone, and the Bevy subsystems it alone pulled must not return through
 /// a crate-level feature. The test above covers the workspace dependency; this covers the
 /// crate that used to opt in.
@@ -620,13 +597,6 @@ fn no_crate_reenables_the_player_only_bevy_features() {
             "vmux_layout should not enable {feature}"
         );
     }
-}
-
-#[test]
-fn patched_bevy_remote_does_not_pull_bevy_dev_tools() {
-    let manifest = include_str!("../../../../patches/bevy_remote-0.19.0/Cargo.toml");
-
-    assert!(!manifest.contains("bevy_dev_tools"));
 }
 
 #[test]

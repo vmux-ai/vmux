@@ -228,6 +228,10 @@ block2 = "0.6"
 raw-window-handle = "0.6"
 
 [dev-dependencies]
+# System type names in schedule graphs, which `platform_systems` reads to prove a system is
+# actually scheduled. A dev-dependency so the shipped binary does not carry the name strings —
+# it only ever had them because the patched `bevy_remote` enabled this transitively.
+bevy_utils = { version = "0.19.0", features = ["debug"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rkyv = { workspace = true }
 tempfile = "3"

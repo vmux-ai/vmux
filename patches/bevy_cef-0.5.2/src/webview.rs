@@ -16,7 +16,6 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window};
 use bevy::winit::WINIT_WINDOWS;
 use bevy_cef_core::prelude::*;
-use bevy_remote::BrpSender;
 #[allow(deprecated)]
 use raw_window_handle::HasRawWindowHandle;
 use serde::{Deserialize, Serialize};
@@ -253,7 +252,6 @@ fn create_webview(
     requester: Res<Requester>,
     ipc_event_sender: Res<IpcEventRawSender>,
     bin_ipc_event_sender: Res<BinIpcEventRawSender>,
-    brp_sender: Res<BrpSender>,
     snapshot_result_sender: Res<SnapshotResultSender>,
     cursor_icon_sender: Res<SystemCursorIconSender>,
     loading_state_sender: Res<WebviewLoadingStateSender>,
@@ -351,7 +349,6 @@ fn create_webview(
                 requester.clone(),
                 ipc_event_sender.0.clone(),
                 bin_ipc_event_sender.0.clone(),
-                brp_sender.clone(),
                 snapshot_result_sender.0.clone(),
                 cursor_icon_sender.clone(),
                 loading_state_sender.0.clone(),
