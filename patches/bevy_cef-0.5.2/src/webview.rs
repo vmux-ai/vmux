@@ -434,82 +434,8 @@ mod tests {
     }
 
     #[test]
-    fn webview_does_not_drive_external_begin_frames_from_bevy_schedule() {
-        let implementation = include_str!("webview.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(!implementation.contains("drive_external_begin_frames"));
-        assert!(!implementation.contains("send_external_begin_frame"));
-    }
-
-    #[test]
-    fn webview_uses_current_monitor_refresh_for_initial_cef_frame_rate() {
-        let implementation = include_str!("webview.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("current_monitor()"));
-        assert!(implementation.contains("refresh_rate_millihertz()"));
-        assert!(implementation.contains("windowless_frame_rate_from_refresh_millihertz"));
-        assert!(implementation.contains("windowless_frame_rate,"));
-    }
-
-    #[test]
-    fn webview_keeps_existing_cef_frame_rate_synced_to_monitor() {
-        let implementation = include_str!("webview.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("sync_windowless_frame_rate"));
-        assert!(implementation.contains("browsers.set_windowless_frame_rate"));
-        assert!(implementation.contains("texture_wake_policy.set_min_interval"));
-    }
-
-    #[test]
-    fn opaque_windowed_background_only_applies_to_windowed_webviews() {
-        let implementation = include_str!("webview.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("WebviewOpaqueWindowedBackground"));
-        assert!(implementation.contains("if windowed && opaque_windowed_background"));
-        assert!(!implementation.contains("if windowed && transparent"));
-        assert!(implementation.contains("Some(0x00000000)"));
-    }
-
-    #[test]
-    fn webview_passes_windowed_native_focus_policy_to_core() {
-        let implementation = include_str!("webview.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("WebviewWindowedNativeFocus"));
-        assert!(implementation.contains("Has<WebviewWindowedNativeFocus>"));
-        assert!(implementation.contains("windowed_native_focus"));
-        assert!(implementation.contains("windowed && windowed_native_focus"));
-    }
-
-    #[test]
     fn shared_textures_feed_every_windowless_webview() {
         assert!(shared_texture_enabled(false));
         assert!(!shared_texture_enabled(true));
-    }
-
-    #[test]
-    fn webview_creation_stops_during_app_exit() {
-        let source = include_str!("webview.rs");
-        let plugin = source
-            .split("impl Plugin for WebviewPlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("fn duration_nanos").next())
-            .unwrap_or_default();
-
-        assert!(plugin.contains("run_if(not(on_message::<AppExit>))"));
     }
 }

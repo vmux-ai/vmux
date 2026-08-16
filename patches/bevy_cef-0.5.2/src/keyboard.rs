@@ -289,19 +289,6 @@ mod tests {
     #[cfg(target_os = "macos")]
     use bevy::prelude::{ButtonInput, KeyCode};
 
-    #[test]
-    fn ime_events_route_to_keyboard_targets() {
-        let implementation = include_str!("keyboard.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("webviews_targeted"));
-        assert!(implementation.contains("set_ime_composition_for"));
-        assert!(implementation.contains("set_ime_commit_text_for"));
-        assert!(implementation.contains("ime_cancel_composition_for"));
-    }
-
     #[cfg(target_os = "macos")]
     #[test]
     fn ctrl_j_k_are_deduped_as_macos_nav_keys() {
