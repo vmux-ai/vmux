@@ -53,7 +53,7 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSWindow",
 ] }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 serde_json = { workspace = true }

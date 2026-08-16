@@ -31,6 +31,6 @@ vmux_core = { path = "../../vmux_core" }
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dev-dependencies]
 bevy = { workspace = true }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }

@@ -52,7 +52,7 @@ tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 

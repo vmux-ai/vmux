@@ -57,7 +57,7 @@ url = { workspace = true }
 # The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
 # manifest cannot use it. `lsp_page` reaches no further than Dioxus, so it renders wherever Dioxus
 # does; the editor proper still needs the DOM and stays in the wasm block below.
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 

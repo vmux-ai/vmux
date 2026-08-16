@@ -30,6 +30,6 @@ vmux_command = { path = "../vmux_command" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_space = { path = "../vmux_space" }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }

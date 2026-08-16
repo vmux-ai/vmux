@@ -16,6 +16,9 @@ pub mod debug_page;
 #[cfg(ui)]
 pub mod tools_page;
 
+#[cfg(web)]
+pub mod page;
+
 // `web`, not `ui`: each of these still reaches the DOM directly and is only ever served into the
 // CEF webview. They were written when `ui` and `web` were the same thing, which stopped being
 // true when iOS arrived — saying `web` records what they are instead of implying a phone can
@@ -24,8 +27,6 @@ pub mod tools_page;
 pub mod error_page;
 #[cfg(web)]
 pub mod extensions_page;
-#[cfg(web)]
-pub mod page;
 #[cfg(web)]
 pub mod vault_page;
 

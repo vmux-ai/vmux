@@ -62,7 +62,7 @@ fn main() {
     }
 }
 
-/// `ui` is the exhaustive complement of `host`; pairing the stub with `web` left iOS — which is
-/// neither — with no `main` at all.
-#[cfg(ui)]
+/// `not(host)` rather than `ui` or `web`: the desktop is both `host` and `ui`, so `ui` would give
+/// it a second `main`, and `web` would leave iOS with none.
+#[cfg(not(host))]
 fn main() {}
