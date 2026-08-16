@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use moonshine_save::prelude::*;
 use vmux_command::ReadAppCommands;
+use vmux_flex::prelude::*;
 
 impl Plugin for SpaceLayoutPlugin {
     fn build(&self, app: &mut App) {
@@ -29,7 +30,7 @@ impl Plugin for SpaceLayoutPlugin {
             )
             .add_systems(
                 PostUpdate,
-                sync_space_container_visibility.before(bevy::ui::UiSystems::Layout),
+                sync_space_container_visibility.before(LayoutSystems::Layout),
             );
     }
 }

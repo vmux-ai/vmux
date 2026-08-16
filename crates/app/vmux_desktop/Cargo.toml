@@ -73,44 +73,43 @@ path = "src/main.rs"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
 bevy_cef_core = { workspace = true }
-
+bevy_world_serialization = { workspace = true }
+cargo-packager-updater = { version = "0.2", optional = true }
+chrono = { workspace = true }
 crossbeam-channel = { workspace = true }
 libc = "0.2"
-muda = "0.19"
-parking_lot = "0.12"
-notify = { workspace = true }
-bevy_world_serialization = { workspace = true }
 moonshine-save = { workspace = true }
-ron = { workspace = true }
+muda = "0.19"
+notify = { workspace = true }
+parking_lot = "0.12"
 rfd = { workspace = true }
+ron = { workspace = true }
+semver = { version = "1", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
+tray-icon = { version = "0.24", optional = true }
+url = { workspace = true }
+uuid = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
 vmux_browser = { path = "../../vmux_browser" }
+vmux_command = { path = "../../page/vmux_command" }
 vmux_core = { path = "../../vmux_core" }
-vmux_ui = { path = "../../vmux_ui", default-features = false }
 vmux_editor = { path = "../../page/vmux_editor" }
+vmux_flex = { path = "../../vmux_flex" }
 vmux_git = { path = "../../vmux_git" }
 vmux_history = { path = "../../page/vmux_history" }
 vmux_knowledge = { path = "../../page/vmux_knowledge" }
 vmux_layout = { path = "../../page/vmux_layout" }
-vmux_command = { path = "../../page/vmux_command" }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
-tracing-appender = "0.2"
+vmux_page = { path = "../../vmux_page", optional = true }
 vmux_service = { path = "../../host/vmux_service" }
+vmux_setting = { path = "../../page/vmux_setting" }
 vmux_space = { path = "../../page/vmux_space" }
 vmux_team = { path = "../../page/vmux_team" }
 vmux_terminal = { path = "../../page/vmux_terminal" }
-vmux_setting = { path = "../../page/vmux_setting" }
-vmux_page = { path = "../../vmux_page", optional = true }
-url = { workspace = true }
-uuid = { workspace = true }
-
-semver = { version = "1", optional = true }
-cargo-packager-updater = { version = "0.2", optional = true }
-tray-icon = { version = "0.24", optional = true }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 color_quant = { version = "2", optional = true }

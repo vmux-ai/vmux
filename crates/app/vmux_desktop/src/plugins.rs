@@ -19,6 +19,7 @@ pub struct VmuxCorePlugins;
 impl PluginGroup for VmuxCorePlugins {
     fn build(self) -> PluginGroupBuilder {
         PluginGroupBuilder::start::<Self>()
+            .add(vmux_flex::FlexPlugin)
             .add(vmux_core::CorePlugin)
             .add(vmux_core::page::PagePlugin)
             .add(vmux_command::CommandPlugin)

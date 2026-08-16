@@ -28,6 +28,7 @@ sysinfo = "0.38"
 tracing = "0.1"
 url = { workspace = true }
 vmux_command = { path = "../vmux_command" }
+vmux_flex = { path = "../../vmux_flex" }
 vmux_history = { path = "../vmux_history" }
 vmux_layout = { path = "../vmux_layout" }
 vmux_service = { path = "../../host/vmux_service" }

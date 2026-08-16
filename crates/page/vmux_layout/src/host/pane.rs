@@ -13,7 +13,6 @@ use bevy::{
         lifecycle::HookContext, message::Messages, relationship::Relationship, world::DeferredWorld,
     },
     prelude::*,
-    ui::{FlexDirection, UiGlobalTransform},
     window::PrimaryWindow,
 };
 use moonshine_save::prelude::*;
@@ -22,7 +21,8 @@ use vmux_command::{
     AppCommand, BrowserCommand, LayoutCommand, OpenCommand, PaneCommand, ReadAppCommands,
     open::{PaneDirection, PaneOpenMode, PaneTarget},
 };
-use vmux_core::{NodeRect, PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_core::{PageOpenRequest, PageOpenTarget, PageOpenTask};
+use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 pub struct PanePlugin;
@@ -70,7 +70,7 @@ impl Plugin for PanePlugin {
                 PostUpdate,
                 (
                     sync_pane_split_gaps_to_settings,
-                    sync_zoom_visibility.before(bevy::ui::UiSystems::Layout),
+                    sync_zoom_visibility.before(LayoutSystems::Layout),
                     clear_zoom_on_pane_removal,
                     warp_cursor_to_active_pane,
                 ),
@@ -1951,7 +1951,7 @@ fn on_pane_select(
     all_children: Query<&Children>,
     leaf_pane_q: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
-    pane_pos_q: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
+    pane_pos_q: Query<&ComputedNode, With<Pane>>,
     mut hover_intent: ResMut<PaneHoverIntent>,
     mut pending_warp: ResMut<PendingCursorWarp>,
     mut new_stack_ctx: ResMut<PendingLaunch>,
@@ -1987,20 +1987,18 @@ fn on_pane_select(
         let Some(current) = current else {
             continue;
         };
-        let Ok((cur_node, cur_gt)) = pane_pos_q.get(current) else {
+        let Ok(&cur) = pane_pos_q.get(current) else {
             continue;
         };
-        let cur = NodeRect::of(cur_node, cur_gt);
 
         let mut candidates: Vec<Entity> = Vec::new();
         for &pane in &panes {
             if pane == current {
                 continue;
             }
-            let Ok((tgt_node, gt)) = pane_pos_q.get(pane) else {
+            let Ok(&tgt) = pane_pos_q.get(pane) else {
                 continue;
             };
-            let tgt = NodeRect::of(tgt_node, gt);
 
             let along = (tgt.center - cur.center).dot(direction);
             if along <= 0.0 {
@@ -2033,10 +2031,7 @@ fn on_pane_select(
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 fn poll_cursor_pane_focus(
     windows: Query<(Entity, &Window), With<PrimaryWindow>>,
-    leaf_panes: Query<
-        (Entity, &ComputedNode, &UiGlobalTransform),
-        (With<Pane>, Without<PaneSplit>),
-    >,
+    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -2064,8 +2059,8 @@ fn poll_cursor_pane_focus(
     };
 
     let mut hovered_pane: Option<Entity> = None;
-    for (entity, node, ui_gt) in &leaf_panes {
-        if NodeRect::of(node, ui_gt).contains(cursor) {
+    for (entity, node) in &leaf_panes {
+        if node.contains(cursor) {
             hovered_pane = Some(entity);
             break;
         }
@@ -2077,11 +2072,7 @@ fn poll_cursor_pane_focus(
     };
 
     // Check if already the active pane
-    let current_active = active_among(
-        leaf_panes
-            .iter()
-            .filter_map(|(e, _, _)| pane_ts.get(e).ok()),
-    );
+    let current_active = active_among(leaf_panes.iter().filter_map(|(e, _)| pane_ts.get(e).ok()));
     if current_active == Some(target) {
         intent.target = None;
         return;
@@ -2152,10 +2143,7 @@ fn native_window_cursor_position(window_entity: Entity, window: &Window) -> Opti
 
 #[cfg(target_os = "macos")]
 fn apply_pending_hover(
-    leaf_panes: Query<
-        (Entity, &ComputedNode, &UiGlobalTransform),
-        (With<Pane>, Without<PaneSplit>),
-    >,
+    leaf_panes: Query<(Entity, &ComputedNode), (With<Pane>, Without<PaneSplit>)>,
     pane_ts: Query<(Entity, &LastActivatedAt), With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
@@ -2170,8 +2158,8 @@ fn apply_pending_hover(
     }
     *last_motion_sequence = pointer.motion_sequence;
     let mut target = None;
-    for (entity, node, ui_gt) in leaf_panes.iter() {
-        if NodeRect::of(node, ui_gt).contains(pointer.position_px) {
+    for (entity, node) in leaf_panes.iter() {
+        if node.contains(pointer.position_px) {
             target = Some(entity);
             break;
         }
@@ -2182,7 +2170,7 @@ fn apply_pending_hover(
     let current = active_among(
         leaf_panes
             .iter()
-            .filter_map(|(entity, _, _)| pane_ts.get(entity).ok()),
+            .filter_map(|(entity, _)| pane_ts.get(entity).ok()),
     );
     if current == Some(target) {
         return;
@@ -2195,16 +2183,15 @@ fn apply_pending_hover(
 
 fn warp_cursor_to_active_pane(
     mut pending: ResMut<PendingCursorWarp>,
-    pane_ui_q: Query<(&ComputedNode, &UiGlobalTransform), (With<Pane>, Without<PaneSplit>)>,
+    pane_ui_q: Query<&ComputedNode, (With<Pane>, Without<PaneSplit>)>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     let Some(target) = pending.target else {
         return;
     };
-    let Ok((node, ui_gt)) = pane_ui_q.get(target) else {
+    let Ok(&rect) = pane_ui_q.get(target) else {
         return;
     };
-    let rect = NodeRect::of(node, ui_gt);
     if rect.is_empty() {
         return;
     }
@@ -2219,7 +2206,7 @@ fn pane_gap_drag_resize(
 
     splits: Query<(Entity, &PaneSplit, &Children), Without<PaneDrag>>,
     active_drags: Query<(Entity, &PaneDrag, &PaneSplit)>,
-    child_nodes: Query<(&ComputedNode, &UiGlobalTransform)>,
+    child_nodes: Query<&ComputedNode>,
     parent_nodes: Query<&ComputedNode>,
     mut node_q: Query<&mut Node>,
     mut size_q: Query<&mut PaneSize>,
@@ -2280,15 +2267,12 @@ fn pane_gap_drag_resize(
     'outer: for (split_entity, split, children) in &splits {
         let sibs: Vec<Entity> = children.iter().collect();
         for i in 0..sibs.len().saturating_sub(1) {
-            let Ok((node_a, gt_a)) = child_nodes.get(sibs[i]) else {
+            let Ok(&a) = child_nodes.get(sibs[i]) else {
                 continue;
             };
-            let Ok((node_b, gt_b)) = child_nodes.get(sibs[i + 1]) else {
+            let Ok(&b) = child_nodes.get(sibs[i + 1]) else {
                 continue;
             };
-
-            let a = NodeRect::of(node_a, gt_a);
-            let b = NodeRect::of(node_b, gt_b);
 
             let (gap_min, gap_max, cross_min, cross_max) = match split.direction {
                 PaneSplitDirection::Row => (
@@ -2574,8 +2558,6 @@ mod tests {
     }
 
     fn place_pane(app: &mut App, parent: Entity, center: Vec2, size: Vec2) -> Entity {
-        use bevy::ui::{ComputedNode, UiGlobalTransform};
-        let node = ComputedNode { size, ..default() };
         let id = app
             .world_mut()
             .spawn((
@@ -2583,8 +2565,11 @@ mod tests {
                 Node::default(),
                 LastActivatedAt::now(),
                 ChildOf(parent),
-                node,
-                UiGlobalTransform::from_translation(center),
+                ComputedNode {
+                    size,
+                    center,
+                    ..default()
+                },
             ))
             .id();
         app.world_mut()
@@ -2760,7 +2745,6 @@ mod tests {
         size: Vec2,
         url: &str,
     ) -> Entity {
-        use bevy::ui::{ComputedNode, UiGlobalTransform};
         let pane = app
             .world_mut()
             .spawn((
@@ -2769,8 +2753,7 @@ mod tests {
                 Node::default(),
                 LastActivatedAt::now(),
                 ChildOf(parent),
-                ComputedNode { size, ..default() },
-                UiGlobalTransform::from_translation(size * 0.5),
+                ComputedNode::from_origin(size),
             ))
             .id();
         let stack = app
@@ -4489,7 +4472,6 @@ mod tests {
         // Layout: A (left, full height), B (top-right), C (bottom-right).
         // From A, both B and C overlap on Y. Expect: navigate to whichever was
         // active most recently (B in this test).
-        use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -4543,7 +4525,6 @@ mod tests {
 
         // Sanity: ensure ComputedNode is set for B and C
         let _ = app.world().get::<ComputedNode>(b).unwrap();
-        let _ = app.world().get::<UiGlobalTransform>(b).unwrap();
 
         // Activate C first, then B (B is the most recently active right-side pane).
         app.world_mut().entity_mut(c).insert(LastActivatedAt::now());
@@ -4577,7 +4558,6 @@ mod tests {
     fn select_left_picks_full_height_neighbor_from_sub_split_pane() {
         // Layout: A on left (full height), B top-right, C bottom-right.
         // From B, pressing 'h' should navigate to A (their bounding boxes overlap on Y).
-        use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -4636,7 +4616,6 @@ mod tests {
         let _ = (a, b);
         // sanity: ensure ComputedNode is set
         let _ = app.world().get::<ComputedNode>(b).unwrap();
-        let _ = app.world().get::<UiGlobalTransform>(b).unwrap();
 
         app.world_mut().entity_mut(a).insert(LastActivatedAt(1));
         app.world_mut().entity_mut(b).insert(LastActivatedAt(10));
@@ -4659,7 +4638,6 @@ mod tests {
 
     #[test]
     fn select_left_picks_left_neighbor_in_horizontal_split() {
-        use bevy::ui::{ComputedNode, UiGlobalTransform};
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, CommandPlugin))
             .init_resource::<PaneHoverIntent>()
@@ -4707,10 +4685,7 @@ mod tests {
             Vec2::new(800.0, 900.0)
         );
         assert_eq!(
-            app.world()
-                .get::<UiGlobalTransform>(right)
-                .unwrap()
-                .transform_point2(Vec2::ZERO),
+            app.world().get::<ComputedNode>(right).unwrap().center,
             Vec2::new(1200.0, 450.0)
         );
 
@@ -5701,7 +5676,7 @@ mod tests {
                 PaneSize::default(),
                 Node {
                     flex_grow: 1.0,
-                    flex_direction: bevy::ui::FlexDirection::Row,
+                    flex_direction: FlexDirection::Row,
                     ..default()
                 },
                 ChildOf(tab),

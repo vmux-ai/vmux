@@ -10,6 +10,7 @@ use vmux_browser::Browser;
 use vmux_core::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, CreatedAt, Order, PageMetadata,
 };
+use vmux_flex::prelude::*;
 use vmux_layout::event::SERVICES_PAGE_URL;
 use vmux_layout::event::TERMINAL_PAGE_URL;
 use vmux_layout::profile::Profile;
@@ -487,7 +488,6 @@ pub(crate) fn rebuild_space_views(
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             HostWindow(pw),
-            ZIndex(0),
             Transform::default(),
             GlobalTransform::default(),
             Node {
@@ -538,7 +538,6 @@ pub(crate) fn rebuild_space_views(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            ZIndex(0),
         ));
 
         let has_browser = all_children

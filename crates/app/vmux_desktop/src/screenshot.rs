@@ -1,13 +1,12 @@
 use bevy::ecs::relationship::Relationship;
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
-use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
 use vmux_agent::{ScreenshotRequest, ScreenshotResponse};
-use vmux_core::NodeRect;
+use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 
 /// Captures still screenshots for the agent, off the command flush so a screenshot request
@@ -56,7 +55,7 @@ fn err_response(request_id: [u8; 16], message: impl Into<String>) -> ScreenshotR
 
 fn resolve_crop(
     id: &str,
-    node_q: &Query<(&ComputedNode, &UiGlobalTransform)>,
+    node_q: &Query<&ComputedNode>,
     child_of_q: &Query<&ChildOf>,
     img_w: u32,
     img_h: u32,
@@ -64,8 +63,8 @@ fn resolve_crop(
     let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
     let mut entity = Entity::from_bits(bits);
     for _ in 0..8 {
-        if let Ok((computed, gt)) = node_q.get(entity) {
-            return Some(CropRect::of(NodeRect::of(computed, gt), img_w, img_h));
+        if let Ok(&computed) = node_q.get(entity) {
+            return Some(CropRect::of(computed, img_w, img_h));
         }
         entity = child_of_q.get(entity).ok()?.get();
     }
@@ -78,7 +77,7 @@ fn start_screenshots(
     bridge: Res<ScreenshotBridge>,
     settings: Res<AppSettings>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,
-    node_q: Query<(&ComputedNode, &UiGlobalTransform)>,
+    node_q: Query<&ComputedNode>,
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
@@ -158,7 +157,7 @@ pub(crate) fn downscale_dims(w: u32, h: u32, max_edge: u32) -> (u32, u32) {
 }
 
 impl CropRect {
-    pub(crate) fn of(rect: NodeRect, img_w: u32, img_h: u32) -> Self {
+    pub(crate) fn of(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
         let min = rect.min();
         let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
         let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
@@ -211,7 +210,7 @@ mod tests {
     #[test]
     fn crop_rect_clamps_to_image() {
         let r = CropRect::of(
-            NodeRect {
+            ComputedNode {
                 size: Vec2::new(80.0, 60.0),
                 center: Vec2::new(100.0, 100.0),
                 ..default()
@@ -230,7 +229,7 @@ mod tests {
         );
 
         let r = CropRect::of(
-            NodeRect {
+            ComputedNode {
                 size: Vec2::splat(40.0),
                 center: Vec2::splat(990.0),
                 ..default()

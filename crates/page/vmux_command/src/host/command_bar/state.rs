@@ -2,6 +2,7 @@ use crate::CommandBar;
 use bevy::prelude::*;
 use bevy_cef::prelude::CefKeyboardTarget;
 use vmux_core::overlay::OverlayState;
+use vmux_flex::prelude::*;
 
 /// The bar's own view of [`OverlayState`], filtered to its entity rather than to any overlay.
 pub type CommandBarStateQuery<'w, 's> = Query<

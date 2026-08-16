@@ -5,15 +5,16 @@
 //! Bevy's UI layout has run and bevy_cef has resized the underlying CEF
 //! webview.
 
-use bevy::{prelude::*, ui::UiSystems};
+use bevy::prelude::*;
 use bevy_cef::prelude::WebviewSource;
 
 use crate::window::VmuxWindow;
+use vmux_flex::prelude::*;
 
 impl Plugin for WebviewRevealPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(on_webview_added)
-            .add_systems(PostUpdate, reveal_webviews.after(UiSystems::Layout));
+            .add_systems(PostUpdate, reveal_webviews.after(LayoutSystems::Layout));
     }
 }
 

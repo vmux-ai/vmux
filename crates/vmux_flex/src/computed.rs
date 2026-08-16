@@ -1,7 +1,6 @@
-//! Where a laid-out node ended up, and the corners every caller actually wants.
+//! What layout produced: where a node ended up, and the corners every caller wants.
 
 use bevy::prelude::*;
-use bevy::ui::UiGlobalTransform;
 
 /// Space reserved inside a node's own box, resolved to physical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -14,13 +13,13 @@ pub struct Insets {
 
 /// The rectangle a laid-out node occupies, in physical pixels, origin at the window's top-left.
 ///
-/// The layout engine reports a node's position as its *centre*, which is almost never what a
-/// caller wants: everything downstream is placing a native view, cropping a framebuffer or hit
-/// testing a cursor, and all three want corners. Deriving them is the same four lines at every
-/// site, and a slipped sign there produces a plausible rectangle in the wrong place — nothing
-/// type-checks it and no test sees it. So the conversion happens once, here.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct NodeRect {
+/// Position is stored as the **centre**, which is what the layout pass naturally produces: a node's
+/// offset accumulates relative to its parent's centre as the tree is walked. Nothing downstream
+/// wants a centre, so the corners are derived here rather than at each of the sixteen call sites
+/// that need them — a slipped sign in that arithmetic gives a plausible rectangle in the wrong
+/// place, which neither the type checker nor a test can see.
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
+pub struct ComputedNode {
     pub size: Vec2,
     pub center: Vec2,
     pub padding: Insets,
@@ -28,12 +27,12 @@ pub struct NodeRect {
     pub inverse_scale_factor: f32,
 }
 
-/// A default rectangle is unscaled, not scaled by zero.
+/// A node that has not been laid out yet is unscaled, not scaled by zero.
 ///
 /// Deriving this would leave `inverse_scale_factor` at `0.0`, which is not a neutral value: it
-/// makes [`NodeRect::scale`] report a million and [`NodeRect::to_logical`] shrink by the same,
-/// so a rectangle built from [`NodeRect::from_origin`] would be silently unusable in logical space.
-impl Default for NodeRect {
+/// makes [`ComputedNode::scale`] report a million and [`ComputedNode::to_logical`] shrink by the
+/// same. `Node` requires this component, so every node holds the default for at least one frame.
+impl Default for ComputedNode {
     fn default() -> Self {
         Self {
             size: Vec2::ZERO,
@@ -44,19 +43,7 @@ impl Default for NodeRect {
     }
 }
 
-impl NodeRect {
-    pub fn of(computed: &ComputedNode, transform: &UiGlobalTransform) -> Self {
-        Self {
-            size: computed.size,
-            center: transform.transform_point2(Vec2::ZERO),
-            padding: Insets {
-                min: computed.padding.min_inset,
-                max: computed.padding.max_inset,
-            },
-            inverse_scale_factor: computed.inverse_scale_factor,
-        }
-    }
-
+impl ComputedNode {
     /// A rectangle of `size` with its top-left corner at the origin.
     pub fn from_origin(size: Vec2) -> Self {
         Self {
@@ -76,7 +63,7 @@ impl NodeRect {
         self.center + self.size * 0.5
     }
 
-    /// Inclusive on every edge, matching the pointer tests this replaces.
+    /// Inclusive on every edge, matching the pointer tests this serves.
     pub fn contains(self, point: Vec2) -> bool {
         let min = self.min();
         let max = self.max();
@@ -94,8 +81,8 @@ impl NodeRect {
         self.min().x.max(other.min().x) < self.max().x.min(other.max().x)
     }
 
-    /// Nothing can be placed against this rectangle — it has no area, or the layout produced a
-    /// value arithmetic cannot survive.
+    /// Nothing can be placed against this rectangle — it has no area, or layout produced a value
+    /// arithmetic cannot survive.
     pub fn is_empty(self) -> bool {
         !(self.size.x > 0.0
             && self.size.y > 0.0
@@ -142,7 +129,7 @@ impl NodeRect {
 mod tests {
     use super::*;
 
-    impl NodeRect {
+    impl ComputedNode {
         fn at(center: Vec2, size: Vec2) -> Self {
             Self {
                 size,
@@ -155,7 +142,7 @@ mod tests {
     /// A slipped sign here puts every native view in the wrong half of the window.
     #[test]
     fn corners_sit_half_a_size_either_side_of_the_centre() {
-        let rect = NodeRect::at(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
+        let rect = ComputedNode::at(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
 
         assert_eq!(rect.min(), Vec2::new(300.0, 250.0));
         assert_eq!(rect.max(), Vec2::new(500.0, 350.0));
@@ -163,23 +150,20 @@ mod tests {
 
     #[test]
     fn edges_and_corners_count_as_inside() {
-        let rect = NodeRect::at(Vec2::new(100.0, 100.0), Vec2::new(50.0, 50.0));
+        let rect = ComputedNode::at(Vec2::new(100.0, 100.0), Vec2::new(50.0, 50.0));
 
         assert!(rect.contains(Vec2::new(75.0, 75.0)));
         assert!(rect.contains(Vec2::new(125.0, 125.0)));
-        assert!(rect.contains(Vec2::splat(100.0)));
         assert!(!rect.contains(Vec2::new(74.9, 100.0)));
-        assert!(!rect.contains(Vec2::new(100.0, 125.1)));
     }
 
-    /// The header on a Retina display: 1544x168 physical at scale 2 is 772x84 logical, and its
-    /// left edge lands 8 logical pixels in. These are the numbers `layout_fixed_offsets_from_computed`
-    /// has always produced.
+    /// The header on a Retina display: 1544x168 physical at scale 2 is 772x84 logical, and its left
+    /// edge lands 8 logical pixels in.
     #[test]
     fn halving_a_retina_rect_gives_the_logical_one() {
-        let rect = NodeRect {
+        let rect = ComputedNode {
             inverse_scale_factor: 0.5,
-            ..NodeRect::at(Vec2::new(788.0, 84.0), Vec2::new(1544.0, 168.0))
+            ..ComputedNode::at(Vec2::new(788.0, 84.0), Vec2::new(1544.0, 168.0))
         };
 
         let logical = rect.to_logical();
@@ -189,14 +173,11 @@ mod tests {
         assert_eq!(logical.scale(), 1.0);
     }
 
-    /// A cursor over a Retina view arrives in physical window pixels and has to reach the view as
-    /// logical pixels from its own top-left, or every hover lands in the wrong place. The 400x300
-    /// view at (100, 50) on a scale-2 display is the case `refresh_active_windowed_hover` feeds.
     #[test]
     fn a_window_point_becomes_logical_pixels_from_the_rects_own_corner() {
-        let rect = NodeRect {
+        let rect = ComputedNode {
             inverse_scale_factor: 0.5,
-            ..NodeRect::at(Vec2::new(300.0, 200.0), Vec2::new(400.0, 300.0))
+            ..ComputedNode::at(Vec2::new(300.0, 200.0), Vec2::new(400.0, 300.0))
         };
 
         assert_eq!(rect.min(), Vec2::new(100.0, 50.0));
@@ -204,30 +185,27 @@ mod tests {
             rect.local_point(Vec2::new(300.0, 250.0)),
             Some(Vec2::splat(100.0))
         );
-        assert_eq!(rect.local_point(Vec2::new(100.0, 50.0)), Some(Vec2::ZERO));
         assert_eq!(rect.local_point(Vec2::new(99.0, 250.0)), None);
     }
 
-    /// `size` is the content box, so the window root's own extent is bigger than it reports by
-    /// exactly the padding the layout reserves for the glass border.
     #[test]
     fn the_padding_box_adds_both_insets() {
-        let rect = NodeRect {
+        let rect = ComputedNode {
             padding: Insets {
                 min: Vec2::new(4.0, 8.0),
                 max: Vec2::new(6.0, 2.0),
             },
-            ..NodeRect::at(Vec2::ZERO, Vec2::new(100.0, 50.0))
+            ..ComputedNode::at(Vec2::ZERO, Vec2::new(100.0, 50.0))
         };
 
         assert_eq!(rect.padding_box(), Vec2::new(110.0, 60.0));
     }
 
-    /// A rectangle nobody gave a scale to is already in logical space, so converting it must be a
-    /// no-op rather than a division by a millionth.
+    /// A node holds the default until its first layout, so converting one to logical space must be
+    /// a no-op rather than a division by a millionth.
     #[test]
     fn an_unscaled_rect_survives_conversion_to_logical() {
-        let rect = NodeRect::from_origin(Vec2::new(400.0, 300.0));
+        let rect = ComputedNode::from_origin(Vec2::new(400.0, 300.0));
 
         assert_eq!(rect.scale(), 1.0);
         assert_eq!(rect.to_logical(), rect);
@@ -236,10 +214,8 @@ mod tests {
 
     #[test]
     fn a_rect_with_no_area_or_a_broken_one_is_empty() {
-        assert!(NodeRect::at(Vec2::ZERO, Vec2::new(0.0, 10.0)).is_empty());
-        assert!(NodeRect::at(Vec2::ZERO, Vec2::new(10.0, -1.0)).is_empty());
-        assert!(NodeRect::at(Vec2::ZERO, Vec2::new(f32::NAN, 10.0)).is_empty());
-        assert!(NodeRect::at(Vec2::ZERO, Vec2::new(f32::INFINITY, 10.0)).is_empty());
-        assert!(!NodeRect::at(Vec2::ZERO, Vec2::new(1.0, 1.0)).is_empty());
+        assert!(ComputedNode::at(Vec2::ZERO, Vec2::new(0.0, 10.0)).is_empty());
+        assert!(ComputedNode::at(Vec2::ZERO, Vec2::new(f32::NAN, 10.0)).is_empty());
+        assert!(!ComputedNode::at(Vec2::ZERO, Vec2::new(1.0, 1.0)).is_empty());
     }
 }

@@ -28,4 +28,5 @@ serde_json = { workspace = true }
 sha2 = "0.10"
 toml = { workspace = true }
 url = { workspace = true }
+vmux_flex = { path = "../vmux_flex" }
 zip = { version = "2", default-features = false, features = ["deflate"] }

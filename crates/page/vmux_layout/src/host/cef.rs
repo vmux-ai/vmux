@@ -1,6 +1,7 @@
 use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
+use vmux_flex::prelude::*;
 
 pub struct LayoutCefPlugin;
 
@@ -209,7 +210,6 @@ pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
             top: Val::Px(0.0),
             ..default()
         },
-        ZIndex(2),
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Inherited,

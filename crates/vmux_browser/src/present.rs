@@ -1,13 +1,12 @@
 //! Making the webviews match the layout Bevy just computed.
 //!
-//! Everything here runs in one chain between `UiSystems::Layout` and the standard material
+//! Everything here runs in one chain between `LayoutSystems::Layout` and the standard material
 //! render: geometry, visibility, focus and the native frames of windowed webviews all read the
 //! same finished layout, so the order is load-bearing rather than incidental.
 
 use bevy::{
     ecs::relationship::Relationship,
     prelude::*,
-    ui::{UiGlobalTransform, UiSystems},
     window::{PrimaryWindow, WindowResized},
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -15,7 +14,6 @@ use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-use vmux_core::NodeRect;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -27,7 +25,10 @@ use vmux_layout::{
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
     tab::Tab,
-    window::{VmuxWindow, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL, WEBVIEW_Z_SIDE_SHEET},
+    window::{
+        VmuxWindow, WEBVIEW_Z_BASE, WEBVIEW_Z_HEADER, WEBVIEW_Z_MAIN, WEBVIEW_Z_MODAL,
+        WEBVIEW_Z_SIDE_SHEET,
+    },
 };
 
 use vmux_setting::AppSettings;
@@ -41,6 +42,7 @@ use crate::{
 #[cfg(target_os = "macos")]
 use crate::native_bridge::CommandBarPointerEvent;
 use crate::native_bridge::NativeBridge;
+use vmux_flex::prelude::*;
 
 pub(crate) struct PresentPlugin;
 
@@ -60,7 +62,7 @@ impl Plugin for PresentPlugin {
                 sync_osr_webview_focus,
             )
                 .chain()
-                .after(UiSystems::Layout),
+                .after(LayoutSystems::Layout),
         );
     }
 }
@@ -169,8 +171,6 @@ fn sync_children_to_ui(
         (
             &mut Transform,
             &ComputedNode,
-            &bevy::ui::ComputedStackIndex,
-            &UiGlobalTransform,
             &ChildOf,
             &mut WebviewSize,
             Option<&Header>,
@@ -186,23 +186,21 @@ fn sync_children_to_ui(
         With<Browser>,
     >,
     child_of_q: Query<&ChildOf>,
-    pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
+    pane_rect: Query<&ComputedNode, With<Pane>>,
     pane_children: Query<&Children, With<Pane>>,
     tab_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     tabs_q: Query<(Entity, &LastActivatedAt), With<Tab>>,
     active_tab_q: Query<(), (With<Tab>, With<vmux_core::Active>)>,
     pending_launch: Res<vmux_core::launcher::PendingLaunch>,
-    glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
+    glass: Single<(Entity, &ComputedNode), With<VmuxWindow>>,
 ) {
-    let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
-    let glass_rect = NodeRect::of(glass_node, glass_ui_gt);
+    let &(glass_entity, glass_node) = &*glass;
+    let glass_rect = *glass_node;
     let glass_size_px = glass_rect.padding_box();
 
     for (
         mut tf,
         self_computed,
-        self_stack_index,
-        self_ui_gt,
         child_of,
         mut webview_size,
         status,
@@ -218,9 +216,9 @@ fn sync_children_to_ui(
     {
         let parent = child_of.get();
         let pane_entity = child_of_q.get(parent).map(|co| co.get()).unwrap_or(parent);
-        let (computed, ui_gt) = match pane_rect.get(pane_entity) {
-            Ok((cn, gt)) => (cn, gt),
-            Err(_) => (self_computed, self_ui_gt),
+        let computed = match pane_rect.get(pane_entity) {
+            Ok(cn) => cn,
+            Err(_) => self_computed,
         };
 
         if glass_size_px.x <= 0.0 || glass_size_px.y <= 0.0 {
@@ -283,7 +281,7 @@ fn sync_children_to_ui(
         };
         tf.scale = new_scale;
 
-        let delta_px = NodeRect::of(computed, ui_gt).center - glass_rect.center;
+        let delta_px = computed.center - glass_rect.center;
 
         let tx = delta_px.x / glass_size_px.x;
         let ty = -delta_px.y / glass_size_px.y;
@@ -300,7 +298,11 @@ fn sync_children_to_ui(
                 WEBVIEW_Z_MAIN - 0.01
             }
         } else {
-            0.01 + self_stack_index.0 as f32 * 0.001
+            // A `Browser` parented straight to the window root, which only `overlay_adopt` does
+            // and only for a `WindowOverlay` — caught by the `modal` branch above. Reaching here
+            // means a new spawn site skipped the stack, so give it the floor rather than a
+            // stacking order nothing computes any more.
+            WEBVIEW_Z_BASE
         };
         let history_swipe_tx = if parent != glass_entity && !is_cef_ui {
             history_swipe_visual
@@ -397,13 +399,7 @@ pub(crate) fn sync_windowed_frames(
     active_panes: Res<vmux_layout::active_panes::ActivePanes>,
     clear_color: Res<ClearColor>,
     browser_q: Query<
-        (
-            Entity,
-            &Transform,
-            &ComputedNode,
-            &UiGlobalTransform,
-            &ChildOf,
-        ),
+        (Entity, &Transform, &ComputedNode, &ChildOf),
         (
             With<Browser>,
             With<WebviewWindowed>,
@@ -412,8 +408,8 @@ pub(crate) fn sync_windowed_frames(
         ),
     >,
     child_of_q: Query<&ChildOf>,
-    pane_rect: Query<(&ComputedNode, &UiGlobalTransform), With<Pane>>,
-    header_rect: Query<(&ComputedNode, &UiGlobalTransform), (With<Header>, With<Open>)>,
+    pane_rect: Query<&ComputedNode, With<Pane>>,
+    header_rect: Query<&ComputedNode, (With<Header>, With<Open>)>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
     mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
@@ -423,14 +419,12 @@ pub(crate) fn sync_windowed_frames(
 ) {
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
-    let header_frame = header_rect
-        .iter()
-        .find_map(|(computed, ui_gt)| windowed_frame_rect_from_computed(computed, ui_gt));
+    let header_frame = header_rect.iter().find_map(WindowedFrameRect::of);
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
     visible_frames.clear();
-    for (entity, tf, self_computed, self_ui_gt, child_of) in &browser_q {
+    for (entity, tf, self_computed, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
             continue;
@@ -438,13 +432,11 @@ pub(crate) fn sync_windowed_frames(
         visible.push(entity);
         let parent = child_of.get();
         let pane_entity = child_of_q.get(parent).map(|co| co.get()).unwrap_or(parent);
-        let (computed, ui_gt) = pane_rect
-            .get(pane_entity)
-            .unwrap_or((self_computed, self_ui_gt));
-        let Some(pane_frame) = windowed_frame_rect_from_computed(computed, ui_gt) else {
+        let computed = pane_rect.get(pane_entity).unwrap_or(self_computed);
+        let Some(pane_frame) = WindowedFrameRect::of(computed) else {
             continue;
         };
-        let scale = NodeRect::of(computed, ui_gt).scale();
+        let scale = computed.scale();
         let frame = windowed_page_frame_rect(
             pane_frame,
             header_frame,
@@ -539,6 +531,19 @@ pub(crate) struct WindowedFrameRect {
 }
 
 impl WindowedFrameRect {
+    fn of(rect: &ComputedNode) -> Option<Self> {
+        if rect.is_empty() {
+            return None;
+        }
+        let min = rect.min();
+        Some(Self {
+            left: min.x,
+            top: min.y,
+            width: rect.size.x,
+            height: rect.size.y,
+        })
+    }
+
     pub(crate) fn right(self) -> f32 {
         self.left + self.width
     }
@@ -546,23 +551,6 @@ impl WindowedFrameRect {
     pub(crate) fn bottom(self) -> f32 {
         self.top + self.height
     }
-}
-
-fn windowed_frame_rect_from_computed(
-    computed: &ComputedNode,
-    ui_gt: &UiGlobalTransform,
-) -> Option<WindowedFrameRect> {
-    let rect = NodeRect::of(computed, ui_gt);
-    if rect.is_empty() {
-        return None;
-    }
-    let min = rect.min();
-    Some(WindowedFrameRect {
-        left: min.x,
-        top: min.y,
-        width: rect.size.x,
-        height: rect.size.y,
-    })
 }
 
 fn windowed_page_frame_rect(
@@ -1274,76 +1262,6 @@ fn should_show_osr_webview(
 mod tests {
     use super::*;
 
-    /// Bevy UI is the only thing computing geometry for the native views: `sync_windowed_frames`
-    /// turns `ComputedNode` + `UiGlobalTransform` into the frame of a pane's child window, and a
-    /// zero size there means the pane is never positioned and never appears.
-    ///
-    /// `bevy_ui` needs a camera for viewport dimensions, and dropping the render stack removed
-    /// everything that used to populate that camera's target size. This asserts the layout pass
-    /// still resolves a real rectangle without it.
-    ///
-    /// The `target_info` written below is what `sync_camera_render_target` writes in the app, so
-    /// the two have to move together: this test stops meaning anything if that system changes
-    /// where the size comes from.
-    #[test]
-    fn percentage_ui_resolves_once_the_camera_knows_its_render_target() {
-        use bevy::ui::UiPlugin;
-
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(bevy::asset::AssetPlugin::default())
-            .add_plugins(bevy::window::WindowPlugin::default())
-            .add_plugins(bevy::image::ImagePlugin::default())
-            .add_plugins(bevy::text::TextPlugin)
-            .add_plugins(bevy::sprite::SpritePlugin)
-            .init_asset::<bevy::mesh::Mesh>()
-            .add_plugins(bevy::input::InputPlugin)
-            .add_plugins(bevy::a11y::AccessibilityPlugin)
-            .add_plugins(bevy::picking::DefaultPickingPlugins)
-            .add_plugins(UiPlugin);
-        app.world_mut().spawn((
-            Window {
-                resolution: (1200, 800).into(),
-                ..default()
-            },
-            bevy::window::PrimaryWindow,
-        ));
-        let camera = app.world_mut().spawn(bevy::camera::Camera2d).id();
-        app.world_mut()
-            .entity_mut(camera)
-            .get_mut::<bevy::camera::Camera>()
-            .expect("Camera2d requires Camera")
-            .computed
-            .target_info = Some(bevy::camera::RenderTargetInfo {
-            physical_size: bevy::math::UVec2::new(1200, 800),
-            scale_factor: 1.0,
-        });
-        let node = app
-            .world_mut()
-            .spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                bevy::ui::UiTargetCamera(camera),
-            ))
-            .id();
-
-        app.update();
-        app.update();
-
-        let computed = app
-            .world()
-            .get::<ComputedNode>(node)
-            .expect("ComputedNode should exist after the UI layout pass");
-        assert!(
-            computed.size.x > 0.0 && computed.size.y > 0.0,
-            "UI layout produced a zero size ({:?}); native views would never be positioned",
-            computed.size
-        );
-    }
-
     /// The precedence the doc comment states, and the reason it exists: a pane can be the
     /// user's focus and an agent's active pane at once, and the user's ring has to win or they
     /// cannot see where they are. Three focus-ring source-scan tests were dropped in 3b73c8ce
@@ -1496,7 +1414,6 @@ mod tests {
                     size: Vec2::new(1200.0, 800.0),
                     ..default()
                 },
-                UiGlobalTransform::default(),
             ))
             .id();
         let layout = app
@@ -1509,8 +1426,6 @@ mod tests {
                     size: Vec2::new(1200.0, 800.0),
                     ..default()
                 },
-                bevy::ui::ComputedStackIndex(0),
-                UiGlobalTransform::default(),
                 WebviewSize(Vec2::ONE),
                 ChildOf(glass),
             ))
@@ -1527,7 +1442,6 @@ mod tests {
                     size: Vec2::new(1200.0, 740.0),
                     ..default()
                 },
-                UiGlobalTransform::default(),
                 ChildOf(tab),
             ))
             .id();
@@ -1544,8 +1458,6 @@ mod tests {
                     size: Vec2::new(1200.0, 740.0),
                     ..default()
                 },
-                bevy::ui::ComputedStackIndex(0),
-                UiGlobalTransform::default(),
                 WebviewSize(Vec2::ONE),
                 ChildOf(stack),
             ))

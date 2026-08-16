@@ -270,12 +270,13 @@ static NATIVE_LAYOUT_SCROLL_AT: Mutex<Option<std::time::Instant>> = Mutex::new(N
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_flex::prelude::*;
 
     #[test]
     fn native_layout_pointer_queue_skips_identical_sample() {
         let mut state = NativeLayoutPointerState {
             regions: vec![CefPointerHitRect {
-                rect: vmux_core::NodeRect {
+                rect: ComputedNode {
                     size: Vec2::new(20.0, 10.0),
                     center: Vec2::new(50.0, 25.0),
                     ..Default::default()

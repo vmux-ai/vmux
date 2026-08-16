@@ -5,6 +5,7 @@ use crate::side_sheet::SideSheet;
 use crate::window::VmuxWindow;
 use bevy::prelude::*;
 use vmux_command::{AppCommand, LayoutCommand, ReadAppCommands, ToggleLayoutCommand};
+use vmux_flex::prelude::*;
 
 pub struct TogglePlugin;
 
@@ -14,7 +15,7 @@ impl Plugin for TogglePlugin {
             .add_systems(Update, handle_toggle.in_set(ReadAppCommands))
             .add_systems(
                 PostUpdate,
-                sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout),
+                sync_window_padding_to_layout_hidden.before(LayoutSystems::Layout),
             );
     }
 }
@@ -85,23 +86,6 @@ mod tests {
         window::VmuxWindow,
     };
     use bevy::window::{Monitor, MonitorSelection, PrimaryWindow, WindowMode};
-
-    #[test]
-    fn window_padding_sync_runs_before_ui_layout() {
-        let source = include_str!("toggle.rs");
-        let plugin_build = source
-            .split("impl Plugin for TogglePlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("/// When").next())
-            .unwrap_or_default();
-
-        assert!(plugin_build.contains(".add_systems(\n                PostUpdate,"));
-        assert!(
-            plugin_build.contains(
-                "sync_window_padding_to_layout_hidden.before(bevy::ui::UiSystems::Layout)"
-            )
-        );
-    }
 
     #[test]
     fn hidden_layout_padding_uses_layout_window_settings() {

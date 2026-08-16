@@ -15,11 +15,7 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(Color::BLACK))
             .add_systems(Startup, setup.in_set(LayoutStartupSet::Window))
-            .add_systems(PostUpdate, fit_main_camera.after(fit_window_to_screen))
-            .add_systems(
-                PostUpdate,
-                sync_camera_render_target.before(bevy::ui::UiSystems::Prepare),
-            );
+            .add_systems(PostUpdate, fit_main_camera.after(fit_window_to_screen));
 
         #[cfg(target_os = "macos")]
         app.insert_resource(ClearColor(Color::NONE));
@@ -40,38 +36,6 @@ pub fn setup(mut commands: Commands, window: Single<&Window, With<PrimaryWindow>
         Projection::Orthographic(projection),
         frame_main_camera_transform(&window, window.aspect(), 0.0),
     ));
-}
-
-/// Tell the camera how big its render target is, which nothing else does any more.
-///
-/// `bevy_ui` sizes every percentage-based node from `Camera::physical_viewport_size`, and that
-/// reads `computed.target_info` — filled in by `camera_system`, which lived in `bevy_render`.
-/// With the render stack gone nothing writes it, so every root node resolves to zero, and
-/// `sync_children_to_ui` divides by that to get a scale of zero, at which point
-/// `sync_windowed_frames` classes every pane as hidden and never gives it a frame. The window is
-/// the render target here, so mirroring its resolution is the whole of what was lost.
-fn sync_camera_render_target(
-    window: Single<&Window, With<PrimaryWindow>>,
-    mut camera_q: Query<&mut bevy::camera::Camera, With<MainCamera>>,
-) {
-    let Ok(mut camera) = camera_q.single_mut() else {
-        return;
-    };
-    let physical_size = UVec2::new(
-        window.resolution.physical_width(),
-        window.resolution.physical_height(),
-    );
-    let scale_factor = window.resolution.scale_factor();
-    let unchanged = camera.computed.target_info.as_ref().is_some_and(|info| {
-        info.physical_size == physical_size && info.scale_factor == scale_factor
-    });
-    if unchanged {
-        return;
-    }
-    camera.computed.target_info = Some(bevy::camera::RenderTargetInfo {
-        physical_size,
-        scale_factor,
-    });
 }
 
 fn fit_main_camera(

@@ -1,6 +1,5 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
-use bevy::ui::{ComputedNode, UiGlobalTransform};
 use bevy::window::PrimaryWindow;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
 use crossbeam_channel::{Receiver, Sender};
@@ -9,7 +8,7 @@ use std::sync::Arc;
 use vmux_agent::{
     RecordStartRequest, RecordStartResponse, RecordStopRequest, RecordStopResponse, RecordingInfo,
 };
-use vmux_core::NodeRect;
+use vmux_flex::prelude::*;
 use vmux_setting::AppSettings;
 
 /// Records the app for the agent: starts and stops captures, enforces the duration cap, and
@@ -206,7 +205,7 @@ pub(crate) struct CropRect {
 }
 
 impl CropRect {
-    pub(crate) fn of(rect: NodeRect, img_w: u32, img_h: u32) -> Self {
+    pub(crate) fn of(rect: ComputedNode, img_w: u32, img_h: u32) -> Self {
         let min = rect.min();
         let left = (min.x.round().max(0.0) as u32).min(img_w.saturating_sub(1));
         let top = (min.y.round().max(0.0) as u32).min(img_h.saturating_sub(1));
@@ -224,7 +223,7 @@ impl CropRect {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn resolve_crop(
     id: &str,
-    node_q: &Query<(&ComputedNode, &UiGlobalTransform)>,
+    node_q: &Query<&ComputedNode>,
     child_of_q: &Query<&ChildOf>,
     img_w: u32,
     img_h: u32,
@@ -233,8 +232,8 @@ fn resolve_crop(
     let (_, bits) = vmux_layout::protocol::parse_id(id).ok()?;
     let mut entity = Entity::from_bits(bits);
     for _ in 0..8 {
-        if let Ok((computed, gt)) = node_q.get(entity) {
-            return Some(CropRect::of(NodeRect::of(computed, gt), img_w, img_h));
+        if let Ok(&computed) = node_q.get(entity) {
+            return Some(CropRect::of(computed, img_w, img_h));
         }
         entity = child_of_q.get(entity).ok()?.get();
     }
@@ -250,7 +249,7 @@ fn start_recording(
     settings: Res<AppSettings>,
     mut status: ResMut<RecordingStatus>,
     window_q: Query<(Entity, &Window), With<PrimaryWindow>>,
-    node_q: Query<(&ComputedNode, &UiGlobalTransform)>,
+    node_q: Query<&ComputedNode>,
     child_of_q: Query<&ChildOf>,
     proxy: Option<Res<EventLoopProxyWrapper>>,
 ) {
@@ -375,7 +374,7 @@ mod tests {
     #[test]
     fn crop_rect_clamps_to_image() {
         let r = CropRect::of(
-            NodeRect {
+            ComputedNode {
                 size: Vec2::new(80.0, 60.0),
                 center: Vec2::new(100.0, 100.0),
                 ..default()

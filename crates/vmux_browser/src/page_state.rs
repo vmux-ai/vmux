@@ -4,9 +4,7 @@
 //! listens for. They run as a group after the CEF state has been applied and focus recomputed,
 //! so every push in a frame describes the same layout.
 
-use bevy::{
-    ecs::relationship::Relationship, prelude::*, ui::UiGlobalTransform, window::PrimaryWindow,
-};
+use bevy::{ecs::relationship::Relationship, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use vmux_core::{OscTitle, PageMetadata, page::PageReady};
 use vmux_history::LastActivatedAt;
@@ -30,11 +28,12 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 
 use crate::{
-    abbreviate_home, active_stack_in_tab, effective_title, first_browser_meta,
-    layout_fixed_offsets_from_computed, layout_window_padding_from_node,
-    layout_window_padding_from_settings, should_emit_cached_payload,
-    should_emit_new_stack_placeholder, should_emit_update, tab_boundary_dir, tab_of,
+    LayoutFixedOffsets, abbreviate_home, active_stack_in_tab, effective_title, first_browser_meta,
+    layout_window_padding_from_node, layout_window_padding_from_settings,
+    should_emit_cached_payload, should_emit_new_stack_placeholder, should_emit_update,
+    tab_boundary_dir, tab_of,
 };
+use vmux_flex::prelude::*;
 
 pub(crate) struct PageStatePlugin;
 
@@ -61,7 +60,7 @@ fn push_layout_state_emit(
     mut commands: Commands,
     browsers: NonSend<Browsers>,
     cef_q: Query<(Entity, Ref<PageReady>), With<LayoutCef>>,
-    header_q: Query<(Has<Open>, Option<&ComputedNode>, Option<&UiGlobalTransform>), With<Header>>,
+    header_q: Query<(Has<Open>, Option<&ComputedNode>), With<Header>>,
     side_sheet_q: Query<(&SideSheetPosition, Has<Open>), With<SideSheet>>,
     window_q: Query<&Node, With<VmuxWindow>>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -80,17 +79,15 @@ fn push_layout_state_emit(
         .ok()
         .map(layout_window_padding_from_node)
         .unwrap_or_else(|| layout_window_padding_from_settings(&settings));
-    let header_open = header_q.iter().any(|(is_open, _, _)| is_open);
+    let header_open = header_q.iter().any(|(is_open, _)| is_open);
     let window_width_px = windows
         .single()
         .ok()
         .map(|window| window.resolution.physical_width() as f32)
         .unwrap_or(0.0);
-    let header_offsets = header_q.iter().find_map(|(_, computed, transform)| {
-        let computed = computed?;
-        let transform = transform?;
-        layout_fixed_offsets_from_computed(computed, transform, window_width_px)
-    });
+    let header_offsets = header_q
+        .iter()
+        .find_map(|(_, computed)| LayoutFixedOffsets::of(computed?, window_width_px));
 
     let payload = LayoutStateEvent {
         header_open,

@@ -10,14 +10,12 @@ use bevy::{
         mouse::{MouseButton, MouseButtonInput, MouseWheel},
     },
     prelude::*,
-    ui::UiGlobalTransform,
     window::{CursorMoved, PrimaryWindow},
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_command::event::LAYOUT_COMMAND_BAR_OPEN_EVENT;
-use vmux_core::NodeRect;
 use vmux_core::overlay::WindowOverlay;
 use vmux_core::overlay::{OverlayState, OverlayStateQuery};
 use vmux_layout::Browser;
@@ -27,18 +25,19 @@ use vmux_layout::{
     side_sheet::SideSheet,
 };
 
-#[cfg(not(target_os = "macos"))]
-use crate::cef_pointer_regions_contains;
 /// The two paths hit-test differently: AppKit walks individual rects as its monitor reports
 /// them, everything else tests the whole region set against one cursor position.
 #[cfg(target_os = "macos")]
-use crate::{CefPointerHitRect, cef_pointer_hit_rect};
+use crate::CefPointerHitRect;
+#[cfg(not(target_os = "macos"))]
+use crate::cef_pointer_regions_contains;
 use crate::{
     CefPointerRegionQuery, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutHoverRefreshState,
     LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout, WindowedHoverRefreshState,
     native_layout_activity_active, native_left_mouse_down, reset_layout_cef_hover,
     set_native_layout_activity,
 };
+use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
 
 impl Plugin for FrameRatePlugin {
@@ -103,7 +102,7 @@ fn refresh_layout_cef_hover(
     {
         if pointer_capture {
             NativeLayout::set_pointer_regions([CefPointerHitRect {
-                rect: vmux_core::NodeRect::from_origin(Vec2::new(window.width(), window.height())),
+                rect: ComputedNode::from_origin(Vec2::new(window.width(), window.height())),
                 interactive: true,
             }
             .physical(scale)]);
@@ -111,13 +110,7 @@ fn refresh_layout_cef_hover(
             NativeLayout::set_pointer_regions(
                 cef_regions
                     .iter()
-                    .map(
-                        |(header, side_sheet, node, computed, transform, visibility, open)| {
-                            cef_pointer_hit_rect(
-                                header, side_sheet, node, computed, transform, visibility, open,
-                            )
-                        },
-                    )
+                    .map(CefPointerHitRect::of)
                     .filter(|rect| rect.interactive)
                     .map(|rect| rect.physical(scale)),
             );
@@ -170,13 +163,7 @@ fn refresh_active_windowed_hover(
     primary_window: Query<Entity, With<PrimaryWindow>>,
     overlay_q: OverlayStateQuery,
     active_q: Query<
-        (
-            Entity,
-            &Transform,
-            &ComputedNode,
-            &UiGlobalTransform,
-            Option<&HostWindow>,
-        ),
+        (Entity, &Transform, &ComputedNode, Option<&HostWindow>),
         (
             With<Browser>,
             With<WebviewWindowed>,
@@ -197,7 +184,7 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     }
-    let Some((entity, transform, computed, ui_gt, host_window)) = active_q.iter().next() else {
+    let Some((entity, transform, &frame, host_window)) = active_q.iter().next() else {
         *state = WindowedHoverRefreshState::default();
         return;
     };
@@ -221,7 +208,6 @@ fn refresh_active_windowed_hover(
         *state = WindowedHoverRefreshState::default();
         return;
     };
-    let frame = NodeRect::of(computed, ui_gt);
     if frame.is_empty() {
         *state = WindowedHoverRefreshState::default();
         return;

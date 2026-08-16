@@ -28,10 +28,7 @@ use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use bevy::{
-    ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*,
-    ui::UiSystems,
-};
+use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
@@ -43,6 +40,7 @@ use vmux_history::{LastActivatedAt, now_millis};
 use vmux_ui::i18n::{Locale, TranslationValue};
 
 use crate::ResolvedLocale;
+use vmux_flex::prelude::*;
 
 pub(crate) use vmux_core::focus_pane_entity;
 
@@ -105,7 +103,7 @@ impl Plugin for CommandBarInputPlugin {
             )
             .add_systems(
                 PostUpdate,
-                reveal_command_bar.chain().after(UiSystems::Layout),
+                reveal_command_bar.chain().after(LayoutSystems::Layout),
             );
     }
 }

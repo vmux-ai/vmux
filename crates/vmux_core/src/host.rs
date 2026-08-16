@@ -14,7 +14,6 @@ pub mod agent;
 pub mod archive;
 pub mod browser;
 pub mod extension;
-pub mod geometry;
 pub mod host_spawn;
 pub mod launcher;
 pub mod notify;
@@ -29,7 +28,6 @@ pub mod workspace;
 pub use archive::{
     ArchivedPage, ArchivedPagePosition, ArchivedTabPage, PageArchiveRequest, PaneStep, SplitAxis,
 };
-pub use geometry::{Insets, NodeRect};
 pub use host_spawn::{HostSpawnRegistry, register_host_spawn};
 pub use launcher::{
     ContributedCommandChosen, FocusLauncherInput, HostsLauncher, InlineTransitionRequested,

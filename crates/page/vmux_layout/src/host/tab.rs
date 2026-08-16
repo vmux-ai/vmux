@@ -6,7 +6,6 @@ use crate::{
 use bevy::{
     ecs::{message::Messages, relationship::Relationship},
     prelude::*,
-    ui::UiSystems,
     window::PrimaryWindow,
 };
 use bevy_cef::prelude::*;
@@ -16,6 +15,7 @@ use vmux_command::open::OpenCommand;
 use vmux_command::{AppCommand, BrowserCommand, LayoutCommand, ReadAppCommands, TabCommand};
 use vmux_core::Order;
 pub use vmux_core::workspace::TabCommandSet;
+use vmux_flex::prelude::*;
 use vmux_history::LastActivatedAt;
 
 impl Plugin for TabPlugin {
@@ -46,7 +46,10 @@ impl Plugin for TabPlugin {
                     .after(TabCommandSet)
                     .after(crate::stack::StackCommandSet),
             )
-            .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout))
+            .add_systems(
+                PostUpdate,
+                sync_tab_visibility.before(LayoutSystems::Layout),
+            )
             .add_systems(PostUpdate, sync_tab_order);
     }
 }
@@ -557,18 +560,6 @@ mod tests {
         assert!(siblings.contains(&a1));
         assert!(siblings.contains(&a2));
         assert!(!siblings.contains(&b1));
-    }
-
-    #[test]
-    fn tab_visibility_sync_runs_before_ui_layout() {
-        let source = include_str!("tab.rs");
-        let plugin = source
-            .split("impl Plugin for TabPlugin")
-            .nth(1)
-            .and_then(|tail| tail.split("#[derive(Component").next())
-            .unwrap_or_default();
-
-        assert!(plugin.contains("sync_tab_visibility.before(UiSystems::Layout)"));
     }
 
     fn order_app() -> App {
@@ -1204,7 +1195,10 @@ mod tests {
         .add_message::<crate::NewTabRequest>()
         .add_message::<CloseTabRequest>()
         .add_systems(Update, handle_tab_commands.in_set(ReadAppCommands))
-        .add_systems(PostUpdate, sync_tab_visibility.before(UiSystems::Layout));
+        .add_systems(
+            PostUpdate,
+            sync_tab_visibility.before(LayoutSystems::Layout),
+        );
 
         app.world_mut().spawn(PrimaryWindow);
         let main = app.world_mut().spawn(MainNode).id();

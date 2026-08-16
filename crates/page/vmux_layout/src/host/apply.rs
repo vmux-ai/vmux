@@ -23,6 +23,7 @@ use bevy::ecs::message::{MessageReader, MessageWriter, Messages};
 use bevy::ecs::relationship::Relationship;
 use bevy::prelude::*;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_flex::prelude::*;
 use vmux_history::{CreatedAt, LastActivatedAt};
 
 #[derive(Message, Clone)]
@@ -381,8 +382,8 @@ fn set_split_direction(world: &mut World, entity: Entity, direction: proto::Spli
     }
     if let Some(mut node) = world.get_mut::<Node>(entity) {
         node.flex_direction = match pane_split_dir {
-            PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
-            PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
+            PaneSplitDirection::Row => FlexDirection::Row,
+            PaneSplitDirection::Column => FlexDirection::Column,
         };
         let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
         node.column_gap = gap.column_gap;
@@ -533,8 +534,8 @@ fn apply_node(world: &mut World, node: &proto::LayoutNode) {
                 }
                 if let Some(mut node) = world.get_mut::<Node>(entity) {
                     node.flex_direction = match pane_split_dir {
-                        PaneSplitDirection::Row => bevy::ui::FlexDirection::Row,
-                        PaneSplitDirection::Column => bevy::ui::FlexDirection::Column,
+                        PaneSplitDirection::Row => FlexDirection::Row,
+                        PaneSplitDirection::Column => FlexDirection::Column,
                     };
                     let gap = pane_split_gaps(pane_split_dir, PANE_GAP_PX);
                     node.column_gap = gap.column_gap;
@@ -1765,7 +1766,7 @@ mod tests {
             .world_mut()
             .query_filtered::<&Node, (With<Pane>, With<PaneSplit>)>()
             .iter(app.world())
-            .filter(|node| node.flex_direction == bevy::ui::FlexDirection::Row)
+            .filter(|node| node.flex_direction == FlexDirection::Row)
             .count();
         assert!(
             split_count >= 1,
@@ -1854,7 +1855,7 @@ mod tests {
         let new_split = splits[0];
 
         let node = app.world().get::<Node>(new_split).unwrap();
-        assert_eq!(node.flex_direction, bevy::ui::FlexDirection::Row);
+        assert_eq!(node.flex_direction, FlexDirection::Row);
 
         let children: Vec<Entity> = app
             .world()
