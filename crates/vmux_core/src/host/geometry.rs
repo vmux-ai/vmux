@@ -19,13 +19,29 @@ pub struct Insets {
 /// testing a cursor, and all three want corners. Deriving them is the same four lines at every
 /// site, and a slipped sign there produces a plausible rectangle in the wrong place — nothing
 /// type-checks it and no test sees it. So the conversion happens once, here.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodeRect {
     pub size: Vec2,
     pub center: Vec2,
     pub padding: Insets,
     /// Reciprocal of the render target's scale factor — `0.5` on a Retina display.
     pub inverse_scale_factor: f32,
+}
+
+/// A default rectangle is unscaled, not scaled by zero.
+///
+/// Deriving this would leave `inverse_scale_factor` at `0.0`, which is not a neutral value: it
+/// makes [`NodeRect::scale`] report a million and [`NodeRect::to_logical`] shrink by the same,
+/// so a rectangle built from [`NodeRect::from_origin`] would be silently unusable in logical space.
+impl Default for NodeRect {
+    fn default() -> Self {
+        Self {
+            size: Vec2::ZERO,
+            center: Vec2::ZERO,
+            padding: Insets::default(),
+            inverse_scale_factor: 1.0,
+        }
+    }
 }
 
 impl NodeRect {
@@ -205,6 +221,17 @@ mod tests {
         };
 
         assert_eq!(rect.padding_box(), Vec2::new(110.0, 60.0));
+    }
+
+    /// A rectangle nobody gave a scale to is already in logical space, so converting it must be a
+    /// no-op rather than a division by a millionth.
+    #[test]
+    fn an_unscaled_rect_survives_conversion_to_logical() {
+        let rect = NodeRect::from_origin(Vec2::new(400.0, 300.0));
+
+        assert_eq!(rect.scale(), 1.0);
+        assert_eq!(rect.to_logical(), rect);
+        assert_eq!(rect.min(), Vec2::ZERO);
     }
 
     #[test]
