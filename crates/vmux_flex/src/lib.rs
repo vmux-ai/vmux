@@ -21,6 +21,16 @@ pub use node::{
 };
 pub use tree::{FlexTree, LayoutContext};
 
+/// The names a crate laying nodes out needs, to be glob-imported the way `bevy::prelude` used to
+/// supply them.
+pub mod prelude {
+    pub use crate::computed::{ComputedNode, Insets};
+    pub use crate::node::{
+        AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, UiRect, Val,
+    };
+    pub use crate::{FlexPlugin, LayoutSystems};
+}
+
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
