@@ -1,5 +1,4 @@
 use crate::cef_state::{MediaPermissionSender, WebviewCefStateSender};
-use crate::common::localhost::responser::{InlineHtmlId, InlineHtmlStore};
 use crate::common::{
     BinIpcEventRawSender, HostWindow, IpcEventRawSender, ResolvedWebviewUri, SnapshotResultSender,
     WebviewMaxFrameRate, WebviewNativeLiquidGlass, WebviewOpaqueWindowedBackground, WebviewSize,
@@ -145,17 +144,6 @@ impl Plugin for WebviewPlugin {
             .register_component_hooks::<WebviewSource>()
             .on_despawn(|mut world: DeferredWorld, ctx: HookContext| {
                 world.non_send_mut::<Browsers>().close(&ctx.entity);
-            });
-
-        app.world_mut()
-            .register_component_hooks::<InlineHtmlId>()
-            .on_remove(|mut world: DeferredWorld, ctx: HookContext| {
-                // `on_remove` runs before the component is dropped; `get` should succeed. If it does
-                // not (e.g. despawn edge cases), skip rather than panic — stale store entries are
-                // bounded and harmless compared to crashing the host.
-                if let Some(id) = world.get::<InlineHtmlId>(ctx.entity).map(|c| c.0.clone()) {
-                    world.resource_mut::<InlineHtmlStore>().remove(&id);
-                }
             });
     }
 }

@@ -1578,7 +1578,7 @@ mod tests {
             matches!(
                 app.world()
                     .get::<bevy_cef::prelude::WebviewSource>(webview),
-                Some(bevy_cef::prelude::WebviewSource::Url(url)) if url == "vmux://start/"
+                Some(bevy_cef::prelude::WebviewSource(url)) if url == "vmux://start/"
             ),
             "the existing document remains loaded"
         );

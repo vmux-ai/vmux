@@ -166,7 +166,7 @@ fn spawn_layout_view(world: &mut World) {
         return;
     };
     let Some(requester) = world.get_resource::<Requester>().cloned() else {
-        report_waiting("no Requester resource, cef localhost plugin has not built yet");
+        report_waiting("no Requester resource, the CEF custom scheme plugin has not built yet");
         return;
     };
     let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {

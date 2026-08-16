@@ -12,7 +12,7 @@ mod webview;
 mod zoom;
 
 use crate::cef_state::WebviewCefStatePlugin;
-use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
+use crate::common::{CustomSchemePlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
 use crate::keyboard::KeyboardPlugin;
 use crate::loading_state::WebviewLoadingStatePlugin;
@@ -79,7 +79,7 @@ impl Plugin for CefPlugin {
         ))
         .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
         .add_plugins((
-            LocalHostPlugin,
+            CustomSchemePlugin,
             MessageLoopPlugin {
                 config: self.command_line_config.clone(),
                 extensions: self.extensions.clone(),

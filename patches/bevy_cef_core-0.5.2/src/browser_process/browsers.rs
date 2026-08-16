@@ -396,16 +396,6 @@ impl Browsers {
                 );
             }
             let emb_scheme = cfg.scheme.clone();
-            let mut cef_factory = LocalSchemaHandlerBuilder::build(requester_for_global.clone());
-            let ok_cef = register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut cef_factory),
-            );
-            assert_eq!(
-                ok_cef, 1,
-                "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
-            );
             let mut embedded_factory =
                 LocalSchemaHandlerBuilder::build(requester_for_global.clone());
             let ok_embedded = register_scheme_handler_factory(
@@ -2349,11 +2339,6 @@ impl Browsers {
         if let Some(context) = context.as_mut() {
             let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
             context.register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
-            );
-            context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
@@ -2386,11 +2371,6 @@ impl Browsers {
         );
         if let Some(context) = context.as_mut() {
             let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
-            context.register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
-            );
             context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
@@ -2700,7 +2680,6 @@ mod tests {
         ));
         assert!(requires_extension_free_context("file://"));
         assert!(!requires_extension_free_context("vmux://layout/"));
-        assert!(!requires_extension_free_context("cef://localhost/"));
         assert!(!requires_extension_free_context("https://example.com/"));
         assert!(!requires_extension_free_context("http://example.com/"));
         assert!(!requires_extension_free_context("about:blank"));

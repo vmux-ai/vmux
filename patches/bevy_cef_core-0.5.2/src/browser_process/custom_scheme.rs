@@ -1,8 +1,10 @@
 mod data_responser;
 mod headers_responser;
 
-use crate::browser_process::localhost::data_responser::{DataResponser, parse_bytes_single_range};
-use crate::browser_process::localhost::headers_responser::HeadersResponser;
+use crate::browser_process::custom_scheme::data_responser::{
+    DataResponser, parse_bytes_single_range,
+};
+use crate::browser_process::custom_scheme::headers_responser::HeadersResponser;
 use crate::prelude::IntoString;
 use async_channel::{Receiver, Sender};
 use bevy::asset::Asset;
@@ -24,8 +26,6 @@ use crate::util::{CefEmbeddedPageConfig, VAULT_PASSKEY_ORIGIN, resolved_cef_embe
 
 /// Map navigated custom-scheme URLs to a Bevy [`AssetServer`] load path.
 ///
-/// - `cef://localhost/embedded/…` → `embedded://…` ([embedded assets](https://bevy.org/examples/assets/embedded-asset/)).
-/// - `cef://localhost/…` (otherwise) → path as-is (disk assets under the app asset root).
 /// - `<scheme>://<host>/` (prefix from [`CefEmbeddedPageConfig::scheme_prefix`], set via
 ///   [`crate::util::try_set_cef_embedded_page_config`]) → `embedded://<default_document>` for that host.
 /// - `<scheme>://<host>/<path>` → `embedded://<dir>/<path>` when `dir` is the parent of that host’s
@@ -79,8 +79,6 @@ pub(crate) fn asset_load_path_from_request_url_with(
     url: &str,
     cfg: &CefEmbeddedPageConfig,
 ) -> String {
-    const CEF_LOCAL: &str = concat!("cef", "://", "localhost", "/");
-    const EMBEDDED_LEAF: &str = "embedded/";
     const EMBEDDED_SCHEME: &str = "embedded://";
 
     if let Some(rest) = url.strip_prefix(VAULT_PASSKEY_ORIGIN)
@@ -119,13 +117,7 @@ pub(crate) fn asset_load_path_from_request_url_with(
         return format!("{EMBEDDED_SCHEME}files/index.html");
     }
 
-    if let Some(rest) = url.strip_prefix(CEF_LOCAL) {
-        if let Some(tail) = rest.strip_prefix(EMBEDDED_LEAF) {
-            format!("{EMBEDDED_SCHEME}{tail}")
-        } else {
-            rest.to_string()
-        }
-    } else if let Some(rest) = url.strip_prefix(cfg.scheme_prefix()) {
+    if let Some(rest) = url.strip_prefix(cfg.scheme_prefix()) {
         let path_part = rest.split(['?', '#']).next().unwrap_or(rest);
         let Some((host, tail)) = split_custom_scheme_host_and_tail(path_part) else {
             return String::new();
@@ -563,28 +555,6 @@ mod custom_scheme_url_tests {
         assert_eq!(
             asset_load_path_from_request_url_with("https://vault.vmux.ai.evil.test/", &cfg),
             ""
-        );
-    }
-
-    #[test]
-    fn cef_localhost_embedded_prefix() {
-        assert_eq!(
-            asset_load_path_from_request_url_with(
-                "cef://localhost/embedded/crate/foo.html",
-                &empty_hosts_config()
-            ),
-            "embedded://crate/foo.html"
-        );
-    }
-
-    #[test]
-    fn cef_localhost_disk_style_path() {
-        assert_eq!(
-            asset_load_path_from_request_url_with(
-                "cef://localhost/index.html",
-                &empty_hosts_config()
-            ),
-            "index.html"
         );
     }
 

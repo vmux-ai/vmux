@@ -364,9 +364,7 @@ fn sync_live_start_pages(
     let targets: Vec<(Entity, bool)> = starts
         .iter()
         .filter_map(|(e, src, synced, keyboard_target)| {
-            let WebviewSource::Url(url) = src else {
-                return None;
-            };
+            let WebviewSource(url) = src;
             if !url.starts_with(START_PAGE_URL) {
                 return None;
             }
@@ -662,9 +660,7 @@ fn mark_start_pages_as_launcher_hosts(
     mut commands: Commands,
 ) {
     for (entity, source) in starts.iter() {
-        let WebviewSource::Url(url) = source else {
-            continue;
-        };
+        let WebviewSource(url) = source;
         if url.starts_with(START_PAGE_URL) {
             commands.entity(entity).insert(HostsLauncher);
         }
