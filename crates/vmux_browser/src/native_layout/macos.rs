@@ -191,8 +191,8 @@ impl NativeLayout {
 impl CefPointerHitRect {
     /// The same rect in physical pixels, which is what the AppKit monitor reports the pointer in.
     pub(crate) fn physical(mut self, scale: f32) -> Self {
-        self.center *= scale;
-        self.size *= scale;
+        self.rect.center *= scale;
+        self.rect.size *= scale;
         self
     }
 }
@@ -225,7 +225,7 @@ impl NativeLayoutPointerState {
             .regions
             .iter()
             .copied()
-            .any(|rect| crate::cef_pointer_hit_rect_contains(rect, position));
+            .any(|rect| rect.contains(position));
         let was_inside = self.pointer_inside;
         let sample_changed =
             self.position_px != Some(position) || self.buttons != buttons || was_inside != inside;
@@ -275,8 +275,11 @@ mod tests {
     fn native_layout_pointer_queue_skips_identical_sample() {
         let mut state = NativeLayoutPointerState {
             regions: vec![CefPointerHitRect {
-                center: Vec2::new(50.0, 25.0),
-                size: Vec2::new(20.0, 10.0),
+                rect: vmux_core::NodeRect {
+                    size: Vec2::new(20.0, 10.0),
+                    center: Vec2::new(50.0, 25.0),
+                    ..Default::default()
+                },
                 interactive: true,
             }],
             ..Default::default()

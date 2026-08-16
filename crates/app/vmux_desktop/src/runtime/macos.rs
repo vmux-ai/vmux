@@ -78,16 +78,13 @@ fn grab_key_window_on_pane_hover(
     let Some(pointer) = vmux_layout::native_pointer::snapshot() else {
         return;
     };
-    let over_pane = panes.iter().any(|(node, transform)| {
-        let center = transform.transform_point2(Vec2::ZERO);
-        let half = node.size * 0.5;
-        let min = center - half;
-        let max = center + half;
-        pointer.position_px.x >= min.x
-            && pointer.position_px.x <= max.x
-            && pointer.position_px.y >= min.y
-            && pointer.position_px.y <= max.y
-    });
+    let mut over_pane = false;
+    for (node, transform) in panes.iter() {
+        if vmux_core::NodeRect::of(node, transform).contains(pointer.position_px) {
+            over_pane = true;
+            break;
+        }
+    }
     if !over_pane {
         return;
     }

@@ -15,6 +15,7 @@ use bevy_cef::prelude::*;
 use std::sync::atomic::Ordering;
 use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
+use vmux_core::NodeRect;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
@@ -194,8 +195,8 @@ fn sync_children_to_ui(
     glass: Single<(Entity, &ComputedNode, &UiGlobalTransform), With<VmuxWindow>>,
 ) {
     let &(glass_entity, glass_node, glass_ui_gt) = &*glass;
-    let pad = glass_node.padding;
-    let glass_size_px = glass_node.size + pad.min_inset + pad.max_inset;
+    let glass_rect = NodeRect::of(glass_node, glass_ui_gt);
+    let glass_size_px = glass_rect.padding_box();
 
     for (
         mut tf,
@@ -282,9 +283,7 @@ fn sync_children_to_ui(
         };
         tf.scale = new_scale;
 
-        let center_ui = ui_gt.transform_point2(Vec2::ZERO);
-        let glass_center_ui = glass_ui_gt.transform_point2(Vec2::ZERO);
-        let delta_px = center_ui - glass_center_ui;
+        let delta_px = NodeRect::of(computed, ui_gt).center - glass_rect.center;
 
         let tx = delta_px.x / glass_size_px.x;
         let ty = -delta_px.y / glass_size_px.y;
@@ -445,7 +444,7 @@ pub(crate) fn sync_windowed_frames(
         let Some(pane_frame) = windowed_frame_rect_from_computed(computed, ui_gt) else {
             continue;
         };
-        let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
+        let scale = NodeRect::of(computed, ui_gt).scale();
         let frame = windowed_page_frame_rect(
             pane_frame,
             header_frame,
@@ -553,16 +552,16 @@ fn windowed_frame_rect_from_computed(
     computed: &ComputedNode,
     ui_gt: &UiGlobalTransform,
 ) -> Option<WindowedFrameRect> {
-    let size = computed.size;
-    if size.x <= 0.0 || size.y <= 0.0 || !size.x.is_finite() || !size.y.is_finite() {
+    let rect = NodeRect::of(computed, ui_gt);
+    if rect.is_empty() {
         return None;
     }
-    let center = ui_gt.transform_point2(Vec2::ZERO);
+    let min = rect.min();
     Some(WindowedFrameRect {
-        left: center.x - size.x * 0.5,
-        top: center.y - size.y * 0.5,
-        width: size.x,
-        height: size.y,
+        left: min.x,
+        top: min.y,
+        width: rect.size.x,
+        height: rect.size.y,
     })
 }
 

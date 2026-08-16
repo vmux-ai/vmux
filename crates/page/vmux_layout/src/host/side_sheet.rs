@@ -3,6 +3,7 @@ use crate::settings::LayoutSettings;
 #[cfg(target_os = "macos")]
 use bevy::{ecs::system::NonSendMarker, winit::WINIT_WINDOWS};
 use bevy::{prelude::*, ui::UiSystems, window::PrimaryWindow};
+use vmux_core::NodeRect;
 
 impl Plugin for SideSheetLayoutPlugin {
     fn build(&self, app: &mut App) {
@@ -137,16 +138,14 @@ fn side_sheet_drag_resize(
         if *pos != SideSheetPosition::Left {
             continue;
         }
-        let center = gt.transform_point2(Vec2::ZERO);
-        let right_edge = center.x + cn.size.x * 0.5;
-        let top = center.y - cn.size.y * 0.5;
-        let bottom = center.y + cn.size.y * 0.5;
+        let rect = NodeRect::of(cn, gt);
+        let right_edge = rect.max().x;
         let cursor_y = cursor_pos.y;
 
         if cursor_x >= right_edge - EDGE_HIT_ZONE
             && cursor_x <= right_edge + EDGE_HIT_ZONE
-            && cursor_y >= top
-            && cursor_y <= bottom
+            && cursor_y >= rect.min().y
+            && cursor_y <= rect.max().y
             && mouse.just_pressed(MouseButton::Left)
         {
             commands.spawn(SideSheetDrag {

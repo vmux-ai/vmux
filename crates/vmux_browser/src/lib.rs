@@ -48,7 +48,8 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadAppCommands;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenRequest, PageOpenSet,
+    CefPageAttachRequest, HostSpawnRegistry, NodeRect, OscTitle, PageMetadata, PageOpenRequest,
+    PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -299,22 +300,17 @@ type CefPointerRegionQuery<'w, 's> = Query<
 
 #[derive(Clone, Copy)]
 struct CefPointerHitRect {
-    center: Vec2,
-    size: Vec2,
+    rect: NodeRect,
     interactive: bool,
 }
 
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
 static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
-fn cef_pointer_hit_rect_contains(rect: CefPointerHitRect, point: Vec2) -> bool {
-    if !rect.interactive {
-        return false;
+impl CefPointerHitRect {
+    fn contains(self, point: Vec2) -> bool {
+        self.interactive && self.rect.contains(point)
     }
-    let half = rect.size * 0.5;
-    let min = rect.center - half;
-    let max = rect.center + half;
-    point.x >= min.x && point.x <= max.x && point.y >= min.y && point.y <= max.y
 }
 
 pub fn set_native_layout_activity(active: bool) -> bool {
@@ -334,33 +330,28 @@ fn cef_pointer_hit_rect(
     visibility: Option<&Visibility>,
     open: bool,
 ) -> CefPointerHitRect {
+    let rect = NodeRect::of(computed, transform);
     let interactive = (header.is_some() || side_sheet.is_some())
         && open
         && node.display != Display::None
         && !matches!(visibility, Some(Visibility::Hidden))
-        && computed.size.x > 0.0
-        && computed.size.y > 0.0;
-    CefPointerHitRect {
-        center: transform.transform_point2(Vec2::ZERO),
-        size: computed.size,
-        interactive,
-    }
+        && !rect.is_empty();
+    CefPointerHitRect { rect, interactive }
 }
 
 fn cef_pointer_regions_contains(
     cursor_pos: Vec2,
     cef_regions: &CefPointerRegionQuery<'_, '_>,
 ) -> bool {
-    cef_regions
-        .iter()
-        .map(
-            |(header, side_sheet, node, computed, transform, visibility, open)| {
-                cef_pointer_hit_rect(
-                    header, side_sheet, node, computed, transform, visibility, open,
-                )
-            },
-        )
-        .any(|rect| cef_pointer_hit_rect_contains(rect, cursor_pos))
+    for (header, side_sheet, node, computed, transform, visibility, open) in cef_regions.iter() {
+        let rect = cef_pointer_hit_rect(
+            header, side_sheet, node, computed, transform, visibility, open,
+        );
+        if rect.contains(cursor_pos) {
+            return true;
+        }
+    }
+    false
 }
 
 fn pointer_button_from_mouse_button(button: MouseButton) -> Option<PointerButton> {
@@ -515,57 +506,6 @@ fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
     let g = u8::from_str_radix(&h[2..4], 16).ok()?;
     let b = u8::from_str_radix(&h[4..6], 16).ok()?;
     Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct WindowedHoverRefreshFrame {
-    left_px: f32,
-    top_px: f32,
-    width_px: f32,
-    height_px: f32,
-    scale: f32,
-}
-
-fn windowed_hover_refresh_frame(
-    computed: &ComputedNode,
-    ui_gt: &UiGlobalTransform,
-) -> Option<WindowedHoverRefreshFrame> {
-    let size_px = computed.size;
-    let scale = 1.0 / computed.inverse_scale_factor.max(1.0e-6);
-    if size_px.x <= 0.0
-        || size_px.y <= 0.0
-        || !size_px.x.is_finite()
-        || !size_px.y.is_finite()
-        || !scale.is_finite()
-        || scale <= 0.0
-    {
-        return None;
-    }
-    let center = ui_gt.transform_point2(Vec2::ZERO);
-    Some(WindowedHoverRefreshFrame {
-        left_px: center.x - size_px.x * 0.5,
-        top_px: center.y - size_px.y * 0.5,
-        width_px: size_px.x,
-        height_px: size_px.y,
-        scale,
-    })
-}
-
-fn windowed_hover_refresh_position(
-    cursor_px: Vec2,
-    frame: WindowedHoverRefreshFrame,
-) -> Option<Vec2> {
-    if cursor_px.x < frame.left_px
-        || cursor_px.x > frame.left_px + frame.width_px
-        || cursor_px.y < frame.top_px
-        || cursor_px.y > frame.top_px + frame.height_px
-    {
-        return None;
-    }
-    Some(Vec2::new(
-        (cursor_px.x - frame.left_px) / frame.scale,
-        (cursor_px.y - frame.top_px) / frame.scale,
-    ))
 }
 
 #[derive(Default)]
@@ -772,23 +712,19 @@ fn layout_fixed_offsets_from_computed(
     transform: &UiGlobalTransform,
     window_width_px: f32,
 ) -> Option<LayoutFixedOffsets> {
-    if computed.size.x <= 0.0 || computed.size.y <= 0.0 || window_width_px <= 0.0 {
+    let rect = NodeRect::of(computed, transform);
+    if rect.is_empty() || window_width_px <= 0.0 {
         return None;
     }
 
-    let inverse_scale = computed.inverse_scale_factor.max(1.0e-6);
-    let size = computed.size * inverse_scale;
-    let center = transform.transform_point2(Vec2::ZERO) * inverse_scale;
-    let window_width = window_width_px * inverse_scale;
-    let left = center.x - size.x * 0.5;
-    let top = center.y - size.y * 0.5;
-    let right = window_width - (center.x + size.x * 0.5);
+    let logical = rect.to_logical();
+    let window_width = window_width_px * rect.inverse_scale_factor.max(1.0e-6);
 
     Some(LayoutFixedOffsets {
-        left,
-        top,
-        right,
-        height: size.y,
+        left: logical.min().x,
+        top: logical.min().y,
+        right: window_width - logical.max().x,
+        height: logical.size.y,
     })
 }
 
@@ -1273,28 +1209,33 @@ mod tests {
         assert_eq!(stack_url, "vmux://agent/vibe/abc-123");
     }
 
+    /// A closed or hidden region must not swallow a pointer that is geometrically over it, and an
+    /// open one must still catch its own edges.
     #[test]
-    fn cef_pointer_hit_rect_contains_edges() {
-        let rect = CefPointerHitRect {
-            center: Vec2::new(50.0, 20.0),
-            size: Vec2::new(100.0, 40.0),
-            interactive: true,
-        };
+    fn a_pointer_hits_only_interactive_regions() {
+        let rect = NodeRect::from_origin(Vec2::new(100.0, 40.0));
 
-        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(0.0, 0.0)));
-        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(100.0, 40.0)));
-        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(100.1, 20.0)));
-    }
-
-    #[test]
-    fn cef_pointer_ignores_inactive_regions() {
-        let rect = CefPointerHitRect {
-            center: Vec2::new(50.0, 20.0),
-            size: Vec2::new(100.0, 40.0),
-            interactive: false,
-        };
-
-        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 20.0)));
+        assert!(
+            CefPointerHitRect {
+                rect,
+                interactive: true
+            }
+            .contains(Vec2::new(100.0, 40.0))
+        );
+        assert!(
+            !CefPointerHitRect {
+                rect,
+                interactive: true
+            }
+            .contains(Vec2::new(100.1, 20.0))
+        );
+        assert!(
+            !CefPointerHitRect {
+                rect,
+                interactive: false
+            }
+            .contains(Vec2::new(50.0, 20.0))
+        );
     }
 
     #[test]
@@ -1363,38 +1304,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn windowed_hover_refresh_position_maps_physical_cursor_to_webview_space() {
-        let frame = WindowedHoverRefreshFrame {
-            left_px: 100.0,
-            top_px: 50.0,
-            width_px: 400.0,
-            height_px: 300.0,
-            scale: 2.0,
-        };
-
-        assert_eq!(
-            windowed_hover_refresh_position(Vec2::new(300.0, 250.0), frame),
-            Some(Vec2::new(100.0, 100.0))
-        );
-    }
-
-    #[test]
-    fn windowed_hover_refresh_position_ignores_cursor_outside_frame() {
-        let frame = WindowedHoverRefreshFrame {
-            left_px: 100.0,
-            top_px: 50.0,
-            width_px: 400.0,
-            height_px: 300.0,
-            scale: 2.0,
-        };
-
-        assert_eq!(
-            windowed_hover_refresh_position(Vec2::new(99.0, 250.0), frame),
-            None
-        );
-    }
-
     /// Windowed is the only backend. The camera-mismatch fallback that used to drop everything
     /// back to offscreen rendering is gone, so a browser that failed to be marked windowed would
     /// render nowhere at all rather than degrading.
@@ -1450,18 +1359,6 @@ mod tests {
         assert!(queue.contains("state.queue_sample("));
         assert!(flush.contains("state.pending = false"));
         assert!(flush.contains("presenter.send(position_px / state.scale"));
-    }
-
-    #[test]
-    fn layout_pointer_regions_match_layout_coordinates() {
-        let rect = CefPointerHitRect {
-            center: Vec2::new(50.0, 25.0),
-            size: Vec2::new(20.0, 10.0),
-            interactive: true,
-        };
-
-        assert!(cef_pointer_hit_rect_contains(rect, Vec2::new(50.0, 25.0)));
-        assert!(!cef_pointer_hit_rect_contains(rect, Vec2::new(39.0, 25.0)));
     }
 
     #[test]
