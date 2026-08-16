@@ -62,8 +62,12 @@ polling = "3.11"
 tungstenite = "0.28"
 url = "2"
 notify = "6"
+# No "web" here. Dioxus declares `dioxus-web` in a plain `[dependencies]` block — it carries no
+# `[target.*]` sections at all — so the feature is not target-gated, and every crate inheriting this
+# spec drags the wasm renderer into the iOS build. The two crates that call `dioxus::launch` on
+# wasm ask for it themselves, from blocks already gated to wasm32: `vmux_page`, and `vmux_ui` for
+# its gallery binary. A crate that only defines components never needs it.
 dioxus = { version = "=0.7.9", default-features = false, features = [
-    "web",
     "minimal",
     "document",
     "asset",

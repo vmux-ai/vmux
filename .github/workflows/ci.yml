@@ -434,6 +434,33 @@ jobs:
           fi
           echo "ok: vmux_mobile does not link bevy_cef"
 
+      # dioxus declares dioxus-web in a plain [dependencies] block, so `dioxus/web` is not
+      # target-gated: any crate enabling it puts the wasm renderer in the phone's graph, silently
+      # and with no build error. Only vmux_page may ask for it, from its wasm32 block.
+      - name: dioxus-web does not reach the phone
+        run: |
+          set -euo pipefail
+
+          phone_tree() {
+            cargo tree --locked --target aarch64-apple-ios -p vmux_mobile -i "$1" 2>/dev/null
+          }
+
+          # `cargo tree --target` exits 0 whether or not it matched, so stdout is the only signal.
+          # Prove the query works against this package and target before trusting an empty result.
+          if [ -z "$(phone_tree dioxus)" ]; then
+            echo "::error::positive control failed: dioxus not found in vmux_mobile, so this job is asserting nothing"
+            exit 1
+          fi
+          echo "control ok: vmux_mobile links dioxus"
+
+          found="$(phone_tree dioxus-web)"
+          if [ -n "$found" ]; then
+            echo "::error::dioxus-web reaches the phone:"
+            echo "$found"
+            exit 1
+          fi
+          echo "ok: vmux_mobile does not link dioxus-web"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

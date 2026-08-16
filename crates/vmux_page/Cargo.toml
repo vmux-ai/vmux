@@ -41,7 +41,7 @@ path = "src/main.rs"
 required-features = ["web"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true, features = ["web"] }
 vmux_agent = { path = "../page/vmux_agent", optional = true }
 vmux_chat = { path = "../page/vmux_chat", optional = true }
 vmux_editor = { path = "../page/vmux_editor", optional = true }

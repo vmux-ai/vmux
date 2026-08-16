@@ -53,7 +53,7 @@ web-sys = { version = "0.3", features = [
     "Navigator",
     "ScrollIntoViewOptions", "ScrollLogicalPosition",
 ] }
-dioxus = { workspace = true }
+dioxus = { workspace = true, features = ["web"] }
 time = { version = "0.3", default-features = false, features = [
     "wasm-bindgen",
 ] }
