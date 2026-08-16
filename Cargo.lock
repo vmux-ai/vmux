@@ -11061,6 +11061,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_flex"
+version = "0.0.30"
+dependencies = [
+ "bevy",
+ "taffy",
+]
+
+[[package]]
 name = "vmux_git"
 version = "0.0.30"
 dependencies = [

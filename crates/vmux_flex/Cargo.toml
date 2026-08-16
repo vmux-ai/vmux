@@ -1,0 +1,21 @@
+[package]
+name = "vmux_flex"
+description = "Flexbox layout for the desktop shell, over taffy"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bevy = { workspace = true }
+# Pinned to the exact feature set bevy_ui resolves taffy to. Cargo unifies features across the
+# graph, so enabling taffy's defaults here would silently change bevy_ui's own layout engine while
+# the differential test is measuring against it — and `calc` in particular is what makes
+# `TaffyTree` genuinely thread-unsafe, which `FlexTree`'s `unsafe impl Send` relies on being off.
+taffy = { version = "0.10", default-features = false, features = [
+    "std",
+    "block_layout",
+    "flexbox",
+    "grid",
+    "content_size",
+    "taffy_tree",
+] }
