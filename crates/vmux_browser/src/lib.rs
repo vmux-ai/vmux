@@ -18,6 +18,10 @@ mod present;
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
+// The layout page's components run in this process, so the dom that drives them lives beside the
+// view that displays it. macOS only, because the wry view it fills is.
+#[cfg(target_os = "macos")]
+mod layout_dom;
 mod layout_view;
 mod page_open;
 mod page_state;

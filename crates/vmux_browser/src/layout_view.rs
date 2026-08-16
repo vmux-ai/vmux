@@ -54,6 +54,7 @@ impl Plugin for LayoutViewPlugin {
             Update,
             (
                 resize_layout_view,
+                render_layout_dom,
                 sync_layout_view_color_scheme.run_if(resource_changed::<AppSettings>),
             )
                 .after(spawn_layout_view),
@@ -86,6 +87,7 @@ unsafe extern "C" {}
 struct LayoutView {
     webview: wry::WebView,
     layout: Entity,
+    dom: crate::layout_dom::LayoutDom,
 }
 
 #[cfg(target_os = "macos")]
@@ -189,7 +191,13 @@ fn spawn_layout_view(world: &mut World) {
         report_waiting("no primary Window component to size against");
         return;
     };
-    let page = PageMessage::new(bin_ipc, layout);
+    let dom = crate::layout_dom::LayoutDom::mount(
+        bin_ipc.clone(),
+        layout,
+        embedded_page_host_of(LAYOUT_PAGE_URL).unwrap_or_default(),
+    );
+    let page = PageMessage::new(bin_ipc, layout, dom.clone());
+    let serve_dom = dom.clone();
     let built = WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         let window = winit_windows.get_window(window_entity)?;
@@ -198,7 +206,7 @@ fn spawn_layout_view(world: &mut World) {
                 .with_transparent(true)
                 .with_initialization_script(WRY_HOST_SHIM)
                 .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
-                    VmuxProtocol::serve(&requester, request, responder);
+                    VmuxProtocol::serve(&serve_dom, &requester, request, responder);
                 })
                 .with_ipc_handler(move |request| page.receive(request.body()))
                 .with_url(LAYOUT_PAGE_URL)
@@ -214,7 +222,11 @@ fn spawn_layout_view(world: &mut World) {
                 .non_send_mut::<Browsers>()
                 .set_externally_hosted(layout);
             info!("layout_view: serving layout entity {layout:?}, no cef browser behind it");
-            let view = LayoutView { webview, layout };
+            let view = LayoutView {
+                webview,
+                layout,
+                dom,
+            };
             view.set_color_scheme(world.resource::<AppSettings>().appearance.mode);
             world.insert_non_send(view);
         }
@@ -274,24 +286,30 @@ fn sync_layout_view_focus(
 
 #[cfg(target_os = "macos")]
 fn forward_host_emit(host_emit: On<BinHostEmitEvent>, view: Option<NonSend<LayoutView>>) {
-    use base64::Engine;
-
     let Some(view) = view else {
         return;
     };
     if host_emit.webview != view.layout {
         return;
     }
-    let payload = base64::engine::general_purpose::STANDARD.encode(&host_emit.payload);
-    let Ok(id) = serde_json::to_string(&host_emit.id) else {
+
+    // Straight to the listener the page registered. The wasm bundle needed this base64'd through
+    // a JS shim because the page was on the other side of a browser; it is in this process now.
+    view.dom.deliver(&host_emit.id, &host_emit.payload);
+}
+
+/// Evaluate whatever the page's components rendered.
+#[cfg(target_os = "macos")]
+fn render_layout_dom(view: Option<NonSend<LayoutView>>) {
+    let Some(view) = view else {
         return;
     };
-    let Ok(payload) = serde_json::to_string(&payload) else {
+    let Some(script) = view.dom.next_batch() else {
         return;
     };
-    let script = format!("window.vmuxWry && window.vmuxWry._dispatch({id}, {payload})");
-    if let Err(error) = view.webview.evaluate_script(&script) {
-        error!("layout_view: host emit '{}' failed: {error}", host_emit.id);
+
+    if let Err(error) = view.webview.evaluate_script(script.as_str()) {
+        error!("layout_view: applying an edit batch failed: {error}");
     }
 }
 
@@ -320,12 +338,70 @@ impl VmuxProtocol {
     /// The responder is handed to a thread rather than awaited here: the reply comes from a Bevy
     /// system, and this runs on the main thread, so blocking would stop the schedule that produces
     /// it and deadlock.
+    /// Whether this asks for the page itself rather than something it references.
+    fn is_document_request(url: &str) -> bool {
+        let path = url
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or(url)
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("");
+        let path = path.split_once('/').map(|(_, rest)| rest).unwrap_or("");
+
+        path.is_empty() || path == "/" || path == "index.html"
+    }
+
+    /// The document a natively-hosted page loads: the interpreter, and nothing else.
+    fn shell_response() -> wry::http::Response<Vec<u8>> {
+        let html = vmux_dioxus::InterpreterShell::new("main", LAYOUT_PAGE_URL)
+            .with_stylesheet("/vmux_ui/assets/theme.css")
+            .html();
+
+        wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "text/html")
+            .body(html.into_bytes())
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
+    }
+
+    /// Answer the synchronous request the page is blocked on.
+    fn answer_event(
+        dom: &crate::layout_dom::LayoutDom,
+        request: &wry::http::Request<Vec<u8>>,
+        responder: wry::RequestAsyncResponder,
+    ) {
+        let header = request
+            .headers()
+            .get("dioxus-data")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let body = dom.handle_event(header).response_bytes();
+        let response = wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
+
+        responder.respond(response);
+    }
+
     fn serve(
+        dom: &crate::layout_dom::LayoutDom,
         requester: &Requester,
         request: wry::http::Request<Vec<u8>>,
         responder: wry::RequestAsyncResponder,
     ) {
         let url = request.uri().to_string();
+
+        // Both branches must come before `asset_load_path_from_request_url`. Neither path has a
+        // file extension, so it would map them to the host's default document and hand the page
+        // HTML where it expects JSON — or the wasm bundle where it expects the shell.
+        if url.trim_end_matches('/').ends_with("/__events") {
+            return Self::answer_event(dom, &request, responder);
+        }
+        if Self::is_document_request(&url) {
+            return responder.respond(Self::shell_response());
+        }
+
         let uri = asset_load_path_from_request_url(&url);
         if uri.is_empty() {
             error!("layout_view: vmux:// url maps to no asset path, url={url}");
@@ -384,16 +460,22 @@ struct PageMessage {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
     webview: Entity,
     host: String,
+    dom: crate::layout_dom::LayoutDom,
 }
 
 #[cfg(target_os = "macos")]
 impl PageMessage {
-    fn new(bin_ipc: async_channel::Sender<BinIpcEventRaw>, webview: Entity) -> Self {
+    fn new(
+        bin_ipc: async_channel::Sender<BinIpcEventRaw>,
+        webview: Entity,
+        dom: crate::layout_dom::LayoutDom,
+    ) -> Self {
         let host = embedded_page_host_of(LAYOUT_PAGE_URL).unwrap_or_default();
         Self {
             bin_ipc,
             webview,
             host,
+            dom,
         }
     }
 
@@ -401,6 +483,17 @@ impl PageMessage {
         use base64::Engine;
         use vmux_ui::transport::bin_ipc_envelope::BinIpcEnvelope;
 
+        // The interpreter's own two messages, sent as `{"method":..}` by `sendIpcMessage`.
+        // `initialize` says the page can take a batch at all; `flushed` says it applied the last
+        // one, which is what releases the next render.
+        if body.contains(r#""method":"initialize""#) {
+            self.dom.page_is_ready();
+            return;
+        }
+        if body.contains(r#""method":"flushed""#) {
+            self.dom.page_flushed();
+            return;
+        }
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
             match level {
