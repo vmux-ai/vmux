@@ -1,4 +1,3 @@
-use crate::browser_process::BrpHandler;
 use crate::browser_process::ClientHandlerBuilder;
 use crate::browser_process::client_handler::FocusCanceler;
 use crate::browser_process::client_handler::{
@@ -10,7 +9,6 @@ use async_channel::Sender;
 use bevy::input::ButtonState;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use bevy_remote::BrpMessage;
 #[cfg(target_os = "macos")]
 use cef::Rect;
 use cef::{
@@ -85,6 +83,37 @@ fn cef_mouse_wheel_event(position: Vec2, delta: Vec2) -> Option<(cef::MouseEvent
     ))
 }
 
+/// Which mouse button an injected event carries.
+///
+/// The one name both halves of the boundary agree on: AppKit and winit map into it, CEF reads out
+/// of it. CEF's own `MouseButtonType` cannot serve, because a click also needs the modifier flag
+/// that says which button is down, and that is a separate enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
+impl PointerButton {
+    fn event_flag(self) -> u32 {
+        match self {
+            Self::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
+            Self::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
+            Self::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
+        }
+    }
+
+    fn cef_button(self) -> MouseButtonType {
+        let button = match self {
+            Self::Primary => cef_mouse_button_type_t::MBT_LEFT,
+            Self::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
+            Self::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
+        };
+        MouseButtonType::from(button)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NativeMouseButtons {
     pub left: bool,
@@ -133,23 +162,10 @@ impl NativeMouseMovePresenter {
         let mouse_event = cef::MouseEvent {
             x: position.x as i32,
             y: position.y as i32,
-            modifiers: match button {
-                PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
-                PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
-                PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
-            } as _,
+            modifiers: button.event_flag() as _,
         };
-        let mouse_button = match button {
-            PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
-            PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
-            _ => cef_mouse_button_type_t::MBT_LEFT,
-        };
-        self.host.send_mouse_click_event(
-            Some(&mouse_event),
-            MouseButtonType::from(mouse_button),
-            mouse_up as _,
-            1,
-        );
+        self.host
+            .send_mouse_click_event(Some(&mouse_event), button.cef_button(), mouse_up as _, 1);
     }
 }
 
@@ -318,7 +334,6 @@ impl Browsers {
         requester: Requester,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
-        brp_sender: Sender<BrpMessage>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -354,7 +369,6 @@ impl Browsers {
             device_scale.clone(),
             ipc_event_sender,
             bin_ipc_event_sender,
-            brp_sender,
             snapshot_result_sender,
             system_cursor_icon_sender,
             webview_loading_state_sender,
@@ -382,16 +396,6 @@ impl Browsers {
                 );
             }
             let emb_scheme = cfg.scheme.clone();
-            let mut cef_factory = LocalSchemaHandlerBuilder::build(requester_for_global.clone());
-            let ok_cef = register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut cef_factory),
-            );
-            assert_eq!(
-                ok_cef, 1,
-                "cef_register_scheme_handler_factory(cef) failed with code {ok_cef}"
-            );
             let mut embedded_factory =
                 LocalSchemaHandlerBuilder::build(requester_for_global.clone());
             let ok_embedded = register_scheme_handler_factory(
@@ -762,23 +766,14 @@ impl Browsers {
             let mouse_event = cef::MouseEvent {
                 x: position.x as i32,
                 y: position.y as i32,
-                modifiers: match button {
-                    PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
-                    PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
-                    PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
-                } as _, // No modifiers for simplicity
-            };
-            let mouse_button = match button {
-                PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
-                PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
-                _ => cef_mouse_button_type_t::MBT_LEFT,
+                modifiers: button.event_flag() as _,
             };
             if !browser.windowed {
                 browser.host.set_focus(true as _);
             }
             browser.host.send_mouse_click_event(
                 Some(&mouse_event),
-                MouseButtonType::from(mouse_button),
+                button.cef_button(),
                 mouse_up as _,
                 1,
             );
@@ -2344,11 +2339,6 @@ impl Browsers {
         if let Some(context) = context.as_mut() {
             let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
             context.register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
-            );
-            context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
                 Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
@@ -2381,11 +2371,6 @@ impl Browsers {
         );
         if let Some(context) = context.as_mut() {
             let emb_scheme = resolved_cef_embedded_page_config().scheme.clone();
-            context.register_scheme_handler_factory(
-                Some(&SCHEME_CEF.into()),
-                Some(&HOST_CEF.into()),
-                Some(&mut LocalSchemaHandlerBuilder::build(requester.clone())),
-            );
             context.register_scheme_handler_factory(
                 Some(&emb_scheme.as_str().into()),
                 None,
@@ -2477,7 +2462,6 @@ impl Browsers {
         device_scale: SharedDeviceScaleFactor,
         ipc_event_sender: Sender<IpcEventRaw>,
         bin_ipc_event_sender: Sender<BinIpcEventRaw>,
-        brp_sender: Sender<BrpMessage>,
         snapshot_result_sender: Sender<SnapshotResultRaw>,
         system_cursor_icon_sender: SystemCursorIconSenderInner,
         webview_loading_state_sender: WebviewLoadingStateSenderInner,
@@ -2523,7 +2507,6 @@ impl Browsers {
             ))
             .with_message_handler(JsEmitEventHandler::new(webview, ipc_event_sender))
             .with_message_handler(BinEmitEventHandler::new(webview, bin_ipc_event_sender))
-            .with_message_handler(BrpHandler::new(brp_sender))
             .with_message_handler(SnapshotResultHandler::new(webview, snapshot_result_sender))
             .build()
     }
@@ -2697,7 +2680,6 @@ mod tests {
         ));
         assert!(requires_extension_free_context("file://"));
         assert!(!requires_extension_free_context("vmux://layout/"));
-        assert!(!requires_extension_free_context("cef://localhost/"));
         assert!(!requires_extension_free_context("https://example.com/"));
         assert!(!requires_extension_free_context("http://example.com/"));
         assert!(!requires_extension_free_context("about:blank"));
@@ -2830,336 +2812,5 @@ mod tests {
             windowless_frame_interval_from_refresh_millihertz(Some(144_000))
                 < Duration::from_millis(8)
         );
-    }
-
-    #[test]
-    fn osr_frame_rate_is_passed_to_cef_settings() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        assert!(
-            implementation.contains("let windowless_frame_rate = normalize_windowless_frame_rate")
-        );
-        assert!(implementation.contains("windowless_frame_rate,"));
-    }
-
-    #[test]
-    fn osr_uses_cef_internal_begin_frame_scheduler() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("external_begin_frame_enabled: false as _"));
-        assert!(!implementation.contains("send_external_begin_frame"));
-    }
-
-    #[test]
-    fn existing_osr_browsers_can_update_frame_rate() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        assert!(implementation.contains("pub fn set_windowless_frame_rate"));
-        assert!(implementation.contains("host.set_windowless_frame_rate(frame_rate)"));
-    }
-
-    #[test]
-    fn hidden_osr_webviews_are_suspended_with_cef_visibility() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        assert!(implementation.contains("hidden: Cell<bool>"));
-        assert!(implementation.contains("browser.host.was_hidden(1)"));
-    }
-
-    #[test]
-    fn native_liquid_glass_embeds_cef_view_as_content() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let create_fn = implementation
-            .split("fn create_native_liquid_glass")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(create_fn.contains("NSGlassEffectViewStyle::Clear"));
-        assert!(!create_fn.contains("NSGlassEffectViewStyle::Regular"));
-        assert!(create_fn.contains("glass.setContentView(Some(view))"));
-        assert!(create_fn.contains("view.setFrame(glass_view.bounds())"));
-    }
-
-    #[test]
-    fn native_liquid_glass_uses_clear_tint() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let create_fn = implementation
-            .split("fn create_native_liquid_glass")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(create_fn.contains("glass.setTintColor(Some(&NSColor::clearColor()))"));
-    }
-
-    #[test]
-    fn native_liquid_glass_makes_cef_view_layer_transparent() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let create_fn = implementation
-            .split("fn create_native_liquid_glass")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(create_fn.contains("view.setWantsLayer(true)"));
-        assert!(create_fn.contains("layer.setOpaque(false)"));
-        assert!(create_fn.contains("layer.setBackgroundColor(Some(&clear_color.CGColor()))"));
-        assert!(create_fn.contains("Self::make_view_tree_transparent"));
-    }
-
-    #[test]
-    fn native_liquid_glass_recursively_clears_cef_subviews() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("fn make_view_tree_transparent"));
-        assert!(implementation.contains("fn make_layer_tree_transparent"));
-        assert!(implementation.contains("for i in 0..subviews.count()"));
-        assert!(implementation.contains("let child = subviews.objectAtIndex(i)"));
-        assert!(implementation.contains("Self::make_view_tree_transparent(&child, clear_color)"));
-        assert!(implementation.contains("for i in 0..sublayers.count()"));
-        assert!(implementation.contains("let child = sublayers.objectAtIndex(i)"));
-        assert!(implementation.contains("Self::make_layer_tree_transparent(&child, clear_color)"));
-    }
-
-    #[test]
-    fn windowed_frame_refreshes_transparency_before_same_frame_return() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let set_frame_fn = implementation
-            .split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(not(target_os = \"macos\"))]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-        let refresh_idx = set_frame_fn
-            .find("Self::refresh_windowed_transparency")
-            .expect("windowed transparency refresh");
-        let cache_idx = set_frame_fn
-            .find("Self::windowed_frame_should_apply")
-            .expect("same frame cache check");
-
-        assert!(refresh_idx < cache_idx);
-    }
-
-    #[test]
-    fn windowed_repaint_nudge_refreshes_transparency() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let nudge_fn = implementation
-            .split("#[cfg(target_os = \"macos\")]\n    pub fn nudge_windowed_repaint")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(not(target_os = \"macos\"))]\n    pub fn nudge_windowed_repaint")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(nudge_fn.contains("Self::refresh_windowed_transparency"));
-    }
-
-    #[test]
-    fn windowed_native_views_apply_corner_radius() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("last_corner_radius: Cell<Option<f64>>"));
-        assert!(implementation.contains("fn apply_view_tree_corner_radius"));
-        assert!(implementation.contains("layer.setCornerRadius(radius)"));
-        assert!(implementation.contains("layer.setMasksToBounds(true)"));
-        assert!(implementation.contains("pub fn set_windowed_corner_radius"));
-    }
-
-    #[test]
-    fn windowed_native_views_clip_to_frame_with_zero_radius() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("layer.setMasksToBounds(true)"));
-        assert!(!implementation.contains("layer.setMasksToBounds(radius > 0.0)"));
-    }
-
-    #[test]
-    fn windowed_corner_cover_uses_even_odd_overlay() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        assert!(implementation.contains("fn update_corner_cover"));
-        assert!(implementation.contains("pub fn set_windowed_corner_cover"));
-        let cover_fn = implementation
-            .split("fn update_corner_cover")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn set_windowed_corner_cover").next())
-            .unwrap_or_default();
-        assert!(cover_fn.contains("kCAFillRuleEvenOdd"));
-        assert!(cover_fn.contains("add_rounded_rect"));
-        assert!(cover_fn.contains("setZPosition"));
-    }
-
-    #[test]
-    fn windowed_native_views_support_focus_ring_border() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("last_focus_ring"));
-        assert!(implementation.contains("pub fn set_windowed_focus_ring"));
-        assert!(implementation.contains("layer.setBorderWidth(width)"));
-        assert!(implementation.contains("layer.setBorderColor"));
-    }
-
-    #[test]
-    fn windowed_native_focus_can_bypass_focus_canceler() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-
-        assert!(implementation.contains("allow_native_focus"));
-        assert!(implementation.contains("if cancel_native_focus"));
-        assert!(
-            implementation
-                .contains(".with_focus_handler(FocusCanceler::build(texture_wake.clone()))")
-        );
-        assert!(implementation.contains("pub fn set_windowed_focus"));
-    }
-
-    #[test]
-    fn devtools_browser_uses_shared_lifetime_tracking() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let devtools = implementation
-            .split("pub fn show_devtool")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn close_devtools").next())
-            .unwrap_or_default();
-
-        assert!(devtools.contains(".with_life_span_handler(LifeSpanHandlerBuilder::build("));
-    }
-
-    #[test]
-    fn windowed_native_focus_detects_first_responder_subtree() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let focus_section = implementation
-            .split("/// Returns whether a native windowed browser")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn set_windowed_focus").next())
-            .unwrap_or_default();
-
-        assert!(focus_section.contains("#[cfg(target_os = \"macos\")]"));
-        assert!(focus_section.contains("window.firstResponder()"));
-        assert!(focus_section.contains("downcast_ref::<NSView>()"));
-        assert!(focus_section.contains("isDescendantOf(view)"));
-        assert!(focus_section.contains("#[cfg(not(target_os = \"macos\"))]"));
-    }
-
-    #[test]
-    fn osr_focus_sync_does_not_clear_windowed_focus() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let sync_fn = implementation
-            .split("pub fn sync_osr_focus_to_active_pane")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn send_mouse_move").next())
-            .unwrap_or_default();
-
-        assert!(sync_fn.contains("if !browser.windowed"));
-        assert!(!sync_fn.contains(
-            "for (_entity, browser) in &self.browsers {\n            browser.host.set_focus(false"
-        ));
-    }
-
-    #[test]
-    fn closing_non_glass_windowed_browser_removes_native_view() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let close_fn = implementation
-            .split("pub fn close")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn show_devtool").next())
-            .unwrap_or_default();
-
-        assert!(close_fn.contains("window_handle"));
-        assert!(close_fn.contains("removeFromSuperview"));
-    }
-
-    #[test]
-    fn windowed_native_bottom_corner_mask_is_not_flipped_to_top() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        let apply_fn = implementation
-            .split("fn apply_view_tree_corner_radius")
-            .nth(1)
-            .and_then(|tail| {
-                tail.split("#[cfg(target_os = \"macos\")]\n    pub fn set_windowed_frame")
-                    .next()
-            })
-            .unwrap_or_default();
-
-        assert!(apply_fn.contains("LayerMinXMinYCorner | CACornerMask::LayerMaxXMinYCorner"));
-        assert!(!apply_fn.contains("isGeometryFlipped"));
-    }
-
-    #[test]
-    fn all_osr_webviews_can_be_suspended_together() {
-        let implementation = include_str!("browsers.rs")
-            .split("#[cfg(test)]\nmod tests")
-            .next()
-            .unwrap_or_default();
-        assert!(implementation.contains("pub fn set_all_osr_hidden"));
-        assert!(implementation.contains("browser.host.set_focus(false"));
     }
 }

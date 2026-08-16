@@ -11,7 +11,6 @@ use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
-use crate::scene::ScenePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
 use crate::space::SpaceLayoutPlugin;
 use crate::stack::StackPlugin;
@@ -64,7 +63,6 @@ impl Plugin for LayoutPlugin {
             .add_plugins((
                 ProfilePlugin,
                 SpaceLayoutPlugin,
-                ScenePlugin,
                 WindowLayoutPlugin,
                 TabPlugin,
                 PanePlugin,

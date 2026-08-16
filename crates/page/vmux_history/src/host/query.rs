@@ -196,9 +196,7 @@ fn broadcast_history_changed(
         return;
     }
     for (e, src) in &webviews {
-        let bevy_cef::prelude::WebviewSource::Url(url) = src else {
-            continue;
-        };
+        let bevy_cef::prelude::WebviewSource(url) = src;
         if !url.starts_with("vmux://history") {
             continue;
         }

@@ -7,7 +7,6 @@ use bevy::{
         ButtonState, InputSystems,
         keyboard::{Key, KeyboardInput},
     },
-    picking::Pickable,
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -745,7 +744,6 @@ fn new_terminal_bundle_with_cwd_and_shell(
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -754,8 +752,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
-            Pickable::default(),
+            Visibility::Visible,
         ),
     )
 }
@@ -835,7 +832,6 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
             WebviewSize(Vec2::new(1280.0, 720.0)),
             TerminalGridSize::default(),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -844,8 +840,7 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
-            Pickable::default(),
+            Visibility::Visible,
         ),
     )
 }

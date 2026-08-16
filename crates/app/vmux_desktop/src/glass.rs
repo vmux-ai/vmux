@@ -238,7 +238,7 @@ fn handle_toggle_fullscreen_command(
 
 fn sync_window_glass_visibility(
     mut state: NonSendMut<GlassState>,
-    mut clear_color: ResMut<ClearColor>,
+    mut clear_color: ResMut<vmux_layout::window::WindowBackground>,
     mut window_q: Query<&mut bevy::window::Window, With<bevy::window::PrimaryWindow>>,
     mut window_fullscreen: ResMut<crate::window_state::WindowFullscreen>,
 ) {

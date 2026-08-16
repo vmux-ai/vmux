@@ -12,7 +12,7 @@ mod webview;
 mod zoom;
 
 use crate::cef_state::WebviewCefStatePlugin;
-use crate::common::{LocalHostPlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
+use crate::common::{CustomSchemePlugin, MessageLoopPlugin, WebviewCoreComponentsPlugin};
 use crate::cursor_icon::SystemCursorIconPlugin;
 use crate::keyboard::KeyboardPlugin;
 use crate::loading_state::WebviewLoadingStatePlugin;
@@ -25,7 +25,6 @@ use bevy_cef_core::prelude::{
     CefAcceptLanguageList, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions,
     CommandLineConfig, compile_time_cef_embedded_scheme, try_set_cef_embedded_page_config,
 };
-use bevy_remote::RemotePlugin;
 
 pub mod prelude {
     pub use crate::{
@@ -35,9 +34,9 @@ pub mod prelude {
     pub use bevy_cef_core::prelude::{
         Browsers, CefAcceptLanguageList, CefColorMode, CefColorScheme, CefDiskProfileRoot,
         CefEmbeddedHost, CefEmbeddedHosts, CefEmbeddedPageConfig, CefExtensions, CefTransitionCore,
-        CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, WebviewCefStateEvent,
-        WebviewCommittedNavigationEvent, WebviewLoadingStateEvent, WebviewPopupEvent,
-        compile_time_cef_embedded_scheme, resolve_media_permission,
+        CefTransitionQualifiers, CommandLineConfig, MediaPermissionRequest, PointerButton,
+        WebviewCefStateEvent, WebviewCommittedNavigationEvent, WebviewLoadingStateEvent,
+        WebviewPopupEvent, compile_time_cef_embedded_scheme, resolve_media_permission,
         resolved_cef_embedded_page_config, set_media_allowlist,
     };
 }
@@ -80,7 +79,7 @@ impl Plugin for CefPlugin {
         ))
         .insert_resource(CefAcceptLanguageList(self.accept_language_list.clone()))
         .add_plugins((
-            LocalHostPlugin,
+            CustomSchemePlugin,
             MessageLoopPlugin {
                 config: self.command_line_config.clone(),
                 extensions: self.extensions.clone(),
@@ -107,9 +106,6 @@ impl Plugin for CefPlugin {
                     .before(CefSystems::CreateAndResize)
                     .run_if(resource_changed::<bevy_cef_core::prelude::CefColorScheme>),
             );
-        if !app.is_plugin_added::<RemotePlugin>() {
-            app.add_plugins(RemotePlugin::default());
-        }
     }
 }
 

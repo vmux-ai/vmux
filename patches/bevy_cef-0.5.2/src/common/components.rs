@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_cef_core::prelude::{HOST_CEF, SCHEME_CEF, resolved_cef_embedded_page_config};
 use serde::{Deserialize, Serialize};
 
 pub(crate) struct WebviewCoreComponentsPlugin;
@@ -26,13 +25,8 @@ impl Plugin for WebviewCoreComponentsPlugin {
     }
 }
 
-/// A component that specifies the content source of a webview.
+/// Marker: restrict forwarded keyboard events to the webviews carrying it.
 ///
-/// Use [`WebviewSource::new`] for remote URLs, [`WebviewSource::local`] for local files
-/// served via `cef://localhost/`, or [`WebviewSource::inline`] for raw HTML content.
-///
-/// When the value of this component is changed at runtime, the existing browser
-/// automatically navigates to the new source without being recreated.
 /// When present on **at least one** [`WebviewSource`] entity, only those entities receive
 /// forwarded keyboard events. When **no** webview has this marker, every webview receives keys
 /// (legacy single- or multi-webview behavior).
@@ -94,70 +88,18 @@ pub struct WebviewMaxFrameRate(pub i32);
 #[reflect(Component, Default)]
 pub struct WebviewNativeOverlay;
 
+/// The URL a webview points at.
+///
+/// When the value is changed at runtime, the existing browser navigates to the new URL
+/// without being recreated.
 #[derive(Component, Debug, Clone, Reflect)]
 #[reflect(Component, Debug)]
 #[require(WebviewSize, ZoomLevel, AudioMuted, PreloadScripts)]
-pub enum WebviewSource {
-    /// A remote or local URL (e.g. `"https://..."` or `"cef://localhost/file.html"`).
-    Url(String),
-    /// Raw HTML content served via an internal `cef://localhost/__inline__/{id}` scheme.
-    InlineHtml(String),
-}
+pub struct WebviewSource(pub String);
 
 impl WebviewSource {
-    /// Creates a URL source.
-    ///
-    /// To specify a local file path, use [`WebviewSource::local`] instead.
     pub fn new(url: impl Into<String>) -> Self {
-        Self::Url(url.into())
-    }
-
-    /// Creates a local file source.
-    ///
-    /// The given path is interpreted as `cef://localhost/<path>`.
-    pub fn local(path: impl Into<String>) -> Self {
-        Self::Url(format!("{SCHEME_CEF}://{HOST_CEF}/{}", path.into()))
-    }
-
-    /// Serves a Bevy [`embedded`](https://bevy.org/examples/assets/embedded-asset/) asset.
-    ///
-    /// Navigates to `cef://localhost/embedded/<path>`, which the CEF localhost handler resolves
-    /// to `embedded://<path>` for [`AssetServer::load`]. Use the same logical path you passed to
-    /// `EmbeddedAssetRegistry::insert_asset`
-    /// (for example `history/index.html`).
-    pub fn embedded(path: impl Into<String>) -> Self {
-        let p = path.into();
-        Self::Url(format!("{SCHEME_CEF}://{HOST_CEF}/embedded/{p}"))
-    }
-
-    pub fn custom_scheme_host_root(host: impl Into<String>) -> Self {
-        let cfg = resolved_cef_embedded_page_config();
-        let h = host.into();
-        Self::Url(format!("{}{}/", cfg.scheme_prefix(), h))
-    }
-
-    pub fn custom_scheme_host_url(host: impl Into<String>) -> Self {
-        let cfg = resolved_cef_embedded_page_config();
-        let h = host.into();
-        Self::Url(format!("{}{}", cfg.scheme_prefix(), h))
-    }
-
-    pub fn custom_scheme_document_url(
-        host: impl Into<String>,
-        embedded_path: impl Into<String>,
-    ) -> Self {
-        let cfg = resolved_cef_embedded_page_config();
-        let h = host.into();
-        let p = embedded_path.into();
-        Self::Url(format!("{}{}/{}", cfg.scheme_prefix(), h, p))
-    }
-
-    /// Creates an inline HTML source.
-    ///
-    /// The HTML content is served through the internal `cef://localhost/__inline__/{id}` scheme,
-    /// so IPC (`window.cef.emit/listen/brp`) and [`PreloadScripts`] work as expected.
-    pub fn inline(html: impl Into<String>) -> Self {
-        Self::InlineHtml(html.into())
+        Self(url.into())
     }
 }
 
@@ -231,13 +173,6 @@ where
         Self(scripts.into_iter().map(Into::into).collect())
     }
 }
-
-/// Holds the webview surface texture handle for alpha hit-testing.
-///
-/// This component is automatically inserted and updated by the render systems.
-/// It provides material-type-agnostic access to the webview texture.
-#[derive(Component, Debug, Clone)]
-pub struct WebviewSurface(pub Handle<Image>);
 
 /// Analogous to [`CefKeyboardTarget`] but for pointer events (mouse wheel only, for now).
 ///

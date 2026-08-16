@@ -185,7 +185,7 @@ jobs:
           fi
 
       - name: Run tests
-        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace --exclude bevy_cef_core --exclude bevy_cef
+        run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test --workspace
 
       - name: Test lean desktop features
         run: env -u CEF_PATH VMUX_SKIP_DX_BUILD=1 cargo test -p vmux_desktop --lib --no-default-features disabled_features::tests

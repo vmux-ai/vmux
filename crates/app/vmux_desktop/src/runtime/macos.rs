@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
+use bevy_cef::prelude::PointerButton;
 
 /// The macOS half of [`super::RuntimePlugin`]: installs the AppKit monitors winit does not own, and gates rendering on demand.
 pub(super) struct RuntimePlatformPlugin;
@@ -667,10 +668,7 @@ fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
 }
 
 /// Which pointer button an `NSEvent` type carries, if any.
-fn native_pointer_button(
-    event_type: objc2_app_kit::NSEventType,
-) -> Option<bevy::picking::pointer::PointerButton> {
-    use bevy::picking::pointer::PointerButton;
+fn native_pointer_button(event_type: objc2_app_kit::NSEventType) -> Option<PointerButton> {
     use objc2_app_kit::NSEventType;
     match event_type {
         NSEventType::LeftMouseDown | NSEventType::LeftMouseUp => Some(PointerButton::Primary),

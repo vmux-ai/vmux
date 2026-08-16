@@ -41,8 +41,6 @@ mod header;
 mod swap;
 mod webview_reveal;
 
-pub mod scene;
-
 pub use cef::{
     Browser, LayoutCef, Loading, NavigationState, apply_cef_state_from_webview,
     mirror_metadata_to_url,

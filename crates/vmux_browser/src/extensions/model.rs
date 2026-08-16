@@ -185,7 +185,7 @@ mod tests {
         spawn_page(
             app.world_mut(),
             pane_two,
-            "cef://localhost/internal",
+            "file:///Users/x/notes.md",
             "Internal",
             3,
         );
@@ -255,6 +255,6 @@ mod tests {
             "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/popup.html"
         ));
         assert!(!extension_visible_url("vmux://terminal/"));
-        assert!(!extension_visible_url("cef://localhost/internal"));
+        assert!(!extension_visible_url("file:///Users/x/notes.md"));
     }
 }

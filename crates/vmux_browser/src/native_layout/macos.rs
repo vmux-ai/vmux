@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use bevy::prelude::*;
-use bevy_cef_core::prelude::{NativeMouseButtons, NativeMouseMovePresenter};
+use bevy_cef_core::prelude::{NativeMouseButtons, NativeMouseMovePresenter, PointerButton};
 
 use super::NativeLayout;
 use crate::{CefPointerHitRect, NATIVE_LAYOUT_ACTIVITY, NATIVE_LAYOUT_POINTER_INSIDE};
@@ -154,11 +154,7 @@ impl NativeLayout {
     /// the winit content view is the hit-test target, winit raises `MouseButtonInput`, and the
     /// ordinary Bevy pointer path already works — swallowing those would trade a working route for
     /// this one.
-    pub fn forward_click(
-        position_px: Vec2,
-        button: bevy::picking::pointer::PointerButton,
-        mouse_up: bool,
-    ) -> bool {
+    pub fn forward_click(position_px: Vec2, button: PointerButton, mouse_up: bool) -> bool {
         // The release has to follow the press that was forwarded, even if the pointer has since
         // left the hit region — the regions track the cursor, and a press delivered without its
         // release leaves the DOM latched in a pressed state.

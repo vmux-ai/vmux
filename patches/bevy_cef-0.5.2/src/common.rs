@@ -1,9 +1,9 @@
 mod components;
+pub(crate) mod custom_scheme;
 mod ipc;
-pub(crate) mod localhost;
 mod message_loop;
 
 pub use components::*;
+pub(crate) use custom_scheme::*;
 pub use ipc::*;
-pub(crate) use localhost::*;
 pub use message_loop::*;

@@ -418,7 +418,6 @@ pub fn leaf_pane_bundle() -> impl Bundle {
         Pane,
         PaneSize::default(),
         Transform::default(),
-        GlobalTransform::default(),
         Node {
             flex_grow: 1.0,
             flex_basis: Val::Px(0.0),
@@ -440,7 +439,6 @@ pub fn split_root_bundle(direction: PaneSplitDirection) -> impl Bundle {
         PaneSplit { direction },
         PaneSize::default(),
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::default(),
         Node {
             flex_grow: 1.0,

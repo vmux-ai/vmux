@@ -132,7 +132,6 @@ pub fn tab_bundle() -> impl Bundle {
     (
         Tab::default(),
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::default(),
         Node {
             width: Val::Percent(100.0),
@@ -374,7 +373,7 @@ fn sync_tab_visibility(
             node.display = target_display;
         }
         let target_vis = if active {
-            Visibility::Inherited
+            Visibility::Visible
         } else {
             Visibility::Hidden
         };

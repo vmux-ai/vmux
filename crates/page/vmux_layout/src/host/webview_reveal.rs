@@ -55,7 +55,7 @@ fn reveal_webviews(
 ) {
     for (entity, source, mut vis, mut pending) in &mut query {
         if webview_reveal_ready(source, false, pending.0) {
-            *vis = Visibility::Inherited;
+            *vis = Visibility::Visible;
             commands.entity(entity).remove::<PendingWebviewReveal>();
         } else {
             pending.0 += 1;

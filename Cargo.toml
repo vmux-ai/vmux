@@ -23,13 +23,7 @@ bevy = { version = "0.19.0", default-features = false, features = [
     "bevy_log",
     "bevy_winit",
     "bevy_window",
-    # Only ever reached through `bevy_sprite`, which only `bevy_ui` pulled in. Named directly now
-    # that the layout engine is `vmux_flex`, because `Visibility` and `Camera2d` live here.
-    "bevy_camera",
-    "bevy_image",
-    "bevy_picking",
     "reflect_auto_register",
-    "https",
     "x11",
     "wayland",
 ] }
@@ -42,7 +36,7 @@ bevy_winit = { version = "0.19.0", default-features = false, features = [
     "x11",
     "wayland",
 ] }
-bevy_world_serialization = "0.19.0"
+bevy_world_serialization = "0.19.1"
 bevy_cef = "0.5.2"
 bevy_cef_core = "0.5.2"
 moonshine-save = "0.7.0"
@@ -183,5 +177,5 @@ codegen-units = 1
 [patch.crates-io]
 bevy_cef = { path = "patches/bevy_cef-0.5.2" }
 bevy_cef_core = { path = "patches/bevy_cef_core-0.5.2" }
-bevy_remote = { path = "patches/bevy_remote-0.19.0" }
 bevy_window = { path = "patches/bevy_window-0.19.0" }
+bevy_world_serialization = { path = "patches/bevy_world_serialization-0.19.1" }

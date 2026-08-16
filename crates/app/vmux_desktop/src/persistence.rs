@@ -461,7 +461,6 @@ pub(crate) fn rebuild_space_views(
     for tab_e in sort_tabs_by_order(saved_tab_order) {
         commands.entity(tab_e).insert((
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -489,7 +488,6 @@ pub(crate) fn rebuild_space_views(
         ecmds.insert((
             HostWindow(pw),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 flex_grow: 1.0,
                 min_height: Val::Px(0.0),
@@ -506,7 +504,6 @@ pub(crate) fn rebuild_space_views(
         let grow = pane_sizes.get(entity).map(|s| s.flex_grow).unwrap_or(1.0);
         commands.entity(entity).insert((
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 flex_grow: grow,
                 flex_basis: Val::Px(0.0),
@@ -529,7 +526,6 @@ pub(crate) fn rebuild_space_views(
         let mut ecmds = commands.entity(entity);
         ecmds.insert((
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),

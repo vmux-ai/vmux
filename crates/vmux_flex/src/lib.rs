@@ -13,6 +13,7 @@
 pub mod computed;
 pub mod node;
 pub mod tree;
+pub mod visibility;
 mod write;
 
 pub use computed::{ComputedNode, Insets};
@@ -20,6 +21,7 @@ pub use node::{
     AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, UiRect, Val,
 };
 pub use tree::{FlexTree, LayoutContext};
+pub use visibility::Visibility;
 
 /// The names a crate laying nodes out needs, to be glob-imported the way `bevy::prelude` used to
 /// supply them.
@@ -28,6 +30,7 @@ pub mod prelude {
     pub use crate::node::{
         AlignItems, Display, FlexDirection, JustifyContent, Node, PositionType, UiRect, Val,
     };
+    pub use crate::visibility::Visibility;
     pub use crate::{FlexPlugin, LayoutSystems};
 }
 

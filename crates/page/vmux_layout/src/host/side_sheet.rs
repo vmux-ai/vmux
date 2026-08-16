@@ -187,7 +187,7 @@ fn sync_side_sheet_visibility(
             continue;
         }
         if is_open {
-            *vis = Visibility::Inherited;
+            *vis = Visibility::Visible;
             node.display = Display::Flex;
             node.width = Val::Px(width);
         } else {

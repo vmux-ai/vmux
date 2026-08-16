@@ -4,6 +4,7 @@ use bevy_cef::prelude::{
     CefShutdownState, PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
 };
 use std::collections::{HashMap, HashSet};
+use vmux_flex::prelude::*;
 
 use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
 use super::load::PreparedExtensions;
@@ -269,7 +270,7 @@ mod tests {
         assert_eq!(bridge.extension_id, EXTENSION_ID);
         assert_eq!(bridge.role, ExtensionBridgeRole::Transport);
         assert!(
-            matches!(source, WebviewSource::Url(url) if url == &format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html"))
+            matches!(source, WebviewSource(url) if url == &format!("chrome-extension://{EXTENSION_ID}/vmux_bridge.html"))
         );
         let [config] = preload.0.as_slice() else {
             panic!("expected one bridge preload script");

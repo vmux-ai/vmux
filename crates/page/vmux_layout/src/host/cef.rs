@@ -1,4 +1,3 @@
-use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_flex::prelude::*;
@@ -111,7 +110,6 @@ impl Browser {
             ResolvedWebviewUri(url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -120,8 +118,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
-            Pickable::default(),
+            Visibility::Visible,
         )
     }
 
@@ -141,7 +138,6 @@ impl Browser {
             ResolvedWebviewUri(url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -150,8 +146,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
-            Pickable::default(),
+            Visibility::Visible,
         )
     }
 
@@ -171,7 +166,6 @@ impl Browser {
             ResolvedWebviewUri(source_url.to_string()),
             WebviewSize(Vec2::new(1280.0, 720.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(0.0),
@@ -180,8 +174,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
-            Pickable::default(),
+            Visibility::Visible,
         )
     }
 }
@@ -211,9 +204,7 @@ pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
             ..default()
         },
         Transform::default(),
-        GlobalTransform::default(),
-        Visibility::Inherited,
-        Pickable::IGNORE,
+        Visibility::Visible,
     )
 }
 
@@ -346,29 +337,8 @@ mod apply_cef_state_tests {
 mod tests {
     use super::*;
 
-    fn build_test_cef(mut commands: Commands) {
-        let host = commands.spawn_empty().id();
-        commands.spawn(layout_cef_bundle(host));
-    }
-
     fn build_test_page(mut commands: Commands) {
         commands.spawn(Browser::new("https://example.com"));
-    }
-
-    #[test]
-    fn layout_cef_uses_manual_pointer_routing() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Startup, build_test_cef);
-        app.update();
-
-        let pickable = app
-            .world_mut()
-            .query_filtered::<&Pickable, With<LayoutCef>>()
-            .single(app.world())
-            .expect("layout CEF shell pickable");
-
-        assert_eq!(pickable, &Pickable::IGNORE);
     }
 
     #[test]

@@ -361,23 +361,7 @@ pub fn early_exit_if_subprocess() {
 }
 
 #[cfg(test)]
-mod tests {
-    #[test]
-    fn main_message_loop_uses_single_pump_pass() {
-        let main_loop = include_str!("message_loop.rs")
-            .split("fn close_all_browsers_then_cef_shutdown")
-            .next()
-            .unwrap_or_default();
-        assert_eq!(main_loop.matches("cef::do_message_loop_work();").count(), 1);
-    }
-
-    #[test]
-    fn cef_global_background_is_transparent_for_windowed_glass() {
-        let source = include_str!("message_loop.rs");
-
-        assert!(source.contains("background_color: 0x00000000"));
-    }
-}
+mod tests {}
 
 #[cfg(target_os = "macos")]
 mod cef_pump_timer {

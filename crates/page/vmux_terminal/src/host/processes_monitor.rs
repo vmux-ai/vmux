@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
@@ -76,7 +76,6 @@ impl ProcessesMonitor {
             (
                 WebviewSize(Vec2::new(1280.0, 720.0)),
                 Transform::default(),
-                GlobalTransform::default(),
                 Node {
                     position_type: PositionType::Absolute,
                     left: Val::Px(0.0),
@@ -85,8 +84,7 @@ impl ProcessesMonitor {
                     bottom: Val::Px(0.0),
                     ..default()
                 },
-                Visibility::Inherited,
-                Pickable::default(),
+                Visibility::Visible,
             ),
         )
     }

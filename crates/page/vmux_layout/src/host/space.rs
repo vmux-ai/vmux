@@ -124,7 +124,6 @@ pub fn space_view_bundle() -> impl Bundle {
     (
         space_container_node(),
         Transform::default(),
-        GlobalTransform::default(),
         Visibility::default(),
     )
 }
@@ -138,7 +137,7 @@ pub fn sync_space_container_visibility(
             node.display = target_display;
         }
         let target_vis = if active {
-            Visibility::Inherited
+            Visibility::Visible
         } else {
             Visibility::Hidden
         };
@@ -245,7 +244,15 @@ mod tests {
             app.world().get::<Node>(active).unwrap().display,
             Display::Flex
         );
+        assert_eq!(
+            *app.world().get::<Visibility>(active).unwrap(),
+            Visibility::Visible
+        );
         assert_eq!(app.world().get::<Node>(bg).unwrap().display, Display::None);
+        assert_eq!(
+            *app.world().get::<Visibility>(bg).unwrap(),
+            Visibility::Hidden
+        );
         assert!(app.world().get_entity(bg).is_ok());
     }
 }

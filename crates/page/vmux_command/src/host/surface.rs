@@ -56,9 +56,7 @@ impl CommandBar {
             WebviewSource::new(COMMAND_BAR_PAGE_URL),
             WebviewSize(Vec2::new(800.0, 600.0)),
             Transform::default(),
-            GlobalTransform::default(),
             Visibility::Hidden,
-            Pickable::IGNORE,
         )
     }
 }

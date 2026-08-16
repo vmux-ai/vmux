@@ -348,7 +348,6 @@ fn package_builds_cef_helper_separately_without_lto() {
     for dependency in [
         "dep:async-channel",
         "dep:bevy",
-        "dep:bevy_remote",
         "dep:bevy_winit",
         "dep:raw-window-handle",
         "dep:winit",
@@ -359,7 +358,6 @@ fn package_builds_cef_helper_separately_without_lto() {
     assert!(helper_manifest.contains("default-features = false"));
     assert!(helper_manifest.contains("cef = { version = \"148.2.0\", default-features = false }"));
     assert!(!handler.contains("use bevy::"));
-    assert!(!handler.contains("use bevy_remote::"));
 }
 
 #[test]
@@ -522,11 +520,7 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_log",
         "bevy_winit",
         "bevy_window",
-        "bevy_camera",
-        "bevy_image",
-        "bevy_picking",
         "reflect_auto_register",
-        "https",
         "x11",
         "wayland",
     ]
@@ -570,33 +564,15 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
         "bevy_ui",
         "bevy_ui_render",
         "ui_picking",
+        "bevy_picking",
+        "bevy_camera",
+        "https",
     ] {
         assert!(
             !features.contains(feature),
             "workspace bevy dependency should not enable feature {feature}"
         );
     }
-}
-
-/// Nothing draws through Bevy any more: every webview is a native view composited by AppKit, and
-/// `vmux_flex` computes geometry over `taffy` without ever painting it. `bevy_camera` stays for
-/// `Visibility`, and it is a separate crate from `bevy_render`, so keeping one does not drag in
-/// the other.
-///
-/// The allowlist above covers the workspace dependency. It cannot see this route: `bevy_remote` is
-/// vendored, and its own default features used to turn `bevy_render` back on for the whole graph
-/// no matter what any consumer asked for. Feature unification makes that one default enough to
-/// undo the removal, and nothing here uses the render subapp it serves.
-#[test]
-fn patched_bevy_remote_does_not_default_to_the_render_subapp() {
-    let manifest = include_str!("../../../../patches/bevy_remote-0.19.0/Cargo.toml");
-    let start = manifest
-        .find("default = [")
-        .expect("bevy_remote default features");
-    let rest = &manifest[start..];
-    let defaults = &rest[..rest.find(']').expect("terminated default list")];
-
-    assert!(!defaults.contains("bevy_render"));
 }
 
 /// The 3D scene is gone, and the Bevy subsystems it alone pulled must not return through
@@ -620,13 +596,6 @@ fn no_crate_reenables_the_player_only_bevy_features() {
             "vmux_layout should not enable {feature}"
         );
     }
-}
-
-#[test]
-fn patched_bevy_remote_does_not_pull_bevy_dev_tools() {
-    let manifest = include_str!("../../../../patches/bevy_remote-0.19.0/Cargo.toml");
-
-    assert!(!manifest.contains("bevy_dev_tools"));
 }
 
 #[test]
@@ -658,19 +627,6 @@ fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
         assert!(!block.contains("\"picking\""));
         assert!(!block.contains("default-features = true"));
     }
-}
-
-#[test]
-fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
-    let manifest = include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
-    let start = manifest
-        .find("[dependencies.bevy]")
-        .expect("bevy_cef_core bevy dependency");
-    let rest = &manifest[start..];
-    let end = rest.find("\n\n").unwrap_or(rest.len());
-    let bevy_block = &rest[..end];
-
-    assert!(bevy_block.contains("\"bevy_picking\""));
 }
 
 #[test]

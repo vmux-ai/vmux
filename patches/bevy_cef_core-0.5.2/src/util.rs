@@ -43,11 +43,7 @@ pub const VAULT_PASSKEY_ORIGIN: &str = "https://vault.vmux.ai";
 
 pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
-pub const SCHEME_CEF: &str = "cef";
-
 pub const FILES_SCHEME: &str = "file";
-
-pub const HOST_CEF: &str = "localhost";
 
 pub fn compile_time_cef_embedded_scheme() -> &'static str {
     include_str!(concat!(env!("OUT_DIR"), "/cef_embedded_scheme.txt")).trim()
@@ -560,39 +556,6 @@ pub fn v8_value_to_json(v8: &cef::V8Value) -> Option<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    struct EnvGuard {
-        _guard: std::sync::MutexGuard<'static, ()>,
-        old_log: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn clear_debug_log_path() -> Self {
-            let guard = ENV_LOCK.lock().expect("env lock");
-            let old_log = std::env::var_os("VMUX_WEBVIEW_DEBUG_LOG");
-            unsafe {
-                std::env::remove_var("VMUX_WEBVIEW_DEBUG_LOG");
-            }
-            Self {
-                _guard: guard,
-                old_log,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(old_log) = &self.old_log {
-                    std::env::set_var("VMUX_WEBVIEW_DEBUG_LOG", old_log);
-                } else {
-                    std::env::remove_var("VMUX_WEBVIEW_DEBUG_LOG");
-                }
-            }
-        }
-    }
 
     fn allowlisted_hosts() -> CefEmbeddedHosts {
         CefEmbeddedHosts(vec![
