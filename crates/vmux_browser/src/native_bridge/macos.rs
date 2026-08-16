@@ -1,7 +1,7 @@
 //! The macOS half: AppKit draws the windowed views, so its monitors do the asking.
 
-use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
+use bevy_cef::prelude::PointerButton;
 use bevy_cef_core::prelude::NativeMouseButtons;
 use std::sync::{LazyLock, Mutex};
 

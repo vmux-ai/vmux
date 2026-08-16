@@ -58,7 +58,6 @@ impl CommandBar {
             Transform::default(),
             GlobalTransform::default(),
             Visibility::Hidden,
-            Pickable::IGNORE,
         )
     }
 }

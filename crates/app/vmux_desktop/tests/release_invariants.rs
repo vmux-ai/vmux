@@ -524,7 +524,6 @@ fn workspace_bevy_uses_explicit_feature_allowlist() {
         "bevy_window",
         "bevy_camera",
         "bevy_image",
-        "bevy_picking",
         "reflect_auto_register",
         "https",
         "x11",
@@ -570,6 +569,7 @@ fn workspace_bevy_does_not_enable_removed_heavy_features() {
         "bevy_ui",
         "bevy_ui_render",
         "ui_picking",
+        "bevy_picking",
     ] {
         assert!(
             !features.contains(feature),
@@ -658,19 +658,6 @@ fn patched_bevy_cef_does_not_reenable_bevy_default_bundles() {
         assert!(!block.contains("\"picking\""));
         assert!(!block.contains("default-features = true"));
     }
-}
-
-#[test]
-fn patched_bevy_cef_core_keeps_required_pointer_input_feature() {
-    let manifest = include_str!("../../../../patches/bevy_cef_core-0.5.2/Cargo.toml");
-    let start = manifest
-        .find("[dependencies.bevy]")
-        .expect("bevy_cef_core bevy dependency");
-    let rest = &manifest[start..];
-    let end = rest.find("\n\n").unwrap_or(rest.len());
-    let bevy_block = &rest[..end];
-
-    assert!(bevy_block.contains("\"bevy_picking\""));
 }
 
 #[test]

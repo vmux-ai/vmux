@@ -7,7 +7,6 @@ use bevy::{
         ButtonState, InputSystems,
         keyboard::{Key, KeyboardInput},
     },
-    picking::Pickable,
     prelude::*,
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
@@ -755,7 +754,6 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         ),
     )
 }
@@ -845,7 +843,6 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         ),
     )
 }

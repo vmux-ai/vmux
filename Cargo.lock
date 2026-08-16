@@ -990,7 +990,6 @@ dependencies = [
  "async-channel",
  "bevy",
  "bevy_cef_core",
- "bevy_picking",
  "bevy_remote",
  "cef",
  "objc",

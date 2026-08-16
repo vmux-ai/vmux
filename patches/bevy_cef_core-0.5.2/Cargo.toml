@@ -74,7 +74,6 @@ features = [
     "bevy_log",
     "bevy_window",
     "bevy_asset",
-    "bevy_picking",
 ]
 default-features = false
 optional = true

@@ -1,4 +1,4 @@
-use bevy::{picking::Pickable, prelude::*};
+use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_layout::cef::Browser;
@@ -55,7 +55,6 @@ impl Spaces {
                     ..default()
                 },
                 Visibility::Inherited,
-                Pickable::default(),
             ),
         )
     }

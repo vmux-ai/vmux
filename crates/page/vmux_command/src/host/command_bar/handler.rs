@@ -28,7 +28,7 @@ use crate::{
     AppCommand, BrowserBarCommand, BrowserCommand, LayoutCommand, PaneCommand, ReadAppCommands,
     SpaceCommand, StackCommand,
 };
-use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, picking::Pickable, prelude::*};
+use bevy::{ecs::message::MessageReader, ecs::system::SystemParam, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::event::space::SpaceCommandEvent;
 use vmux_core::page::{SettingsPageSpawnRequest, SpacesPageSpawnRequest};
@@ -218,15 +218,12 @@ fn prewarm_command_bar_modal(
         return;
     }
     prepare_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
-    commands
-        .entity(modal_e)
-        .insert(Pickable::IGNORE)
-        .insert(PendingCommandBarReveal {
-            frames: 0,
-            open_id: OpenId::NONE,
-            payload: None,
-            started_at: None,
-        });
+    commands.entity(modal_e).insert(PendingCommandBarReveal {
+        frames: 0,
+        open_id: OpenId::NONE,
+        payload: None,
+        started_at: None,
+    });
 }
 
 fn next_command_bar_reveal_frames(
@@ -1159,7 +1156,6 @@ fn on_command_bar_action(
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
-            .insert(Pickable::IGNORE)
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
@@ -1194,7 +1190,6 @@ fn deferred_dismiss_modal(
         close_command_bar_surface(&mut modal_node, &mut modal_vis, native_overlay);
         commands
             .entity(modal_e)
-            .insert(Pickable::IGNORE)
             .remove::<CefKeyboardTarget>()
             .remove::<CefPointerTarget>()
             .remove::<CommandBarRenderedOpen>()
@@ -1556,10 +1551,6 @@ mod tests {
         assert_eq!(*visibility, Visibility::Hidden);
         assert_eq!(reveal.open_id, OpenId::NONE);
         assert!(app.world().get::<CefKeyboardTarget>(modal).is_none());
-        assert_eq!(
-            app.world().get::<bevy::picking::Pickable>(modal),
-            Some(&bevy::picking::Pickable::IGNORE)
-        );
     }
 
     #[test]

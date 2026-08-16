@@ -85,6 +85,37 @@ fn cef_mouse_wheel_event(position: Vec2, delta: Vec2) -> Option<(cef::MouseEvent
     ))
 }
 
+/// Which mouse button an injected event carries.
+///
+/// The one name both halves of the boundary agree on: AppKit and winit map into it, CEF reads out
+/// of it. CEF's own `MouseButtonType` cannot serve, because a click also needs the modifier flag
+/// that says which button is down, and that is a separate enum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointerButton {
+    Primary,
+    Secondary,
+    Middle,
+}
+
+impl PointerButton {
+    fn event_flag(self) -> u32 {
+        match self {
+            Self::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
+            Self::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
+            Self::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
+        }
+    }
+
+    fn cef_button(self) -> MouseButtonType {
+        let button = match self {
+            Self::Primary => cef_mouse_button_type_t::MBT_LEFT,
+            Self::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
+            Self::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
+        };
+        MouseButtonType::from(button)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NativeMouseButtons {
     pub left: bool,
@@ -133,23 +164,10 @@ impl NativeMouseMovePresenter {
         let mouse_event = cef::MouseEvent {
             x: position.x as i32,
             y: position.y as i32,
-            modifiers: match button {
-                PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
-                PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
-                PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
-            } as _,
+            modifiers: button.event_flag() as _,
         };
-        let mouse_button = match button {
-            PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
-            PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
-            _ => cef_mouse_button_type_t::MBT_LEFT,
-        };
-        self.host.send_mouse_click_event(
-            Some(&mouse_event),
-            MouseButtonType::from(mouse_button),
-            mouse_up as _,
-            1,
-        );
+        self.host
+            .send_mouse_click_event(Some(&mouse_event), button.cef_button(), mouse_up as _, 1);
     }
 }
 
@@ -762,23 +780,14 @@ impl Browsers {
             let mouse_event = cef::MouseEvent {
                 x: position.x as i32,
                 y: position.y as i32,
-                modifiers: match button {
-                    PointerButton::Primary => cef_event_flags_t::EVENTFLAG_LEFT_MOUSE_BUTTON.0,
-                    PointerButton::Secondary => cef_event_flags_t::EVENTFLAG_RIGHT_MOUSE_BUTTON.0,
-                    PointerButton::Middle => cef_event_flags_t::EVENTFLAG_MIDDLE_MOUSE_BUTTON.0,
-                } as _, // No modifiers for simplicity
-            };
-            let mouse_button = match button {
-                PointerButton::Secondary => cef_mouse_button_type_t::MBT_RIGHT,
-                PointerButton::Middle => cef_mouse_button_type_t::MBT_MIDDLE,
-                _ => cef_mouse_button_type_t::MBT_LEFT,
+                modifiers: button.event_flag() as _,
             };
             if !browser.windowed {
                 browser.host.set_focus(true as _);
             }
             browser.host.send_mouse_click_event(
                 Some(&mouse_event),
-                MouseButtonType::from(mouse_button),
+                button.cef_button(),
                 mouse_up as _,
                 1,
             );

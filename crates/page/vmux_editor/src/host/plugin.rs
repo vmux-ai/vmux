@@ -547,7 +547,6 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         ),
     )
 }

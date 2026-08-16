@@ -1,4 +1,4 @@
-use bevy::{picking::Pickable, prelude::*};
+use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_command::command::{AppCommand, LayoutCommand, WindowCommand};
 use vmux_core::page::PageReady;
@@ -86,7 +86,6 @@ impl Settings {
                     ..default()
                 },
                 Visibility::Inherited,
-                Pickable::default(),
             ),
         )
     }

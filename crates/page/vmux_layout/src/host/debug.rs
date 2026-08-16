@@ -1,4 +1,3 @@
-use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenTask};
@@ -43,7 +42,6 @@ impl DebugView {
                     ..default()
                 },
                 Visibility::Inherited,
-                Pickable::default(),
             ),
         )
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use bevy::{ecs::relationship::Relationship, picking::Pickable, prelude::*};
+use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
@@ -86,7 +86,6 @@ impl ProcessesMonitor {
                     ..default()
                 },
                 Visibility::Inherited,
-                Pickable::default(),
             ),
         )
     }

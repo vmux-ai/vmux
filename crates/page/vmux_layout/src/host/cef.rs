@@ -1,4 +1,3 @@
-use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_flex::prelude::*;
@@ -121,7 +120,6 @@ impl Browser {
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         )
     }
 
@@ -151,7 +149,6 @@ impl Browser {
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         )
     }
 
@@ -181,7 +178,6 @@ impl Browser {
                 ..default()
             },
             Visibility::Inherited,
-            Pickable::default(),
         )
     }
 }
@@ -213,7 +209,6 @@ pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
         Transform::default(),
         GlobalTransform::default(),
         Visibility::Inherited,
-        Pickable::IGNORE,
     )
 }
 
@@ -346,29 +341,8 @@ mod apply_cef_state_tests {
 mod tests {
     use super::*;
 
-    fn build_test_cef(mut commands: Commands) {
-        let host = commands.spawn_empty().id();
-        commands.spawn(layout_cef_bundle(host));
-    }
-
     fn build_test_page(mut commands: Commands) {
         commands.spawn(Browser::new("https://example.com"));
-    }
-
-    #[test]
-    fn layout_cef_uses_manual_pointer_routing() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Startup, build_test_cef);
-        app.update();
-
-        let pickable = app
-            .world_mut()
-            .query_filtered::<&Pickable, With<LayoutCef>>()
-            .single(app.world())
-            .expect("layout CEF shell pickable");
-
-        assert_eq!(pickable, &Pickable::IGNORE);
     }
 
     #[test]

@@ -27,7 +27,6 @@ bevy = { version = "0.19.0", default-features = false, features = [
     # that the layout engine is `vmux_flex`, because `Visibility` and `Camera2d` live here.
     "bevy_camera",
     "bevy_image",
-    "bevy_picking",
     "reflect_auto_register",
     "https",
     "x11",
