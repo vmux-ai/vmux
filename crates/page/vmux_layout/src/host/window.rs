@@ -26,10 +26,7 @@ impl Plugin for WindowLayoutPlugin {
             .register_type::<Option<Vec2>>()
             .add_systems(
                 Startup,
-                setup
-                    .in_set(LayoutStartupSet::Window)
-                    .after(crate::scene::setup)
-                    .after(PageEmbedSet),
+                setup.in_set(LayoutStartupSet::Window).after(PageEmbedSet),
             )
             .add_systems(
                 Startup,
@@ -69,7 +66,8 @@ impl Plugin for WindowLayoutPlugin {
             )
             .add_systems(Update, handle_window_commands.in_set(ReadAppCommands));
 
-        app.init_resource::<Assets<WindowMaterial>>();
+        app.init_resource::<Assets<WindowMaterial>>()
+            .init_resource::<WindowBackground>();
     }
 }
 
@@ -98,6 +96,25 @@ const _: () = {
 pub struct WindowMaterial;
 
 pub const WINDOW_BACKGROUND_SRGB: [f32; 3] = [0.13, 0.13, 0.14];
+
+/// What shows through where no webview covers the window.
+///
+/// This was `bevy_camera::ClearColor`, which only ever meant anything to a renderer clearing a
+/// framebuffer. Nothing clears anything here — the value is read by the native cover view and
+/// written when the glass effect toggles, so it is app state and belongs to the app.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct WindowBackground(pub Color);
+
+impl Default for WindowBackground {
+    /// Transparent on macOS, where AppKit composites the glass behind the window.
+    fn default() -> Self {
+        if cfg!(target_os = "macos") {
+            Self(Color::NONE)
+        } else {
+            Self(Color::BLACK)
+        }
+    }
+}
 
 /// Handle `WindowCommand` events (e.g. minimize via Cmd+M).
 fn handle_window_commands(
@@ -190,7 +207,7 @@ fn setup(
             crate::Open,
             Transform::default(),
             GlobalTransform::default(),
-            Visibility::Inherited,
+            Visibility::Visible,
             Node {
                 width: Val::Px(crate::event::SIDE_SHEET_WIDTH_PX),
                 min_height: Val::Px(0.0),
@@ -226,7 +243,7 @@ fn setup(
     commands.spawn((
         Header,
         crate::Open,
-        Visibility::Inherited,
+        Visibility::Visible,
         Transform::default(),
         GlobalTransform::default(),
         Node {
@@ -695,7 +712,6 @@ mod tests {
             },
             PrimaryWindow,
         ));
-        app.world_mut().spawn(crate::scene::MainCamera);
         app.add_systems(Startup, setup);
         app
     }

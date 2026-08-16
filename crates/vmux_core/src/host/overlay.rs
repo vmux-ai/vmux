@@ -133,7 +133,7 @@ mod tests {
     #[test]
     fn missing_keyboard_target_is_closed() {
         assert_eq!(
-            OverlayState::of(Display::Flex, Visibility::Inherited, false, false),
+            OverlayState::of(Display::Flex, Visibility::Visible, false, false),
             OverlayState::Closed
         );
     }
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn display_none_is_closed_even_with_keyboard_target() {
         assert_eq!(
-            OverlayState::of(Display::None, Visibility::Inherited, true, false),
+            OverlayState::of(Display::None, Visibility::Visible, true, false),
             OverlayState::Closed
         );
     }
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn visible_surface_with_keyboard_target_is_shown() {
-        let state = OverlayState::of(Display::Flex, Visibility::Inherited, true, false);
+        let state = OverlayState::of(Display::Flex, Visibility::Visible, true, false);
 
         assert_eq!(state, OverlayState::Shown);
         assert!(state.owns_input());

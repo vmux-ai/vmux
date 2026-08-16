@@ -41,7 +41,7 @@ impl DebugView {
                     bottom: Val::Px(0.0),
                     ..default()
                 },
-                Visibility::Inherited,
+                Visibility::Visible,
             ),
         )
     }

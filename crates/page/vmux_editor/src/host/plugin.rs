@@ -546,7 +546,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         ),
     )
 }

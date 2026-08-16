@@ -119,7 +119,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         )
     }
 
@@ -148,7 +148,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         )
     }
 
@@ -177,7 +177,7 @@ impl Browser {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         )
     }
 }
@@ -208,7 +208,7 @@ pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
         },
         Transform::default(),
         GlobalTransform::default(),
-        Visibility::Inherited,
+        Visibility::Visible,
     )
 }
 

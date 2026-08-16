@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 
 use crate::computed::ComputedNode;
+use crate::visibility::Visibility;
 
 /// A length, resolved against the render target when layout runs.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

@@ -4,6 +4,7 @@ use bevy_cef::prelude::{
     CefShutdownState, PrivatePreloadScripts, WebviewMaxFrameRate, WebviewSize, WebviewSource,
 };
 use std::collections::{HashMap, HashSet};
+use vmux_flex::prelude::*;
 
 use super::bridge::{BridgeIdentity, ExtensionBridgeServer};
 use super::load::PreparedExtensions;

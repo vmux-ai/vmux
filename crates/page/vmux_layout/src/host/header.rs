@@ -24,7 +24,7 @@ fn sync_header_visibility(
 ) {
     for entity in &added {
         if let Ok((mut vis, mut node)) = header_q.get_mut(entity) {
-            *vis = Visibility::Inherited;
+            *vis = Visibility::Visible;
             node.display = Display::Flex;
             node.height = Val::Px(CEF_RESERVED_HEIGHT_PX);
         }

@@ -397,7 +397,7 @@ pub(crate) fn sync_windowed_frames(
     layout_hidden: Res<vmux_layout::toggle::LayoutHidden>,
     focus: Res<vmux_layout::stack::FocusedStack>,
     active_panes: Res<vmux_layout::active_panes::ActivePanes>,
-    clear_color: Res<ClearColor>,
+    clear_color: Res<vmux_layout::window::WindowBackground>,
     browser_q: Query<
         (Entity, &Transform, &ComputedNode, &ChildOf),
         (
@@ -1351,12 +1351,12 @@ mod tests {
     fn hidden_or_collapsed_webviews_do_not_render() {
         assert!(!webview_layout_is_renderable(
             Vec2::ZERO,
-            Some(&Visibility::Inherited),
+            Some(&Visibility::Visible),
             false
         ));
         assert!(!webview_layout_is_renderable(
             Vec2::new(100.0, 0.0),
-            Some(&Visibility::Inherited),
+            Some(&Visibility::Visible),
             false
         ));
         assert!(!webview_layout_is_renderable(
@@ -1366,7 +1366,7 @@ mod tests {
         ));
         assert!(webview_layout_is_renderable(
             Vec2::new(100.0, 20.0),
-            Some(&Visibility::Inherited),
+            Some(&Visibility::Visible),
             false
         ));
     }
@@ -1836,7 +1836,7 @@ mod tests {
         ));
         assert!(!command_bar_windowed_view_should_render_hidden(
             Display::Flex,
-            Visibility::Inherited
+            Visibility::Visible
         ));
     }
 

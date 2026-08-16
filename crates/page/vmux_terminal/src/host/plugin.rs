@@ -753,7 +753,7 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         ),
     )
 }
@@ -842,7 +842,7 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 bottom: Val::Px(0.0),
                 ..default()
             },
-            Visibility::Inherited,
+            Visibility::Visible,
         ),
     )
 }

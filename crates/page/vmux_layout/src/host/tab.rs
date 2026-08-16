@@ -374,7 +374,7 @@ fn sync_tab_visibility(
             node.display = target_display;
         }
         let target_vis = if active {
-            Visibility::Inherited
+            Visibility::Visible
         } else {
             Visibility::Hidden
         };

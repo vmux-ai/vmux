@@ -170,7 +170,7 @@ fn prepare_command_bar_surface(
 ) {
     modal_node.display = Display::Flex;
     *modal_vis = if native_overlay {
-        Visibility::Inherited
+        Visibility::Visible
     } else {
         Visibility::Hidden
     };
@@ -1246,7 +1246,7 @@ fn reveal_command_bar(
         ) {
             Some(frames) => pending.frames = frames,
             None => {
-                *vis = Visibility::Inherited;
+                *vis = Visibility::Visible;
                 commands.entity(entity).remove::<PendingCommandBarReveal>();
             }
         }
@@ -1520,7 +1520,7 @@ mod tests {
         close_command_bar_surface(&mut node, &mut visibility, true);
 
         assert_eq!(node.display, Display::Flex);
-        assert_eq!(visibility, Visibility::Inherited);
+        assert_eq!(visibility, Visibility::Visible);
         assert!(!OverlayState::of(node.display, visibility, false, false).owns_input());
     }
 
@@ -1777,7 +1777,7 @@ mod tests {
     #[test]
     fn native_command_bar_ignores_hidden_prewarm_size() {
         assert!(!command_bar_size_should_apply(Visibility::Hidden, None));
-        assert!(command_bar_size_should_apply(Visibility::Inherited, None));
+        assert!(command_bar_size_should_apply(Visibility::Visible, None));
     }
 
     #[test]
@@ -2170,7 +2170,7 @@ mod tests {
                     display: Display::Flex,
                     ..default()
                 },
-                Visibility::Inherited,
+                Visibility::Visible,
                 CefKeyboardTarget,
                 CommandBarRenderedOpen(OpenId(1)),
             ))
