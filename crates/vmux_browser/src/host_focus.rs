@@ -104,7 +104,7 @@ pub(crate) fn compute_host_focus_intent(
     layout_keyboard_q: Query<(), crate::present::LayoutKeyboardHost>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
-    let next = if let Some((modal, windowed)) = modal_q.iter().find_map(
+    let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
         |(entity, node, visibility, keyboard_target, windowed, shown_inline)| {
             OverlayState::of(
                 node.display,
@@ -113,14 +113,21 @@ pub(crate) fn compute_host_focus_intent(
                 shown_inline,
             )
             .owns_input()
-            .then_some((entity, windowed))
+            .then_some((entity, windowed, shown_inline))
         },
     ) {
-        // A windowed command bar hosts a real DOM text field, so Chromium must receive the
-        // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no DOM
-        // key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor before the
-        // event reaches the view, so dismiss still works while the bar holds first responder.
-        if windowed {
+        if shown_inline {
+            // The overlay says it is open, but its own webview is not what is drawn — the layout
+            // page renders it. Reading `windowed` here and focusing that webview hands the
+            // keyboard to a surface nobody can see, and takes the responder off the one that is
+            // showing the field.
+            HostFocusIntent::LayoutView
+        } else if windowed {
+            // A windowed command bar hosts a real DOM text field, so Chromium must receive the
+            // keystrokes itself — `send_key_event` forwarding is a windowless API and produces no
+            // DOM key events here. Escape and Ctrl-C are intercepted by the `NSEvent` monitor
+            // before the event reaches the view, so dismiss still works while the bar holds first
+            // responder.
             HostFocusIntent::Windowed(modal)
         } else {
             HostFocusIntent::WinitHost
@@ -203,6 +210,7 @@ pub(crate) fn apply_windowed_host_focus(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vmux_command::command_bar::panel::CommandBarPanelActive;
     use vmux_layout::bookmark::{BookmarkContextMenuActive, BookmarkTextInputActive};
     use vmux_layout::cef::LayoutCef;
 
@@ -383,6 +391,33 @@ mod tests {
         });
         app.update();
         assert_eq!(intent(&app), HostFocusIntent::LayoutView);
+    }
+
+    #[test]
+    fn an_overlay_the_layout_page_draws_leaves_the_caret_with_the_layout_view() {
+        let mut app = app();
+        let stack = app.world_mut().spawn_empty().id();
+        app.world_mut().spawn((Browser, ChildOf(stack)));
+        app.world_mut().spawn((LayoutCef, CommandBarPanelActive));
+        // The overlay's own webview: open, windowed, and drawn nowhere.
+        app.world_mut().spawn((
+            WindowOverlay,
+            Node::default(),
+            Visibility::Hidden,
+            WebviewWindowed,
+            vmux_core::overlay::OverlayShownInline,
+        ));
+        app.insert_resource(FocusedStack {
+            stack: Some(stack),
+            ..default()
+        });
+        app.update();
+
+        assert_eq!(
+            intent(&app),
+            HostFocusIntent::LayoutView,
+            "focusing the overlay's own webview takes the responder off the surface showing the field"
+        );
     }
 
     #[test]

@@ -28,6 +28,7 @@ use vmux_ui::transport::{BytesListener, PageHost, install_host};
 pub(crate) struct LayoutDom {
     page: Rc<RefCell<PageDom>>,
     listeners: Listeners,
+    pending_scripts: PendingScripts,
     /// The page has an interpreter and a root, so a batch can be evaluated into it.
     ready: Rc<Cell<bool>>,
     /// The first batch has been sent.
@@ -40,6 +41,13 @@ pub(crate) struct LayoutDom {
 /// the page reacting, not a message crossing a thread.
 type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 
+/// Script the page's components asked the host to run, waiting for the render system.
+///
+/// Queued rather than evaluated on the spot because a component asks while the webview is a
+/// `NonSend` resource it has no handle to — and because a call made during a render would reach
+/// the document before the edits that render produced.
+type PendingScripts = Rc<RefCell<Vec<String>>>;
+
 impl LayoutDom {
     /// Mount the layout page and install the transport its components reach the host through.
     ///
@@ -51,17 +59,20 @@ impl LayoutDom {
         host: String,
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
+        let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
 
         install_host(Rc::new(LayoutPageHost {
             bin_ipc,
             webview,
             host,
             listeners: listeners.clone(),
+            pending_scripts: pending_scripts.clone(),
         }));
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
             listeners,
+            pending_scripts,
             ready: Rc::new(Cell::new(false)),
             mounted: Rc::new(Cell::new(false)),
         }
@@ -119,6 +130,18 @@ impl LayoutDom {
         page.handle(event)
     }
 
+    /// Script the page asked for since this was last called.
+    ///
+    /// Drained after a batch is evaluated, never before: a component that asks to focus an element
+    /// is asking about the element the same render just produced.
+    pub(crate) fn take_pending_scripts(&self) -> Vec<String> {
+        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
+            return Vec::new();
+        };
+
+        std::mem::take(&mut *pending)
+    }
+
     /// Deliver a host event to whatever the page registered for it.
     pub(crate) fn deliver(&self, id: &str, payload: &[u8]) {
         let Ok(mut listeners) = self.listeners.try_borrow_mut() else {
@@ -146,6 +169,7 @@ struct LayoutPageHost {
     webview: Entity,
     host: String,
     listeners: Listeners,
+    pending_scripts: PendingScripts,
 }
 
 impl PageHost for LayoutPageHost {
@@ -170,5 +194,20 @@ impl PageHost for LayoutPageHost {
         listeners.entry(id.to_string()).or_default().push(on_bytes);
 
         Ok(())
+    }
+
+    fn focus_element(&self, element_id: &str) {
+        // Through `serde_json` rather than interpolated, because an id reaches this from page code
+        // and a quote in one would otherwise close the string it lands in.
+        let Ok(id) = serde_json::to_string(element_id) else {
+            return;
+        };
+        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
+            return;
+        };
+
+        pending.push(format!(
+            "(function(){{const el=document.getElementById({id});if(el)el.focus();}})();"
+        ));
     }
 }

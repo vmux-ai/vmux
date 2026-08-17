@@ -30,6 +30,14 @@ pub trait PageHost {
 
     /// Register interest in an event id. The callback receives raw payload bytes.
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError>;
+
+    /// Give keyboard focus to an element the page rendered.
+    ///
+    /// A capability of the host rather than of the target, because whether there is a document to
+    /// focus into is a property of what is hosting the page: wasm reaches it directly, the phone
+    /// has no separate document, and the desktop has one it can only reach by evaluating a script.
+    /// The default is the phone's answer.
+    fn focus_element(&self, _element_id: &str) {}
 }
 
 /// Receives the raw payload bytes of one host event.
@@ -57,6 +65,10 @@ impl Host {
 
     pub(crate) fn listen(id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
         Self::with_installed(|host| host.listen(id, on_bytes))?
+    }
+
+    pub(crate) fn focus_element(id: &str) {
+        let _ = Self::with_installed(|host| host.focus_element(id));
     }
 
     /// The host an app installed, or the one this target assumes when nobody did.

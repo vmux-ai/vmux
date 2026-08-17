@@ -168,6 +168,13 @@ mod imp {
 
 #[cfg(not(web))]
 impl FocusClaim {
-    /// Inert: no host is taking the caret away, so nothing has to take it back.
-    pub fn request(self) {}
+    /// Ask the installed host to focus the element.
+    ///
+    /// Not inert any more. This used to be, on the reasoning that no host takes the caret away —
+    /// true of the phone, where the page is the whole app, and false of the desktop, which renders
+    /// this page's components into a document it owns. A page that cannot claim focus there is a
+    /// page that cannot be typed into.
+    pub fn request(self) {
+        crate::transport::Host::focus_element(self.element_id);
+    }
 }

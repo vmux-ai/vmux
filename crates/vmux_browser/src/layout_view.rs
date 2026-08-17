@@ -304,12 +304,17 @@ fn render_layout_dom(view: Option<NonSend<LayoutView>>) {
     let Some(view) = view else {
         return;
     };
-    let Some(script) = view.dom.next_batch() else {
-        return;
-    };
-
-    if let Err(error) = view.webview.evaluate_script(script.as_str()) {
+    if let Some(script) = view.dom.next_batch()
+        && let Err(error) = view.webview.evaluate_script(script.as_str())
+    {
         error!("layout_view: applying an edit batch failed: {error}");
+    }
+
+    // After the batch, so an element a component just asked to focus exists to be found.
+    for script in view.dom.take_pending_scripts() {
+        if let Err(error) = view.webview.evaluate_script(&script) {
+            error!("layout_view: a page script failed: {error}");
+        }
     }
 }
 
