@@ -18,6 +18,32 @@ pub struct NativePage {
     pub transparent: bool,
 }
 
+impl NativePage {
+    /// A page that fills what it is opened into: opaque, and carrying the app's own stylesheets.
+    ///
+    /// Almost every page is this. The ones that are not say so by writing the struct out — the
+    /// chrome is the layout's alone, because it is the only page drawn over the others and so the
+    /// only one that has to see through itself.
+    pub const fn pane(url: &'static str, component: crate::PageComponent) -> Self {
+        Self {
+            url,
+            component,
+            root_id: "main",
+            root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
+            head: r#"<base href="/"/>
+<style>
+html, body { height: 100%; margin: 0; min-height: 0; }
+body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+</style>
+<link rel="stylesheet" href="./assets/index.css"/>
+<link rel="stylesheet" href="./assets/theme.css"/>"#,
+            html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+            body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+            transparent: false,
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 impl NativePage {
     /// The document this page loads: the interpreter, and nothing else.

@@ -11055,7 +11055,6 @@ dependencies = [
  "vmux_command",
  "vmux_core",
  "vmux_editor",
- "vmux_history",
  "vmux_layout",
  "vmux_service",
  "vmux_setting",

@@ -10,10 +10,9 @@ use vmux_command::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
     ContributionsChanged,
 };
-use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
+use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
-use crate::cef::Browser;
 use crate::settings::ResolvedLocale;
 use crate::start::START_PAGE_URL;
 use crate::start::event::{
@@ -31,7 +30,13 @@ pub struct StartPlugin;
 
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
-        app.world_mut().spawn(crate::start::PAGE_MANIFEST);
+        app.world_mut().spawn((
+            crate::start::PAGE_MANIFEST,
+            vmux_core::host::page::NativelyHosted {
+                url: START_PAGE_URL,
+                title: "Start",
+            },
+        ));
         app.add_message::<FocusLauncherInput>()
             .add_message::<InlineTransitionRequested>()
             .add_systems(
@@ -45,7 +50,7 @@ impl Plugin for StartPlugin {
         // Without this an in-place navigation to the URL takes the plain-navigate branch and asks
         // a CEF browser to load it, which for a natively-hosted page means loading nothing. Every
         // route to the launcher — typed, bookmarked, or the startup url — comes through
-        // `handle_start_page_open` instead.
+        // `handle_native_page_open` instead.
         vmux_core::register_host_spawn(app, "start");
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
@@ -55,16 +60,10 @@ impl Plugin for StartPlugin {
             .add_observer(on_start_select_workspace)
             .add_systems(
                 Update,
-                (
-                    handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    sync_live_start_pages,
-                    drain_start_workspace_pickers,
-                ),
+                (sync_live_start_pages, drain_start_workspace_pickers),
             );
     }
 }
-
-type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
 /// Marks a live `vmux://start/` page that has received the current launcher payload.
 /// Cleared implicitly by re-pushing whenever a launcher snapshot changes, so a page that
@@ -403,35 +402,6 @@ fn should_focus_start_sync(
     keyboard_target && (!synced || keyboard_target_added || focus_changed)
 }
 
-/// Claim `vmux://start/` page-open tasks by giving the stack a natively-hosted launcher.
-///
-/// There is no prewarming any more, and nothing to prewarm: the page's components run in this
-/// process, so a launcher is a `VirtualDom` and a `WKWebView`, not a CEF browser fetching a wasm
-/// bundle. The pool that used to hide that cost, and the race over whether a spare had finished
-/// mounting, went with it.
-fn handle_start_page_open(
-    tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    children_q: Query<&Children>,
-    mut commands: Commands,
-) {
-    for (entity, task) in &tasks {
-        if task.url != START_PAGE_URL {
-            continue;
-        }
-        clear_stack_children(task.stack, &children_q, &mut commands);
-        commands.entity(task.stack).insert(PageMetadata {
-            url: START_PAGE_URL.to_string(),
-            title: "Start".to_string(),
-            ..default()
-        });
-        commands.spawn((
-            Browser::native_page(START_PAGE_URL, "Start"),
-            ChildOf(task.stack),
-        ));
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
 /// Answer the `vmux://start/` page's on-mount [`StartDataRequest`] with the shared
 /// command-bar launcher payload (opening selections in place).
 fn on_start_data_request(
@@ -518,15 +488,6 @@ fn build_start_payload(
     );
     payload.prompt_context = prompt_context.context(active_tab, git_info);
     payload
-}
-
-/// Despawn a stack's existing webview children before attaching new content.
-fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
-    if let Ok(children) = children_q.get(stack) {
-        for child in children.iter() {
-            commands.entity(child).try_despawn();
-        }
-    }
 }
 
 /// Claims [`HostsLauncher`] for every start page, so the command bar can ask what a page can do

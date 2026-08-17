@@ -121,6 +121,11 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     transparent: false,
 };
 
+/// Browsing history.
+#[cfg(target_os = "macos")]
+pub static HISTORY_PAGE: NativePage =
+    NativePage::pane(vmux_history::PAGE_URL, vmux_history::page::Page);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own

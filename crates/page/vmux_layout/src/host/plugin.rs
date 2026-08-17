@@ -9,6 +9,7 @@ use crate::cef::LayoutCefPlugin;
 use crate::contract::LayoutContractPlugin;
 use crate::host::header::HeaderLayoutPlugin;
 use crate::host::webview_reveal::WebviewRevealPlugin;
+use crate::native_open::NativeOpenPlugin;
 use crate::pane::PanePlugin;
 use crate::profile::ProfilePlugin;
 use crate::side_sheet::SideSheetLayoutPlugin;
@@ -77,6 +78,7 @@ impl Plugin for LayoutPlugin {
                 WebviewRevealPlugin,
                 ArchivePlugin,
                 PrewarmPagesPlugin,
+                NativeOpenPlugin,
                 BookmarkPlugin,
                 LayoutCefPlugin,
                 crate::workspace_snapshot_publish::WorkspaceSnapshotPlugin,

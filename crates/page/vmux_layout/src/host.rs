@@ -15,6 +15,7 @@ pub mod bookmark;
 pub mod cef;
 pub mod contract;
 pub mod debug;
+pub mod native_open;
 pub mod native_pointer;
 pub mod overlay_adopt;
 pub mod pane;

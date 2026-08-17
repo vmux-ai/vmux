@@ -61,6 +61,18 @@ pub struct PrewarmPage {
     pub pool_size: usize,
 }
 
+/// A page whose components run in this process, declared beside its [`PageManifest`].
+///
+/// The opposite of [`PrewarmPage`], and a page has one or the other. A prewarmed page keeps hidden
+/// browsers mounted so it can be revealed rather than loaded; this one has nothing to keep warm,
+/// because mounting it is building a `VirtualDom` rather than starting a browser and fetching a
+/// bundle into it.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativelyHosted {
+    pub url: &'static str,
+    pub title: &'static str,
+}
+
 impl PageManifest {
     pub fn embedded_host(&self) -> CefEmbeddedHost {
         CefEmbeddedHost {

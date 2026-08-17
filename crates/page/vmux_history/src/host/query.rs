@@ -186,21 +186,25 @@ fn on_history_open_request(
     });
 }
 
+/// Tell every open history page that what it is showing has changed.
+///
+/// Found by `PageMetadata` rather than `WebviewSource`: the page runs in this process now and has
+/// no source, so the old query matched nothing and the page rendered once and never again.
+/// `can_emit_to` for the same reason — a page with no CEF browser can still be emitted to.
 fn broadcast_history_changed(
     changed: Query<(), (Changed<LastVisitedAt>, With<Url>)>,
-    webviews: Query<(Entity, &bevy_cef::prelude::WebviewSource)>,
+    pages: Query<(Entity, &vmux_core::PageMetadata)>,
     browsers: NonSend<bevy_cef_core::prelude::Browsers>,
     mut commands: Commands,
 ) {
     if changed.iter().next().is_none() {
         return;
     }
-    for (e, src) in &webviews {
-        let bevy_cef::prelude::WebviewSource(url) = src;
-        if !url.starts_with("vmux://history") {
+    for (e, page) in &pages {
+        if !page.url.starts_with("vmux://history") {
             continue;
         }
-        if !browsers.has_browser(e) || !browsers.host_emit_ready(&e) {
+        if !browsers.can_emit_to(&e) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
