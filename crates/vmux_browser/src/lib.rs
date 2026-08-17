@@ -19,11 +19,8 @@ mod present;
 use crate::page_life::spawn_popup_stacks;
 use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
-// The layout page's components run in this process, so the dom that drives them lives beside the
-// view that displays it. macOS only, because the wry view it fills is.
 mod page_open;
 mod page_state;
-#[cfg(target_os = "macos")]
 mod scroll;
 mod snapshot;
 pub use host_focus::HostFocusIntent;
@@ -113,12 +110,16 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
+            native_page::NativePagesPlugin,
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
             extensions::project::ExtensionProjectPlugin,
             extensions::windows::ExtensionWindowsPlugin,
+        ));
+        #[cfg(target_os = "macos")]
+        app.add_plugins(native_page::NativePagePlugin::as_layout(
+            &native_page::LAYOUT_PAGE,
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(

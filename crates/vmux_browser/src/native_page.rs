@@ -73,10 +73,14 @@ impl NativePagePlugin {
 
 /// The layout: the window's chrome, transparent and drawn over every pane.
 ///
+/// macOS only, along with every other page here: a page's components are a `ui` target's, and the
+/// only target that is both `ui` and `host` is this one.
+///
 /// The document below is the wasm bundle's own `index.html` with the wasm removed. It is not
 /// decoration: without `index.css` nothing has a Tailwind rule, and without the height and flex
 /// rules on `html`, `body` and the root, a flex child has no box to fill — which renders as one
 /// icon at its intrinsic size filling the window.
+#[cfg(target_os = "macos")]
 pub static LAYOUT_PAGE: NativePage = NativePage {
     url: vmux_layout::event::LAYOUT_PAGE_URL,
     component: vmux_layout::page::Page,
@@ -118,7 +122,9 @@ pub enum Placement {
 struct NativePages(Vec<(&'static NativePage, Placement)>);
 
 /// The half of native page hosting that exists once, however many pages there are.
-struct NativePagesPlugin;
+///
+/// Added by the shell whether or not any page is, so a build with no renderer says so.
+pub struct NativePagesPlugin;
 
 impl Plugin for NativePagesPlugin {
     fn build(&self, app: &mut App) {
