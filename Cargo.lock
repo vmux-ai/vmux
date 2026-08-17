@@ -10620,6 +10620,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "tokio",
  "tungstenite 0.28.0",
  "url",
  "uuid",

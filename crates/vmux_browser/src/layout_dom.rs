@@ -27,6 +27,7 @@ use vmux_ui::transport::{BytesListener, PageHost, install_host};
 #[derive(Clone)]
 pub(crate) struct LayoutDom {
     page: Rc<RefCell<PageDom>>,
+    reactor: Rc<tokio::runtime::Runtime>,
     listeners: Listeners,
     pending_scripts: PendingScripts,
     /// The page has an interpreter and a root, so a batch can be evaluated into it.
@@ -71,11 +72,30 @@ impl LayoutDom {
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
+            reactor: Rc::new(Self::reactor()),
             listeners,
             pending_scripts,
             ready: Rc::new(Cell::new(false)),
             mounted: Rc::new(Cell::new(false)),
         }
+    }
+
+    /// A reactor for the futures the page spawns.
+    ///
+    /// `vmux_ui::platform::sleep_ms` is `tokio::time::sleep` off the web, and a page has plenty of
+    /// reasons to wait — the palette debounces its host search, the layout defers work by a turn.
+    /// Dioxus polls those tasks on this thread, which is Bevy's, and Bevy has no reactor, so
+    /// without one the first timer panics rather than failing anywhere a caller could see.
+    ///
+    /// One worker, and it exists to drive timers rather than to run work: a current-thread runtime
+    /// would let a sleep register and then never wake it, because nothing would be driving it.
+    fn reactor() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .thread_name("vmux-layout-page")
+            .build()
+            .expect("a reactor for the layout page's timers")
     }
 
     /// The page reported that its interpreter is initialized and holding a root.
@@ -96,6 +116,7 @@ impl LayoutDom {
             return None;
         }
 
+        let _reactor = self.reactor.enter();
         let mut page = self.page.try_borrow_mut().ok()?;
         let edits = if self.mounted.get() {
             page.render()?
@@ -122,6 +143,7 @@ impl LayoutDom {
             }
         };
 
+        let _reactor = self.reactor.enter();
         let Ok(mut page) = self.page.try_borrow_mut() else {
             warn!("layout_dom: an event arrived while the page was rendering");
             return EventOutcome::unreadable();
