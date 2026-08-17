@@ -54,6 +54,7 @@ impl Plugin for LayoutViewPlugin {
             Update,
             (
                 resize_layout_view,
+                keep_layout_view_in_front,
                 render_layout_dom,
                 sync_layout_view_color_scheme.run_if(resource_changed::<AppSettings>),
             )
@@ -132,6 +133,35 @@ impl LayoutView {
         if !window.makeFirstResponder(Some(view)) {
             warn!("layout_view: the window refused first responder, chrome input will not work");
         }
+    }
+
+    /// Put the view last in its parent's subview array, so clicks land on the chrome.
+    ///
+    /// `hitTest:` walks siblings back to front and knows nothing of `zPosition`, so the chrome
+    /// painting above a pane is not the same as the chrome receiving the pointer. A windowed CEF
+    /// browser is created with `set_as_child` against this same parent view, and every pane opened
+    /// after this view was built lands after it in that array — visibly on top, and taking every
+    /// click aimed at the command bar drawn over it.
+    ///
+    /// Reasserted rather than done once, because the next pane to open undoes it again.
+    fn raise_above_panes(&self) {
+        use objc2_app_kit::{NSView, NSWindowOrderingMode};
+        use wry::WebViewExtMacOS;
+
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        // `superview` is unsafe only because it hands out a reference AppKit could invalidate; it
+        // is read and dropped inside this call, on the thread that owns the hierarchy.
+        let Some(parent) = (unsafe { view.superview() }) else {
+            return;
+        };
+        let subviews = parent.subviews();
+        let frontmost = subviews.lastObject();
+        if frontmost.is_some_and(|front| std::ptr::eq(&*front, view)) {
+            return;
+        }
+
+        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
     }
 
     fn set_color_scheme(&self, mode: vmux_setting::ColorScheme) {
@@ -248,6 +278,15 @@ fn resize_layout_view(
     if let Err(error) = view.webview.set_bounds(LayoutView::bounds_of(window)) {
         error!("layout_view: set_bounds failed: {error}");
     }
+}
+
+/// A pane can open on any frame, and opening one puts its view in front of the chrome.
+#[cfg(target_os = "macos")]
+fn keep_layout_view_in_front(view: Option<NonSend<LayoutView>>) {
+    let Some(view) = view else {
+        return;
+    };
+    view.raise_above_panes();
 }
 
 #[cfg(target_os = "macos")]
@@ -612,11 +651,11 @@ const WRY_HOST_SHIM: &str = r#"
 
 /// Keep the chrome above the other layers in this window.
 ///
-/// Not the panes — those are windowed CEF browsers living in child `NSWindow`s of their own, which
-/// no ordering here can reach and none is wanted: a pane sits above the chrome and takes the clicks
-/// that land on it, which is the arrangement. What this beats is inside the main window, where
-/// `sync_layout_overlay` still parents a `CALayer` at `zPosition` 100 and subview order cannot
-/// outrank a `zPosition` — only another one can.
+/// `sync_layout_overlay` parents a `CALayer` at `zPosition` 100, and subview order cannot outrank a
+/// `zPosition` — only another one can. This is that other one.
+///
+/// It buys painting and nothing else. A layer's `zPosition` is invisible to `hitTest:`, which walks
+/// the subview array back to front, so raising it here does not move a single click.
 #[cfg(target_os = "macos")]
 fn raise_above_window_layers(webview: &wry::WebView) {
     use objc2_app_kit::NSView;
