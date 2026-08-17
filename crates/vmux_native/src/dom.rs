@@ -183,6 +183,47 @@ impl SurfaceDom {
         Self::respond(responder, edits.unwrap_or_default(), has_requests);
     }
 
+    /// Hand over what the page's own components asked to be done to their elements.
+    ///
+    /// The page collects rather than the host reaching in, because reaching in means composing a
+    /// statement here, and the vocabulary then lives in whatever `format!` last wrote it. This way
+    /// the host ships data and the shim holds the fixed set of things that can be asked for.
+    pub(crate) fn serve_dom_requests(&self, responder: wry::RequestAsyncResponder) {
+        let body = match serde_json::to_vec(&self.take_pending_requests()) {
+            Ok(body) => body,
+            Err(error) => {
+                error!("vmux_native: dom requests would not serialize: {error}");
+                b"[]".to_vec()
+            }
+        };
+        let response = wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
+
+        responder.respond(response);
+    }
+
+    /// Answer the synchronous request the page is blocked on.
+    pub(crate) fn answer_event(
+        &self,
+        request: &wry::http::Request<Vec<u8>>,
+        responder: wry::RequestAsyncResponder,
+    ) {
+        let header = request
+            .headers()
+            .get("dioxus-data")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or_default();
+        let body = self.handle_event(header).response_bytes();
+        let response = wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
+
+        responder.respond(response);
+    }
+
     /// The batch, and whether the page should collect its element requests once it has applied it.
     fn respond(responder: wry::RequestAsyncResponder, edits: Vec<u8>, has_requests: bool) {
         let built = wry::http::Response::builder()

@@ -1,13 +1,13 @@
 //! A page's view: the webview that paints it, and the dom that fills it.
 
-use std::rc::Rc;
-
 use tracing::{error, warn};
 
 use crate::dom::SurfaceDom;
-use crate::embed::{Assets, Embedding};
+use crate::embed::Embedding;
 use crate::page::NativePage;
-use crate::protocol::{PageMessage, VmuxProtocol, WRY_HOST_SHIM};
+use crate::report::PageMessage;
+use crate::route::PageRoutes;
+use crate::shim::WRY_HOST_SHIM;
 
 /// What a view's `prefers-color-scheme` should answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,13 +33,12 @@ impl PageSurface {
     ) -> Result<Self, wry::Error> {
         let dom = SurfaceDom::mount(page.component, &embed);
         let message = PageMessage::new(page, embed.outbox, dom.clone());
-        let assets: Rc<dyn Assets> = embed.assets;
-        let serve = dom.clone();
+        let routes = PageRoutes::new(page, dom.clone(), embed.assets);
         let webview = wry::WebViewBuilder::new()
             .with_transparent(page.transparent)
             .with_initialization_script(WRY_HOST_SHIM)
             .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
-                VmuxProtocol::serve(page, &serve, assets.as_ref(), request, responder);
+                routes.serve(request, responder);
             })
             .with_ipc_handler(move |request| message.receive(request.body()))
             .with_url(page.url)

@@ -17,3 +17,25 @@ pub struct NativePage {
     /// A page drawn over other content wants to see through itself; one filling a pane does not.
     pub transparent: bool,
 }
+
+#[cfg(target_os = "macos")]
+impl NativePage {
+    /// The document this page loads: the interpreter, and nothing else.
+    ///
+    /// The chrome a page carries is not decoration: without its stylesheet nothing has a Tailwind
+    /// rule, and without the height and flex rules on `html`, `body` and the root, a flex child
+    /// has no box to fill — which renders as one icon at its intrinsic size filling the window.
+    pub(crate) fn shell(&self) -> wry::http::Response<Vec<u8>> {
+        let html = crate::InterpreterShell::new(self.root_id, self.url)
+            .with_head(self.head)
+            .with_html_attributes(self.html_attributes)
+            .with_body_class(self.body_class)
+            .with_root_class(self.root_class)
+            .html();
+
+        wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "text/html")
+            .body(html.into_bytes())
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
+    }
+}

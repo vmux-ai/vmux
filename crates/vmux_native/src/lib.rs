@@ -44,7 +44,11 @@ mod dom_request;
 #[cfg(target_os = "macos")]
 mod embed;
 #[cfg(target_os = "macos")]
-mod protocol;
+mod report;
+#[cfg(target_os = "macos")]
+mod route;
+#[cfg(target_os = "macos")]
+mod shim;
 #[cfg(target_os = "macos")]
 mod surface;
 
