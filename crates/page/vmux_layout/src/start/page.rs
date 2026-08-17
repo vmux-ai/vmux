@@ -36,7 +36,7 @@ pub fn Page(
         mounted.set(true);
     });
 
-    use_effect(|| StartFocus::install());
+    use_effect(StartFocus::install);
 
     rsx! {
         document::Title { {translate("start-title")} }
@@ -57,6 +57,19 @@ pub fn Page(
                 }
             }
         }
+    }
+}
+
+/// The launcher as a host surface renders it: no props, because a surface names a component and
+/// has nothing to hand it.
+///
+/// The inline agent transition is a `web` affordance — it swaps this document for an agent page in
+/// place — and a natively-hosted launcher has no document of its own to swap, so it declines and
+/// the pane is replaced the ordinary way.
+#[component]
+pub fn StartPage() -> Element {
+    rsx! {
+        Page {}
     }
 }
 

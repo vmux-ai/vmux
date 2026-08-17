@@ -193,6 +193,7 @@ impl Plugin for BrowserPlugin {
                 navigation::NavigationPlugin,
                 present::PresentPlugin,
                 page_open::PageOpenPlugin,
+                page_surface::PageSurfacePlugin,
                 page_state::PageStatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,

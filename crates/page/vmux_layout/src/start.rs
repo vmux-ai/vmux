@@ -6,10 +6,7 @@ pub mod event;
 pub use vmux_wire::agent::supports_inline_agent_transition;
 
 pub mod focus;
-// `web` only until `command_bar::palette` is portable. That is now the sole thing holding the
-// launcher to the browser: the page's own focus handling has moved to `focus`, which is inert
-// anywhere there is no host taking the caret away.
-#[cfg(web)]
+#[cfg(ui)]
 pub mod page;
 
 #[cfg(host)]
