@@ -535,13 +535,17 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
 /// Read from `PageMetadata` rather than `WebviewSource`: a natively-hosted launcher has no source,
 /// because no CEF browser is fetching anything for it, and one that never claimed this marker would
 /// go quiet — no focus request, and nothing for the command bar to recognise.
+///
+/// `try_insert`, because a launcher is replaced by whatever the user picks from it: choosing an
+/// agent clears the stack's children in the same frame this ran, and a plain `insert` applied
+/// afterwards takes the whole app down with it.
 fn mark_start_pages_as_launcher_hosts(
     starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
     mut commands: Commands,
 ) {
     for (entity, meta) in starts.iter() {
         if meta.url.starts_with(START_PAGE_URL) {
-            commands.entity(entity).insert(HostsLauncher);
+            commands.entity(entity).try_insert(HostsLauncher);
         }
     }
 }
