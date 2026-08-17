@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use bevy::prelude::*;
+use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef_core::prelude::BinIpcEventRaw;
 use vmux_dioxus::{EditScript, EventOutcome, EventRequest, PageDom};
 use vmux_ui::hooks::EventListenerError;
@@ -28,6 +29,7 @@ use vmux_ui::transport::{BytesListener, PageHost, install_host};
 pub(crate) struct LayoutDom {
     page: Rc<RefCell<PageDom>>,
     reactor: Rc<tokio::runtime::Runtime>,
+    waker: PageWaker,
     listeners: Listeners,
     pending_scripts: PendingScripts,
     /// The page has an interpreter and a root, so a batch can be evaluated into it.
@@ -58,6 +60,7 @@ impl LayoutDom {
         bin_ipc: async_channel::Sender<BinIpcEventRaw>,
         webview: Entity,
         host: String,
+        waker: PageWaker,
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
@@ -73,6 +76,7 @@ impl LayoutDom {
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
             reactor: Rc::new(Self::reactor()),
+            waker,
             listeners,
             pending_scripts,
             ready: Rc::new(Cell::new(false)),
@@ -101,13 +105,20 @@ impl LayoutDom {
     /// The page reported that its interpreter is initialized and holding a root.
     pub(crate) fn page_is_ready(&self) {
         self.ready.set(true);
+        self.waker.wake();
     }
 
     /// The page applied the batch it was last given.
+    ///
+    /// Waking is the whole point of hearing about it. A render is withheld until the last batch
+    /// lands, and the ack arrives over IPC rather than through winit, so without this the frame
+    /// that would send the next batch waits for the reactive timer — a second, at rest. Anything
+    /// needing more than one pass then opens in stages.
     pub(crate) fn page_flushed(&self) {
         if let Ok(mut page) = self.page.try_borrow_mut() {
             page.flushed();
         }
+        self.waker.wake();
     }
 
     /// The next batch to evaluate, if there is one and the page can take it.
@@ -149,7 +160,13 @@ impl LayoutDom {
             return EventOutcome::unreadable();
         };
 
-        page.handle(event)
+        let outcome = page.handle(event);
+        drop(page);
+        // A handler almost always wrote a signal, and the click that ran it reached the WKWebView
+        // rather than winit, so nothing else in the app knows a render is due.
+        self.waker.wake();
+
+        outcome
     }
 
     /// Script the page asked for since this was last called.
@@ -177,6 +194,29 @@ impl LayoutDom {
         for listener in registered {
             listener(payload);
         }
+        drop(listeners);
+        self.waker.wake();
+    }
+}
+
+/// Asks winit for a frame, because the page just gave itself something to render.
+///
+/// The app renders on demand — `UpdateMode::Reactive` with a one-second wait — so every source of
+/// work has to say so. A page hosted here has three winit cannot see: an IPC ack, a DOM event
+/// answered on the protocol thread, and a host emit running a listener.
+#[derive(Clone)]
+pub(crate) struct PageWaker(Option<EventLoopProxy<WinitUserEvent>>);
+
+impl PageWaker {
+    pub(crate) fn of(proxy: Option<&EventLoopProxyWrapper>) -> Self {
+        Self(proxy.map(|proxy| (*proxy).clone()))
+    }
+
+    fn wake(&self) {
+        let Some(proxy) = self.0.as_ref() else {
+            return;
+        };
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
 

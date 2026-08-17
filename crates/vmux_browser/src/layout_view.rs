@@ -221,10 +221,14 @@ fn spawn_layout_view(world: &mut World) {
         report_waiting("no primary Window component to size against");
         return;
     };
+    let waker = crate::layout_dom::PageWaker::of(
+        world.get_resource::<bevy::winit::EventLoopProxyWrapper>(),
+    );
     let dom = crate::layout_dom::LayoutDom::mount(
         bin_ipc.clone(),
         layout,
         embedded_page_host_of(LAYOUT_PAGE_URL).unwrap_or_default(),
+        waker,
     );
     let page = PageMessage::new(bin_ipc, layout, dom.clone());
     let serve_dom = dom.clone();
