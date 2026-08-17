@@ -45,6 +45,13 @@ pub trait PageHost {
     /// scroll only where something hosts the page in a document. The default is the phone's answer,
     /// which has no keyboard to move a selection out of view in the first place.
     fn scroll_element_into_view(&self, _element_id: &str) {}
+
+    /// Highlight the whole value of a text field, leaving the view where it is.
+    fn select_element_text(&self, _element_id: &str) {}
+
+    /// Focus a text field and offer its value up to be overtyped: selected whole, and rewound to
+    /// the start so a long one reads as an offer rather than as a tail.
+    fn offer_element_text(&self, _element_id: &str) {}
 }
 
 /// Receives the raw payload bytes of one host event.
@@ -79,6 +86,19 @@ impl Host {
     #[cfg(not(web))]
     pub(crate) fn focus_element(id: &str) {
         let _ = Self::with_installed(|host| host.focus_element(id));
+    }
+
+    /// `not(web)` only, for the same reason as [`Self::focus_element`]: on the web
+    /// [`crate::caret::TextCaret`] reaches the field itself.
+    #[cfg(not(web))]
+    pub(crate) fn select_element_text(id: &str) {
+        let _ = Self::with_installed(|host| host.select_element_text(id));
+    }
+
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(not(web))]
+    pub(crate) fn offer_element_text(id: &str) {
+        let _ = Self::with_installed(|host| host.offer_element_text(id));
     }
 
     /// The host an app installed, or the one this target assumes when nobody did.

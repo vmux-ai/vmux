@@ -287,4 +287,18 @@ impl PageHost for LayoutPageHost {
             r#"el.scrollIntoView({block:"nearest",inline:"nearest"})"#,
         );
     }
+
+    fn select_element_text(&self, element_id: &str) {
+        self.on_element(element_id, "el.setSelectionRange(0,el.value.length)");
+    }
+
+    /// A frame later than the rest, because focusing an input may move the selection itself and
+    /// the focus this follows was queued as its own script.
+    fn offer_element_text(&self, element_id: &str) {
+        self.on_element(
+            element_id,
+            "requestAnimationFrame(function(){\
+             el.focus();el.setSelectionRange(0,el.value.length);el.scrollLeft=0;})",
+        );
+    }
 }

@@ -7,7 +7,6 @@
 /// overtype — has to reach the host. Byte offsets in and out: the DOM's UTF-16 code units stop
 /// here, because mixing the two units is how a caret ends up beside the wrong character.
 #[derive(Clone, Copy)]
-#[cfg_attr(not(web), allow(dead_code))]
 pub struct TextCaret {
     element_id: &'static str,
 }
@@ -160,19 +159,27 @@ mod imp {
 
 #[cfg(not(web))]
 impl TextCaret {
-    /// Inert: a touch host has no programmatic caret to place, and the field scrolls its own.
+    /// Zero, always. Reading the caret is the one operation here that needs an *answer* from the
+    /// document, and a host that reaches it by queueing a script cannot be asked a question.
+    ///
+    /// Only the readline chords consult this, and they degrade to acting from the start of the
+    /// value rather than from the caret.
     pub fn position(self) -> usize {
         0
     }
 
-    /// Inert. See [`Self::position`].
+    /// Inert. See [`Self::position`] — placing needs the offset that reading would have given.
     pub fn place(self, _byte: usize) {}
 
-    /// Inert. See [`Self::position`].
-    pub fn select_all(self) {}
+    /// Asks the host, which may have a document even though this target has no `web_sys`.
+    pub fn select_all(self) {
+        crate::transport::Host::select_element_text(self.element_id);
+    }
 
-    /// Inert. See [`Self::position`].
-    pub fn select_all_from_start_next_frame(self) {}
+    /// Asks the host. See [`Self::select_all`].
+    pub fn select_all_from_start_next_frame(self) {
+        crate::transport::Host::offer_element_text(self.element_id);
+    }
 }
 
 /// Largest char boundary of `s` at or before `i`, so a DOM text offset never slices a UTF-8
