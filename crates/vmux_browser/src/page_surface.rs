@@ -2,46 +2,54 @@
 //!
 //! The layout was the first, and is no longer the only one: a start pane is the same arrangement in
 //! a smaller rectangle. What differs between two native pages is a URL, a root component and the
-//! document chrome they render into — [`SurfacePage`] — so that is all a caller supplies.
+//! document chrome they render into — a [`NativePage`] — so that is all a caller supplies.
 //!
-//! What does *not* differ, and lives here: the view, the `vmux://` protocol that answers `__events`
-//! and serves the shell, the IPC handler that hears the page back, and the `VirtualDom` in
-//! [`dom`](self::dom).
+//! The surface itself belongs to [`vmux_native`], which knows nothing of this app: it owns the
+//! view, the `vmux://` protocol that answers `__events` and serves the shell, the IPC handler that
+//! hears the page back, and the `VirtualDom`. What lives here is the half that is this app's —
+//! which entity gets a view, where it sits, who has the keyboard — and the three channels a page
+//! reaches back through, in [`PageEmbedder`].
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy::winit::WINIT_WINDOWS;
+use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WINIT_WINDOWS, WinitUserEvent};
 use bevy_cef::prelude::BinIpcEventRawSender;
-use bevy_cef_core::prelude::{BinIpcEventRaw, Browsers, Requester, embedded_page_host_of};
+use bevy_cef_core::prelude::{
+    BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
+    asset_load_path_from_request_url, embedded_page_host_of,
+};
 use vmux_core::host::page::HostsPage;
 use vmux_core::page_metadata::PageMetadata;
 use vmux_layout::LayoutCef;
+use vmux_native::{AssetReply, Embedding, NativePage, PageSurface};
+use vmux_ui::hooks::EventListenerError;
 
-use self::dom::{PageWaker, SurfaceDom};
-use self::protocol::{PageMessage, VmuxProtocol, WRY_HOST_SHIM};
 use crate::present::PaneFrames;
-
-pub(crate) mod dom;
-mod protocol;
 
 /// Every page this build can host in its own process, by the URL that asks for it.
 ///
 /// The layout is absent on purpose: its view is full-window, front-most and transparent, and it is
 /// built before any pane exists. It is the same `PageSurface` underneath, driven by its own systems.
-static NATIVE_PAGES: &[&SurfacePage] = &[];
+static NATIVE_PAGES: &[&NativePage] = &[];
 
 pub(crate) struct PageSurfacePlugin;
 
 impl Plugin for PageSurfacePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, open_native_surfaces).add_systems(
-            PostUpdate,
-            (place_native_surfaces, render_native_surfaces)
-                .chain()
-                .after(crate::present::sync_windowed_frames),
-        );
+        app.add_systems(Update, open_native_surfaces)
+            .add_systems(
+                PostUpdate,
+                (place_native_surfaces, render_native_surfaces)
+                    .chain()
+                    .after(crate::present::sync_windowed_frames),
+            )
+            .add_systems(
+                PostUpdate,
+                focus_native_surface.after(crate::host_focus::apply_windowed_host_focus),
+            );
     }
 }
 
@@ -53,12 +61,18 @@ impl Plugin for PageSurfacePlugin {
 #[derive(Default)]
 pub(crate) struct PageSurfaces(HashMap<Entity, PageSurface>);
 
+impl PageSurfaces {
+    fn get(&self, page: Entity) -> Option<&PageSurface> {
+        self.0.get(&page)
+    }
+}
+
 /// Build a view for any page that asks for one and has not got one yet.
 ///
-/// Exclusive because building needs the winit window, the asset requester and the IPC channel at
-/// once, and because the surfaces are `NonSend`.
+/// Exclusive because building needs the winit window and the app's channels at once, and because
+/// the surfaces are `NonSend`.
 fn open_native_surfaces(world: &mut World) {
-    let wanted: Vec<(Entity, &'static SurfacePage)> = world
+    let wanted: Vec<(Entity, &'static NativePage)> = world
         .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>()
         .iter(world)
         .filter_map(|(entity, meta)| {
@@ -77,16 +91,9 @@ fn open_native_surfaces(world: &mut World) {
     else {
         return;
     };
-    let Some(requester) = world.get_resource::<Requester>().cloned() else {
+    let Ok(embedder) = PageEmbedder::of(world) else {
         return;
     };
-    let Some(bin_ipc) = world
-        .get_resource::<BinIpcEventRawSender>()
-        .map(|s| s.0.clone())
-    else {
-        return;
-    };
-    let waker = dom::PageWaker::of(world.get_resource::<bevy::winit::EventLoopProxyWrapper>());
     if world.get_non_send::<PageSurfaces>().is_none() {
         world.insert_non_send(PageSurfaces::default());
     }
@@ -109,11 +116,8 @@ fn open_native_surfaces(world: &mut World) {
             Some(PageSurface::build(
                 page,
                 &**window,
-                entity,
                 bounds,
-                bin_ipc.clone(),
-                requester.clone(),
-                waker.clone(),
+                embedder.embed(entity, page.url),
             ))
         });
         match built {
@@ -165,6 +169,24 @@ fn place_native_surfaces(
     }
 }
 
+/// Hand first responder to the pane the focus intent named.
+///
+/// Every frame rather than on the edge, for the same reason the layout view does it: focus is taken
+/// away by routes with their own schedules, and having lost it looks exactly like never having had
+/// it.
+fn focus_native_surface(
+    surfaces: Option<NonSend<PageSurfaces>>,
+    intent: Res<crate::host_focus::HostFocusIntent>,
+) {
+    let crate::host_focus::HostFocusIntent::NativePane(page) = *intent else {
+        return;
+    };
+    let Some(surface) = surfaces.as_ref().and_then(|surfaces| surfaces.get(page)) else {
+        return;
+    };
+    surface.take_first_responder();
+}
+
 fn render_native_surfaces(surfaces: Option<NonSend<PageSurfaces>>) {
     let Some(surfaces) = surfaces else {
         return;
@@ -174,106 +196,140 @@ fn render_native_surfaces(surfaces: Option<NonSend<PageSurfaces>>) {
     }
 }
 
-/// Everything that distinguishes one natively-hosted page from another.
+/// The app's half of every native page: the channels a surface reaches back through.
 ///
-/// A `const` per page, because a page names itself: the alternative is a registry the pages have to
-/// be looked up in, which is one more thing to keep in agreement with them.
-pub(crate) struct SurfacePage {
-    pub(crate) url: &'static str,
-    pub(crate) component: vmux_dioxus::PageComponent,
-    /// The element the interpreter renders into, and its classes.
-    pub(crate) root_id: &'static str,
-    pub(crate) root_class: &'static str,
-    /// Everything inside `<head>` — stylesheets, `<base>`, inline rules.
-    pub(crate) head: &'static str,
-    pub(crate) html_attributes: &'static str,
-    pub(crate) body_class: &'static str,
-    /// A page drawn over other content wants to see through itself; one filling a pane does not.
-    pub(crate) transparent: bool,
+/// Gathered once and asked for an [`Embedding`] per page, because all three belong to the app
+/// rather than to any one page — what makes an embedding a page's own is the entity it addresses.
+#[derive(Clone)]
+pub(crate) struct PageEmbedder {
+    bin_ipc: async_channel::Sender<BinIpcEventRaw>,
+    requester: Requester,
+    waker: PageWaker,
 }
 
-/// One page's view and the dom that fills it.
-pub(crate) struct PageSurface {
-    webview: wry::WebView,
-    dom: SurfaceDom,
-}
-
-impl PageSurface {
-    /// Build the view for a page, as a child of the app's window.
+impl PageEmbedder {
+    /// Read the app's channels out of the world.
     ///
-    /// Returns `None` when the window is not up yet, which is a state the caller retries out of
-    /// rather than an error.
-    pub(crate) fn build(
-        page: &'static SurfacePage,
-        window: &impl wry::raw_window_handle::HasWindowHandle,
-        entity: Entity,
-        bounds: wry::Rect,
-        bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-        requester: Requester,
-        waker: PageWaker,
-    ) -> Result<Self, wry::Error> {
-        let dom = SurfaceDom::mount(
-            page.component,
-            bin_ipc.clone(),
-            entity,
-            embedded_page_host_of(page.url).unwrap_or_default(),
-            waker,
-        );
-        let message = PageMessage::new(page, bin_ipc, entity, dom.clone());
-        let serve = dom.clone();
-        let webview = wry::WebViewBuilder::new()
-            .with_transparent(page.transparent)
-            .with_initialization_script(WRY_HOST_SHIM)
-            .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
-                VmuxProtocol::serve(page, &serve, &requester, request, responder);
+    /// The error names the one that is missing, because a surface that silently never builds looks
+    /// exactly like one that built and rendered nothing.
+    pub(crate) fn of(world: &mut World) -> Result<Self, &'static str> {
+        let Some(requester) = world.get_resource::<Requester>().cloned() else {
+            return Err("no Requester resource, the CEF custom scheme plugin has not built yet");
+        };
+        let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {
+            return Err("no BinIpcEventRawSender resource, the cef ipc plugin has not built yet");
+        };
+
+        Ok(Self {
+            bin_ipc: bin_ipc.0.clone(),
+            requester,
+            waker: PageWaker::of(world.get_resource::<EventLoopProxyWrapper>()),
+        })
+    }
+
+    /// What one page's surface is handed when it is built.
+    pub(crate) fn embed(&self, entity: Entity, url: &str) -> Embedding {
+        Embedding {
+            outbox: Rc::new(PageOutbox {
+                bin_ipc: self.bin_ipc.clone(),
+                webview: entity,
+                host: embedded_page_host_of(url).unwrap_or_default(),
+            }),
+            assets: Rc::new(PageAssets(self.requester.clone())),
+            waker: Rc::new(self.waker.clone()),
+        }
+    }
+}
+
+/// Asks winit for a frame, because the page just gave itself something to render.
+///
+/// The app renders on demand — `UpdateMode::Reactive` with a one-second wait — so every source of
+/// work has to say so. A page hosted here has three winit cannot see: an IPC ack, a DOM event
+/// answered on the protocol thread, and a host emit running a listener.
+#[derive(Clone)]
+pub(crate) struct PageWaker(Option<EventLoopProxy<WinitUserEvent>>);
+
+impl PageWaker {
+    fn of(proxy: Option<&EventLoopProxyWrapper>) -> Self {
+        Self(proxy.map(|proxy| (*proxy).clone()))
+    }
+}
+
+impl vmux_native::Wake for PageWaker {
+    fn wake(&self) {
+        let Some(proxy) = self.0.as_ref() else {
+            return;
+        };
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
+    }
+}
+
+/// Where a natively-hosted page's emitted bytes go: onto the channel every existing `BinReceive`
+/// observer already reads.
+///
+/// A page in the wasm bundle reaches the host by base64-ing an envelope through `window.ipc`,
+/// which the IPC handler decodes back into a [`BinIpcEventRaw`]. Running in this process the
+/// payload is already bytes and the entity is already known, so it goes straight on.
+struct PageOutbox {
+    bin_ipc: async_channel::Sender<BinIpcEventRaw>,
+    webview: Entity,
+    host: String,
+}
+
+impl vmux_native::Outbox for PageOutbox {
+    fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
+        // Unbounded, so this never blocks — which is what lets an event handler call it while the
+        // page waits on a synchronous reply.
+        self.bin_ipc
+            .send_blocking(BinIpcEventRaw {
+                webview: self.webview,
+                host: self.host.clone(),
+                id: id.to_string(),
+                payload: bytes.to_vec(),
             })
-            .with_ipc_handler(move |request| message.receive(request.body()))
-            .with_url(page.url)
-            .with_bounds(bounds)
-            .build_as_child(window)?;
-
-        Ok(Self { webview, dom })
+            .map_err(|_| EventListenerError::Unsupported)
     }
+}
 
-    pub(crate) fn dom(&self) -> &SurfaceDom {
-        &self.dom
-    }
+/// `vmux://` assets, resolved by the same Bevy systems that answer them for CEF.
+///
+/// CEF's scheme handler only forwards a [`CefRequest`] down a channel and waits for a
+/// [`CefResponse`], so resolution was never CEF-specific and this sends the same request.
+struct PageAssets(Requester);
 
-    pub(crate) fn set_bounds(&self, bounds: wry::Rect) {
-        if let Err(error) = self.webview.set_bounds(bounds) {
-            error!("page_surface: set_bounds failed: {error}");
+impl vmux_native::Assets for PageAssets {
+    /// The reply is handed to a thread rather than answered here: it comes from a Bevy system, and
+    /// this runs on the main thread, so blocking would stop the schedule that produces it.
+    fn fetch(&self, url: &str, reply: AssetReply) {
+        let uri = asset_load_path_from_request_url(url);
+        if uri.is_empty() {
+            error!("page_surface: vmux:// url maps to no asset path, url={url}");
+            reply.fail("no asset path for url");
+            return;
         }
-    }
-
-    /// A pane the frame sync skipped is one that is not on screen.
-    ///
-    /// It has to be said explicitly: the sync leaves a hidden pane out rather than giving it an
-    /// empty rectangle, so a surface left alone would sit at whatever rectangle it last had.
-    pub(crate) fn set_visible(&self, visible: bool) {
-        if let Err(error) = self.webview.set_visible(visible) {
-            error!("page_surface: set_visible failed: {error}");
-        }
-    }
-
-    /// Evaluate the next batch of edits, then whatever scripts the page asked for.
-    ///
-    /// The scripts go after the batch, so an element a component just asked to focus exists to be
-    /// found.
-    pub(crate) fn render(&self) {
-        if let Some(script) = self.dom.next_batch()
-            && let Err(error) = self.webview.evaluate_script(script.as_str())
+        let (tx, rx) = async_channel::bounded::<CefResponse>(1);
+        if self
+            .0
+            .send_blocking(CefRequest {
+                uri: uri.clone(),
+                responser: Responser(tx),
+            })
+            .is_err()
         {
-            error!("page_surface: applying an edit batch failed: {error}");
+            error!("page_surface: vmux:// request channel closed, uri={uri}");
+            reply.fail("request channel closed");
+            return;
         }
-        for script in self.dom.take_pending_scripts() {
-            if let Err(error) = self.webview.evaluate_script(&script) {
-                error!("page_surface: a page script failed: {error}");
+        std::thread::spawn(move || match rx.recv_blocking() {
+            Ok(response) => reply.respond(
+                response.status_code as u16,
+                &response.mime_type,
+                response.data,
+            ),
+            Err(_) => {
+                error!("page_surface: vmux:// responder dropped, uri={uri}");
+                reply.fail("responder dropped");
             }
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn webview(&self) -> &wry::WebView {
-        &self.webview
+        });
     }
 }

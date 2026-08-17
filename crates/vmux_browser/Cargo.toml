@@ -35,11 +35,11 @@ url = { workspace = true }
 uuid = { workspace = true }
 vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
-vmux_dioxus = { path = "../vmux_dioxus" }
 vmux_flex = { path = "../vmux_flex" }
 vmux_git = { path = "../vmux_git" }
 vmux_history = { path = "../page/vmux_history" }
 vmux_layout = { path = "../page/vmux_layout" }
+vmux_native = { path = "../vmux_native" }
 vmux_service = { path = "../host/vmux_service" }
 vmux_setting = { path = "../page/vmux_setting" }
 vmux_space = { path = "../page/vmux_space" }

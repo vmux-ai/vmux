@@ -10627,11 +10627,11 @@ dependencies = [
  "vmux_agent",
  "vmux_command",
  "vmux_core",
- "vmux_dioxus",
  "vmux_flex",
  "vmux_git",
  "vmux_history",
  "vmux_layout",
+ "vmux_native",
  "vmux_service",
  "vmux_setting",
  "vmux_space",
@@ -10817,19 +10817,6 @@ dependencies = [
  "vmux_team",
  "vmux_terminal",
  "vmux_ui",
-]
-
-[[package]]
-name = "vmux_dioxus"
-version = "0.0.30"
-dependencies = [
- "base64 0.22.1",
- "dioxus",
- "dioxus-core",
- "dioxus-html",
- "dioxus-interpreter-js",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -11035,6 +11022,24 @@ dependencies = [
  "vmux_team",
  "vmux_ui",
  "vmux_wire",
+]
+
+[[package]]
+name = "vmux_native"
+version = "0.0.30"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-html",
+ "dioxus-interpreter-js",
+ "objc2-app-kit 0.3.2",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vmux_ui",
+ "wry",
 ]
 
 [[package]]

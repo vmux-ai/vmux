@@ -1,26 +1,42 @@
 //! Serving a natively-hosted page, and hearing it back.
 //!
 //! Two directions over one webview. `vmux://` in: the shell document, the `__events` verdict the
-//! page blocks on, and every asset, which resolve through the same Bevy systems that answer CEF.
-//! wry's string IPC out: the interpreter's own handshake, the caret the document volunteers, the
-//! console, and the rkyv envelopes a page emits.
+//! page blocks on, and every asset, which the host resolves. wry's string IPC out: the
+//! interpreter's own handshake, the caret the document volunteers, the console, and the rkyv
+//! envelopes a page emits.
 
-use bevy::prelude::*;
-use bevy_cef_core::prelude::{
-    BinIpcEventRaw, CefRequest, CefResponse, Requester, Responser,
-    asset_load_path_from_request_url, embedded_page_host_of,
-};
+use tracing::{error, info, warn};
 
-use super::SurfacePage;
-use super::dom::SurfaceDom;
+use crate::dom::SurfaceDom;
+use crate::embed::{AssetReply, Assets, Outbox};
+use crate::page::NativePage;
 
-/// `vmux://` for the wry view, answered by the same Bevy systems that answer it for CEF.
-pub(super) struct VmuxProtocol;
+/// `vmux://` for the wry view, answered by the host that would answer it for any other engine.
+pub(crate) struct VmuxProtocol;
 
 impl VmuxProtocol {
-    /// The responder is handed to a thread rather than awaited here: the reply comes from a Bevy
-    /// system, and this runs on the main thread, so blocking would stop the schedule that produces
-    /// it and deadlock.
+    pub(crate) fn serve(
+        page: &NativePage,
+        dom: &SurfaceDom,
+        assets: &dyn Assets,
+        request: wry::http::Request<Vec<u8>>,
+        responder: wry::RequestAsyncResponder,
+    ) {
+        let url = request.uri().to_string();
+
+        // Both branches must come before the host sees the url. Neither path has a file extension,
+        // so an asset lookup would map them to the host's default document and hand the page HTML
+        // where it expects JSON — or the wasm bundle where it expects the shell.
+        if url.trim_end_matches('/').ends_with("/__events") {
+            return Self::answer_event(dom, &request, responder);
+        }
+        if Self::is_document_request(&url) {
+            return responder.respond(Self::shell_response(page));
+        }
+
+        assets.fetch(&url, AssetReply::of(responder));
+    }
+
     /// Whether this asks for the page itself rather than something it references.
     fn is_document_request(url: &str) -> bool {
         let path = url
@@ -37,12 +53,11 @@ impl VmuxProtocol {
 
     /// The document a natively-hosted page loads: the interpreter, and nothing else.
     ///
-    /// The chrome below is the bundle's own `index.html` with the wasm removed. It is not
-    /// decoration: without `index.css` nothing has a Tailwind rule, and without the height and
-    /// flex rules on `html`, `body` and the root, a flex child has no box to fill — which renders
-    /// as one icon at its intrinsic size filling the window.
-    fn shell_response(page: &SurfacePage) -> wry::http::Response<Vec<u8>> {
-        let html = vmux_dioxus::InterpreterShell::new(page.root_id, page.url)
+    /// The chrome a page carries is not decoration: without its stylesheet nothing has a Tailwind
+    /// rule, and without the height and flex rules on `html`, `body` and the root, a flex child
+    /// has no box to fill — which renders as one icon at its intrinsic size filling the window.
+    fn shell_response(page: &NativePage) -> wry::http::Response<Vec<u8>> {
+        let html = crate::InterpreterShell::new(page.root_id, page.url)
             .with_head(page.head)
             .with_html_attributes(page.html_attributes)
             .with_body_class(page.body_class)
@@ -74,105 +89,29 @@ impl VmuxProtocol {
 
         responder.respond(response);
     }
-
-    pub(super) fn serve(
-        page: &SurfacePage,
-        dom: &SurfaceDom,
-        requester: &Requester,
-        request: wry::http::Request<Vec<u8>>,
-        responder: wry::RequestAsyncResponder,
-    ) {
-        let url = request.uri().to_string();
-
-        // Both branches must come before `asset_load_path_from_request_url`. Neither path has a
-        // file extension, so it would map them to the host's default document and hand the page
-        // HTML where it expects JSON — or the wasm bundle where it expects the shell.
-        if url.trim_end_matches('/').ends_with("/__events") {
-            return Self::answer_event(dom, &request, responder);
-        }
-        if Self::is_document_request(&url) {
-            return responder.respond(Self::shell_response(page));
-        }
-
-        let uri = asset_load_path_from_request_url(&url);
-        if uri.is_empty() {
-            error!("page_surface: vmux:// url maps to no asset path, url={url}");
-            responder.respond(Self::error_response("no asset path for url"));
-            return;
-        }
-        let (tx, rx) = async_channel::bounded::<CefResponse>(1);
-        if requester
-            .send_blocking(CefRequest {
-                uri: uri.clone(),
-                responser: Responser(tx),
-            })
-            .is_err()
-        {
-            error!("page_surface: vmux:// request channel closed, uri={uri}");
-            responder.respond(Self::error_response("request channel closed"));
-            return;
-        }
-        std::thread::spawn(move || match rx.recv_blocking() {
-            Ok(response) => {
-                let built = wry::http::Response::builder()
-                    .status(response.status_code as u16)
-                    .header(wry::http::header::CONTENT_TYPE, response.mime_type)
-                    .body(response.data);
-                match built {
-                    Ok(built) => responder.respond(built),
-                    Err(error) => {
-                        error!("page_surface: vmux:// response invalid uri={uri}: {error}");
-                        responder.respond(Self::error_response("response invalid"));
-                    }
-                }
-            }
-            Err(_) => {
-                error!("page_surface: vmux:// responder dropped, uri={uri}");
-                responder.respond(Self::error_response("responder dropped"));
-            }
-        });
-    }
-
-    fn error_response(reason: &str) -> wry::http::Response<Vec<u8>> {
-        wry::http::Response::builder()
-            .status(500)
-            .header(wry::http::header::CONTENT_TYPE, "text/plain")
-            .body(reason.as_bytes().to_vec())
-            .expect("a literal status and body always build")
-    }
 }
 
 /// One page-to-host message, as it arrives over wry's string IPC.
 ///
-/// `window.cef.binEmit` takes an `ArrayBuffer`; wry's IPC carries text, so the shim base64s the
-/// same `BinIpcEnvelope` bytes and this undoes it. The envelope framing is left alone, because
-/// the Bevy side matches its id with `bin_ipc_event_id::<E>()` and that has to keep agreeing.
-pub(super) struct PageMessage {
-    bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-    webview: Entity,
-    host: String,
+/// A page emits through an `ArrayBuffer`; wry's IPC carries text, so the shim base64s the same
+/// `BinIpcEnvelope` bytes and this undoes it. The envelope framing is left alone, because the host
+/// matches its id with `bin_ipc_event_id::<E>()` and that has to keep agreeing.
+pub(crate) struct PageMessage {
+    outbox: std::rc::Rc<dyn Outbox>,
     name: &'static str,
     dom: SurfaceDom,
 }
 
 impl PageMessage {
-    pub(super) fn new(
-        page: &SurfacePage,
-        bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-        webview: Entity,
-        dom: SurfaceDom,
-    ) -> Self {
-        let host = embedded_page_host_of(page.url).unwrap_or_default();
+    pub(crate) fn new(page: &NativePage, outbox: std::rc::Rc<dyn Outbox>, dom: SurfaceDom) -> Self {
         Self {
-            bin_ipc,
-            webview,
-            host,
+            outbox,
             name: page.url,
             dom,
         }
     }
 
-    pub(super) fn receive(&self, body: &str) {
+    pub(crate) fn receive(&self, body: &str) {
         use base64::Engine;
         use vmux_ui::transport::bin_ipc_envelope::BinIpcEnvelope;
 
@@ -207,35 +146,29 @@ impl PageMessage {
         let bytes = match base64::engine::general_purpose::STANDARD.decode(body) {
             Ok(bytes) => bytes,
             Err(error) => {
-                error!("page_surface: ipc payload was not base64: {error}");
+                error!("vmux_native: ipc payload was not base64: {error}");
                 return;
             }
         };
         let Some((id, payload)) = BinIpcEnvelope::decode(&bytes) else {
             error!(
-                "layout_view: ipc payload was not a bin ipc envelope, {} bytes",
+                "vmux_native: ipc payload was not a bin ipc envelope, {} bytes",
                 bytes.len()
             );
             return;
         };
-        let sent = self.bin_ipc.send_blocking(BinIpcEventRaw {
-            webview: self.webview,
-            host: self.host.clone(),
-            id,
-            payload,
-        });
-        if sent.is_err() {
-            error!("page_surface: bin ipc channel closed");
+        if self.outbox.send(&id, &payload).is_err() {
+            error!("vmux_native: the host outbox is closed");
         }
     }
 }
 
-/// What a wasm page finds on `window` instead of `window.cef`.
+/// What a natively-hosted page finds on `window` instead of the bundle's own bridge.
 ///
 /// Deliberately the same two verbs. `vmux_ui::transport` picks its `PageHost` at runtime, so the
 /// page half of this is a matter of answering to whichever object is present, not of teaching the
 /// pages a second protocol.
-pub(super) const WRY_HOST_SHIM: &str = r#"
+pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
   const report = (kind, text) => {
     try { window.ipc.postMessage('log:' + kind + ':' + text); } catch (e) {}

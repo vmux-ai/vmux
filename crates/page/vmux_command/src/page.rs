@@ -1622,6 +1622,14 @@ fn focus_command_bar_input() {
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).select_all_from_start_next_frame();
 }
 
+/// Put the caret in the launcher's prompt field.
+///
+/// The launcher owns the gesture and this crate owns the field, so the id stays here rather than
+/// being spelled out by every caller that wants the composer focused.
+pub fn focus_prompt_input() {
+    focus_prompt_end(PROMPT_INPUT_ID);
+}
+
 /// Cmd+A and the Ctrl readline chords, offered the key before the field's own handling.
 ///
 /// Returns whether the key was consumed.

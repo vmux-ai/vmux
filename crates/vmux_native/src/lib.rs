@@ -1,8 +1,10 @@
-//! Run a Dioxus page in the host process instead of compiling it to wasm.
+//! Run a vmux page in this process instead of compiling it to wasm.
 //!
-//! The page's components and its `VirtualDom` execute here, in Rust. A browser engine somewhere
-//! else still owns the document and does the layout, styling and painting — this crate only says
-//! what the document should contain, and reads back what the user did to it.
+//! The page's components and its `VirtualDom` execute here, in Rust, while a browser engine owns
+//! the document and does the layout, styling and painting. On macOS that engine is a `wry` webview
+//! this crate builds and drives — [`PageSurface`] — which makes this a small `dioxus_desktop` cut
+//! to what vmux needs: no windowing stack of its own, no event loop, and a page described by a
+//! [`NativePage`] const rather than assembled by a builder.
 //!
 //! Two directions, and they are not symmetric:
 //!
@@ -17,8 +19,9 @@
 //! `XMLHttpRequest` and only calls `preventDefault()` once it has read the reply, so an answer
 //! that arrives a frame later is not late, it is useless — the browser has already acted.
 //!
-//! This crate is deliberately ignorant of both Bevy and wry. It never opens a socket, never binds
-//! a port, and holds no handle to a window.
+//! Nothing here knows what is embedding it. A host answers for the three things this cannot know —
+//! a frame, an asset, and where a page's bytes go — through [`Embedding`], and that is what keeps
+//! an ECS, a window and an asset server on the other side of the boundary.
 //!
 //! Not here yet: an element backing for `onmounted`. Dioxus substitutes `MountedData::new(())` for
 //! a mounted event, whose methods all answer `NotSupported`, so `MountedData::set_focus` and
@@ -33,3 +36,21 @@ pub use edit_script::EditScript;
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
 pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
+
+#[cfg(target_os = "macos")]
+mod dom;
+#[cfg(target_os = "macos")]
+mod embed;
+#[cfg(target_os = "macos")]
+mod page;
+#[cfg(target_os = "macos")]
+mod protocol;
+#[cfg(target_os = "macos")]
+mod surface;
+
+#[cfg(target_os = "macos")]
+pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
+#[cfg(target_os = "macos")]
+pub use page::NativePage;
+#[cfg(target_os = "macos")]
+pub use surface::PageSurface;

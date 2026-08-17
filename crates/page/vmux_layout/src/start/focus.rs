@@ -154,9 +154,19 @@ mod imp {
 
 #[cfg(not(web))]
 impl StartFocus {
-    /// Inert: there is no host taking the caret away, so nothing has to take it back.
-    pub fn request() {}
+    /// Ask the host for the caret, which it gives by queueing a script against the field.
+    pub fn request() {
+        vmux_command::page::focus_prompt_input();
+    }
+
+    /// Inert. The web build installs document listeners that take the caret *back* from whatever
+    /// the browser gave it to; nothing here takes it away in the first place.
     pub fn install() {}
+
+    /// Inert, for the same reason as [`Self::install`]: there is no capture to release.
     pub fn release_for_agent_transition() {}
-    pub fn claim_on_mount() {}
+
+    pub fn claim_on_mount() {
+        Self::request();
+    }
 }

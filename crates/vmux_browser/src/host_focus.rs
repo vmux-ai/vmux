@@ -70,6 +70,12 @@ pub enum HostFocusIntent {
     /// so keys reach a terminal by way of winit and Bevy; the chrome is a DOM that must receive
     /// them natively, and routing them through winit sends them to a CEF browser that is not there.
     LayoutView,
+    /// Active page runs in this process and paints into a `WKWebView` of its own.
+    ///
+    /// Distinct from [`Self::Windowed`] for the reason that makes this whole variant necessary:
+    /// `Windowed` is applied through `Browsers::set_windowed_focus`, which asks CEF to focus a
+    /// browser it has never heard of and silently does nothing. The keyboard would land nowhere.
+    NativePane(Entity),
     /// Active page is a terminal, or there is none — the winit host window must own first-responder.
     #[default]
     WinitHost,
@@ -78,10 +84,16 @@ pub enum HostFocusIntent {
 pub(crate) fn host_focus_intent(
     active_webview: Option<Entity>,
     is_terminal: bool,
+    is_native: bool,
 ) -> HostFocusIntent {
     match active_webview {
-        Some(webview) if !is_terminal => HostFocusIntent::Windowed(webview),
-        _ => HostFocusIntent::WinitHost,
+        Some(webview) if is_terminal => {
+            let _ = webview;
+            HostFocusIntent::WinitHost
+        }
+        Some(webview) if is_native => HostFocusIntent::NativePane(webview),
+        Some(webview) => HostFocusIntent::Windowed(webview),
+        None => HostFocusIntent::WinitHost,
     }
 }
 
@@ -102,6 +114,7 @@ pub(crate) fn compute_host_focus_intent(
         With<WindowOverlay>,
     >,
     layout_keyboard_q: Query<(), crate::present::LayoutKeyboardHost>,
+    native_q: Query<(), With<vmux_core::host::page::HostsPage>>,
     mut intent: ResMut<HostFocusIntent>,
 ) {
     let next = if let Some((modal, windowed, shown_inline)) = modal_q.iter().find_map(
@@ -144,7 +157,8 @@ pub(crate) fn compute_host_focus_intent(
             })
         });
         let is_terminal = active.is_some_and(|webview| terminal_q.contains(webview));
-        host_focus_intent(active, is_terminal)
+        let is_native = active.is_some_and(|webview| native_q.contains(webview));
+        host_focus_intent(active, is_terminal, is_native)
     };
     set_intent(&mut intent, next);
 }

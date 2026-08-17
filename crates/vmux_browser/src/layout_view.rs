@@ -28,9 +28,9 @@ use bevy::window::PrimaryWindow;
 #[cfg(target_os = "macos")]
 use bevy::winit::WINIT_WINDOWS;
 #[cfg(target_os = "macos")]
-use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender};
+use bevy_cef::prelude::BinHostEmitEvent;
 #[cfg(target_os = "macos")]
-use bevy_cef_core::prelude::{Browsers, Requester};
+use bevy_cef_core::prelude::Browsers;
 
 #[cfg(target_os = "macos")]
 use vmux_setting::AppSettings;
@@ -83,7 +83,7 @@ unsafe extern "C" {}
 /// makes this a change of engine rather than a rewrite of the layout's host half.
 #[cfg(target_os = "macos")]
 struct LayoutView {
-    surface: crate::page_surface::PageSurface,
+    surface: vmux_native::PageSurface,
     layout: Entity,
 }
 
@@ -94,7 +94,7 @@ struct LayoutView {
 /// rules on `html`, `body` and the root, a flex child has no box to fill — which renders as one
 /// icon at its intrinsic size filling the window.
 #[cfg(target_os = "macos")]
-static LAYOUT_SURFACE: crate::page_surface::SurfacePage = crate::page_surface::SurfacePage {
+static LAYOUT_SURFACE: vmux_native::NativePage = vmux_native::NativePage {
     url: LAYOUT_PAGE_URL,
     component: vmux_layout::page::Page,
     root_id: "main",
@@ -122,38 +122,6 @@ impl LayoutView {
         wry::Rect {
             position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: wry::dpi::LogicalSize::new(window.width(), window.height()).into(),
-        }
-    }
-
-    /// Make `prefers-color-scheme` inside the view answer with the app's setting rather than the
-    /// system's.
-    ///
-    /// The `theme` event alone is not enough. CEF has a colour-scheme override of its own, which
-    /// `sync_appearance_to_cef` drives, so a CEF page's media queries already agreed with the
-    /// setting; a `WKWebView` has no such thing and inherits its `NSAppearance` from the window.
-    /// Left alone it renders the chrome dark on a dark desktop no matter what the setting says.
-    /// Hand the view AppKit first responder, so its DOM receives keys.
-    ///
-    /// A CEF page is focused through `Browsers::set_windowed_focus` and a terminal wants the
-    /// keyboard on the winit window; neither route can reach a `WKWebView`, so nothing else in the
-    /// app can give this view the responder.
-    fn take_first_responder(&self) {
-        use objc2_app_kit::NSView;
-        use wry::WebViewExtMacOS;
-
-        let wk = self.surface.webview().webview();
-        let view: &NSView = &wk;
-        let Some(window) = view.window() else {
-            return;
-        };
-        let already_holds_it = window
-            .firstResponder()
-            .is_some_and(|current| std::ptr::eq(&*current as *const _ as *const NSView, view));
-        if already_holds_it {
-            return;
-        }
-        if !window.makeFirstResponder(Some(view)) {
-            warn!("layout_view: the window refused first responder, chrome input will not work");
         }
     }
 
@@ -186,6 +154,13 @@ impl LayoutView {
         parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
     }
 
+    /// Make `prefers-color-scheme` inside the view answer with the app's setting rather than the
+    /// system's.
+    ///
+    /// The `theme` event alone is not enough. CEF has a colour-scheme override of its own, which
+    /// `sync_appearance_to_cef` drives, so a CEF page's media queries already agreed with the
+    /// setting; a `WKWebView` has no such thing and inherits its `NSAppearance` from the window.
+    /// Left alone it renders the chrome dark on a dark desktop no matter what the setting says.
     fn set_color_scheme(&self, mode: vmux_setting::ColorScheme) {
         use objc2_app_kit::{
             NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua,
@@ -219,15 +194,13 @@ fn spawn_layout_view(world: &mut World) {
         report_waiting("no primary window entity");
         return;
     };
-    let Some(requester) = world.get_resource::<Requester>().cloned() else {
-        report_waiting("no Requester resource, the CEF custom scheme plugin has not built yet");
-        return;
+    let embedder = match crate::page_surface::PageEmbedder::of(world) {
+        Ok(embedder) => embedder,
+        Err(reason) => {
+            report_waiting(reason);
+            return;
+        }
     };
-    let Some(bin_ipc) = world.get_resource::<BinIpcEventRawSender>() else {
-        report_waiting("no BinIpcEventRawSender resource, cef ipc plugin has not built yet");
-        return;
-    };
-    let bin_ipc = bin_ipc.0.clone();
     let Ok(layout) = world
         .query_filtered::<Entity, With<LayoutCef>>()
         .single(world)
@@ -243,20 +216,14 @@ fn spawn_layout_view(world: &mut World) {
         report_waiting("no primary Window component to size against");
         return;
     };
-    let waker = crate::page_surface::dom::PageWaker::of(
-        world.get_resource::<bevy::winit::EventLoopProxyWrapper>(),
-    );
     let built = WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         let window = winit_windows.get_window(window_entity)?;
-        Some(crate::page_surface::PageSurface::build(
+        Some(vmux_native::PageSurface::build(
             &LAYOUT_SURFACE,
             &**window,
-            layout,
             bounds,
-            bin_ipc,
-            requester,
-            waker,
+            embedder.embed(layout, LAYOUT_PAGE_URL),
         ))
     });
     match built {
@@ -329,7 +296,7 @@ fn sync_layout_view_focus(
     let Some(view) = view else {
         return;
     };
-    view.take_first_responder();
+    view.surface.take_first_responder();
 }
 
 #[cfg(target_os = "macos")]
@@ -343,9 +310,7 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, view: Option<NonSend<Layou
 
     // Straight to the listener the page registered. The wasm bundle needed this base64'd through
     // a JS shim because the page was on the other side of a browser; it is in this process now.
-    view.surface
-        .dom()
-        .deliver(&host_emit.id, &host_emit.payload);
+    view.surface.deliver(&host_emit.id, &host_emit.payload);
 }
 
 /// Evaluate whatever the page's components rendered.

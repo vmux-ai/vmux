@@ -1,12 +1,12 @@
 //! One page's `VirtualDom`, run here rather than compiled into a wasm bundle.
 //!
-//! [`PageSurface`](super::PageSurface) owns the `WKWebView`; this owns what fills it. The webview
-//! is handed a document carrying nothing but the interpreter, and every element it displays arrives
+//! [`PageSurface`](crate::PageSurface) owns the webview; this owns what fills it. The webview is
+//! handed a document carrying nothing but the interpreter, and every element it displays arrives
 //! as a batch of edits evaluated into it.
 //!
 //! Three things share one `Rc`, all on the main thread:
 //!
-//! - the render system, which asks the dom for a batch each frame,
+//! - the host's render call, which asks the dom for a batch each frame,
 //! - the `vmux://` handler, which answers `__events` while the page blocks on the reply,
 //! - and the IPC handler, which hears `initialize` and `flushed` back from the page.
 //!
@@ -17,12 +17,12 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use bevy::prelude::*;
-use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef_core::prelude::BinIpcEventRaw;
-use vmux_dioxus::{EditScript, EventOutcome, EventRequest, PageDom};
+use tracing::warn;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
+
+use crate::embed::{Embedding, Outbox, Wake};
+use crate::{EditScript, EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.
 #[derive(Clone)]
@@ -30,7 +30,7 @@ pub(crate) struct SurfaceDom {
     page: Rc<RefCell<PageDom>>,
     host: Rc<dyn PageHost>,
     reactor: Rc<tokio::runtime::Runtime>,
-    waker: PageWaker,
+    waker: Rc<dyn Wake>,
     caret: CaretMirror,
     listeners: Listeners,
     pending_scripts: PendingScripts,
@@ -46,33 +46,25 @@ pub(crate) struct SurfaceDom {
 /// the page reacting, not a message crossing a thread.
 type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 
-/// Script the page's components asked the host to run, waiting for the render system.
+/// Script the page's components asked the host to run, waiting for the next render.
 ///
-/// Queued rather than evaluated on the spot because a component asks while the webview is a
-/// `NonSend` resource it has no handle to — and because a call made during a render would reach
-/// the document before the edits that render produced.
+/// Queued rather than evaluated on the spot because a component asks while it has no handle to the
+/// webview at all — and because a call made during a render would reach the document before the
+/// edits that render produced.
 type PendingScripts = Rc<RefCell<Vec<String>>>;
 
 impl SurfaceDom {
-    /// Mount the layout page and build the transport its components reach the host through.
+    /// Mount a page and build the transport its components reach the host through.
     ///
     /// The transport is entered as a [`HostScope`] around every entry into the dom rather than
     /// installed for the thread, because the thread will eventually run more than one page and a
     /// single installed host would leave all but the last talking to the wrong one.
-    pub(crate) fn mount(
-        component: vmux_dioxus::PageComponent,
-        bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-        webview: Entity,
-        host: String,
-        waker: PageWaker,
-    ) -> Self {
+    pub(crate) fn mount(component: crate::PageComponent, embed: &Embedding) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
         let caret = CaretMirror::default();
-        let page_host: Rc<dyn PageHost> = Rc::new(SurfacePageHost {
-            bin_ipc,
-            webview,
-            host,
+        let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
+            outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
             pending_scripts: pending_scripts.clone(),
             caret: caret.clone(),
@@ -80,9 +72,9 @@ impl SurfaceDom {
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(component))),
-            host: page_host,
+            host,
             reactor: Rc::new(Self::reactor()),
-            waker,
+            waker: embed.waker.clone(),
             caret,
             listeners,
             pending_scripts,
@@ -95,8 +87,8 @@ impl SurfaceDom {
     ///
     /// `vmux_ui::platform::sleep_ms` is `tokio::time::sleep` off the web, and a page has plenty of
     /// reasons to wait — the palette debounces its host search, the layout defers work by a turn.
-    /// Dioxus polls those tasks on this thread, which is Bevy's, and Bevy has no reactor, so
-    /// without one the first timer panics rather than failing anywhere a caller could see.
+    /// Dioxus polls those tasks on this thread, which is the host's, and a host with no reactor of
+    /// its own would panic on the first timer rather than failing anywhere a caller could see.
     ///
     /// One worker, and it exists to drive timers rather than to run work: a current-thread runtime
     /// would let a sleep register and then never wake it, because nothing would be driving it.
@@ -106,7 +98,7 @@ impl SurfaceDom {
             .enable_time()
             .thread_name("vmux-page")
             .build()
-            .expect("a reactor for the layout page's timers")
+            .expect("a reactor for a page's timers")
     }
 
     /// The page reported that its interpreter is initialized and holding a root.
@@ -118,9 +110,9 @@ impl SurfaceDom {
     /// The page applied the batch it was last given.
     ///
     /// Waking is the whole point of hearing about it. A render is withheld until the last batch
-    /// lands, and the ack arrives over IPC rather than through winit, so without this the frame
-    /// that would send the next batch waits for the reactive timer — a second, at rest. Anything
-    /// needing more than one pass then opens in stages.
+    /// lands, and the ack arrives over IPC rather than through the host's event loop, so without
+    /// this the frame that would send the next batch waits for a reactive timer. Anything needing
+    /// more than one pass then opens in stages.
     pub(crate) fn page_flushed(&self) {
         let _host = HostScope::enter(self.host.clone());
         if let Ok(mut page) = self.page.try_borrow_mut() {
@@ -150,7 +142,7 @@ impl SurfaceDom {
 
     /// Run one event through the page and produce the reply it is blocked on.
     ///
-    /// The borrow can fail: this arrives on the main run loop, which the app spins inside modal
+    /// The borrow can fail: this arrives on the main run loop, which an app spins inside modal
     /// dialogs and menu tracking, so it can land while a render holds the dom. Letting the browser
     /// act is the only safe answer there — the alternative is re-entering the runtime mid-render,
     /// which panics.
@@ -158,7 +150,7 @@ impl SurfaceDom {
         let event = match EventRequest::from_header(header) {
             Ok(event) => event.into_event(),
             Err(error) => {
-                warn!("page_surface: {error}");
+                warn!("vmux_native: {error}");
                 return EventOutcome::unreadable();
             }
         };
@@ -166,14 +158,14 @@ impl SurfaceDom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let Ok(mut page) = self.page.try_borrow_mut() else {
-            warn!("page_surface: an event arrived while the page was rendering");
+            warn!("vmux_native: an event arrived while the page was rendering");
             return EventOutcome::unreadable();
         };
 
         let outcome = page.handle(event);
         drop(page);
-        // A handler almost always wrote a signal, and the click that ran it reached the WKWebView
-        // rather than winit, so nothing else in the app knows a render is due.
+        // A handler almost always wrote a signal, and the click that ran it reached the webview
+        // rather than the host's event loop, so nothing else knows a render is due.
         self.waker.wake();
 
         outcome
@@ -202,7 +194,7 @@ impl SurfaceDom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let Ok(mut listeners) = self.listeners.try_borrow_mut() else {
-            warn!("page_surface: a host emit arrived while the page was registering listeners");
+            warn!("vmux_native: a host emit arrived while the page was registering listeners");
             return;
         };
         let Some(registered) = listeners.get_mut(id) else {
@@ -217,37 +209,14 @@ impl SurfaceDom {
     }
 }
 
-/// Asks winit for a frame, because the page just gave itself something to render.
-///
-/// The app renders on demand — `UpdateMode::Reactive` with a one-second wait — so every source of
-/// work has to say so. A page hosted here has three winit cannot see: an IPC ack, a DOM event
-/// answered on the protocol thread, and a host emit running a listener.
-#[derive(Clone)]
-pub(crate) struct PageWaker(Option<EventLoopProxy<WinitUserEvent>>);
-
-impl PageWaker {
-    pub(crate) fn of(proxy: Option<&EventLoopProxyWrapper>) -> Self {
-        Self(proxy.map(|proxy| (*proxy).clone()))
-    }
-
-    fn wake(&self) {
-        let Some(proxy) = self.0.as_ref() else {
-            return;
-        };
-        let _ = proxy.send_event(WinitUserEvent::WakeUp);
-    }
-}
-
 /// A page's half of [`PageHost`], with no browser in between.
 ///
-/// A page in the wasm bundle reaches the host by base64-ing an envelope through `window.ipc`,
-/// which the IPC handler decodes back into a [`BinIpcEventRaw`]. Running in this process, the
-/// payload is already bytes and the entity is already known, so it goes straight onto the channel
-/// every existing `BinReceive` observer already reads.
-struct SurfacePageHost {
-    bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-    webview: Entity,
-    host: String,
+/// A page in a wasm bundle reaches the host by base64-ing an envelope through `window.ipc`, which
+/// the IPC handler decodes back. Running in this process the payload is already bytes, so it goes
+/// straight to the host's [`Outbox`]. Every other capability here is the document's, and this
+/// answers for it without asking anyone.
+struct SurfaceHost {
+    outbox: Rc<dyn Outbox>,
     listeners: Listeners,
     pending_scripts: PendingScripts,
     caret: CaretMirror,
@@ -285,7 +254,7 @@ impl CaretMirror {
     }
 }
 
-impl SurfacePageHost {
+impl SurfaceHost {
     /// Queue a statement to run against an element the page rendered, if it is still there.
     ///
     /// The id goes through `serde_json` rather than interpolation, because it reaches this from
@@ -304,18 +273,9 @@ impl SurfacePageHost {
     }
 }
 
-impl PageHost for SurfacePageHost {
+impl PageHost for SurfaceHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
-        // Unbounded, so this never blocks — which is what lets an event handler call it while the
-        // page waits on a synchronous reply.
-        self.bin_ipc
-            .send_blocking(BinIpcEventRaw {
-                webview: self.webview,
-                host: self.host.clone(),
-                id: id.to_string(),
-                payload: bytes.to_vec(),
-            })
-            .map_err(|_| EventListenerError::Unsupported)
+        self.outbox.send(id, bytes)
     }
 
     fn listen(&self, id: &str, on_bytes: BytesListener) -> Result<(), EventListenerError> {
