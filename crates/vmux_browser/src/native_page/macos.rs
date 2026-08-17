@@ -151,7 +151,7 @@ fn open_native_pages(world: &mut World) {
                     .non_send_mut::<Browsers>()
                     .set_externally_hosted(entity);
                 info!(
-                    "native_page: hosting {} for {entity:?} as {placement:?}",
+                    "native_page: hosting {} for {entity:?} as {placement:?}, {appearance:?}",
                     page.url
                 );
                 world
@@ -257,6 +257,7 @@ fn sync_native_appearance(hosted: Option<NonSend<HostedPages>>, settings: Res<Ap
         return;
     };
     let appearance = appearance_of(settings.appearance.mode);
+    info!("native_page: colour scheme set to {appearance:?}");
     for page in hosted.0.values() {
         page.surface.set_appearance(appearance);
     }
