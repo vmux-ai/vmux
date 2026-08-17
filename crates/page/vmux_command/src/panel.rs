@@ -41,6 +41,34 @@ struct PanelDrag {
     start: PanelPlacement,
 }
 
+impl PanelDrag {
+    /// The move and end legs, mounted on the backdrop only while a drag is under way.
+    ///
+    /// The backdrop covers the viewport, so a drag that leaves the small grab handle keeps being
+    /// tracked without capturing the pointer. That is also why these cannot simply stay written on
+    /// it: the interpreter registers every bubbling listener on the page root, so a declared
+    /// `pointermove` makes *every* pointer move over the window dispatch — and with the page hosted
+    /// natively each one is a synchronous XHR the web content blocks on until a frame ends.
+    fn listeners(
+        drag: Signal<Option<Self>>,
+        placement: Signal<Option<PanelPlacement>>,
+    ) -> Vec<Attribute> {
+        // A read, not a `peek`: the backdrop has to re-render when `begin` sets the drag, or the
+        // legs never mount and the bar cannot be moved.
+        if drag.read().is_none() {
+            return Vec::new();
+        }
+
+        vec![
+            dioxus_elements::events::onpointermove(move |event| {
+                advance_panel_drag(drag, placement, event)
+            }),
+            dioxus_elements::events::onpointerup(move |_| finish_panel_drag(drag)),
+            dioxus_elements::events::onpointercancel(move |_| finish_panel_drag(drag)),
+        ]
+    }
+}
+
 fn apply_panel_drag(drag: PanelDrag, pointer_x: f64, pointer_y: f64) -> PanelPlacement {
     let dx = pointer_x - drag.pointer_x;
     let dy = pointer_y - drag.pointer_y;
@@ -213,11 +241,7 @@ pub fn CommandBarPanel() -> Element {
         div {
             class: "pointer-events-auto fixed inset-0",
             onclick: move |_| set_open(false),
-            // The move and end legs live on the backdrop, which covers the viewport, so a drag
-            // that leaves the small grab handle keeps being tracked without capturing the pointer.
-            onpointermove: move |e| advance_panel_drag(drag, placement, e),
-            onpointerup: move |_| finish_panel_drag(drag),
-            onpointercancel: move |_| finish_panel_drag(drag),
+            ..PanelDrag::listeners(drag, placement),
             div {
                 class: card_class,
                 style: card_style,

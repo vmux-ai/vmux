@@ -320,9 +320,7 @@ fn SideSheetView(
         div {
             class: "flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-2 pb-3 pt-2 text-foreground",
             style: "scrollbar-gutter:stable;",
-            onpointermove: move |event| update_bookmark_drag(drag_state, &event),
-            onpointerup: move |event| end_bookmark_drag(drag_state, &event),
-            onpointercancel: move |event| cancel_bookmark_drag(drag_state, &event),
+            ..BookmarkDragState::listeners(drag_state),
             if let Some(space) = active_space {
                 div { class: "glass mb-2 flex shrink-0 flex-col overflow-hidden rounded-lg",
                     SideSheetSpaceRow { key: "{space.id}", space: space.clone() }
@@ -1545,6 +1543,35 @@ struct BookmarkDragState {
     ghost_offset_y: f64,
     active: bool,
     target: Option<BookmarkDropTarget>,
+}
+
+impl BookmarkDragState {
+    /// The legs of the drag that only mean anything once one has begun.
+    ///
+    /// They are spread onto the container rather than written on it, because a declared
+    /// `pointermove` is not free: the interpreter registers every bubbling listener on the page
+    /// root, so one anywhere in the tree makes *every* pointer move on the page dispatch. On the
+    /// wasm path that is a call; with the page hosted natively it is a synchronous XHR the web
+    /// content blocks on until the host answers, which it can only do between frames. Left
+    /// mounted, it starves the very thing it sits on — scrolling and clicking included.
+    fn listeners(state: Signal<Option<Self>>) -> Vec<Attribute> {
+        // A read, not a `peek`: the container has to re-render when a drag begins, or the legs
+        // never mount. `update_bookmark_drag` writes only when the drop target changes, so this
+        // costs a render per target, not per move.
+        if state.read().is_none() {
+            return Vec::new();
+        }
+
+        vec![
+            dioxus_elements::events::onpointermove(move |event| {
+                update_bookmark_drag(state, &event)
+            }),
+            dioxus_elements::events::onpointerup(move |event| end_bookmark_drag(state, &event)),
+            dioxus_elements::events::onpointercancel(move |event| {
+                cancel_bookmark_drag(state, &event)
+            }),
+        ]
+    }
 }
 
 fn bookmark_nodes_contain_url(nodes: &[BookmarkNode], url: &str) -> bool {
