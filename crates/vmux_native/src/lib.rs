@@ -38,8 +38,6 @@ pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
 
 #[cfg(target_os = "macos")]
-mod document;
-#[cfg(target_os = "macos")]
 mod dom;
 #[cfg(target_os = "macos")]
 mod dom_request;

@@ -31,14 +31,6 @@ impl PageDom {
         }
     }
 
-    /// Hand the page something every component can reach with `consume_context`.
-    ///
-    /// The root scope, so it is in scope for the whole tree rather than for whichever component
-    /// happened to provide it.
-    pub fn provide<T: Clone + 'static>(&self, context: T) {
-        self.dom.provide_root_context(context);
-    }
-
     /// Teach `dioxus_html` how to turn a serialized event back into typed data.
     ///
     /// The converter is a process-wide slot that starts empty, and every downcast in a handler

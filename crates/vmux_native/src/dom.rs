@@ -22,7 +22,6 @@ use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
-use crate::document::SurfaceDocument;
 use crate::dom_request::DomRequest;
 use crate::embed::{Embedding, Outbox, Wake};
 use crate::{EventOutcome, EventRequest, PageDom};
@@ -78,11 +77,8 @@ impl SurfaceDom {
             caret: caret.clone(),
         });
 
-        let page = PageDom::mount(component);
-        page.provide(SurfaceDocument::of());
-
         Self {
-            page: Rc::new(RefCell::new(page)),
+            page: Rc::new(RefCell::new(PageDom::mount(component))),
             host,
             reactor: Rc::new(Self::reactor()),
             waker: embed.waker.clone(),
