@@ -46,7 +46,7 @@ pub(crate) struct PresentPlugin;
 
 impl Plugin for PresentPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<PaneFrames>().add_systems(
             PostUpdate,
             (
                 sync_keyboard_target,
@@ -414,18 +414,18 @@ pub(crate) fn sync_windowed_frames(
     header_rect: Query<&ComputedNode, (With<Header>, With<Open>)>,
     all_children: Query<&Children>,
     leaf_panes: Query<Entity, (With<Pane>, Without<PaneSplit>)>,
-    mut last_raised_frame: Local<std::collections::HashMap<Entity, (i32, i32, i32, i32)>>,
-    mut last_visible_pages: Local<Vec<Entity>>,
+    mut memory: Local<FrameSyncMemory>,
     mut last_windowed_pages: Local<Vec<Entity>>,
-    mut visible_frames: Local<Vec<WindowedFrameRect>>,
+    mut pane_frames: ResMut<PaneFrames>,
 ) {
+    pane_frames.0.clear();
     let visible_pane_count =
         visible_pane_count_for_windowed_sync(focus.tab, &all_children, &leaf_panes);
     let header_frame = header_rect.iter().find_map(WindowedFrameRect::of);
     let force_raise = layout_hidden.is_changed();
     let mut hidden = Vec::new();
     let mut visible = Vec::new();
-    visible_frames.clear();
+    memory.visible_frames.clear();
     for (entity, tf, self_computed, child_of) in &browser_q {
         if tf.scale.x <= 1.0e-3 {
             hidden.push(entity);
@@ -445,7 +445,10 @@ pub(crate) fn sync_windowed_frames(
             layout_hidden.0,
             visible_pane_count,
         );
-        let became_visible = !last_visible_pages.contains(&entity);
+        if let Some(logical) = PaneFrame::of(frame, scale) {
+            pane_frames.0.insert(entity, logical);
+        }
+        let became_visible = !memory.visible_pages.contains(&entity);
         if became_visible {
             browsers.set_windowed_hidden(&entity, false);
         }
@@ -495,14 +498,14 @@ pub(crate) fn sync_windowed_frames(
             [cover_rgb.red, cover_rgb.green, cover_rgb.blue],
         );
         if browsers.has_browser(entity) {
-            visible_frames.push(frame);
+            memory.visible_frames.push(frame);
             let key = (
                 frame.left.round() as i32,
                 frame.top.round() as i32,
                 frame.width.round() as i32,
                 frame.height.round() as i32,
             );
-            let changed = last_raised_frame.insert(entity, key) != Some(key);
+            let changed = memory.raised_frame.insert(entity, key) != Some(key);
             if force_raise || changed || became_visible {
                 browsers.raise_windowed_to_front(&entity);
             }
@@ -514,14 +517,16 @@ pub(crate) fn sync_windowed_frames(
         .copied()
         .filter(|entity| !last_windowed_pages.contains(entity))
         .collect();
-    let ever_shown: Vec<Entity> = last_raised_frame.keys().copied().collect();
-    for entity in windowed_pages_to_hide(&hidden, &last_visible_pages, &ever_shown, &newly_windowed)
+    let ever_shown: Vec<Entity> = memory.raised_frame.keys().copied().collect();
+    for entity in
+        windowed_pages_to_hide(&hidden, &memory.visible_pages, &ever_shown, &newly_windowed)
     {
         browsers.set_windowed_hidden(&entity, true);
     }
-    *last_visible_pages = visible;
+    memory.visible_pages = visible;
     *last_windowed_pages = current_windowed;
-    *visible_frames = NativeBridge::set_windowed_page_frames(std::mem::take(&mut *visible_frames));
+    memory.visible_frames =
+        NativeBridge::set_windowed_page_frames(std::mem::take(&mut memory.visible_frames));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -530,6 +535,62 @@ pub(crate) struct WindowedFrameRect {
     pub(crate) top: f32,
     pub(crate) width: f32,
     pub(crate) height: f32,
+}
+
+/// What the frame sync has to remember between runs.
+///
+/// One `Local` rather than three: Bevy caps a system's parameters, and three separate slots of
+/// remembered state spend that budget on something that is one thing.
+#[derive(Default)]
+pub(crate) struct FrameSyncMemory {
+    /// The rectangle each page was last raised to, so an unchanged one is not raised again.
+    raised_frame: std::collections::HashMap<Entity, (i32, i32, i32, i32)>,
+    /// The pages visible on the previous run, which is how a page that has just become visible is
+    /// told apart from one that always was.
+    visible_pages: Vec<Entity>,
+    visible_frames: Vec<WindowedFrameRect>,
+}
+
+/// Where each windowed page sits, in the units wry speaks.
+///
+/// `sync_windowed_frames` already answers this question for CEF, in physical pixels plus a separate
+/// scale, because that is what CEF's own API takes. A page hosted in this process needs the same
+/// rectangle in logical pixels — and deriving it a second time from `ComputedNode` is how two
+/// answers to one question start disagreeing about where a pane is.
+///
+/// A page with no entry is one the frame sync did not reach this run: hidden, or no longer a pane.
+#[derive(Resource, Default)]
+pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
+
+impl PaneFrames {
+    pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
+        self.0.get(&page).copied()
+    }
+}
+
+/// One page's rectangle in logical pixels.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct PaneFrame {
+    pub(crate) left: f32,
+    pub(crate) top: f32,
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+}
+
+impl PaneFrame {
+    /// `frame` is physical, as everything downstream of `ComputedNode` is.
+    fn of(frame: WindowedFrameRect, scale: f32) -> Option<Self> {
+        if !scale.is_finite() || scale <= 0.0 {
+            return None;
+        }
+
+        Some(Self {
+            left: frame.left / scale,
+            top: frame.top / scale,
+            width: frame.width / scale,
+            height: frame.height / scale,
+        })
+    }
 }
 
 impl WindowedFrameRect {
