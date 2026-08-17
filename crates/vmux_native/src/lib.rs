@@ -29,11 +29,13 @@
 
 mod edit_script;
 mod event_request;
+mod page;
 mod page_dom;
 mod shell;
 
 pub use edit_script::EditScript;
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
+pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;
 
@@ -42,8 +44,6 @@ mod dom;
 #[cfg(target_os = "macos")]
 mod embed;
 #[cfg(target_os = "macos")]
-mod page;
-#[cfg(target_os = "macos")]
 mod protocol;
 #[cfg(target_os = "macos")]
 mod surface;
@@ -51,6 +51,12 @@ mod surface;
 #[cfg(target_os = "macos")]
 pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
 #[cfg(target_os = "macos")]
-pub use page::NativePage;
+pub use surface::{Appearance, PageSurface};
+
+// wry calls `objc2::exception::catch`, whose C shim ships as a static archive built by
+// `objc2-exception-helper`. Cargo puts that archive's directory on the link path but its `-l`
+// never reaches the binary, so the reference resolves to nothing. Naming the library here is what
+// pulls it in.
 #[cfg(target_os = "macos")]
-pub use surface::PageSurface;
+#[link(name = "objc2_exception_helper_0_1", kind = "static")]
+unsafe extern "C" {}

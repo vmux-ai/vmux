@@ -12,6 +12,7 @@ mod page_life;
 
 mod native_bridge;
 mod native_layout;
+pub mod native_page;
 mod navigation;
 mod present;
 
@@ -20,11 +21,9 @@ use present::CommandBarWindowedFrame;
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 // The layout page's components run in this process, so the dom that drives them lives beside the
 // view that displays it. macOS only, because the wry view it fills is.
-mod layout_view;
 mod page_open;
 mod page_state;
 #[cfg(target_os = "macos")]
-mod page_surface;
 mod scroll;
 mod snapshot;
 pub use host_focus::HostFocusIntent;
@@ -114,7 +113,7 @@ impl Plugin for BrowserPlugin {
         .unwrap_or_else(|error| panic!("failed to start extension bridge: {error}"));
         app.add_plugins((
             vmux_command::command_bar::CommandBarPlugin,
-            layout_view::LayoutViewPlugin,
+            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
             extensions::ExtensionsPlugin,
             extensions::bridge_page::ExtensionBridgePagePlugin,
             extensions::broker::ExtensionBrokerPlugin,
@@ -193,7 +192,6 @@ impl Plugin for BrowserPlugin {
                 navigation::NavigationPlugin,
                 present::PresentPlugin,
                 page_open::PageOpenPlugin,
-                page_surface::PageSurfacePlugin,
                 page_state::PageStatePlugin,
                 snapshot::SnapshotPlugin,
                 scroll::ScrollPlugin,

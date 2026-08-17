@@ -9,6 +9,14 @@ use crate::embed::{Assets, Embedding};
 use crate::page::NativePage;
 use crate::protocol::{PageMessage, VmuxProtocol, WRY_HOST_SHIM};
 
+/// What a view's `prefers-color-scheme` should answer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Appearance {
+    Light,
+    Dark,
+    System,
+}
+
 /// One page running in this process, painted by a webview of its own.
 pub struct PageSurface {
     webview: wry::WebView,
@@ -78,6 +86,77 @@ impl PageSurface {
     /// Hand the page an event the host raised, for whatever it registered against that id.
     pub fn deliver(&self, id: &str, payload: &[u8]) {
         self.dom.deliver(id, payload);
+    }
+
+    /// Put the view last in its parent's subview array, so clicks land on it.
+    ///
+    /// `hitTest:` walks siblings back to front and knows nothing of `zPosition`, so a view
+    /// painting above another is not the same as that view receiving the pointer. Anything the
+    /// host adds to the same parent afterwards lands in front — visibly on top, and taking every
+    /// click aimed at what is drawn over it.
+    ///
+    /// Reasserted rather than done once, because the next sibling to arrive undoes it again.
+    pub fn raise_above_siblings(&self) {
+        use objc2_app_kit::{NSView, NSWindowOrderingMode};
+        use wry::WebViewExtMacOS;
+
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        // `superview` is unsafe only because it hands out a reference AppKit could invalidate; it
+        // is read and dropped inside this call, on the thread that owns the hierarchy.
+        let Some(parent) = (unsafe { view.superview() }) else {
+            return;
+        };
+        let subviews = parent.subviews();
+        let frontmost = subviews.lastObject();
+        if frontmost.is_some_and(|front| std::ptr::eq(&*front, view)) {
+            return;
+        }
+
+        parent.addSubview_positioned_relativeTo(view, NSWindowOrderingMode::Above, None);
+    }
+
+    /// Outrank the layers of whatever else is drawn in this window.
+    ///
+    /// A sibling's `CALayer` can carry a `zPosition`, and subview order cannot outrank one — only
+    /// another `zPosition` can. This is that other one.
+    ///
+    /// It buys painting and nothing else. A layer's `zPosition` is invisible to `hitTest:`, which
+    /// walks the subview array back to front, so this does not move a single click;
+    /// [`Self::raise_above_siblings`] is what does.
+    pub fn raise_above_layers(&self) {
+        use objc2_app_kit::NSView;
+        use wry::WebViewExtMacOS;
+
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        view.setWantsLayer(true);
+        let Some(layer) = view.layer() else {
+            error!("vmux_native: the view has no layer, it will paint under its siblings");
+            return;
+        };
+        layer.setZPosition(500.0);
+    }
+
+    /// Make `prefers-color-scheme` inside the view answer with something other than the system's.
+    ///
+    /// A `WKWebView` has no colour-scheme override and inherits its `NSAppearance` from the
+    /// window, so left alone it renders dark on a dark desktop whatever the app has been set to.
+    pub fn set_appearance(&self, appearance: Appearance) {
+        use objc2_app_kit::{
+            NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua,
+            NSAppearanceNameDarkAqua, NSView,
+        };
+        use wry::WebViewExtMacOS;
+
+        let named = match appearance {
+            Appearance::Light => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameAqua }),
+            Appearance::Dark => NSAppearance::appearanceNamed(unsafe { NSAppearanceNameDarkAqua }),
+            Appearance::System => None,
+        };
+        let wk = self.webview.webview();
+        let view: &NSView = &wk;
+        view.setAppearance(named.as_deref());
     }
 
     /// Give this view AppKit first responder, so its DOM receives keys.
