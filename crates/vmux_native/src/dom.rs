@@ -21,6 +21,7 @@ use tracing::warn;
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
+use crate::document::SurfaceDocument;
 use crate::embed::{Embedding, Outbox, Wake};
 use crate::{EditScript, EventOutcome, EventRequest, PageDom};
 
@@ -40,18 +41,18 @@ pub(crate) struct SurfaceDom {
     mounted: Rc<Cell<bool>>,
 }
 
-/// Host-to-page callbacks, by event id.
-///
-/// A `RefCell` rather than a channel because a listener runs inside the dom's own runtime: it is
-/// the page reacting, not a message crossing a thread.
-type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
-
 /// Script the page's components asked the host to run, waiting for the next render.
 ///
 /// Queued rather than evaluated on the spot because a component asks while it has no handle to the
 /// webview at all — and because a call made during a render would reach the document before the
 /// edits that render produced.
 type PendingScripts = Rc<RefCell<Vec<String>>>;
+
+/// Host-to-page callbacks, by event id.
+///
+/// A `RefCell` rather than a channel because a listener runs inside the dom's own runtime: it is
+/// the page reacting, not a message crossing a thread.
+type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 
 impl SurfaceDom {
     /// Mount a page and build the transport its components reach the host through.
@@ -70,8 +71,11 @@ impl SurfaceDom {
             caret: caret.clone(),
         });
 
+        let page = PageDom::mount(component);
+        page.provide(SurfaceDocument::of());
+
         Self {
-            page: Rc::new(RefCell::new(PageDom::mount(component))),
+            page: Rc::new(RefCell::new(page)),
             host,
             reactor: Rc::new(Self::reactor()),
             waker: embed.waker.clone(),
