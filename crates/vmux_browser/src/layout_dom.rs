@@ -194,6 +194,25 @@ struct LayoutPageHost {
     pending_scripts: PendingScripts,
 }
 
+impl LayoutPageHost {
+    /// Queue a statement to run against an element the page rendered, if it is still there.
+    ///
+    /// The id goes through `serde_json` rather than interpolation, because it reaches this from
+    /// page code and a quote in one would otherwise close the string literal it lands in.
+    fn on_element(&self, element_id: &str, statement: &str) {
+        let Ok(id) = serde_json::to_string(element_id) else {
+            return;
+        };
+        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
+            return;
+        };
+
+        pending.push(format!(
+            "(function(){{const el=document.getElementById({id});if(el){statement};}})();"
+        ));
+    }
+}
+
 impl PageHost for LayoutPageHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         // Unbounded, so this never blocks — which is what lets an event handler call it while the
@@ -219,17 +238,13 @@ impl PageHost for LayoutPageHost {
     }
 
     fn focus_element(&self, element_id: &str) {
-        // Through `serde_json` rather than interpolated, because an id reaches this from page code
-        // and a quote in one would otherwise close the string it lands in.
-        let Ok(id) = serde_json::to_string(element_id) else {
-            return;
-        };
-        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
-            return;
-        };
+        self.on_element(element_id, "el.focus()");
+    }
 
-        pending.push(format!(
-            "(function(){{const el=document.getElementById({id});if(el)el.focus();}})();"
-        ));
+    fn scroll_element_into_view(&self, element_id: &str) {
+        self.on_element(
+            element_id,
+            r#"el.scrollIntoView({block:"nearest",inline:"nearest"})"#,
+        );
     }
 }

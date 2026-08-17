@@ -19,9 +19,13 @@ impl Host {
 
     pub(crate) fn schedule_listener_retry(_retry_tick: Signal<u32>, _current: u32) {}
 
-    /// Scrolling needs the DOM, and the affordance follows keyboard navigation, which a touch host
-    /// does not have. True because there is nothing here for a caller to wait on.
-    pub(crate) fn scroll_item_into_view(_item_id: &str) -> bool {
+    /// Ask the host to reveal the row, and report the request as satisfied.
+    ///
+    /// Always true, where the browser answers false for an element it cannot find. A host here
+    /// reaches the document by queueing a script evaluated *after* the batch that rendered the row,
+    /// so the element exists by the time the request runs and there is nothing to retry.
+    pub(crate) fn scroll_item_into_view(item_id: &str) -> bool {
+        let _ = Host::with_installed(|host| host.scroll_element_into_view(item_id));
         true
     }
 

@@ -38,6 +38,13 @@ pub trait PageHost {
     /// has no separate document, and the desktop has one it can only reach by evaluating a script.
     /// The default is the phone's answer.
     fn focus_element(&self, _element_id: &str) {}
+
+    /// Scroll the least that brings an element the page rendered into view.
+    ///
+    /// A host capability for the same reason as [`Self::focus_element`]: there is a viewport to
+    /// scroll only where something hosts the page in a document. The default is the phone's answer,
+    /// which has no keyboard to move a selection out of view in the first place.
+    fn scroll_element_into_view(&self, _element_id: &str) {}
 }
 
 /// Receives the raw payload bytes of one host event.
