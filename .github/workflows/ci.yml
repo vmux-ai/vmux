@@ -408,58 +408,43 @@ jobs:
       - name: Check the pages that ship on the phone
         run: cargo check --locked --target aarch64-apple-ios -p vmux_chat -p vmux_start -p vmux_team -p vmux_ui
 
-      - name: bevy_cef does not reach the phone
+      # Neither of these is catchable by building. `dioxus` declares `dioxus-web` in a plain
+      # [dependencies] block, so `dioxus/web` is not target-gated and feature unification can put
+      # the wasm renderer in the phone's graph silently — only vmux_page may ask for it, from its
+      # wasm32 block. And bevy_cef arriving would mean a portable page had taken a dependency on
+      # the desktop's browser engine.
+      - name: The phone links no desktop-only crate
         run: |
           set -euo pipefail
 
-          cef_tree() {
-            cargo tree --locked --target aarch64-apple-ios -p "$1" -i bevy_cef 2>/dev/null
+          reaches() {
+            cargo tree --locked --target aarch64-apple-ios -p "$1" -i "$2" 2>/dev/null
           }
 
-          # Unlike the host-target query in deps-rust, `cargo tree --target` exits 0 whether or not
-          # it found anything and prints "nothing to print" to stderr, so the exit code says
-          # nothing and stdout is the only signal. Prove the query can still find bevy_cef before
-          # trusting it not to.
-          if [ -z "$(cef_tree vmux_desktop)" ]; then
-            echo "::error::positive control failed: bevy_cef not found in vmux_desktop, so this job is asserting nothing"
-            exit 1
-          fi
-          echo "control ok: vmux_desktop links bevy_cef"
-
-          found="$(cef_tree vmux_mobile)"
-          if [ -n "$found" ]; then
-            echo "::error::bevy_cef reaches the phone:"
-            echo "$found"
-            exit 1
-          fi
-          echo "ok: vmux_mobile does not link bevy_cef"
-
-      # dioxus declares dioxus-web in a plain [dependencies] block, so `dioxus/web` is not
-      # target-gated: any crate enabling it puts the wasm renderer in the phone's graph, silently
-      # and with no build error. Only vmux_page may ask for it, from its wasm32 block.
-      - name: dioxus-web does not reach the phone
-        run: |
-          set -euo pipefail
-
-          phone_tree() {
-            cargo tree --locked --target aarch64-apple-ios -p vmux_mobile -i "$1" 2>/dev/null
-          }
-
-          # `cargo tree --target` exits 0 whether or not it matched, so stdout is the only signal.
-          # Prove the query works against this package and target before trusting an empty result.
-          if [ -z "$(phone_tree dioxus)" ]; then
-            echo "::error::positive control failed: dioxus not found in vmux_mobile, so this job is asserting nothing"
-            exit 1
-          fi
-          echo "control ok: vmux_mobile links dioxus"
-
-          found="$(phone_tree dioxus-web)"
-          if [ -n "$found" ]; then
-            echo "::error::dioxus-web reaches the phone:"
-            echo "$found"
-            exit 1
-          fi
-          echo "ok: vmux_mobile does not link dioxus-web"
+          # `cargo tree --target` exits 0 whether or not it matched and prints "nothing to print"
+          # to stderr, so the exit code says nothing and stdout is the only signal. That makes an
+          # empty result ambiguous — absent, or a query that has stopped working — so each row
+          # carries a control the same query must still find. Only one of those reads as clean.
+          #
+          # The control for bevy_cef comes from another package on purpose: the phone is where it
+          # is forbidden, so it can only be proven findable somewhere it is expected.
+          while read -r forbidden control_package control_crate; do
+            [ -n "$forbidden" ] || continue
+            if [ -z "$(reaches "$control_package" "$control_crate")" ]; then
+              echo "::error::positive control failed: $control_crate not found in $control_package, so this job is asserting nothing about $forbidden"
+              exit 1
+            fi
+            found="$(reaches vmux_mobile "$forbidden")"
+            if [ -n "$found" ]; then
+              echo "::error::$forbidden reaches the phone:"
+              echo "$found"
+              exit 1
+            fi
+            echo "ok: vmux_mobile does not link $forbidden (control: $control_package links $control_crate)"
+          done <<'FORBIDDEN'
+          dioxus-web vmux_mobile dioxus
+          bevy_cef vmux_desktop bevy_cef
+          FORBIDDEN
 
   lint:
     name: Lint
