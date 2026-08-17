@@ -30,6 +30,7 @@ pub(crate) struct LayoutDom {
     page: Rc<RefCell<PageDom>>,
     reactor: Rc<tokio::runtime::Runtime>,
     waker: PageWaker,
+    caret: CaretMirror,
     listeners: Listeners,
     pending_scripts: PendingScripts,
     /// The page has an interpreter and a root, so a batch can be evaluated into it.
@@ -64,6 +65,7 @@ impl LayoutDom {
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
+        let caret = CaretMirror::default();
 
         install_host(Rc::new(LayoutPageHost {
             bin_ipc,
@@ -71,12 +73,14 @@ impl LayoutDom {
             host,
             listeners: listeners.clone(),
             pending_scripts: pending_scripts.clone(),
+            caret: caret.clone(),
         }));
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
             reactor: Rc::new(Self::reactor()),
             waker,
+            caret,
             listeners,
             pending_scripts,
             ready: Rc::new(Cell::new(false)),
@@ -169,6 +173,11 @@ impl LayoutDom {
         outcome
     }
 
+    /// The document reported where its caret is.
+    pub(crate) fn report_caret(&self, element_id: &str, byte: usize) {
+        self.caret.report(element_id, byte);
+    }
+
     /// Script the page asked for since this was last called.
     ///
     /// Drained after a batch is evaluated, never before: a component that asks to focus an element
@@ -232,6 +241,39 @@ struct LayoutPageHost {
     host: String,
     listeners: Listeners,
     pending_scripts: PendingScripts,
+    caret: CaretMirror,
+}
+
+/// Where the caret last was, as the document itself reported it.
+///
+/// Every other capability here is an instruction, which a queued script delivers fine. Reading the
+/// caret is a question, and there is nobody to answer it: `evaluate_script` returns nothing to a
+/// caller standing in a Dioxus event handler. So the document volunteers the answer on every
+/// selection change instead, and a reader takes the last one.
+///
+/// Stale only if the caret moved without the document saying so, which nothing does — it moves on
+/// input, and the report is posted before the next key can arrive.
+#[derive(Clone, Default)]
+struct CaretMirror(Rc<RefCell<Option<(String, usize)>>>);
+
+impl CaretMirror {
+    fn report(&self, element_id: &str, byte: usize) {
+        let Ok(mut reported) = self.0.try_borrow_mut() else {
+            return;
+        };
+        *reported = Some((element_id.to_string(), byte));
+    }
+
+    /// The caret in this field, or zero if the last report was about another one.
+    fn position_in(&self, element_id: &str) -> usize {
+        let Ok(reported) = self.0.try_borrow() else {
+            return 0;
+        };
+        match reported.as_ref() {
+            Some((id, byte)) if id == element_id => *byte,
+            _ => 0,
+        }
+    }
 }
 
 impl LayoutPageHost {
@@ -299,6 +341,23 @@ impl PageHost for LayoutPageHost {
             element_id,
             "requestAnimationFrame(function(){\
              el.focus();el.setSelectionRange(0,el.value.length);el.scrollLeft=0;})",
+        );
+    }
+
+    fn caret_position(&self, element_id: &str) -> usize {
+        self.caret.position_in(element_id)
+    }
+
+    /// The offset is in UTF-8 bytes and `setSelectionRange` counts UTF-16 units, so the value is
+    /// re-encoded and cut where the caller cut it. The cut is on a character boundary already —
+    /// `TextCaret::place` floors it — so the decode cannot land mid-character.
+    fn place_caret(&self, element_id: &str, byte: usize) {
+        self.on_element(
+            element_id,
+            &format!(
+                "var b=new TextEncoder().encode(el.value).slice(0,{byte});\
+                 var i=new TextDecoder().decode(b).length;el.setSelectionRange(i,i)"
+            ),
         );
     }
 }

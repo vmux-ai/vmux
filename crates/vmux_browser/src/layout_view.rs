@@ -562,6 +562,13 @@ impl PageMessage {
             self.dom.page_flushed();
             return;
         }
+        if let Some(rest) = body.strip_prefix("caret:")
+            && let Some((element_id, byte)) = rest.rsplit_once(':')
+            && let Ok(byte) = byte.parse::<usize>()
+        {
+            self.dom.report_caret(element_id, byte);
+            return;
+        }
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
             match level {
@@ -608,6 +615,19 @@ const WRY_HOST_SHIM: &str = r#"
   const report = (kind, text) => {
     try { window.ipc.postMessage('log:' + kind + ':' + text); } catch (e) {}
   };
+  // Volunteered rather than asked for: the host reaches this document by evaluating a script,
+  // which returns nothing, so a component wanting the caret has no way to ask. Reported in UTF-8
+  // bytes because that is the unit the Rust side counts in.
+  const reportCaret = () => {
+    const el = document.activeElement;
+    if (!el || !el.id || typeof el.selectionStart !== 'number') return;
+    const bytes = new TextEncoder().encode(el.value.slice(0, el.selectionStart)).length;
+    try { window.ipc.postMessage('caret:' + el.id + ':' + bytes); } catch (e) {}
+  };
+  document.addEventListener('selectionchange', reportCaret);
+  for (const name of ['keyup', 'mouseup', 'input', 'focusin']) {
+    document.addEventListener(name, reportCaret, true);
+  }
   window.addEventListener('error', (e) => {
     report('error', (e.message || 'error') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0));
   });

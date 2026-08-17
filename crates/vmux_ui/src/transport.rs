@@ -52,6 +52,17 @@ pub trait PageHost {
     /// Focus a text field and offer its value up to be overtyped: selected whole, and rewound to
     /// the start so a long one reads as an offer rather than as a tail.
     fn offer_element_text(&self, _element_id: &str) {}
+
+    /// Where the caret sits in a text field, as a UTF-8 byte offset into its value.
+    ///
+    /// The one capability here that needs an answer rather than an instruction, which is why a
+    /// host may only be able to give a remembered one. Zero when it has nothing to report.
+    fn caret_position(&self, _element_id: &str) -> usize {
+        0
+    }
+
+    /// Put the caret at a UTF-8 byte offset into a text field's value.
+    fn place_caret(&self, _element_id: &str, _byte: usize) {}
 }
 
 /// Receives the raw payload bytes of one host event.
@@ -99,6 +110,18 @@ impl Host {
     #[cfg(not(web))]
     pub(crate) fn offer_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.offer_element_text(id));
+    }
+
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(not(web))]
+    pub(crate) fn caret_position(id: &str) -> usize {
+        Self::with_installed(|host| host.caret_position(id)).unwrap_or(0)
+    }
+
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(not(web))]
+    pub(crate) fn place_caret(id: &str, byte: usize) {
+        let _ = Self::with_installed(|host| host.place_caret(id, byte));
     }
 
     /// The host an app installed, or the one this target assumes when nobody did.

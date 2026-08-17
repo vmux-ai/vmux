@@ -159,17 +159,19 @@ mod imp {
 
 #[cfg(not(web))]
 impl TextCaret {
-    /// Zero, always. Reading the caret is the one operation here that needs an *answer* from the
-    /// document, and a host that reaches it by queueing a script cannot be asked a question.
+    /// The last position the host was told about, rather than the field's own.
     ///
-    /// Only the readline chords consult this, and they degrade to acting from the start of the
-    /// value rather than from the caret.
+    /// Reading is the one operation here needing an *answer*, and a host reaching the document by
+    /// queueing a script cannot ask a question — so the document reports unprompted instead. Zero
+    /// when nothing has reported, which is where the web path also lands for a missing field.
     pub fn position(self) -> usize {
-        0
+        crate::transport::Host::caret_position(self.element_id)
     }
 
-    /// Inert. See [`Self::position`] — placing needs the offset that reading would have given.
-    pub fn place(self, _byte: usize) {}
+    /// Asks the host. See [`Self::position`].
+    pub fn place(self, byte: usize) {
+        crate::transport::Host::place_caret(self.element_id, byte);
+    }
 
     /// Asks the host, which may have a document even though this target has no `web_sys`.
     pub fn select_all(self) {
