@@ -13,12 +13,6 @@ pub mod page;
 #[cfg(ui)]
 pub mod panel;
 
-// `web`, not `ui`: the modal exists to make a webview behave like one, so it measures its own
-// shell and talks to the host about native window size. The palette it wraps is portable; this is
-// not, and the surface a user actually opens is `panel::CommandBarPanel` instead.
-#[cfg(web)]
-pub mod modal;
-
 pub mod event;
 pub mod size;
 pub use vmux_wire::open_target;

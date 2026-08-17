@@ -67,6 +67,9 @@ impl Host {
         Self::with_installed(|host| host.listen(id, on_bytes))?
     }
 
+    /// `not(web)` only: a page compiled for the browser reaches the document itself, so its
+    /// `FocusClaim` never asks the host.
+    #[cfg(not(web))]
     pub(crate) fn focus_element(id: &str) {
         let _ = Self::with_installed(|host| host.focus_element(id));
     }

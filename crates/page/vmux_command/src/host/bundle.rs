@@ -1,5 +1,3 @@
-pub const COMMAND_BAR_PAGE_URL: &str = "vmux://command-bar/";
-
 /// The command bar's host-side entity.
 ///
 /// It was called `Modal` and lived in `vmux_layout::window`, which made the layout the owner of a
