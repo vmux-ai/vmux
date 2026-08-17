@@ -9,6 +9,12 @@ use crate::embed::{Assets, Embedding};
 use crate::page::NativePage;
 use crate::protocol::{PageMessage, VmuxProtocol, WRY_HOST_SHIM};
 
+/// Ask the page to collect the requests waiting for it.
+///
+/// A constant, and the only script this crate composes: everything the page said travels as JSON
+/// over `__dom` instead of being spliced in here.
+const PULL_DOM_REQUESTS: &str = "window.vmuxWry.pullDom();";
+
 /// What a view's `prefers-color-scheme` should answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Appearance {
@@ -66,20 +72,21 @@ impl PageSurface {
         }
     }
 
-    /// Evaluate the next batch of edits, then whatever scripts the page asked for.
+    /// Evaluate the next batch of edits, then tell the page to collect what it asked the host for.
     ///
-    /// The scripts go after the batch, so an element a component just asked to focus exists to be
-    /// found.
+    /// The collection goes after the batch, so an element a component just asked to focus exists to
+    /// be found. What is evaluated is a constant: the requests themselves travel as JSON over
+    /// `__dom`, so nothing a page said is ever spliced into a script.
     pub fn render(&self) {
         if let Some(script) = self.dom.next_batch()
             && let Err(error) = self.webview.evaluate_script(script.as_str())
         {
             error!("vmux_native: applying an edit batch failed: {error}");
         }
-        for script in self.dom.take_pending_scripts() {
-            if let Err(error) = self.webview.evaluate_script(&script) {
-                error!("vmux_native: a page script failed: {error}");
-            }
+        if self.dom.has_pending_requests()
+            && let Err(error) = self.webview.evaluate_script(PULL_DOM_REQUESTS)
+        {
+            error!("vmux_native: asking the page to collect its requests failed: {error}");
         }
     }
 

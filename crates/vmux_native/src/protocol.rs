@@ -24,11 +24,14 @@ impl VmuxProtocol {
     ) {
         let url = request.uri().to_string();
 
-        // Both branches must come before the host sees the url. Neither path has a file extension,
-        // so an asset lookup would map them to the host's default document and hand the page HTML
-        // where it expects JSON — or the wasm bundle where it expects the shell.
+        // These branches must come before the host sees the url. None of the paths has a file
+        // extension, so an asset lookup would map them to the host's default document and hand the
+        // page HTML where it expects JSON — or the wasm bundle where it expects the shell.
         if url.trim_end_matches('/').ends_with("/__events") {
             return Self::answer_event(dom, &request, responder);
+        }
+        if url.trim_end_matches('/').ends_with("/__dom") {
+            return Self::answer_dom_requests(dom, responder);
         }
         if Self::is_document_request(&url) {
             return responder.respond(Self::shell_response(page));
@@ -68,6 +71,28 @@ impl VmuxProtocol {
             .header(wry::http::header::CONTENT_TYPE, "text/html")
             .body(html.into_bytes())
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
+    }
+
+    /// Hand over what the page's own components asked to be done to their elements.
+    ///
+    /// The page collects rather than the host reaching in, because reaching in means evaluating a
+    /// statement composed here, and the vocabulary then lives in whatever `format!` last wrote it.
+    /// This way the host only ever ships data, and the shim holds the fixed set of things that can
+    /// be asked for.
+    fn answer_dom_requests(dom: &SurfaceDom, responder: wry::RequestAsyncResponder) {
+        let body = match serde_json::to_vec(&dom.take_pending_requests()) {
+            Ok(body) => body,
+            Err(error) => {
+                error!("vmux_native: dom requests would not serialize: {error}");
+                b"[]".to_vec()
+            }
+        };
+        let response = wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
+
+        responder.respond(response);
     }
 
     /// Answer the synchronous request the page is blocked on.
@@ -216,7 +241,51 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
     return bytes.buffer;
   }
+  // Everything the host may ask to be done to an element, and nothing else. The host queues these
+  // as data and the page collects them here once a batch has landed, so no statement composed on
+  // the Rust side is ever evaluated.
+  const applyDomRequest = (request) => {
+    const el = document.getElementById(request.element);
+    if (!el) return;
+    switch (request.kind) {
+      case 'focus':
+        el.focus();
+        break;
+      case 'scrollIntoView':
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        break;
+      case 'selectAll':
+        el.setSelectionRange(0, el.value.length);
+        break;
+      // A frame later than the rest, because focusing a field may move the selection itself.
+      case 'offerText':
+        requestAnimationFrame(() => {
+          el.focus();
+          el.setSelectionRange(0, el.value.length);
+          el.scrollLeft = 0;
+        });
+        break;
+      // The offset is in UTF-8 bytes and `setSelectionRange` counts UTF-16 units, so the value is
+      // re-encoded and cut where the host cut it. The cut is on a character boundary already —
+      // `TextCaret::place` floors it — so the decode cannot land mid-character.
+      case 'placeCaret': {
+        const bytes = new TextEncoder().encode(el.value).slice(0, request.byte);
+        const index = new TextDecoder().decode(bytes).length;
+        el.setSelectionRange(index, index);
+        break;
+      }
+    }
+  };
   window.vmuxWry = {
+    // Collect and apply whatever the page's components asked the host for. Synchronous, like the
+    // event reply, and asked for only when the host says there is something waiting.
+    pullDom() {
+      const request = new XMLHttpRequest();
+      request.open('GET', '/__dom', false);
+      request.send();
+      if (request.status !== 200) return;
+      for (const queued of JSON.parse(request.responseText)) applyDomRequest(queued);
+    },
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];

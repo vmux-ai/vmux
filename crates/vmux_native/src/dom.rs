@@ -22,6 +22,7 @@ use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
 use crate::document::SurfaceDocument;
+use crate::dom_request::DomRequest;
 use crate::embed::{Embedding, Outbox, Wake};
 use crate::{EditScript, EventOutcome, EventRequest, PageDom};
 
@@ -34,19 +35,19 @@ pub(crate) struct SurfaceDom {
     waker: Rc<dyn Wake>,
     caret: CaretMirror,
     listeners: Listeners,
-    pending_scripts: PendingScripts,
+    pending_requests: PendingRequests,
     /// The page has an interpreter and a root, so a batch can be evaluated into it.
     ready: Rc<Cell<bool>>,
     /// The first batch has been sent.
     mounted: Rc<Cell<bool>>,
 }
 
-/// Script the page's components asked the host to run, waiting for the next render.
+/// What the page's components asked the host to do to their elements, waiting for the page to ask.
 ///
-/// Queued rather than evaluated on the spot because a component asks while it has no handle to the
-/// webview at all — and because a call made during a render would reach the document before the
+/// Queued rather than done on the spot because a component asks while it has no handle to the view
+/// at all — and because a request answered during a render would reach the document before the
 /// edits that render produced.
-type PendingScripts = Rc<RefCell<Vec<String>>>;
+type PendingRequests = Rc<RefCell<Vec<DomRequest>>>;
 
 /// Host-to-page callbacks, by event id.
 ///
@@ -62,12 +63,12 @@ impl SurfaceDom {
     /// single installed host would leave all but the last talking to the wrong one.
     pub(crate) fn mount(component: crate::PageComponent, embed: &Embedding) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
-        let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
+        let pending_requests: PendingRequests = Rc::new(RefCell::new(Vec::new()));
         let caret = CaretMirror::default();
         let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
             outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
-            pending_scripts: pending_scripts.clone(),
+            pending_requests: pending_requests.clone(),
             caret: caret.clone(),
         });
 
@@ -81,7 +82,7 @@ impl SurfaceDom {
             waker: embed.waker.clone(),
             caret,
             listeners,
-            pending_scripts,
+            pending_requests,
             ready: Rc::new(Cell::new(false)),
             mounted: Rc::new(Cell::new(false)),
         }
@@ -180,12 +181,19 @@ impl SurfaceDom {
         self.caret.report(element_id, byte);
     }
 
-    /// Script the page asked for since this was last called.
+    /// Whether the page has anything to collect, so a render knows to tell it to ask.
+    pub(crate) fn has_pending_requests(&self) -> bool {
+        self.pending_requests
+            .try_borrow()
+            .is_ok_and(|pending| !pending.is_empty())
+    }
+
+    /// What the page asked for since it last collected.
     ///
-    /// Drained after a batch is evaluated, never before: a component that asks to focus an element
-    /// is asking about the element the same render just produced.
-    pub(crate) fn take_pending_scripts(&self) -> Vec<String> {
-        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
+    /// Drained when the page asks, which it does once a batch has landed: a component that asks to
+    /// focus an element is asking about the element the same render just produced.
+    pub(crate) fn take_pending_requests(&self) -> Vec<DomRequest> {
+        let Ok(mut pending) = self.pending_requests.try_borrow_mut() else {
             return Vec::new();
         };
 
@@ -222,7 +230,7 @@ impl SurfaceDom {
 struct SurfaceHost {
     outbox: Rc<dyn Outbox>,
     listeners: Listeners,
-    pending_scripts: PendingScripts,
+    pending_requests: PendingRequests,
     caret: CaretMirror,
 }
 
@@ -259,21 +267,13 @@ impl CaretMirror {
 }
 
 impl SurfaceHost {
-    /// Queue a statement to run against an element the page rendered, if it is still there.
-    ///
-    /// The id goes through `serde_json` rather than interpolation, because it reaches this from
-    /// page code and a quote in one would otherwise close the string literal it lands in.
-    fn on_element(&self, element_id: &str, statement: &str) {
-        let Ok(id) = serde_json::to_string(element_id) else {
-            return;
-        };
-        let Ok(mut pending) = self.pending_scripts.try_borrow_mut() else {
+    /// Queue something to do to an element the page rendered, for the page to collect.
+    fn request(&self, request: DomRequest) {
+        let Ok(mut pending) = self.pending_requests.try_borrow_mut() else {
             return;
         };
 
-        pending.push(format!(
-            "(function(){{const el=document.getElementById({id});if(el){statement};}})();"
-        ));
+        pending.push(request);
     }
 }
 
@@ -293,44 +293,37 @@ impl PageHost for SurfaceHost {
     }
 
     fn focus_element(&self, element_id: &str) {
-        self.on_element(element_id, "el.focus()");
+        self.request(DomRequest::Focus {
+            element: element_id.to_string(),
+        });
     }
 
     fn scroll_element_into_view(&self, element_id: &str) {
-        self.on_element(
-            element_id,
-            r#"el.scrollIntoView({block:"nearest",inline:"nearest"})"#,
-        );
+        self.request(DomRequest::ScrollIntoView {
+            element: element_id.to_string(),
+        });
     }
 
     fn select_element_text(&self, element_id: &str) {
-        self.on_element(element_id, "el.setSelectionRange(0,el.value.length)");
+        self.request(DomRequest::SelectAll {
+            element: element_id.to_string(),
+        });
     }
 
-    /// A frame later than the rest, because focusing an input may move the selection itself and
-    /// the focus this follows was queued as its own script.
     fn offer_element_text(&self, element_id: &str) {
-        self.on_element(
-            element_id,
-            "requestAnimationFrame(function(){\
-             el.focus();el.setSelectionRange(0,el.value.length);el.scrollLeft=0;})",
-        );
+        self.request(DomRequest::OfferText {
+            element: element_id.to_string(),
+        });
     }
 
     fn caret_position(&self, element_id: &str) -> usize {
         self.caret.position_in(element_id)
     }
 
-    /// The offset is in UTF-8 bytes and `setSelectionRange` counts UTF-16 units, so the value is
-    /// re-encoded and cut where the caller cut it. The cut is on a character boundary already —
-    /// `TextCaret::place` floors it — so the decode cannot land mid-character.
     fn place_caret(&self, element_id: &str, byte: usize) {
-        self.on_element(
-            element_id,
-            &format!(
-                "var b=new TextEncoder().encode(el.value).slice(0,{byte});\
-                 var i=new TextDecoder().decode(b).length;el.setSelectionRange(i,i)"
-            ),
-        );
+        self.request(DomRequest::PlaceCaret {
+            element: element_id.to_string(),
+            byte,
+        });
     }
 }

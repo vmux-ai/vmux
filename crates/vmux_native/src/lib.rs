@@ -44,6 +44,8 @@ mod document;
 #[cfg(target_os = "macos")]
 mod dom;
 #[cfg(target_os = "macos")]
+mod dom_request;
+#[cfg(target_os = "macos")]
 mod embed;
 #[cfg(target_os = "macos")]
 mod protocol;
