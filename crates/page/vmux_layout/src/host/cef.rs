@@ -193,6 +193,10 @@ impl Browser {
 pub fn layout_cef_bundle(host_window: Entity) -> impl Bundle {
     (
         LayoutCef,
+        // No `WebviewSource`: this page's components run in the host process. The marker is how
+        // anything that used to ask "is there a page here?" by looking for a source still gets a
+        // true answer.
+        vmux_core::host::page::HostsPage,
         vmux_core::launcher::RendersLauncherPanel,
         HostWindow(host_window),
         Node {

@@ -44,6 +44,15 @@ pub struct PageManifest {
     pub command_bar: bool,
 }
 
+/// A Dioxus page is mounted on this entity, wherever its components run.
+///
+/// `WebviewSource` used to be the way to ask this, because a page was always a URL a CEF browser
+/// loaded. That stopped being true when the layout began running its components in the host
+/// process: it hosts a page and has no source, so every query filtered on one silently skipped it
+/// — which left its keyboard claims empty and its published context read by nobody.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HostsPage;
+
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrewarmPage {
     pub host: &'static str,

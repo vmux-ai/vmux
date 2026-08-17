@@ -107,13 +107,17 @@ fn sync_keyboard_target(
         return;
     }
 
-    if let Ok(layout) = layout_keyboard_q.single() {
+    // The layout has no CEF browser — its page runs in the host process and its view is handed
+    // keys by AppKit — so there is no target to give `CefKeyboardTarget` to. Taking it off every
+    // browser is the whole job: what must not happen is a pane still holding it and reading the
+    // keystrokes meant for the chrome.
+    //
+    // This used to look for the layout inside `content_q` and hand it the marker. That query is
+    // `With<Browser>`, which the layout has not had since it left CEF, so the comparison could
+    // never be true and the right thing happened only because the loop fell through to `else`.
+    if layout_keyboard_q.single().is_ok() {
         for (browser_e, has_kb) in &content_q {
-            if browser_e == layout {
-                if !has_kb {
-                    commands.entity(browser_e).try_insert(CefKeyboardTarget);
-                }
-            } else if has_kb {
+            if has_kb {
                 commands.entity(browser_e).try_remove::<CefKeyboardTarget>();
             }
         }
