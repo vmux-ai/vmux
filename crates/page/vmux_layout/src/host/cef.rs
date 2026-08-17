@@ -150,6 +150,40 @@ impl Browser {
         )
     }
 
+    /// A pane whose page runs in the host process, with no CEF browser behind it.
+    ///
+    /// The same shape as [`Self::new_with_title`] minus the two components that say "CEF owns
+    /// this": without `WebviewSource` no browser is created for it, and `HostsPage` is how every
+    /// reader that used to ask "is there a page here?" by looking for a source still gets a true
+    /// answer.
+    ///
+    /// `PageMetadata` is complete here rather than filled in later, because the CEF callback that
+    /// would supply a title and icon never fires for a page CEF is not rendering.
+    pub fn native_page(url: &str, title: &str) -> impl Bundle {
+        (
+            Self,
+            WebviewWindowed,
+            vmux_core::host::page::HostsPage,
+            vmux_core::PageMetadata {
+                title: title.to_string(),
+                url: url.to_string(),
+                icon: vmux_core::PageIcon::None,
+                bg_color: None,
+            },
+            WebviewSize(Vec2::new(1280.0, 720.0)),
+            Transform::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                ..default()
+            },
+            Visibility::Visible,
+        )
+    }
+
     pub fn new_error(source_url: &str, display_url: &str, title: &str) -> impl Bundle {
         (
             Self,

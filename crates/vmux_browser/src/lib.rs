@@ -118,8 +118,9 @@ impl Plugin for BrowserPlugin {
             extensions::windows::ExtensionWindowsPlugin,
         ));
         #[cfg(target_os = "macos")]
-        app.add_plugins(native_page::NativePagePlugin::as_layout(
-            &native_page::LAYOUT_PAGE,
+        app.add_plugins((
+            native_page::NativePagePlugin::as_layout(&native_page::LAYOUT_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(

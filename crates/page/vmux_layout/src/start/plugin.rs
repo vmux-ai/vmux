@@ -10,9 +10,7 @@ use vmux_command::snapshot::{
     CommandBarPagesSnapshot, CommandBarSpacesSnapshot, CommandBarWorkSnapshot, Contributions,
     ContributionsChanged,
 };
-use vmux_core::{
-    CefPageAttachRequest, PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask,
-};
+use vmux_core::{PageMetadata, PageOpenError, PageOpenHandled, PageOpenSet, PageOpenTask};
 use vmux_ui::i18n::Locale;
 
 use crate::cef::Browser;
@@ -23,11 +21,9 @@ use crate::start::event::{
     StartSelectWorkspace,
 };
 use crate::tab::{Tab, TabWorkspace, TabWorktree};
-use crate::window::VmuxWindow;
 use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{FocusLauncherInput, HostsLauncher, InlineTransitionRequested};
-use vmux_flex::prelude::*;
 
 /// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
 /// and answers [`StartDataRequest`] with the shared command-bar payload.
@@ -46,19 +42,21 @@ impl Plugin for StartPlugin {
                     begin_requested_inline_transition,
                 ),
             );
+        // Without this an in-place navigation to the URL takes the plain-navigate branch and asks
+        // a CEF browser to load it, which for a natively-hosted page means loading nothing. Every
+        // route to the launcher — typed, bookmarked, or the startup url — comes through
+        // `handle_start_page_open` instead.
+        vmux_core::register_host_spawn(app, "start");
         app.add_plugins(BinEventEmitterPlugin::<(
             StartDataRequest,
             StartSelectWorkspace,
         )>::for_hosts(&["start"]))
-            .add_message::<StartSpareRevealed>()
             .add_observer(on_start_data_request)
             .add_observer(on_start_select_workspace)
             .add_systems(
                 Update,
                 (
                     handle_start_page_open.in_set(PageOpenSet::HandleKnownPages),
-                    maintain_warm_start_pool,
-                    on_start_spare_revealed.after(PageOpenSet::HandleKnownPages),
                     sync_live_start_pages,
                     drain_start_workspace_pickers,
                 ),
@@ -68,38 +66,11 @@ impl Plugin for StartPlugin {
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
-/// How many prewarmed `vmux://start/` webviews to keep ready.
-const WARM_START_POOL_SIZE: usize = 1;
-
-/// Marks a prewarmed, parked `vmux://start/` webview waiting to be claimed by the next
-/// start open. Removed when the spare is reparented into a real stack.
-#[derive(Component)]
-struct WarmStartSpare;
-
-/// Set on a warm spare once its page has actually mounted (it emitted [`StartDataRequest`]),
-/// so a claim only reuses a spare that is genuinely warm — never one whose CEF browser or
-/// WASM is still loading (which would defeat the near-instant path and fall to a cold paint).
-#[derive(Component)]
-struct WarmStartReady;
-
-/// The hidden, zero-size holding node the warm spares are parked under so they keep their
-/// CEF browser + WASM warm without compositing (a `Visibility::Hidden` ancestor makes them
-/// non-renderable, so `sync_children_to_ui` collapses them and CEF hides the native view).
-#[derive(Component)]
-struct WarmStartPoolNode;
-
 /// Marks a live `vmux://start/` page that has received the current launcher payload.
 /// Cleared implicitly by re-pushing whenever a launcher snapshot changes, so a page that
 /// becomes ready after snapshots were populated still gets the data.
 #[derive(Component)]
 struct StartWorkSynced;
-
-/// Host-internal signal that a warm spare was just revealed into a stack, so its launcher
-/// data must be refreshed (it captured boot-time tabs/spaces) and its input refocused.
-#[derive(Message)]
-struct StartSpareRevealed {
-    webview: Entity,
-}
 
 #[derive(Component)]
 struct PendingStartWorkspacePicker {
@@ -432,122 +403,32 @@ fn should_focus_start_sync(
     keyboard_target && (!synced || keyboard_target_added || focus_changed)
 }
 
-/// Claim `vmux://start/` page-open tasks. When a warm spare is available it is reparented
-/// into the target stack for a near-instant paint; otherwise it falls back to spawning a
-/// cold launcher webview via [`CefPageAttachRequest`].
+/// Claim `vmux://start/` page-open tasks by giving the stack a natively-hosted launcher.
+///
+/// There is no prewarming any more, and nothing to prewarm: the page's components run in this
+/// process, so a launcher is a `VirtualDom` and a `WKWebView`, not a CEF browser fetching a wasm
+/// bundle. The pool that used to hide that cost, and the race over whether a spare had finished
+/// mounting, went with it.
 fn handle_start_page_open(
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
-    spares: Query<Entity, (With<WarmStartSpare>, With<WarmStartReady>)>,
     children_q: Query<&Children>,
-    mut attach: MessageWriter<CefPageAttachRequest>,
-    mut revealed: MessageWriter<StartSpareRevealed>,
     mut commands: Commands,
 ) {
-    let mut available: Vec<Entity> = spares.iter().collect();
     for (entity, task) in &tasks {
         if task.url != START_PAGE_URL {
             continue;
         }
-        if let Some(spare) = available.pop() {
-            clear_stack_children(task.stack, &children_q, &mut commands);
-            commands.entity(task.stack).insert(PageMetadata {
-                url: START_PAGE_URL.to_string(),
-                title: "Start".to_string(),
-                ..default()
-            });
-            commands
-                .entity(spare)
-                .insert((ChildOf(task.stack), CefKeyboardTarget))
-                .remove::<(WarmStartSpare, WarmStartReady)>();
-            revealed.write(StartSpareRevealed { webview: spare });
-        } else {
-            attach.write(CefPageAttachRequest {
-                stack: task.stack,
-                url: START_PAGE_URL.to_string(),
-                title: "Start".to_string(),
-                bg_color: None,
-            });
-        }
-        commands.entity(entity).insert(PageOpenHandled);
-    }
-}
-
-/// Keep the warm-start pool topped up to [`WARM_START_POOL_SIZE`]. Spares are parked under a
-/// hidden holding node (created lazily once the window exists) so their CEF browser + WASM
-/// load ahead of time without compositing.
-fn maintain_warm_start_pool(
-    pool_node: Query<Entity, With<WarmStartPoolNode>>,
-    vmux_window: Query<Entity, With<VmuxWindow>>,
-    spares: Query<(), With<WarmStartSpare>>,
-    mut commands: Commands,
-) {
-    let Ok(window) = vmux_window.single() else {
-        return;
-    };
-    let node = match pool_node.single() {
-        Ok(node) => node,
-        Err(_) => commands
-            .spawn((
-                WarmStartPoolNode,
-                Node {
-                    width: Val::Px(0.0),
-                    height: Val::Px(0.0),
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-                Visibility::Hidden,
-                ChildOf(window),
-            ))
-            .id(),
-    };
-    for _ in spares.iter().count()..WARM_START_POOL_SIZE {
+        clear_stack_children(task.stack, &children_q, &mut commands);
+        commands.entity(task.stack).insert(PageMetadata {
+            url: START_PAGE_URL.to_string(),
+            title: "Start".to_string(),
+            ..default()
+        });
         commands.spawn((
-            Browser::new_with_title(START_PAGE_URL, "Start"),
-            WarmStartSpare,
-            ChildOf(node),
+            Browser::native_page(START_PAGE_URL, "Start"),
+            ChildOf(task.stack),
         ));
-    }
-}
-
-/// Refresh a freshly-revealed warm spare: push current launcher data (the spare captured
-/// boot-time state) and refocus its input, matching a cold open.
-fn on_start_spare_revealed(
-    mut revealed: MessageReader<StartSpareRevealed>,
-    tab_gather: TabGatherParams,
-    prompt_context: StartPromptContextParams,
-    spaces_snapshot: Res<CommandBarSpacesSnapshot>,
-    contributions: Contributions,
-    pages_snapshot: Res<CommandBarPagesSnapshot>,
-    work_snapshot: Res<CommandBarWorkSnapshot>,
-    locale: Option<Res<ResolvedLocale>>,
-    mut commands: Commands,
-) {
-    for ev in revealed.read() {
-        let locale = locale
-            .as_deref()
-            .map(|locale| locale.0.clone())
-            .unwrap_or_else(Locale::preferred);
-        let payload = build_start_payload(
-            &tab_gather,
-            &spaces_snapshot,
-            &contributions,
-            &pages_snapshot,
-            &work_snapshot,
-            &prompt_context,
-            tab_gather.active_tab.get(),
-            None,
-            &locale,
-        );
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            ev.webview,
-            START_COMMAND_BAR_OPEN_EVENT,
-            &payload,
-        ));
-        commands.trigger(BinHostEmitEvent::from_rkyv(
-            ev.webview,
-            START_FOCUS_INPUT_EVENT,
-            &StartFocusInput,
-        ));
+        commands.entity(entity).insert(PageOpenHandled);
     }
 }
 
@@ -555,7 +436,6 @@ fn on_start_spare_revealed(
 /// command-bar launcher payload (opening selections in place).
 fn on_start_data_request(
     trigger: On<BinReceive<StartDataRequest>>,
-    spares: Query<(), With<WarmStartSpare>>,
     keyboard_targets: Query<(), With<CefKeyboardTarget>>,
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
@@ -567,10 +447,6 @@ fn on_start_data_request(
     mut commands: Commands,
 ) {
     let webview = trigger.event().webview;
-    let is_spare = spares.contains(webview);
-    if is_spare {
-        commands.entity(webview).insert(WarmStartReady);
-    }
     let payload = build_start_payload(
         &tab_gather,
         &spaces_snapshot,
@@ -653,15 +529,18 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
     }
 }
 
-/// Claims [`HostsLauncher`] for every start webview, so the command bar can ask what a page can do
+/// Claims [`HostsLauncher`] for every start page, so the command bar can ask what a page can do
 /// instead of comparing its URL.
+///
+/// Read from `PageMetadata` rather than `WebviewSource`: a natively-hosted launcher has no source,
+/// because no CEF browser is fetching anything for it, and one that never claimed this marker would
+/// go quiet — no focus request, and nothing for the command bar to recognise.
 fn mark_start_pages_as_launcher_hosts(
-    starts: Query<(Entity, &WebviewSource), Without<HostsLauncher>>,
+    starts: Query<(Entity, &PageMetadata), Without<HostsLauncher>>,
     mut commands: Commands,
 ) {
-    for (entity, source) in starts.iter() {
-        let WebviewSource(url) = source;
-        if url.starts_with(START_PAGE_URL) {
+    for (entity, meta) in starts.iter() {
+        if meta.url.starts_with(START_PAGE_URL) {
             commands.entity(entity).insert(HostsLauncher);
         }
     }
@@ -704,7 +583,6 @@ fn begin_requested_inline_transition(
 mod tests {
     use super::*;
     use bevy_cef::prelude::BinReceive;
-    use vmux_core::PageOpenId;
     use vmux_core::page::PageManifest;
 
     #[derive(Resource, Default)]
@@ -775,172 +653,5 @@ mod tests {
             emitted,
             &[START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT]
         );
-    }
-
-    #[test]
-    fn warm_start_waits_for_reveal_before_focusing() {
-        let mut app = start_ready_app();
-        let webview = app.world_mut().spawn(WarmStartSpare).id();
-
-        emit_start_ready(&mut app, webview);
-
-        assert!(app.world().get::<WarmStartReady>(webview).is_some());
-        let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[START_COMMAND_BAR_OPEN_EVENT]);
-    }
-
-    #[test]
-    fn inactive_cold_start_waits_for_activation_before_focusing() {
-        let mut app = start_ready_app();
-        let webview = app.world_mut().spawn_empty().id();
-
-        emit_start_ready(&mut app, webview);
-
-        let emitted = &app.world().resource::<EmittedIds>().0;
-        assert_eq!(emitted, &[START_COMMAND_BAR_OPEN_EVENT]);
-    }
-
-    #[test]
-    fn start_sync_focuses_only_active_pages_on_first_sync_or_activation() {
-        assert!(!should_focus_start_sync(false, false, false, false));
-        assert!(should_focus_start_sync(false, true, false, false));
-        assert!(should_focus_start_sync(true, true, true, false));
-        assert!(should_focus_start_sync(true, true, false, true));
-        assert!(!should_focus_start_sync(true, true, false, false));
-    }
-
-    #[test]
-    fn start_sync_refreshes_when_agent_recency_changes() {
-        assert!(should_refresh_start_payload(
-            false, true, false, false, false
-        ));
-        assert!(!should_refresh_start_payload(
-            false, false, false, false, false
-        ));
-    }
-
-    fn start_task(stack: Entity) -> PageOpenTask {
-        PageOpenTask {
-            id: PageOpenId::new(),
-            stack,
-            url: START_PAGE_URL.to_string(),
-            request_id: None,
-        }
-    }
-
-    #[test]
-    fn warm_claim_reuses_spare() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CefPageAttachRequest>()
-            .add_message::<StartSpareRevealed>()
-            .add_systems(Update, handle_start_page_open);
-        let stack = app.world_mut().spawn_empty().id();
-        let spare = app.world_mut().spawn((WarmStartSpare, WarmStartReady)).id();
-        let task = app.world_mut().spawn(start_task(stack)).id();
-        app.update();
-
-        assert_eq!(
-            app.world().get::<ChildOf>(spare).map(|c| c.parent()),
-            Some(stack),
-            "spare reparented into the target stack"
-        );
-        assert!(
-            app.world().get::<WarmStartSpare>(spare).is_none(),
-            "spare marker removed on claim"
-        );
-        let meta = app
-            .world()
-            .get::<PageMetadata>(stack)
-            .expect("stack received start metadata");
-        assert_eq!(meta.url, START_PAGE_URL);
-        assert!(app.world().get::<PageOpenHandled>(task).is_some());
-
-        let attaches = app
-            .world_mut()
-            .resource_mut::<Messages<CefPageAttachRequest>>()
-            .drain()
-            .count();
-        assert_eq!(attaches, 0, "warm claim must not spawn a cold webview");
-        let reveals: Vec<StartSpareRevealed> = app
-            .world_mut()
-            .resource_mut::<Messages<StartSpareRevealed>>()
-            .drain()
-            .collect();
-        assert_eq!(reveals.len(), 1);
-        assert_eq!(reveals[0].webview, spare);
-    }
-
-    #[test]
-    fn not_ready_spare_is_not_claimed() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CefPageAttachRequest>()
-            .add_message::<StartSpareRevealed>()
-            .add_systems(Update, handle_start_page_open);
-        let stack = app.world_mut().spawn_empty().id();
-        let spare = app.world_mut().spawn(WarmStartSpare).id();
-        let task = app.world_mut().spawn(start_task(stack)).id();
-        app.update();
-
-        assert!(
-            app.world().get::<ChildOf>(spare).is_none(),
-            "an unready spare must not be reparented"
-        );
-        assert!(
-            app.world().get::<WarmStartSpare>(spare).is_some(),
-            "an unready spare stays in the pool"
-        );
-        assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let attaches = app
-            .world_mut()
-            .resource_mut::<Messages<CefPageAttachRequest>>()
-            .drain()
-            .count();
-        assert_eq!(attaches, 1, "unready spare falls back to the cold path");
-    }
-
-    #[test]
-    fn cold_fallback_when_pool_empty() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_message::<CefPageAttachRequest>()
-            .add_message::<StartSpareRevealed>()
-            .add_systems(Update, handle_start_page_open);
-        let stack = app.world_mut().spawn_empty().id();
-        let task = app.world_mut().spawn(start_task(stack)).id();
-        app.update();
-
-        assert!(app.world().get::<PageOpenHandled>(task).is_some());
-        let attaches: Vec<CefPageAttachRequest> = app
-            .world_mut()
-            .resource_mut::<Messages<CefPageAttachRequest>>()
-            .drain()
-            .collect();
-        assert_eq!(attaches.len(), 1);
-        assert_eq!(attaches[0].url, START_PAGE_URL);
-        let reveals = app
-            .world_mut()
-            .resource_mut::<Messages<StartSpareRevealed>>()
-            .drain()
-            .count();
-        assert_eq!(reveals, 0, "cold fallback emits no reveal");
-    }
-
-    #[test]
-    fn start_pool_fills_one_ready_slot() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_systems(Update, maintain_warm_start_pool);
-        app.world_mut().spawn(VmuxWindow);
-        app.update();
-        app.update();
-
-        let count = app
-            .world_mut()
-            .query_filtered::<(), With<WarmStartSpare>>()
-            .iter(app.world())
-            .count();
-        assert_eq!(count, WARM_START_POOL_SIZE);
     }
 }

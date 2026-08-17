@@ -4,6 +4,7 @@
 //!
 //! ```ignore
 //! NativePagePlugin::as_layout(&LAYOUT_PAGE),
+//! NativePagePlugin::in_pane(&START_PAGE),
 //! ```
 //!
 //! The surface itself belongs to [`vmux_native`], which knows nothing of this app. What lives here
@@ -98,6 +99,26 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
     body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
                  text-foreground antialiased",
     transparent: true,
+};
+
+/// The launcher: opaque, because it fills its pane rather than floating over one.
+#[cfg(target_os = "macos")]
+pub static START_PAGE: NativePage = NativePage {
+    url: vmux_layout::start::START_PAGE_URL,
+    component: vmux_layout::start::page::StartPage,
+    root_id: "main",
+    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
+    head: r#"<base href="/"/>
+<title>Start</title>
+<style>
+html, body { height: 100%; margin: 0; min-height: 0; }
+body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+</style>
+<link rel="stylesheet" href="./assets/index.css"/>
+<link rel="stylesheet" href="./assets/theme.css"/>"#,
+    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
+    transparent: false,
 };
 
 /// Where a native page's view goes.
