@@ -72,8 +72,36 @@ pub type BytesListener = Box<dyn FnMut(&[u8])>;
 ///
 /// An embedding app calls this at startup the way a runtime calls `main` — before there is a page,
 /// and so before there is a [`Host`] for it to hang off.
+///
+/// One host per thread, permanently. A thread running more than one page wants [`HostScope`]
+/// instead — this would leave every page but the last talking to the wrong host.
 pub fn install_host(host: Rc<dyn PageHost>) {
     HOST.with(|slot| *slot.borrow_mut() = Some(host));
+}
+
+/// The installed host, for as long as this value lives.
+///
+/// A page reaches its host through a thread-local, which is what lets a component deep in a tree
+/// emit without being handed anything. That is exactly right for one page per thread and wrong the
+/// moment there are two: whichever mounted last would own the slot, and every other page's `send`
+/// and `listen` would silently address it.
+///
+/// So a host that runs several pages on one thread does not install one — it enters the scope of
+/// the page it is about to touch, around every entry into that page's `VirtualDom`. Restoring the
+/// previous value rather than clearing it is what makes those entries nest safely, which they do:
+/// a listener runs inside `deliver`, and an event handler can emit.
+pub struct HostScope(Option<Rc<dyn PageHost>>);
+
+impl HostScope {
+    pub fn enter(host: Rc<dyn PageHost>) -> Self {
+        Self(HOST.with(|slot| slot.borrow_mut().replace(host)))
+    }
+}
+
+impl Drop for HostScope {
+    fn drop(&mut self) {
+        HOST.with(|slot| *slot.borrow_mut() = self.0.take());
+    }
 }
 
 /// What the target hosting a page can do for it, decided at compile time.
@@ -223,5 +251,50 @@ mod tests {
         Host::emit("other", &bytes).unwrap();
 
         assert_eq!(*seen.borrow(), vec![Ping { value: 7 }]);
+    }
+
+    /// Counts what was sent to it, which is the only way to tell two hosts apart from outside.
+    #[derive(Default)]
+    struct CountingHost {
+        sent: RefCell<usize>,
+    }
+
+    impl PageHost for CountingHost {
+        fn send(&self, _id: &str, _bytes: &[u8]) -> Result<(), EventListenerError> {
+            *self.sent.borrow_mut() += 1;
+            Ok(())
+        }
+
+        fn listen(&self, _id: &str, _on_bytes: BytesListener) -> Result<(), EventListenerError> {
+            Ok(())
+        }
+    }
+
+    /// Two pages on one thread each reach their own host, and a page nested inside another's
+    /// delivery does not leave the outer one addressing the wrong host afterwards.
+    ///
+    /// Without a scope there is one slot: the second page to mount would own it, and everything the
+    /// first sent from then on would arrive at the second's entity — no error, no warning.
+    #[test]
+    fn a_page_addresses_its_own_host_even_while_another_is_mounted() {
+        let first = Rc::new(CountingHost::default());
+        let second = Rc::new(CountingHost::default());
+
+        let outer = HostScope::enter(first.clone());
+        Host::emit("a", &[]).unwrap();
+        {
+            let _inner = HostScope::enter(second.clone());
+            Host::emit("b", &[]).unwrap();
+            Host::emit("c", &[]).unwrap();
+        }
+        Host::emit("d", &[]).unwrap();
+        drop(outer);
+
+        assert_eq!(*first.sent.borrow(), 2, "the outer page sent 'a' and 'd'");
+        assert_eq!(*second.sent.borrow(), 2, "the inner page sent 'b' and 'c'");
+        assert!(
+            matches!(Host::emit("e", &[]), Err(EventListenerError::NoHost)),
+            "leaving the last scope leaves no host installed, rather than the first one"
+        );
     }
 }

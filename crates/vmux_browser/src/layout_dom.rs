@@ -22,12 +22,13 @@ use bevy::winit::{EventLoopProxy, EventLoopProxyWrapper, WinitUserEvent};
 use bevy_cef_core::prelude::BinIpcEventRaw;
 use vmux_dioxus::{EditScript, EventOutcome, EventRequest, PageDom};
 use vmux_ui::hooks::EventListenerError;
-use vmux_ui::transport::{BytesListener, PageHost, install_host};
+use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
 /// What the layout page needs from the host, and what the host needs back.
 #[derive(Clone)]
 pub(crate) struct LayoutDom {
     page: Rc<RefCell<PageDom>>,
+    host: Rc<dyn PageHost>,
     reactor: Rc<tokio::runtime::Runtime>,
     waker: PageWaker,
     caret: CaretMirror,
@@ -53,10 +54,11 @@ type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 type PendingScripts = Rc<RefCell<Vec<String>>>;
 
 impl LayoutDom {
-    /// Mount the layout page and install the transport its components reach the host through.
+    /// Mount the layout page and build the transport its components reach the host through.
     ///
-    /// `install_host` has to happen before the first render, because a component asks for the
-    /// installed host as it mounts and the native fallback is deliberately `None`.
+    /// The transport is entered as a [`HostScope`] around every entry into the dom rather than
+    /// installed for the thread, because the thread will eventually run more than one page and a
+    /// single installed host would leave all but the last talking to the wrong one.
     pub(crate) fn mount(
         bin_ipc: async_channel::Sender<BinIpcEventRaw>,
         webview: Entity,
@@ -66,18 +68,18 @@ impl LayoutDom {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
         let caret = CaretMirror::default();
-
-        install_host(Rc::new(LayoutPageHost {
+        let page_host: Rc<dyn PageHost> = Rc::new(LayoutPageHost {
             bin_ipc,
             webview,
             host,
             listeners: listeners.clone(),
             pending_scripts: pending_scripts.clone(),
             caret: caret.clone(),
-        }));
+        });
 
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
+            host: page_host,
             reactor: Rc::new(Self::reactor()),
             waker,
             caret,
@@ -119,6 +121,7 @@ impl LayoutDom {
     /// that would send the next batch waits for the reactive timer — a second, at rest. Anything
     /// needing more than one pass then opens in stages.
     pub(crate) fn page_flushed(&self) {
+        let _host = HostScope::enter(self.host.clone());
         if let Ok(mut page) = self.page.try_borrow_mut() {
             page.flushed();
         }
@@ -132,6 +135,7 @@ impl LayoutDom {
         }
 
         let _reactor = self.reactor.enter();
+        let _host = HostScope::enter(self.host.clone());
         let mut page = self.page.try_borrow_mut().ok()?;
         let edits = if self.mounted.get() {
             page.render()?
@@ -159,6 +163,7 @@ impl LayoutDom {
         };
 
         let _reactor = self.reactor.enter();
+        let _host = HostScope::enter(self.host.clone());
         let Ok(mut page) = self.page.try_borrow_mut() else {
             warn!("layout_dom: an event arrived while the page was rendering");
             return EventOutcome::unreadable();
@@ -192,6 +197,9 @@ impl LayoutDom {
 
     /// Deliver a host event to whatever the page registered for it.
     pub(crate) fn deliver(&self, id: &str, payload: &[u8]) {
+        // A listener body is page code: it writes the page's signals and may emit back.
+        let _reactor = self.reactor.enter();
+        let _host = HostScope::enter(self.host.clone());
         let Ok(mut listeners) = self.listeners.try_borrow_mut() else {
             warn!("layout_dom: a host emit arrived while the page was registering listeners");
             return;
