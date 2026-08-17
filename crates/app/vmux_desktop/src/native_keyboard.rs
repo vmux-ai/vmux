@@ -101,9 +101,6 @@ fn decide(
 }
 
 fn classify(combo: KeyCombo) -> KeyAction {
-    if vmux_browser::request_native_dismiss(&combo) {
-        return KeyAction::Consume(None);
-    }
     if escape_exits_fullscreen(&combo) {
         EXIT_FULLSCREEN_REQUESTED.store(true, Ordering::Relaxed);
         return KeyAction::Consume(None);

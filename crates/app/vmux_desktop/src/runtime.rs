@@ -489,7 +489,6 @@ mod tests {
             .unwrap_or_default();
 
         assert!(monitor.contains("event_location_in_window_physical_px"));
-        assert!(monitor.contains("request_native_dismiss_for_mouse_down"));
     }
 
     #[test]

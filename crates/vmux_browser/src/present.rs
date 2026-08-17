@@ -11,7 +11,6 @@ use bevy::{
     winit::{EventLoopProxyWrapper, WinitUserEvent},
 };
 use bevy_cef::prelude::*;
-use std::sync::atomic::Ordering;
 use vmux_command::command_bar::handler::{CommandBarNativeSize, PendingCommandBarReveal};
 use vmux_command::command_bar::panel::CommandBarPanelActive;
 use vmux_core::overlay::{OverlayState, WindowOverlay};
@@ -34,9 +33,8 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 
 use crate::{
-    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap,
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED, NATIVE_COMMAND_BAR_ROUTE, VIBE_LOGO_PNG, agent_ring_rgb,
-    decode_premultiplied, hex_to_rgb,
+    CLAUDE_LOGO_PNG, CODEX_LOGO_PNG, CommandBarRoute, LogoBitmap, NATIVE_COMMAND_BAR_ROUTE,
+    VIBE_LOGO_PNG, agent_ring_rgb, decode_premultiplied, hex_to_rgb,
 };
 
 #[cfg(target_os = "macos")]
@@ -682,9 +680,6 @@ fn publish_native_command_bar_route(
         frame,
         scale,
     };
-    if !owns_input {
-        NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(false, Ordering::Relaxed);
-    }
 }
 
 fn command_bar_windowed_frame(
@@ -1327,14 +1322,8 @@ mod tests {
         assert_eq!(width, 0.0);
     }
 
+    use crate::native_command_bar_route;
     use crate::tests::test_app_settings_with_radius;
-    use crate::{
-        command_bar_windowed_click_should_dismiss, native_command_bar_route,
-        request_native_dismiss, request_native_dismiss_for_mouse_down,
-        take_native_command_bar_dismiss_requested,
-    };
-    use bevy::input::ButtonState;
-    use vmux_command::shortcut::KeyCombo;
 
     #[test]
     fn osr_webview_hides_when_window_is_hidden() {
@@ -1731,45 +1720,6 @@ mod tests {
         assert!((frame.height_px - 440.0).abs() < 0.01);
     }
 
-    #[test]
-    fn windowed_command_bar_outside_click_dismisses() {
-        let frame = CommandBarWindowedFrame {
-            left_px: 100.0,
-            top_px: 50.0,
-            width_px: 200.0,
-            height_px: 100.0,
-        };
-
-        assert!(command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(150.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            true,
-            MouseButton::Right,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-        assert!(!command_bar_windowed_click_should_dismiss(
-            false,
-            MouseButton::Left,
-            ButtonState::Pressed,
-            Some(Vec2::new(99.0, 80.0)),
-            Some(frame),
-        ));
-    }
-
     /// One test, because every case here mutates the process-wide published route and the test
     /// runner is multi-threaded.
     #[test]
@@ -1787,37 +1737,8 @@ mod tests {
         assert_eq!(published.generation, before.wrapping_add(1));
         assert_eq!(published.scale, 2.0);
 
-        // A frame published by a bar that no longer owns input must not turn an unrelated click
-        // into a dismiss.
         publish_native_command_bar_route(false, Some(frame), 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        publish_native_command_bar_route(true, Some(frame), 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(120.0, 60.0));
-        assert!(!take_native_command_bar_dismiss_requested());
-        assert!(request_native_dismiss_for_mouse_down(90.0, 60.0));
-        assert!(take_native_command_bar_dismiss_requested());
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        // Revealing: owns input, but no rectangle is on screen to click outside of yet.
-        publish_native_command_bar_route(true, None, 1.0);
-        assert!(!request_native_dismiss_for_mouse_down(90.0, 60.0));
-
-        // A key the bar does not close on is left for the keymap even while it owns input.
-        assert!(!request_native_dismiss(&KeyCombo {
-            key: bevy::input::keyboard::KeyCode::KeyJ,
-            modifiers: Default::default(),
-        }));
-        assert!(!take_native_command_bar_dismiss_requested());
-
-        // Closing drops a dismiss that was requested while open.
-        assert!(request_native_dismiss(&KeyCombo {
-            key: bevy::input::keyboard::KeyCode::Escape,
-            modifiers: Default::default(),
-        }));
-        publish_native_command_bar_route(false, None, 1.0);
-        assert!(!take_native_command_bar_dismiss_requested());
+        assert!(!native_command_bar_route().owns_input);
     }
 
     #[test]

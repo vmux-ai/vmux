@@ -37,11 +37,7 @@ pub use native_layout::NativeLayout;
 #[cfg(target_os = "macos")]
 pub use native_layout::NativeLayoutPointerMoveResult;
 
-use bevy::{
-    ecs::relationship::Relationship,
-    input::{ButtonState, mouse::MouseButton},
-    prelude::*,
-};
+use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
 use bevy_cef::prelude::*;
 use bevy_cef_core::prelude::{CefEmbeddedHosts, CommandLineConfig};
 use std::path::Path;
@@ -577,7 +573,6 @@ struct CommandBarRoute {
 
 static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
     LazyLock::new(|| Mutex::new(CommandBarRoute::default()));
-static NATIVE_COMMAND_BAR_DISMISS_REQUESTED: AtomicBool = AtomicBool::new(false);
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
@@ -609,62 +604,11 @@ pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
 }
 
-fn command_bar_windowed_click_should_dismiss(
-    open: bool,
-    button: MouseButton,
-    state: ButtonState,
-    cursor: Option<Vec2>,
-    frame: Option<CommandBarWindowedFrame>,
-) -> bool {
-    if !open || button != MouseButton::Left || state != ButtonState::Pressed {
-        return false;
-    }
-    let (Some(cursor), Some(frame)) = (cursor, frame) else {
-        return false;
-    };
-    !command_bar_windowed_frame_contains(frame, cursor)
-}
-
 fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: Vec2) -> bool {
     cursor.x >= frame.left_px
         && cursor.x <= frame.left_px + frame.width_px
         && cursor.y >= frame.top_px
         && cursor.y <= frame.top_px + frame.height_px
-}
-
-/// Offers a native keystroke to whichever page surface wants to close on it, and reports whether
-/// one took it. The host consumes the key when this is true.
-pub fn request_native_dismiss(combo: &vmux_command::shortcut::KeyCombo) -> bool {
-    if !combo.dismisses_command_bar() {
-        return false;
-    }
-    if !native_command_bar_route().owns_input {
-        return false;
-    }
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
-    true
-}
-
-pub fn request_native_dismiss_for_mouse_down(x_px: f32, y_px: f32) -> bool {
-    if !x_px.is_finite() || !y_px.is_finite() {
-        return false;
-    }
-    let route = native_command_bar_route();
-    if !route.owns_input {
-        return false;
-    }
-    let Some(frame) = route.frame else {
-        return false;
-    };
-    if command_bar_windowed_frame_contains(frame, Vec2::new(x_px, y_px)) {
-        return false;
-    }
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.store(true, Ordering::Relaxed);
-    true
-}
-
-pub fn take_native_command_bar_dismiss_requested() -> bool {
-    NATIVE_COMMAND_BAR_DISMISS_REQUESTED.swap(false, Ordering::Relaxed)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
