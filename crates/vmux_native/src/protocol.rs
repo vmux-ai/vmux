@@ -30,6 +30,9 @@ impl VmuxProtocol {
         if url.trim_end_matches('/').ends_with("/__events") {
             return Self::answer_event(dom, &request, responder);
         }
+        if url.trim_end_matches('/').ends_with("/__edits") {
+            return dom.serve_edits(responder);
+        }
         if url.trim_end_matches('/').ends_with("/__dom") {
             return Self::answer_dom_requests(dom, responder);
         }
@@ -276,6 +279,32 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
   };
+  // The page asks for its own edits rather than having them evaluated into it. The host holds the
+  // request until a render produces a batch, so this loop costs one idle connection and no polling.
+  const pumpEdits = async () => {
+    for (;;) {
+      try {
+        const response = await fetch('/__edits');
+        if (!response.ok) { await new Promise((r) => setTimeout(r, 50)); continue; }
+        const batch = await response.arrayBuffer();
+        if (batch.byteLength) window.interpreter.run_from_bytes(batch);
+        // After the batch, so an element a component asked to focus exists to be found — and
+        // before the acknowledgement, which is what releases the render that would replace it.
+        // An empty batch still gets here: a request for the caret gives the page nothing to draw.
+        if (response.headers.get('x-vmux-dom') === '1') window.vmuxWry.pullDom();
+        if (batch.byteLength) window.interpreter.sendIpcMessage('flushed');
+      } catch (e) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+    }
+  };
+  // The interpreter arrives with the shell's module, so it is not there when this runs at
+  // document start; the pump waits for it rather than racing it.
+  const startPump = () => {
+    if (window.interpreter && window.interpreter.run_from_bytes) pumpEdits();
+    else setTimeout(startPump, 10);
+  };
+  startPump();
   window.vmuxWry = {
     // Collect and apply whatever the page's components asked the host for. Synchronous, like the
     // event reply, and asked for only when the host says there is something waiting.

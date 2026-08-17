@@ -9,8 +9,8 @@
 //! Two directions, and they are not symmetric:
 //!
 //! - **Out.** A render produces a batch of bytes in the interpreter's binary protocol, which the
-//!   page applies with `run_from_bytes`. [`PageDom::render`] yields the batch; [`EditScript`]
-//!   wraps it for a host that delivers edits by evaluating a script.
+//!   page applies with `run_from_bytes`. [`PageDom::render`] yields the batch, and the page asks
+//!   for it over `__edits` rather than having it evaluated in.
 //! - **In.** An event arrives as base64 JSON in a `dioxus-data` request header, is run through the
 //!   `VirtualDom`, and is answered *synchronously* with whether the browser should still take its
 //!   default action. [`EventRequest`] decodes it and [`EventOutcome`] encodes the answer.
@@ -27,13 +27,11 @@
 //! a mounted event, whose methods all answer `NotSupported`, so `MountedData::set_focus` and
 //! friends are inert until a host provides one.
 
-mod edit_script;
 mod event_request;
 mod page;
 mod page_dom;
 mod shell;
 
-pub use edit_script::EditScript;
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
 pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};

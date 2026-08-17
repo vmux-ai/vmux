@@ -9,12 +9,6 @@ use crate::embed::{Assets, Embedding};
 use crate::page::NativePage;
 use crate::protocol::{PageMessage, VmuxProtocol, WRY_HOST_SHIM};
 
-/// Ask the page to collect the requests waiting for it.
-///
-/// A constant, and the only script this crate composes: everything the page said travels as JSON
-/// over `__dom` instead of being spliced in here.
-const PULL_DOM_REQUESTS: &str = "window.vmuxWry.pullDom();";
-
 /// What a view's `prefers-color-scheme` should answer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Appearance {
@@ -72,22 +66,13 @@ impl PageSurface {
         }
     }
 
-    /// Evaluate the next batch of edits, then tell the page to collect what it asked the host for.
+    /// Hand the page whatever this frame produced, if it is waiting for it.
     ///
-    /// The collection goes after the batch, so an element a component just asked to focus exists to
-    /// be found. What is evaluated is a constant: the requests themselves travel as JSON over
-    /// `__dom`, so nothing a page said is ever spliced into a script.
+    /// Nothing is evaluated. The page holds a standing request for its next batch and this answers
+    /// it, so the interpreter's bytes travel as bytes and the only thing reaching the document is
+    /// what the document asked for.
     pub fn render(&self) {
-        if let Some(script) = self.dom.next_batch()
-            && let Err(error) = self.webview.evaluate_script(script.as_str())
-        {
-            error!("vmux_native: applying an edit batch failed: {error}");
-        }
-        if self.dom.has_pending_requests()
-            && let Err(error) = self.webview.evaluate_script(PULL_DOM_REQUESTS)
-        {
-            error!("vmux_native: asking the page to collect its requests failed: {error}");
-        }
+        self.dom.flush_to_page();
     }
 
     /// Hand the page an event the host raised, for whatever it registered against that id.
@@ -188,9 +173,5 @@ impl PageSurface {
         if !window.makeFirstResponder(Some(view)) {
             warn!("vmux_native: the window refused first responder, this page cannot be typed in");
         }
-    }
-
-    pub fn webview(&self) -> &wry::WebView {
-        &self.webview
     }
 }

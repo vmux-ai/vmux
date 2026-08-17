@@ -2,12 +2,13 @@
 //!
 //! [`PageSurface`](crate::PageSurface) owns the webview; this owns what fills it. The webview is
 //! handed a document carrying nothing but the interpreter, and every element it displays arrives
-//! as a batch of edits evaluated into it.
+//! as a batch of edits the page asks for and applies itself.
 //!
 //! Three things share one `Rc`, all on the main thread:
 //!
-//! - the host's render call, which asks the dom for a batch each frame,
-//! - the `vmux://` handler, which answers `__events` while the page blocks on the reply,
+//! - the host's render call, which hands over a batch when the page is waiting for one,
+//! - the `vmux://` handler, which answers `__events` while the page blocks on the reply, and
+//!   holds the page's standing request for `__edits`,
 //! - and the IPC handler, which hears `initialize` and `flushed` back from the page.
 //!
 //! wry's asynchronous protocol closure carries no `Send` bound, so the compiler holds all three to
@@ -17,14 +18,14 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use tracing::warn;
+use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
 use crate::document::SurfaceDocument;
 use crate::dom_request::DomRequest;
 use crate::embed::{Embedding, Outbox, Wake};
-use crate::{EditScript, EventOutcome, EventRequest, PageDom};
+use crate::{EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.
 #[derive(Clone)]
@@ -40,7 +41,12 @@ pub(crate) struct SurfaceDom {
     ready: Rc<Cell<bool>>,
     /// The first batch has been sent.
     mounted: Rc<Cell<bool>>,
+    /// The page's standing request for the next batch, waiting for a render to produce one.
+    parked: Rc<RefCell<Option<wry::RequestAsyncResponder>>>,
 }
+
+/// Tells the page whether to collect its element requests once it has applied the batch.
+pub(crate) const DOM_REQUESTS_WAITING: &str = "x-vmux-dom";
 
 /// What the page's components asked the host to do to their elements, waiting for the page to ask.
 ///
@@ -85,6 +91,7 @@ impl SurfaceDom {
             pending_requests,
             ready: Rc::new(Cell::new(false)),
             mounted: Rc::new(Cell::new(false)),
+            parked: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -126,8 +133,8 @@ impl SurfaceDom {
         self.waker.wake();
     }
 
-    /// The next batch to evaluate, if there is one and the page can take it.
-    pub(crate) fn next_batch(&self) -> Option<EditScript> {
+    /// The next batch, if there is one and the page can take it.
+    fn next_batch(&self) -> Option<Vec<u8>> {
         if !self.ready.get() {
             return None;
         }
@@ -135,14 +142,64 @@ impl SurfaceDom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let mut page = self.page.try_borrow_mut().ok()?;
-        let edits = if self.mounted.get() {
-            page.render()?
+        if self.mounted.get() {
+            page.render()
         } else {
             self.mounted.set(true);
-            page.rebuild()
+            Some(page.rebuild())
+        }
+    }
+
+    /// Answer the page's standing request for the next batch, or hold it until there is one.
+    ///
+    /// The page asks rather than being handed a script, which is what keeps the interpreter's bytes
+    /// out of a string literal — and out of base64, which inflated every batch by a third and made
+    /// the page decode it a character at a time.
+    ///
+    /// Only one request is ever held. A second means the first belongs to a page that has gone —
+    /// reloaded, or timed its fetch out — so it is answered empty rather than left to rot.
+    pub(crate) fn serve_edits(&self, responder: wry::RequestAsyncResponder) {
+        if let Some(stale) = self.parked.borrow_mut().take() {
+            Self::respond(stale, Vec::new(), false);
+        }
+        *self.parked.borrow_mut() = Some(responder);
+        self.flush_to_page();
+    }
+
+    /// Hand the page whatever is waiting for it, if it is waiting to be handed something.
+    ///
+    /// A batch is not the only reason to answer. A component can ask for the caret without giving
+    /// the page anything new to draw, and a request nobody collects is a keystroke that lands in
+    /// the wrong field — so an empty batch still goes out when there are requests behind it.
+    pub(crate) fn flush_to_page(&self) {
+        if self.parked.borrow().is_none() {
+            return;
+        }
+        let edits = self.next_batch();
+        let has_requests = self.has_pending_requests();
+        if edits.is_none() && !has_requests {
+            return;
+        }
+        let Some(responder) = self.parked.borrow_mut().take() else {
+            return;
         };
 
-        Some(EditScript::of(&edits))
+        Self::respond(responder, edits.unwrap_or_default(), has_requests);
+    }
+
+    /// The batch, and whether the page should collect its element requests once it has applied it.
+    fn respond(responder: wry::RequestAsyncResponder, edits: Vec<u8>, has_requests: bool) {
+        let built = wry::http::Response::builder()
+            .header(wry::http::header::CONTENT_TYPE, "application/octet-stream")
+            .header(DOM_REQUESTS_WAITING, if has_requests { "1" } else { "0" })
+            .body(edits);
+        match built {
+            Ok(response) => responder.respond(response),
+            Err(error) => {
+                error!("vmux_native: an edit batch would not build a response: {error}");
+                responder.respond(wry::http::Response::new(Vec::new()));
+            }
+        }
     }
 
     /// Run one event through the page and produce the reply it is blocked on.
@@ -237,9 +294,9 @@ struct SurfaceHost {
 /// Where the caret last was, as the document itself reported it.
 ///
 /// Every other capability here is an instruction, which a queued script delivers fine. Reading the
-/// caret is a question, and there is nobody to answer it: `evaluate_script` returns nothing to a
-/// caller standing in a Dioxus event handler. So the document volunteers the answer on every
-/// selection change instead, and a reader takes the last one.
+/// caret is a question, and nothing carries an answer back: the host hands the page a batch and
+/// the page applies it. So the document volunteers the answer on every selection change instead,
+/// and a reader takes the last one.
 ///
 /// Stale only if the caret moved without the document saying so, which nothing does — it moves on
 /// input, and the report is posted before the next key can arrive.
