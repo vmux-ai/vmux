@@ -30,10 +30,7 @@ use bevy::winit::WINIT_WINDOWS;
 #[cfg(target_os = "macos")]
 use bevy_cef::prelude::{BinHostEmitEvent, BinIpcEventRawSender};
 #[cfg(target_os = "macos")]
-use bevy_cef_core::prelude::{
-    BinIpcEventRaw, Browsers, CefRequest, CefResponse, Requester, Responser,
-    asset_load_path_from_request_url, embedded_page_host_of,
-};
+use bevy_cef_core::prelude::{Browsers, Requester};
 
 #[cfg(target_os = "macos")]
 use vmux_setting::AppSettings;
@@ -86,10 +83,35 @@ unsafe extern "C" {}
 /// makes this a change of engine rather than a rewrite of the layout's host half.
 #[cfg(target_os = "macos")]
 struct LayoutView {
-    webview: wry::WebView,
+    surface: crate::page_surface::PageSurface,
     layout: Entity,
-    dom: crate::layout_dom::LayoutDom,
 }
+
+/// The chrome page: transparent, full window, and drawn over every pane.
+///
+/// The document below is the wasm bundle's own `index.html` with the wasm removed. It is not
+/// decoration: without `index.css` nothing has a Tailwind rule, and without the height and flex
+/// rules on `html`, `body` and the root, a flex child has no box to fill — which renders as one
+/// icon at its intrinsic size filling the window.
+#[cfg(target_os = "macos")]
+static LAYOUT_SURFACE: crate::page_surface::SurfacePage = crate::page_surface::SurfacePage {
+    url: LAYOUT_PAGE_URL,
+    component: vmux_layout::page::Page,
+    root_id: "main",
+    root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
+    head: r#"<base href="/"/>
+<title>vmux</title>
+<style>
+html, body { height: 100%; margin: 0; min-height: 0; }
+body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
+</style>
+<link rel="stylesheet" href="./assets/index.css"/>
+<link rel="stylesheet" href="./assets/theme.css"/>"#,
+    html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
+    body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
+                 text-foreground antialiased",
+    transparent: true,
+};
 
 #[cfg(target_os = "macos")]
 impl LayoutView {
@@ -119,7 +141,7 @@ impl LayoutView {
         use objc2_app_kit::NSView;
         use wry::WebViewExtMacOS;
 
-        let wk = self.webview.webview();
+        let wk = self.surface.webview().webview();
         let view: &NSView = &wk;
         let Some(window) = view.window() else {
             return;
@@ -148,7 +170,7 @@ impl LayoutView {
         use objc2_app_kit::{NSView, NSWindowOrderingMode};
         use wry::WebViewExtMacOS;
 
-        let wk = self.webview.webview();
+        let wk = self.surface.webview().webview();
         let view: &NSView = &wk;
         // `superview` is unsafe only because it hands out a reference AppKit could invalidate; it
         // is read and dropped inside this call, on the thread that owns the hierarchy.
@@ -178,7 +200,7 @@ impl LayoutView {
             ColorScheme::Device => None,
         };
         let appearance = name.and_then(NSAppearance::appearanceNamed);
-        let wk = self.webview.webview();
+        let wk = self.surface.webview().webview();
         let view: &NSView = &wk;
         view.setAppearance(appearance.as_deref());
         info!("layout_view: color scheme set to {mode:?}");
@@ -221,46 +243,31 @@ fn spawn_layout_view(world: &mut World) {
         report_waiting("no primary Window component to size against");
         return;
     };
-    let waker = crate::layout_dom::PageWaker::of(
+    let waker = crate::page_surface::dom::PageWaker::of(
         world.get_resource::<bevy::winit::EventLoopProxyWrapper>(),
     );
-    let dom = crate::layout_dom::LayoutDom::mount(
-        bin_ipc.clone(),
-        layout,
-        embedded_page_host_of(LAYOUT_PAGE_URL).unwrap_or_default(),
-        waker,
-    );
-    let page = PageMessage::new(bin_ipc, layout, dom.clone());
-    let serve_dom = dom.clone();
     let built = WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         let window = winit_windows.get_window(window_entity)?;
-        Some(
-            wry::WebViewBuilder::new()
-                .with_transparent(true)
-                .with_initialization_script(WRY_HOST_SHIM)
-                .with_asynchronous_custom_protocol("vmux".into(), move |_id, request, responder| {
-                    VmuxProtocol::serve(&serve_dom, &requester, request, responder);
-                })
-                .with_ipc_handler(move |request| page.receive(request.body()))
-                .with_url(LAYOUT_PAGE_URL)
-                .with_bounds(bounds)
-                .build_as_child(&**window),
-        )
+        Some(crate::page_surface::PageSurface::build(
+            &LAYOUT_SURFACE,
+            &**window,
+            layout,
+            bounds,
+            bin_ipc,
+            requester,
+            waker,
+        ))
     });
     match built {
         None => report_waiting("primary window has no winit window yet"),
-        Some(Ok(webview)) => {
-            raise_above_window_layers(&webview);
+        Some(Ok(surface)) => {
+            raise_above_window_layers(surface.webview());
             world
                 .non_send_mut::<Browsers>()
                 .set_externally_hosted(layout);
             info!("layout_view: serving layout entity {layout:?}, no cef browser behind it");
-            let view = LayoutView {
-                webview,
-                layout,
-                dom,
-            };
+            let view = LayoutView { surface, layout };
             view.set_color_scheme(world.resource::<AppSettings>().appearance.mode);
             world.insert_non_send(view);
         }
@@ -279,9 +286,7 @@ fn resize_layout_view(
     let Ok(window) = window.single() else {
         return;
     };
-    if let Err(error) = view.webview.set_bounds(LayoutView::bounds_of(window)) {
-        error!("layout_view: set_bounds failed: {error}");
-    }
+    view.surface.set_bounds(LayoutView::bounds_of(window));
 }
 
 /// A pane can open on any frame, and opening one puts its view in front of the chrome.
@@ -338,7 +343,9 @@ fn forward_host_emit(host_emit: On<BinHostEmitEvent>, view: Option<NonSend<Layou
 
     // Straight to the listener the page registered. The wasm bundle needed this base64'd through
     // a JS shim because the page was on the other side of a browser; it is in this process now.
-    view.dom.deliver(&host_emit.id, &host_emit.payload);
+    view.surface
+        .dom()
+        .deliver(&host_emit.id, &host_emit.payload);
 }
 
 /// Evaluate whatever the page's components rendered.
@@ -347,18 +354,7 @@ fn render_layout_dom(view: Option<NonSend<LayoutView>>) {
     let Some(view) = view else {
         return;
     };
-    if let Some(script) = view.dom.next_batch()
-        && let Err(error) = view.webview.evaluate_script(script.as_str())
-    {
-        error!("layout_view: applying an edit batch failed: {error}");
-    }
-
-    // After the batch, so an element a component just asked to focus exists to be found.
-    for script in view.dom.take_pending_scripts() {
-        if let Err(error) = view.webview.evaluate_script(&script) {
-            error!("layout_view: a page script failed: {error}");
-        }
-    }
+    view.surface.render();
 }
 
 /// Nothing renders the layout off macOS.
@@ -376,302 +372,6 @@ fn spawn_layout_view() {
         warn!("layout_view: the layout has no renderer on this platform, chrome will be missing");
     }
 }
-
-/// `vmux://` for the wry view, answered by the same Bevy systems that answer it for CEF.
-#[cfg(target_os = "macos")]
-struct VmuxProtocol;
-
-#[cfg(target_os = "macos")]
-impl VmuxProtocol {
-    /// The responder is handed to a thread rather than awaited here: the reply comes from a Bevy
-    /// system, and this runs on the main thread, so blocking would stop the schedule that produces
-    /// it and deadlock.
-    /// Whether this asks for the page itself rather than something it references.
-    fn is_document_request(url: &str) -> bool {
-        let path = url
-            .split_once("://")
-            .map(|(_, rest)| rest)
-            .unwrap_or(url)
-            .split(['?', '#'])
-            .next()
-            .unwrap_or("");
-        let path = path.split_once('/').map(|(_, rest)| rest).unwrap_or("");
-
-        path.is_empty() || path == "/" || path == "index.html"
-    }
-
-    /// The document a natively-hosted page loads: the interpreter, and nothing else.
-    ///
-    /// The chrome below is the bundle's own `index.html` with the wasm removed. It is not
-    /// decoration: without `index.css` nothing has a Tailwind rule, and without the height and
-    /// flex rules on `html`, `body` and the root, a flex child has no box to fill — which renders
-    /// as one icon at its intrinsic size filling the window.
-    fn shell_response() -> wry::http::Response<Vec<u8>> {
-        const HEAD: &str = r#"<base href="/"/>
-<title>vmux</title>
-<style>
-html, body { height: 100%; margin: 0; min-height: 0; }
-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: transparent; }
-</style>
-<link rel="stylesheet" href="./assets/index.css"/>
-<link rel="stylesheet" href="./assets/theme.css"/>"#;
-
-        let html = vmux_dioxus::InterpreterShell::new("main", LAYOUT_PAGE_URL)
-            .with_head(HEAD)
-            .with_html_attributes(r#"lang="en" class="h-full" style="color-scheme: light dark""#)
-            .with_body_class(
-                "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
-                 text-foreground antialiased",
-            )
-            .with_root_class("flex min-h-0 min-w-0 flex-1 flex-col")
-            .html();
-
-        wry::http::Response::builder()
-            .header(wry::http::header::CONTENT_TYPE, "text/html")
-            .body(html.into_bytes())
-            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()))
-    }
-
-    /// Answer the synchronous request the page is blocked on.
-    fn answer_event(
-        dom: &crate::layout_dom::LayoutDom,
-        request: &wry::http::Request<Vec<u8>>,
-        responder: wry::RequestAsyncResponder,
-    ) {
-        let header = request
-            .headers()
-            .get("dioxus-data")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        let body = dom.handle_event(header).response_bytes();
-        let response = wry::http::Response::builder()
-            .header(wry::http::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
-
-        responder.respond(response);
-    }
-
-    fn serve(
-        dom: &crate::layout_dom::LayoutDom,
-        requester: &Requester,
-        request: wry::http::Request<Vec<u8>>,
-        responder: wry::RequestAsyncResponder,
-    ) {
-        let url = request.uri().to_string();
-
-        // Both branches must come before `asset_load_path_from_request_url`. Neither path has a
-        // file extension, so it would map them to the host's default document and hand the page
-        // HTML where it expects JSON — or the wasm bundle where it expects the shell.
-        if url.trim_end_matches('/').ends_with("/__events") {
-            return Self::answer_event(dom, &request, responder);
-        }
-        if Self::is_document_request(&url) {
-            return responder.respond(Self::shell_response());
-        }
-
-        let uri = asset_load_path_from_request_url(&url);
-        if uri.is_empty() {
-            error!("layout_view: vmux:// url maps to no asset path, url={url}");
-            responder.respond(Self::error_response("no asset path for url"));
-            return;
-        }
-        let (tx, rx) = async_channel::bounded::<CefResponse>(1);
-        if requester
-            .send_blocking(CefRequest {
-                uri: uri.clone(),
-                responser: Responser(tx),
-            })
-            .is_err()
-        {
-            error!("layout_view: vmux:// request channel closed, uri={uri}");
-            responder.respond(Self::error_response("request channel closed"));
-            return;
-        }
-        std::thread::spawn(move || match rx.recv_blocking() {
-            Ok(response) => {
-                let built = wry::http::Response::builder()
-                    .status(response.status_code as u16)
-                    .header(wry::http::header::CONTENT_TYPE, response.mime_type)
-                    .body(response.data);
-                match built {
-                    Ok(built) => responder.respond(built),
-                    Err(error) => {
-                        error!("layout_view: vmux:// response invalid uri={uri}: {error}");
-                        responder.respond(Self::error_response("response invalid"));
-                    }
-                }
-            }
-            Err(_) => {
-                error!("layout_view: vmux:// responder dropped, uri={uri}");
-                responder.respond(Self::error_response("responder dropped"));
-            }
-        });
-    }
-
-    fn error_response(reason: &str) -> wry::http::Response<Vec<u8>> {
-        wry::http::Response::builder()
-            .status(500)
-            .header(wry::http::header::CONTENT_TYPE, "text/plain")
-            .body(reason.as_bytes().to_vec())
-            .expect("a literal status and body always build")
-    }
-}
-
-/// One page-to-host message, as it arrives over wry's string IPC.
-///
-/// `window.cef.binEmit` takes an `ArrayBuffer`; wry's IPC carries text, so the shim base64s the
-/// same `BinIpcEnvelope` bytes and this undoes it. The envelope framing is left alone, because
-/// the Bevy side matches its id with `bin_ipc_event_id::<E>()` and that has to keep agreeing.
-#[cfg(target_os = "macos")]
-struct PageMessage {
-    bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-    webview: Entity,
-    host: String,
-    dom: crate::layout_dom::LayoutDom,
-}
-
-#[cfg(target_os = "macos")]
-impl PageMessage {
-    fn new(
-        bin_ipc: async_channel::Sender<BinIpcEventRaw>,
-        webview: Entity,
-        dom: crate::layout_dom::LayoutDom,
-    ) -> Self {
-        let host = embedded_page_host_of(LAYOUT_PAGE_URL).unwrap_or_default();
-        Self {
-            bin_ipc,
-            webview,
-            host,
-            dom,
-        }
-    }
-
-    fn receive(&self, body: &str) {
-        use base64::Engine;
-        use vmux_ui::transport::bin_ipc_envelope::BinIpcEnvelope;
-
-        // The interpreter's own two messages, sent as `{"method":..}` by `sendIpcMessage`.
-        // `initialize` says the page can take a batch at all; `flushed` says it applied the last
-        // one, which is what releases the next render.
-        if body.contains(r#""method":"initialize""#) {
-            self.dom.page_is_ready();
-            return;
-        }
-        if body.contains(r#""method":"flushed""#) {
-            self.dom.page_flushed();
-            return;
-        }
-        if let Some(rest) = body.strip_prefix("caret:")
-            && let Some((element_id, byte)) = rest.rsplit_once(':')
-            && let Ok(byte) = byte.parse::<usize>()
-        {
-            self.dom.report_caret(element_id, byte);
-            return;
-        }
-        if let Some(rest) = body.strip_prefix("log:") {
-            let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
-            match level {
-                "error" | "reject" => error!("layout page: {text}"),
-                "warn" => warn!("layout page: {text}"),
-                _ => info!("layout page: {text}"),
-            }
-            return;
-        }
-        let bytes = match base64::engine::general_purpose::STANDARD.decode(body) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                error!("layout_view: ipc payload was not base64: {error}");
-                return;
-            }
-        };
-        let Some((id, payload)) = BinIpcEnvelope::decode(&bytes) else {
-            error!(
-                "layout_view: ipc payload was not a bin ipc envelope, {} bytes",
-                bytes.len()
-            );
-            return;
-        };
-        let sent = self.bin_ipc.send_blocking(BinIpcEventRaw {
-            webview: self.webview,
-            host: self.host.clone(),
-            id,
-            payload,
-        });
-        if sent.is_err() {
-            error!("layout_view: bin ipc channel closed");
-        }
-    }
-}
-
-/// What a wasm page finds on `window` instead of `window.cef`.
-///
-/// Deliberately the same two verbs. `vmux_ui::transport` picks its `PageHost` at runtime, so the
-/// page half of this is a matter of answering to whichever object is present, not of teaching the
-/// pages a second protocol.
-#[cfg(target_os = "macos")]
-const WRY_HOST_SHIM: &str = r#"
-(function () {
-  const report = (kind, text) => {
-    try { window.ipc.postMessage('log:' + kind + ':' + text); } catch (e) {}
-  };
-  // Volunteered rather than asked for: the host reaches this document by evaluating a script,
-  // which returns nothing, so a component wanting the caret has no way to ask. Reported in UTF-8
-  // bytes because that is the unit the Rust side counts in.
-  const reportCaret = () => {
-    const el = document.activeElement;
-    if (!el || !el.id || typeof el.selectionStart !== 'number') return;
-    const bytes = new TextEncoder().encode(el.value.slice(0, el.selectionStart)).length;
-    try { window.ipc.postMessage('caret:' + el.id + ':' + bytes); } catch (e) {}
-  };
-  document.addEventListener('selectionchange', reportCaret);
-  for (const name of ['keyup', 'mouseup', 'input', 'focusin']) {
-    document.addEventListener(name, reportCaret, true);
-  }
-  window.addEventListener('error', (e) => {
-    report('error', (e.message || 'error') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0));
-  });
-  window.addEventListener('unhandledrejection', (e) => {
-    report('reject', String((e.reason && e.reason.stack) || e.reason));
-  });
-  for (const level of ['error', 'warn', 'log']) {
-    const original = console[level].bind(console);
-    console[level] = (...args) => {
-      report(level, args.map((a) => {
-        if (a instanceof Error) return a.stack || a.message;
-        if (typeof a === 'object') { try { return JSON.stringify(a); } catch (e) { return String(a); } }
-        return String(a);
-      }).join(' '));
-      original(...args);
-    };
-  }
-  const listeners = new Map();
-  function toBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary);
-  }
-  function fromBase64(text) {
-    const binary = atob(text);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-    return bytes.buffer;
-  }
-  window.vmuxWry = {
-    binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
-    binListen(id, callback) {
-      const existing = listeners.get(id) || [];
-      existing.push(callback);
-      listeners.set(id, existing);
-    },
-    _dispatch(id, base64) {
-      const buffer = fromBase64(base64);
-      for (const callback of listeners.get(id) || []) callback(buffer);
-    },
-  };
-})();
-"#;
 
 /// Keep the chrome above the other layers in this window.
 ///

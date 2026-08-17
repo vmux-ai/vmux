@@ -1,8 +1,8 @@
-//! The layout page's `VirtualDom`, run here rather than compiled into the wasm bundle.
+//! One page's `VirtualDom`, run here rather than compiled into a wasm bundle.
 //!
-//! [`layout_view`](crate::layout_view) owns the `WKWebView`; this owns what fills it. The webview
-//! is handed a document carrying nothing but the interpreter, and every element it displays
-//! arrives as a batch of edits evaluated into it.
+//! [`PageSurface`](super::PageSurface) owns the `WKWebView`; this owns what fills it. The webview
+//! is handed a document carrying nothing but the interpreter, and every element it displays arrives
+//! as a batch of edits evaluated into it.
 //!
 //! Three things share one `Rc`, all on the main thread:
 //!
@@ -24,9 +24,9 @@ use vmux_dioxus::{EditScript, EventOutcome, EventRequest, PageDom};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
-/// What the layout page needs from the host, and what the host needs back.
+/// What a page needs from the host, and what the host needs back.
 #[derive(Clone)]
-pub(crate) struct LayoutDom {
+pub(crate) struct SurfaceDom {
     page: Rc<RefCell<PageDom>>,
     host: Rc<dyn PageHost>,
     reactor: Rc<tokio::runtime::Runtime>,
@@ -53,13 +53,14 @@ type Listeners = Rc<RefCell<HashMap<String, Vec<BytesListener>>>>;
 /// the document before the edits that render produced.
 type PendingScripts = Rc<RefCell<Vec<String>>>;
 
-impl LayoutDom {
+impl SurfaceDom {
     /// Mount the layout page and build the transport its components reach the host through.
     ///
     /// The transport is entered as a [`HostScope`] around every entry into the dom rather than
     /// installed for the thread, because the thread will eventually run more than one page and a
     /// single installed host would leave all but the last talking to the wrong one.
     pub(crate) fn mount(
+        component: vmux_dioxus::PageComponent,
         bin_ipc: async_channel::Sender<BinIpcEventRaw>,
         webview: Entity,
         host: String,
@@ -68,7 +69,7 @@ impl LayoutDom {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_scripts: PendingScripts = Rc::new(RefCell::new(Vec::new()));
         let caret = CaretMirror::default();
-        let page_host: Rc<dyn PageHost> = Rc::new(LayoutPageHost {
+        let page_host: Rc<dyn PageHost> = Rc::new(SurfacePageHost {
             bin_ipc,
             webview,
             host,
@@ -78,7 +79,7 @@ impl LayoutDom {
         });
 
         Self {
-            page: Rc::new(RefCell::new(PageDom::mount(vmux_layout::page::Page))),
+            page: Rc::new(RefCell::new(PageDom::mount(component))),
             host: page_host,
             reactor: Rc::new(Self::reactor()),
             waker,
@@ -103,7 +104,7 @@ impl LayoutDom {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(1)
             .enable_time()
-            .thread_name("vmux-layout-page")
+            .thread_name("vmux-page")
             .build()
             .expect("a reactor for the layout page's timers")
     }
@@ -157,7 +158,7 @@ impl LayoutDom {
         let event = match EventRequest::from_header(header) {
             Ok(event) => event.into_event(),
             Err(error) => {
-                warn!("layout_dom: {error}");
+                warn!("page_surface: {error}");
                 return EventOutcome::unreadable();
             }
         };
@@ -165,7 +166,7 @@ impl LayoutDom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let Ok(mut page) = self.page.try_borrow_mut() else {
-            warn!("layout_dom: an event arrived while the page was rendering");
+            warn!("page_surface: an event arrived while the page was rendering");
             return EventOutcome::unreadable();
         };
 
@@ -201,7 +202,7 @@ impl LayoutDom {
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let Ok(mut listeners) = self.listeners.try_borrow_mut() else {
-            warn!("layout_dom: a host emit arrived while the page was registering listeners");
+            warn!("page_surface: a host emit arrived while the page was registering listeners");
             return;
         };
         let Some(registered) = listeners.get_mut(id) else {
@@ -237,13 +238,13 @@ impl PageWaker {
     }
 }
 
-/// The layout page's half of [`PageHost`], with no browser in between.
+/// A page's half of [`PageHost`], with no browser in between.
 ///
 /// A page in the wasm bundle reaches the host by base64-ing an envelope through `window.ipc`,
 /// which the IPC handler decodes back into a [`BinIpcEventRaw`]. Running in this process, the
 /// payload is already bytes and the entity is already known, so it goes straight onto the channel
 /// every existing `BinReceive` observer already reads.
-struct LayoutPageHost {
+struct SurfacePageHost {
     bin_ipc: async_channel::Sender<BinIpcEventRaw>,
     webview: Entity,
     host: String,
@@ -284,7 +285,7 @@ impl CaretMirror {
     }
 }
 
-impl LayoutPageHost {
+impl SurfacePageHost {
     /// Queue a statement to run against an element the page rendered, if it is still there.
     ///
     /// The id goes through `serde_json` rather than interpolation, because it reaches this from
@@ -303,7 +304,7 @@ impl LayoutPageHost {
     }
 }
 
-impl PageHost for LayoutPageHost {
+impl PageHost for SurfacePageHost {
     fn send(&self, id: &str, bytes: &[u8]) -> Result<(), EventListenerError> {
         // Unbounded, so this never blocks — which is what lets an event handler call it while the
         // page waits on a synchronous reply.
