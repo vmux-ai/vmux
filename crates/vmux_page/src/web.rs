@@ -56,7 +56,6 @@ macro_rules! web_pages {
 
 web_pages! {
     render_layout: "layout" => vmux_layout::page::Page,
-    render_error: "error" => vmux_layout::error_page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,
     render_agent: "agent" => vmux_chat::page::Page,
     render_files: "files" => vmux_editor::page::Page,

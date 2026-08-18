@@ -126,6 +126,8 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
+                .takes::<vmux_wire::error::ErrorPageData>(),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -855,28 +857,28 @@ fn attach_cef_page_to_stack(
     browser
 }
 
+/// Replace whatever is in a stack with the error page, and record on its view what to show.
+///
+/// The stack keeps the url that failed, because that is what the address bar is reporting; the
+/// view is the error page itself, so it is named `vmux://error/` — the url the native surface is
+/// claimed by — and carries the failure as a component for [`answer_error_data_request`] to read.
 fn attach_error_page_to_stack(
     stack: Entity,
-    display_url: &str,
-    title: &str,
-    message: &str,
+    failure: vmux_wire::error::ErrorPageData,
     children_q: &Query<&Children>,
     commands: &mut Commands,
 ) {
-    let source = error_page_source(title, message, display_url);
     clear_stack_children(stack, children_q, commands);
     commands.entity(stack).insert(PageMetadata {
-        url: display_url.to_string(),
-        title: title.to_string(),
+        url: failure.url.clone(),
+        title: failure.title.clone(),
         ..default()
     });
-    let browser = commands
-        .spawn((
-            Browser::new_error(&source, display_url, title),
-            ChildOf(stack),
-        ))
-        .id();
-    commands.entity(browser).insert(CefKeyboardTarget);
+    commands.spawn((
+        Browser::native_page(vmux_wire::error::ERROR_PAGE_URL, &failure.title),
+        failure,
+        ChildOf(stack),
+    ));
 }
 
 fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: &mut Commands) {
@@ -885,28 +887,6 @@ fn clear_stack_children(stack: Entity, children_q: &Query<&Children>, commands: 
             commands.entity(child).try_despawn();
         }
     }
-}
-
-fn error_page_source(title: &str, message: &str, url: &str) -> String {
-    format!(
-        "vmux://error/?title={}&message={}&url={}",
-        percent_encode(title),
-        percent_encode(message),
-        percent_encode(url),
-    )
-}
-
-fn percent_encode(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len() * 3);
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char)
-            }
-            _ => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 /// A pending agent-initiated in-place navigation, keyed by the target webview.
@@ -925,25 +905,6 @@ pub struct PendingNavSnapshots(pub std::collections::HashMap<Entity, NavPending>
 
 fn cef_root_cache_path() -> Option<String> {
     vmux_core::profile::cef_cache_path()
-}
-
-#[cfg(test)]
-mod error_page_source_tests {
-    use super::{error_page_source, percent_encode};
-
-    #[test]
-    fn percent_encode_escapes_reserved_keeps_unreserved() {
-        assert_eq!(percent_encode("a b/&"), "a%20b%2F%26");
-        assert_eq!(percent_encode("v0.0.1-rc~_"), "v0.0.1-rc~_");
-    }
-
-    #[test]
-    fn error_page_source_builds_query() {
-        assert_eq!(
-            error_page_source("Page not found", "", "vmux://nowhere/"),
-            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fnowhere%2F"
-        );
-    }
 }
 
 #[cfg(test)]

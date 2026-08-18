@@ -184,33 +184,6 @@ impl Browser {
         )
     }
 
-    pub fn new_error(source_url: &str, display_url: &str, title: &str) -> impl Bundle {
-        (
-            Self,
-            WebviewWindowed,
-            WebviewWindowedNativeFocus,
-            WebviewOpaqueWindowedBackground,
-            vmux_core::PageMetadata {
-                title: title.to_string(),
-                url: display_url.to_string(),
-                icon: vmux_core::PageIcon::None,
-                bg_color: None,
-            },
-            WebviewSource::new(source_url),
-            ResolvedWebviewUri(source_url.to_string()),
-            WebviewSize(Vec2::new(1280.0, 720.0)),
-            Transform::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                ..default()
-            },
-            Visibility::Visible,
-        )
-    }
 }
 
 /// The layout's entity, carrying no CEF browser.
