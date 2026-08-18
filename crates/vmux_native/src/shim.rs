@@ -105,9 +105,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   // that would replace it. A frame with no edits still arrives: a request for the caret gives the
   // page nothing to draw.
   const pumpEdits = async () => {
+    let applied = false;
     for (;;) {
       try {
-        const response = await fetch('/__edits');
+        // Asking for the next frame is how the last one is acknowledged: the two always happened
+        // together, and sending them apart left the host waking itself to notice the ack.
+        const response = await fetch('/__edits', {
+          headers: { 'x-vmux-applied': applied ? '1' : '0' },
+        });
+        applied = false;
         if (!response.ok) { await new Promise((r) => setTimeout(r, 50)); continue; }
         const frame = await response.arrayBuffer();
         if (frame.byteLength < 4) continue;
@@ -118,7 +124,7 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           const json = new TextDecoder().decode(new Uint8Array(frame, 4, length));
           for (const queued of JSON.parse(json)) applyDomRequest(queued);
         }
-        if (edits.byteLength) window.interpreter.sendIpcMessage('flushed');
+        applied = edits.byteLength > 0;
       } catch (e) {
         await new Promise((r) => setTimeout(r, 50));
       }

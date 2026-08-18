@@ -33,7 +33,7 @@ impl PageRoutes {
         let url = request.uri().to_string();
         match Route::of(&url) {
             Route::Events => self.dom.answer_event(&request, responder),
-            Route::Edits => self.dom.serve_edits(responder),
+            Route::Edits => self.dom.serve_edits(&request, responder),
             Route::Document => responder.respond(self.page.shell()),
             Route::Asset => self.assets.fetch(&url, AssetReply::of(responder)),
         }

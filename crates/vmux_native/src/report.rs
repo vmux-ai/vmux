@@ -1,8 +1,9 @@
 //! What a page says back, over wry's string IPC.
 //!
 //! The other direction from [`route`](crate::route): that is the page asking the host for
-//! something, this is the page telling it something. Five kinds, and the wire is text because
-//! that is all `window.ipc` carries.
+//! something, this is the page telling it something. The wire is text, because that is all
+//! `window.ipc` carries — which is why anything with a shape rides a request over `vmux://`
+//! instead, and why what is left here keeps shrinking.
 
 use std::rc::Rc;
 
@@ -16,8 +17,6 @@ use crate::page::NativePage;
 enum PageReport<'a> {
     /// The interpreter is up and holding a root, so the page can take a batch at all.
     Initialized,
-    /// The last batch was applied, which is what releases the next render.
-    Flushed,
     /// Where the caret is, volunteered because nothing can ask for it.
     Caret {
         element: &'a str,
@@ -36,13 +35,10 @@ enum PageReport<'a> {
 
 impl<'a> PageReport<'a> {
     fn of(body: &'a str) -> Self {
-        // The interpreter's own two, which it sends as `{"method":..}` through `sendIpcMessage`
-        // rather than through the shim, so they arrive as JSON and everything else does not.
+        // The interpreter's own, which it sends as `{"method":..}` through `sendIpcMessage` rather
+        // than through the shim, so it arrives as JSON and everything else does not.
         if body.contains(r#""method":"initialize""#) {
             return Self::Initialized;
-        }
-        if body.contains(r#""method":"flushed""#) {
-            return Self::Flushed;
         }
         if let Some(rest) = body.strip_prefix("selected:") {
             return Self::Selected(rest == "1");
@@ -92,7 +88,6 @@ impl PageMessage {
     pub(crate) fn receive(&self, body: &str) {
         match PageReport::of(body) {
             PageReport::Initialized => self.dom.page_is_ready(),
-            PageReport::Flushed => self.dom.page_flushed(),
             PageReport::Caret {
                 element,
                 start,
@@ -147,7 +142,6 @@ mod tests {
         fn described(body: &str) -> String {
             match PageReport::of(body) {
                 PageReport::Initialized => "initialized".to_string(),
-                PageReport::Flushed => "flushed".to_string(),
                 PageReport::Caret {
                     element,
                     start,
@@ -169,7 +163,6 @@ mod tests {
     fn each_report_decodes_from_the_string_the_shim_posts() {
         let decoded: Vec<String> = [
             r#"{"method":"initialize"}"#,
-            r#"{"method":"flushed"}"#,
             "caret:prompt:3:7",
             "caret:vmux:prompt:0:0",
             "selected:1",
@@ -185,7 +178,6 @@ mod tests {
             decoded,
             [
                 "initialized",
-                "flushed",
                 "caret prompt 3..7",
                 "caret vmux:prompt 0..0",
                 "selected true",

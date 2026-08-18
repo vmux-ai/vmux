@@ -9,7 +9,7 @@
 //! - the host's render call, which hands over a batch when the page is waiting for one,
 //! - the `vmux://` handler, which answers `__events` while the page blocks on the reply, and
 //!   holds the page's standing request for `__edits`,
-//! - and the IPC handler, which hears `initialize` and `flushed` back from the page.
+//! - and the IPC handler, which hears `initialize` back from the page.
 //!
 //! wry's asynchronous protocol closure carries no `Send` bound, so the compiler holds all three to
 //! the same thread without a thread-local or an `unsafe`.
@@ -44,6 +44,9 @@ pub(crate) struct SurfaceDom {
     /// The page's standing request for the next batch, waiting for a render to produce one.
     parked: Rc<RefCell<Option<wry::RequestAsyncResponder>>>,
 }
+
+/// Set on a request that is also the acknowledgement of the frame before it.
+const FRAME_APPLIED: &str = "x-vmux-applied";
 
 /// What the page's components asked the host to do to their elements, waiting for the page to ask.
 ///
@@ -119,16 +122,14 @@ impl SurfaceDom {
 
     /// The page applied the batch it was last given.
     ///
-    /// Waking is the whole point of hearing about it. A render is withheld until the last batch
-    /// lands, and the ack arrives over IPC rather than through the host's event loop, so without
-    /// this the frame that would send the next batch waits for a reactive timer. Anything needing
-    /// more than one pass then opens in stages.
-    pub(crate) fn page_flushed(&self) {
+    /// No wake. The ack used to arrive over IPC, separately from the request it always accompanied,
+    /// so the host had to wake itself to notice that a render was released; it rides the request
+    /// now, and the flush that follows happens in the same call.
+    fn page_flushed(&self) {
         let _host = HostScope::enter(self.host.clone());
         if let Ok(mut page) = self.page.try_borrow_mut() {
             page.flushed();
         }
-        self.waker.wake();
     }
 
     /// The next batch, if there is one and the page can take it.
@@ -156,7 +157,19 @@ impl SurfaceDom {
     ///
     /// Only one request is ever held. A second means the first belongs to a page that has gone —
     /// reloaded, or timed its fetch out — so it is answered empty rather than left to rot.
-    pub(crate) fn serve_edits(&self, responder: wry::RequestAsyncResponder) {
+    ///
+    /// The request is also the acknowledgement of the frame before it, which is what releases the
+    /// next render. Reading it here rather than over IPC is what makes the ordering deterministic:
+    /// the two arrived on separate queues, so a request handled before its own ack found the page
+    /// still unflushed and produced nothing.
+    pub(crate) fn serve_edits(
+        &self,
+        request: &wry::http::Request<Vec<u8>>,
+        responder: wry::RequestAsyncResponder,
+    ) {
+        if Self::acknowledges_last_frame(request) {
+            self.page_flushed();
+        }
         if let Some(stale) = self.parked.borrow_mut().take() {
             Self::respond(stale, PageFrame::new(Vec::new(), Vec::new()));
         }
@@ -212,6 +225,17 @@ impl SurfaceDom {
             .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
 
         responder.respond(response);
+    }
+
+    /// Whether this request says the page applied the frame before it.
+    ///
+    /// A header rather than a body: WebKit does not hand a scheme handler the body of a `fetch`,
+    /// which is why the interpreter's own event payload travels as a header too.
+    fn acknowledges_last_frame(request: &wry::http::Request<Vec<u8>>) -> bool {
+        request
+            .headers()
+            .get(FRAME_APPLIED)
+            .is_some_and(|value| value == "1")
     }
 
     fn respond(responder: wry::RequestAsyncResponder, frame: PageFrame) {
