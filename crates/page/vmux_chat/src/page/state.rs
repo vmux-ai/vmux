@@ -66,21 +66,17 @@ pub struct Chat {
 }
 
 /// Build the page's state, subscribe it to the host, and start the effects that keep it current.
-pub fn use_chat(
-    agent_override: Option<String>,
-    transition_prompt: Option<String>,
-    transition_attachments: Option<Vec<ChatAttachment>>,
-) -> Chat {
+pub fn use_chat() -> Chat {
     use_theme();
     let transcript = use_transcript();
     let items = transcript.items;
     let chat = Chat {
-        agent: use_signal(|| agent_override.unwrap_or_else(current_agent)),
+        agent: use_signal(current_agent),
         transcript,
         run: use_run_state(),
         identity: use_agent_identity(),
         handoff: use_handoff(),
-        composer: use_composer_draft(transition_prompt, transition_attachments),
+        composer: use_composer_draft(),
         queue: use_prompt_queue(),
         media: use_media_picker(),
         models: use_model_picker(),
@@ -913,10 +909,13 @@ pub struct ComposerDraft {
     pub transition_attachments: Signal<Vec<ChatAttachment>>,
 }
 
-pub fn use_composer_draft(
-    transition_prompt: Option<String>,
-    transition_attachments: Option<Vec<ChatAttachment>>,
-) -> ComposerDraft {
+/// Both transition signals start empty.
+///
+/// They are what the launcher typed, shown greyed in the composer until the run picks it up. The
+/// launcher hands it over as a `PromptQueue` entry on the stack rather than as a prop, so the only
+/// caller that ever filled these was the web inline-transition wrapper — and it passed the prompt
+/// through `window.name`, which carries the target url and nothing else.
+pub fn use_composer_draft() -> ComposerDraft {
     ComposerDraft {
         draft: use_signal(String::new),
         attachments: use_signal(Vec::new),
@@ -924,8 +923,8 @@ pub fn use_composer_draft(
         attachment_preview_requests: use_signal(HashSet::new),
         history_cursor: use_signal(|| None),
         history_scratch: use_signal(String::new),
-        transition_preview: use_signal(|| transition_prompt.unwrap_or_default()),
-        transition_attachments: use_signal(|| transition_attachments.unwrap_or_default()),
+        transition_preview: use_signal(String::new),
+        transition_attachments: use_signal(Vec::new),
     }
 }
 
@@ -1054,21 +1053,33 @@ fn merge_transcript_page(
     incoming_start
 }
 
-/// Running subagents and unfinished plan steps across the transcript.
-
-/// The agent id from the page URL (`vmux://agent/<id>` → `<id>`); the chat UI is shared
-/// across agents and only the id differs.
-#[cfg(web)]
+/// The agent id this view is showing (`vmux://agent/<id>` → `<id>`); the chat UI is shared across
+/// agents and only the id differs.
+///
+/// A native host registers one page for the whole `vmux://agent/` subtree, so the document's own
+/// url names no conversation — the view's [`vmux_core::PageMetadata`] does, and the host puts it
+/// in the root scope before the first render. On the web the document *is* the conversation, so
+/// `location` answers instead.
 fn current_agent() -> String {
-    web_sys::window()
-        .and_then(|w| w.location().pathname().ok())
-        .and_then(|path| path.split('/').find(|s| !s.is_empty()).map(str::to_string))
-        .unwrap_or_else(|| "agent".to_string())
-}
+    /// The first path segment, which is the provider — a resumed session adds a second segment
+    /// naming the session rather than the agent.
+    fn provider(path: &str) -> Option<String> {
+        Some(path.split('/').find(|part| !part.is_empty())?.to_string())
+    }
 
-/// A native host has no page URL to read the id out of, so it passes `agent_override` instead —
-/// which takes precedence over this anyway.
-#[cfg(not(web))]
-fn current_agent() -> String {
+    if let Some(meta) = try_consume_context::<vmux_core::PageMetadata>()
+        && let Some(rest) = meta.url.strip_prefix("vmux://agent/")
+        && let Some(agent) = provider(rest)
+    {
+        return agent;
+    }
+    #[cfg(web)]
+    if let Some(agent) = web_sys::window()
+        .and_then(|window| window.location().pathname().ok())
+        .and_then(|path| provider(&path))
+    {
+        return agent;
+    }
+
     "agent".to_string()
 }

@@ -57,11 +57,9 @@ macro_rules! web_pages {
 web_pages! {
     render_layout: "layout" => vmux_layout::page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,
-    render_agent: "agent" => vmux_chat::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
     render_vault: "vault" => vmux_layout::vault_page::Page,
-    render_start: "start" => StartAgentPage,
 }
 
 #[component]
@@ -78,66 +76,6 @@ fn UnknownPage(host: String) -> Element {
                     &[("host", TranslationValue::String(&host))],
                 )}
             }
-        }
-    }
-}
-
-#[component]
-fn StartAgentPage() -> Element {
-    let mut transition = use_signal(InlineAgentWindow::pending);
-    if let Some(active) = transition() {
-        return rsx! {
-            vmux_chat::page::Page {
-                agent_override: Some(InlineAgentWindow::agent_id(&active.target_url)),
-                transition_prompt: Some(active.prompt),
-                transition_attachments: Some(active.attachments),
-            }
-        };
-    }
-    rsx! {
-        vmux_start::page::Page {
-            on_inline_transition: move |next: vmux_command::page::StartInlineTransition| {
-                vmux_start::page::begin_agent_transition();
-                InlineAgentWindow::set(&next.target_url);
-                transition.set(Some(next));
-            },
-        }
-    }
-}
-
-/// The start page hands off to an agent by navigating, which would drop the target. The agent
-/// URL rides across the navigation in `window.name`.
-struct InlineAgentWindow;
-
-impl InlineAgentWindow {
-    const PREFIX: &'static str = "vmux-inline-agent:";
-
-    /// The transition this window was opened for, if it was opened for one.
-    fn pending() -> Option<vmux_command::page::StartInlineTransition> {
-        let name = web_sys::window()?.name().ok()?;
-        let agent_url = name.strip_prefix(Self::PREFIX)?;
-        Some(vmux_command::page::StartInlineTransition {
-            target_url: agent_url.to_string(),
-            prompt: String::new(),
-            attachments: Vec::new(),
-        })
-    }
-
-    fn set(agent_url: &str) {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let _ = window.set_name(&format!("{}{agent_url}", Self::PREFIX));
-    }
-
-    /// The `<id>` in `vmux://agent/<id>/...`.
-    fn agent_id(agent_url: &str) -> String {
-        let Some(path) = agent_url.strip_prefix("vmux://agent/") else {
-            return "agent".to_string();
-        };
-        match path.split('/').next() {
-            Some(segment) if !segment.is_empty() => segment.to_string(),
-            _ => "agent".to_string(),
         }
     }
 }

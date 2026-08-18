@@ -1522,8 +1522,19 @@ mod tests {
         );
     }
 
+    /// The launcher's view is replaced rather than relabelled, and the prompt the user typed into
+    /// it survives that.
+    ///
+    /// Reuse was the old shape: a CEF browser had the bundle loaded and a url swap kept it, so the
+    /// entity stayed and only its metadata changed. A native view is a `VirtualDom` built from the
+    /// launcher's component, which no url swap turns into chat — the surface would have stayed the
+    /// launcher's forever, showing a launcher in a pane the user had already left.
+    ///
+    /// The prompt is the part that must not regress either way: it is on its way from
+    /// `PendingPrompt` on the stack to the queue the run drains, and a despawn in the middle is
+    /// exactly where it could be dropped without anything noticing.
     #[test]
-    pub(crate) fn inline_start_transition_reuses_the_existing_webview() {
+    pub(crate) fn inline_start_transition_replaces_the_launcher_view_and_keeps_the_prompt() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<SpawnAgentInStackRequest>()
@@ -1568,24 +1579,19 @@ mod tests {
 
         app.update();
 
-        assert!(app.world().get_entity(webview).is_ok());
         assert!(
-            app.world()
-                .get::<crate::host::chat::AgentChatView>(webview)
-                .is_some()
+            app.world().get_entity(webview).is_err(),
+            "the launcher's view is gone rather than relabelled"
         );
-        assert!(
-            matches!(
-                app.world()
-                    .get::<bevy_cef::prelude::WebviewSource>(webview),
-                Some(bevy_cef::prelude::WebviewSource(url)) if url == "vmux://start/"
-            ),
-            "the existing document remains loaded"
-        );
-        assert_eq!(
-            app.world().get::<PageMetadata>(webview).unwrap().url,
-            "vmux://agent/claude"
-        );
+        let mut views = app
+            .world_mut()
+            .query_filtered::<(&PageMetadata, &ChildOf), With<crate::host::chat::AgentChatView>>();
+        let opened: Vec<_> = views.iter(app.world()).collect();
+        let [(meta, parent)] = opened.as_slice() else {
+            panic!("expected exactly one chat view, got {}", opened.len());
+        };
+        assert_eq!(meta.url, "vmux://agent/claude");
+        assert_eq!(parent.parent(), stack);
         let queue = app.world().get::<vmux_session::PromptQueue>(stack).unwrap();
         assert_eq!(
             queue.items.front().map(|item| item.text.as_str()),

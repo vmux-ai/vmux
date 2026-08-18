@@ -23,10 +23,11 @@
 //! a frame, an asset, and where a page's bytes go — through [`Embedding`], and that is what keeps
 //! an ECS, a window and an asset server on the other side of the boundary.
 //!
-//! Half here: the element backing for `onmounted`. A mounted component can focus its element and
-//! scroll it, because those are instructions and the next frame carries them. The three questions
-//! it can ask — its rect, its scroll size, its scroll offset — still answer `NotSupported`, since
-//! an answer has to travel back and nothing here carries one yet.
+//! `onmounted` works here too, which it does not by default: dioxus hands a mounted component
+//! `MountedData::new(())`, whose every method answers `NotSupported`. Focus and scroll are
+//! instructions and resolve as soon as the next frame carries them; the three questions — rect,
+//! scroll size, scroll offset — go out node-addressed with a token and come back against it, so
+//! two in flight cannot take each other's answer.
 
 mod event_request;
 mod instance;

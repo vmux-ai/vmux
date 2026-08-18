@@ -301,7 +301,7 @@ impl Placement {
                     .query_filtered::<(Entity, &PageMetadata), (With<HostsPage>, Without<LayoutCef>)>(
                     );
                 for (entity, meta) in pages.iter(world) {
-                    if meta.url == page.url {
+                    if page.answers_for(&meta.url) {
                         claimed.push(entity);
                     }
                 }

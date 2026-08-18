@@ -12,13 +12,11 @@ build = ["dep:regex", "dep:sha2"]
 web = [
     "dep:dioxus",
     "dep:vmux_agent",
-    "dep:vmux_chat",
     "dep:vmux_editor",
     "dep:vmux_command",
     "dep:vmux_layout",
     "dep:vmux_service",
     "dep:vmux_setting",
-    "dep:vmux_start",
     "dep:vmux_terminal",
     "dep:vmux_ui",
     "dep:web-sys",
@@ -41,13 +39,11 @@ required-features = ["web"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, optional = true, features = ["web"] }
 vmux_agent = { path = "../page/vmux_agent", optional = true }
-vmux_chat = { path = "../page/vmux_chat", optional = true }
 vmux_editor = { path = "../page/vmux_editor", optional = true }
 vmux_command = { path = "../page/vmux_command", optional = true }
 vmux_layout = { path = "../page/vmux_layout", optional = true }
 vmux_service = { path = "../host/vmux_service", optional = true }
 vmux_setting = { path = "../page/vmux_setting", optional = true }
-vmux_start = { path = "../page/vmux_start", optional = true }
 vmux_terminal = { path = "../page/vmux_terminal", optional = true }
 vmux_ui = { path = "../vmux_ui", optional = true }
 web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

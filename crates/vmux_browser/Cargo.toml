@@ -34,6 +34,7 @@ tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../page/vmux_agent" }
+vmux_chat = { path = "../page/vmux_chat" }
 vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_flex = { path = "../vmux_flex" }

@@ -128,6 +128,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
     body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden bg-transparent p-0 \
                  text-foreground antialiased",
     transparent: true,
+    owns_subtree: false,
 };
 
 /// The launcher: opaque, because it fills its pane rather than floating over one.
@@ -148,6 +149,7 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
     html_attributes: r#"lang="en" class="h-full" style="color-scheme: light dark""#,
     body_class: "m-0 flex h-full min-h-0 flex-col overflow-hidden p-0 text-foreground antialiased",
     transparent: false,
+    owns_subtree: false,
 };
 
 /// Browsing history.
@@ -163,6 +165,16 @@ pub static TEAM_PAGE: NativePage =
 /// The agents that can be installed and run.
 #[cfg(target_os = "macos")]
 pub static AGENTS_PAGE: NativePage = NativePage::pane("vmux://agents/", vmux_agent::page::Page);
+
+/// One agent conversation.
+///
+/// The only page registered for a subtree rather than a url: `vmux://agent/<id>` names a
+/// conversation, so there is one page and unboundedly many urls. The document it loads is
+/// therefore `vmux://agent/` for every view, and which conversation a view is showing reaches its
+/// components as the view's own [`PageMetadata`](vmux_core::PageMetadata).
+#[cfg(target_os = "macos")]
+pub static CHAT_PAGE: NativePage =
+    NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree();
 
 /// The app's settings.
 #[cfg(target_os = "macos")]

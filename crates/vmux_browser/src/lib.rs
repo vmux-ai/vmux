@@ -122,6 +122,8 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::AGENTS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::CHAT_PAGE)
+                .takes::<vmux_core::PageMetadata>(),
             native_page::NativePagePlugin::in_pane(&native_page::SETTINGS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),

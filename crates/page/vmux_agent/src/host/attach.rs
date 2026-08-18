@@ -90,26 +90,18 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
         },
     ));
     let url = format!("vmux://agent/{provider}");
+    // The launcher's view is despawned rather than relabelled. Reuse was worth it when the view
+    // was a CEF browser holding a wasm bundle a url swap would keep loaded; a native view holds a
+    // `VirtualDom` built from the launcher's own component, and no url swap turns that into chat.
     if let Some(webview) = webview {
-        commands
-            .entity(webview)
-            .insert((
-                crate::host::chat::AgentChatView,
-                PageMetadata {
-                    url,
-                    title: format!("{provider}/{model}"),
-                    bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-                    ..default()
-                },
-            ))
-            .remove::<crate::host::chat::ChatSynced>();
-    } else {
-        commands.spawn((
-            vmux_layout::Browser::new(&url),
-            crate::host::chat::AgentChatView,
-            ChildOf(stack),
-        ));
+        commands.entity(webview).despawn();
     }
+    commands.spawn((
+        vmux_layout::Browser::native_page(&url, &format!("{provider}/{model}")),
+        crate::host::chat::AgentChatView,
+        ChildOf(stack),
+    ));
+
     Some(())
 }
 
@@ -178,29 +170,25 @@ pub(crate) fn attach_acp_agent_to_stack_with_webview(
     {
         commands.entity(stack).insert(imported);
     }
-    // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
     if let Some(webview) = webview {
-        commands
-            .entity(webview)
-            .insert((
-                crate::host::chat::AgentChatView,
-                PageMetadata {
-                    url,
-                    title: name.to_string(),
-                    bg_color: Some(vmux_layout::event::TERMINAL_CEF_BG_COLOR.to_string()),
-                    icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
-                },
-                anchor,
-            ))
-            .remove::<crate::host::chat::ChatSynced>();
-    } else {
-        commands.spawn((
-            vmux_layout::Browser::new(&url),
+        commands.entity(webview).despawn();
+    }
+    // The webview carries the anchor `ProcessId`, so vmux_mcp tool calls resolve to this pane.
+    let view = commands
+        .spawn((
+            vmux_layout::Browser::native_page(&url, name),
             crate::host::chat::AgentChatView,
             ChildOf(stack),
             anchor,
-        ));
-    }
+        ))
+        .id();
+    // Over the bundle's own, which has no icon to give: the registry knows this agent's.
+    commands.entity(view).insert(PageMetadata {
+        url,
+        title: name.to_string(),
+        bg_color: None,
+        icon: vmux_core::PageIcon::favicon(icon.unwrap_or("")),
+    });
 }
 
 /// The registry icon URL for an ACP agent id, if the catalog is loaded and lists it.
