@@ -24,6 +24,7 @@ use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
 use crate::dom_request::DomRequest;
 use crate::embed::{Embedding, Outbox, Wake};
+use crate::frame::PageFrame;
 use crate::{EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.
@@ -43,9 +44,6 @@ pub(crate) struct SurfaceDom {
     /// The page's standing request for the next batch, waiting for a render to produce one.
     parked: Rc<RefCell<Option<wry::RequestAsyncResponder>>>,
 }
-
-/// Tells the page whether to collect its element requests once it has applied the batch.
-pub(crate) const DOM_REQUESTS_WAITING: &str = "x-vmux-dom";
 
 /// What the page's components asked the host to do to their elements, waiting for the page to ask.
 ///
@@ -160,7 +158,7 @@ impl SurfaceDom {
     /// reloaded, or timed its fetch out — so it is answered empty rather than left to rot.
     pub(crate) fn serve_edits(&self, responder: wry::RequestAsyncResponder) {
         if let Some(stale) = self.parked.borrow_mut().take() {
-            Self::respond(stale, Vec::new(), false);
+            Self::respond(stale, PageFrame::new(Vec::new(), Vec::new()));
         }
         *self.parked.borrow_mut() = Some(responder);
         self.flush_to_page();
@@ -171,41 +169,29 @@ impl SurfaceDom {
     /// A batch is not the only reason to answer. A component can ask for the caret without giving
     /// the page anything new to draw, and a request nobody collects is a keystroke that lands in
     /// the wrong field — so an empty batch still goes out when there are requests behind it.
+    ///
+    /// The requests travel in the same body rather than being collected afterwards. The host knows
+    /// at this point whether there are any, so telling the page to come back and ask spends a
+    /// blocking round trip on something already decided.
     pub(crate) fn flush_to_page(&self) {
         if self.parked.borrow().is_none() {
             return;
         }
+        // Rendering first, because a component asks to focus an element from the render that
+        // produces it — draining before would leave the request behind for a frame.
         let edits = self.next_batch();
-        let has_requests = self.has_pending_requests();
-        if edits.is_none() && !has_requests {
+        let requests = self.take_pending_requests();
+        if edits.is_none() && requests.is_empty() {
             return;
         }
         let Some(responder) = self.parked.borrow_mut().take() else {
             return;
         };
 
-        Self::respond(responder, edits.unwrap_or_default(), has_requests);
-    }
-
-    /// Hand over what the page's own components asked to be done to their elements.
-    ///
-    /// The page collects rather than the host reaching in, because reaching in means composing a
-    /// statement here, and the vocabulary then lives in whatever `format!` last wrote it. This way
-    /// the host ships data and the shim holds the fixed set of things that can be asked for.
-    pub(crate) fn serve_dom_requests(&self, responder: wry::RequestAsyncResponder) {
-        let body = match serde_json::to_vec(&self.take_pending_requests()) {
-            Ok(body) => body,
-            Err(error) => {
-                error!("vmux_native: dom requests would not serialize: {error}");
-                b"[]".to_vec()
-            }
-        };
-        let response = wry::http::Response::builder()
-            .header(wry::http::header::CONTENT_TYPE, "application/json")
-            .body(body)
-            .unwrap_or_else(|_| wry::http::Response::new(Vec::new()));
-
-        responder.respond(response);
+        Self::respond(
+            responder,
+            PageFrame::new(requests, edits.unwrap_or_default()),
+        );
     }
 
     /// Answer the synchronous request the page is blocked on.
@@ -228,16 +214,14 @@ impl SurfaceDom {
         responder.respond(response);
     }
 
-    /// The batch, and whether the page should collect its element requests once it has applied it.
-    fn respond(responder: wry::RequestAsyncResponder, edits: Vec<u8>, has_requests: bool) {
+    fn respond(responder: wry::RequestAsyncResponder, frame: PageFrame) {
         let built = wry::http::Response::builder()
             .header(wry::http::header::CONTENT_TYPE, "application/octet-stream")
-            .header(DOM_REQUESTS_WAITING, if has_requests { "1" } else { "0" })
-            .body(edits);
+            .body(frame.into_body());
         match built {
             Ok(response) => responder.respond(response),
             Err(error) => {
-                error!("vmux_native: an edit batch would not build a response: {error}");
+                error!("vmux_native: a frame would not build a response: {error}");
                 responder.respond(wry::http::Response::new(Vec::new()));
             }
         }
@@ -284,18 +268,11 @@ impl SurfaceDom {
         self.caret.report_document_selection(selected);
     }
 
-    /// Whether the page has anything to collect, so a render knows to tell it to ask.
-    pub(crate) fn has_pending_requests(&self) -> bool {
-        self.pending_requests
-            .try_borrow()
-            .is_ok_and(|pending| !pending.is_empty())
-    }
-
-    /// What the page asked for since it last collected.
+    /// What the page asked for since the last frame.
     ///
-    /// Drained when the page asks, which it does once a batch has landed: a component that asks to
-    /// focus an element is asking about the element the same render just produced.
-    pub(crate) fn take_pending_requests(&self) -> Vec<DomRequest> {
+    /// Drained into the frame that carries the batch they follow: a component that asks to focus an
+    /// element is asking about the element the same render just produced.
+    fn take_pending_requests(&self) -> Vec<DomRequest> {
         let Ok(mut pending) = self.pending_requests.try_borrow_mut() else {
             return Vec::new();
         };

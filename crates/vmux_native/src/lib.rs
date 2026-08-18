@@ -46,6 +46,8 @@ mod dom_request;
 #[cfg(target_os = "macos")]
 mod embed;
 #[cfg(target_os = "macos")]
+mod frame;
+#[cfg(target_os = "macos")]
 mod report;
 #[cfg(target_os = "macos")]
 mod route;

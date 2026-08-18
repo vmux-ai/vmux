@@ -1,9 +1,8 @@
 //! What a page can ask its host for, and who answers.
 //!
-//! Everything the page needs arrives over `vmux://`: the document it loads, the batches it renders,
-//! the verdict on an event it is blocked on, the element requests its own components queued, and
-//! every asset any of those reference. [`Route`] is that list, so adding one is a variant rather
-//! than another branch in a chain of string tests.
+//! Everything the page needs arrives over `vmux://`: the document it loads, the frames it renders,
+//! the verdict on an event it is blocked on, and every asset any of those reference. [`Route`] is
+//! that list, so adding one is a variant rather than another branch in a chain of string tests.
 
 use std::rc::Rc;
 
@@ -35,7 +34,6 @@ impl PageRoutes {
         match Route::of(&url) {
             Route::Events => self.dom.answer_event(&request, responder),
             Route::Edits => self.dom.serve_edits(responder),
-            Route::Dom => self.dom.serve_dom_requests(responder),
             Route::Document => responder.respond(self.page.shell()),
             Route::Asset => self.assets.fetch(&url, AssetReply::of(responder)),
         }
@@ -46,10 +44,8 @@ impl PageRoutes {
 enum Route {
     /// The verdict on an event, which the page is blocked on until it arrives.
     Events,
-    /// The next batch of edits, which the page holds a standing request for.
+    /// The next frame, which the page holds a standing request for.
     Edits,
-    /// The element requests the page's own components queued.
-    Dom,
     /// The page itself.
     Document,
     /// Anything the document references.
@@ -64,7 +60,6 @@ impl Route {
         match Self::path_of(url) {
             "__events" => Self::Events,
             "__edits" => Self::Edits,
-            "__dom" => Self::Dom,
             "" | "index.html" => Self::Document,
             _ => Self::Asset,
         }
@@ -103,8 +98,7 @@ mod tests {
     #[test]
     fn the_hosts_own_routes_are_not_mistaken_for_assets() {
         assert!(matches!(Route::of("vmux://layout/__events"), Route::Events));
-        assert!(matches!(Route::of("vmux://layout/__edits"), Route::Edits));
-        assert!(matches!(Route::of("vmux://layout/__dom/"), Route::Dom));
+        assert!(matches!(Route::of("vmux://layout/__edits/"), Route::Edits));
     }
 
     /// A query is how the interpreter cache-busts, and it must not change what is being asked for.
