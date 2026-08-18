@@ -23,7 +23,6 @@ use vmux_layout::{
     window::{Main, WindowGeometry},
 };
 use vmux_setting::AppSettings;
-use vmux_setting::Settings;
 use vmux_setting::event::SETTINGS_PAGE_URL;
 use vmux_space::event::SPACES_PAGE_URL;
 use vmux_space::{ActiveSpace, Spaces};
@@ -605,7 +604,13 @@ pub(crate) fn rebuild_space_views(
                 .url
                 .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
             {
-                commands.spawn((Settings::new(), ChildOf(entity)));
+                commands.spawn((
+                    vmux_layout::cef::Browser::native_page(
+                        vmux_setting::event::SETTINGS_PAGE_URL,
+                        "Settings",
+                    ),
+                    ChildOf(entity),
+                ));
             } else if meta.url.starts_with("file:") {
                 if let Some(bundle) = vmux_editor::restore_file_view_bundle(&meta.url) {
                     commands.spawn((bundle, ChildOf(entity)));

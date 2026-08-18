@@ -5,9 +5,9 @@ use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
 use vmux_layout::{
     Browser,
+    native_open::HostedPage,
     pane::{Pane, PaneSplit},
     stack::FocusedStack,
-    warm_page::WarmPage,
 };
 use vmux_ui::i18n::Locale;
 
@@ -29,7 +29,7 @@ impl Plugin for SettingsViewPlugin {
         app.init_resource::<CurrentUpdateCheckStatus>()
             .add_message::<CheckForUpdatesRequest>()
             .add_plugins((
-                vmux_layout::warm_page::WarmPagePlugin::<Settings>::default(),
+                vmux_layout::native_open::HostedPagePlugin::<Settings>::default(),
                 BinEventEmitterPlugin::<(SettingsCommandEvent, CheckForUpdatesEvent)>::for_hosts(
                     &["settings"],
                 ),
@@ -55,7 +55,7 @@ impl Plugin for SettingsViewPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Settings;
 
 impl Settings {
@@ -90,14 +90,10 @@ impl Settings {
     }
 }
 
-impl WarmPage for Settings {
+impl HostedPage for Settings {
     const HOST: &'static str = "settings";
     const URL: &'static str = SETTINGS_PAGE_URL;
     const TITLE: &'static str = "Settings";
-
-    fn spawn(commands: &mut Commands) -> Entity {
-        commands.spawn(Settings::new()).id()
-    }
 }
 
 fn reset_sent_markers_on_page_ready(
@@ -149,7 +145,7 @@ fn broadcast_settings_to_views(
         json: serialize_settings_to_json(&settings),
     };
     for entity in &pending {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -161,7 +157,7 @@ fn broadcast_settings_to_views(
     }
     if settings.is_changed() {
         for entity in &sent {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -188,7 +184,7 @@ fn broadcast_schema_to_views(
         json: serde_json::to_string(&build_settings_schema_for(&locale)).unwrap_or_default(),
     };
     for entity in &pending {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -200,7 +196,7 @@ fn broadcast_schema_to_views(
     }
     if settings.is_changed() {
         for entity in &sent {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -230,7 +226,7 @@ fn broadcast_update_status_to_views(
         status: status.0.clone(),
     };
     for entity in &pending {
-        if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+        if !browsers.can_emit_to(&entity) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -242,7 +238,7 @@ fn broadcast_update_status_to_views(
     }
     if status.is_changed() {
         for entity in &sent {
-            if !browsers.has_browser(entity) || !browsers.host_emit_ready(&entity) {
+            if !browsers.can_emit_to(&entity) {
                 continue;
             }
             commands.trigger(BinHostEmitEvent::from_rkyv(
@@ -910,13 +906,14 @@ mod browser_schema_tests {
 mod page_open_tests {
     use super::*;
     use vmux_core::{PageOpenHandled, PageOpenId, PageOpenTask};
-    use vmux_layout::warm_page::WarmPagePlugin;
+    use vmux_layout::native_open::{HostedPagePlugin, NativeOpenPlugin};
 
     #[test]
     fn settings_page_open_spawns_marker_and_handles() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(WarmPagePlugin::<Settings>::default());
+            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         let claimed = app
             .world_mut()
@@ -947,7 +944,8 @@ mod page_open_tests {
     fn settings_page_open_dedupes_per_stack() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .add_plugins(WarmPagePlugin::<Settings>::default());
+            .add_plugins(NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin::<Settings>::default());
         let stack = app.world_mut().spawn_empty().id();
         for _ in 0..2 {
             app.world_mut().spawn(PageOpenTask {

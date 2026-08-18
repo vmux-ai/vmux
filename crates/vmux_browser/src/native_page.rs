@@ -135,6 +135,13 @@ pub static TEAM_PAGE: NativePage =
 #[cfg(target_os = "macos")]
 pub static AGENTS_PAGE: NativePage = NativePage::pane("vmux://agents/", vmux_agent::page::Page);
 
+/// The app's settings.
+#[cfg(target_os = "macos")]
+pub static SETTINGS_PAGE: NativePage = NativePage::pane(
+    vmux_setting::event::SETTINGS_PAGE_URL,
+    vmux_setting::page::Page,
+);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own

@@ -61,7 +61,6 @@ web_pages! {
     render_terminal: "terminal" => vmux_terminal::page::Page,
     render_services: "services" => vmux_service::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
-    render_settings: "settings" => vmux_setting::page::Page,
     render_agent: "agent" => vmux_chat::page::Page,
     render_files: "files" => vmux_editor::page::Page,
     render_lsp: "lsp" => vmux_editor::lsp_page::Page,
