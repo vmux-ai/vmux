@@ -126,6 +126,11 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 pub static HISTORY_PAGE: NativePage =
     NativePage::pane(vmux_history::PAGE_URL, vmux_history::page::Page);
 
+/// The user and the agents in the active space.
+#[cfg(target_os = "macos")]
+pub static TEAM_PAGE: NativePage =
+    NativePage::pane(vmux_core::event::team::TEAM_PAGE_URL, vmux_team::page::Page);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own

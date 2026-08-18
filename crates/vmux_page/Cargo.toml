@@ -19,7 +19,6 @@ web = [
     "dep:vmux_service",
     "dep:vmux_setting",
     "dep:vmux_space",
-    "dep:vmux_team",
     "dep:vmux_terminal",
     "dep:vmux_ui",
     "dep:web-sys",
@@ -49,7 +48,6 @@ vmux_layout = { path = "../page/vmux_layout", optional = true }
 vmux_service = { path = "../host/vmux_service", optional = true }
 vmux_setting = { path = "../page/vmux_setting", optional = true }
 vmux_space = { path = "../page/vmux_space", optional = true }
-vmux_team = { path = "../page/vmux_team", optional = true }
 vmux_terminal = { path = "../page/vmux_terminal", optional = true }
 vmux_ui = { path = "../vmux_ui", optional = true }
 web-sys = { version = "0.3", features = ["Location", "Window"], optional = true }

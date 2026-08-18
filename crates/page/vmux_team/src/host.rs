@@ -13,9 +13,9 @@ use vmux_core::page::PageReady;
 use vmux_core::team::{Agent, Profile, User};
 use vmux_core::{PageMetadata, focus_pane_entity};
 use vmux_layout::cef::LayoutCef;
+use vmux_layout::native_open::{HostedPage, HostedPagePlugin};
 use vmux_layout::space::{ActiveSpaceEntity, Space, space_of};
 use vmux_layout::stack::Stack;
-use vmux_layout::warm_page::{WarmPage, WarmPagePlugin};
 use vmux_service::agent_events::AgentCommandRequest;
 use vmux_service::client::ServiceClient;
 use vmux_service::protocol::{AgentCommand, AgentCommandResult, ClientMessage, SharedAgentCommand};
@@ -27,11 +27,10 @@ pub struct TeamPlugin;
 impl Plugin for TeamPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "team");
         app.add_systems(Startup, spawn_user_profile)
             .add_systems(Update, (sync_user_profile_name, emit_team).chain())
             .add_systems(Update, answer_list_team)
-            .add_plugins(WarmPagePlugin::<Team>::default())
+            .add_plugins(HostedPagePlugin::<Team>::default())
             .add_plugins(BinEventEmitterPlugin::<(TeamCommandEvent,)>::for_hosts(&[
                 "team", "layout",
             ]))
@@ -50,22 +49,13 @@ pub const PAGE_MANIFEST: vmux_core::page::PageManifest = vmux_core::page::PageMa
     command_bar: true,
 };
 
-#[derive(Component)]
+#[derive(Component, Default)]
 struct Team;
 
-impl WarmPage for Team {
+impl HostedPage for Team {
     const HOST: &'static str = "team";
     const URL: &'static str = TEAM_PAGE_URL;
     const TITLE: &'static str = "Team";
-
-    fn spawn(commands: &mut Commands) -> Entity {
-        commands
-            .spawn((
-                vmux_layout::Browser::new_with_title(Self::URL, Self::TITLE),
-                Team,
-            ))
-            .id()
-    }
 }
 
 #[derive(Component)]
@@ -504,8 +494,11 @@ mod tests {
     fn team_page_open_titles_webview_team() {
         use vmux_core::page_open::{PageOpenId, PageOpenTask};
         let mut app = App::new();
+        // Both halves, because that is what opening a page takes: one plugin declares the page and
+        // marks its view, the other is what actually opens one.
         app.add_plugins(MinimalPlugins)
-            .add_plugins(WarmPagePlugin::<Team>::default());
+            .add_plugins(vmux_layout::native_open::NativeOpenPlugin)
+            .add_plugins(HostedPagePlugin::<Team>::default());
 
         let stack = app.world_mut().spawn(Stack::default()).id();
         app.world_mut().spawn(PageOpenTask {
