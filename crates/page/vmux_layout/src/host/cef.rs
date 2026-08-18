@@ -183,7 +183,6 @@ impl Browser {
             Visibility::Visible,
         )
     }
-
 }
 
 /// The layout's entity, carrying no CEF browser.

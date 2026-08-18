@@ -37,10 +37,7 @@ impl Approval {
         };
 
         Self {
-            message: translate_with(
-                id,
-                &[("name", TranslationValue::String(&extension.name))],
-            ),
+            message: translate_with(id, &[("name", TranslationValue::String(&extension.name))]),
             permissions,
         }
     }

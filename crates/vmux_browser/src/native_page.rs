@@ -41,10 +41,11 @@ impl Plugin for NativePagePlugin {
         if !app.is_plugin_added::<NativePagesPlugin>() {
             app.add_plugins(NativePagesPlugin);
         }
-        app.world_mut()
-            .resource_mut::<NativePages>()
-            .0
-            .push((self.page, self.placement, self.instance));
+        app.world_mut().resource_mut::<NativePages>().0.push((
+            self.page,
+            self.placement,
+            self.instance,
+        ));
     }
 
     /// Every page is another instance of this, and Bevy rejects a repeated plugin by type.
