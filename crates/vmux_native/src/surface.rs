@@ -33,7 +33,7 @@ impl PageSurface {
         instance: crate::Instance,
     ) -> Result<Self, wry::Error> {
         let dom = SurfaceDom::mount(page.component, instance, &embed);
-        let message = PageMessage::new(page, embed.outbox, dom.clone());
+        let message = PageMessage::new(page, embed.outbox);
         let routes = PageRoutes::new(page, dom.clone(), embed.assets);
         let webview = wry::WebViewBuilder::new()
             .with_transparent(page.transparent)

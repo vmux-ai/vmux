@@ -34,7 +34,7 @@ use crate::format::composer::{
 };
 use dioxus::prelude::*;
 use vmux_core::input::{KeyStroke, PageKeyContext, Unclaimed};
-use vmux_ui::caret::{DocumentSelection, TextCaret, byte_offset_to_utf16};
+use vmux_ui::caret::{EventSelection, byte_offset_to_utf16};
 use vmux_ui::components::prompt_composer::{PROMPT_INPUT_ID, focus_prompt_end};
 use vmux_ui::hooks::{
     KeyClaim, MenuDirection, choice_number_index, move_selection, send, use_key_claim, use_listener,
@@ -129,7 +129,7 @@ impl ChatKeys {
     /// because `ArrowUp` doubles as caret movement, not because prompt recall is optional.
     fn wanted_locally(&self, stroke: &KeyStroke) -> bool {
         if Self::copies(stroke) {
-            return DocumentSelection::is_active();
+            return EventSelection::in_document();
         }
         if !Self::moves_the_caret(stroke) {
             return false;
@@ -201,7 +201,7 @@ impl ChatKeys {
     /// recall rather than appear to do nothing.
     fn recall_direction(&self, key: &str, ctrl: bool) -> Option<PromptHistoryDirection> {
         let draft = self.chat.draft();
-        let (start, end) = TextCaret::in_field(PROMPT_INPUT_ID).selection();
+        let (start, end) = EventSelection::in_field(PROMPT_INPUT_ID);
         let direction = prompt_history_direction(
             key,
             ctrl,

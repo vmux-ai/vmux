@@ -4,15 +4,15 @@
 //! handed a document carrying nothing but the interpreter, and every element it displays arrives
 //! as a batch of edits the page asks for and applies itself.
 //!
-//! Three things share one `Rc`, all on the main thread:
+//! Two things share one `Rc`, both on the main thread:
 //!
-//! - the host's render call, which hands over a batch when the page is waiting for one,
-//! - the `vmux://` handler, which answers `__events` while the page blocks on the reply, and
-//!   holds the page's standing request for `__edits`,
-//! - and the IPC handler, which hears what the page volunteers.
+//! - the host's render call, which hands over a batch when the page is waiting for one, and
+//! - the `vmux://` handler, which answers `__events` while the page blocks on the reply, and holds
+//!   the page's standing request for `__edits`.
 //!
-//! wry's asynchronous protocol closure carries no `Send` bound, so the compiler holds all three to
-//! the same thread without a thread-local or an `unsafe`.
+//! wry's asynchronous protocol closure carries no `Send` bound, so the compiler holds both to the
+//! same thread without a thread-local or an `unsafe`. The IPC handler is not among them: what a
+//! page still says over `window.ipc` is its console, which nothing here has to be consulted about.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -24,6 +24,7 @@ use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
 use crate::dom_request::DomRequest;
 use crate::embed::{Embedding, Outbox, Wake};
+use crate::event_selection::EventSelection;
 use crate::frame::PageFrame;
 use crate::{EventOutcome, EventRequest, PageDom};
 
@@ -34,7 +35,8 @@ pub(crate) struct SurfaceDom {
     host: Rc<dyn PageHost>,
     reactor: Rc<tokio::runtime::Runtime>,
     waker: Rc<dyn Wake>,
-    caret: CaretMirror,
+    /// What the event being handled found selected, for as long as it is being handled.
+    selection: Rc<RefCell<EventSelection>>,
     listeners: Listeners,
     pending_requests: PendingRequests,
     /// The first batch has been sent.
@@ -72,12 +74,12 @@ impl SurfaceDom {
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_requests: PendingRequests = Rc::new(RefCell::new(Vec::new()));
-        let caret = CaretMirror::default();
+        let selection: Rc<RefCell<EventSelection>> = Rc::default();
         let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
             outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
             pending_requests: pending_requests.clone(),
-            caret: caret.clone(),
+            selection: selection.clone(),
         });
 
         Self {
@@ -85,7 +87,7 @@ impl SurfaceDom {
             host,
             reactor: Self::reactor(),
             waker: embed.waker.clone(),
-            caret,
+            selection,
             listeners,
             pending_requests,
             mounted: Rc::new(Cell::new(false)),
@@ -214,12 +216,14 @@ impl SurfaceDom {
         request: &wry::http::Request<Vec<u8>>,
         responder: wry::RequestAsyncResponder,
     ) {
-        let header = request
-            .headers()
-            .get("dioxus-data")
+        let headers = request.headers();
+        let payload = headers
+            .get(EventRequest::HEADER)
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default();
-        let body = self.handle_event(header).response_bytes();
+        let body = self
+            .handle_event(payload, EventSelection::of(headers))
+            .response_bytes();
         let response = wry::http::Response::builder()
             .header(wry::http::header::CONTENT_TYPE, "application/json")
             .body(body)
@@ -258,8 +262,8 @@ impl SurfaceDom {
     /// dialogs and menu tracking, so it can land while a render holds the dom. Letting the browser
     /// act is the only safe answer there — the alternative is re-entering the runtime mid-render,
     /// which panics.
-    pub(crate) fn handle_event(&self, header: &str) -> EventOutcome {
-        let event = match EventRequest::from_header(header) {
+    fn handle_event(&self, payload: &str, selection: EventSelection) -> EventOutcome {
+        let event = match EventRequest::from_header(payload) {
             Ok(event) => event.into_event(),
             Err(error) => {
                 warn!("vmux_native: {error}");
@@ -274,23 +278,17 @@ impl SurfaceDom {
             return EventOutcome::unreadable();
         };
 
+        // Held for the handler and no longer, so a component reading it from anywhere else finds
+        // nothing rather than a stale answer wearing the face of a current one.
+        *self.selection.borrow_mut() = selection;
         let outcome = page.handle(event);
+        *self.selection.borrow_mut() = EventSelection::default();
         drop(page);
         // A handler almost always wrote a signal, and the click that ran it reached the webview
         // rather than the host's event loop, so nothing else knows a render is due.
         self.waker.wake();
 
         outcome
-    }
-
-    /// The document reported where its caret is.
-    pub(crate) fn report_caret(&self, element_id: &str, start: usize, end: usize) {
-        self.caret.report(element_id, start, end);
-    }
-
-    /// The document reported whether anything in it is selected.
-    pub(crate) fn report_document_selection(&self, selected: bool) {
-        self.caret.report_document_selection(selected);
     }
 
     /// What the page asked for since the last frame.
@@ -336,46 +334,9 @@ struct SurfaceHost {
     outbox: Rc<dyn Outbox>,
     listeners: Listeners,
     pending_requests: PendingRequests,
-    caret: CaretMirror,
-}
-
-/// Where the caret last was, as the document itself reported it.
-///
-/// Every other capability here is an instruction, which a queued script delivers fine. Reading the
-/// caret is a question, and nothing carries an answer back: the host hands the page a batch and
-/// the page applies it. So the document volunteers the answer on every selection change instead,
-/// and a reader takes the last one.
-///
-/// Stale only if the caret moved without the document saying so, which nothing does — it moves on
-/// input, and the report is posted before the next key can arrive.
-#[derive(Clone, Default)]
-struct CaretMirror {
-    field: Rc<RefCell<Option<(String, usize, usize)>>>,
-    document_selected: Rc<Cell<bool>>,
-}
-
-impl CaretMirror {
-    fn report(&self, element_id: &str, start: usize, end: usize) {
-        let Ok(mut reported) = self.field.try_borrow_mut() else {
-            return;
-        };
-        *reported = Some((element_id.to_string(), start, end));
-    }
-
-    fn report_document_selection(&self, selected: bool) {
-        self.document_selected.set(selected);
-    }
-
-    /// The caret range in this field, collapsed at zero if the last report was about another one.
-    fn selection_in(&self, element_id: &str) -> (usize, usize) {
-        let Ok(reported) = self.field.try_borrow() else {
-            return (0, 0);
-        };
-        match reported.as_ref() {
-            Some((id, start, end)) if id == element_id => (*start, *end),
-            _ => (0, 0),
-        }
-    }
+    /// Only ever read while [`SurfaceDom::handle_event`] holds it, which is the only time a page
+    /// can meaningfully ask.
+    selection: Rc<RefCell<EventSelection>>,
 }
 
 impl SurfaceHost {
@@ -428,12 +389,12 @@ impl PageHost for SurfaceHost {
         });
     }
 
-    fn caret_selection(&self, element_id: &str) -> (usize, usize) {
-        self.caret.selection_in(element_id)
+    fn event_field_selection(&self, element_id: &str) -> (usize, usize) {
+        self.selection.borrow().in_field(element_id)
     }
 
-    fn has_text_selection(&self) -> bool {
-        self.caret.document_selected.get()
+    fn event_document_has_selection(&self) -> bool {
+        self.selection.borrow().in_document()
     }
 
     fn resolves_keys(&self) -> bool {

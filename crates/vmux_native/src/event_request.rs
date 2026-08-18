@@ -1,4 +1,7 @@
 //! The event leg: base64 JSON in, a verdict out while the page waits.
+//!
+//! What happened. What it happened *to* is [`event_selection`](crate::event_selection), which
+//! rides the same request.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;

@@ -5,32 +5,45 @@
 //! present, not of teaching the pages a second protocol.
 //!
 //! The rest is what a natively-hosted page has to do for itself, because nothing evaluates script
-//! into it: pull its own edits, apply the element requests its components queued, and volunteer the
-//! caret nothing can ask it for.
+//! into it: pull its own edits, apply the element requests its components queued, and put what is
+//! selected on the request for the event that needs to know.
 
 pub(crate) const WRY_HOST_SHIM: &str = r#"
 (function () {
   const report = (kind, text) => {
     try { window.ipc.postMessage('log:' + kind + ':' + text); } catch (e) {}
   };
-  // Volunteered rather than asked for: everything the host sends travels one way, so a component
-  // wanting the caret has nothing to ask down. Reported in UTF-8 bytes, the unit Rust counts in.
+  // What is selected travels on the event's own request. A handler settles preventDefault before
+  // it returns, so it cannot wait to be told, and anything posted separately can reach the host
+  // after the decision it was meant to inform. dioxus sends that request from a module-local
+  // function, so there is no method to override and the headers go on the XHR itself — which is
+  // also what makes them the event's own, since `send` runs inside the dispatch.
   const encoder = new TextEncoder();
-  const reportCaret = () => {
-    // A field's own selection and the document's are separate facts, and a page asks both: one
-    // decides whether Up moves the caret or recalls, the other whether Ctrl+C copies.
-    const selected = !(document.getSelection() || { isCollapsed: true }).isCollapsed;
-    try { window.ipc.postMessage('selected:' + (selected ? '1' : '0')); } catch (e) {}
-    const el = document.activeElement;
-    if (!el || !el.id || typeof el.selectionStart !== 'number') return;
-    const bytes = (upto) => encoder.encode(el.value.slice(0, upto)).length;
-    const range = bytes(el.selectionStart) + ':' + bytes(el.selectionEnd);
-    try { window.ipc.postMessage('caret:' + el.id + ':' + range); } catch (e) {}
+  const nativeOpen = XMLHttpRequest.prototype.open;
+  const nativeSend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+    this.__vmuxEvent = String(url).endsWith('/__events');
+    return nativeOpen.call(this, method, url, ...rest);
   };
-  document.addEventListener('selectionchange', reportCaret);
-  for (const name of ['keyup', 'mouseup', 'input', 'focusin']) {
-    document.addEventListener(name, reportCaret, true);
-  }
+  XMLHttpRequest.prototype.send = function (body) {
+    if (this.__vmuxEvent) {
+      // A field's own selection and the document's are separate facts, and a page asks both: one
+      // decides whether Up moves the caret or recalls, the other whether Ctrl+C copies.
+      const selected = !(document.getSelection() || { isCollapsed: true }).isCollapsed;
+      this.setRequestHeader('x-vmux-selected', selected ? '1' : '0');
+      const el = document.activeElement;
+      // An id outside this set would not survive a header, and a field the host cannot name is one
+      // it cannot answer about anyway. Offsets in UTF-8 bytes, the unit Rust counts in.
+      if (el && typeof el.selectionStart === 'number' && /^[\w:.-]+$/.test(el.id)) {
+        const bytes = (upto) => encoder.encode(el.value.slice(0, upto)).length;
+        this.setRequestHeader(
+          'x-vmux-caret',
+          el.id + ':' + bytes(el.selectionStart) + ':' + bytes(el.selectionEnd),
+        );
+      }
+    }
+    return nativeSend.call(this, body);
+  };
   window.addEventListener('error', (e) => {
     report('error', (e.message || 'error') + ' @ ' + (e.filename || '?') + ':' + (e.lineno || 0));
   });

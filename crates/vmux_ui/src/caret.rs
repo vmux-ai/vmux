@@ -1,4 +1,4 @@
-//! Placing the caret in a text field, where only the host can do it.
+//! Moving the caret in a text field, and reading what an event found selected.
 
 /// The caret in one text field, addressed by element id and measured in UTF-8 bytes.
 ///
@@ -6,35 +6,35 @@
 /// programmatic move — a readline chord, accepting a completion, revealing a URL ready to
 /// overtype — has to reach the host. Byte offsets in and out: the DOM's UTF-16 code units stop
 /// here, because mixing the two units is how a caret ends up beside the wrong character.
+///
+/// Instructions only. Reading is [`EventSelection`] — a different question with a different
+/// lifetime, since an instruction is good whenever it is issued and an answer only for the event
+/// it arrived with.
 #[derive(Clone, Copy)]
 pub struct TextCaret {
     element_id: &'static str,
 }
 
 impl TextCaret {
-    /// The caret in the `<input>` with this id.
+    /// The caret in the field with this id.
     pub fn in_field(element_id: &'static str) -> Self {
         Self { element_id }
     }
-
-    /// Where the caret is, as a byte offset into the field's value.
-    pub fn position(self) -> usize {
-        self.selection().0
-    }
-
-    /// Whether this field has text highlighted rather than a bare caret.
-    pub fn has_selection(self) -> bool {
-        let (start, end) = self.selection();
-        start != end
-    }
 }
 
-/// What is highlighted in the page as a whole, which no field can answer for.
+/// What was selected when the event now being dispatched was raised.
 ///
-/// A separate question from [`TextCaret::has_selection`] and not derivable from it: an engine keeps
-/// a text field's internal selection out of the document's, so a page that has to tell "copy this"
-/// from "interrupt that" has to ask both.
-pub struct DocumentSelection;
+/// Meaningful only inside a handler, and the only reading of a selection a handler can do. A key
+/// handler settles `prevent_default` before it returns, so it cannot await an answer; off the web
+/// the values therefore travel on the event's own request rather than being asked for.
+pub struct EventSelection;
+
+impl EventSelection {
+    /// Where the caret was in this field, ignoring anything selected past it.
+    pub fn caret_in(element_id: &str) -> usize {
+        Self::in_field(element_id).0
+    }
+}
 
 #[cfg(web)]
 mod imp {
@@ -42,55 +42,119 @@ mod imp {
     use wasm_bindgen::closure::Closure;
 
     use super::{
-        TextCaret, byte_offset_to_utf16, caret_scroll_left, floor_char_boundary,
+        EventSelection, TextCaret, byte_offset_to_utf16, caret_scroll_left, floor_char_boundary,
         utf16_offset_to_byte,
     };
 
     /// Pixels of text kept visible past the caret when the field has to scroll to reach it.
     const FOLLOW_MARGIN_PX: f64 = 8.0;
 
-    impl TextCaret {
-        /// What is selected in the field, as byte offsets into its value, collapsed to the caret
-        /// when nothing is. `(0, 0)` if the field is gone.
-        pub fn selection(self) -> (usize, usize) {
-            let Some(input) = self.input() else {
+    /// A text field, whichever of the two elements the page built it from.
+    ///
+    /// `HtmlInputElement` and `HtmlTextAreaElement` share no web-sys trait for a value or a
+    /// selection, so the pair is named once here rather than at every call. Both are in use and
+    /// want the same chords: the command bar is an `<input>`, the prompt composer a `<textarea>`.
+    enum Field {
+        Input(web_sys::HtmlInputElement),
+        TextArea(web_sys::HtmlTextAreaElement),
+    }
+
+    impl Field {
+        fn with_id(element_id: &str) -> Option<Self> {
+            let element = web_sys::window()?
+                .document()?
+                .get_element_by_id(element_id)?;
+            match element.dyn_into::<web_sys::HtmlInputElement>() {
+                Ok(input) => Some(Self::Input(input)),
+                Err(element) => element.dyn_into().ok().map(Self::TextArea),
+            }
+        }
+
+        fn value(&self) -> String {
+            match self {
+                Self::Input(input) => input.value(),
+                Self::TextArea(area) => area.value(),
+            }
+        }
+
+        /// The selected range in UTF-16 code units, collapsed to the caret when nothing is.
+        fn range(&self) -> (u32, u32) {
+            let (start, end) = match self {
+                Self::Input(input) => (input.selection_start(), input.selection_end()),
+                Self::TextArea(area) => (area.selection_start(), area.selection_end()),
+            };
+            let start = start.unwrap_or(Some(0)).unwrap_or(0);
+            let end = end.unwrap_or(Some(start)).unwrap_or(start);
+            (start, end)
+        }
+
+        fn select(&self, start: u32, end: u32) {
+            let _ = match self {
+                Self::Input(input) => input.set_selection_range(start, end),
+                Self::TextArea(area) => area.set_selection_range(start, end),
+            };
+        }
+
+        fn html(&self) -> &web_sys::HtmlElement {
+            match self {
+                Self::Input(input) => input,
+                Self::TextArea(area) => area,
+            }
+        }
+    }
+
+    impl EventSelection {
+        /// Read straight from the field, which is where a handler on the web already is.
+        pub fn in_field(element_id: &str) -> (usize, usize) {
+            let Some(field) = Field::with_id(element_id) else {
                 return (0, 0);
             };
-            let value = input.value();
-            let start = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
-            let end = input
-                .selection_end()
-                .unwrap_or(Some(start))
-                .unwrap_or(start);
+            let value = field.value();
+            let (start, end) = field.range();
             (
                 utf16_offset_to_byte(&value, start),
                 utf16_offset_to_byte(&value, end),
             )
         }
 
+        pub fn in_document() -> bool {
+            let Some(window) = web_sys::window() else {
+                return false;
+            };
+            let Ok(Some(selection)) = window.get_selection() else {
+                return false;
+            };
+
+            !selection.is_collapsed()
+        }
+    }
+
+    impl TextCaret {
         /// Put the caret at a byte offset, scrolling the field so it is visible.
         ///
         /// The two are one operation because a programmatic move bypasses Chromium's own
         /// caret-follow: on a long URL, placing without scrolling leaves the caret off-screen,
         /// which reads as the keystroke having done nothing.
         pub fn place(self, byte: usize) {
-            let Some(input) = self.input() else {
+            let Some(field) = Field::with_id(self.element_id) else {
                 return;
             };
-            let value = input.value();
+            let value = field.value();
             let byte = floor_char_boundary(&value, byte);
-            let utf16 = byte_offset_to_utf16(&value, byte);
-            let _ = input.set_selection_range(utf16, utf16);
-            Self::follow(&input, &value[..byte]);
+            field.select(
+                byte_offset_to_utf16(&value, byte),
+                byte_offset_to_utf16(&value, byte),
+            );
+            Self::follow(&field, &value[..byte]);
         }
 
         /// Highlight the whole value, leaving the view where it is.
         pub fn select_all(self) {
-            let Some(input) = self.input() else {
+            let Some(field) = Field::with_id(self.element_id) else {
                 return;
             };
-            let end = input.value().encode_utf16().count() as u32;
-            let _ = input.set_selection_range(0, end);
+            let end = field.value().encode_utf16().count() as u32;
+            field.select(0, end);
         }
 
         /// Highlight the whole value one frame from now, taking focus and rewinding the view to
@@ -111,43 +175,35 @@ mod imp {
                 return;
             };
             let callback = Closure::once_into_js(move || {
-                let Some(input) = self.input() else {
+                let Some(field) = Field::with_id(self.element_id) else {
                     return;
                 };
-                let _ = input.focus();
+                let _ = field.html().focus();
                 self.select_all();
-                input.set_scroll_left(0);
+                field.html().set_scroll_left(0);
             });
             let _ = window.request_animation_frame(callback.unchecked_ref());
         }
 
-        fn input(self) -> Option<web_sys::HtmlInputElement> {
-            web_sys::window()?
-                .document()?
-                .get_element_by_id(self.element_id)?
-                .dyn_into()
-                .ok()
-        }
-
-        fn follow(input: &web_sys::HtmlInputElement, before_caret: &str) {
-            let Some((viewport, caret_px)) = Self::metrics(input, before_caret) else {
+        fn follow(field: &Field, before_caret: &str) {
+            let Some((viewport, caret_px)) = Self::metrics(field, before_caret) else {
                 return;
             };
-            let scroll_left = input.scroll_left() as f64;
+            let scroll_left = field.html().scroll_left() as f64;
             if let Some(scrolled) =
                 caret_scroll_left(caret_px, viewport, scroll_left, FOLLOW_MARGIN_PX)
             {
-                input.set_scroll_left(scrolled as i32);
+                field.html().set_scroll_left(scrolled as i32);
             }
         }
 
         /// The field's usable text width and the pixel offset of `prefix` in its current font,
         /// measured on an offscreen canvas. `None` when the canvas, its context or the computed
         /// font is unavailable, which leaves the field scrolled where it was.
-        fn metrics(input: &web_sys::HtmlInputElement, prefix: &str) -> Option<(f64, f64)> {
+        fn metrics(field: &Field, prefix: &str) -> Option<(f64, f64)> {
             let window = web_sys::window()?;
             let document = window.document()?;
-            let style = window.get_computed_style(input).ok()??;
+            let style = window.get_computed_style(field.html()).ok()??;
             let font_size = style.get_property_value("font-size").unwrap_or_default();
             let font_family = style.get_property_value("font-family").unwrap_or_default();
             if font_size.is_empty() || font_family.is_empty() {
@@ -168,20 +224,8 @@ mod imp {
                     .get_property_value("padding-right")
                     .unwrap_or_default(),
             );
-            let viewport = (input.client_width() as f64 - pad_left - pad_right).max(1.0);
+            let viewport = (field.html().client_width() as f64 - pad_left - pad_right).max(1.0);
             caret_px.is_finite().then_some((viewport, caret_px))
-        }
-    }
-
-    impl super::DocumentSelection {
-        pub fn is_active() -> bool {
-            let Some(window) = web_sys::window() else {
-                return false;
-            };
-            let Ok(Some(selection)) = window.get_selection() else {
-                return false;
-            };
-            !selection.is_collapsed()
         }
     }
 
@@ -197,26 +241,21 @@ mod imp {
 }
 
 #[cfg(not(web))]
-impl DocumentSelection {
-    /// Asks the host, which reports on every selection change for the same reason the caret does.
-    pub fn is_active() -> bool {
-        crate::transport::Host::has_text_selection()
+impl EventSelection {
+    /// What the event's own request carried, which is `(0, 0)` when the event came from anywhere
+    /// but this field — where the web path also lands for a field that is gone.
+    pub fn in_field(element_id: &str) -> (usize, usize) {
+        crate::transport::Host::event_field_selection(element_id)
+    }
+
+    pub fn in_document() -> bool {
+        crate::transport::Host::event_document_has_selection()
     }
 }
 
 #[cfg(not(web))]
 impl TextCaret {
-    /// The last range the host was told about, rather than the field's own.
-    ///
-    /// Reading is the one operation here needing an *answer*, and a host reaching the document by
-    /// queueing a script cannot ask a question — so the document reports unprompted instead.
-    /// `(0, 0)` when nothing has reported, which is where the web path also lands for a missing
-    /// field.
-    pub fn selection(self) -> (usize, usize) {
-        crate::transport::Host::caret_selection(self.element_id)
-    }
-
-    /// Asks the host. See [`Self::position`].
+    /// Asks the host, which queues it for the page to apply behind the next frame.
     pub fn place(self, byte: usize) {
         crate::transport::Host::place_caret(self.element_id, byte);
     }

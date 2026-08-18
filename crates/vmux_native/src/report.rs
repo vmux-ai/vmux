@@ -9,46 +9,20 @@ use std::rc::Rc;
 
 use tracing::{error, info, warn};
 
-use crate::dom::SurfaceDom;
 use crate::embed::Outbox;
 use crate::page::NativePage;
 
 /// One page-to-host message, decoded.
 enum PageReport<'a> {
-    /// Where the caret is, volunteered because nothing can ask for it.
-    Caret {
-        element: &'a str,
-        start: usize,
-        end: usize,
-    },
-    /// Whether anything in the document is selected, which a field's own range cannot answer.
-    Selected(bool),
-    Console {
-        level: &'a str,
-        text: &'a str,
-    },
+    /// A console line, which stays here rather than riding a request precisely because it is worth
+    /// most when the page is broken: a log coupled to the frame loop goes silent with it.
+    Console { level: &'a str, text: &'a str },
     /// A payload a page emitted, still base64 as the shim sent it.
     Emitted(&'a str),
 }
 
 impl<'a> PageReport<'a> {
     fn of(body: &'a str) -> Self {
-        if let Some(rest) = body.strip_prefix("selected:") {
-            return Self::Selected(rest == "1");
-        }
-        // Split from the right: an element id may contain a colon, the two offsets may not.
-        if let Some(rest) = body.strip_prefix("caret:")
-            && let Some((rest, end)) = rest.rsplit_once(':')
-            && let Some((element, start)) = rest.rsplit_once(':')
-            && let Ok(start) = start.parse::<usize>()
-            && let Ok(end) = end.parse::<usize>()
-        {
-            return Self::Caret {
-                element,
-                start,
-                end,
-            };
-        }
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
             return Self::Console { level, text };
@@ -66,26 +40,18 @@ impl<'a> PageReport<'a> {
 pub(crate) struct PageMessage {
     outbox: Rc<dyn Outbox>,
     name: &'static str,
-    dom: SurfaceDom,
 }
 
 impl PageMessage {
-    pub(crate) fn new(page: &NativePage, outbox: Rc<dyn Outbox>, dom: SurfaceDom) -> Self {
+    pub(crate) fn new(page: &NativePage, outbox: Rc<dyn Outbox>) -> Self {
         Self {
             outbox,
             name: page.url,
-            dom,
         }
     }
 
     pub(crate) fn receive(&self, body: &str) {
         match PageReport::of(body) {
-            PageReport::Caret {
-                element,
-                start,
-                end,
-            } => self.dom.report_caret(element, start, end),
-            PageReport::Selected(selected) => self.dom.report_document_selection(selected),
             PageReport::Console { level, text } => self.log(level, text),
             PageReport::Emitted(payload) => self.emit(payload),
         }
@@ -133,45 +99,27 @@ mod tests {
         /// The decoded report, flattened to something an assertion can name.
         fn described(body: &str) -> String {
             match PageReport::of(body) {
-                PageReport::Caret {
-                    element,
-                    start,
-                    end,
-                } => format!("caret {element} {start}..{end}"),
-                PageReport::Selected(selected) => format!("selected {selected}"),
                 PageReport::Console { level, text } => format!("console {level} {text}"),
                 PageReport::Emitted(payload) => format!("emitted {payload}"),
             }
         }
     }
 
-    /// Every report is decoded from the same untagged string, so one prefix shadowing another or
-    /// one field splitting off the wrong end is silent: the caret simply reads zero forever and
-    /// a page that asks where it is quietly gets the wrong answer.
-    ///
-    /// The colon in the element id is the case the offsets have to be split from the right for.
+    /// Both kinds arrive as the same untagged string, so a body taken for the wrong one is silent:
+    /// a log read as a payload is a base64 error in place of the message that explains the crash,
+    /// and a message split on the wrong colon loses everything after the first one.
     #[test]
     fn each_report_decodes_from_the_string_the_shim_posts() {
-        let decoded: Vec<String> = [
-            "caret:prompt:3:7",
-            "caret:vmux:prompt:0:0",
-            "selected:1",
-            "selected:0",
-            "log:warn:something",
-            "AAAA",
-        ]
-        .iter()
-        .map(|body| PageReport::described(body))
-        .collect();
+        let decoded: Vec<String> = ["log:warn:something", "log:error:at line 3: boom", "AAAA"]
+            .iter()
+            .map(|body| PageReport::described(body))
+            .collect();
 
         assert_eq!(
             decoded,
             [
-                "caret prompt 3..7",
-                "caret vmux:prompt 0..0",
-                "selected true",
-                "selected false",
                 "console warn something",
+                "console error at line 3: boom",
                 "emitted AAAA",
             ]
         );

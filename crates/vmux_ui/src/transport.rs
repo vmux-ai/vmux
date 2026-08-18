@@ -53,21 +53,24 @@ pub trait PageHost {
     /// the start so a long one reads as an offer rather than as a tail.
     fn offer_element_text(&self, _element_id: &str) {}
 
-    /// What is selected in a text field, as UTF-8 byte offsets into its value. Collapsed to the
-    /// caret when nothing is.
-    ///
-    /// The one capability here that needs an answer rather than an instruction, which is why a
-    /// host may only be able to give a remembered one. `(0, 0)` when it has nothing to report.
-    fn caret_selection(&self, _element_id: &str) -> (usize, usize) {
-        (0, 0)
-    }
-
     /// Put the caret at a UTF-8 byte offset into a text field's value.
     fn place_caret(&self, _element_id: &str, _byte: usize) {}
 
-    /// Whether anything in the document is selected, which no field's own range can answer: an
-    /// engine keeps a text field's selection out of the document's.
-    fn has_text_selection(&self) -> bool {
+    /// What was selected in a text field when the event being dispatched was raised, as UTF-8 byte
+    /// offsets into its value, collapsed to the caret when nothing was.
+    ///
+    /// The two reads here are scoped to an event rather than askable at will, unlike every
+    /// instruction above. A key handler settles `prevent_default` before it returns, so it cannot
+    /// wait for an answer — the values have to arrive with the event that needs them. `(0, 0)`
+    /// outside a handler, and for a field the event did not come from.
+    fn event_field_selection(&self, _element_id: &str) -> (usize, usize) {
+        (0, 0)
+    }
+
+    /// Whether anything in the document was selected when that same event was raised, which no
+    /// field's own range can answer: an engine keeps a text field's selection out of the
+    /// document's.
+    fn event_document_has_selection(&self) -> bool {
         false
     }
 
@@ -158,14 +161,14 @@ impl Host {
 
     /// `not(web)` only. See [`Self::select_element_text`].
     #[cfg(not(web))]
-    pub(crate) fn caret_selection(id: &str) -> (usize, usize) {
-        Self::with_installed(|host| host.caret_selection(id)).unwrap_or((0, 0))
+    pub(crate) fn event_field_selection(id: &str) -> (usize, usize) {
+        Self::with_installed(|host| host.event_field_selection(id)).unwrap_or((0, 0))
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
     #[cfg(not(web))]
-    pub(crate) fn has_text_selection() -> bool {
-        Self::with_installed(|host| host.has_text_selection()).unwrap_or(false)
+    pub(crate) fn event_document_has_selection() -> bool {
+        Self::with_installed(|host| host.event_document_has_selection()).unwrap_or(false)
     }
 
     /// Whether a page hosted here can hand a stroke over and be told what it meant.

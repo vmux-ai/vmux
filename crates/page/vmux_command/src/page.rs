@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use vmux_core::input::{PageKeyContext, Unclaimed};
 use vmux_ui::agent_accent::agent_accent;
-use vmux_ui::caret::TextCaret;
+use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::components::prompt_box::{PromptBox, PromptPopup, PromptPopupPlacement};
 use vmux_ui::components::prompt_composer::{
@@ -1658,29 +1658,35 @@ fn handle_readline_chord(event: &KeyboardEvent, mut query: Signal<String>, ghost
 
     event.prevent_default();
     event.stop_propagation();
-    apply_ctrl_edit(&mut query, action, ghost);
+    apply_ctrl_edit(
+        &mut query,
+        action,
+        ghost,
+        EventSelection::caret_in(COMMAND_BAR_INPUT_ID),
+    );
     true
 }
 
 /// Run a readline edit against the query, then put the caret where it landed.
 ///
-/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is [`TextCaret`]'s. The value goes
-/// through the signal the field is bound to, so there is nothing to tell Dioxus afterwards — the
-/// element write and the synthetic `input` event that used to follow it existed only because the
-/// field was uncontrolled.
-fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str) {
-    let caret = TextCaret::in_field(COMMAND_BAR_INPUT_ID);
+/// The arithmetic is [`CtrlEditAction::apply`]'s and the caret is the one the key arrived with,
+/// which is why it is a parameter: it can only be read while a handler is running, so a function
+/// that fetched it for itself would be right only for the callers that happen to be in one. The
+/// value goes through the signal the field is bound to, so there is nothing to tell Dioxus
+/// afterwards — the element write and the synthetic `input` event that used to follow it existed
+/// only because the field was uncontrolled.
+fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &str, caret: usize) {
     let value = query.peek().clone();
     let ghost = match action {
         CtrlEditAction::End => ghost,
         _ => "",
     };
 
-    let edited = action.apply(&value, caret.position(), ghost);
+    let edited = action.apply(&value, caret, ghost);
     if edited.value != value {
         query.set(edited.value);
     }
-    caret.place(edited.caret);
+    TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(edited.caret);
 }
 
 /// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
