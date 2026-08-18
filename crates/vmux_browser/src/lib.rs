@@ -576,6 +576,10 @@ static NATIVE_COMMAND_BAR_ROUTE: LazyLock<Mutex<CommandBarRoute>> =
 static NATIVE_LEFT_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static NATIVE_PAGE_OWNS_ESCAPE: AtomicBool = AtomicBool::new(false);
 
+/// The write side is ungated, but the only thing that reads this in production is the `NSEvent`
+/// monitor. `test` is in the gate because the rust jobs run on linux: gating on the target alone
+/// would take the atomicity test out of CI rather than move it to another job.
+#[cfg(any(target_os = "macos", test))]
 fn native_command_bar_route() -> CommandBarRoute {
     *NATIVE_COMMAND_BAR_ROUTE
         .lock()
@@ -604,6 +608,8 @@ pub fn native_left_mouse_down() -> bool {
     NATIVE_LEFT_MOUSE_DOWN.load(Ordering::Relaxed)
 }
 
+/// Answers a cursor position for the AppKit event thread, and nothing else.
+#[cfg(target_os = "macos")]
 fn command_bar_windowed_frame_contains(frame: CommandBarWindowedFrame, cursor: Vec2) -> bool {
     cursor.x >= frame.left_px
         && cursor.x <= frame.left_px + frame.width_px

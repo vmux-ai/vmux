@@ -563,6 +563,8 @@ pub(crate) struct FrameSyncMemory {
 pub(crate) struct PaneFrames(std::collections::HashMap<Entity, PaneFrame>);
 
 impl PaneFrames {
+    /// Filled on every target, read only where there is a native page surface to place.
+    #[cfg(target_os = "macos")]
     pub(crate) fn of(&self, page: Entity) -> Option<PaneFrame> {
         self.0.get(&page).copied()
     }
