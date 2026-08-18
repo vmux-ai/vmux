@@ -15,8 +15,6 @@ use crate::page::NativePage;
 
 /// One page-to-host message, decoded.
 enum PageReport<'a> {
-    /// The interpreter is up and holding a root, so the page can take a batch at all.
-    Initialized,
     /// Where the caret is, volunteered because nothing can ask for it.
     Caret {
         element: &'a str,
@@ -35,11 +33,6 @@ enum PageReport<'a> {
 
 impl<'a> PageReport<'a> {
     fn of(body: &'a str) -> Self {
-        // The interpreter's own, which it sends as `{"method":..}` through `sendIpcMessage` rather
-        // than through the shim, so it arrives as JSON and everything else does not.
-        if body.contains(r#""method":"initialize""#) {
-            return Self::Initialized;
-        }
         if let Some(rest) = body.strip_prefix("selected:") {
             return Self::Selected(rest == "1");
         }
@@ -87,7 +80,6 @@ impl PageMessage {
 
     pub(crate) fn receive(&self, body: &str) {
         match PageReport::of(body) {
-            PageReport::Initialized => self.dom.page_is_ready(),
             PageReport::Caret {
                 element,
                 start,
@@ -141,7 +133,6 @@ mod tests {
         /// The decoded report, flattened to something an assertion can name.
         fn described(body: &str) -> String {
             match PageReport::of(body) {
-                PageReport::Initialized => "initialized".to_string(),
                 PageReport::Caret {
                     element,
                     start,
@@ -162,7 +153,6 @@ mod tests {
     #[test]
     fn each_report_decodes_from_the_string_the_shim_posts() {
         let decoded: Vec<String> = [
-            r#"{"method":"initialize"}"#,
             "caret:prompt:3:7",
             "caret:vmux:prompt:0:0",
             "selected:1",
@@ -177,7 +167,6 @@ mod tests {
         assert_eq!(
             decoded,
             [
-                "initialized",
                 "caret prompt 3..7",
                 "caret vmux:prompt 0..0",
                 "selected true",

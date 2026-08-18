@@ -9,7 +9,7 @@
 //! - the host's render call, which hands over a batch when the page is waiting for one,
 //! - the `vmux://` handler, which answers `__events` while the page blocks on the reply, and
 //!   holds the page's standing request for `__edits`,
-//! - and the IPC handler, which hears `initialize` back from the page.
+//! - and the IPC handler, which hears what the page volunteers.
 //!
 //! wry's asynchronous protocol closure carries no `Send` bound, so the compiler holds all three to
 //! the same thread without a thread-local or an `unsafe`.
@@ -37,8 +37,6 @@ pub(crate) struct SurfaceDom {
     caret: CaretMirror,
     listeners: Listeners,
     pending_requests: PendingRequests,
-    /// The page has an interpreter and a root, so a batch can be evaluated into it.
-    ready: Rc<Cell<bool>>,
     /// The first batch has been sent.
     mounted: Rc<Cell<bool>>,
     /// The page's standing request for the next batch, waiting for a render to produce one.
@@ -90,7 +88,6 @@ impl SurfaceDom {
             caret,
             listeners,
             pending_requests,
-            ready: Rc::new(Cell::new(false)),
             mounted: Rc::new(Cell::new(false)),
             parked: Rc::new(RefCell::new(None)),
         }
@@ -124,12 +121,6 @@ impl SurfaceDom {
         REACTOR.with(Rc::clone)
     }
 
-    /// The page reported that its interpreter is initialized and holding a root.
-    pub(crate) fn page_is_ready(&self) {
-        self.ready.set(true);
-        self.waker.wake();
-    }
-
     /// The page applied the batch it was last given.
     ///
     /// No wake. The ack used to arrive over IPC, separately from the request it always accompanied,
@@ -142,12 +133,12 @@ impl SurfaceDom {
         }
     }
 
-    /// The next batch, if there is one and the page can take it.
+    /// The next batch, if there is one.
+    ///
+    /// Nothing checks that the page can take one, because reaching here means it asked: the only
+    /// caller returns unless a request is parked, and the shell starts the pump once the
+    /// interpreter holds a root.
     fn next_batch(&self) -> Option<Vec<u8>> {
-        if !self.ready.get() {
-            return None;
-        }
-
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
         let mut page = self.page.try_borrow_mut().ok()?;

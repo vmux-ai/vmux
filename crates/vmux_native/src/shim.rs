@@ -130,14 +130,10 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
   };
-  // The interpreter arrives with the shell's module, so it is not there when this runs at
-  // document start; the pump waits for it rather than racing it.
-  const startPump = () => {
-    if (window.interpreter && window.interpreter.run_from_bytes) pumpEdits();
-    else setTimeout(startPump, 10);
-  };
-  startPump();
   window.vmuxWry = {
+    // Asking for a frame is what tells the host the page can take one, so the shell calls this
+    // once the interpreter holds a root and never before.
+    start: pumpEdits,
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];

@@ -67,13 +67,13 @@ impl InterpreterShell {
             root_class,
         } = self;
 
-        // `initialize` is a handshake, not a formality: the host must not evaluate an edit batch
-        // until the interpreter exists and has been given a root, and `window.onload` is the only
-        // point at which that is true.
+        // The pump starts here rather than at document start because asking for a frame is what
+        // tells the host the page can take one, and an interpreter without a root cannot apply
+        // it. `onload` is the earliest point at which it has one.
         //
         // Deliberately no `waitForRequest`. That opens the WebSocket dioxus-desktop serves edits
-        // over; here they arrive by script evaluation instead, so calling it would leave a socket
-        // retrying against a port nothing is listening on.
+        // over; here the page fetches them itself, so calling it would leave a socket retrying
+        // against a port nothing is listening on.
         format!(
             r#"<!DOCTYPE html>
 <html {html_attributes}>
@@ -92,7 +92,7 @@ window.onload = function() {{
   const root = window.document.getElementById("{root_id}");
   if (root != null) {{
     window.interpreter.initialize(root);
-    window.interpreter.sendIpcMessage("initialize");
+    window.vmuxWry.start();
   }}
 }};
 </script>
@@ -123,7 +123,7 @@ mod tests {
         // The interpreter class defines `waitForRequest`; what must not appear is a call to it.
         assert!(
             !shell.contains("interpreter.waitForRequest"),
-            "edits arrive by script evaluation; calling it would retry against a port nothing binds"
+            "the page fetches its own edits; calling it would retry against a port nothing binds"
         );
     }
 
