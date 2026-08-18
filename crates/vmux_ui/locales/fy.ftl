@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } ynstallearje
 setup-run-install = Ynstallaasjekommando útfiere
 setup-auto-reload = Vmux draait it yn in terminal en laadt opnij as { $command } klear is.
 
-debug-title = Debug
-debug-auto-update = Automatysk bywurkje
-debug-simulate-update = Beskikbere update simulearje
-debug-simulate-download = Download simulearje
-debug-clear-update = Update wiskje
-debug-trigger-restart = Opnij starten aktivearje
 
 command-manage-spaces = Romten beheare…
 command-pane-stack-location = finsterdiel { $pane } / steapel { $stack }

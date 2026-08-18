@@ -159,13 +159,6 @@ pub static SPACES_PAGE: NativePage =
 pub static TOOLS_PAGE: NativePage =
     NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page);
 
-/// The debug page, which only a developer opens.
-#[cfg(target_os = "macos")]
-pub static DEBUG_PAGE: NativePage = NativePage::pane(
-    vmux_layout::debug::DEBUG_PAGE_URL,
-    vmux_layout::debug_page::Page,
-);
-
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own

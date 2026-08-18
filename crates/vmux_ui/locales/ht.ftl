@@ -680,12 +680,6 @@ setup-install-homebrew = Enstale Homebrew + { $name }
 setup-run-install = Kouri kòmand enstalasyon
 setup-auto-reload = Vmux kouri li nan yon tèminal epi li rechaje lè { $command } pare.
 
-debug-title = Debogaj
-debug-auto-update = Mizajou otomatik
-debug-simulate-update = Simile mizajou disponib
-debug-simulate-download = Simile telechajman
-debug-clear-update = Efase mizajou
-debug-trigger-restart = Deklanche rekòmansman
 
 command-manage-spaces = Jere espas yo…
 command-pane-stack-location = panèl { $pane } / pil { $stack }

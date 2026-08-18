@@ -680,12 +680,6 @@ setup-install-homebrew = Įdiegti Homebrew + { $name }
 setup-run-install = Paleisti diegimo komandą
 setup-auto-reload = Vmux paleidžia ją terminale ir įkelia iš naujo, kai { $command } paruošta.
 
-debug-title = Derinimas
-debug-auto-update = Automatinis naujinimas
-debug-simulate-update = Imituoti galimą naujinį
-debug-simulate-download = Imituoti atsisiuntimą
-debug-clear-update = Išvalyti naujinį
-debug-trigger-restart = Suaktyvinti paleidimą iš naujo
 
 command-manage-spaces = Tvarkyti erdves…
 command-pane-stack-location = polangis { $pane } / dėklas { $stack }

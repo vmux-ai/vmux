@@ -665,12 +665,6 @@ setup-install-homebrew = Homebrew + { $name }をインストール
 setup-run-install = インストールコマンドを実行
 setup-auto-reload = Vmuxがターミナルで実行し、{ $command }の準備ができたら再読み込みします。
 
-debug-title = デバッグ
-debug-auto-update = 自動アップデート
-debug-simulate-update = アップデートありをシミュレート
-debug-simulate-download = ダウンロードをシミュレート
-debug-clear-update = アップデートをクリア
-debug-trigger-restart = 再起動をトリガー
 
 command-manage-spaces = スペースを管理…
 command-pane-stack-location = ペイン { $pane } / スタック { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } 설치
 setup-run-install = 설치 명령 실행
 setup-auto-reload = Vmux가 터미널에서 실행하고 { $command }이(가) 준비되면 다시 로드합니다.
 
-debug-title = 디버그
-debug-auto-update = 자동 업데이트
-debug-simulate-update = 업데이트 사용 가능 상태 시뮬레이션
-debug-simulate-download = 다운로드 시뮬레이션
-debug-clear-update = 업데이트 지우기
-debug-trigger-restart = 재시작 트리거
 
 command-manage-spaces = 스페이스 관리…
 command-pane-stack-location = 패널 { $pane } / 스택 { $stack }

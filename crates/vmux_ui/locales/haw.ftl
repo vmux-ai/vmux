@@ -680,12 +680,6 @@ setup-install-homebrew = Hoʻouka iā Homebrew + { $name }
 setup-run-install = Holo i ke kauoha hoʻouka
 setup-auto-reload = Hoʻoholo ʻo Vmux iā ia ma ke kahua kauoha a hoʻouka hou ke mākaukau ʻo { $command }.
 
-debug-title = Huli hewa
-debug-auto-update = Hōʻano hou ʻakomi
-debug-simulate-update = Hoʻohālike i ka loaʻa o ka hōʻano hou
-debug-simulate-download = Hoʻohālike hoʻoiho
-debug-clear-update = Holoi hōʻano hou
-debug-trigger-restart = Hoʻomaka hou koke
 
 command-manage-spaces = Hoʻokele i nā space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

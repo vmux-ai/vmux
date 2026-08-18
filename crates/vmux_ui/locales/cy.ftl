@@ -680,12 +680,6 @@ setup-install-homebrew = Gosod Homebrew + { $name }
 setup-run-install = Rhedeg gorchymyn gosod
 setup-auto-reload = Mae Vmux yn ei redeg mewn terfynell ac yn ail-lwytho pan fydd { $command } yn barod.
 
-debug-title = Dadfygio
-debug-auto-update = Diweddaru’n awtomatig
-debug-simulate-update = Efelychu diweddariad ar gael
-debug-simulate-download = Efelychu lawrlwythiad
-debug-clear-update = Clirio diweddariad
-debug-trigger-restart = Sbarduno ailgychwyn
 
 command-manage-spaces = Rheoli mannau…
 command-pane-stack-location = cwarel { $pane } / pentwr { $stack }

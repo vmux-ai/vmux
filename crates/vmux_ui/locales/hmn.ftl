@@ -680,12 +680,6 @@ setup-install-homebrew = Nruab Homebrew + { $name }
 setup-run-install = Khiav install command
 setup-auto-reload = Vmux khiav nws hauv terminal thiab rov thauj thaum { $command } npaj lawm.
 
-debug-title = Debug
-debug-auto-update = Update nws tus kheej
-debug-simulate-update = Sim ua muaj update
-debug-simulate-download = Sim download
-debug-clear-update = Tshem update
-debug-trigger-restart = Ua kom rov qhib
 
 command-manage-spaces = Tswj cov chaw…
 command-pane-stack-location = pane { $pane } / stack { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Girka Homebrew + { $name }
 setup-run-install = Gudanar da umarnin girka
 setup-auto-reload = Vmux yana gudanar da shi a tashar umarni kuma yana sake loda idan { $command } ya shirya.
 
-debug-title = Gyaran kurakurai
-debug-auto-update = Sabunta kai tsaye
-debug-simulate-update = Kwaikwayi akwai sabuntawa
-debug-simulate-download = Kwaikwayi zazzagewa
-debug-clear-update = Share sabuntawa
-debug-trigger-restart = Tayar da sake farawa
 
 command-manage-spaces = Sarrafa sarari…
 command-pane-stack-location = fanni { $pane } / tari { $stack }

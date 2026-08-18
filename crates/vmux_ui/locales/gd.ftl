@@ -680,12 +680,6 @@ setup-install-homebrew = Stàlaich Homebrew + { $name }
 setup-run-install = Ruith àithne stàlaidh
 setup-auto-reload = Ruithidh Vmux e ann an tèirmineal agus ath-luchdaichidh e nuair a bhios { $command } deiseil.
 
-debug-title = Dì-bhugachadh
-debug-auto-update = Fèin-ùrachadh
-debug-simulate-update = Samhlaich ùrachadh ri fhaighinn
-debug-simulate-download = Samhlaich luchdadh a-nuas
-debug-clear-update = Glan an t-ùrachadh
-debug-trigger-restart = Brosnaich ath-thòiseachadh
 
 command-manage-spaces = Stiùirich àiteachan…
 command-pane-stack-location = leòsan { $pane } / stac { $stack }

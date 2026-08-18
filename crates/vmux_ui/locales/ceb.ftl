@@ -680,12 +680,6 @@ setup-install-homebrew = I-install ang Homebrew + { $name }
 setup-run-install = Padagana ang install command
 setup-auto-reload = Gipadagan kini sa Vmux sa terminal ug mo-reload kung andam na ang { $command }.
 
-debug-title = Debug
-debug-auto-update = Auto-update
-debug-simulate-update = I-simulate nga naay update
-debug-simulate-download = I-simulate ang download
-debug-clear-update = Hawani ang update
-debug-trigger-restart = I-trigger ang restart
 
 command-manage-spaces = Dumala og mga space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

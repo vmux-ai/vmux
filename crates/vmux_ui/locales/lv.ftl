@@ -680,12 +680,6 @@ setup-install-homebrew = Instalēt Homebrew + { $name }
 setup-run-install = Palaist instalēšanas komandu
 setup-auto-reload = Vmux palaiž to terminālī un pārlādē, kad { $command } ir gatavs.
 
-debug-title = Atkļūdošana
-debug-auto-update = Automātiska atjaunināšana
-debug-simulate-update = Simulēt pieejamu atjauninājumu
-debug-simulate-download = Simulēt lejupielādi
-debug-clear-update = Notīrīt atjauninājumu
-debug-trigger-restart = Aktivizēt restartēšanu
 
 command-manage-spaces = Pārvaldīt telpas…
 command-pane-stack-location = panelis { $pane } / steks { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Pasang Homebrew + { $name }
 setup-run-install = Lakokake prentah pamasangan
 setup-auto-reload = Vmux nglakokake ing terminal lan ngemot ulang nalika { $command } wis siap.
 
-debug-title = Debug
-debug-auto-update = Nganyari otomatis
-debug-simulate-update = Simulasikake nganyari kasedhiya
-debug-simulate-download = Simulasikake undhuhan
-debug-clear-update = Resiki nganyari
-debug-trigger-restart = Picu wiwit maneh
 
 command-manage-spaces = Atur space…
 command-pane-stack-location = pane { $pane } / stack { $stack }

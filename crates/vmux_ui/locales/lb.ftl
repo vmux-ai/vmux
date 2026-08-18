@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } installéieren
 setup-run-install = Installatiounskommando ausféieren
 setup-auto-reload = Vmux féiert en an engem Terminal aus a lued nei, wann { $command } prett ass.
 
-debug-title = Debug
-debug-auto-update = Automatesch aktualiséieren
-debug-simulate-update = Disponibelen Update simuléieren
-debug-simulate-download = Download simuléieren
-debug-clear-update = Update läschen
-debug-trigger-restart = Neistart ausléisen
 
 command-manage-spaces = Spacë verwalten…
 command-pane-stack-location = Beräich { $pane } / Stack { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } لګول
 setup-run-install = د لګولو قومانده چلول
 setup-auto-reload = Vmux یې په ترمینل کې چلوي او کله چې { $command } چمتو شي، بیا یې پورته کوي.
 
-debug-title = ډیبګ
-debug-auto-update = اتومات اوسمهالنه
-debug-simulate-update = د شته اوسمهالنې تقلید
-debug-simulate-download = د ښکته کولو تقلید
-debug-clear-update = اوسمهالنه پاکول
-debug-trigger-restart = بیاپیلول راپارول
 
 command-manage-spaces = سپېسونه مدیریت کړئ…
 command-pane-stack-location = پین { $pane } / سټک { $stack }

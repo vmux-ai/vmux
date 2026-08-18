@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::BinReceive;
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
@@ -18,8 +17,7 @@ impl Plugin for UpdatePlugin {
             poll_interval: self.updater.poll_interval,
         })
         .add_systems(Startup, init_update_checker)
-        .add_systems(Update, poll_update_result)
-        .add_observer(on_debug_simulate_download);
+        .add_systems(Update, poll_update_result);
     }
 }
 
@@ -290,42 +288,6 @@ fn make_wake(proxy: Option<&EventLoopProxyWrapper>) -> Box<dyn Fn() + Send> {
         }
         None => Box::new(|| {}),
     }
-}
-
-fn on_debug_simulate_download(
-    _trigger: On<BinReceive<vmux_layout::event::DebugSimulateDownload>>,
-    checker: Res<UpdateChecker>,
-    proxy: Option<Res<EventLoopProxyWrapper>>,
-) {
-    let tx = checker.tx.clone();
-    let wake = make_wake(proxy.as_deref());
-    std::thread::spawn(move || {
-        simulate_download(&tx, &*wake);
-    });
-}
-
-fn simulate_download(tx: &mpsc::Sender<UpdateResult>, wake: &(dyn Fn() + Send)) {
-    let version = "0.0.0-sim".to_string();
-    let total: u64 = 24 * 1024 * 1024;
-    let step = total / 50;
-    let mut downloaded = 0u64;
-    while downloaded < total {
-        downloaded = downloaded.saturating_add(step).min(total);
-        let _ = tx.send(UpdateResult::Downloading {
-            version: version.clone(),
-            downloaded,
-            total,
-        });
-        wake();
-        std::thread::sleep(Duration::from_millis(60));
-    }
-    let _ = tx.send(UpdateResult::Installing {
-        version: version.clone(),
-    });
-    wake();
-    std::thread::sleep(Duration::from_millis(1200));
-    let _ = tx.send(UpdateResult::Installed { version });
-    wake();
 }
 
 fn progress_step(downloaded: u64, total: u64, last_marker: u64) -> Option<u64> {

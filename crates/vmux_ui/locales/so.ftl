@@ -680,12 +680,6 @@ setup-install-homebrew = Rakib Homebrew + { $name }
 setup-run-install = Ful amarka rakibidda
 setup-auto-reload = Vmux wuxuu ku socodsiiyaa terminal, wuuna dib u raraa marka { $command } diyaar noqdo.
 
-debug-title = Cilad-baaris
-debug-auto-update = Is-cusboonaysiin
-debug-simulate-update = Jil cusboonaysiin diyaar ah
-debug-simulate-download = Jil soo dejin
-debug-clear-update = Nadiifi cusboonaysiinta
-debug-trigger-restart = Kici dib-u-bilow
 
 command-manage-spaces = Maamul goobaha…
 command-pane-stack-location = daaqad-qayb { $pane } / lakab { $stack }

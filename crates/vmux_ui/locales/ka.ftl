@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name }-ის დაყენება
 setup-run-install = დაყენების ბრძანების გაშვება
 setup-auto-reload = Vmux მას ტერმინალში გაუშვებს და { $command }-ის მზადყოფნისას ხელახლა ჩაიტვირთება.
 
-debug-title = გამართვა
-debug-auto-update = ავტომატური განახლება
-debug-simulate-update = ხელმისაწვდომი განახლების სიმულაცია
-debug-simulate-download = ჩამოტვირთვის სიმულაცია
-debug-clear-update = განახლების გასუფთავება
-debug-trigger-restart = გადატვირთვის გაშვება
 
 command-manage-spaces = სივრცეების მართვა…
 command-pane-stack-location = პანელი { $pane } / სტეკი { $stack }

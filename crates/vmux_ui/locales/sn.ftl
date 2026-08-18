@@ -680,12 +680,6 @@ setup-install-homebrew = Isa Homebrew + { $name }
 setup-run-install = Mhanyisa murairo wekuisa
 setup-auto-reload = Vmux inoimhanyisa muteminari uye inorodhazve kana { $command } yagadzirira.
 
-debug-title = Debug
-debug-auto-update = Kuzvivandudza otomatiki
-debug-simulate-update = Tevedzera update iripo
-debug-simulate-download = Tevedzera kudhawunirodha
-debug-clear-update = Bvisa update
-debug-trigger-restart = Konzera kutangazve
 
 command-manage-spaces = Ronga nzvimbo…
 command-pane-stack-location = pani { $pane } / staki { $stack }

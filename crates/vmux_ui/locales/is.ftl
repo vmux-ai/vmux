@@ -680,12 +680,6 @@ setup-install-homebrew = Setja upp Homebrew + { $name }
 setup-run-install = Keyra uppsetningarskipun
 setup-auto-reload = Vmux keyrir hana í skel og endurhleður þegar { $command } er tilbúin.
 
-debug-title = Villuleit
-debug-auto-update = Sjálfvirk uppfærsla
-debug-simulate-update = Herma eftir tiltækri uppfærslu
-debug-simulate-download = Herma eftir niðurhali
-debug-clear-update = Hreinsa uppfærslu
-debug-trigger-restart = Kveikja á endurræsingu
 
 command-manage-spaces = Stjórna vinnusvæðum…
 command-pane-stack-location = svæði { $pane } / stafli { $stack }

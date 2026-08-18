@@ -680,12 +680,6 @@ setup-install-homebrew = Fi Homebrew + { $name } sori ẹrọ
 setup-run-install = Ṣiṣe àṣẹ fífi sori ẹrọ
 setup-auto-reload = Vmux ń ṣiṣẹ́ rẹ̀ nínú tẹ́míńà, ó sì tún ṣí nígbà tí { $command } bá ṣetán.
 
-debug-title = Ṣàtúnṣe aṣìṣe
-debug-auto-update = Ìmúdójúìwọ̀n aládàáṣiṣẹ́
-debug-simulate-update = Ṣe àfihàn pé ìmúdójúìwọ̀n wà
-debug-simulate-download = Ṣe àfihàn gbígbà sílẹ̀
-debug-clear-update = Nu ìmúdójúìwọ̀n
-debug-trigger-restart = Fa ìtúnbẹ̀rẹ̀ ṣẹ́
 
 command-manage-spaces = Ṣàkóso àwọn ààyè…
 command-pane-stack-location = pẹ́ẹ̀nù { $pane } / àkójọpọ̀ { $stack }

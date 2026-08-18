@@ -680,12 +680,6 @@ setup-install-homebrew = Faka i-Homebrew + { $name }
 setup-run-install = Qalisa umyalo wokufaka
 setup-auto-reload = I-Vmux iyisebenzisa kutheminali futhi ilayisha kabusha uma i-{ $command } isilungile.
 
-debug-title = Lungisa amaphutha
-debug-auto-update = Ukubuyekeza okuzenzakalelayo
-debug-simulate-update = Lingisa ukuthi isibuyekezo siyatholakala
-debug-simulate-download = Lingisa ukulanda
-debug-clear-update = Sula isibuyekezo
-debug-trigger-restart = Qalisa ukuqalisa kabusha
 
 command-manage-spaces = Phatha izikhala…
 command-pane-stack-location = ifasitelana { $pane } / isitaki { $stack }

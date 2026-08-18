@@ -680,12 +680,6 @@ setup-install-homebrew = دامەزراندنی Homebrew + { $name }
 setup-run-install = جێبەجێکردنی فرمانی دامەزراندن
 setup-auto-reload = Vmux لە تێرمیناڵێکدا جێبەجێی دەکات و کاتێک { $command } ئامادە بوو دووبارە بار دەکاتەوە.
 
-debug-title = هەڵەدۆزی
-debug-auto-update = نوێکردنەوەی خودکار
-debug-simulate-update = لاساییکردنەوەی بەردەستبوونی نوێکاری
-debug-simulate-download = لاساییکردنەوەی داگرتن
-debug-clear-update = پاککردنەوەی نوێکاری
-debug-trigger-restart = دەستپێکردنی دووبارەکردنەوە
 
 command-manage-spaces = بەڕێوەبردنی فەزاكان…
 command-pane-stack-location = پەین { $pane } / ستاك { $stack }

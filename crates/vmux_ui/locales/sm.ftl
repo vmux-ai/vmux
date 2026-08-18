@@ -680,12 +680,6 @@ setup-install-homebrew = Fa‘apipi‘i Homebrew + { $name }
 setup-run-install = Fa‘agaioi le poloa‘iga fa‘apipi‘i
 setup-auto-reload = E fa‘agaioi e Vmux i se terminal ma toe uta pe a sauni { $command }.
 
-debug-title = Debug
-debug-auto-update = Fa‘afou otometi
-debug-simulate-update = Fa‘ata‘ita‘i ua avanoa se fa‘afouga
-debug-simulate-download = Fa‘ata‘ita‘i le la‘u mai
-debug-clear-update = Fa‘amamā fa‘afouga
-debug-trigger-restart = Fa‘atupu toe amata
 
 command-manage-spaces = Pulea avanoa…
 command-pane-stack-location = vaega { $pane } / faaputuga { $stack }

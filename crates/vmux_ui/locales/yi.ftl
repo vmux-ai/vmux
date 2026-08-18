@@ -680,12 +680,6 @@ setup-install-homebrew = אינסטאַלירן Homebrew + { $name }
 setup-run-install = לויפֿן אינסטאַליר־באַפֿעל
 setup-auto-reload = Vmux לויפֿט עס אין אַ טערמינאַל און לאָדט ווידער ווען { $command } איז גרייט.
 
-debug-title = דעבאַג
-debug-auto-update = אויטאָ־דערהײַנטיקן
-debug-simulate-update = סימולירן דערהײַנטיקונג פֿאַראַן
-debug-simulate-download = סימולירן אַראָפּלאָדן
-debug-clear-update = אויסרייניקן דערהײַנטיקונג
-debug-trigger-restart = אַרויסרופֿן ווידער־אָנהייב
 
 command-manage-spaces = פֿאַרוואַלטן ספּייסעס…
 command-pane-stack-location = פּאַן { $pane } / סטאַק { $stack }

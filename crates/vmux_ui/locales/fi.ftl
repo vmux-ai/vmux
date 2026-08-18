@@ -680,12 +680,6 @@ setup-install-homebrew = Asenna Homebrew + { $name }
 setup-run-install = Suorita asennuskomento
 setup-auto-reload = Vmux suorittaa sen päätteessä ja lataa uudelleen, kun { $command } on valmis.
 
-debug-title = Vianmääritys
-debug-auto-update = Automaattinen päivitys
-debug-simulate-update = Simuloi saatavilla oleva päivitys
-debug-simulate-download = Simuloi lataus
-debug-clear-update = Tyhjennä päivitys
-debug-trigger-restart = Käynnistä uudelleen
 
 command-manage-spaces = Hallitse tiloja…
 command-pane-stack-location = paneeli { $pane } / pino { $stack }

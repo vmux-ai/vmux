@@ -680,12 +680,6 @@ setup-install-homebrew = Sakinisha Homebrew + { $name }
 setup-run-install = Endesha amri ya kusakinisha
 setup-auto-reload = Vmux huiendesha kwenye teminali na kupakia upya { $command } ikiwa tayari.
 
-debug-title = Tatua
-debug-auto-update = Sasisho otomatiki
-debug-simulate-update = Iga sasisho linapatikana
-debug-simulate-download = Iga upakuaji
-debug-clear-update = Futa sasisho
-debug-trigger-restart = Anzisha upya sasa
 
 command-manage-spaces = Dhibiti nafasi…
 command-pane-stack-location = kidirisha { $pane } / tabaka { $stack }

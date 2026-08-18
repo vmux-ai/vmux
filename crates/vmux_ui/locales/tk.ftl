@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } gur
 setup-run-install = Gurnama buýrugyny işlet
 setup-auto-reload = Vmux ony terminalda işledýär we { $command } taýýar bolanda täzeden ýükleýär.
 
-debug-title = Debug
-debug-auto-update = Awtomatiki täzelenme
-debug-simulate-update = Täzelenme bar ýaly görkez
-debug-simulate-download = Göçürmäni simulirle
-debug-clear-update = Täzelenmäni arassala
-debug-trigger-restart = Täzeden başlatmany işjeň et
 
 command-manage-spaces = Giňişlikleri dolandyr…
 command-pane-stack-location = panel { $pane } / gatlak { $stack }

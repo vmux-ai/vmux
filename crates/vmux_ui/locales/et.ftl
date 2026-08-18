@@ -680,12 +680,6 @@ setup-install-homebrew = Installi Homebrew + { $name }
 setup-run-install = Käivita installikäsk
 setup-auto-reload = Vmux käivitab selle terminalis ja laadib uuesti, kui { $command } on valmis.
 
-debug-title = Silumine
-debug-auto-update = Automaatne värskendamine
-debug-simulate-update = Simuleeri saadaolevat värskendust
-debug-simulate-download = Simuleeri allalaadimist
-debug-clear-update = Tühjenda värskendus
-debug-trigger-restart = Käivita taaskäivitus
 
 command-manage-spaces = Halda ruume…
 command-pane-stack-location = paan { $pane } / virn { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } ઇન્સ્ટોલ કરો
 setup-run-install = ઇન્સ્ટોલ કમાન્ડ ચલાવો
 setup-auto-reload = Vmux તેને ટર્મિનલમાં ચલાવે છે અને { $command } તૈયાર થાય ત્યારે ફરી લોડ કરે છે.
 
-debug-title = ડિબગ
-debug-auto-update = આપમેળે અપડેટ
-debug-simulate-update = ઉપલબ્ધ અપડેટનું સિમ્યુલેશન કરો
-debug-simulate-download = ડાઉનલોડનું સિમ્યુલેશન કરો
-debug-clear-update = અપડેટ સાફ કરો
-debug-trigger-restart = ફરી શરૂ કરાવો
 
 command-manage-spaces = સ્પેસ સંચાલિત કરો…
 command-pane-stack-location = પેન { $pane } / સ્ટેક { $stack }

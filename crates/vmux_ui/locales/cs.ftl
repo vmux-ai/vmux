@@ -680,12 +680,6 @@ setup-install-homebrew = Nainstalovat Homebrew + { $name }
 setup-run-install = Spustit instalační příkaz
 setup-auto-reload = Vmux ho spustí v terminálu a po připravení { $command } stránku znovu načte.
 
-debug-title = Ladění
-debug-auto-update = Automatické aktualizace
-debug-simulate-update = Simulovat dostupnou aktualizaci
-debug-simulate-download = Simulovat stažení
-debug-clear-update = Vymazat aktualizaci
-debug-trigger-restart = Spustit restart
 
 command-manage-spaces = Spravovat prostory…
 command-pane-stack-location = panel { $pane } / vrstva { $stack }

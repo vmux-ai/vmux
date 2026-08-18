@@ -680,12 +680,6 @@ setup-install-homebrew = Instalează Homebrew + { $name }
 setup-run-install = Rulează comanda de instalare
 setup-auto-reload = Vmux o rulează într-un terminal și reîncarcă atunci când { $command } este gata.
 
-debug-title = Depanare
-debug-auto-update = Actualizare automată
-debug-simulate-update = Simulează actualizare disponibilă
-debug-simulate-download = Simulează descărcarea
-debug-clear-update = Șterge actualizarea
-debug-trigger-restart = Declanșează repornirea
 
 command-manage-spaces = Gestionează spațiile…
 command-pane-stack-location = panou { $pane } / stivă { $stack }

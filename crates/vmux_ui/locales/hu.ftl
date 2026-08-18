@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } telepítése
 setup-run-install = Telepítőparancs futtatása
 setup-auto-reload = A Vmux terminálban futtatja, és újratölt, amikor a { $command } készen áll.
 
-debug-title = Hibakeresés
-debug-auto-update = Automatikus frissítés
-debug-simulate-update = Elérhető frissítés szimulálása
-debug-simulate-download = Letöltés szimulálása
-debug-clear-update = Frissítés törlése
-debug-trigger-restart = Újraindítás indítása
 
 command-manage-spaces = Terek kezelése…
 command-pane-stack-location = panel { $pane } / verem { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } ස්ථාපනය කරන්
 setup-run-install = ස්ථාපන විධානය ධාවනය කරන්න
 setup-auto-reload = Vmux එය ටර්මිනලයක ධාවනය කර, { $command } සූදානම් වූ විට නැවත පූරණය කරයි.
 
-debug-title = දෝෂ සොයන්න
-debug-auto-update = ස්වයංක්‍රීය යාවත්කාලීනය
-debug-simulate-update = යාවත්කාලීනයක් ලබා ගත හැකි බව අනුකරණය කරන්න
-debug-simulate-download = බාගැනීම අනුකරණය කරන්න
-debug-clear-update = යාවත්කාලීනය හිස් කරන්න
-debug-trigger-restart = නැවත ආරම්භ කිරීම ක්‍රියාත්මක කරන්න
 
 command-manage-spaces = අවකාශ කළමනාකරණය කරන්න…
 command-pane-stack-location = පැනලය { $pane } / ස්ටැක් { $stack }

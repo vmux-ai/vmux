@@ -680,12 +680,6 @@ setup-install-homebrew = Насби Homebrew + { $name }
 setup-run-install = Иҷрои фармони насб
 setup-auto-reload = Vmux онро дар терминал иҷро мекунад ва вақте { $command } омода шуд, аз нав бор мекунад.
 
-debug-title = Ислоҳи хато
-debug-auto-update = Навсозии худкор
-debug-simulate-update = Шабеҳсозии дастрасии навсозӣ
-debug-simulate-download = Шабеҳсозии боргирӣ
-debug-clear-update = Тоза кардани навсозӣ
-debug-trigger-restart = Оғози бозоғозӣ
 
 command-manage-spaces = Идоракунии фазоҳо…
 command-pane-stack-location = панел { $pane } / стек { $stack }

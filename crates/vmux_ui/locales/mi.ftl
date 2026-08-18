@@ -680,12 +680,6 @@ setup-install-homebrew = Tāuta Homebrew + { $name }
 setup-run-install = Whakahaere tono tāuta
 setup-auto-reload = Ka whakahaere a Vmux i tētahi kāpeka, ā, ka uta anō ina rite a { $command }.
 
-debug-title = Patuiro
-debug-auto-update = Whakahou aunoa
-debug-simulate-update = Whakaari he whakahou kei te wātea
-debug-simulate-download = Whakaari tikiake
-debug-clear-update = Ūkui whakahou
-debug-trigger-restart = Tīmata anō inaianei
 
 command-manage-spaces = Whakahaere wāhi…
 command-pane-stack-location = pihanga { $pane } / tāpae { $stack }

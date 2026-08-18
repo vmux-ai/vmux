@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } yükle
 setup-run-install = Yükleme komutunu çalıştır
 setup-auto-reload = Vmux bunu bir terminalde çalıştırır ve { $command } hazır olduğunda yeniden yükler.
 
-debug-title = Hata ayıklama
-debug-auto-update = Otomatik güncelle
-debug-simulate-update = Güncelleme varmış gibi simüle et
-debug-simulate-download = İndirmeyi simüle et
-debug-clear-update = Güncellemeyi temizle
-debug-trigger-restart = Yeniden başlatmayı tetikle
 
 command-manage-spaces = Alanları yönet…
 command-pane-stack-location = bölme { $pane } / yığın { $stack }

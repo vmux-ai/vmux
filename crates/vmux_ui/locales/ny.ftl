@@ -680,12 +680,6 @@ setup-install-homebrew = Ikani Homebrew + { $name }
 setup-run-install = Yendetsani lamulo loyika
 setup-auto-reload = Vmux imaliyendetsa mu teminali ndipo imatsegulanso { $command } ikakonzeka.
 
-debug-title = Kukonza zolakwika
-debug-auto-update = Kusintha zokha
-debug-simulate-update = Yeserani ngati zosintha zilipo
-debug-simulate-download = Yeserani kutsitsa
-debug-clear-update = Chotsani zosintha
-debug-trigger-restart = Yambitsani kuyambiranso
 
 command-manage-spaces = Samalira malo…
 command-pane-stack-location = gawo { $pane } / mulu { $stack }

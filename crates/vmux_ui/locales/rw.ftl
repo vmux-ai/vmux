@@ -680,12 +680,6 @@ setup-install-homebrew = Shyiramo Homebrew + { $name }
 setup-run-install = Koresha ibwiriza ryo gushyiramo
 setup-auto-reload = Vmux irarikoresha muri teminali maze ikongera gutangiza iyo { $command } yiteguye.
 
-debug-title = Gukosora
-debug-auto-update = Kwivugurura
-debug-simulate-update = Kwigana ko ivugurura rihari
-debug-simulate-download = Kwigana ivanaho
-debug-clear-update = Gukuraho ivugurura
-debug-trigger-restart = Gutangiza kongera gutangira
 
 command-manage-spaces = Gucunga imyanya…
 command-pane-stack-location = igice { $pane } / urwego { $stack }

@@ -680,12 +680,6 @@ setup-install-homebrew = Kenya Homebrew + { $name }
 setup-run-install = Sebedisa taelo ya ho kenya
 setup-auto-reload = Vmux e e tsamaisa ho terminal mme e kenya hape ha { $command } e se e lokile.
 
-debug-title = Lokisa diphoso
-debug-auto-update = Intjhafatso ya othomathiki
-debug-simulate-update = Etsa eka ntjhafatso e teng
-debug-simulate-download = Etsa eka ho a jarollwa
-debug-clear-update = Hlakola ntjhafatso
-debug-trigger-restart = Qalisa ho qala hape
 
 command-manage-spaces = Laola libaka…
 command-pane-stack-location = pane { $pane } / mokgobo { $stack }

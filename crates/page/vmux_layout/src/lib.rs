@@ -12,8 +12,6 @@ pub mod reconcile;
 pub mod start;
 
 #[cfg(ui)]
-pub mod debug_page;
-#[cfg(ui)]
 pub mod tools_page;
 
 #[cfg(ui)]

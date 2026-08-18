@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } ጫን
 setup-run-install = የመጫኛ ትዕዛዝ አሂድ
 setup-auto-reload = Vmux በተርሚናል ያስኬደዋል፣ { $command } ሲዘጋጅም ዳግም ይጫናል።
 
-debug-title = ማረሚያ
-debug-auto-update = ራስ-ሰር ዝማኔ
-debug-simulate-update = ዝማኔ እንዳለ አስመስል
-debug-simulate-download = ማውረድን አስመስል
-debug-clear-update = ዝማኔ አጽዳ
-debug-trigger-restart = ዳግም ማስጀመር አስነሳ
 
 command-manage-spaces = ቦታዎችን አስተዳድር…
 command-pane-stack-location = ክፍል { $pane } / ቁልል { $stack }

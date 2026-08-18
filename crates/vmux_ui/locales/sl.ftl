@@ -680,12 +680,6 @@ setup-install-homebrew = Namesti Homebrew + { $name }
 setup-run-install = Zaženi ukaz za namestitev
 setup-auto-reload = Vmux ga zažene v terminalu in znova naloži, ko je { $command } pripravljen.
 
-debug-title = Razhroščevanje
-debug-auto-update = Samodejno posodabljanje
-debug-simulate-update = Simuliraj razpoložljivo posodobitev
-debug-simulate-download = Simuliraj prenos
-debug-clear-update = Počisti posodobitev
-debug-trigger-restart = Sproži ponovni zagon
 
 command-manage-spaces = Upravljanje prostorov …
 command-pane-stack-location = podokno { $pane } / sklad { $stack }

@@ -51,9 +51,7 @@ pub use vmux_layout::{Browser, Loading};
 use vmux_layout::{
     Header, Open, PendingWebviewReveal, UpdateState,
     bookmark::BookmarkContextMenuActive,
-    event::{
-        DebugSimulateDownload, DebugUpdateClear, DebugUpdateReady, HeaderCommandEvent, StackRow,
-    },
+    event::{HeaderCommandEvent, StackRow},
     pane::{Pane, PaneSplit},
     side_sheet::SideSheet,
     stack::{Stack, active_stack_in_pane, collect_leaf_panes},
@@ -128,7 +126,6 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
-            native_page::NativePagePlugin::in_pane(&native_page::DEBUG_PAGE),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(
@@ -160,31 +157,22 @@ impl Plugin for BrowserPlugin {
                     .chain()
                     .after(ReadAppCommands),
             )
-            .add_plugins(
-                (
-                    CefPlugin {
-                        command_line_config: cef_command_line,
-                        root_cache_path: cef_root_cache_path(),
-                        locale: startup_locale,
-                        accept_language_list: startup_accept_language_list,
-                        embedded_hosts,
-                        ..default()
-                    },
-                    BinEventEmitterPlugin::<(
-                        HeaderCommandEvent,
-                        SideSheetCommandEvent,
-                        RemoteCommandEvent,
-                        RemoteCopyEvent,
-                    )>::for_hosts(&["layout"]),
-                    BinEventEmitterPlugin::<(
-                        DebugUpdateReady,
-                        DebugUpdateClear,
-                        DebugSimulateDownload,
-                    )>::for_hosts(&["debug"]),
-                ),
-            )
-            .add_observer(on_debug_update_ready)
-            .add_observer(on_debug_update_clear)
+            .add_plugins((
+                CefPlugin {
+                    command_line_config: cef_command_line,
+                    root_cache_path: cef_root_cache_path(),
+                    locale: startup_locale,
+                    accept_language_list: startup_accept_language_list,
+                    embedded_hosts,
+                    ..default()
+                },
+                BinEventEmitterPlugin::<(
+                    HeaderCommandEvent,
+                    SideSheetCommandEvent,
+                    RemoteCommandEvent,
+                    RemoteCopyEvent,
+                )>::for_hosts(&["layout"]),
+            ))
             .add_systems(Update, (vmux_layout::apply_cef_state_from_webview,))
             .add_systems(
                 Update,
@@ -775,22 +763,6 @@ fn should_emit_update(
     last.as_ref() != Some(current) || (page_ready_changed && *current != UpdateState::Idle)
 }
 
-fn on_debug_update_ready(
-    trigger: On<BinReceive<DebugUpdateReady>>,
-    mut state: ResMut<UpdateState>,
-) {
-    *state = UpdateState::Ready {
-        version: trigger.event().payload.version.clone(),
-    };
-}
-
-fn on_debug_update_clear(
-    _trigger: On<BinReceive<DebugUpdateClear>>,
-    mut state: ResMut<UpdateState>,
-) {
-    *state = UpdateState::Idle;
-}
-
 fn knowledge_path_url(root: &Path, requested: &Path) -> Option<String> {
     let root = root.canonicalize().ok()?;
     let metadata = std::fs::symlink_metadata(requested).ok()?;
@@ -956,39 +928,6 @@ fn cef_root_cache_path() -> Option<String> {
 }
 
 #[cfg(test)]
-mod debug_update_observer_tests {
-    use super::*;
-    use bevy_cef::prelude::BinReceive;
-
-    #[test]
-    fn debug_ready_sets_state_then_clear_resets() {
-        let mut app = App::new();
-        app.init_resource::<UpdateState>()
-            .add_observer(on_debug_update_ready)
-            .add_observer(on_debug_update_clear);
-
-        app.world_mut().trigger(BinReceive::<DebugUpdateReady> {
-            webview: Entity::PLACEHOLDER,
-            payload: DebugUpdateReady {
-                version: "v9.0.0".into(),
-            },
-        });
-        assert_eq!(
-            *app.world().resource::<UpdateState>(),
-            UpdateState::Ready {
-                version: "v9.0.0".into()
-            }
-        );
-
-        app.world_mut().trigger(BinReceive::<DebugUpdateClear> {
-            webview: Entity::PLACEHOLDER,
-            payload: DebugUpdateClear,
-        });
-        assert_eq!(*app.world().resource::<UpdateState>(), UpdateState::Idle);
-    }
-}
-
-#[cfg(test)]
 mod error_page_source_tests {
     use super::{error_page_source, percent_encode};
 
@@ -1001,8 +940,8 @@ mod error_page_source_tests {
     #[test]
     fn error_page_source_builds_query() {
         assert_eq!(
-            error_page_source("Page not found", "", "vmux://debug/"),
-            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fdebug%2F"
+            error_page_source("Page not found", "", "vmux://nowhere/"),
+            "vmux://error/?title=Page%20not%20found&message=&url=vmux%3A%2F%2Fnowhere%2F"
         );
     }
 }

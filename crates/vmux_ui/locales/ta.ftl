@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } நிறுவு
 setup-run-install = நிறுவல் கட்டளையை இயக்கு
 setup-auto-reload = Vmux அதை முனையத்தில் இயக்கி, { $command } தயாரானதும் மீளேற்றும்.
 
-debug-title = Debug
-debug-auto-update = தானியக்க புதுப்பிப்பு
-debug-simulate-update = புதுப்பிப்பு கிடைப்பதைப் போல உருவகப்படுத்து
-debug-simulate-download = பதிவிறக்கத்தை உருவகப்படுத்து
-debug-clear-update = புதுப்பிப்பை அழி
-debug-trigger-restart = மறுதொடக்கத்தைத் தூண்டு
 
 command-manage-spaces = ஸ்பேஸ்களை நிர்வகி…
 command-pane-stack-location = பலகம் { $pane } / அடுக்கு { $stack }

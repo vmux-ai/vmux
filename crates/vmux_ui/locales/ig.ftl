@@ -680,12 +680,6 @@ setup-install-homebrew = Tinye Homebrew + { $name }
 setup-run-install = Gbaa iwu ntinye
 setup-auto-reload = Vmux na-agba ya na terminal ma na-ebubata ọzọ mgbe { $command } dị njikere.
 
-debug-title = Debug
-debug-auto-update = Mmelite akpaka
-debug-simulate-update = Mee ka mmelite dị ka ọ dị
-debug-simulate-download = Mee ka nbudata dị ka ọ na-eme
-debug-clear-update = Kpochapụ mmelite
-debug-trigger-restart = Kpalite mmalitegharị
 
 command-manage-spaces = Jikwaa oghere…
 command-pane-stack-location = pane { $pane } / stack { $stack }

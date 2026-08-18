@@ -7,13 +7,7 @@ pub struct LayoutCefPlugin;
 impl Plugin for LayoutCefPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::LAYOUT_PAGE_MANIFEST);
-        app.world_mut().spawn((
-            crate::DEBUG_PAGE_MANIFEST,
-            vmux_core::host::page::NativelyHosted {
-                url: crate::debug::DEBUG_PAGE_URL,
-                title: "Debug",
-            },
-        ));
+
         app.world_mut().spawn(crate::ERROR_PAGE_MANIFEST);
     }
 }

@@ -710,12 +710,6 @@ setup-install-homebrew = Install Homebrew + { $name }
 setup-run-install = Run install command
 setup-auto-reload = Vmux runs it in a terminal and reloads when { $command } is ready.
 
-debug-title = Debug
-debug-auto-update = Auto-update
-debug-simulate-update = Simulate update available
-debug-simulate-download = Simulate download
-debug-clear-update = Clear update
-debug-trigger-restart = Trigger restart
 
 agent-effort = Effort
 agent-effort-default = Default

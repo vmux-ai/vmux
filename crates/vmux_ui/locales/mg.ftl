@@ -680,12 +680,6 @@ setup-install-homebrew = Apetraho Homebrew + { $name }
 setup-run-install = Alefaso baiko fametrahana
 setup-auto-reload = Alefan’i Vmux ao anaty terminal izany ary averiny ampidirina rehefa vonona ny { $command }.
 
-debug-title = Debug
-debug-auto-update = Fanavaozana mandeha ho azy
-debug-simulate-update = Andramo hoe misy fanavaozana
-debug-simulate-download = Andramo fisintomana
-debug-clear-update = Diovy fanavaozana
-debug-trigger-restart = Alefaso famerenana manomboka
 
 command-manage-spaces = Tantano ny habaka…
 command-pane-stack-location = tontonana { $pane } / antontany { $stack }

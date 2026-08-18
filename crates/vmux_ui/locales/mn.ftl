@@ -680,12 +680,6 @@ setup-install-homebrew = Homebrew + { $name } суулгах
 setup-run-install = Суулгах командыг ажиллуулах
 setup-auto-reload = Vmux үүнийг терминалд ажиллуулж, { $command } бэлэн болохоор дахин ачаална.
 
-debug-title = Дибаг
-debug-auto-update = Автомат шинэчлэлт
-debug-simulate-update = Шинэчлэл бэлэнг дуурайх
-debug-simulate-download = Таталтыг дуурайх
-debug-clear-update = Шинэчлэл цэвэрлэх
-debug-trigger-restart = Дахин эхлүүлэхийг өдөөх
 
 command-manage-spaces = Спэйсүүдийг удирдах…
 command-pane-stack-location = самбар { $pane } / стек { $stack }

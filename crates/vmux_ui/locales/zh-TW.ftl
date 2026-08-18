@@ -680,12 +680,6 @@ setup-install-homebrew = 安裝 Homebrew + { $name }
 setup-run-install = 執行安裝指令
 setup-auto-reload = Vmux 會在終端機中執行，並在 { $command } 就緒後重新載入。
 
-debug-title = 偵錯
-debug-auto-update = 自動更新
-debug-simulate-update = 模擬有可用更新
-debug-simulate-download = 模擬下載
-debug-clear-update = 清除更新
-debug-trigger-restart = 觸發重新啟動
 
 command-manage-spaces = 管理工作區…
 command-pane-stack-location = 窗格 { $pane } / 堆疊 { $stack }

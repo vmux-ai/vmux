@@ -680,12 +680,6 @@ setup-install-homebrew = Installare Homebrew + { $name }
 setup-run-install = Currere mandatum installationis
 setup-auto-reload = Vmux id in terminali currit et reonerat cum { $command } paratum est.
 
-debug-title = Debug
-debug-auto-update = Renovatio automatica
-debug-simulate-update = Simulare renovationem praesto
-debug-simulate-download = Simulare depositionem
-debug-clear-update = Purgare renovationem
-debug-trigger-restart = Restarte incitare
 
 command-manage-spaces = Spatia administrare…
 command-pane-stack-location = area { $pane } / strues { $stack }
