@@ -1,7 +1,9 @@
 //! The `VirtualDom`, driven by hand.
 
+use std::rc::Rc;
+
 use dioxus_core::{Element, Event, VirtualDom};
-use dioxus_html::HtmlEvent;
+use dioxus_html::{EventData, HtmlEvent, MountedData, PlatformEventData, RenderedElementBacking};
 use dioxus_interpreter_js::MutationState;
 
 use crate::event_request::EventOutcome;
@@ -112,7 +114,15 @@ impl PageDom {
     ///
     /// The answer is the caller's to return to a blocked page, so this must not defer any part of
     /// the work: the handlers run here, on this thread, before it returns.
-    pub fn handle(&mut self, event: HtmlEvent) -> EventOutcome {
+    ///
+    /// `backing` is what a mounted component will hold, and only a renderer can supply it: the
+    /// element is named by the node it assigned. One that has nothing to offer passes `()`, which
+    /// is what dioxus substitutes anyway.
+    pub fn handle(
+        &mut self,
+        event: HtmlEvent,
+        backing: impl RenderedElementBacking + 'static,
+    ) -> EventOutcome {
         let HtmlEvent {
             element,
             name,
@@ -120,7 +130,17 @@ impl PageDom {
             data,
         } = event;
 
-        let event = Event::new(data.into_any(), bubbles);
+        // Dioxus hardcodes `MountedData::new(())` for a mounted event, whose every method answers
+        // `NotSupported`, so this is the one point at which a renderer can put its own in reach of
+        // the component about to look for it.
+        let data = match data {
+            EventData::Mounted => {
+                Rc::new(PlatformEventData::new(Box::new(MountedData::new(backing))))
+                    as Rc<dyn std::any::Any>
+            }
+            data => data.into_any(),
+        };
+        let event = Event::new(data, bubbles);
         self.dom
             .runtime()
             .handle_event(&name, event.clone(), element);
@@ -181,7 +201,7 @@ mod tests {
 
         let mut page = PageDom::mount(Counting, crate::Instance::default());
         page.rebuild();
-        page.handle(click_on(ElementId(1)));
+        page.handle(click_on(ElementId(1)), ());
 
         assert!(
             page.render().is_none(),
@@ -206,7 +226,7 @@ mod tests {
         page.rebuild();
 
         assert!(
-            page.handle(click_on(ElementId(1))).prevent_default(),
+            page.handle(click_on(ElementId(1)), ()).prevent_default(),
             "a page that blocks navigation depends on this answer arriving before it returns"
         );
     }
@@ -221,7 +241,7 @@ mod tests {
         let mut page = PageDom::mount(Plain, crate::Instance::default());
         page.rebuild();
 
-        assert!(!page.handle(click_on(ElementId(1))).prevent_default());
+        assert!(!page.handle(click_on(ElementId(1)), ()).prevent_default());
     }
 
     #[test]
@@ -230,7 +250,7 @@ mod tests {
         page.rebuild();
 
         assert!(
-            !page.handle(click_on(ElementId(9999))).prevent_default(),
+            !page.handle(click_on(ElementId(9999)), ()).prevent_default(),
             "the page blocks on the reply, so an unrecognised element still has to be answered"
         );
     }

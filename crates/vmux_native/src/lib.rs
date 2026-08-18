@@ -23,9 +23,10 @@
 //! a frame, an asset, and where a page's bytes go — through [`Embedding`], and that is what keeps
 //! an ECS, a window and an asset server on the other side of the boundary.
 //!
-//! Not here yet: an element backing for `onmounted`. Dioxus substitutes `MountedData::new(())` for
-//! a mounted event, whose methods all answer `NotSupported`, so `MountedData::set_focus` and
-//! friends are inert until a host provides one.
+//! Half here: the element backing for `onmounted`. A mounted component can focus its element and
+//! scroll it, because those are instructions and the next frame carries them. The three questions
+//! it can ask — its rect, its scroll size, its scroll offset — still answer `NotSupported`, since
+//! an answer has to travel back and nothing here carries one yet.
 
 mod event_request;
 mod instance;
@@ -57,6 +58,8 @@ mod route;
 mod shim;
 #[cfg(target_os = "macos")]
 mod surface;
+#[cfg(target_os = "macos")]
+mod surface_element;
 
 #[cfg(target_os = "macos")]
 pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};

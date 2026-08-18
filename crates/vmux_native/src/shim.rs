@@ -78,6 +78,23 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   // as data and the page collects them here once a batch has landed, so no statement composed on
   // the Rust side is ever evaluated.
   const applyDomRequest = (request) => {
+    // A request naming a node rather than an id came from a component holding a MountedData, and
+    // what it wants is a method the interpreter already has for the node it assigned.
+    switch (request.kind) {
+      case 'focusNode':
+        window.interpreter.setFocus(request.node, request.focus);
+        return;
+      case 'scrollNode':
+        window.interpreter.scroll(request.node, request.x, request.y, request.behavior);
+        return;
+      case 'revealNode':
+        window.interpreter.scrollTo(request.node, {
+          behavior: request.behavior,
+          block: request.block,
+          inline: request.inline,
+        });
+        return;
+    }
     const el = document.getElementById(request.element);
     if (!el) return;
     switch (request.kind) {

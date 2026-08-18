@@ -22,10 +22,11 @@ use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
 use vmux_ui::transport::{BytesListener, HostScope, PageHost};
 
-use crate::dom_request::DomRequest;
+use crate::dom_request::{DomRequest, RequestQueue};
 use crate::embed::{Embedding, Outbox, Wake};
 use crate::event_selection::EventSelection;
 use crate::frame::PageFrame;
+use crate::surface_element::SurfaceElement;
 use crate::{EventOutcome, EventRequest, PageDom};
 
 /// What a page needs from the host, and what the host needs back.
@@ -38,7 +39,7 @@ pub(crate) struct SurfaceDom {
     /// What the event being handled found selected, for as long as it is being handled.
     selection: Rc<RefCell<EventSelection>>,
     listeners: Listeners,
-    pending_requests: PendingRequests,
+    requests: RequestQueue,
     /// The first batch has been sent.
     mounted: Rc<Cell<bool>>,
     /// The page's standing request for the next batch, waiting for a render to produce one.
@@ -47,13 +48,6 @@ pub(crate) struct SurfaceDom {
 
 /// Set on a request that is also the acknowledgement of the frame before it.
 const FRAME_APPLIED: &str = "x-vmux-applied";
-
-/// What the page's components asked the host to do to their elements, waiting for the page to ask.
-///
-/// Queued rather than done on the spot because a component asks while it has no handle to the view
-/// at all — and because a request answered during a render would reach the document before the
-/// edits that render produced.
-type PendingRequests = Rc<RefCell<Vec<DomRequest>>>;
 
 /// Host-to-page callbacks, by event id.
 ///
@@ -73,12 +67,12 @@ impl SurfaceDom {
         embed: &Embedding,
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
-        let pending_requests: PendingRequests = Rc::new(RefCell::new(Vec::new()));
+        let requests = RequestQueue::default();
         let selection: Rc<RefCell<EventSelection>> = Rc::default();
         let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
             outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
-            pending_requests: pending_requests.clone(),
+            requests: requests.clone(),
             selection: selection.clone(),
         });
 
@@ -89,7 +83,7 @@ impl SurfaceDom {
             waker: embed.waker.clone(),
             selection,
             listeners,
-            pending_requests,
+            requests,
             mounted: Rc::new(Cell::new(false)),
             parked: Rc::new(RefCell::new(None)),
         }
@@ -196,7 +190,7 @@ impl SurfaceDom {
         // Rendering first, because a component asks to focus an element from the render that
         // produces it — draining before would leave the request behind for a frame.
         let edits = self.next_batch();
-        let requests = self.take_pending_requests();
+        let requests = self.requests.take();
         if edits.is_none() && requests.is_empty() {
             return;
         }
@@ -281,7 +275,8 @@ impl SurfaceDom {
         // Held for the handler and no longer, so a component reading it from anywhere else finds
         // nothing rather than a stale answer wearing the face of a current one.
         *self.selection.borrow_mut() = selection;
-        let outcome = page.handle(event);
+        let element = SurfaceElement::new(event.element, self.requests.clone());
+        let outcome = page.handle(event, element);
         *self.selection.borrow_mut() = EventSelection::default();
         drop(page);
         // A handler almost always wrote a signal, and the click that ran it reached the webview
@@ -289,18 +284,6 @@ impl SurfaceDom {
         self.waker.wake();
 
         outcome
-    }
-
-    /// What the page asked for since the last frame.
-    ///
-    /// Drained into the frame that carries the batch they follow: a component that asks to focus an
-    /// element is asking about the element the same render just produced.
-    fn take_pending_requests(&self) -> Vec<DomRequest> {
-        let Ok(mut pending) = self.pending_requests.try_borrow_mut() else {
-            return Vec::new();
-        };
-
-        std::mem::take(&mut *pending)
     }
 
     /// Deliver a host event to whatever the page registered for it.
@@ -333,7 +316,7 @@ impl SurfaceDom {
 struct SurfaceHost {
     outbox: Rc<dyn Outbox>,
     listeners: Listeners,
-    pending_requests: PendingRequests,
+    requests: RequestQueue,
     /// Only ever read while [`SurfaceDom::handle_event`] holds it, which is the only time a page
     /// can meaningfully ask.
     selection: Rc<RefCell<EventSelection>>,
@@ -342,11 +325,7 @@ struct SurfaceHost {
 impl SurfaceHost {
     /// Queue something to do to an element the page rendered, for the page to collect.
     fn request(&self, request: DomRequest) {
-        let Ok(mut pending) = self.pending_requests.try_borrow_mut() else {
-            return;
-        };
-
-        pending.push(request);
+        self.requests.push(request);
     }
 }
 
