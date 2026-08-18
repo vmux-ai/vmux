@@ -30,8 +30,9 @@ impl PageSurface {
         window: &impl wry::raw_window_handle::HasWindowHandle,
         bounds: wry::Rect,
         embed: Embedding,
+        instance: crate::Instance,
     ) -> Result<Self, wry::Error> {
-        let dom = SurfaceDom::mount(page.component, &embed);
+        let dom = SurfaceDom::mount(page.component, instance, &embed);
         let message = PageMessage::new(page, embed.outbox, dom.clone());
         let routes = PageRoutes::new(page, dom.clone(), embed.assets);
         let webview = wry::WebViewBuilder::new()

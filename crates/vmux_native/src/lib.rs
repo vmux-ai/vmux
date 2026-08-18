@@ -28,11 +28,13 @@
 //! friends are inert until a host provides one.
 
 mod event_request;
+mod instance;
 mod page;
 mod page_dom;
 mod shell;
 
 pub use event_request::{EventOutcome, EventRequest, EventRequestError};
+pub use instance::{Instance, PageScope};
 pub use page::NativePage;
 pub use page_dom::{PageComponent, PageDom};
 pub use shell::InterpreterShell;

@@ -27,7 +27,14 @@ mod other;
 pub struct NativePagePlugin {
     page: &'static NativePage,
     placement: Placement,
+    instance: Option<ReadInstance>,
 }
+
+/// Reads a page's per-view data off the entity it was opened for.
+///
+/// A function pointer rather than a generic parameter on the plugin, because every page is stored
+/// in one list and only some of them have anything per view to read.
+type ReadInstance = fn(&World, Entity) -> vmux_native::Instance;
 
 impl Plugin for NativePagePlugin {
     fn build(&self, app: &mut App) {
@@ -37,7 +44,7 @@ impl Plugin for NativePagePlugin {
         app.world_mut()
             .resource_mut::<NativePages>()
             .0
-            .push((self.page, self.placement));
+            .push((self.page, self.placement, self.instance));
     }
 
     /// Every page is another instance of this, and Bevy rejects a repeated plugin by type.
@@ -52,6 +59,7 @@ impl NativePagePlugin {
         Self {
             page,
             placement: Placement::Pane,
+            instance: None,
         }
     }
 
@@ -60,6 +68,7 @@ impl NativePagePlugin {
         Self {
             page,
             placement: Placement::Layout,
+            instance: None,
         }
     }
 
@@ -68,7 +77,26 @@ impl NativePagePlugin {
         Self {
             page,
             placement: Placement::Modal,
+            instance: None,
         }
+    }
+
+    /// Give the page the `C` on the entity it was opened for, before its first render.
+    ///
+    /// For a page whose two views differ — the error page shows a different failure in each. The
+    /// url cannot carry it, because a [`NativePage`] is one const per url; the host builds the
+    /// `VirtualDom` itself, so the difference goes in the root scope instead and the page reads it
+    /// with `try_consume_context` rather than asking over IPC and rendering twice.
+    pub fn takes<C: Component + Clone>(mut self) -> Self {
+        self.instance = Some(Self::read::<C>);
+        self
+    }
+
+    fn read<C: Component + Clone>(world: &World, entity: Entity) -> vmux_native::Instance {
+        let Some(value) = world.get::<C>(entity).cloned() else {
+            return vmux_native::Instance::default();
+        };
+        vmux_native::Instance::of(move |scope| scope.provide(value))
     }
 }
 
@@ -159,6 +187,16 @@ pub static SPACES_PAGE: NativePage =
 pub static TOOLS_PAGE: NativePage =
     NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page);
 
+/// What a pane shows where a page failed to open, or where no page answers the url.
+///
+/// The one page never asked for by name: a view carries it because something else could not be
+/// opened, so what it reports arrives as a component on that view rather than as part of a url.
+#[cfg(target_os = "macos")]
+pub static ERROR_PAGE: NativePage = NativePage::pane(
+    vmux_wire::error::ERROR_PAGE_URL,
+    vmux_layout::error_page::Page,
+);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own
@@ -178,7 +216,7 @@ pub enum Placement {
 
 /// Every page registered by a [`NativePagePlugin`], and where each one goes.
 #[derive(Resource, Default)]
-struct NativePages(Vec<(&'static NativePage, Placement)>);
+struct NativePages(Vec<(&'static NativePage, Placement, Option<ReadInstance>)>);
 
 /// The half of native page hosting that exists once, however many pages there are.
 ///

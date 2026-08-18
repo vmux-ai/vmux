@@ -21,11 +21,17 @@ pub struct PageDom {
 
 impl PageDom {
     /// Mount `app` without rendering it. Call [`PageDom::rebuild`] for the first batch.
-    pub fn mount(app: PageComponent) -> Self {
+    ///
+    /// `instance` is provided before the first render rather than after, so a page that differs
+    /// per view reads its difference on the render that produces the document.
+    pub fn mount(app: PageComponent, instance: crate::Instance) -> Self {
         Self::install_event_converter();
 
+        let dom = VirtualDom::new(app);
+        instance.provide_to(&dom);
+
         Self {
-            dom: VirtualDom::new(app),
+            dom,
             mutations: MutationState::default(),
             unflushed: false,
         }
@@ -145,7 +151,7 @@ mod tests {
 
     #[test]
     fn a_first_render_describes_a_document_that_does_not_exist_yet() {
-        let mut page = PageDom::mount(Static);
+        let mut page = PageDom::mount(Static, crate::Instance::default());
 
         assert!(
             !page.rebuild().is_empty(),
@@ -155,7 +161,7 @@ mod tests {
 
     #[test]
     fn a_render_that_changes_nothing_sends_nothing() {
-        let mut page = PageDom::mount(Static);
+        let mut page = PageDom::mount(Static, crate::Instance::default());
         page.rebuild();
         page.flushed();
 
@@ -173,7 +179,7 @@ mod tests {
             rsx! { button { onclick: move |_| count += 1, "{count}" } }
         }
 
-        let mut page = PageDom::mount(Counting);
+        let mut page = PageDom::mount(Counting, crate::Instance::default());
         page.rebuild();
         page.handle(click_on(ElementId(1)));
 
@@ -196,7 +202,7 @@ mod tests {
             rsx! { a { onclick: |event: Event<MouseData>| event.prevent_default(), "link" } }
         }
 
-        let mut page = PageDom::mount(Preventing);
+        let mut page = PageDom::mount(Preventing, crate::Instance::default());
         page.rebuild();
 
         assert!(
@@ -212,7 +218,7 @@ mod tests {
             rsx! { a { onclick: |_| {}, "link" } }
         }
 
-        let mut page = PageDom::mount(Plain);
+        let mut page = PageDom::mount(Plain, crate::Instance::default());
         page.rebuild();
 
         assert!(!page.handle(click_on(ElementId(1))).prevent_default());
@@ -220,7 +226,7 @@ mod tests {
 
     #[test]
     fn an_event_for_an_element_that_has_no_handler_is_answered_rather_than_dropped() {
-        let mut page = PageDom::mount(Static);
+        let mut page = PageDom::mount(Static, crate::Instance::default());
         page.rebuild();
 
         assert!(

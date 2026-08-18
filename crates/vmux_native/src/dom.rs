@@ -66,7 +66,11 @@ impl SurfaceDom {
     /// The transport is entered as a [`HostScope`] around every entry into the dom rather than
     /// installed for the thread, because the thread will eventually run more than one page and a
     /// single installed host would leave all but the last talking to the wrong one.
-    pub(crate) fn mount(component: crate::PageComponent, embed: &Embedding) -> Self {
+    pub(crate) fn mount(
+        component: crate::PageComponent,
+        instance: crate::Instance,
+        embed: &Embedding,
+    ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let pending_requests: PendingRequests = Rc::new(RefCell::new(Vec::new()));
         let caret = CaretMirror::default();
@@ -78,7 +82,7 @@ impl SurfaceDom {
         });
 
         Self {
-            page: Rc::new(RefCell::new(PageDom::mount(component))),
+            page: Rc::new(RefCell::new(PageDom::mount(component, instance))),
             host,
             reactor: Rc::new(Self::reactor()),
             waker: embed.waker.clone(),

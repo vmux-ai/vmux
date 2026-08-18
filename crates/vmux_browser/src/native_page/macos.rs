@@ -86,12 +86,12 @@ impl HostedPages {
 fn open_native_pages(world: &mut World) {
     let registered = world.resource::<NativePages>().0.clone();
     let mut wanted = Vec::new();
-    for (page, placement) in registered {
+    for (page, placement, instance) in registered {
         for entity in placement.claim(world, page) {
-            wanted.push((entity, page, placement));
+            wanted.push((entity, page, placement, instance));
         }
     }
-    wanted.retain(|(entity, _, _)| {
+    wanted.retain(|(entity, _, _, _)| {
         !world
             .get_non_send::<HostedPages>()
             .is_some_and(|hosted| hosted.0.contains_key(entity))
@@ -119,12 +119,16 @@ fn open_native_pages(world: &mut World) {
         world.insert_non_send(HostedPages::default());
     }
 
-    for (entity, page, placement) in wanted {
+    for (entity, page, placement, read_instance) in wanted {
         // Off screen until the placement pass says where it goes, rather than briefly at the
         // origin.
         let bounds = wry::Rect {
             position: wry::dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: wry::dpi::LogicalSize::new(1.0, 1.0).into(),
+        };
+        let instance = match read_instance {
+            Some(read) => read(world, entity),
+            None => vmux_native::Instance::default(),
         };
         let built = WINIT_WINDOWS.with(|winit_windows| {
             let winit_windows = winit_windows.borrow();
@@ -134,6 +138,7 @@ fn open_native_pages(world: &mut World) {
                 &**window,
                 bounds,
                 embedder.embed(entity, page.url),
+                instance,
             ))
         });
         match built {
