@@ -74,6 +74,14 @@ pub trait PageHost {
         false
     }
 
+    /// Put text on the system clipboard.
+    ///
+    /// A host capability, but not for the reason the ones above are: there is no document in it.
+    /// The browser has a clipboard API and reaches it directly; every other host has the OS
+    /// pasteboard and no page-side way to touch it. The default is silence rather than an error,
+    /// because a copy that does not happen is a copy the user repeats, not a broken page.
+    fn write_to_clipboard(&self, _text: &str) {}
+
     /// Whether this host looks a stroke up in a keymap and answers with what it meant.
     ///
     /// A host capability for the same reason as [`Self::focus_element`]: the keymap is built from
@@ -157,6 +165,13 @@ impl Host {
     #[cfg(not(web))]
     pub(crate) fn offer_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.offer_element_text(id));
+    }
+
+    /// `not(web)` only: the browser has a clipboard API and
+    /// [`crate::clipboard::Clipboard`] uses it directly there.
+    #[cfg(not(web))]
+    pub(crate) fn write_to_clipboard(text: &str) {
+        let _ = Self::with_installed(|host| host.write_to_clipboard(text));
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].

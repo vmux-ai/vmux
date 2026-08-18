@@ -13,7 +13,6 @@
 #![allow(non_snake_case)]
 
 pub mod activity;
-pub mod clipboard;
 pub mod event;
 pub mod transcript;
 

@@ -10576,6 +10576,7 @@ dependencies = [
  "url",
  "uuid",
  "vmux_chat",
+ "vmux_clipboard",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -10697,6 +10698,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "vmux_clipboard"
+version = "0.0.30"
+dependencies = [
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "vmux_command"
 version = "0.0.30"
 dependencies = [
@@ -10804,6 +10815,7 @@ dependencies = [
  "uuid",
  "vmux_agent",
  "vmux_browser",
+ "vmux_clipboard",
  "vmux_command",
  "vmux_core",
  "vmux_editor",
@@ -11041,6 +11053,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "vmux_clipboard",
  "vmux_ui",
  "wry",
 ]
@@ -11259,8 +11272,6 @@ dependencies = [
  "dioxus",
  "js-sys",
  "libc",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
  "portable-pty",
  "rfd 0.15.4",
  "rkyv",
@@ -11270,6 +11281,7 @@ dependencies = [
  "tracing",
  "unicode-width",
  "url",
+ "vmux_clipboard",
  "vmux_command",
  "vmux_core",
  "vmux_flex",

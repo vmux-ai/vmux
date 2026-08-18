@@ -1,6 +1,6 @@
 //! macOS clipboard: `pbcopy`/`pbpaste` for text, `NSPasteboard` for image data.
 
-use bevy::log::warn;
+use tracing::warn;
 
 impl super::Clipboard {
     pub(super) fn write_blocking(text: &str) {

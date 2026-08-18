@@ -424,12 +424,11 @@ fn tiff_to_png(bytes: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn clipboard_image_path() -> Option<std::path::PathBuf> {
-    if let Some(path) = vmux_terminal::clipboard::image_file_path() {
+    if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(std::path::PathBuf::from(path));
     }
-    let png = vmux_terminal::clipboard::read_image_png().or_else(|| {
-        vmux_terminal::clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes))
-    })?;
+    let png = vmux_clipboard::read_image_png()
+        .or_else(|| vmux_clipboard::read_image_tiff().and_then(|bytes| tiff_to_png(&bytes)))?;
     let directory = std::env::temp_dir().join("vmux-prompt-attachments");
     std::fs::create_dir_all(&directory).ok()?;
     let path = directory.join(format!("clipboard-{}.png", uuid::Uuid::new_v4()));

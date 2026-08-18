@@ -378,6 +378,14 @@ impl PageHost for SurfaceHost {
         });
     }
 
+    /// Straight to the pasteboard rather than through a [`DomRequest`], because this is the one
+    /// capability here that is not about the document. Asking the page to run
+    /// `navigator.clipboard` would also need `vmux://` to be a secure context, which is a property
+    /// of how wry registered the scheme rather than anything this crate decides.
+    fn write_to_clipboard(&self, text: &str) {
+        vmux_clipboard::write(text.to_string());
+    }
+
     fn event_field_selection(&self, element_id: &str) -> (usize, usize) {
         self.selection.borrow().in_field(element_id)
     }

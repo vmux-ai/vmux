@@ -35,6 +35,7 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = [
     "CALayer",
 ] }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+vmux_clipboard = { path = "../vmux_clipboard" }
 vmux_ui = { path = "../vmux_ui", default-features = false }
 wry = { version = "0.53", features = ["transparent"] }
 

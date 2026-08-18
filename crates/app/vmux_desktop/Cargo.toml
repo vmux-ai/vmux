@@ -95,6 +95,7 @@ url = { workspace = true }
 uuid = { workspace = true }
 vmux_agent = { path = "../../page/vmux_agent" }
 vmux_browser = { path = "../../vmux_browser" }
+vmux_clipboard = { path = "../../vmux_clipboard" }
 vmux_command = { path = "../../page/vmux_command" }
 vmux_core = { path = "../../vmux_core" }
 vmux_editor = { path = "../../page/vmux_editor" }

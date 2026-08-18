@@ -1,8 +1,8 @@
 //! Why the agent stopped, shown inline in the transcript where the turn died.
 
-use crate::clipboard::copy_to_clipboard;
 use crate::event::ChatOpenPage;
 use dioxus::prelude::*;
+use vmux_ui::clipboard::Clipboard;
 use vmux_ui::hooks::send;
 use vmux_ui::i18n::translate;
 
@@ -37,7 +37,7 @@ pub(super) fn ChatErrorCard(message: String) -> Element {
                     class: "ml-auto flex h-6 w-6 items-center justify-center rounded-md text-red-500/70 transition hover:bg-red-500/10 hover:text-red-500",
                     title: "{copy_label}",
                     aria_label: "{copy_label}",
-                    onclick: move |_| copy_to_clipboard(&copy_text),
+                    onclick: move |_| Clipboard::write(&copy_text),
                     svg {
                         class: "h-3.5 w-3.5",
                         view_box: "0 0 24 24",

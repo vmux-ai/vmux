@@ -35,7 +35,7 @@ impl Plugin for RemotePlugin {
 
 fn on_remote_copy(_trigger: On<BinReceive<RemoteCopyEvent>>, state: Res<RemoteState>) {
     if state.phase == RemotePhase::Enabled && !state.pairing_url.is_empty() {
-        vmux_terminal::clipboard::write(state.pairing_url.clone());
+        vmux_clipboard::write(state.pairing_url.clone());
     }
 }
 

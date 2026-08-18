@@ -1,7 +1,7 @@
 //! Platforms with no clipboard integration: writes are logged and dropped, and
 //! every read comes back empty.
 
-use bevy::log::warn;
+use tracing::warn;
 
 impl super::Clipboard {
     pub(super) fn write_blocking(_text: &str) {

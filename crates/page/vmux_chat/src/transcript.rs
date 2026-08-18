@@ -14,7 +14,7 @@ use vmux_wire::prompt_media::{ChatAttachment, ChatSubmitAttachment};
 use crate::activity::{
     ActivityIcon, ActivityIconView, FileActivityIcon, ToolActivityIcon, ToolPresentation,
 };
-use crate::clipboard::copy_to_clipboard;
+use vmux_ui::clipboard::Clipboard;
 use vmux_ui::platform::{random_index, sleep_ms};
 
 #[component]
@@ -57,7 +57,7 @@ pub fn MessageCopyButton(text: String) -> Element {
             aria_label: "{label}",
             onclick: move |event| {
                 event.stop_propagation();
-                copy_to_clipboard(&text);
+                Clipboard::write(&text);
             },
             LineIconView { icon: LineIcon::Copy, class: "h-3.5 w-3.5" }
         }

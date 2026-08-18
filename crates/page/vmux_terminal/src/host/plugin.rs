@@ -1580,7 +1580,7 @@ fn poll_service_messages(
                 process_id: _,
                 text,
             } if !text.is_empty() => {
-                crate::clipboard::write(text);
+                vmux_clipboard::write(text);
             }
             ServiceMessage::AgentCommand {
                 request_id,
@@ -2481,21 +2481,21 @@ fn write_clipboard_image_temp(process_id: ProcessId, png: &[u8]) -> Option<std::
 /// the pasteboard, so its data is written to a temp file and pasted as a path.
 /// Otherwise the clipboard text is bracketed-pasted. `None` when nothing to paste.
 fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
-    if let Some(path) = crate::clipboard::image_file_path() {
+    if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(bracketed_paste(
             image_path_payload(is_vibe, &path).as_bytes(),
         ));
     }
-    if crate::clipboard::has_image() {
+    if vmux_clipboard::has_image() {
         if is_vibe {
-            let png = crate::clipboard::read_image_png()?;
+            let png = vmux_clipboard::read_image_png()?;
             let path = write_clipboard_image_temp(process_id, &png)?;
             let payload = image_path_payload(true, &path.to_string_lossy());
             return Some(bracketed_paste(payload.as_bytes()));
         }
         return Some(vec![CTRL_V]);
     }
-    let text = crate::clipboard::read_blocking()?;
+    let text = vmux_clipboard::read_blocking()?;
     (!text.is_empty()).then(|| bracketed_paste(text.as_bytes()))
 }
 
@@ -2505,15 +2505,15 @@ fn resolve_paste(is_vibe: bool, process_id: ProcessId) -> Option<Vec<u8>> {
 /// pasteboard via `Ctrl+V`, and the draft is delivered later as text. Returns
 /// `None` when there is nothing to paste.
 fn resolve_paste_text(is_vibe: bool, process_id: ProcessId) -> Option<String> {
-    if let Some(path) = crate::clipboard::image_file_path() {
+    if let Some(path) = vmux_clipboard::image_file_path() {
         return Some(image_path_payload(is_vibe, &path));
     }
-    if crate::clipboard::has_image() {
-        let png = crate::clipboard::read_image_png()?;
+    if vmux_clipboard::has_image() {
+        let png = vmux_clipboard::read_image_png()?;
         let path = write_clipboard_image_temp(process_id, &png)?;
         return Some(image_path_payload(is_vibe, &path.to_string_lossy()));
     }
-    let text = crate::clipboard::read_blocking()?;
+    let text = vmux_clipboard::read_blocking()?;
     (!text.is_empty()).then_some(text)
 }
 
