@@ -300,7 +300,7 @@ fn handle_agent_page_open(
     settings: Res<AppSettings>,
     workspace: AgentPageOpenWorkspace,
     catalog: Option<Res<crate::client::acp::AcpCatalog>>,
-    transitions: Query<&vmux_layout::start::StartInlineTransition>,
+    transitions: Query<&vmux_start::StartInlineTransition>,
 ) {
     let tasks: Vec<(Entity, PageOpenTask)> = open_q
         .p0()
@@ -349,7 +349,7 @@ fn handle_agent_page_open(
             .get(task.stack)
             .ok()
             .map(|transition| transition.webview)
-            .filter(|_| vmux_layout::start::supports_inline_agent_transition(&task.url));
+            .filter(|_| vmux_start::supports_inline_agent_transition(&task.url));
         match handle_agent_page_open_task(
             &task,
             initial_prompt,
@@ -372,7 +372,7 @@ fn handle_agent_page_open(
                 commands.entity(entity).insert(PageOpenHandled);
                 commands
                     .entity(task.stack)
-                    .remove::<vmux_layout::start::StartInlineTransition>();
+                    .remove::<vmux_start::StartInlineTransition>();
             }
             Err(message) => {
                 commands.entity(entity).insert(PageOpenError { message });
@@ -1552,13 +1552,13 @@ mod tests {
                     title: "Start".to_string(),
                     ..default()
                 },
-                vmux_layout::start::StartInlineTransitionView,
+                vmux_start::StartInlineTransitionView,
                 ChildOf(stack),
             ))
             .id();
         app.world_mut()
             .entity_mut(stack)
-            .insert(vmux_layout::start::StartInlineTransition { webview });
+            .insert(vmux_start::StartInlineTransition { webview });
         app.world_mut().spawn(PageOpenTask {
             id: vmux_core::PageOpenId::new(),
             stack,
@@ -1607,7 +1607,7 @@ mod tests {
         );
         assert!(
             app.world()
-                .get::<vmux_layout::start::StartInlineTransition>(stack)
+                .get::<vmux_start::StartInlineTransition>(stack)
                 .is_none()
         );
     }

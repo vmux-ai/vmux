@@ -104,8 +104,8 @@ body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; b
 /// The launcher: opaque, because it fills its pane rather than floating over one.
 #[cfg(target_os = "macos")]
 pub static START_PAGE: NativePage = NativePage {
-    url: vmux_layout::start::START_PAGE_URL,
-    component: vmux_layout::start::page::StartPage,
+    url: vmux_start::START_PAGE_URL,
+    component: vmux_start::page::StartPage,
     root_id: "main",
     root_class: "flex min-h-0 min-w-0 flex-1 flex-col",
     head: r#"<base href="/"/>

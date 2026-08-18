@@ -10588,6 +10588,7 @@ dependencies = [
  "vmux_session",
  "vmux_setting",
  "vmux_space",
+ "vmux_start",
  "vmux_terminal",
  "vmux_ui",
  "vmux_wire",
@@ -10635,6 +10636,7 @@ dependencies = [
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_start",
  "vmux_team",
  "vmux_terminal",
  "vmux_ui",
@@ -10814,6 +10816,7 @@ dependencies = [
  "vmux_service",
  "vmux_setting",
  "vmux_space",
+ "vmux_start",
  "vmux_team",
  "vmux_terminal",
  "vmux_ui",
@@ -11057,6 +11060,7 @@ dependencies = [
  "vmux_layout",
  "vmux_service",
  "vmux_setting",
+ "vmux_start",
  "vmux_terminal",
  "vmux_ui",
  "web-sys",
@@ -11201,11 +11205,26 @@ dependencies = [
 name = "vmux_start"
 version = "0.0.30"
 dependencies = [
+ "bevy",
+ "bevy_cef",
+ "bevy_ecs",
  "dioxus",
  "dioxus-primitives",
+ "js-sys",
+ "rfd 0.15.4",
+ "rkyv",
+ "serde",
  "serde_json",
+ "vmux_command",
+ "vmux_core",
+ "vmux_flex",
+ "vmux_git",
+ "vmux_layout",
+ "vmux_space",
  "vmux_ui",
  "vmux_wire",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

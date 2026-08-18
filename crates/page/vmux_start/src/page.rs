@@ -6,10 +6,10 @@ use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, Start
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
 use vmux_ui::i18n::translate;
 
-use crate::start::event::{
+use crate::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
 };
-use crate::start::focus::StartFocus;
+use crate::focus::StartFocus;
 use vmux_command::page::{CommandPalette, PaletteVariant, StartInlineTransition};
 
 /// The `vmux://start/` launcher page: a cinematic centered hero that requests its

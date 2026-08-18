@@ -44,6 +44,7 @@ vmux_native = { path = "../vmux_native" }
 vmux_service = { path = "../host/vmux_service" }
 vmux_setting = { path = "../page/vmux_setting" }
 vmux_space = { path = "../page/vmux_space" }
+vmux_start = { path = "../page/vmux_start" }
 vmux_team = { path = "../page/vmux_team" }
 vmux_terminal = { path = "../page/vmux_terminal" }
 vmux_ui = { path = "../vmux_ui", default-features = false }

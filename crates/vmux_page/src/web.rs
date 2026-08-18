@@ -97,9 +97,9 @@ fn StartAgentPage() -> Element {
         };
     }
     rsx! {
-        vmux_layout::start::page::Page {
+        vmux_start::page::Page {
             on_inline_transition: move |next: vmux_command::page::StartInlineTransition| {
-                vmux_layout::start::page::begin_agent_transition();
+                vmux_start::page::begin_agent_transition();
                 InlineAgentWindow::set(&next.target_url);
                 transition.set(Some(next));
             },

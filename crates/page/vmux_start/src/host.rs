@@ -13,16 +13,16 @@ use vmux_command::snapshot::{
 use vmux_core::PageMetadata;
 use vmux_ui::i18n::Locale;
 
-use crate::settings::ResolvedLocale;
-use crate::start::START_PAGE_URL;
-use crate::start::event::{
+use crate::START_PAGE_URL;
+use crate::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
     StartSelectWorkspace,
 };
-use crate::tab::{Tab, TabWorkspace, TabWorktree};
-use crate::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 use vmux_command::build_command_bar_open_payload;
 use vmux_core::launcher::{FocusLauncherInput, HostsLauncher, InlineTransitionRequested};
+use vmux_layout::settings::ResolvedLocale;
+use vmux_layout::tab::{Tab, TabWorkspace, TabWorktree};
+use vmux_layout::workspace_snapshot::{TabGatherParams, gather_command_bar_tabs};
 
 /// Bevy plugin for `vmux://start/`: spawns the page manifest, claims start page-open tasks,
 /// and answers [`StartDataRequest`] with the shared command-bar payload.
@@ -31,7 +31,7 @@ pub struct StartPlugin;
 impl Plugin for StartPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
-            crate::start::PAGE_MANIFEST,
+            crate::PAGE_MANIFEST,
             vmux_core::host::page::NativelyHosted {
                 url: START_PAGE_URL,
                 title: "Start",
@@ -248,7 +248,7 @@ fn drain_start_workspace_pickers(
             }
             if let Ok(mut tab) = tabs.get_mut(picker.tab) {
                 tab.startup_dir = Some(path.to_string_lossy().into_owned());
-                if crate::worktree::is_generated_tab_name(&tab.name)
+                if vmux_layout::worktree::is_generated_tab_name(&tab.name)
                     && let Some(name) = path.file_name().and_then(|name| name.to_str())
                     && !name.is_empty()
                 {
@@ -260,12 +260,12 @@ fn drain_start_workspace_pickers(
                         TabWorkspace {
                             project_dir: path.to_string_lossy().into_owned(),
                         },
-                        crate::tab::TabDirDecided,
+                        vmux_layout::tab::TabDirDecided,
                     ))
                     .remove::<(
                         TabWorktree,
-                        crate::worktree::TabWorktreeReady,
-                        crate::tab::TabWorktreeUnavailable,
+                        vmux_layout::worktree::TabWorktreeReady,
+                        vmux_layout::tab::TabWorktreeUnavailable,
                     )>();
             }
         }
@@ -287,7 +287,7 @@ fn sync_live_start_pages(
     pages_snapshot: Res<CommandBarPagesSnapshot>,
     work_snapshot: Res<CommandBarWorkSnapshot>,
     locale: Option<Res<ResolvedLocale>>,
-    focused: Res<crate::stack::FocusedStack>,
+    focused: Res<vmux_layout::stack::FocusedStack>,
     starts: Query<
         (
             Entity,
@@ -295,7 +295,7 @@ fn sync_live_start_pages(
             Has<StartWorkSynced>,
             Has<CefKeyboardTarget>,
         ),
-        Without<crate::start::StartInlineTransitionView>,
+        Without<crate::StartInlineTransitionView>,
     >,
     added_keyboard_targets: Query<(), Added<CefKeyboardTarget>>,
     browsers: NonSend<Browsers>,
@@ -522,8 +522,8 @@ fn focus_start_input_on_request(
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(
             request.webview,
-            crate::start::event::START_FOCUS_INPUT_EVENT,
-            &crate::start::event::StartFocusInput,
+            crate::event::START_FOCUS_INPUT_EVENT,
+            &crate::event::StartFocusInput,
         ));
     }
 }
@@ -535,12 +535,12 @@ fn begin_requested_inline_transition(
     for request in requests.read() {
         commands
             .entity(request.stack)
-            .insert(crate::start::StartInlineTransition {
+            .insert(crate::StartInlineTransition {
                 webview: request.webview,
             });
         commands
             .entity(request.webview)
-            .insert(crate::start::StartInlineTransitionView);
+            .insert(crate::StartInlineTransitionView);
     }
 }
 
@@ -586,22 +586,22 @@ mod tests {
 
     #[test]
     fn inline_transition_only_supports_page_agents() {
-        assert!(crate::start::supports_inline_agent_transition(
+        assert!(crate::supports_inline_agent_transition(
             "vmux://agent/codex"
         ));
-        assert!(crate::start::supports_inline_agent_transition(
+        assert!(crate::supports_inline_agent_transition(
             "vmux://agent/openai/gpt-5/session"
         ));
-        assert!(!crate::start::supports_inline_agent_transition(
+        assert!(!crate::supports_inline_agent_transition(
             "vmux://agent/codex/cli"
         ));
-        assert!(!crate::start::supports_inline_agent_transition(
+        assert!(!crate::supports_inline_agent_transition(
             "vmux://agent/vibe/setup"
         ));
-        assert!(crate::start::supports_inline_agent_transition(
+        assert!(crate::supports_inline_agent_transition(
             "vmux://agent/cliff"
         ));
-        assert!(crate::start::supports_inline_agent_transition(
+        assert!(crate::supports_inline_agent_transition(
             "vmux://agent/setupwizard"
         ));
     }

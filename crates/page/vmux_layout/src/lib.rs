@@ -9,7 +9,6 @@
 pub mod event;
 pub mod protocol;
 pub mod reconcile;
-pub mod start;
 
 #[cfg(ui)]
 pub mod tools_page;
