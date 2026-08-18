@@ -4,6 +4,10 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 use vmux_core::event::*;
+use vmux_ui::components::alert_dialog::{
+    AlertDialogAction, AlertDialogActions, AlertDialogCancel, AlertDialogContent,
+    AlertDialogDescription, AlertDialogRoot, AlertDialogTitle,
+};
 use vmux_ui::components::manager::{
     ManagerBadge, ManagerButton, ManagerButtonVariant, ManagerEmpty, ManagerHeader, ManagerList,
     ManagerPage, ManagerRow, ManagerSkeleton, ManagerTone,
@@ -11,21 +15,34 @@ use vmux_ui::components::manager::{
 use vmux_ui::hooks::{send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
 
-fn approval_message(extension: &ExtRow) -> String {
-    let mut requested = extension.required_permissions.clone();
-    requested.extend(extension.required_host_permissions.iter().cloned());
-    if requested.is_empty() {
-        translate_with(
-            "extensions-enable-confirm",
-            &[("name", TranslationValue::String(&extension.name))],
-        )
-    } else {
-        let permissions = requested.join("\n");
-        let message = translate_with(
-            "extensions-enable-permissions",
-            &[("name", TranslationValue::String(&extension.name))],
-        );
-        format!("{message}\n\n{permissions}")
+/// What enabling an extension is asking the reader to agree to.
+///
+/// Kept apart from its rendering because the two halves are not the same shape: the message is one
+/// of two sentences, and the permissions are a list. They were one newline-joined string while
+/// `window.confirm` was showing them, which is a plain-text box and the only thing it could take.
+#[derive(Clone, PartialEq)]
+struct Approval {
+    message: String,
+    permissions: Vec<String>,
+}
+
+impl Approval {
+    fn of(extension: &ExtRow) -> Self {
+        let mut permissions = extension.required_permissions.clone();
+        permissions.extend(extension.required_host_permissions.iter().cloned());
+        let id = if permissions.is_empty() {
+            "extensions-enable-confirm"
+        } else {
+            "extensions-enable-permissions"
+        };
+
+        Self {
+            message: translate_with(
+                id,
+                &[("name", TranslationValue::String(&extension.name))],
+            ),
+            permissions,
+        }
     }
 }
 
@@ -142,10 +159,49 @@ fn ExtensionRow(extension: ExtRow) -> Element {
     let toggle_id = item.id.clone();
     let toggle_enabled = item.enabled;
     let needs_approval = item.needs_approval;
-    let approval = approval_message(&item);
+    let approval = Approval::of(&item);
+    let name = item.name.clone();
     let remove_id = item.id.clone();
     let icon = item.icon.clone();
+    let mut asking = use_signal(|| Some(false));
+    let approve_id = toggle_id.clone();
     rsx! {
+        AlertDialogRoot {
+            open: Into::<ReadSignal<Option<bool>>>::into(asking),
+            on_open_change: Callback::new(move |open| asking.set(Some(open))),
+            default_open: false,
+            attributes: vec![],
+            AlertDialogContent { attributes: vec![],
+                AlertDialogTitle { attributes: vec![], "{name}" }
+                AlertDialogDescription { attributes: vec![], "{approval.message}" }
+                if !approval.permissions.is_empty() {
+                    ul { class: "mt-3 space-y-1 text-sm text-muted-foreground",
+                        for permission in approval.permissions.iter() {
+                            li { class: "font-mono text-xs", "{permission}" }
+                        }
+                    }
+                }
+                AlertDialogActions { attributes: vec![],
+                    AlertDialogCancel {
+                        attributes: vec![],
+                        on_click: Some(EventHandler::new(move |_| asking.set(Some(false)))),
+                        {translate("common-cancel")}
+                    }
+                    AlertDialogAction {
+                        attributes: vec![],
+                        on_click: Some(EventHandler::new(move |_| {
+                            asking.set(Some(false));
+                            let _ = send(&ExtToggleRequest {
+                                id: approve_id.clone(),
+                                enabled: true,
+                                approve_permissions: true,
+                            });
+                        })),
+                        {translate("common-enable")}
+                    }
+                }
+            }
+        }
         ManagerRow {
             icon: rsx! {
                 if let Some(icon) = icon.as_ref() {
@@ -167,20 +223,14 @@ fn ExtensionRow(extension: ExtRow) -> Element {
                     variant: ManagerButtonVariant::Secondary,
                     onclick: move |_| {
                         let enabling = !toggle_enabled;
-                        let approve_permissions = if enabling && needs_approval {
-                            web_sys::window()
-                                .and_then(|window| window.confirm_with_message(&approval).ok())
-                                .unwrap_or(false)
-                        } else {
-                            false
-                        };
-                        if enabling && needs_approval && !approve_permissions {
+                        if enabling && needs_approval {
+                            asking.set(Some(true));
                             return;
                         }
                         let _ = send(&ExtToggleRequest {
                             id: toggle_id.clone(),
                             enabled: enabling,
-                            approve_permissions,
+                            approve_permissions: false,
                         });
                     },
                     if item.enabled { {translate("common-disable")} } else { {translate("common-enable")} }

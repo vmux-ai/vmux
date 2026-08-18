@@ -187,6 +187,13 @@ pub static SPACES_PAGE: NativePage =
 pub static TOOLS_PAGE: NativePage =
     NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page);
 
+/// The installed browser extensions.
+#[cfg(target_os = "macos")]
+pub static EXTENSIONS_PAGE: NativePage = NativePage::pane(
+    vmux_core::event::EXTENSIONS_PAGE_URL,
+    vmux_layout::extensions_page::Page,
+);
+
 /// What a pane shows where a page failed to open, or where no page answers the url.
 ///
 /// The one page never asked for by name: a view carries it because something else could not be

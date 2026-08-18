@@ -18,13 +18,12 @@ pub mod page;
 
 #[cfg(ui)]
 pub mod error_page;
-
-// `web`, not `ui`: each of these still reaches the DOM directly and is only ever served into the
-// CEF webview. They were written when `ui` and `web` were the same thing, which stopped being
-// true when iOS arrived — saying `web` records what they are instead of implying a phone can
-// render them.
-#[cfg(web)]
+#[cfg(ui)]
 pub mod extensions_page;
+
+// `web`, not `ui`: this still reaches the DOM directly and is only ever served into the CEF
+// webview. It was written when `ui` and `web` were the same thing, which stopped being true when
+// iOS arrived — saying `web` records what it is instead of implying a phone can render it.
 #[cfg(web)]
 pub mod vault_page;
 

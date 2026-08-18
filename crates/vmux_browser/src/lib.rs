@@ -126,6 +126,7 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::SERVICES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::SPACES_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TOOLS_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::EXTENSIONS_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::ERROR_PAGE)
                 .takes::<vmux_wire::error::ErrorPageData>(),
         ));
