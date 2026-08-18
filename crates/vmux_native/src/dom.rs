@@ -275,8 +275,13 @@ impl SurfaceDom {
     }
 
     /// The document reported where its caret is.
-    pub(crate) fn report_caret(&self, element_id: &str, byte: usize) {
-        self.caret.report(element_id, byte);
+    pub(crate) fn report_caret(&self, element_id: &str, start: usize, end: usize) {
+        self.caret.report(element_id, start, end);
+    }
+
+    /// The document reported whether anything in it is selected.
+    pub(crate) fn report_document_selection(&self, selected: bool) {
+        self.caret.report_document_selection(selected);
     }
 
     /// Whether the page has anything to collect, so a render knows to tell it to ask.
@@ -342,24 +347,31 @@ struct SurfaceHost {
 /// Stale only if the caret moved without the document saying so, which nothing does — it moves on
 /// input, and the report is posted before the next key can arrive.
 #[derive(Clone, Default)]
-struct CaretMirror(Rc<RefCell<Option<(String, usize)>>>);
+struct CaretMirror {
+    field: Rc<RefCell<Option<(String, usize, usize)>>>,
+    document_selected: Rc<Cell<bool>>,
+}
 
 impl CaretMirror {
-    fn report(&self, element_id: &str, byte: usize) {
-        let Ok(mut reported) = self.0.try_borrow_mut() else {
+    fn report(&self, element_id: &str, start: usize, end: usize) {
+        let Ok(mut reported) = self.field.try_borrow_mut() else {
             return;
         };
-        *reported = Some((element_id.to_string(), byte));
+        *reported = Some((element_id.to_string(), start, end));
     }
 
-    /// The caret in this field, or zero if the last report was about another one.
-    fn position_in(&self, element_id: &str) -> usize {
-        let Ok(reported) = self.0.try_borrow() else {
-            return 0;
+    fn report_document_selection(&self, selected: bool) {
+        self.document_selected.set(selected);
+    }
+
+    /// The caret range in this field, collapsed at zero if the last report was about another one.
+    fn selection_in(&self, element_id: &str) -> (usize, usize) {
+        let Ok(reported) = self.field.try_borrow() else {
+            return (0, 0);
         };
         match reported.as_ref() {
-            Some((id, byte)) if id == element_id => *byte,
-            _ => 0,
+            Some((id, start, end)) if id == element_id => (*start, *end),
+            _ => (0, 0),
         }
     }
 }
@@ -414,8 +426,16 @@ impl PageHost for SurfaceHost {
         });
     }
 
-    fn caret_position(&self, element_id: &str) -> usize {
-        self.caret.position_in(element_id)
+    fn caret_selection(&self, element_id: &str) -> (usize, usize) {
+        self.caret.selection_in(element_id)
+    }
+
+    fn has_text_selection(&self) -> bool {
+        self.caret.document_selected.get()
+    }
+
+    fn resolves_keys(&self) -> bool {
+        true
     }
 
     fn place_caret(&self, element_id: &str, byte: usize) {

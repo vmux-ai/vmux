@@ -53,16 +53,32 @@ pub trait PageHost {
     /// the start so a long one reads as an offer rather than as a tail.
     fn offer_element_text(&self, _element_id: &str) {}
 
-    /// Where the caret sits in a text field, as a UTF-8 byte offset into its value.
+    /// What is selected in a text field, as UTF-8 byte offsets into its value. Collapsed to the
+    /// caret when nothing is.
     ///
     /// The one capability here that needs an answer rather than an instruction, which is why a
-    /// host may only be able to give a remembered one. Zero when it has nothing to report.
-    fn caret_position(&self, _element_id: &str) -> usize {
-        0
+    /// host may only be able to give a remembered one. `(0, 0)` when it has nothing to report.
+    fn caret_selection(&self, _element_id: &str) -> (usize, usize) {
+        (0, 0)
     }
 
     /// Put the caret at a UTF-8 byte offset into a text field's value.
     fn place_caret(&self, _element_id: &str, _byte: usize) {}
+
+    /// Whether anything in the document is selected, which no field's own range can answer: an
+    /// engine keeps a text field's selection out of the document's.
+    fn has_text_selection(&self) -> bool {
+        false
+    }
+
+    /// Whether this host looks a stroke up in a keymap and answers with what it meant.
+    ///
+    /// A host capability for the same reason as [`Self::focus_element`]: the keymap is built from
+    /// `settings.json`, so only a host holding that file can resolve against it. The default is the
+    /// phone's answer, which leaves a page there resolving alone whatever it can.
+    fn resolves_keys(&self) -> bool {
+        false
+    }
 }
 
 /// Receives the raw payload bytes of one host event.
@@ -142,8 +158,22 @@ impl Host {
 
     /// `not(web)` only. See [`Self::select_element_text`].
     #[cfg(not(web))]
-    pub(crate) fn caret_position(id: &str) -> usize {
-        Self::with_installed(|host| host.caret_position(id)).unwrap_or(0)
+    pub(crate) fn caret_selection(id: &str) -> (usize, usize) {
+        Self::with_installed(|host| host.caret_selection(id)).unwrap_or((0, 0))
+    }
+
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(not(web))]
+    pub(crate) fn has_text_selection() -> bool {
+        Self::with_installed(|host| host.has_text_selection()).unwrap_or(false)
+    }
+
+    /// Whether a page hosted here can hand a stroke over and be told what it meant.
+    ///
+    /// Not cfg'd, unlike the capabilities above: every target has some host that may or may not
+    /// hold a keymap, and a page with a local fallback asks before choosing which to use.
+    pub(crate) fn resolves_keys() -> bool {
+        Self::with_installed(|host| host.resolves_keys()).unwrap_or(false)
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].

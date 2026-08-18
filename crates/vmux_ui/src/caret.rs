@@ -16,7 +16,25 @@ impl TextCaret {
     pub fn in_field(element_id: &'static str) -> Self {
         Self { element_id }
     }
+
+    /// Where the caret is, as a byte offset into the field's value.
+    pub fn position(self) -> usize {
+        self.selection().0
+    }
+
+    /// Whether this field has text highlighted rather than a bare caret.
+    pub fn has_selection(self) -> bool {
+        let (start, end) = self.selection();
+        start != end
+    }
 }
+
+/// What is highlighted in the page as a whole, which no field can answer for.
+///
+/// A separate question from [`TextCaret::has_selection`] and not derivable from it: an engine keeps
+/// a text field's internal selection out of the document's, so a page that has to tell "copy this"
+/// from "interrupt that" has to ask both.
+pub struct DocumentSelection;
 
 #[cfg(web)]
 mod imp {
@@ -32,13 +50,22 @@ mod imp {
     const FOLLOW_MARGIN_PX: f64 = 8.0;
 
     impl TextCaret {
-        /// Where the caret is, as a byte offset into the field's value. Zero if the field is gone.
-        pub fn position(self) -> usize {
+        /// What is selected in the field, as byte offsets into its value, collapsed to the caret
+        /// when nothing is. `(0, 0)` if the field is gone.
+        pub fn selection(self) -> (usize, usize) {
             let Some(input) = self.input() else {
-                return 0;
+                return (0, 0);
             };
-            let utf16 = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
-            utf16_offset_to_byte(&input.value(), utf16)
+            let value = input.value();
+            let start = input.selection_start().unwrap_or(Some(0)).unwrap_or(0);
+            let end = input
+                .selection_end()
+                .unwrap_or(Some(start))
+                .unwrap_or(start);
+            (
+                utf16_offset_to_byte(&value, start),
+                utf16_offset_to_byte(&value, end),
+            )
         }
 
         /// Put the caret at a byte offset, scrolling the field so it is visible.
@@ -146,6 +173,18 @@ mod imp {
         }
     }
 
+    impl super::DocumentSelection {
+        pub fn is_active() -> bool {
+            let Some(window) = web_sys::window() else {
+                return false;
+            };
+            let Ok(Some(selection)) = window.get_selection() else {
+                return false;
+            };
+            !selection.is_collapsed()
+        }
+    }
+
     /// Parse a computed `<n>px` length, defaulting to `0.0`.
     fn css_px(value: &str) -> f64 {
         value
@@ -158,14 +197,23 @@ mod imp {
 }
 
 #[cfg(not(web))]
+impl DocumentSelection {
+    /// Asks the host, which reports on every selection change for the same reason the caret does.
+    pub fn is_active() -> bool {
+        crate::transport::Host::has_text_selection()
+    }
+}
+
+#[cfg(not(web))]
 impl TextCaret {
-    /// The last position the host was told about, rather than the field's own.
+    /// The last range the host was told about, rather than the field's own.
     ///
     /// Reading is the one operation here needing an *answer*, and a host reaching the document by
-    /// queueing a script cannot ask a question — so the document reports unprompted instead. Zero
-    /// when nothing has reported, which is where the web path also lands for a missing field.
-    pub fn position(self) -> usize {
-        crate::transport::Host::caret_position(self.element_id)
+    /// queueing a script cannot ask a question — so the document reports unprompted instead.
+    /// `(0, 0)` when nothing has reported, which is where the web path also lands for a missing
+    /// field.
+    pub fn selection(self) -> (usize, usize) {
+        crate::transport::Host::caret_selection(self.element_id)
     }
 
     /// Asks the host. See [`Self::position`].

@@ -21,8 +21,11 @@ enum PageReport<'a> {
     /// Where the caret is, volunteered because nothing can ask for it.
     Caret {
         element: &'a str,
-        byte: usize,
+        start: usize,
+        end: usize,
     },
+    /// Whether anything in the document is selected, which a field's own range cannot answer.
+    Selected(bool),
     Console {
         level: &'a str,
         text: &'a str,
@@ -41,11 +44,21 @@ impl<'a> PageReport<'a> {
         if body.contains(r#""method":"flushed""#) {
             return Self::Flushed;
         }
+        if let Some(rest) = body.strip_prefix("selected:") {
+            return Self::Selected(rest == "1");
+        }
+        // Split from the right: an element id may contain a colon, the two offsets may not.
         if let Some(rest) = body.strip_prefix("caret:")
-            && let Some((element, byte)) = rest.rsplit_once(':')
-            && let Ok(byte) = byte.parse::<usize>()
+            && let Some((rest, end)) = rest.rsplit_once(':')
+            && let Some((element, start)) = rest.rsplit_once(':')
+            && let Ok(start) = start.parse::<usize>()
+            && let Ok(end) = end.parse::<usize>()
         {
-            return Self::Caret { element, byte };
+            return Self::Caret {
+                element,
+                start,
+                end,
+            };
         }
         if let Some(rest) = body.strip_prefix("log:") {
             let (level, text) = rest.split_once(':').unwrap_or(("log", rest));
@@ -80,7 +93,12 @@ impl PageMessage {
         match PageReport::of(body) {
             PageReport::Initialized => self.dom.page_is_ready(),
             PageReport::Flushed => self.dom.page_flushed(),
-            PageReport::Caret { element, byte } => self.dom.report_caret(element, byte),
+            PageReport::Caret {
+                element,
+                start,
+                end,
+            } => self.dom.report_caret(element, start, end),
+            PageReport::Selected(selected) => self.dom.report_document_selection(selected),
             PageReport::Console { level, text } => self.log(level, text),
             PageReport::Emitted(payload) => self.emit(payload),
         }
@@ -117,5 +135,64 @@ impl PageMessage {
         if self.outbox.send(&id, &payload).is_err() {
             error!("vmux_native: the host outbox is closed");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    impl PageReport<'_> {
+        /// The decoded report, flattened to something an assertion can name.
+        fn described(body: &str) -> String {
+            match PageReport::of(body) {
+                PageReport::Initialized => "initialized".to_string(),
+                PageReport::Flushed => "flushed".to_string(),
+                PageReport::Caret {
+                    element,
+                    start,
+                    end,
+                } => format!("caret {element} {start}..{end}"),
+                PageReport::Selected(selected) => format!("selected {selected}"),
+                PageReport::Console { level, text } => format!("console {level} {text}"),
+                PageReport::Emitted(payload) => format!("emitted {payload}"),
+            }
+        }
+    }
+
+    /// Every report is decoded from the same untagged string, so one prefix shadowing another or
+    /// one field splitting off the wrong end is silent: the caret simply reads zero forever and
+    /// a page that asks where it is quietly gets the wrong answer.
+    ///
+    /// The colon in the element id is the case the offsets have to be split from the right for.
+    #[test]
+    fn each_report_decodes_from_the_string_the_shim_posts() {
+        let decoded: Vec<String> = [
+            r#"{"method":"initialize"}"#,
+            r#"{"method":"flushed"}"#,
+            "caret:prompt:3:7",
+            "caret:vmux:prompt:0:0",
+            "selected:1",
+            "selected:0",
+            "log:warn:something",
+            "AAAA",
+        ]
+        .iter()
+        .map(|body| PageReport::described(body))
+        .collect();
+
+        assert_eq!(
+            decoded,
+            [
+                "initialized",
+                "flushed",
+                "caret prompt 3..7",
+                "caret vmux:prompt 0..0",
+                "selected true",
+                "selected false",
+                "console warn something",
+                "emitted AAAA",
+            ]
+        );
     }
 }

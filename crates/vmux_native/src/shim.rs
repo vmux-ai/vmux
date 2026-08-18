@@ -15,11 +15,17 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   };
   // Volunteered rather than asked for: everything the host sends travels one way, so a component
   // wanting the caret has nothing to ask down. Reported in UTF-8 bytes, the unit Rust counts in.
+  const encoder = new TextEncoder();
   const reportCaret = () => {
+    // A field's own selection and the document's are separate facts, and a page asks both: one
+    // decides whether Up moves the caret or recalls, the other whether Ctrl+C copies.
+    const selected = !(document.getSelection() || { isCollapsed: true }).isCollapsed;
+    try { window.ipc.postMessage('selected:' + (selected ? '1' : '0')); } catch (e) {}
     const el = document.activeElement;
     if (!el || !el.id || typeof el.selectionStart !== 'number') return;
-    const bytes = new TextEncoder().encode(el.value.slice(0, el.selectionStart)).length;
-    try { window.ipc.postMessage('caret:' + el.id + ':' + bytes); } catch (e) {}
+    const bytes = (upto) => encoder.encode(el.value.slice(0, upto)).length;
+    const range = bytes(el.selectionStart) + ':' + bytes(el.selectionEnd);
+    try { window.ipc.postMessage('caret:' + el.id + ':' + range); } catch (e) {}
   };
   document.addEventListener('selectionchange', reportCaret);
   for (const name of ['keyup', 'mouseup', 'input', 'focusin']) {

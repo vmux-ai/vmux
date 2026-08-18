@@ -121,6 +121,11 @@ impl PageHost for WebHost {
         closure.forget();
         Ok(())
     }
+
+    /// Both engines that inject a bridge do it from the process holding the keymap.
+    fn resolves_keys(&self) -> bool {
+        true
+    }
 }
 
 /// The object a page finds on `window` to reach whatever is hosting it.
