@@ -14,9 +14,9 @@ use vmux_flex::prelude::*;
 use vmux_layout::{
     cef::Browser,
     event::SERVICES_PAGE_URL,
+    native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
     stack::{ActiveTabParam, Stack, focused_stack, stack_bundle},
-    warm_page::{WarmPage, WarmPagePlugin, WarmPageSpare},
 };
 
 pub struct ProcessesMonitorPlugin;
@@ -51,11 +51,11 @@ impl Plugin for ProcessesMonitorPlugin {
             .add_observer(on_process_navigate)
             .add_observer(on_process_kill)
             .add_observer(on_process_kill_all)
-            .add_plugins(WarmPagePlugin::<ProcessesMonitor>::default());
+            .add_plugins(HostedPagePlugin::<ProcessesMonitor>::default());
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct ProcessesMonitor;
 
 impl ProcessesMonitor {
@@ -90,14 +90,10 @@ impl ProcessesMonitor {
     }
 }
 
-impl WarmPage for ProcessesMonitor {
+impl HostedPage for ProcessesMonitor {
     const HOST: &'static str = "services";
     const URL: &'static str = SERVICES_PAGE_URL;
     const TITLE: &'static str = "Background Services";
-
-    fn spawn(commands: &mut Commands) -> Entity {
-        commands.spawn(ProcessesMonitor::new()).id()
-    }
 }
 
 #[derive(Resource, Default)]
@@ -165,7 +161,7 @@ fn request_process_list(
     time: Res<Time>,
     mut timer: ResMut<ProcessesPollTimer>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
 ) {
     if monitors.is_empty() {
@@ -182,7 +178,7 @@ fn request_process_list(
 fn sample_process_usage(
     time: Res<Time>,
     mut timer: ResMut<SysinfoPollTimer>,
-    monitors: Query<(), (With<ProcessesMonitor>, Without<WarmPageSpare>)>,
+    monitors: Query<(), With<ProcessesMonitor>>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     process_list: Res<ServiceProcessList>,
     mut sys: ResMut<SysinfoState>,
@@ -253,14 +249,7 @@ fn broadcast_to_monitors(
     process_list: Res<ServiceProcessList>,
     usage: Res<ProcessUsage>,
     service: Option<Res<ServiceClient>>,
-    monitors: Query<
-        Entity,
-        (
-            With<ProcessesMonitor>,
-            With<PageReady>,
-            Without<WarmPageSpare>,
-        ),
-    >,
+    monitors: Query<Entity, (With<ProcessesMonitor>, With<PageReady>)>,
     claimed: Query<(), (With<ProcessesMonitor>, Added<CefKeyboardTarget>)>,
     browsers: NonSend<Browsers>,
     terminal_pids: Query<&ProcessId, With<Terminal>>,
@@ -286,7 +275,7 @@ fn broadcast_to_monitors(
     };
 
     for entity in &monitors {
-        if browsers.has_browser(entity) && browsers.host_emit_ready(&entity) {
+        if browsers.can_emit_to(&entity) {
             commands.trigger(BinHostEmitEvent::from_rkyv(
                 entity,
                 PROCESSES_LIST_EVENT,

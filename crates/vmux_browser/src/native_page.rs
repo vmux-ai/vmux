@@ -142,6 +142,13 @@ pub static SETTINGS_PAGE: NativePage = NativePage::pane(
     vmux_setting::page::Page,
 );
 
+/// The background services the daemon is running.
+#[cfg(target_os = "macos")]
+pub static SERVICES_PAGE: NativePage = NativePage::pane(
+    vmux_layout::event::SERVICES_PAGE_URL,
+    vmux_service::page::Page,
+);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own

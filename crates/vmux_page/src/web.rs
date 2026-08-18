@@ -59,7 +59,6 @@ web_pages! {
     render_debug: "debug" => vmux_layout::debug_page::Page,
     render_error: "error" => vmux_layout::error_page::Page,
     render_terminal: "terminal" => vmux_terminal::page::Page,
-    render_services: "services" => vmux_service::page::Page,
     render_spaces: "spaces" => vmux_space::page::Page,
     render_agent: "agent" => vmux_chat::page::Page,
     render_files: "files" => vmux_editor::page::Page,

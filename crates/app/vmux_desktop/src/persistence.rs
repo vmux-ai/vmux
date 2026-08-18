@@ -546,7 +546,10 @@ pub(crate) fn rebuild_space_views(
                 .starts_with(SERVICES_PAGE_URL.trim_end_matches('/'))
             {
                 commands.spawn((
-                    vmux_terminal::processes_monitor::ProcessesMonitor::new(),
+                    vmux_layout::cef::Browser::native_page(
+                        SERVICES_PAGE_URL,
+                        "Background Services",
+                    ),
                     ChildOf(entity),
                 ));
             } else if meta
