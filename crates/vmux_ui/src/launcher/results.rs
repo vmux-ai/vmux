@@ -1,4 +1,4 @@
-use vmux_ui::i18n::translate;
+use crate::i18n::translate;
 use vmux_wire::PageIcon;
 use vmux_wire::command_bar::{
     CommandBarCommandEntry, CommandBarPage, CommandBarRecentFile, CommandBarSpace, CommandBarTab,

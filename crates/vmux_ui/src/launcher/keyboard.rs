@@ -1,10 +1,10 @@
 //! Which Ctrl chords the command-bar input claims, and what each one does to the text.
 //!
 //! The caret mechanics these compute against — byte/UTF-16 conversion, boundary clamping,
-//! caret-follow scrolling — are [`vmux_ui::caret`]'s, because they are facts about a text field
+//! caret-follow scrolling — are [`crate::caret`]'s, because they are facts about a text field
 //! rather than about this keymap.
 
-use vmux_ui::caret::floor_char_boundary;
+use crate::caret::floor_char_boundary;
 
 /// A readline edit the command-bar input performs on itself, named for the motion rather than
 /// the chord that triggers it.

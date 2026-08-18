@@ -24,17 +24,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use vmux_core::input::{PageKeyContext, Unclaimed};
-use vmux_start::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
-use vmux_start::results::{
-    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
-    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
-    space_switch_results, start_page_results,
-};
-use vmux_start::row::ResultRow;
-use vmux_start::style::{
-    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
-    result_list_class,
-};
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::caret::TextCaret;
 use vmux_ui::components::icon::Icon;
@@ -46,6 +35,17 @@ use vmux_ui::components::prompt_media_options::{PromptMediaOption, PromptMediaOp
 use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{MenuDirection, send, use_key_claim, use_listener};
 use vmux_ui::i18n::translate;
+use vmux_ui::launcher::keyboard::{CtrlEditAction, CtrlKeyCapture, ctrl_key_capture_for_code};
+use vmux_ui::launcher::results::{
+    CommandBarResultItem as ResultItem, active_space_index, filter_results, open_session_results,
+    prepend_prompt_targets, prompt_target_matches_query, prompt_target_results, prompt_target_url,
+    space_switch_results, start_page_results,
+};
+use vmux_ui::launcher::row::ResultRow;
+use vmux_ui::launcher::style::{
+    command_bar_input_class, command_bar_input_row_class, command_bar_input_wrap_class,
+    result_list_class,
+};
 use vmux_ui::platform::sleep_ms;
 use vmux_ui::scroll::ScrollIntoView;
 
@@ -814,7 +814,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                     start_keydown_nav
                         || prompt_target_matches_query(item, &start_keydown_q)
                         || (matches!(item, ResultItem::Terminal { .. })
-                            && vmux_start::results::terminal_matches_query(&start_keydown_q))
+                            && vmux_ui::launcher::results::terminal_matches_query(&start_keydown_q))
                 }) {
                     execute(item);
                 } else if let Some(item) = start_keydown_default_agent.as_ref() {
@@ -1004,7 +1004,7 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
                                     || action_nav
                                     || prompt_target_matches_query(item, &action_query)
                                     || (matches!(item, ResultItem::Terminal { .. })
-                                        && vmux_start::results::terminal_matches_query(&action_query))
+                                        && vmux_ui::launcher::results::terminal_matches_query(&action_query))
                             }) {
                                 execute(item);
                             } else if !action_query.trim().is_empty()

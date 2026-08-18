@@ -4,8 +4,3 @@
 //! same surface; only the result providers and the action sink differ per host.
 
 #![allow(non_snake_case)]
-
-pub mod keyboard;
-pub mod results;
-pub mod row;
-pub mod style;

@@ -3,16 +3,16 @@
 //! Both the desktop launcher and the phone render results through this, so a session looks the
 //! same wherever you see it. The row owns its chrome; hosts supply the item and the callbacks.
 
+use crate::components::icon::Icon;
+use crate::favicon::Favicon;
+use crate::i18n::{TranslationValue, translate, translate_with};
+use crate::icon::PageIconView;
 use dioxus::prelude::*;
-use vmux_ui::components::icon::Icon;
-use vmux_ui::favicon::Favicon;
-use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use vmux_ui::icon::PageIconView;
 use vmux_wire::command_bar::looks_like_url;
 
-use crate::results::CommandBarResultItem as ResultItem;
-use crate::results::{prompt_target_matches_query, prompt_target_url};
-use crate::style::{
+use crate::launcher::results::CommandBarResultItem as ResultItem;
+use crate::launcher::results::{prompt_target_matches_query, prompt_target_url};
+use crate::launcher::style::{
     result_content_row_class, result_favicon_class, result_history_url_class, result_item_class,
     result_leading_icon_class, result_location_class, result_primary_text_class,
     result_secondary_text_class, result_shortcut_badge_class, result_terminal_path_class,
