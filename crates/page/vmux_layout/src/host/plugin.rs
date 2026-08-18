@@ -52,11 +52,6 @@ impl Plugin for LayoutPlugin {
                 Update,
                 (apply::apply_layout_requests, apply::serve_snapshot_requests),
             )
-            .add_systems(
-                Update,
-                crate::debug::handle_debug_page_open
-                    .in_set(vmux_core::PageOpenSet::HandleKnownPages),
-            )
             .add_plugins(BinEventEmitterPlugin::<(PageReady,)>::with_id(
                 PAGE_READY_BIN_EVENT_ID,
             ))

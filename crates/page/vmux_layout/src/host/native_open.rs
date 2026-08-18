@@ -78,6 +78,15 @@ impl Plugin for NativeOpenPlugin {
 
 type PendingPageOpen = (Without<PageOpenHandled>, Without<PageOpenError>);
 
+/// Whether a task is asking for this page, ignoring a trailing slash.
+///
+/// A url reaches a task from a bookmark, a typed address or another page's link, and those do not
+/// agree about the slash. The debug page had its own opener and its own comparison for exactly
+/// this reason; every page hosted here inherits it rather than each one remembering.
+fn names_the_same_page(page: &str, asked_for: &str) -> bool {
+    page.trim_end_matches('/') == asked_for.trim_end_matches('/')
+}
+
 fn handle_native_page_open(
     pages: Query<&NativelyHosted>,
     tasks: Query<(Entity, &PageOpenTask), PendingPageOpen>,
@@ -87,7 +96,10 @@ fn handle_native_page_open(
     let mut opened = std::collections::HashSet::new();
 
     for (task_entity, task) in &tasks {
-        let Some(page) = pages.iter().find(|page| page.url == task.url) else {
+        let Some(page) = pages
+            .iter()
+            .find(|page| names_the_same_page(page.url, &task.url))
+        else {
             continue;
         };
         // Two tasks can name one stack in a frame; the second would clear what the first put there.
@@ -104,5 +116,26 @@ fn handle_native_page_open(
             ));
         }
         commands.entity(task_entity).insert(PageOpenHandled);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::names_the_same_page;
+
+    /// A bookmark, a typed address and a link do not agree about the trailing slash, and a page
+    /// that fails to match is answered with "Page not found" by the fallback.
+    #[test]
+    fn a_trailing_slash_does_not_decide_which_page_was_asked_for() {
+        assert!(names_the_same_page("vmux://debug/", "vmux://debug/"));
+        assert!(names_the_same_page("vmux://debug/", "vmux://debug"));
+        assert!(names_the_same_page("vmux://debug", "vmux://debug/"));
+    }
+
+    /// One page's url must never claim another's, and a prefix is the way that happens.
+    #[test]
+    fn a_longer_url_is_a_different_page() {
+        assert!(!names_the_same_page("vmux://debug/", "vmux://debugger/"));
+        assert!(!names_the_same_page("vmux://debug/", "vmux://debug/panel"));
     }
 }
