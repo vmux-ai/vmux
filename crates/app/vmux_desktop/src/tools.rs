@@ -118,11 +118,9 @@ impl Plugin for ToolsPlugin {
         }
         app.world_mut().spawn((
             PAGE_MANIFEST,
-            PrewarmPage {
-                host: "tools",
+            vmux_core::host::page::NativelyHosted {
                 url: "vmux://tools/",
                 title: "Tools",
-                pool_size: 1,
             },
         ));
         app.world_mut().spawn((

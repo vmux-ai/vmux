@@ -154,6 +154,11 @@ pub static SERVICES_PAGE: NativePage = NativePage::pane(
 pub static SPACES_PAGE: NativePage =
     NativePage::pane(vmux_wire::space::SPACES_PAGE_URL, vmux_space::page::Page);
 
+/// The tools an agent can be given.
+#[cfg(target_os = "macos")]
+pub static TOOLS_PAGE: NativePage =
+    NativePage::pane("vmux://tools/", vmux_layout::tools_page::Page);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own
