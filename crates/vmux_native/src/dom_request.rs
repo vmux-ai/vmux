@@ -38,18 +38,32 @@ pub(crate) enum DomRequest {
     OfferText {
         element: String,
     },
+    /// Empty a field the page uses as a composition buffer rather than as a value.
+    ClearText {
+        element: String,
+    },
+    /// Play a media element if it is paused, pause it if it is playing.
+    ///
+    /// The one request about something other than text or position. Playback is state the element
+    /// owns and no attribute reaches — a page can render `controls` but cannot render `playing`.
+    ToggleMedia {
+        element: String,
+    },
     /// `byte` is a UTF-8 offset, which the page re-encodes: `setSelectionRange` counts UTF-16 units.
     PlaceCaret {
         element: String,
         byte: usize,
     },
-    /// Reveal an element the page rendered, aligning it as `block` says.
+    /// Reveal the first of these the page rendered, aligning it as `block` says.
     ///
-    /// Separate from [`Self::ScrollIntoView`], which is the list-navigation case and always asks
-    /// for the least movement that works. A caret being brought back after a jump wants the
-    /// opposite — the middle of the viewport, so what surrounds it is visible too.
+    /// Separate from [`Self::ScrollIntoView`], which is the list-navigation case: one element,
+    /// always the least movement that works. This is the caret case, and differs twice over. It
+    /// may want the middle of the viewport, because what surrounds a caret matters as much as the
+    /// caret. And it names candidates rather than an element, because a caret's own span exists
+    /// only while something is being edited — which of the fallbacks is present is a fact about
+    /// the document, so the page cannot answer it and does not try.
     RevealElement {
-        element: String,
+        elements: Vec<String>,
         block: &'static str,
     },
     /// Which character of an element's text a point on screen falls on.

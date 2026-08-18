@@ -19,12 +19,20 @@ impl ScrollIntoView {
         crate::transport::Host::scroll_item_into_view(element_id)
     }
 
-    /// Reveal the element with this id in the middle of its viewport.
+    /// Reveal the first of these ids the page actually rendered, scrolling the least that works.
     ///
-    /// For a caret that has just jumped elsewhere in a document, where the line it landed on is
-    /// only half the answer. No report of whether the element was there, unlike [`Self::nearest`]:
-    /// nothing drives this from an effect that would have to try again.
-    pub fn center(element_id: &str) {
-        crate::transport::Host::center_item(element_id);
+    /// For a caret, whose own element exists only while something is being edited — the ids after
+    /// the first are progressively coarser places to look. No report of which one was found: the
+    /// point of the list is that the caller cannot know, so there is nothing useful to report.
+    pub fn first_rendered(element_ids: &[&str]) {
+        crate::transport::Host::reveal_first_rendered(element_ids, false);
+    }
+
+    /// As [`Self::first_rendered`], but in the middle of the viewport.
+    ///
+    /// For a caret that has just jumped somewhere else in a document, where the line it landed on
+    /// is only half of what the reader needs to see.
+    pub fn first_rendered_centered(element_ids: &[&str]) {
+        crate::transport::Host::reveal_first_rendered(element_ids, true);
     }
 }

@@ -46,12 +46,14 @@ pub trait PageHost {
     /// which has no keyboard to move a selection out of view in the first place.
     fn scroll_element_into_view(&self, _element_id: &str) {}
 
-    /// Scroll an element the page rendered to the middle of its viewport.
+    /// Reveal the first of these ids the page actually rendered.
     ///
-    /// The opposite ask to [`Self::scroll_element_into_view`], and separate because the callers
-    /// want opposite things: a list revealing the row it just selected wants the view disturbed as
-    /// little as possible, while a caret arriving after a jump wants its surroundings visible too.
-    fn center_element(&self, _element_id: &str) {}
+    /// The caret's version of [`Self::scroll_element_into_view`], differing twice over. It may
+    /// want the middle of the viewport rather than the least movement, because what surrounds a
+    /// caret matters as much as the caret. And it names candidates rather than an element: a
+    /// caret's own span exists only while something is being edited, and which of the coarser
+    /// fallbacks is present is a fact about the document that the page cannot answer.
+    fn reveal_first_rendered(&self, _element_ids: &[&str], _centered: bool) {}
 
     /// Which character of an element's text a point on screen falls on.
     ///
@@ -66,6 +68,16 @@ pub trait PageHost {
 
     /// Highlight the whole value of a text field, leaving the view where it is.
     fn select_element_text(&self, _element_id: &str) {}
+
+    /// Empty a field the page uses as a composition buffer rather than as a value.
+    fn clear_element_text(&self, _element_id: &str) {}
+
+    /// Play a media element if it is paused, pause it if it is playing.
+    ///
+    /// Not about the document's text or geometry, unlike everything else here, but a host
+    /// capability for the same reason: playback is state the element owns, and a page can render
+    /// `controls` without being able to render `playing`.
+    fn toggle_media(&self, _element_id: &str) {}
 
     /// Focus a text field and offer its value up to be overtyped: selected whole, and rewound to
     /// the start so a long one reads as an offer rather than as a tail.
@@ -227,10 +239,22 @@ impl Host {
         let _ = Self::with_installed(|host| host.place_caret(id, byte));
     }
 
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(not(web))]
+    pub(crate) fn clear_element_text(id: &str) {
+        let _ = Self::with_installed(|host| host.clear_element_text(id));
+    }
+
+    /// `not(web)` only. See [`Self::select_element_text`].
+    #[cfg(all(ui, not(web)))]
+    pub(crate) fn toggle_media(id: &str) {
+        let _ = Self::with_installed(|host| host.toggle_media(id));
+    }
+
     /// Both targets go through the installed host, unlike [`Self::scroll_item_into_view`]: there is
     /// no report to fabricate for a host that has no viewport, so nothing needs a per-target body.
-    pub(crate) fn center_item(id: &str) {
-        let _ = Self::with_installed(|host| host.center_element(id));
+    pub(crate) fn reveal_first_rendered(element_ids: &[&str], centered: bool) {
+        let _ = Self::with_installed(|host| host.reveal_first_rendered(element_ids, centered));
     }
 
     /// `ui` rather than `not(web)`: only a page asks this, and every `ui` target has some host

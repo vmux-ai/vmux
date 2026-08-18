@@ -368,10 +368,10 @@ impl PageHost for SurfaceHost {
         });
     }
 
-    fn center_element(&self, element_id: &str) {
+    fn reveal_first_rendered(&self, element_ids: &[&str], centered: bool) {
         self.request(DomRequest::RevealElement {
-            element: element_id.to_string(),
-            block: "center",
+            elements: element_ids.iter().map(|id| id.to_string()).collect(),
+            block: if centered { "center" } else { "nearest" },
         });
     }
 
@@ -395,6 +395,18 @@ impl PageHost for SurfaceHost {
 
     fn select_element_text(&self, element_id: &str) {
         self.request(DomRequest::SelectAll {
+            element: element_id.to_string(),
+        });
+    }
+
+    fn clear_element_text(&self, element_id: &str) {
+        self.request(DomRequest::ClearText {
+            element: element_id.to_string(),
+        });
+    }
+
+    fn toggle_media(&self, element_id: &str) {
+        self.request(DomRequest::ToggleMedia {
             element: element_id.to_string(),
         });
     }

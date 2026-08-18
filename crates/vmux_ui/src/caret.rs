@@ -88,6 +88,13 @@ mod imp {
             (start, end)
         }
 
+        fn set_value(&self, value: &str) {
+            match self {
+                Self::Input(input) => input.set_value(value),
+                Self::TextArea(area) => area.set_value(value),
+            }
+        }
+
         fn select(&self, start: u32, end: u32) {
             let _ = match self {
                 Self::Input(input) => input.set_selection_range(start, end),
@@ -155,6 +162,14 @@ mod imp {
             };
             let end = field.value().encode_utf16().count() as u32;
             field.select(0, end);
+        }
+
+        /// Empty the field, discarding whatever is in it.
+        pub fn clear(self) {
+            let Some(field) = Field::with_id(self.element_id) else {
+                return;
+            };
+            field.set_value("");
         }
 
         /// Highlight the whole value one frame from now, taking focus and rewinding the view to
@@ -263,6 +278,11 @@ impl TextCaret {
     /// Asks the host, which may have a document even though this target has no `web_sys`.
     pub fn select_all(self) {
         crate::transport::Host::select_element_text(self.element_id);
+    }
+
+    /// Asks the host. See [`Self::select_all`].
+    pub fn clear(self) {
+        crate::transport::Host::clear_element_text(self.element_id);
     }
 
     /// Asks the host. See [`Self::select_all`].

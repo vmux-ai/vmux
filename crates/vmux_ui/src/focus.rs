@@ -22,10 +22,12 @@
 ///
 /// This is a fact about the host, not about any page, which is why it lives here rather than in
 /// the two pages that used to carry a copy of it.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 #[cfg_attr(not(web), allow(dead_code))]
 pub struct FocusClaim {
-    element_id: &'static str,
+    /// Owned where it has to be: most ids are constants, but a row in a tree is named after the
+    /// path it shows and there is no static string for that.
+    element_id: std::borrow::Cow<'static, str>,
     caret: Caret,
 }
 
@@ -40,9 +42,9 @@ pub enum Caret {
 
 impl FocusClaim {
     /// Claim focus for the element with this id.
-    pub fn new(element_id: &'static str) -> Self {
+    pub fn new(element_id: impl Into<std::borrow::Cow<'static, str>>) -> Self {
         Self {
-            element_id,
+            element_id: element_id.into(),
             caret: Caret::AsIs,
         }
     }
@@ -68,10 +70,10 @@ mod imp {
             let Some(window) = web_sys::window() else {
                 return;
             };
-            if self.settle() || pending(&window, self.element_id) {
+            if self.settle() || pending(&window, &self.element_id) {
                 return;
             }
-            set_pending(&window, self.element_id, true);
+            set_pending(&window, &self.element_id, true);
             self.wait_for_window_focus(&window);
         }
 
@@ -80,17 +82,18 @@ mod imp {
         ///
         /// Nothing can arrive between the check that failed and this listener existing, because
         /// both are one synchronous run and a `focus` event has to queue behind it. The listener
-        /// captures two `Copy` fields and no signal, so — unlike a listener holding a component's
-        /// state — there is nothing it can outlive.
+        /// captures a copy of the claim and no signal, so — unlike a listener holding a
+        /// component's state — there is nothing it can outlive.
         fn wait_for_window_focus(self, window: &web_sys::Window) {
+            let claim = self.clone();
             let handler = Closure::once_into_js(move || {
                 let Some(window) = web_sys::window() else {
                     return;
                 };
-                if self.settle() {
-                    set_pending(&window, self.element_id, false);
+                if claim.settle() {
+                    set_pending(&window, &claim.element_id, false);
                 } else {
-                    self.wait_for_window_focus(&window);
+                    claim.wait_for_window_focus(&window);
                 }
             });
             let options = web_sys::AddEventListenerOptions::new();
@@ -104,17 +107,17 @@ mod imp {
                 )
                 .is_err()
             {
-                set_pending(window, self.element_id, false);
+                set_pending(window, &self.element_id, false);
             }
         }
 
         /// Assert the claim once. True when the document genuinely holds focus and the element is
         /// the active one, which is the only state worth stopping on.
-        fn settle(self) -> bool {
+        fn settle(&self) -> bool {
             let Some(document) = web_sys::window().and_then(|window| window.document()) else {
                 return true;
             };
-            let Some(element) = document.get_element_by_id(self.element_id) else {
+            let Some(element) = document.get_element_by_id(&self.element_id) else {
                 return false;
             };
             if !self.is_active(&document) {
@@ -128,11 +131,11 @@ mod imp {
             document.has_focus().unwrap_or(false) && self.is_active(&document)
         }
 
-        fn is_active(self, document: &web_sys::Document) -> bool {
+        fn is_active(&self, document: &web_sys::Document) -> bool {
             let Some(active) = document.active_element() else {
                 return false;
             };
-            active.id() == self.element_id
+            active.id() == self.element_id.as_ref()
         }
 
         /// `set_selection_range` counts UTF-16 code units, so a byte length would land the caret
@@ -175,6 +178,6 @@ impl FocusClaim {
     /// this page's components into a document it owns. A page that cannot claim focus there is a
     /// page that cannot be typed into.
     pub fn request(self) {
-        crate::transport::Host::focus_element(self.element_id);
+        crate::transport::Host::focus_element(&self.element_id);
     }
 }

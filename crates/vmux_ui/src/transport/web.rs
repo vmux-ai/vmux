@@ -127,16 +127,24 @@ impl PageHost for WebHost {
         true
     }
 
-    fn center_element(&self, element_id: &str) {
-        let Some(element) = window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(element_id))
-        else {
+    fn reveal_first_rendered(&self, element_ids: &[&str], centered: bool) {
+        let Some(document) = window().and_then(|window| window.document()) else {
             return;
         };
-        let options = web_sys::ScrollIntoViewOptions::new();
-        options.set_block(web_sys::ScrollLogicalPosition::Center);
-        element.scroll_into_view_with_scroll_into_view_options(&options);
+        for id in element_ids {
+            let Some(element) = document.get_element_by_id(id) else {
+                continue;
+            };
+            let options = web_sys::ScrollIntoViewOptions::new();
+            options.set_block(if centered {
+                web_sys::ScrollLogicalPosition::Center
+            } else {
+                web_sys::ScrollLogicalPosition::Nearest
+            });
+            element.scroll_into_view_with_scroll_into_view_options(&options);
+
+            return;
+        }
     }
 
     /// Already known by the time it is asked, unlike the hosts that have to send the question to a

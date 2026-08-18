@@ -45,6 +45,9 @@ pub mod components;
 
 pub mod platform;
 
+#[cfg(ui)]
+pub mod media;
+
 pub mod scroll;
 
 #[cfg(ui)]

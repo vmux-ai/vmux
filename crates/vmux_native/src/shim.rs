@@ -145,7 +145,17 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           'measured:' + request.token + ':' + measureNode(request.node, request.what).join(','),
         );
         return;
-      // Answers the same way, and an empty list means the same thing.
+      // Named candidates rather than one element, so the lookup cannot be the shared one below.
+      case 'revealElement':
+        for (const id of request.elements) {
+          const target = document.getElementById(id);
+          if (target) {
+            target.scrollIntoView({ block: request.block, inline: 'nearest' });
+            break;
+          }
+        }
+        return;
+      // Answers the same way as a measurement, and an empty list means the same thing.
       case 'textOffsetAtPoint':
         window.ipc.postMessage(
           'measured:' +
@@ -158,14 +168,19 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
     const el = document.getElementById(request.element);
     if (!el) return;
     switch (request.kind) {
+      // Never scrolling: a page that wants the element revealed asks for that separately, and a
+      // focus that scrolls on its own fights whatever the page had already decided to show.
       case 'focus':
-        el.focus();
+        el.focus({ preventScroll: true });
+        break;
+      case 'clearText':
+        el.value = '';
+        break;
+      case 'toggleMedia':
+        if (el.paused) { el.play(); } else { el.pause(); }
         break;
       case 'scrollIntoView':
         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-        break;
-      case 'revealElement':
-        el.scrollIntoView({ block: request.block, inline: 'nearest' });
         break;
       case 'selectAll':
         el.setSelectionRange(0, el.value.length);
