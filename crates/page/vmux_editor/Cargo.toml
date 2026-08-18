@@ -55,25 +55,11 @@ tempfile = "3"
 url = { workspace = true }
 
 # The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
-# manifest cannot use it. `lsp_page` reaches no further than Dioxus, so it renders wherever Dioxus
-# does; the editor proper still needs the DOM and stays in the wasm block below.
+# manifest cannot use it.
 [target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
+base64 = "0.22"
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-js-sys = "0.3"
-unicode-width = "0.2"
-wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = [
-    "Window", "Document", "DocumentFragment", "Element", "FocusOptions", "HtmlElement", "Node",
-    "CaretPosition", "DomRect", "Range", "Selection", "CssStyleDeclaration",
-    "ResizeObserver", "ResizeObserverEntry",
-    "WheelEvent", "KeyboardEvent", "Location",
-    "Blob", "Url",
-    "HtmlTextAreaElement", "InputEvent", "CompositionEvent", "MouseEvent",
-    "ScrollIntoViewOptions", "ScrollLogicalPosition",
-] }
 
 [[bin]]
 name = "vmux_mock_lsp"

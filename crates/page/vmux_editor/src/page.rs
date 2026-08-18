@@ -1,19 +1,20 @@
 #![allow(non_snake_case)]
 
-use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::explorer::ExplorerPanel;
-use crate::note::MdBlockView;
+use crate::note::{ListEditLine, ListLineHit, MdBlockView, NoteLineChunk};
 use crate::page_key::{Completions, FileKeys, FilePage, use_file_keys};
 use crate::page_model::{
-    NoteCaretVisibilityQueue, NoteCaretVisibilityRequest, NoteCursorActivation, NoteInlineKind,
-    NoteInlineNode, centered_scroll_top, clamp_selection, dir_select_index, editor_drag_started,
-    gutter_width, heading_class, image_mime, line_severity, note_cursor_activation,
-    note_inline_nodes, note_list_marker_prefix_len, note_source_offset, note_source_position,
-    severity_color_class, should_apply_explorer_chrome, span_style, squiggle_style,
-    viewport_reveal_delta,
+    NoteCursorActivation, NoteInlineKind, NoteInlineNode, centered_scroll_top, clamp_selection,
+    dir_select_index, editor_drag_started, gutter_width, heading_class, image_mime, line_severity,
+    note_cursor_activation, note_inline_nodes, note_list_marker_prefix_len, note_source_offset,
+    note_source_position, severity_color_class, should_apply_explorer_chrome, span_style,
+    squiggle_style,
 };
+use dioxus::html::geometry::{ClientPoint, ElementPoint, PixelsVector2D};
+use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_core::knowledge::{KnowledgeProperty, KnowledgePropertyKind, KnowledgeReference};
@@ -21,13 +22,16 @@ use vmux_core::media::MediaKind;
 use vmux_git::event::{GIT_CHANGED_EVENT, GitChangedEvent};
 use vmux_git::ui::{DiffView, GitBar, GitFooter};
 use vmux_git::view::EditorDiffMarker;
+use vmux_ui::caret::{EventSelection, TextCaret};
 use vmux_ui::components::icon::Icon;
 use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{PressedKey, send, use_listener, use_theme};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
+use vmux_ui::media::MediaElement;
+use vmux_ui::platform::{now_millis, random_index, sleep_ms};
 use vmux_ui::scroll::ScrollIntoView;
-use wasm_bindgen::JsCast;
-use wasm_bindgen::prelude::*;
+use vmux_ui::text_run::TextRun;
 
 #[component]
 pub fn Page() -> Element {
@@ -59,7 +63,9 @@ pub fn Page() -> Element {
     let mut preview = use_signal(|| Preview::None);
     let mut thumbs = use_signal(HashMap::<String, String>::new);
     let mut theme_style = use_signal(String::new);
-    let cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let mut cell_dims = use_signal(|| (0.0f64, 0.0f64));
+    let viewport = FileViewport::new();
+    let mut page_width = use_signal(|| 0u32);
     let last_resize = use_signal(FileResizeEvent::default);
     let mut git_path = use_signal(String::new);
     let mut git_has_diff = use_signal(|| false);
@@ -71,7 +77,6 @@ pub fn Page() -> Element {
     let mut note_active = use_signal(|| Option::<u32>::None);
     let mut note_editing = use_signal(|| false);
     let mut note_edit_line = use_signal(|| Option::<u32>::None);
-    let mut note_edit_rect = use_signal(|| Option::<NoteEditRect>::None);
     let mut note_dragging = use_signal(|| false);
     let mut editor_dragging = use_signal(|| false);
     let mut editor_drag_origin = use_signal(|| Option::<(i32, i32)>::None);
@@ -111,6 +116,14 @@ pub fn Page() -> Element {
     let mut explorer_resizing = use_signal(|| false);
     let explorer_client_id = use_signal(explorer_client_id);
     let explorer_request_id = use_signal(|| 0u64);
+    let explorer = ExplorerPane {
+        visible: explorer_visible,
+        preferred_visible: explorer_preferred_visible,
+        width: explorer_width,
+        page_width,
+        client_id: explorer_client_id,
+        request_id: explorer_request_id,
+    };
     let mut tidy_prompt = use_signal(|| Option::<u32>::None);
     let mut doc_title = use_signal(String::new);
 
@@ -124,11 +137,7 @@ pub fn Page() -> Element {
     let comp_filtered = use_memo(move || completions.matching());
     let file_page = FilePage {
         mode,
-        explorer_visible,
-        explorer_preferred_visible,
-        explorer_width,
-        explorer_client_id,
-        explorer_request_id,
+        explorer,
         completion_open: comp_open,
         completion_selection: comp_sel,
         completion_anchor: comp_anchor,
@@ -152,11 +161,7 @@ pub fn Page() -> Element {
         if explorer_width() != c.width {
             explorer_width.set(c.width);
         }
-        schedule_explorer_visibility_sync(
-            explorer_visible,
-            explorer_preferred_visible,
-            explorer_width,
-        );
+        explorer.sync();
     });
 
     let _tidy = use_listener::<FileTidyPromptEvent, _>(FILE_TIDY_PROMPT_EVENT, move |e| {
@@ -165,9 +170,9 @@ pub fn Page() -> Element {
 
     let _meta = use_listener::<FileMetaEvent, _>(FILE_META_EVENT, move |m| {
         error.set(String::new());
-        clear_blob_state(preview, thumbs);
+        clear_preview(preview, thumbs);
         media.set(None);
-        reset_file_scroll();
+        viewport.reset();
         last_scroll_req.set(0);
         doc_title.set(m.path.rsplit('/').next().unwrap_or(&m.path).to_string());
         path.set(m.path);
@@ -184,21 +189,13 @@ pub fn Page() -> Element {
         lsp_install_notice.set(None);
         lsp_install_request.set(None);
         lsp_notice_generation.set(lsp_notice_generation().wrapping_add(1));
-        show_explorer_if_room(
-            explorer_visible,
-            explorer_preferred_visible,
-            explorer_width,
-            explorer_client_id,
-            explorer_request_id,
-            mode,
-        );
+        explorer.show_if_room(mode);
         note_blocks.set(Vec::new());
         note_properties.set(Vec::new());
         note_references.set(Vec::new());
         note_active.set(None);
         note_editing.set(false);
         note_edit_line.set(None);
-        note_edit_rect.set(None);
         note_dragging.set(false);
         editor_dragging.set(false);
         editor_drag_origin.set(None);
@@ -255,7 +252,6 @@ pub fn Page() -> Element {
                     note_active,
                     note_editing,
                     note_edit_line,
-                    note_edit_rect,
                 );
             }
             if *note_editing.peek() {
@@ -263,14 +259,8 @@ pub fn Page() -> Element {
                     matches!(note_blocks.peek()[index].block, MdBlock::List { .. })
                 });
                 let edit_line = is_list.then_some(c.source_primary.line);
-                let rect = active
-                    .filter(|_| is_list)
-                    .and_then(|index| note_list_edit_rect_for_line(index, c.source_primary.line));
                 if *note_edit_line.peek() != edit_line {
                     note_edit_line.set(edit_line);
-                }
-                if *note_edit_rect.peek() != rect {
-                    note_edit_rect.set(rect);
                 }
             }
             let active = active.map(|index| index as u32);
@@ -282,7 +272,7 @@ pub fn Page() -> Element {
             }
         }
         if moved && !note_mode {
-            ensure_line_visible(c.primary.row, cell_dims().1);
+            viewport.reveal_row(c.primary.row, cell_dims().1);
         }
     });
 
@@ -295,7 +285,7 @@ pub fn Page() -> Element {
         if line_height <= 0.0 {
             return;
         }
-        scroll_viewport_by(event.lines, line_height);
+        viewport.scroll_by(event.lines, line_height);
     });
 
     let _dirty = use_listener::<FileDirtyEvent, _>(FILE_DIRTY_EVENT, move |d| {
@@ -322,12 +312,11 @@ pub fn Page() -> Element {
                         note_active,
                         note_editing,
                         note_edit_line,
-                        note_edit_rect,
                     );
                 }
             }
             FileViewMode::Editor => {
-                schedule_line_center(cursor().row, cell_dims().1, true);
+                viewport.center_row(cursor().row, cell_dims().1);
             }
             _ => {}
         }
@@ -347,7 +336,6 @@ pub fn Page() -> Element {
                     note_active,
                     note_editing,
                     note_edit_line,
-                    note_edit_rect,
                 );
             }
         }
@@ -392,16 +380,10 @@ pub fn Page() -> Element {
                     note_active,
                     note_editing,
                     note_edit_line,
-                    note_edit_rect,
                 ),
-                NoteCursorActivation::PreserveViewport(_) => activate_note_cursor(
-                    index,
-                    line,
-                    note_active,
-                    note_editing,
-                    note_edit_line,
-                    note_edit_rect,
-                ),
+                NoteCursorActivation::PreserveViewport(_) => {
+                    activate_note_cursor(index, line, note_active, note_editing, note_edit_line)
+                }
             }
         }
     });
@@ -414,7 +396,7 @@ pub fn Page() -> Element {
         refs.set(e.items);
         refs_sel.set(0);
         refs_open.set(true);
-        focus_by_id("refs-panel");
+        FocusClaim::new("refs-panel").request();
     });
 
     let _comp = use_listener::<FileCompletionEvent, _>(FILE_COMPLETION_EVENT, move |e| {
@@ -503,7 +485,7 @@ pub fn Page() -> Element {
 
     let _dir = use_listener::<FileDirEvent, _>(FILE_DIR_EVENT, move |d| {
         error.set(String::new());
-        clear_blob_state(preview, thumbs);
+        clear_preview(preview, thumbs);
         media.set(None);
         doc_title.set(
             d.path
@@ -542,7 +524,7 @@ pub fn Page() -> Element {
 
     let _media = use_listener::<FileMediaEvent, _>(FILE_MEDIA_EVENT, move |e| {
         error.set(String::new());
-        clear_blob_state(preview, thumbs);
+        clear_preview(preview, thumbs);
         let kind = e.kind;
         media.set(Some(e));
         mode.set(Mode::Media(kind));
@@ -553,13 +535,9 @@ pub fn Page() -> Element {
 
     let _prev = use_listener::<FilePreviewEvent, _>(FILE_PREVIEW_EVENT, move |ev| {
         if ev.thumb {
-            if let PreviewKind::Image { bytes, .. } = ev.kind
-                && let Some(url) = blob_url(&bytes)
-            {
-                let old = thumbs.write().insert(ev.path.clone(), url);
-                if let Some(old) = old {
-                    revoke(&old);
-                }
+            if let PreviewKind::Image { bytes, .. } = ev.kind {
+                let url = image_data_url(&bytes, &ev.path);
+                thumbs.write().insert(ev.path.clone(), url);
             }
             return;
         }
@@ -569,10 +547,7 @@ pub fn Page() -> Element {
             return;
         }
         let next = match ev.kind {
-            PreviewKind::Image { bytes, .. } => match blob_url(&bytes) {
-                Some(u) => Preview::Image(u),
-                None => Preview::Error(translate("editor-failed-decode-image")),
-            },
+            PreviewKind::Image { bytes, .. } => Preview::Image(image_data_url(&bytes, &ev.path)),
             PreviewKind::Video { url, path, native } => Preview::Video { url, path, native },
             PreviewKind::Text(l) => Preview::Text(l),
             PreviewKind::Dir(e) => Preview::Dir(e),
@@ -587,9 +562,6 @@ pub fn Page() -> Element {
             },
             PreviewKind::Error(m) => Preview::Error(m),
         };
-        if let Preview::Image(old) = &*preview.read() {
-            revoke(old);
-        }
         preview.set(next);
     });
 
@@ -611,15 +583,11 @@ pub fn Page() -> Element {
     });
 
     use_effect(move || {
-        let _ = file_view_mode();
-        setup_measurement(
-            cell_dims,
-            total_lines,
-            last_resize,
-            explorer_visible,
-            explorer_preferred_visible,
-            explorer_width,
-        );
+        explorer.sync();
+        viewport
+            .geometry
+            .read()
+            .announce(cell_dims(), total_lines(), last_resize);
     });
 
     use_effect(move || match mode() {
@@ -646,6 +614,7 @@ pub fn Page() -> Element {
         if g.is_empty() { path() } else { g }
     };
 
+    let measure_text = vec!["X".repeat(MEASURE_COLS); MEASURE_ROWS].join("\n");
     let comp_filtered: Vec<CompletionItem> = comp_filtered();
     let comp_sel_clamped = comp_sel().min(comp_filtered.len().saturating_sub(1));
 
@@ -656,6 +625,12 @@ pub fn Page() -> Element {
         div {
             id: PAGE_ID,
             class: "flex h-full w-full flex-row overflow-hidden bg-background",
+            onresize: move |event: Event<ResizeData>| {
+                let Ok(size) = event.get_border_box_size() else {
+                    return;
+                };
+                page_width.set(size.width.max(0.0) as u32);
+            },
             onmousemove: move |e: Event<MouseData>| {
                 if explorer_resizing() {
                     let x = e.client_coordinates().x as i32;
@@ -712,11 +687,7 @@ pub fn Page() -> Element {
                 if keys.offer(&e) {
                     return;
                 }
-                let data = e.data();
-                let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-                    return;
-                };
-                let key = raw.key();
+                let key = e.key().to_string();
                 if mode() == Mode::Text
                     && file_view_mode() == FileViewMode::Note
                     && is_markdown_file(&git_path())
@@ -838,16 +809,31 @@ pub fn Page() -> Element {
                 }
             },
 
+            // Out of flow, and blockified by that — a resize observer skips inline elements, and
+            // this has to be observed rather than measured because what changes it is the font
+            // arriving, which nothing else announces.
+            span {
+                id: MEASURE_ID,
+                style: "position:absolute;top:0;left:0;visibility:hidden;white-space:pre;font:inherit",
+                onresize: move |event: Event<ResizeData>| {
+                    let Ok(size) = event.get_border_box_size() else {
+                        return;
+                    };
+                    let cell = (
+                        size.width / MEASURE_COLS as f64,
+                        size.height / MEASURE_ROWS as f64,
+                    );
+                    let (cw, ch) = *cell_dims.peek();
+                    if (cw - cell.0).abs() > 0.01 || (ch - cell.1).abs() > 0.01 {
+                        cell_dims.set(cell);
+                    }
+                },
+                {measure_text}
+            }
+
             div {
                 class: "flex h-9 shrink-0 items-center gap-2 border-b border-foreground/[0.07] bg-foreground/[0.06] px-4 font-sans text-xs text-muted-foreground",
-                ExplorerToggleButton {
-                    visible: explorer_visible,
-                    preferred_visible: explorer_preferred_visible,
-                    width: explorer_width,
-                    client_id: explorer_client_id,
-                    request_id: explorer_request_id,
-                    mode,
-                }
+                ExplorerToggleButton { pane: explorer, mode }
                 {rsx! { TypeIcon { path: header_path.to_string(), is_dir: mode() == Mode::Dir, class: "h-4 w-4 shrink-0 text-foreground/80" } }}
                 span { class: "truncate text-foreground/90", "{header_path}" }
                 if dirty() {
@@ -872,7 +858,6 @@ pub fn Page() -> Element {
                                                 note_active,
                                                 note_editing,
                                                 note_edit_line,
-                                                note_edit_rect,
                                             );
                                         }
                                     },
@@ -889,7 +874,7 @@ pub fn Page() -> Element {
                                 onclick: move |_| {
                                     note_editing.set(false);
                                     file_view_mode.set(FileViewMode::Editor);
-                                    schedule_line_center(cursor().row, cell_dims().1, true);
+                                    viewport.center_row(cursor().row, cell_dims().1);
                                     let _ = send(&FileViewModeSet { mode: FileViewMode::Editor });
                                     focus_file_input();
                                 },
@@ -1128,7 +1113,7 @@ pub fn Page() -> Element {
                             let block_count = note_blocks.read().len();
                             rsx! {
                                 div {
-                                    id: "file-scroll",
+                                    id: SCROLL_ID,
                                     class: "file-mode-note-enter min-h-0 flex-1 overflow-auto px-8 py-8",
                                     onclick: move |event| {
                                         if keymap() == vmux_core::KeymapKind::Vim {
@@ -1141,7 +1126,6 @@ pub fn Page() -> Element {
                                                     note_active,
                                                     note_editing,
                                                     note_edit_line,
-                                                    note_edit_rect,
                                                 );
                                             }
                                             return;
@@ -1150,7 +1134,6 @@ pub fn Page() -> Element {
                                             note_editing.set(false);
                                             note_active.set(None);
                                             note_edit_line.set(None);
-                                            note_edit_rect.set(None);
                                             focus_container();
                                         }
                                     },
@@ -1158,37 +1141,12 @@ pub fn Page() -> Element {
                                         if !note_dragging() {
                                             return;
                                         }
-                                        let data = event.data();
-                                        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-                                            return;
-                                        };
-                                        if pointer.buttons() & 1 != 1 {
+                                        if !event.held_buttons().contains(MouseButton::Primary) {
                                             note_dragging.set(false);
-                                            set_pointer_capture(&event, "file-scroll", false);
-                                            return;
-                                        }
-                                        event.stop_propagation();
-                                        event.prevent_default();
-                                        if let Some((line, col)) = note_pointer_position_at(
-                                            pointer.client_x() as f64,
-                                            pointer.client_y() as f64,
-                                            &note_blocks.read(),
-                                        ) {
-                                            let _ = send(&FilePointerEvent {
-                                                line,
-                                                col,
-                                                extend: true,
-                                            });
                                         }
                                     },
-                                    onpointerup: move |event: Event<PointerData>| {
-                                        set_pointer_capture(&event, "file-scroll", false);
-                                        note_dragging.set(false);
-                                    },
-                                    onpointercancel: move |event: Event<PointerData>| {
-                                        set_pointer_capture(&event, "file-scroll", false);
-                                        note_dragging.set(false);
-                                    },
+                                    onpointerup: move |_| note_dragging.set(false),
+                                    onpointercancel: move |_| note_dragging.set(false),
                                     div {
                                         class: "mx-auto max-w-3xl font-sans text-[15px] leading-7 text-foreground/90",
                                         NoteProperties { properties: note_properties() }
@@ -1209,7 +1167,6 @@ pub fn Page() -> Element {
                                                         note_active,
                                                         note_editing,
                                                         note_edit_line,
-                                                        note_edit_rect,
                                                         note_dragging,
                                                         comp_open: editing && comp_open(),
                                                         comp_filtered: if editing {
@@ -1223,34 +1180,34 @@ pub fn Page() -> Element {
                                             }
                                         }
                                         textarea {
-                                            id: "file-input",
+                                            id: INPUT_ID,
+                                            onmounted: move |event: Event<MountedData>| {
+                                                viewport.field_mounted(event.data());
+                                            },
                                             class: "pointer-events-none absolute left-0 top-0 h-px w-px resize-none overflow-hidden border-0 bg-transparent p-0 opacity-0 outline-none",
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
                                             oncompositionstart: move |_| composing.set(true),
-                                            oncompositionend: move |_| {
+                                            oncompositionend: move |event: Event<CompositionData>| {
                                                 composing.set(false);
-                                                send_committed_text();
+                                                send_committed_text(event.data().data());
                                             },
-                                            oninput: move |_| {
-                                                if !composing() {
-                                                    send_committed_text();
+                                            oninput: move |event: Event<FormData>| {
+                                                if composing() {
+                                                    return;
                                                 }
+                                                send_committed_text(event.value());
                                             },
                                             onkeydown: move |event: Event<KeyboardData>| {
-                                                let data = event.data();
-                                                let Some(raw) = data.downcast::<web_sys::KeyboardEvent>() else {
-                                                    return;
-                                                };
                                                 event.stop_propagation();
-                                                if raw.is_composing() {
+                                                if composing() {
                                                     return;
                                                 }
                                                 if keys.offer(&event) {
                                                     return;
                                                 }
-                                                if raw.key() == "Escape" {
+                                                if event.key() == Key::Escape {
                                                     event.prevent_default();
                                                     if keymap() != vmux_core::KeymapKind::Vim {
                                                         note_editing.set(false);
@@ -1333,7 +1290,7 @@ pub fn Page() -> Element {
                             let txtcol = if composing() { "inherit" } else { "transparent" };
                             rsx! {
                                 div {
-                                    id: "file-scroll",
+                                    id: SCROLL_ID,
                                     class: "file-mode-editor-enter relative min-h-0 flex-1 overflow-auto",
                                     onmouseleave: move |_| {
                                         lsp_hover.set(None);
@@ -1341,35 +1298,25 @@ pub fn Page() -> Element {
                                         gutter_hover.set(false);
                                     },
                                     onpointermove: move |event: Event<PointerData>| {
-                                        let data = event.data();
-                                        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-                                            return;
-                                        };
                                         let Some(origin) = editor_drag_origin() else {
                                             return;
                                         };
-                                        if pointer.buttons() & 1 != 1 {
+                                        let at = event.client_coordinates();
+                                        if !event.held_buttons().contains(MouseButton::Primary) {
                                             editor_dragging.set(false);
                                             editor_drag_origin.set(None);
-                                            set_pointer_capture(&event, "file-scroll", false);
                                             return;
                                         }
                                         if !editor_dragging() {
-                                            if !editor_drag_started(
-                                                origin,
-                                                (pointer.client_x(), pointer.client_y()),
-                                            ) {
+                                            if !editor_drag_started(origin, (at.x as i32, at.y as i32)) {
                                                 return;
                                             }
                                             editor_dragging.set(true);
                                         }
-                                        let (cw, ch) = cell_dims();
-                                        let gutter = gw as f64 * cw + 48.0;
-                                        if let Some((line, col)) = editor_pointer_file_position(
-                                            pointer,
-                                            gutter,
-                                            cw,
-                                            ch,
+                                        if let Some((line, col)) = viewport.file_position(
+                                            at,
+                                            cell_dims(),
+                                            total_lines(),
                                             &line_layouts.read(),
                                             wrap_columns(),
                                             false,
@@ -1382,26 +1329,34 @@ pub fn Page() -> Element {
                                             });
                                         }
                                     },
-                                    onpointerup: move |event: Event<PointerData>| {
-                                        set_pointer_capture(&event, "file-scroll", false);
+                                    onpointerup: move |_| {
                                         editor_dragging.set(false);
                                         editor_drag_origin.set(None);
                                     },
-                                    onpointercancel: move |event: Event<PointerData>| {
-                                        set_pointer_capture(&event, "file-scroll", false);
+                                    onpointercancel: move |_| {
                                         editor_dragging.set(false);
                                         editor_drag_origin.set(None);
                                     },
-                                    onscroll: move |_| {
+                                    onmounted: move |event: Event<MountedData>| {
+                                        viewport.mounted(event.data());
+                                    },
+                                    onresize: move |event: Event<ResizeData>| {
+                                        let Ok(size) = event.get_border_box_size() else {
+                                            return;
+                                        };
+                                        viewport.resized((size.width, size.height));
+                                    },
+                                    onscroll: move |event: Event<ScrollData>| {
+                                        viewport.scrolled_to((
+                                            event.scroll_left(),
+                                            event.scroll_top(),
+                                        ));
                                         let (_, ch) = cell_dims();
                                         if ch <= 0.0 {
                                             return;
                                         }
-                                        let Some(el) = scroll_el() else {
-                                            return;
-                                        };
-                                        let vis_first = (el.scroll_top() as f64 / ch).floor().max(0.0) as u32;
-                                        let vis_rows = (el.client_height() as f64 / ch).ceil() as u32 + 1;
+                                        let vis_first = (event.scroll_top() / ch).floor().max(0.0) as u32;
+                                        let vis_rows = (event.client_height() as f64 / ch).ceil() as u32 + 1;
                                         let trigger = (vis_rows as f32 * vmux_core::scroll::EDGE_TRIGGER_K).ceil() as u32;
                                         let rfirst = first_row();
                                         let loaded_len = line_layouts
@@ -1454,38 +1409,29 @@ pub fn Page() -> Element {
                                                         onpointerdown: move |e: Event<PointerData>| {
                                                             e.prevent_default();
                                                             ctx_menu.set(None);
-                                                            let (cw, ch) = cell_dims();
-                                                            let g = gw as f64 * cw + 48.0;
-                                                            let dd = e.data();
-                                                            if let Some(raw) = dd.downcast::<web_sys::PointerEvent>()
-                                                                && let Some((line, col)) = editor_pointer_file_position(
-                                                                    raw,
-                                                                    g,
-                                                                    cw,
-                                                                    ch,
-                                                                    &line_layouts.read(),
-                                                                    wrap_cols,
-                                                                    true,
-                                                                )
-                                                            {
-                                                                if raw.meta_key() {
-                                                                    editor_dragging.set(false);
+                                                            let at = e.client_coordinates();
+                                                            if let Some((line, col)) = viewport.file_position(
+                                                                at,
+                                                                cell_dims(),
+                                                                total_lines(),
+                                                                &line_layouts.read(),
+                                                                wrap_cols,
+                                                                true,
+                                                            ) {
+                                                                editor_dragging.set(false);
+                                                                if e.modifiers().meta() {
                                                                     editor_drag_origin.set(None);
                                                                     let _ = send(&FileDefinitionRequest {
                                                                         line,
                                                                         col,
                                                                     });
                                                                 } else {
-                                                                    editor_dragging.set(false);
-                                                                    editor_drag_origin.set(Some((
-                                                                        raw.client_x(),
-                                                                        raw.client_y(),
-                                                                    )));
-                                                                    set_pointer_capture(&e, "file-scroll", true);
+                                                                    editor_drag_origin
+                                                                        .set(Some((at.x as i32, at.y as i32)));
                                                                     let _ = send(&FilePointerEvent {
                                                                         line,
                                                                         col,
-                                                                        extend: raw.shift_key(),
+                                                                        extend: e.modifiers().shift(),
                                                                     });
                                                                 }
                                                             }
@@ -1493,68 +1439,43 @@ pub fn Page() -> Element {
                                                         },
                                                         oncontextmenu: move |e: Event<MouseData>| {
                                                             e.prevent_default();
-                                                            let (cw, ch) = cell_dims();
-                                                            let g = gw as f64 * cw + 48.0;
-                                                            let dd = e.data();
-                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
-                                                                && let Some(t) = raw
-                                                                    .current_target()
-                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                                                            {
-                                                                let (_, col) = editor_pointer_position(
-                                                                    raw,
-                                                                    &t,
-                                                                    g,
-                                                                    cw,
-                                                                    ch,
-                                                                    wrap_cols,
-                                                                    true,
-                                                                );
-                                                                ctx_menu.set(Some((
-                                                                    raw.client_x() as f64,
-                                                                    raw.client_y() as f64,
-                                                                    ln,
-                                                                    col,
-                                                                )));
-                                                            }
+                                                            let cell = cell_dims();
+                                                            let (_, col) = column_in_line(
+                                                                e.element_coordinates(),
+                                                                gutter_px(total_lines(), cell.0),
+                                                                cell,
+                                                                wrap_cols,
+                                                                true,
+                                                            );
+                                                            let at = e.client_coordinates();
+                                                            ctx_menu.set(Some((at.x, at.y, ln, col)));
                                                         },
                                                         onmousemove: move |e: Event<MouseData>| {
                                                             if editor_dragging() {
                                                                 return;
                                                             }
-                                                            let (cw, ch) = cell_dims();
-                                                            let g = gw as f64 * cw + 48.0;
-                                                            let dd = e.data();
-                                                            if let Some(raw) = dd.downcast::<web_sys::MouseEvent>()
-                                                                && let Some(t) = raw
-                                                                    .current_target()
-                                                                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                                                            {
-                                                                let (x, pointer_col) = editor_pointer_position(
-                                                                    raw,
-                                                                    &t,
-                                                                    g,
-                                                                    cw,
-                                                                    ch,
-                                                                    wrap_cols,
-                                                                    false,
-                                                                );
-                                                                let in_gutter = x < 0.0;
-                                                                if gutter_hover() != in_gutter {
-                                                                    gutter_hover.set(in_gutter);
-                                                                }
-                                                                if x < 0.0 {
-                                                                    return;
-                                                                }
-                                                                let col = pointer_col;
-                                                                if hover_pos() != Some((ln, col)) {
-                                                                    hover_pos.set(Some((ln, col)));
-                                                                    lsp_hover.set(None);
-                                                                    let _ = send(&FileHoverRequest {
-                                                                        line: ln,
-                                                                        col,
-                                                                    });
-                                                                }
+                                                            let cell = cell_dims();
+                                                            let (x, col) = column_in_line(
+                                                                e.element_coordinates(),
+                                                                gutter_px(total_lines(), cell.0),
+                                                                cell,
+                                                                wrap_cols,
+                                                                false,
+                                                            );
+                                                            let in_gutter = x < 0.0;
+                                                            if gutter_hover() != in_gutter {
+                                                                gutter_hover.set(in_gutter);
+                                                            }
+                                                            if in_gutter {
+                                                                return;
+                                                            }
+                                                            if hover_pos() != Some((ln, col)) {
+                                                                hover_pos.set(Some((ln, col)));
+                                                                lsp_hover.set(None);
+                                                                let _ = send(&FileHoverRequest {
+                                                                    line: ln,
+                                                                    col,
+                                                                });
                                                             }
                                                         },
                                                         span {
@@ -1684,30 +1605,29 @@ pub fn Page() -> Element {
                                         }
 
                                         textarea {
-                                            id: "file-input",
+                                            id: INPUT_ID,
+                                            onmounted: move |event: Event<MountedData>| {
+                                                viewport.field_mounted(event.data());
+                                            },
                                             class: "absolute z-10 resize-none overflow-hidden whitespace-pre border-0 bg-transparent p-0 caret-transparent outline-none",
                                             style: "left:{cx}px;top:{cy}px;min-width:2ch;height:{ch}px;color:{txtcol};",
                                             autocomplete: "off",
                                             autocapitalize: "off",
                                             spellcheck: "false",
                                             oncompositionstart: move |_| composing.set(true),
-                                            oncompositionend: move |_| {
+                                            oncompositionend: move |event: Event<CompositionData>| {
                                                 composing.set(false);
-                                                send_committed_text();
+                                                send_committed_text(event.data().data());
                                             },
-                                            oninput: move |_| {
+                                            oninput: move |event: Event<FormData>| {
                                                 if composing() {
                                                     return;
                                                 }
-                                                send_committed_text();
+                                                send_committed_text(event.value());
                                             },
                                             onkeydown: move |e: Event<KeyboardData>| {
-                                                let dd = e.data();
-                                                let Some(raw) = dd.downcast::<web_sys::KeyboardEvent>() else {
-                                                    return;
-                                                };
                                                 e.stop_propagation();
-                                                if raw.is_composing() {
+                                                if composing() {
                                                     return;
                                                 }
                                                 if keys.offer(&e) {
@@ -1891,11 +1811,7 @@ pub fn Page() -> Element {
                                 if keys.offer(&e) {
                                     return;
                                 }
-                                let key = e
-                                    .data()
-                                    .downcast::<web_sys::KeyboardEvent>()
-                                    .map(|k| k.key())
-                                    .unwrap_or_default();
+                                let key = e.key().to_string();
                                 let len = refs.read().len();
                                 match key.as_str() {
                                     "j" => {
@@ -2010,18 +1926,23 @@ pub fn Page() -> Element {
 const CONTAINER_ID: &str = "file-container";
 const PAGE_ID: &str = "file-page";
 const MEASURE_ID: &str = "file-measure";
+/// How many rows of how many columns the measuring span holds.
+///
+/// Both dimensions come off the one element: the width divides out to a character and the height
+/// to a line box — which a single-line span could not give, since its box is the font's content
+/// area rather than the pitch from one row of text to the next.
+const MEASURE_COLS: usize = 80;
+const MEASURE_ROWS: usize = 8;
 const NOTE_CARET_ID: &str = "note-caret";
 const VIDEO_HOST_ID: &str = "vmux-video-host";
 const INPUT_ID: &str = "file-input";
 const SCROLL_ID: &str = "file-scroll";
-const GIT_REFRESH_DEBOUNCE_MS: i32 = 120;
+const GIT_REFRESH_DEBOUNCE_MS: u32 = 120;
 const NOTE_MAX_CONTENT_WIDTH_PX: u32 = 768;
-const LSP_NOTICE_DONE_MS: i32 = 2_500;
-const LSP_NOTICE_FAILED_MS: i32 = 6_000;
+const LSP_NOTICE_DONE_MS: u32 = 2_500;
+const LSP_NOTICE_FAILED_MS: u32 = 6_000;
 
-std::thread_local! {
-    static NOTE_CARET_VISIBILITY_QUEUE: RefCell<NoteCaretVisibilityQueue> = RefCell::new(NoteCaretVisibilityQueue::default());
-}
+std::thread_local! {}
 
 fn is_markdown_file(path: &str) -> bool {
     path.rsplit_once('.')
@@ -2041,139 +1962,36 @@ fn file_mode_class(active: bool) -> &'static str {
     }
 }
 
-fn editor_pointer_position(
-    event: &web_sys::MouseEvent,
-    target: &web_sys::Element,
+/// Where in a line's own box a pointer is: how far past the gutter, and which column.
+///
+/// A negative offset means the gutter itself, which is what the caller tests to tell a click on
+/// the fold column from a click on text.
+fn column_in_line(
+    at: ElementPoint,
     gutter: f64,
-    char_width: f64,
-    char_height: f64,
+    cell: (f64, f64),
     wrap_columns: u16,
     round: bool,
 ) -> (f64, u32) {
-    let rect = target.get_bounding_client_rect();
-    let x = event.client_x() as f64 - rect.left() - gutter;
-    if char_width <= 0.0 {
+    let (cw, ch) = cell;
+    let x = at.x - gutter;
+    if cw <= 0.0 {
         return (x, 0);
     }
     let local = if round {
-        (x.max(0.0) / char_width).round()
+        (x.max(0.0) / cw).round()
     } else {
-        (x.max(0.0) / char_width).floor()
+        (x.max(0.0) / cw).floor()
     } as u32;
-    if wrap_columns == 0 || char_height <= 0.0 {
+    if wrap_columns == 0 || ch <= 0.0 {
         return (x, local);
     }
-    let wrapped_row =
-        ((event.client_y() as f64 - rect.top()).max(0.0) / char_height).floor() as u32;
+    let wrapped_row = (at.y.max(0.0) / ch).floor() as u32;
+
     (
         x,
         wrapped_row * wrap_columns as u32 + local.min(wrap_columns as u32),
     )
-}
-
-fn set_pointer_capture(event: &Event<PointerData>, element_id: &str, capture: bool) {
-    let data = event.data();
-    let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-        return;
-    };
-    let Some(element) = web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(element_id))
-    else {
-        return;
-    };
-    if capture {
-        let _ = element.set_pointer_capture(pointer.pointer_id());
-    } else {
-        let _ = element.release_pointer_capture(pointer.pointer_id());
-    }
-}
-
-fn editor_pointer_file_position(
-    pointer: &web_sys::PointerEvent,
-    gutter: f64,
-    char_width: f64,
-    char_height: f64,
-    layouts: &[FileLineLayout],
-    wrap_columns: u16,
-    round: bool,
-) -> Option<(u32, u32)> {
-    if char_width <= 0.0 || char_height <= 0.0 {
-        return None;
-    }
-    let scroll = scroll_el()?;
-    let rect = scroll.get_bounding_client_rect();
-    let content_y = pointer.client_y() as f64 - rect.top() + scroll.scroll_top() as f64;
-    let row = (content_y.max(0.0) / char_height).floor() as u32;
-    let layout = layouts
-        .iter()
-        .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
-    let x = pointer.client_x() as f64 - rect.left() + scroll.scroll_left() as f64 - gutter;
-    let local = if round {
-        (x.max(0.0) / char_width).round()
-    } else {
-        (x.max(0.0) / char_width).floor()
-    } as u32;
-    let col = if wrap_columns == 0 {
-        local
-    } else {
-        (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
-    };
-    Some((layout.line_no, col))
-}
-
-#[derive(Clone, Copy, PartialEq)]
-struct NoteEditRect {
-    top: f64,
-    left: f64,
-    width: f64,
-    height: f64,
-}
-
-fn note_list_item_line(event: &Event<MouseData>) -> Option<u32> {
-    let data = event.data();
-    let raw = data.downcast::<web_sys::MouseEvent>()?;
-    raw.target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?
-        .closest("[data-note-list-line]")
-        .ok()
-        .flatten()?
-        .get_attribute("data-note-list-line")?
-        .parse()
-        .ok()
-}
-
-fn note_list_edit_rect(event: &Event<MouseData>, block_index: usize) -> Option<NoteEditRect> {
-    let data = event.data();
-    let raw = data.downcast::<web_sys::MouseEvent>()?;
-    let target = raw
-        .target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
-    let item = target.closest("[data-note-list-line]").ok().flatten()?;
-    let line = item.get_attribute("data-note-list-line")?.parse().ok()?;
-    note_list_edit_rect_for_line(block_index, line)
-}
-
-fn note_list_edit_rect_for_line(block_index: usize, line: u32) -> Option<NoteEditRect> {
-    let document = web_sys::window()?.document()?;
-    let block = document.get_element_by_id(&format!("note-block-{block_index}"))?;
-    let item = block
-        .query_selector(&format!("[data-note-list-line=\"{line}\"]"))
-        .ok()
-        .flatten()?;
-    let content = item
-        .query_selector(":scope > p")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| item.clone());
-    let block_rect = block.get_bounding_client_rect();
-    let item_rect = content.get_bounding_client_rect();
-    Some(NoteEditRect {
-        top: item_rect.top() - block_rect.top(),
-        left: item_rect.left() - block_rect.left(),
-        width: item_rect.width(),
-        height: item_rect.height(),
-    })
 }
 
 fn activate_note_cursor(
@@ -2182,7 +2000,6 @@ fn activate_note_cursor(
     note_active: Signal<Option<u32>>,
     note_editing: Signal<bool>,
     note_edit_line: Signal<Option<u32>>,
-    note_edit_rect: Signal<Option<NoteEditRect>>,
 ) {
     set_note_cursor_active(
         block_index,
@@ -2190,7 +2007,6 @@ fn activate_note_cursor(
         note_active,
         note_editing,
         note_edit_line,
-        note_edit_rect,
         false,
     );
 }
@@ -2201,7 +2017,6 @@ fn activate_note_cursor_centered(
     note_active: Signal<Option<u32>>,
     note_editing: Signal<bool>,
     note_edit_line: Signal<Option<u32>>,
-    note_edit_rect: Signal<Option<NoteEditRect>>,
 ) {
     set_note_cursor_active(
         block_index,
@@ -2209,81 +2024,58 @@ fn activate_note_cursor_centered(
         note_active,
         note_editing,
         note_edit_line,
-        note_edit_rect,
         true,
     );
 }
 
+/// Open a block for editing with the caret on one of its lines.
+///
+/// The scroll happens a turn later because the caret it is aiming at does not exist yet: the
+/// render that draws the source line is what puts it in the document.
 fn set_note_cursor_active(
     block_index: usize,
     line: u32,
     mut note_active: Signal<Option<u32>>,
     mut note_editing: Signal<bool>,
     mut note_edit_line: Signal<Option<u32>>,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
     center: bool,
 ) {
     note_active.set(Some(block_index as u32));
     note_editing.set(true);
     note_edit_line.set(Some(line));
-    note_edit_rect.set(None);
-    schedule_note_cursor_activation(block_index, line, note_edit_rect, center, true);
-}
-
-fn schedule_note_cursor_activation(
-    block_index: usize,
-    line: u32,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
-    center: bool,
-    retry: bool,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        note_edit_rect.set(note_list_edit_rect_for_line(block_index, line));
+    spawn(async move {
+        sleep_ms(0).await;
         focus_file_input();
         if center {
             center_note_caret(block_index, line);
         }
-        if retry {
-            schedule_note_cursor_activation(block_index, line, note_edit_rect, center, false);
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
+    });
 }
 
-fn browser_has_text_selection() -> bool {
-    web_sys::window()
-        .and_then(|window| window.get_selection().ok().flatten())
-        .is_some_and(|selection| !selection.is_collapsed())
-}
-
-fn note_pointer_line(event: &Event<MouseData>, start: u32, end: u32, block: &MdBlock) -> u32 {
+/// Which line of a block a pointer is over.
+///
+/// A list answers exactly, because the item the pointer went down on said so on its way past. Any
+/// other block is one run of text with no internal structure to ask, so how far down the box the
+/// pointer sits is the whole of what there is to go on.
+fn note_pointer_line(
+    at: ElementPoint,
+    height: f64,
+    start: u32,
+    end: u32,
+    block: &MdBlock,
+    list_hit: Option<u32>,
+) -> u32 {
     if matches!(block, MdBlock::List { .. })
-        && let Some(line) = note_list_item_line(event)
+        && let Some(line) = list_hit
     {
         return line;
     }
     let count = end.saturating_sub(start).max(1);
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::MouseEvent>() else {
-        return start;
-    };
-    let Some(target) = raw
-        .current_target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    else {
-        return start;
-    };
-    let rect = target.get_bounding_client_rect();
-    if rect.height() <= 0.0 {
+    if height <= 0.0 {
         return start;
     }
-    let ratio = ((raw.client_y() as f64 - rect.top()) / rect.height()).clamp(0.0, 1.0);
+    let ratio = (at.y / height).clamp(0.0, 1.0);
+
     start + ((ratio * count as f64).floor() as u32).min(count - 1)
 }
 
@@ -2326,153 +2118,32 @@ fn note_block_index_for_line(blocks: &[NoteBlock], line: u32) -> Option<usize> {
         .or_else(|| (!blocks.is_empty()).then_some(0))
 }
 
-fn note_pointer_col_from_pointer(event: &Event<PointerData>, text: &str) -> u32 {
-    let data = event.data();
-    let Some(raw) = data.downcast::<web_sys::PointerEvent>() else {
-        return 0;
-    };
-    let Some(target) = raw
-        .current_target()
-        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-    else {
-        return 0;
-    };
-    note_col_at_point(&target, raw.client_x() as f64, raw.client_y() as f64, text)
-}
-
-fn note_pointer_position_at(
-    client_x: f64,
-    client_y: f64,
-    blocks: &[NoteBlock],
-) -> Option<(u32, u32)> {
-    let document = web_sys::window()?.document()?;
-    let target = document.element_from_point(client_x as f32, client_y as f32)?;
-    if let Some(block_element) = target.closest("[data-note-edit-block]").ok().flatten() {
-        let index = block_element
-            .get_attribute("data-note-edit-block")?
-            .parse::<usize>()
-            .ok()?;
-        let block = blocks.get(index)?;
-        let offset = note_col_at_point(&block_element, client_x, client_y, &block.source);
-        return Some(note_source_position(
-            &block.source,
-            block.start_line,
-            offset,
-        ));
-    }
-    let line_element = target
-        .closest("[data-note-edit-line], [data-note-list-line]")
-        .ok()
-        .flatten()?;
-    let line = line_element
-        .get_attribute("data-note-edit-line")
-        .or_else(|| line_element.get_attribute("data-note-list-line"))?
-        .parse::<u32>()
-        .ok()?;
-    let block = blocks
-        .iter()
-        .find(|block| block.start_line <= line && line < block.end_line)?;
-    let raw = block
-        .source
-        .lines()
-        .nth(line.saturating_sub(block.start_line) as usize)
-        .unwrap_or_default();
-    let prefix = if matches!(block.block, MdBlock::List { .. }) {
-        note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
-    } else {
-        0
-    };
-    let displayed = raw.chars().skip(prefix as usize).collect::<String>();
-    let col = prefix + note_col_at_point(&line_element, client_x, client_y, &displayed);
-    Some((line, col))
-}
-
-fn note_col_at_point(target: &web_sys::Element, client_x: f64, client_y: f64, text: &str) -> u32 {
-    let text_target = target
-        .query_selector("[data-note-line-text]")
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| target.clone());
-    let char_count = text.chars().count() as u32;
-    if let Some(document) = web_sys::window().and_then(|window| window.document())
-        && let Some(caret) = document.caret_position_from_point(client_x as f32, client_y as f32)
-        && let Some(offset_node) = caret.offset_node()
-    {
-        let text_node: &web_sys::Node = text_target.as_ref();
-        if text_node.contains(Some(&offset_node))
-            && let Ok(range) = document.create_range()
-            && range.select_node_contents(text_node).is_ok()
-            && range.set_end(&offset_node, caret.offset()).is_ok()
-            && let Ok(fragment) = range.clone_contents()
-        {
-            return fragment
-                .text_content()
-                .unwrap_or_default()
-                .chars()
-                .count()
-                .min(char_count as usize) as u32;
-        }
-    }
-    let rect = text_target.get_bounding_client_rect();
-    if rect.width() <= 0.0 {
-        return 0;
-    }
-    let x = client_x - rect.left();
-    if x <= 0.0 {
-        return 0;
-    }
-    if x >= rect.width() {
-        return char_count;
-    }
-    let ratio = x / rect.width();
-    (ratio * char_count as f64).round() as u32
-}
-
-fn place_note_caret(line: u32, text: String, client_x: f64, prefix: u32) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let Some(target) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&format!("note-line-{line}")))
-        else {
-            return;
-        };
-        let rect = target.get_bounding_client_rect();
-        let col =
-            prefix + note_col_at_point(&target, client_x, rect.top() + rect.height() / 2.0, &text);
+/// Put the caret where a pointer landed in a run of rendered source, and take the keyboard.
+///
+/// Waits for the answer, which a pointer handler can afford to do: whether the gesture belongs to
+/// the page was settled before this was called, and never depended on where in the line it fell.
+fn place_note_caret(element_id: String, line: u32, prefix: u32, at: ClientPoint, extend: bool) {
+    spawn(async move {
+        let offset = TextRun::in_element(element_id)
+            .offset_at(at.x, at.y)
+            .await
+            .unwrap_or_default();
         let _ = send(&FilePointerEvent {
             line,
-            col,
-            extend: false,
+            col: prefix + offset,
+            extend,
         });
         focus_file_input();
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
+    });
 }
 
-fn place_note_block_caret(
-    index: usize,
-    start_line: u32,
-    source: String,
-    client_x: f64,
-    client_y: f64,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let Some(target) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&format!("note-live-block-{index}")))
-        else {
-            return;
-        };
-        let offset = note_col_at_point(&target, client_x, client_y, &source);
+/// The same, for a block whose source is one run rather than one run per line.
+fn place_note_block_caret(index: usize, start_line: u32, source: String, at: ClientPoint) {
+    spawn(async move {
+        let offset = TextRun::in_element(format!("note-live-block-{index}"))
+            .offset_at(at.x, at.y)
+            .await
+            .unwrap_or_default();
         let (line, col) = note_source_position(&source, start_line, offset);
         let _ = send(&FilePointerEvent {
             line,
@@ -2480,69 +2151,7 @@ fn place_note_block_caret(
             extend: false,
         });
         focus_file_input();
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-#[derive(Clone, PartialEq)]
-struct NoteLineChunk {
-    text: String,
-    selected: bool,
-    caret_before: bool,
-}
-
-fn note_line_chunks(
-    text: &str,
-    caret: Option<u32>,
-    selection: Option<vmux_core::editor::SelSpan>,
-) -> Vec<NoteLineChunk> {
-    let chars = text.chars().collect::<Vec<_>>();
-    let len = chars.len() as u32;
-    let caret = caret.map(|column| column.min(len));
-    let selection = selection.map(|span| {
-        let start = span.start.min(len);
-        let end = if span.end == u32::MAX {
-            len
-        } else {
-            span.end.min(len)
-        };
-        (start.min(end), start.max(end))
     });
-    let mut boundaries = vec![0, len];
-    if let Some(caret) = caret {
-        boundaries.push(caret);
-    }
-    if let Some((start, end)) = selection {
-        boundaries.push(start);
-        boundaries.push(end);
-    }
-    boundaries.sort_unstable();
-    boundaries.dedup();
-    let mut chunks = boundaries
-        .windows(2)
-        .map(|range| {
-            let start = range[0];
-            let end = range[1];
-            NoteLineChunk {
-                text: chars[start as usize..end as usize].iter().collect(),
-                selected: selection.is_some_and(|(selection_start, selection_end)| {
-                    start < selection_end && end > selection_start
-                }),
-                caret_before: caret == Some(start),
-            }
-        })
-        .collect::<Vec<_>>();
-    if chunks.is_empty() || caret == Some(len) {
-        chunks.push(NoteLineChunk {
-            text: String::new(),
-            selected: false,
-            caret_before: caret == Some(len),
-        });
-    }
-    chunks
 }
 
 #[derive(Clone, PartialEq)]
@@ -2663,27 +2272,13 @@ fn ExplorerSidebar(
 }
 
 #[component]
-fn ExplorerToggleButton(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) -> Element {
+fn ExplorerToggleButton(pane: ExplorerPane, mode: Signal<Mode>) -> Element {
     rsx! {
         button {
             class: "shrink-0 cursor-default rounded p-0.5 text-foreground/60 hover:bg-foreground/[0.08] hover:text-foreground",
             title: translate("editor-toggle-explorer"),
             onclick: move |_| {
-                toggle_explorer(
-                    visible,
-                    preferred_visible,
-                    width,
-                    client_id,
-                    request_id,
-                    mode,
-                )
+                pane.toggle(mode)
             },
             svg {
                 class: "h-4 w-4",
@@ -2965,7 +2560,6 @@ fn NoteBlockView(
     mut note_active: Signal<Option<u32>>,
     mut note_editing: Signal<bool>,
     mut note_edit_line: Signal<Option<u32>>,
-    mut note_edit_rect: Signal<Option<NoteEditRect>>,
     mut note_dragging: Signal<bool>,
     comp_open: bool,
     comp_filtered: Vec<CompletionItem>,
@@ -2988,11 +2582,6 @@ fn NoteBlockView(
         note_edit_line.read().unwrap_or(current.line)
     } else {
         0
-    };
-    let edit_rect = if editing {
-        *note_edit_rect.read()
-    } else {
-        None
     };
     let is_list = matches!(note_block.block, MdBlock::List { .. });
     let is_live_inline = matches!(
@@ -3053,74 +2642,105 @@ fn NoteBlockView(
     } else {
         "w-[2px]"
     };
-    let edit_overlay_class = if is_list {
-        "visible absolute z-10 cursor-text overflow-auto"
-    } else {
-        note_edit_overlay_class()
+    let line_chunks = |line: u32, raw: &str, prefix: u32| {
+        let selection = selections
+            .iter()
+            .find(|selection| selection.line == line)
+            .map(|selection| vmux_core::editor::SelSpan {
+                line: selection.line,
+                row: selection.row,
+                start: selection.start.saturating_sub(prefix),
+                end: if selection.end == u32::MAX {
+                    u32::MAX
+                } else {
+                    selection.end.saturating_sub(prefix)
+                },
+            });
+        NoteLineChunk::split(
+            raw,
+            (line == current.line).then_some(current.col.saturating_sub(prefix)),
+            selection,
+        )
     };
-    let edit_overlay_style = if is_list {
-        edit_rect.map_or_else(String::new, |rect| {
-            format!(
-                "top:{}px;left:{}px;width:{}px;height:{}px;",
-                rect.top, rect.left, rect.width, rect.height,
-            )
-        })
-    } else {
-        String::new()
+    // A list draws its own edited item, in place, because it is the only thing that knows where
+    // that item is. Every other block draws one overlay across the whole of itself.
+    let list_edit = match edit_lines.first() {
+        Some((line, raw, prefix)) if is_list => Some(ListEditLine {
+            line: *line,
+            chunks: line_chunks(*line, raw, *prefix),
+            caret_width_class: caret_width_class.to_string(),
+        }),
+        _ => None,
     };
+    let mut block_height = use_signal(|| 0.0f64);
+    let ListLineHit(list_hit) = use_context_provider(|| ListLineHit(Signal::new(None)));
+    let marker_prefix = move |source: &str, line: u32| {
+        let raw = source
+            .lines()
+            .nth(line.saturating_sub(start) as usize)
+            .unwrap_or_default();
+        if is_list {
+            note_list_marker_prefix_len(raw).map_or(0, |(_, prefix)| prefix as u32)
+        } else {
+            0
+        }
+    };
+    let down_source = source.clone();
+    let on_line_down = use_callback(move |(line, at, extend): (u32, ClientPoint, bool)| {
+        note_dragging.set(true);
+        place_note_caret(
+            format!("note-line-{line}"),
+            line,
+            marker_prefix(&down_source, line),
+            at,
+            extend,
+        );
+    });
 
     rsx! {
         div {
             id: "note-block-{index}",
             "data-note-block": "{index}",
             class: "relative flow-root w-full cursor-text",
-            onclick: move |event| {
+            onresize: move |event: Event<ResizeData>| {
+                if let Ok(size) = event.get_border_box_size() {
+                    block_height.set(size.height);
+                }
+            },
+            onclick: move |event: Event<MouseData>| {
                 if editing && !is_list {
                     return;
                 }
                 event.stop_propagation();
-                if browser_has_text_selection() {
+                if EventSelection::in_document() {
                     return;
                 }
-                let event_data = event.data();
-                let raw = event_data.downcast::<web_sys::MouseEvent>();
-                let client_x = raw.map_or(0.0, |raw| raw.client_x() as f64);
-                let client_y = raw.map_or(0.0, |raw| raw.client_y() as f64);
+                let at = event.client_coordinates();
                 if is_live_inline {
                     note_active.set(Some(index as u32));
                     note_editing.set(true);
                     note_edit_line.set(None);
-                    note_edit_rect.set(None);
-                    place_note_block_caret(
-                        index,
-                        start,
-                        live_pointer_source.clone(),
-                        client_x,
-                        client_y,
-                    );
+                    place_note_block_caret(index, start, live_pointer_source.clone(), at);
                     return;
                 }
-                let line = note_pointer_line(&event, start, end, &pointer_block);
-                let text = pointer_source
-                    .lines()
-                    .nth(line.saturating_sub(start) as usize)
-                    .unwrap_or_default()
-                    .to_string();
-                let prefix = if is_list {
-                    note_list_marker_prefix_len(&text).map_or(0, |(_, prefix)| prefix as u32)
-                } else {
-                    0
-                };
+                let line = note_pointer_line(
+                    event.element_coordinates(),
+                    block_height(),
+                    start,
+                    end,
+                    &pointer_block,
+                    list_hit(),
+                );
                 note_active.set(Some(index as u32));
                 note_editing.set(true);
                 note_edit_line.set(Some(line));
-                note_edit_rect.set(
-                    is_list
-                        .then(|| note_list_edit_rect(&event, index))
-                        .flatten(),
+                place_note_caret(
+                    format!("note-line-{line}"),
+                    line,
+                    marker_prefix(&pointer_source, line),
+                    at,
+                    false,
                 );
-                let displayed = text.chars().skip(prefix as usize).collect();
-                place_note_caret(line, displayed, client_x, prefix);
             },
             if let Some(marker) = note_diff_marker {
                 span {
@@ -3132,11 +2752,12 @@ fn NoteBlockView(
                 index,
                 hidden_list_line: (editing && is_list).then_some(active_edit_line),
                 invisible: editing && !is_list,
+                list_edit,
+                on_line_down,
             }
-            if editing {
+            if editing && !is_list {
                 div {
-                    class: edit_overlay_class,
-                    style: edit_overlay_style,
+                    class: note_edit_overlay_class(),
                     if is_live_inline {
                         div {
                             id: "note-live-block-{index}",
@@ -3149,27 +2770,13 @@ fn NoteBlockView(
                             onpointerdown: move |event: Event<PointerData>| {
                                 event.stop_propagation();
                                 event.prevent_default();
-                                let extend = event
-                                    .data()
-                                    .downcast::<web_sys::PointerEvent>()
-                                    .is_some_and(|raw| raw.shift_key());
-                                let offset = note_pointer_col_from_pointer(
-                                    &event,
-                                    &live_down_source,
-                                );
-                                let (line, col) = note_source_position(
-                                    &live_down_source,
-                                    start,
-                                    offset,
-                                );
                                 note_dragging.set(true);
-                                set_pointer_capture(&event, "file-scroll", true);
-                                let _ = send(&FilePointerEvent {
-                                    line,
-                                    col,
-                                    extend,
-                                });
-                                focus_file_input();
+                                place_note_block_caret(
+                                    index,
+                                    start,
+                                    live_down_source.clone(),
+                                    event.client_coordinates(),
+                                );
                             },
                             onmousedown: move |event: Event<MouseData>| {
                                 event.stop_propagation();
@@ -3197,26 +2804,7 @@ fn NoteBlockView(
                                 {
                                     let line = *line;
                                     let prefix = *prefix;
-                                    let pointer_raw_down = raw.clone();
-                                    let line_selection = selections
-                                        .iter()
-                                        .find(|selection| selection.line == line)
-                                        .map(|selection| vmux_core::editor::SelSpan {
-                                            line: selection.line,
-                                            row: selection.row,
-                                            start: selection.start.saturating_sub(prefix),
-                                            end: if selection.end == u32::MAX {
-                                                u32::MAX
-                                            } else {
-                                                selection.end.saturating_sub(prefix)
-                                            },
-                                        });
-                                    let chunks = note_line_chunks(
-                                        raw,
-                                        (line == current.line)
-                                            .then_some(current.col.saturating_sub(prefix)),
-                                        line_selection,
-                                    );
+                                    let chunks = line_chunks(line, raw, prefix);
                                     let line_class = if is_list {
                                         "min-h-[1lh] w-full whitespace-pre-wrap break-words"
                                     } else {
@@ -3235,23 +2823,21 @@ fn NoteBlockView(
                                             onpointerdown: move |event: Event<PointerData>| {
                                                 event.stop_propagation();
                                                 event.prevent_default();
-                                                let extend = event
-                                                    .data()
-                                                    .downcast::<web_sys::PointerEvent>()
-                                                    .is_some_and(|raw| raw.shift_key());
-                                                let col = prefix
-                                                    + note_pointer_col_from_pointer(
-                                                        &event,
-                                                        &pointer_raw_down,
-                                                    );
-                                                note_dragging.set(true);
-                                                set_pointer_capture(&event, "file-scroll", true);
-                                                let _ = send(&FilePointerEvent {
+                                                on_line_down.call((
                                                     line,
-                                                    col,
-                                                    extend,
-                                                });
-                                                focus_file_input();
+                                                    event.client_coordinates(),
+                                                    event.modifiers().shift(),
+                                                ));
+                                            },
+                                            onpointermove: move |event: Event<PointerData>| {
+                                                if !note_dragging() {
+                                                    return;
+                                                }
+                                                on_line_down.call((
+                                                    line,
+                                                    event.client_coordinates(),
+                                                    true,
+                                                ));
                                             },
                                             onmousedown: move |event: Event<MouseData>| {
                                                 event.stop_propagation();
@@ -3329,26 +2915,25 @@ enum Preview {
     Error(String),
 }
 
-fn blob_url(bytes: &[u8]) -> Option<String> {
-    let arr = js_sys::Uint8Array::from(bytes);
-    let parts = js_sys::Array::new();
-    parts.push(&arr.buffer());
-    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).ok()?;
-    web_sys::Url::create_object_url_with_blob(&blob).ok()
+/// An image's bytes, as something an `<img>` can name.
+///
+/// A `data:` URL rather than an object URL. An object URL is a handle the document owns and has to
+/// be handed back, and every path that forgets leaks the whole image for as long as the page lives
+/// — which is what the three revoking call sites here were for. This costs a third more bytes
+/// through the render batch and nothing else.
+fn image_data_url(bytes: &[u8], path: &str) -> String {
+    use base64::Engine;
+
+    let mime = image_mime(path).unwrap_or("application/octet-stream");
+
+    format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
 }
 
-fn revoke(url: &str) {
-    let _ = web_sys::Url::revoke_object_url(url);
-}
-
-fn clear_blob_state(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
-    if let Preview::Image(old) = &*preview.read() {
-        revoke(old);
-    }
+fn clear_preview(mut preview: Signal<Preview>, mut thumbs: Signal<HashMap<String, String>>) {
     preview.set(Preview::None);
-    for url in thumbs.read().values() {
-        revoke(url);
-    }
     thumbs.set(HashMap::new());
 }
 
@@ -3367,20 +2952,12 @@ fn open_path(path: String) {
 fn schedule_git_refresh(mut generation: Signal<u32>, mut nonce: Signal<u32>) {
     let next = generation().wrapping_add(1);
     generation.set(next);
-    let Some(window) = web_sys::window() else {
-        nonce.set(nonce().wrapping_add(1));
-        return;
-    };
-    let closure = Closure::once(move || {
+    spawn(async move {
+        sleep_ms(GIT_REFRESH_DEBOUNCE_MS).await;
         if generation() == next {
             nonce.set(nonce().wrapping_add(1));
         }
     });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        closure.as_ref().unchecked_ref(),
-        GIT_REFRESH_DEBOUNCE_MS,
-    );
-    closure.forget();
 }
 
 fn parent_of(path: &str) -> String {
@@ -3496,13 +3073,7 @@ fn apply_dir(
     new_path: String,
     select_path: Option<String>,
 ) {
-    for url in thumbs.read().values() {
-        revoke(url);
-    }
     thumbs.set(HashMap::new());
-    if let Preview::Image(old) = &*preview.read() {
-        revoke(old);
-    }
     preview.set(Preview::None);
     parent_entries.set(parent);
     path.set(new_path);
@@ -3555,7 +3126,6 @@ fn PreviewPane(preview: Preview) -> Element {
                         key: "{path}",
                         id: VIDEO_HOST_ID,
                         class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
-                        onmounted: move |_| report_video_rect(path.clone()),
                     }
                 }
             } else {
@@ -3619,106 +3189,88 @@ fn PreviewPane(preview: Preview) -> Element {
 }
 
 fn explorer_client_id() -> u64 {
-    ((js_sys::Date::now() as u64) << 12) ^ (js_sys::Math::random() * 4096.0) as u64
+    ((now_millis() as u64) << 12) ^ random_index(4096) as u64
 }
 
-fn set_explorer_visible(
-    next: bool,
-    mut visible: Signal<bool>,
-    mut preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    mut request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    let next_request_id = request_id().wrapping_add(1);
-    request_id.set(next_request_id);
-    preferred_visible.set(next);
-    visible.set(next && explorer_has_room(width()));
-    let _ = send(&ExplorerPanelSetVisible {
-        visible: next,
-        client_id: client_id(),
-        request_id: next_request_id,
-    });
-    if !next {
+/// Whether a sidebar of this width still leaves a readable column beside it.
+///
+/// The page's own width comes from an `onresize` on it rather than from a read: the question is
+/// asked while deciding what to render, and by then the answer has to already be known.
+fn explorer_has_room(page_width: u32, explorer_width: u32) -> bool {
+    page_width > 0 && NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
+}
+
+/// The explorer sidebar, as the page holds it.
+///
+/// Six signals that only ever travel together: whether it is showing, whether the user asked for
+/// it, how wide it and the page are, and the pair that tells the host's own copy of this state
+/// apart from an echo of what the page just sent.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ExplorerPane {
+    pub visible: Signal<bool>,
+    pub preferred_visible: Signal<bool>,
+    pub width: Signal<u32>,
+    pub page_width: Signal<u32>,
+    pub client_id: Signal<u64>,
+    pub request_id: Signal<u64>,
+}
+
+impl ExplorerPane {
+    fn has_room(self) -> bool {
+        explorer_has_room((self.page_width)(), (self.width)())
+    }
+
+    /// Hide it if the pane has become too narrow to hold it and a readable column both.
+    fn sync(mut self) {
+        let next = (self.preferred_visible)() && self.has_room();
+        if (self.visible)() != next {
+            self.visible.set(next);
+        }
+    }
+
+    fn set_visible(mut self, next: bool, mode: Signal<Mode>) {
+        let request_id = (self.request_id)().wrapping_add(1);
+        self.request_id.set(request_id);
+        self.preferred_visible.set(next);
+        self.visible.set(next && self.has_room());
+        let _ = send(&ExplorerPanelSetVisible {
+            visible: next,
+            client_id: (self.client_id)(),
+            request_id,
+        });
+        if next {
+            return;
+        }
         match mode() {
             Mode::Text => focus_file_input(),
             Mode::Dir | Mode::Media(_) => focus_container(),
         }
     }
-}
 
-fn explorer_page_width() -> Option<u32> {
-    web_sys::window()
-        .and_then(|window| window.document())
-        .and_then(|document| document.get_element_by_id(PAGE_ID))
-        .map(|element| element.client_width().max(0) as u32)
-}
-
-fn explorer_has_room(explorer_width: u32) -> bool {
-    explorer_page_width().is_some_and(|page_width| {
-        NOTE_MAX_CONTENT_WIDTH_PX.saturating_add(explorer_width) <= page_width
-    })
-}
-
-fn sync_explorer_visibility(
-    mut visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-) {
-    let next = preferred_visible() && explorer_has_room(width());
-    if visible() != next {
-        visible.set(next);
+    pub(crate) fn toggle(self, mode: Signal<Mode>) {
+        self.set_visible(!(self.preferred_visible)(), mode);
     }
-}
 
-fn schedule_explorer_visibility_sync(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        sync_explorer_visibility(visible, preferred_visible, width);
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
+    pub(crate) fn reveal_current(self, mode: Signal<Mode>) {
+        if (self.visible)() {
+            let _ = send(&ExplorerRevealCurrent);
+        } else {
+            self.set_visible(true, mode);
+        }
     }
-}
 
-fn show_explorer_if_room(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        if visible() {
-            return;
-        }
-        if explorer_has_room(width()) {
-            set_explorer_visible(
-                true,
-                visible,
-                preferred_visible,
-                width,
-                client_id,
-                request_id,
-                mode,
-            );
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
+    /// Open it a turn from now, if by then there is room.
+    ///
+    /// A turn, because the caller is opening a file and the pane it is opening into may not have
+    /// been laid out yet — asking now would measure the pane the file came from.
+    fn show_if_room(self, mode: Signal<Mode>) {
+        spawn(async move {
+            sleep_ms(0).await;
+            if (self.visible)() || !self.has_room() {
+                return;
+            }
+            self.set_visible(true, mode);
+        });
     }
 }
 
@@ -3726,66 +3278,17 @@ fn schedule_lsp_notice_clear(
     mut notice: Signal<Option<LspInstallProgress>>,
     mut request: Signal<Option<(String, String)>>,
     mut generation: Signal<u32>,
-    delay: i32,
+    delay: u32,
 ) {
     let id = generation().wrapping_add(1);
     generation.set(id);
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let clear = Closure::once(move || {
+    spawn(async move {
+        sleep_ms(delay).await;
         if generation() == id {
             notice.set(None);
             request.set(None);
         }
     });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        clear.as_ref().unchecked_ref(),
-        delay,
-    );
-    clear.forget();
-}
-
-pub(crate) fn toggle_explorer(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    set_explorer_visible(
-        !preferred_visible(),
-        visible,
-        preferred_visible,
-        width,
-        client_id,
-        request_id,
-        mode,
-    );
-}
-
-pub(crate) fn reveal_current_in_explorer(
-    visible: Signal<bool>,
-    preferred_visible: Signal<bool>,
-    width: Signal<u32>,
-    client_id: Signal<u64>,
-    request_id: Signal<u64>,
-    mode: Signal<Mode>,
-) {
-    if visible() {
-        let _ = send(&ExplorerRevealCurrent);
-    } else {
-        set_explorer_visible(
-            true,
-            visible,
-            preferred_visible,
-            width,
-            client_id,
-            request_id,
-            mode,
-        );
-    }
 }
 
 #[component]
@@ -3923,13 +3426,17 @@ fn RenderedNoteBlock(
     index: usize,
     hidden_list_line: Option<u32>,
     invisible: bool,
+    #[props(default)] list_edit: Option<ListEditLine>,
+    #[props(default)] on_line_down: Option<EventHandler<(u32, ClientPoint, bool)>>,
 ) -> Element {
     rsx! {
         div { class: if invisible { "invisible" } else { "" },
-            if let Some(line) = hidden_list_line {
-                MdBlockView { block: block.clone(), block_key: index, hidden_list_line: Some(line) }
-            } else {
-                MdBlockView { block: block.clone(), block_key: index }
+            MdBlockView {
+                block: block.clone(),
+                block_key: index,
+                hidden_list_line,
+                list_edit,
+                on_line_down,
             }
         }
     }
@@ -3940,248 +3447,278 @@ fn scroll_dir_row_into_view(idx: usize) {
 }
 
 fn toggle_preview_video() {
-    let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("preview-video"))
-    else {
-        return;
-    };
-    let target: &JsValue = el.as_ref();
-    let paused = js_sys::Reflect::get(target, &JsValue::from_str("paused"))
-        .ok()
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let method = if paused { "play" } else { "pause" };
-    if let Ok(f) = js_sys::Reflect::get(target, &JsValue::from_str(method))
-        && let Ok(f) = f.dyn_into::<js_sys::Function>()
-    {
-        let _ = f.call0(target);
-    }
+    MediaElement::with_id("preview-video").toggle_playback();
 }
 
 fn focus_container() {
-    if let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(CONTAINER_ID))
-        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
-    {
-        let _ = html.focus();
-    }
+    FocusClaim::new(CONTAINER_ID).request();
 }
 
 pub(crate) fn focus_file_input() {
-    focus_by_id(INPUT_ID);
+    FocusClaim::new(INPUT_ID).request();
 }
 
-fn focus_by_id(id: &str) {
-    if let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(id))
-        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
-    {
-        let options = web_sys::FocusOptions::new();
-        options.set_prevent_scroll(true);
-        let _ = html.focus_with_options(&options);
-    }
+/// The box the file scrolls in: how big it is, where it is, and how far it has been scrolled.
+///
+/// Cached rather than read when wanted, because the pointer handlers that need it settle
+/// `prevent_default` before they return and cannot wait for an answer. Each part has an event that
+/// reports it — `onresize` for the size, `onscroll` for the offset — except the origin, which is
+/// asked for after each resize on the grounds that what moves this box is what resizes it.
+#[derive(Clone, Copy, Default, PartialEq)]
+struct ScrollBox {
+    size: (f64, f64),
+    origin: (f64, f64),
 }
 
-fn scroll_el() -> Option<web_sys::Element> {
-    web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(SCROLL_ID))
-}
-
-fn scroll_viewport_by(lines: i32, line_height: f64) {
-    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return;
-    };
-    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
-        return;
-    };
-    let restore_input_focus = document
-        .active_element()
-        .is_some_and(|element| element.id() == INPUT_ID);
-    if restore_input_focus
-        && let Some(input) = document
-            .get_element_by_id(INPUT_ID)
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        let _ = input.blur();
-    }
-    let top = scroll.scroll_top() as f64 + lines as f64 * line_height;
-    scroll.set_scroll_top(top.max(0.0).round() as i32);
-    if restore_input_focus {
-        focus_by_id(INPUT_ID);
-    }
-}
-
-fn scroll_note_caret_into_view(block_index: usize, line: u32) -> bool {
-    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return false;
-    };
-    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
-        return false;
-    };
-    let block_selector = format!("#note-block-{block_index}");
-    let caret = document
-        .get_element_by_id(NOTE_CARET_ID)
-        .filter(|caret| caret.closest(&block_selector).ok().flatten().is_some());
-    let exact = caret.is_some();
-    let Some(target) = caret
-        .or_else(|| document.get_element_by_id(&format!("note-line-{line}")))
-        .or_else(|| document.get_element_by_id(&format!("note-live-block-{block_index}")))
-        .or_else(|| document.get_element_by_id(&format!("note-block-{block_index}")))
-    else {
-        return false;
-    };
-    let viewport = scroll.get_bounding_client_rect();
-    let target = target.get_bounding_client_rect();
-    let delta = viewport_reveal_delta(
-        target.top(),
-        target.bottom(),
-        viewport.top(),
-        viewport.bottom(),
-    );
-    if delta.abs() >= 1.0 {
-        scroll.set_scroll_top((scroll.scroll_top() as f64 + delta).round() as i32);
-    }
-    exact
-}
-
-fn center_note_caret(block_index: usize, line: u32) {
-    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return;
-    };
-    let Some(scroll) = document.get_element_by_id(SCROLL_ID) else {
-        return;
-    };
-    let block_selector = format!("#note-block-{block_index}");
-    let caret = document
-        .get_element_by_id(NOTE_CARET_ID)
-        .filter(|caret| caret.closest(&block_selector).ok().flatten().is_some());
-    let Some(target) = caret
-        .or_else(|| document.get_element_by_id(&format!("note-line-{line}")))
-        .or_else(|| document.get_element_by_id(&format!("note-live-block-{block_index}")))
-        .or_else(|| document.get_element_by_id(&format!("note-block-{block_index}")))
-    else {
-        return;
-    };
-    let viewport = scroll.get_bounding_client_rect();
-    let target = target.get_bounding_client_rect();
-    let target_center =
-        scroll.scroll_top() as f64 + target.top() - viewport.top() + target.height() * 0.5;
-    let top = centered_scroll_top(target_center, viewport.height());
-    scroll.set_scroll_top(top.round() as i32);
-}
-
-fn schedule_note_caret_visibility() {
-    let Some(window) = web_sys::window() else {
-        NOTE_CARET_VISIBILITY_QUEUE.with(|queue| {
-            queue.borrow_mut().take();
-        });
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        let pending = NOTE_CARET_VISIBILITY_QUEUE.with(|queue| queue.borrow_mut().take());
-        if let Some(request) = pending
-            && !scroll_note_caret_into_view(request.block_index, request.line)
-            && request.retry
-        {
-            queue_note_caret_visibility(request.block_index, request.line, false);
+impl ScrollBox {
+    /// Tell the host how the file has to be laid out, if enough is known yet to say.
+    ///
+    /// Two elements answer for this and they answer separately — the measuring span when the font
+    /// finishes loading, this box when the pane changes size — so neither is a complete answer on
+    /// its own. Nothing goes out until both have arrived: a wrap width computed from a cell of
+    /// zero puts every line of the file on one row.
+    fn announce(self, cell: (f64, f64), total_lines: u32, mut last: Signal<FileResizeEvent>) {
+        let (cw, ch) = cell;
+        if cw <= 0.0 || ch <= 0.0 || self.size.0 <= 0.0 {
+            return;
         }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
+        let next = FileResizeEvent {
+            char_height: ch as f32,
+            viewport_height: self.size.1 as f32,
+            wrap_columns: ((self.size.0 - gutter_px(total_lines, cw) - 32.0).max(cw) / cw)
+                .floor()
+                .min(u16::MAX as f64) as u16,
+        };
+        let previous = last.peek().clone();
+        if (previous.char_height - next.char_height).abs() <= 0.01
+            && (previous.viewport_height - next.viewport_height).abs() <= 0.01
+            && previous.wrap_columns == next.wrap_columns
+        {
+            return;
+        }
+        last.set(next.clone());
+        let _ = send(&next);
     }
 }
 
-fn queue_note_caret_visibility(block_index: usize, line: u32, retry: bool) {
-    let should_schedule = NOTE_CARET_VISIBILITY_QUEUE.with(|queue| {
-        queue.borrow_mut().enqueue(NoteCaretVisibilityRequest {
-            block_index,
-            line,
-            retry,
-        })
-    });
-    if should_schedule {
-        schedule_note_caret_visibility();
+/// How wide the line-number gutter is, including the space between it and the text.
+fn gutter_px(total_lines: u32, char_width: f64) -> f64 {
+    gutter_width(total_lines) as f64 * char_width + 48.0
+}
+
+/// That box, the field that floats inside it, and the writes that are neither arithmetic nor CSS.
+///
+/// One type because the two elements are entangled: the field sits at the caret *within* the box,
+/// so a programmatic scroll has to let go of it first — an engine keeps a focused editable in view
+/// and would undo the scroll the moment it landed.
+#[derive(Clone, Copy)]
+struct FileViewport {
+    element: Signal<Option<Rc<MountedData>>>,
+    field: Signal<Option<Rc<MountedData>>>,
+    geometry: Signal<ScrollBox>,
+    /// Its own signal rather than a field of the box, so that scrolling — which happens every
+    /// frame of a drag — does not wake everything watching the box's size.
+    offset: Signal<(f64, f64)>,
+}
+
+impl FileViewport {
+    fn new() -> Self {
+        Self {
+            element: use_signal(|| None),
+            field: use_signal(|| None),
+            geometry: use_signal(ScrollBox::default),
+            offset: use_signal(|| (0.0, 0.0)),
+        }
+    }
+
+    fn scrolled_to(self, offset: (f64, f64)) {
+        let mut current = self.offset;
+        current.set(offset);
+    }
+
+    /// The box changed size, which is also the only thing that moves it.
+    fn resized(self, size: (f64, f64)) {
+        let mut geometry = self.geometry;
+        if geometry.peek().size == size {
+            return;
+        }
+        geometry.write().size = size;
+        self.locate();
+    }
+
+    fn mounted(self, element: Rc<MountedData>) {
+        let mut current = self.element;
+        current.set(Some(element));
+        self.locate();
+    }
+
+    fn field_mounted(self, element: Rc<MountedData>) {
+        let mut current = self.field;
+        current.set(Some(element));
+    }
+
+    /// Re-read where the box is and how big it is. A question, so it answers a frame later.
+    fn locate(self) {
+        spawn(async move {
+            let Some(element) = self.element.peek().clone() else {
+                return;
+            };
+            let Ok(rect) = element.get_client_rect().await else {
+                return;
+            };
+            let mut geometry = self.geometry;
+            let mut geometry = geometry.write();
+            geometry.origin = (rect.origin.x, rect.origin.y);
+            geometry.size = (rect.size.width, rect.size.height);
+        });
+    }
+
+    /// Scroll to an absolute offset, letting the field go first and taking it back after.
+    ///
+    /// A mode with no field has nothing to let go of, which is what keeps this from pulling focus
+    /// into a document that is only being read.
+    fn scroll_to(self, top: f64) {
+        spawn(async move {
+            let Some(element) = self.element.peek().clone() else {
+                return;
+            };
+            let field = self.field.peek().clone();
+            if let Some(field) = &field {
+                let _ = field.set_focus(false).await;
+            }
+            let _ = element
+                .scroll(
+                    PixelsVector2D::new(0.0, top.max(0.0)),
+                    ScrollBehavior::Instant,
+                )
+                .await;
+            if field.is_some() {
+                focus_file_input();
+            }
+        });
+    }
+
+    fn scroll_by(self, lines: i32, line_height: f64) {
+        let from = self.offset.peek().1;
+        self.scroll_to(from + lines as f64 * line_height);
+    }
+
+    fn reset(self) {
+        self.scroll_to(0.0);
+    }
+
+    /// Scroll the least that brings a row of the file into view.
+    fn reveal_row(self, row: u32, ch: f64) {
+        let geometry = *self.geometry.peek();
+        if ch <= 0.0 || geometry.size.1 <= 0.0 {
+            return;
+        }
+        let top = row as f64 * ch;
+        let from = self.offset.peek().1;
+        if top < from {
+            self.scroll_to(top);
+        } else if top + ch > from + geometry.size.1 {
+            self.scroll_to(top + ch - geometry.size.1);
+        }
+    }
+
+    fn center_row(self, row: u32, ch: f64) {
+        let geometry = *self.geometry.peek();
+        if ch <= 0.0 || geometry.size.1 <= 0.0 {
+            return;
+        }
+        self.scroll_to(centered_scroll_top(
+            row as f64 * ch + ch * 0.5,
+            geometry.size.1,
+        ));
+    }
+
+    /// Which line and column of the file a point on screen is over.
+    ///
+    /// Counted from the top of the scrolled content rather than of the viewport, which is why this
+    /// needs the box and a handler sitting on one line does not.
+    fn file_position(
+        self,
+        at: ClientPoint,
+        cell: (f64, f64),
+        total_lines: u32,
+        layouts: &[FileLineLayout],
+        wrap_columns: u16,
+        round: bool,
+    ) -> Option<(u32, u32)> {
+        let (cw, ch) = cell;
+        if cw <= 0.0 || ch <= 0.0 {
+            return None;
+        }
+        let geometry = *self.geometry.peek();
+        let offset = *self.offset.peek();
+        let row = ((at.y - geometry.origin.1 + offset.1).max(0.0) / ch).floor() as u32;
+        let layout = layouts
+            .iter()
+            .find(|layout| row >= layout.row && row < layout.row + layout.rows as u32)?;
+        let x = at.x - geometry.origin.0 + offset.0 - gutter_px(total_lines, cw);
+        let local = if round {
+            (x.max(0.0) / cw).round()
+        } else {
+            (x.max(0.0) / cw).floor()
+        } as u32;
+        let col = if wrap_columns == 0 {
+            local
+        } else {
+            (row - layout.row) * wrap_columns as u32 + local.min(wrap_columns as u32)
+        };
+
+        Some((layout.line_no, col))
+    }
+}
+
+/// Where to scroll to when the caret moves in note mode.
+///
+/// Four candidates, progressively coarser, because the caret's own span exists only while a block
+/// is being edited and the block only while it is on screen. Which of them the document holds is
+/// the host's to find out — the page rendered them all and knows no more than that.
+///
+/// Nothing retries. The retry existed because the caret might not have been rendered yet, and a
+/// request is applied after the batch that renders it.
+struct NoteCaretAnchor([String; 4]);
+
+impl NoteCaretAnchor {
+    fn of(block_index: usize, line: u32) -> Self {
+        Self([
+            NOTE_CARET_ID.to_string(),
+            format!("note-line-{line}"),
+            format!("note-live-block-{block_index}"),
+            format!("note-block-{block_index}"),
+        ])
+    }
+
+    fn reveal(&self) {
+        ScrollIntoView::first_rendered(&self.0.each_ref().map(String::as_str));
+    }
+
+    fn center(&self) {
+        ScrollIntoView::first_rendered_centered(&self.0.each_ref().map(String::as_str));
     }
 }
 
 fn ensure_note_caret_visible(block_index: usize, line: u32) {
-    queue_note_caret_visibility(block_index, line, true);
+    NoteCaretAnchor::of(block_index, line).reveal();
 }
 
-fn ensure_line_visible(line: u32, ch: f64) {
-    if ch <= 0.0 {
-        return;
-    }
-    let Some(el) = scroll_el() else {
-        return;
-    };
-    let view_h = el.client_height() as f64;
-    if view_h <= 0.0 {
-        return;
-    }
-    let top = line as f64 * ch;
-    let view_top = el.scroll_top() as f64;
-    if top < view_top {
-        el.set_scroll_top(top as i32);
-    } else if top + ch > view_top + view_h {
-        el.set_scroll_top((top + ch - view_h) as i32);
-    }
+fn center_note_caret(block_index: usize, line: u32) {
+    NoteCaretAnchor::of(block_index, line).center();
 }
 
-fn center_line(line: u32, ch: f64) {
-    if ch <= 0.0 {
+/// Hand the host what has been typed and empty the buffer it was typed into.
+///
+/// The field is a composition buffer rather than a value: an IME needs somewhere real to build a
+/// character, and what the page wants is the finished one.
+fn send_committed_text(text: String) {
+    if text.is_empty() {
         return;
     }
-    let Some(el) = scroll_el() else {
-        return;
-    };
-    let view_h = el.client_height() as f64;
-    if view_h <= 0.0 {
-        return;
-    }
-    let target_center = line as f64 * ch + ch * 0.5;
-    el.set_scroll_top(centered_scroll_top(target_center, view_h).round() as i32);
-}
-
-fn schedule_line_center(line: u32, ch: f64, retry: bool) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let callback = Closure::once_into_js(move || {
-        center_line(line, ch);
-        if retry {
-            schedule_line_center(line, ch, false);
-        }
-    })
-    .unchecked_into::<js_sys::Function>();
-    if window.request_animation_frame(&callback).is_err() {
-        let _ = callback.call0(&JsValue::NULL);
-    }
-}
-
-fn reset_file_scroll() {
-    if let Some(el) = scroll_el() {
-        el.set_scroll_top(0);
-    }
-}
-
-fn send_committed_text() {
-    if let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id(INPUT_ID))
-        .and_then(|e| e.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
-    {
-        let v = el.value();
-        if !v.is_empty() {
-            let _ = send(&FileTextInput { text: v });
-            el.set_value("");
-        }
-    }
+    let _ = send(&FileTextInput { text });
+    TextCaret::in_field(INPUT_ID).clear();
 }
 
 fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMode) -> bool {
@@ -4196,172 +3733,47 @@ fn forward_file_key(event: &Event<KeyboardData>, mode: vmux_core::editor::EditMo
     true
 }
 
-fn setup_measurement(
-    cell_dims: Signal<(f64, f64)>,
-    total_lines: Signal<u32>,
-    last_resize: Signal<FileResizeEvent>,
-    explorer_visible: Signal<bool>,
-    explorer_preferred_visible: Signal<bool>,
-    explorer_width: Signal<u32>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
-        return;
-    };
-
-    sync_explorer_visibility(explorer_visible, explorer_preferred_visible, explorer_width);
-    if document.get_element_by_id(MEASURE_ID).is_some() {
-        do_measure(cell_dims, total_lines, last_resize);
-        return;
-    }
-
-    let measure: web_sys::Element = document.create_element("span").unwrap();
-    measure
-        .set_attribute(
-            "style",
-            "position:absolute;visibility:hidden;white-space:pre;font:inherit",
-        )
-        .unwrap();
-    measure.set_attribute("id", MEASURE_ID).unwrap();
-    let measure_node: &web_sys::Node = measure.as_ref();
-    measure_node.set_text_content(Some(&"X".repeat(80)));
-    container.append_child(&measure).unwrap();
-
-    do_measure(cell_dims, total_lines, last_resize);
-
-    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        sync_explorer_visibility(explorer_visible, explorer_preferred_visible, explorer_width);
-        do_measure(cell_dims, total_lines, last_resize);
-    }) as Box<dyn FnMut(JsValue)>);
-
-    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
-        observer.observe(&container);
-        observer.observe(&measure);
-        std::mem::forget(observer);
-    }
-    callback.forget();
-}
-
-/// Emit the current on-screen rect of the native video host element so the backend
-/// can position the `AVPlayer` overlay over it.
-fn emit_video_rect(path: &str) {
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
-        return;
-    };
-    let rect = el.get_bounding_client_rect();
-    if rect.width() <= 0.0 || rect.height() <= 0.0 {
-        return;
-    }
-    let _ = send(&FileVideoRect {
-        path: path.to_string(),
-        x: rect.left() as f32,
-        y: rect.top() as f32,
-        w: rect.width() as f32,
-        h: rect.height() as f32,
+/// Where the host draws the native video overlay.
+///
+/// Reported rather than rendered: the frames belong to an `AVPlayer` the host puts over the page,
+/// so all the page contributes is the rectangle to put it in. Asked for again on every resize,
+/// since moving a pane is also resizing it.
+#[component]
+fn NativeVideoHost(path: String) -> Element {
+    let mut element = use_signal(|| None::<Rc<MountedData>>);
+    let reported = path.clone();
+    let report = use_callback(move |()| {
+        let path = reported.clone();
+        spawn(async move {
+            let Some(element) = element.peek().clone() else {
+                return;
+            };
+            let Ok(rect) = element.get_client_rect().await else {
+                return;
+            };
+            if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+                return;
+            }
+            let _ = send(&FileVideoRect {
+                path,
+                x: rect.origin.x as f32,
+                y: rect.origin.y as f32,
+                w: rect.size.width as f32,
+                h: rect.size.height as f32,
+            });
+        });
     });
-}
 
-/// Report the video host rect now and on every subsequent resize (window/layout),
-/// keeping the native overlay aligned with the page element.
-fn report_video_rect(path: String) {
-    emit_video_rect(&path);
-    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
-        return;
-    };
-    let Some(el) = document.get_element_by_id(VIDEO_HOST_ID) else {
-        return;
-    };
-    let callback = Closure::wrap(Box::new(move |_entries: JsValue| {
-        emit_video_rect(&path);
-    }) as Box<dyn FnMut(JsValue)>);
-    if let Ok(observer) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
-        observer.observe(&el);
-        std::mem::forget(observer);
+    rsx! {
+        div {
+            key: "{path}",
+            id: VIDEO_HOST_ID,
+            class: "h-full w-full rounded-xl bg-black/40 ring-1 ring-cyan-400/20",
+            onmounted: move |event: Event<MountedData>| {
+                element.set(Some(event.data()));
+                report.call(());
+            },
+            onresize: move |_| report.call(()),
+        }
     }
-    callback.forget();
-}
-
-fn do_measure(
-    mut cell_dims: Signal<(f64, f64)>,
-    total_lines: Signal<u32>,
-    mut last_resize: Signal<FileResizeEvent>,
-) {
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let Some(document) = window.document() else {
-        return;
-    };
-    let Some(container) = document.get_element_by_id(CONTAINER_ID) else {
-        return;
-    };
-    let Some(measure) = document.get_element_by_id(MEASURE_ID) else {
-        return;
-    };
-
-    let rect = measure.get_bounding_client_rect();
-    let cw = rect.width() / 80.0;
-
-    let ch = window
-        .get_computed_style(&container)
-        .ok()
-        .flatten()
-        .and_then(|cs| {
-            cs.get_property_value("line-height")
-                .ok()
-                .and_then(|s| s.trim_end_matches("px").parse::<f64>().ok())
-        })
-        .unwrap_or(rect.height());
-
-    if cw <= 0.0 || ch <= 0.0 {
-        return;
-    }
-
-    let previous_dims = cell_dims();
-    if (previous_dims.0 - cw).abs() > 0.01 || (previous_dims.1 - ch).abs() > 0.01 {
-        cell_dims.set((cw, ch));
-    }
-
-    let html: &web_sys::HtmlElement = container.unchecked_ref();
-    let _ = html.style().set_property("--cw", &format!("{cw}px"));
-    let _ = html.style().set_property("--ch", &format!("{ch}px"));
-
-    let scroll = document.get_element_by_id(SCROLL_ID);
-    let vh = scroll
-        .as_ref()
-        .map(|element| element.client_height() as f64)
-        .filter(|h| *h > 0.0)
-        .unwrap_or_else(|| container.client_height() as f64);
-    let vw = scroll
-        .as_ref()
-        .map(|element| element.client_width() as f64)
-        .filter(|width| *width > 0.0)
-        .unwrap_or_else(|| container.client_width() as f64);
-    let gutter = gutter_width(total_lines()) as f64 * cw + 48.0;
-    let wrap_columns = ((vw - gutter - 32.0).max(cw) / cw)
-        .floor()
-        .min(u16::MAX as f64) as u16;
-
-    let next = FileResizeEvent {
-        char_height: ch as f32,
-        viewport_height: vh as f32,
-        wrap_columns,
-    };
-    let previous = last_resize();
-    if (previous.char_height - next.char_height).abs() <= 0.01
-        && (previous.viewport_height - next.viewport_height).abs() <= 0.01
-        && previous.wrap_columns == next.wrap_columns
-    {
-        return;
-    }
-    last_resize.set(next.clone());
-    let _ = send(&next);
 }

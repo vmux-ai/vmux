@@ -180,6 +180,15 @@ pub static CHAT_PAGE: NativePage =
 #[cfg(target_os = "macos")]
 pub static LSP_PAGE: NativePage = NativePage::pane("vmux://lsp/", vmux_editor::lsp_page::Page);
 
+/// A file, or the directory holding one.
+///
+/// The second page after chat to claim a subtree rather than a url, and for the same reason:
+/// `file:///path` names what is open, so one page answers unboundedly many urls. Which file a view
+/// is showing is the `FileView` on its entity and the events addressed to it, never the document.
+#[cfg(target_os = "macos")]
+pub static FILES_PAGE: NativePage =
+    NativePage::pane("file://", vmux_editor::page::Page).owning_subtree();
+
 /// A pty.
 ///
 /// Every terminal view loads this same url. Which pty a view is showing is the `Terminal` on its

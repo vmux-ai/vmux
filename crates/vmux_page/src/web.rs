@@ -55,7 +55,6 @@ macro_rules! web_pages {
 }
 
 web_pages! {
-    render_files: "files" => vmux_editor::page::Page,
     render_vault: "vault" => vmux_layout::vault_page::Page,
 }
 

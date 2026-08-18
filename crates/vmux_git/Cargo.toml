@@ -30,6 +30,8 @@ two-face = { version = "0.5", default-features = false, features = ["syntect-fan
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dev-dependencies]
 tempfile = "3"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
+# manifest cannot use it.
+[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../vmux_ui", default-features = false }

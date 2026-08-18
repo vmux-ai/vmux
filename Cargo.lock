@@ -10841,6 +10841,7 @@ name = "vmux_editor"
 version = "0.0.30"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "bevy",
  "bevy_cef",
  "bevy_ecs",
@@ -10848,7 +10849,6 @@ dependencies = [
  "dioxus",
  "flate2",
  "image",
- "js-sys",
  "lsp-types",
  "notify",
  "percent-encoding",
@@ -10877,8 +10877,6 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
- "wasm-bindgen",
- "web-sys",
  "zip",
 ]
 
@@ -11070,7 +11068,6 @@ dependencies = [
  "vmux_agent",
  "vmux_command",
  "vmux_core",
- "vmux_editor",
  "vmux_layout",
  "vmux_service",
  "vmux_setting",

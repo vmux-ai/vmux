@@ -9,12 +9,14 @@ use crate::page_model::merge_tree_motion_rows;
 use dioxus::prelude::*;
 use vmux_core::event::*;
 use vmux_ui::file_icon::TypeIcon;
+use vmux_ui::focus::FocusClaim;
 use vmux_ui::hooks::{send, use_listener};
 use vmux_ui::i18n::{TranslationValue, translate, translate_with};
-use wasm_bindgen::{JsCast, closure::Closure};
+use vmux_ui::platform::sleep_ms;
+use vmux_ui::scroll::ScrollIntoView;
 
-const TREE_MOTION_MS: i32 = 170;
-const NOTICE_MS: i32 = 2400;
+const TREE_MOTION_MS: u32 = 170;
+const NOTICE_MS: u32 = 2400;
 
 #[derive(Clone, PartialEq)]
 struct MotionRow {
@@ -113,26 +115,6 @@ fn delete_entry(path: String) {
     let _ = send(&ExplorerDelete { path });
 }
 
-fn menu_position(x: f64, y: f64) -> (f64, f64) {
-    let Some(window) = web_sys::window() else {
-        return (x, y);
-    };
-    let width = window
-        .inner_width()
-        .ok()
-        .and_then(|value| value.as_f64())
-        .unwrap_or(x + 200.0);
-    let height = window
-        .inner_height()
-        .ok()
-        .and_then(|value| value.as_f64())
-        .unwrap_or(y + 240.0);
-    (
-        x.min((width - 190.0).max(8.0)),
-        y.min((height - 220.0).max(8.0)),
-    )
-}
-
 fn tree_row_id(path: &str) -> String {
     let hash = path
         .as_bytes()
@@ -146,31 +128,17 @@ fn tree_row_id(path: &str) -> String {
 fn schedule_tree_focus(path: String, mut generation: Signal<u32>) {
     let id = generation().wrapping_add(1);
     generation.set(id);
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let focus = Closure::once(move || {
+    spawn(async move {
+        // Past the end of the motion, because a row revealed while it is still sliding is scrolled
+        // to where it was rather than to where it is going.
+        sleep_ms(TREE_MOTION_MS + 20).await;
         if generation() != id {
             return;
         }
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&tree_row_id(&path)))
-        else {
-            return;
-        };
-        let options = web_sys::ScrollIntoViewOptions::new();
-        options.set_block(web_sys::ScrollLogicalPosition::Nearest);
-        element.scroll_into_view_with_scroll_into_view_options(&options);
-        if let Ok(element) = element.dyn_into::<web_sys::HtmlElement>() {
-            let _ = element.focus();
-        }
+        let row = tree_row_id(&path);
+        ScrollIntoView::nearest(&row);
+        FocusClaim::new(row).request();
     });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        focus.as_ref().unchecked_ref(),
-        TREE_MOTION_MS + 20,
-    );
-    focus.forget();
 }
 
 fn cancel_tree_focus(mut generation: Signal<u32>) {
@@ -196,47 +164,31 @@ fn reconcile_rows(
         .map(|(row, visible)| MotionRow { row, visible })
         .collect();
     rows.set(merged);
-    if let Some(window) = web_sys::window() {
-        let enter_paths = next_paths;
-        let enter = Closure::once(move || {
-            if generation() != id {
-                return;
+    spawn(async move {
+        // A turn before anything is opened, so the new rows reach the document closed: one that
+        // appears already visible has no transition left to run.
+        sleep_ms(0).await;
+        if generation() != id {
+            return;
+        }
+        let mut opening = rows.read().clone();
+        for item in &mut opening {
+            if next_paths.contains(&item.row.path) {
+                item.visible = true;
             }
-            let mut current = rows.read().clone();
-            for item in &mut current {
-                if enter_paths.contains(&item.row.path) {
-                    item.visible = true;
-                }
-            }
-            rows.set(current);
-        });
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            enter.as_ref().unchecked_ref(),
-            0,
-        );
-        enter.forget();
+        }
+        rows.set(opening);
 
-        let settle = Closure::once(move || {
-            if generation() == id {
-                rows.set(
-                    next.into_iter()
-                        .map(|row| MotionRow { row, visible: true })
-                        .collect(),
-                );
-            }
-        });
-        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-            settle.as_ref().unchecked_ref(),
-            TREE_MOTION_MS,
-        );
-        settle.forget();
-    } else {
+        sleep_ms(TREE_MOTION_MS).await;
+        if generation() != id {
+            return;
+        }
         rows.set(
             next.into_iter()
                 .map(|row| MotionRow { row, visible: true })
                 .collect(),
         );
-    }
+    });
 }
 
 fn show_notice(
@@ -247,19 +199,12 @@ fn show_notice(
     let id = generation().wrapping_add(1);
     generation.set(id);
     notice.set(Some(value));
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let clear = Closure::once(move || {
+    spawn(async move {
+        sleep_ms(NOTICE_MS).await;
         if generation() == id {
             notice.set(None);
         }
     });
-    let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
-        clear.as_ref().unchecked_ref(),
-        NOTICE_MS,
-    );
-    clear.forget();
 }
 
 fn submit_prompt(mut prompt: Signal<Option<TreePrompt>>, draft: Signal<String>) {
@@ -520,7 +465,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                     oncontextmenu: move |e: Event<MouseData>| {
                         e.prevent_default();
                         let coordinates = e.client_coordinates();
-                        let (x, y) = menu_position(coordinates.x, coordinates.y);
+                        let (x, y) = (coordinates.x, coordinates.y);
                         menu.set(Some(TreeMenu {
                             path: root_path(),
                             name: root_name(),
@@ -577,7 +522,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                                                     e.prevent_default();
                                                     e.stop_propagation();
                                                     let coordinates = e.client_coordinates();
-                                                    let (x, y) = menu_position(coordinates.x, coordinates.y);
+                                                    let (x, y) = (coordinates.x, coordinates.y);
                                                     menu.set(Some(TreeMenu {
                                                         path: path_menu.clone(),
                                                         name: name_menu.clone(),
@@ -644,7 +589,7 @@ pub fn ExplorerPanel(visible: Signal<bool>) -> Element {
                 }
                 div {
                     class: "fixed z-[999] min-w-[180px] origin-top-left animate-[dx-fade-zoom-in_120ms_ease-out_forwards] rounded-lg bg-background p-1 text-xs text-foreground shadow-[0_12px_40px_rgba(0,0,0,0.28),inset_0_0_0_1px_var(--border)]",
-                    style: "left:{current.x}px;top:{current.y}px;",
+                    style: "left:clamp(8px, {current.x}px, 100dvw - 190px);top:clamp(8px, {current.y}px, 100dvh - 220px);",
                     onclick: move |e| e.stop_propagation(),
                     if current.is_dir {
                         button {

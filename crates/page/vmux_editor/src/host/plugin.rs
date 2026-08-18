@@ -531,8 +531,7 @@ fn new_file_view_bundle(url: &str, path: PathBuf) -> impl Bundle {
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(url),
-            ResolvedWebviewUri(url.to_string()),
+            vmux_core::host::page::HostsPage,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
