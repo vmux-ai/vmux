@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_cef::prelude::{
-    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget, WebviewSource,
+    BinEventEmitterPlugin, BinHostEmitEvent, BinReceive, Browsers, CefKeyboardTarget,
 };
 use vmux_command::event::{CommandBarOpenEvent, CommandBarPromptContext, OpenId};
 use vmux_command::open_target::OpenTarget;
@@ -278,6 +278,12 @@ fn drain_start_workspace_pickers(
 /// start page when a launcher snapshot changed this frame, or when newly ready and not yet synced
 /// (covers panes that spawn before the start page's CEF is ready). Uses [`OpenId::NONE`],
 /// which does not reset the palette's input/selection.
+///
+/// Found by `PageMetadata` rather than `WebviewSource`, for the reason given on
+/// [`mark_start_pages_as_launcher_hosts`]: the launcher runs in this process and has no source, so
+/// the old query matched nothing and the payload it was built from went out once and never again.
+/// `CefKeyboardTarget` still applies — `Browser::native_page` keeps the `Browser` marker the
+/// keyboard router looks for.
 fn sync_live_start_pages(
     tab_gather: TabGatherParams,
     prompt_context: StartPromptContextParams,
@@ -291,7 +297,7 @@ fn sync_live_start_pages(
     starts: Query<
         (
             Entity,
-            &WebviewSource,
+            &PageMetadata,
             Has<StartWorkSynced>,
             Has<CefKeyboardTarget>,
         ),
@@ -333,9 +339,8 @@ fn sync_live_start_pages(
         .unwrap_or_else(Locale::preferred);
     let targets: Vec<(Entity, bool)> = starts
         .iter()
-        .filter_map(|(e, src, synced, keyboard_target)| {
-            let WebviewSource(url) = src;
-            if !url.starts_with(START_PAGE_URL) {
+        .filter_map(|(e, meta, synced, keyboard_target)| {
+            if !meta.url.starts_with(START_PAGE_URL) {
                 return None;
             }
             if !browsers.can_emit_to(&e) {
