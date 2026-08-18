@@ -85,7 +85,7 @@ impl SurfaceDom {
         Self {
             page: Rc::new(RefCell::new(PageDom::mount(component, instance))),
             host,
-            reactor: Rc::new(Self::reactor()),
+            reactor: Self::reactor(),
             waker: embed.waker.clone(),
             caret,
             listeners,
@@ -96,7 +96,7 @@ impl SurfaceDom {
         }
     }
 
-    /// A reactor for the futures the page spawns.
+    /// The reactor for the futures pages spawn, shared by every page on this thread.
     ///
     /// `vmux_ui::platform::sleep_ms` is `tokio::time::sleep` off the web, and a page has plenty of
     /// reasons to wait — the palette debounces its host search, the layout defers work by a turn.
@@ -105,13 +105,23 @@ impl SurfaceDom {
     ///
     /// One worker, and it exists to drive timers rather than to run work: a current-thread runtime
     /// would let a sleep register and then never wake it, because nothing would be driving it.
-    fn reactor() -> tokio::runtime::Runtime {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_time()
-            .thread_name("vmux-page")
-            .build()
-            .expect("a reactor for a page's timers")
+    ///
+    /// Shared, because one per page is a worker thread per page and a pane is a page. They can only
+    /// ever want the same timers driven: every page runs on this thread. It also outlives them,
+    /// which closing a pane wants — dropping a runtime blocks until its workers stop.
+    fn reactor() -> Rc<tokio::runtime::Runtime> {
+        thread_local! {
+            static REACTOR: Rc<tokio::runtime::Runtime> = Rc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(1)
+                    .enable_time()
+                    .thread_name("vmux-page")
+                    .build()
+                    .expect("a reactor for a page's timers"),
+            );
+        }
+
+        REACTOR.with(Rc::clone)
     }
 
     /// The page reported that its interpreter is initialized and holding a root.
