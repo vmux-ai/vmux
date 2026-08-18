@@ -11059,7 +11059,6 @@ dependencies = [
  "vmux_layout",
  "vmux_service",
  "vmux_setting",
- "vmux_space",
  "vmux_terminal",
  "vmux_ui",
  "web-sys",

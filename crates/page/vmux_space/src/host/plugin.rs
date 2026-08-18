@@ -4,8 +4,8 @@ use bevy::{ecs::message::MessageReader, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
 use vmux_core::page::PageReady;
 use vmux_core::{PageMetadata, PageOpenRequest, PageOpenTarget};
+use vmux_layout::native_open::HostedPagePlugin;
 use vmux_layout::stack::Stack;
-use vmux_layout::warm_page::WarmPagePlugin;
 use vmux_layout::{TabLayoutSpawnContent, TabLayoutSpawnRequest};
 
 use crate::event::{
@@ -20,7 +20,6 @@ pub struct SpacePlugin;
 impl Plugin for SpacePlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn(crate::PAGE_MANIFEST);
-        vmux_core::register_host_spawn(app, "spaces");
         app.add_plugins(vmux_layout::LayoutContractPlugin)
             .init_resource::<ActiveSpace>()
             .add_message::<SaveSpaceRequest>()
@@ -56,7 +55,7 @@ impl Plugin for SpacePlugin {
                 respond_spaces_spawn.in_set(vmux_command::ReadAppCommands),
             )
             .add_plugins((
-                WarmPagePlugin::<Spaces>::default(),
+                HostedPagePlugin::<Spaces>::default(),
                 super::key::SpaceKeyPlugin,
                 crate::snapshot_updater::SpaceSnapshotPlugin,
                 BinEventEmitterPlugin::<(SpaceCommandEvent,)>::for_hosts(&["spaces", "layout"]),

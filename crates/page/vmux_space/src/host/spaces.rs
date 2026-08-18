@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_cef::prelude::*;
 use vmux_core::PageMetadata;
 use vmux_layout::cef::Browser;
-use vmux_layout::warm_page::WarmPage;
+use vmux_layout::native_open::HostedPage;
 
 use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
@@ -24,7 +24,7 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
     )
 }
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub struct Spaces;
 
 impl Spaces {
@@ -59,14 +59,10 @@ impl Spaces {
     }
 }
 
-impl WarmPage for Spaces {
+impl HostedPage for Spaces {
     const HOST: &'static str = "spaces";
     const URL: &'static str = SPACES_PAGE_URL;
     const TITLE: &'static str = "Spaces";
-
-    fn spawn(commands: &mut Commands) -> Entity {
-        commands.spawn(Spaces::new()).id()
-    }
 }
 
 #[cfg(test)]

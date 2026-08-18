@@ -149,6 +149,11 @@ pub static SERVICES_PAGE: NativePage = NativePage::pane(
     vmux_service::page::Page,
 );
 
+/// The workspaces a window can switch between.
+#[cfg(target_os = "macos")]
+pub static SPACES_PAGE: NativePage =
+    NativePage::pane(vmux_wire::space::SPACES_PAGE_URL, vmux_space::page::Page);
+
 /// Where a native page's view goes.
 ///
 /// Not how it looks: whether a page is see-through is the page's own
