@@ -176,6 +176,17 @@ pub static AGENTS_PAGE: NativePage = NativePage::pane("vmux://agents/", vmux_age
 pub static CHAT_PAGE: NativePage =
     NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree();
 
+/// A pty.
+///
+/// Every terminal view loads this same url. Which pty a view is showing is the `Terminal` on its
+/// entity and the events addressed to it, never anything in the document — which is why this page
+/// needs no subtree and no per-view context.
+#[cfg(target_os = "macos")]
+pub static TERMINAL_PAGE: NativePage = NativePage::pane(
+    vmux_terminal::event::TERMINAL_PAGE_URL,
+    vmux_terminal::page::Page,
+);
+
 /// The app's settings.
 #[cfg(target_os = "macos")]
 pub static SETTINGS_PAGE: NativePage = NativePage::pane(

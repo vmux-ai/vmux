@@ -1,7 +1,7 @@
 [package]
 name = "vmux_terminal"
 build = "../../build_cfg.rs"
-description = "Bevy + CEF + Dioxus terminal webview"
+description = "Bevy + Dioxus terminal"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -13,10 +13,12 @@ default = []
 path = "src/lib.rs"
 
 [dependencies]
+dioxus = { workspace = true }
 serde = { workspace = true }
 rkyv = { workspace = true }
 unicode-width = "0.2"
 vmux_core = { path = "../../vmux_core" }
+vmux_ui = { path = "../../vmux_ui", default-features = false }
 
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
 vmux_clipboard = { path = "../../vmux_clipboard" }
@@ -41,16 +43,3 @@ tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { workspace = true }
-js-sys = "0.3"
-vmux_ui = { path = "../../vmux_ui", default-features = false }
-wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = [
-    "Window", "Document", "Element", "HtmlElement", "Node",
-    "DomRect", "CssStyleDeclaration",
-    "ResizeObserver", "ResizeObserverEntry",
-    "MouseEvent", "WheelEvent",
-    "HtmlCanvasElement", "CanvasRenderingContext2d", "MediaQueryList",
-] }

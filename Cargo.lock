@@ -11073,7 +11073,6 @@ dependencies = [
  "vmux_layout",
  "vmux_service",
  "vmux_setting",
- "vmux_terminal",
  "vmux_ui",
  "web-sys",
 ]
@@ -11269,7 +11268,6 @@ dependencies = [
  "bevy_cef",
  "bevy_ecs",
  "dioxus",
- "js-sys",
  "libc",
  "portable-pty",
  "rfd 0.15.4",
@@ -11290,8 +11288,6 @@ dependencies = [
  "vmux_setting",
  "vmux_space",
  "vmux_ui",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]

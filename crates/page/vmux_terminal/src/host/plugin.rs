@@ -736,8 +736,8 @@ fn new_terminal_bundle_with_cwd_and_shell(
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_PAGE_URL),
-            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
+            WebviewWindowed,
+            vmux_core::host::page::HostsPage,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
@@ -824,8 +824,8 @@ pub fn reattach_terminal_bundle(process_id: ProcessId) -> impl Bundle {
                 icon: vmux_core::PageIcon::None,
                 bg_color: None,
             },
-            WebviewSource::new(TERMINAL_PAGE_URL),
-            ResolvedWebviewUri(TERMINAL_PAGE_URL.to_string()),
+            WebviewWindowed,
+            vmux_core::host::page::HostsPage,
         ),
         (
             WebviewSize(Vec2::new(1280.0, 720.0)),
