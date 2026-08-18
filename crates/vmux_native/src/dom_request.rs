@@ -62,6 +62,24 @@ pub(crate) enum DomRequest {
         block: &'static str,
         inline: &'static str,
     },
+    /// The one request that wants an answer, which comes back over IPC against `token`.
+    MeasureNode {
+        node: usize,
+        token: u64,
+        what: Measure,
+    },
+}
+
+/// Which of an element's numbers a page was asked for.
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Measure {
+    /// Where the element is on screen, and how big.
+    Rect,
+    /// How big its content is, including what overflows.
+    ScrollSize,
+    /// How far its content is scrolled.
+    ScrollOffset,
 }
 
 impl DomRequest {
@@ -92,6 +110,14 @@ impl DomRequest {
             behavior: Self::behaviour(options.behavior),
             block: Self::alignment(options.vertical),
             inline: Self::alignment(options.horizontal),
+        }
+    }
+
+    pub(crate) fn measure_node(node: ElementId, token: u64, what: Measure) -> Self {
+        Self::MeasureNode {
+            node: node.0,
+            token,
+            what,
         }
     }
 

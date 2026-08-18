@@ -77,6 +77,21 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
   // Everything the host may ask to be done to an element, and nothing else. The host queues these
   // as data and the page collects them here once a batch has landed, so no statement composed on
   // the Rust side is ever evaluated.
+  // Four numbers, or none at all. The interpreter's own getters, so the node ids agree with the
+  // ones the host queued and nothing here has to find an element for itself.
+  const measureNode = (node, what) => {
+    const i = window.interpreter;
+    if (what === 'rect') {
+      const rect = i.getClientRect(node);
+      return rect ? [rect.origin[0], rect.origin[1], rect.size[0], rect.size[1]] : [];
+    }
+    const pair =
+      what === 'scrollSize'
+        ? [i.getScrollWidth(node), i.getScrollHeight(node)]
+        : [i.getScrollLeft(node), i.getScrollTop(node)];
+
+    return pair.some((n) => n === undefined) ? [] : [pair[0], pair[1], 0, 0];
+  };
   const applyDomRequest = (request) => {
     // A request naming a node rather than an id came from a component holding a MountedData, and
     // what it wants is a method the interpreter already has for the node it assigned.
@@ -93,6 +108,13 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           block: request.block,
           inline: request.inline,
         });
+        return;
+      // The only request that answers. An empty list says the node was gone by the time we looked,
+      // which the host turns back into a refusal rather than into a measurement of zero.
+      case 'measureNode':
+        window.ipc.postMessage(
+          'measured:' + request.token + ':' + measureNode(request.node, request.what).join(','),
+        );
         return;
     }
     const el = document.getElementById(request.element);

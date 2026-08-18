@@ -51,6 +51,8 @@ mod event_selection;
 #[cfg(target_os = "macos")]
 mod frame;
 #[cfg(target_os = "macos")]
+mod measurement;
+#[cfg(target_os = "macos")]
 mod report;
 #[cfg(target_os = "macos")]
 mod route;

@@ -26,6 +26,7 @@ use crate::dom_request::{DomRequest, RequestQueue};
 use crate::embed::{Embedding, Outbox, Wake};
 use crate::event_selection::EventSelection;
 use crate::frame::PageFrame;
+use crate::measurement::PendingReads;
 use crate::surface_element::SurfaceElement;
 use crate::{EventOutcome, EventRequest, PageDom};
 
@@ -40,6 +41,8 @@ pub(crate) struct SurfaceDom {
     selection: Rc<RefCell<EventSelection>>,
     listeners: Listeners,
     requests: RequestQueue,
+    /// The questions mounted components have asked about their elements.
+    reads: PendingReads,
     /// The first batch has been sent.
     mounted: Rc<Cell<bool>>,
     /// The page's standing request for the next batch, waiting for a render to produce one.
@@ -68,6 +71,7 @@ impl SurfaceDom {
     ) -> Self {
         let listeners: Listeners = Rc::new(RefCell::new(HashMap::new()));
         let requests = RequestQueue::default();
+        let reads = PendingReads::default();
         let selection: Rc<RefCell<EventSelection>> = Rc::default();
         let host: Rc<dyn PageHost> = Rc::new(SurfaceHost {
             outbox: embed.outbox.clone(),
@@ -84,6 +88,7 @@ impl SurfaceDom {
             selection,
             listeners,
             requests,
+            reads,
             mounted: Rc::new(Cell::new(false)),
             parked: Rc::new(RefCell::new(None)),
         }
@@ -115,6 +120,11 @@ impl SurfaceDom {
         }
 
         REACTOR.with(Rc::clone)
+    }
+
+    /// The questions in flight, for whatever hears the page answer them.
+    pub(crate) fn reads(&self) -> PendingReads {
+        self.reads.clone()
     }
 
     /// The page applied the batch it was last given.
@@ -275,7 +285,7 @@ impl SurfaceDom {
         // Held for the handler and no longer, so a component reading it from anywhere else finds
         // nothing rather than a stale answer wearing the face of a current one.
         *self.selection.borrow_mut() = selection;
-        let element = SurfaceElement::new(event.element, self.requests.clone());
+        let element = SurfaceElement::new(event.element, self.requests.clone(), self.reads.clone());
         let outcome = page.handle(event, element);
         *self.selection.borrow_mut() = EventSelection::default();
         drop(page);
