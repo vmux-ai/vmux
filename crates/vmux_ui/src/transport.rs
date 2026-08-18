@@ -173,8 +173,11 @@ impl Host {
 
     /// Whether a page hosted here can hand a stroke over and be told what it meant.
     ///
-    /// Not cfg'd, unlike the capabilities above: every target has some host that may or may not
-    /// hold a keymap, and a page with a local fallback asks before choosing which to use.
+    /// `ui` rather than `not(web)`, unlike the capabilities above: the question is not which
+    /// frontend a page draws with but whether it draws at all, since only a page asks it. Every
+    /// `ui` target has some host that may or may not hold a keymap, and a page with a local
+    /// fallback asks before choosing which to use.
+    #[cfg(ui)]
     pub(crate) fn resolves_keys() -> bool {
         Self::with_installed(|host| host.resolves_keys()).unwrap_or(false)
     }
