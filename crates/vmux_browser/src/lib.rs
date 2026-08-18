@@ -123,6 +123,7 @@ impl Plugin for BrowserPlugin {
             native_page::NativePagePlugin::in_pane(&native_page::START_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::HISTORY_PAGE),
             native_page::NativePagePlugin::in_pane(&native_page::TEAM_PAGE),
+            native_page::NativePagePlugin::in_pane(&native_page::AGENTS_PAGE),
         ));
         let mut manifests = app.world_mut().query::<&PageManifest>();
         let embedded_hosts = CefEmbeddedHosts(

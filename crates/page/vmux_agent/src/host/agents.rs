@@ -15,7 +15,7 @@ use crate::event::{
     AgentsOpen, AgentsUninstall,
 };
 use vmux_core::agent::AgentKind;
-use vmux_core::page::PrewarmPage;
+use vmux_core::host::page::NativelyHosted;
 
 pub struct AgentsManagerPlugin;
 
@@ -23,13 +23,13 @@ impl Plugin for AgentsManagerPlugin {
     fn build(&self, app: &mut App) {
         app.world_mut().spawn((
             PAGE_MANIFEST,
-            PrewarmPage {
-                host: "agents",
+            NativelyHosted {
                 url: "vmux://agents/",
                 title: "Agents",
-                pool_size: 1,
             },
         ));
+        // This page has no marker of its own, so it declares itself rather than going through
+        // `HostedPagePlugin`, and nothing else would register the host for it.
         vmux_core::register_host_spawn(app, "agents");
         app.init_resource::<AgentsPageWebviews>()
             .init_resource::<AgentsStatus>()
@@ -404,7 +404,7 @@ fn push_agents(
         .unwrap_or(&[]);
     let payload = catalog_snapshot(&catalog, &status, acp_configs, &versions);
     for &webview in &webviews.0 {
-        if !browsers.has_browser(webview) || !browsers.host_emit_ready(&webview) {
+        if !browsers.can_emit_to(&webview) {
             continue;
         }
         commands.trigger(BinHostEmitEvent::from_rkyv(

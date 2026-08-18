@@ -33,6 +33,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 tungstenite = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
+vmux_agent = { path = "../page/vmux_agent" }
 vmux_command = { path = "../page/vmux_command" }
 vmux_core = { path = "../vmux_core" }
 vmux_flex = { path = "../vmux_flex" }
