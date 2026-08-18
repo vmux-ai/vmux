@@ -176,6 +176,10 @@ pub static AGENTS_PAGE: NativePage = NativePage::pane("vmux://agents/", vmux_age
 pub static CHAT_PAGE: NativePage =
     NativePage::pane("vmux://agent/", vmux_chat::page::Page).owning_subtree();
 
+/// The language servers that can be installed and run.
+#[cfg(target_os = "macos")]
+pub static LSP_PAGE: NativePage = NativePage::pane("vmux://lsp/", vmux_editor::lsp_page::Page);
+
 /// A pty.
 ///
 /// Every terminal view loads this same url. Which pty a view is showing is the `Terminal` on its
