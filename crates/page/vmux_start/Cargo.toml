@@ -20,12 +20,10 @@ dioxus-primitives = { git = "https://github.com/DioxusLabs/components", package 
 rkyv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-vmux_ui = { path = "../../vmux_ui" }
-vmux_wire = { path = "../../vmux_wire" }
-
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
 vmux_command = { path = "../vmux_command" }
 vmux_core = { path = "../../vmux_core" }
+vmux_ui = { path = "../../vmux_ui" }
+vmux_wire = { path = "../../vmux_wire" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
