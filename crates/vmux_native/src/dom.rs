@@ -20,7 +20,7 @@ use std::rc::Rc;
 
 use tracing::{error, warn};
 use vmux_ui::hooks::EventListenerError;
-use vmux_ui::transport::{BytesListener, HostScope, PageHost};
+use vmux_ui::transport::{BytesListener, HostScope, PageHost, TextOffsetAnswer};
 
 use crate::dom_request::{DomRequest, RequestQueue};
 use crate::embed::{Embedding, Outbox, Wake};
@@ -77,6 +77,7 @@ impl SurfaceDom {
             outbox: embed.outbox.clone(),
             listeners: listeners.clone(),
             requests: requests.clone(),
+            reads: reads.clone(),
             selection: selection.clone(),
         });
 
@@ -327,6 +328,7 @@ struct SurfaceHost {
     outbox: Rc<dyn Outbox>,
     listeners: Listeners,
     requests: RequestQueue,
+    reads: PendingReads,
     /// Only ever read while [`SurfaceDom::handle_event`] holds it, which is the only time a page
     /// can meaningfully ask.
     selection: Rc<RefCell<EventSelection>>,
@@ -364,6 +366,31 @@ impl PageHost for SurfaceHost {
         self.request(DomRequest::ScrollIntoView {
             element: element_id.to_string(),
         });
+    }
+
+    fn center_element(&self, element_id: &str) {
+        self.request(DomRequest::RevealElement {
+            element: element_id.to_string(),
+            block: "center",
+        });
+    }
+
+    /// Unlike every other capability here, this one waits: the answer is a number the page has to
+    /// go and read, so it comes back over IPC against a token the way a measurement does.
+    fn text_offset_at(&self, element_id: &str, x: f64, y: f64) -> TextOffsetAnswer {
+        let measurement = self.reads.ask();
+        self.request(DomRequest::TextOffsetAtPoint {
+            element: element_id.to_string(),
+            token: measurement.token(),
+            x,
+            y,
+        });
+
+        Box::pin(async move {
+            let [offset, _, _, _] = measurement.await.ok()?;
+
+            Some(offset.max(0.0) as u32)
+        })
     }
 
     fn select_element_text(&self, element_id: &str) {

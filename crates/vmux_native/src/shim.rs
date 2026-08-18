@@ -92,6 +92,35 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
 
     return pair.some((n) => n === undefined) ? [] : [pair[0], pair[1], 0, 0];
   };
+  // Which character of an element's text a point falls on. Counted in code points, the unit Rust
+  // counts in, and scoped to the element the host named — the engine reports the caret against
+  // whichever descendant text node holds it, and what the page asked for is the offset in the run.
+  const textOffsetAtPoint = (element, x, y) => {
+    const el = document.getElementById(element);
+    if (!el) return [];
+    let node = null;
+    let offset = 0;
+    if (document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(x, y);
+      if (position) { node = position.offsetNode; offset = position.offset; }
+    } else if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(x, y);
+      if (range) { node = range.startContainer; offset = range.startOffset; }
+    }
+    if (node && el.contains(node)) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.setEnd(node, offset);
+      return [[...range.cloneContents().textContent].length, 0, 0, 0];
+    }
+    // The point missed the text: past the end of a short line, or over the padding beside it. How
+    // far along the box it sits is the best answer left, and for proportional text only an estimate.
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0) return [0, 0, 0, 0];
+    const length = [...(el.textContent || '')].length;
+    const ratio = Math.min(Math.max((x - rect.left) / rect.width, 0), 1);
+    return [Math.round(ratio * length), 0, 0, 0];
+  };
   const applyDomRequest = (request) => {
     // A request naming a node rather than an id came from a component holding a MountedData, and
     // what it wants is a method the interpreter already has for the node it assigned.
@@ -116,6 +145,15 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
           'measured:' + request.token + ':' + measureNode(request.node, request.what).join(','),
         );
         return;
+      // Answers the same way, and an empty list means the same thing.
+      case 'textOffsetAtPoint':
+        window.ipc.postMessage(
+          'measured:' +
+            request.token +
+            ':' +
+            textOffsetAtPoint(request.element, request.x, request.y).join(','),
+        );
+        return;
     }
     const el = document.getElementById(request.element);
     if (!el) return;
@@ -125,6 +163,9 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
         break;
       case 'scrollIntoView':
         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        break;
+      case 'revealElement':
+        el.scrollIntoView({ block: request.block, inline: 'nearest' });
         break;
       case 'selectAll':
         el.setSelectionRange(0, el.value.length);

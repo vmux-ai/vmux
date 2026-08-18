@@ -47,6 +47,9 @@ pub mod platform;
 
 pub mod scroll;
 
+#[cfg(ui)]
+pub mod text_run;
+
 pub mod util;
 
 pub mod dioxus_ext {

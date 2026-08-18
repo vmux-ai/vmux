@@ -46,6 +46,24 @@ pub trait PageHost {
     /// which has no keyboard to move a selection out of view in the first place.
     fn scroll_element_into_view(&self, _element_id: &str) {}
 
+    /// Scroll an element the page rendered to the middle of its viewport.
+    ///
+    /// The opposite ask to [`Self::scroll_element_into_view`], and separate because the callers
+    /// want opposite things: a list revealing the row it just selected wants the view disturbed as
+    /// little as possible, while a caret arriving after a jump wants its surroundings visible too.
+    fn center_element(&self, _element_id: &str) {}
+
+    /// Which character of an element's text a point on screen falls on.
+    ///
+    /// For text laid out proportionally, where no arithmetic on a cell size answers it. The only
+    /// capability here that asks a question and is not scoped to an event: a pointer handler
+    /// settles `prevent_default` without needing the answer, so unlike
+    /// [`Self::event_field_selection`] this one can afford to wait for it. The default is the
+    /// phone's — no document to measure against, so nowhere to put the caret.
+    fn text_offset_at(&self, _element_id: &str, _x: f64, _y: f64) -> TextOffsetAnswer {
+        Box::pin(std::future::ready(None))
+    }
+
     /// Highlight the whole value of a text field, leaving the view where it is.
     fn select_element_text(&self, _element_id: &str) {}
 
@@ -94,6 +112,12 @@ pub trait PageHost {
 
 /// Receives the raw payload bytes of one host event.
 pub type BytesListener = Box<dyn FnMut(&[u8])>;
+
+/// What [`PageHost::text_offset_at`] will answer with once the page has looked.
+///
+/// Boxed rather than an associated future, because the trait is used as `dyn PageHost` — a page
+/// reaches its host through a thread-local and never knows which one it has.
+pub type TextOffsetAnswer = std::pin::Pin<Box<dyn std::future::Future<Output = Option<u32>>>>;
 
 /// Install the host for this thread. Call once, before the first page mounts.
 ///
@@ -201,6 +225,22 @@ impl Host {
     #[cfg(not(web))]
     pub(crate) fn place_caret(id: &str, byte: usize) {
         let _ = Self::with_installed(|host| host.place_caret(id, byte));
+    }
+
+    /// Both targets go through the installed host, unlike [`Self::scroll_item_into_view`]: there is
+    /// no report to fabricate for a host that has no viewport, so nothing needs a per-target body.
+    pub(crate) fn center_item(id: &str) {
+        let _ = Self::with_installed(|host| host.center_element(id));
+    }
+
+    /// `ui` rather than `not(web)`: only a page asks this, and every `ui` target has some host
+    /// that may or may not have a document to answer it against.
+    #[cfg(ui)]
+    pub(crate) fn text_offset_at(id: &str, x: f64, y: f64) -> TextOffsetAnswer {
+        match Self::with_installed(|host| host.text_offset_at(id, x, y)) {
+            Ok(answer) => answer,
+            Err(_) => Box::pin(std::future::ready(None)),
+        }
     }
 
     /// The host an app installed, or the one this target assumes when nobody did.

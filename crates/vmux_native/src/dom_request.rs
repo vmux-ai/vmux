@@ -43,6 +43,28 @@ pub(crate) enum DomRequest {
         element: String,
         byte: usize,
     },
+    /// Reveal an element the page rendered, aligning it as `block` says.
+    ///
+    /// Separate from [`Self::ScrollIntoView`], which is the list-navigation case and always asks
+    /// for the least movement that works. A caret being brought back after a jump wants the
+    /// opposite — the middle of the viewport, so what surrounds it is visible too.
+    RevealElement {
+        element: String,
+        block: &'static str,
+    },
+    /// Which character of an element's text a point on screen falls on.
+    ///
+    /// The one question addressed by id rather than by node, because the elements that need it are
+    /// rendered in a loop and holding a `MountedData` for each would cost a signal per line. It
+    /// answers over IPC against `token`, like a measurement, and for the same reason: the caller is
+    /// a pointer handler that has already settled `prevent_default`, so a frame's wait costs it
+    /// nothing.
+    TextOffsetAtPoint {
+        element: String,
+        token: u64,
+        x: f64,
+        y: f64,
+    },
     /// `interpreter.setFocus`.
     FocusNode {
         node: usize,
