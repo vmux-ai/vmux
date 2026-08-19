@@ -30,8 +30,6 @@ pub use native_bridge::NativeBridge;
 #[cfg(target_os = "macos")]
 pub use native_bridge::{queue_command_bar_pointer_button, queue_command_bar_pointer_move};
 pub use native_layout::NativeLayout;
-#[cfg(target_os = "macos")]
-pub use native_layout::NativeLayoutPointerMoveResult;
 
 use bevy::{ecs::relationship::Relationship, input::mouse::MouseButton, prelude::*};
 use bevy_cef::prelude::*;
@@ -322,7 +320,6 @@ struct CefPointerHitRect {
 }
 
 static NATIVE_LAYOUT_POINTER_INSIDE: AtomicBool = AtomicBool::new(false);
-static NATIVE_LAYOUT_ACTIVITY: AtomicBool = AtomicBool::new(false);
 
 impl CefPointerHitRect {
     /// A region only takes the pointer while it is a header or sheet that is open, laid out and
@@ -340,14 +337,6 @@ impl CefPointerHitRect {
     fn contains(self, point: Vec2) -> bool {
         self.interactive && self.rect.contains(point)
     }
-}
-
-pub fn set_native_layout_activity(active: bool) -> bool {
-    NATIVE_LAYOUT_ACTIVITY.swap(active, Ordering::Relaxed) != active
-}
-
-fn native_layout_activity_active() -> bool {
-    NATIVE_LAYOUT_ACTIVITY.load(Ordering::Relaxed)
 }
 
 fn cef_pointer_regions_contains(
@@ -516,40 +505,30 @@ fn hex_to_rgb(hex: &str) -> Option<[f32; 3]> {
     Some([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0])
 }
 
+#[cfg(not(target_os = "macos"))]
 #[derive(Default)]
 struct LayoutHoverRefreshState {
-    #[cfg(not(target_os = "macos"))]
     sequence: u64,
-    #[cfg(not(target_os = "macos"))]
     position: Option<Vec2>,
-    #[cfg(not(target_os = "macos"))]
     in_region: bool,
 }
 
+#[cfg(not(target_os = "macos"))]
 fn reset_layout_cef_hover(
     browsers: &Browsers,
     buttons: &ButtonInput<MouseButton>,
     layout: Entity,
     state: &mut LayoutHoverRefreshState,
 ) {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (browsers, buttons, layout);
-        NativeLayout::clear_pointer_state();
-        *state = LayoutHoverRefreshState::default();
+    if state.in_region {
+        browsers.send_mouse_move(
+            &layout,
+            buttons.get_pressed(),
+            state.position.unwrap_or_default(),
+            true,
+        );
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if state.in_region {
-            browsers.send_mouse_move(
-                &layout,
-                buttons.get_pressed(),
-                state.position.unwrap_or_default(),
-                true,
-            );
-        }
-        *state = LayoutHoverRefreshState::default();
-    }
+    *state = LayoutHoverRefreshState::default();
 }
 
 #[derive(Default)]
@@ -1198,35 +1177,6 @@ mod tests {
             assert!(app.world().get::<WebviewWindowed>(entity).is_some());
             assert!(app.world().get::<WebviewNativeOverlay>(entity).is_none());
         }
-    }
-
-    #[test]
-    fn native_layout_pointer_queue_retains_only_latest_sample() {
-        let source = include_str!("native_layout/macos.rs");
-        let queue = source
-            .split("pub fn queue_pointer_move")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn flush_pointer_move").next())
-            .unwrap_or_default();
-        let flush = source
-            .split("pub fn flush_pointer_move")
-            .nth(1)
-            .and_then(|tail| tail.split("pub fn forward_scroll").next())
-            .unwrap_or_default();
-        let sample = source
-            .split("fn queue_sample")
-            .nth(1)
-            .and_then(|tail| tail.split("#[cfg(test)]").next())
-            .unwrap_or_default();
-
-        assert!(sample.contains("self.position_px = Some(position)"));
-        assert!(sample.contains("self.buttons = buttons"));
-        assert!(source.contains("fn queue_sample"));
-        assert!(sample.contains("sample_changed"));
-        assert!(sample.contains("self.pending = true"));
-        assert!(queue.contains("state.queue_sample("));
-        assert!(flush.contains("state.pending = false"));
-        assert!(flush.contains("presenter.send(position_px / state.scale"));
     }
 
     #[test]

@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::winit::{EventLoopProxyWrapper, WinitUserEvent};
-use bevy_cef::prelude::PointerButton;
 
 /// The macOS half of [`super::RuntimePlugin`]: installs the AppKit monitors winit does not own, and gates rendering on demand.
 pub(super) struct RuntimePlatformPlugin;
@@ -37,14 +36,6 @@ use vmux_flex::prelude::*;
 
 const NATIVE_MOUSE_MOVE_WAKE_INTERVAL: Duration = Duration::from_millis(33);
 const NATIVE_MOUSE_DRAG_WAKE_INTERVAL: Duration = Duration::from_millis(16);
-const NATIVE_LAYOUT_ACTIVITY_SETTLE: Duration = Duration::from_millis(300);
-/// How often Bevy has to run while the layout webview is being scrolled.
-///
-/// The layout is composited as a native overlay: CEF paints into an `IOSurface` and the presenter
-/// hands it to the `CALayer` on the main dispatch queue, so no Bevy frame stands between a scrolled
-/// pixel and the screen. The app only has to tick often enough to keep the frame-rate governor from
-/// falling back to the idle rate, which it does after `LAYOUT_INPUT_BURST`.
-const NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL: Duration = Duration::from_millis(100);
 
 static NATIVE_MOUSE_WAKE_MONITOR_INSTALLED: AtomicBool = AtomicBool::new(false);
 static IN_LIVE_RESIZE: AtomicBool = AtomicBool::new(false);
@@ -206,8 +197,6 @@ fn activate_app_during_boot(
 
 type NativeThrottle = Arc<dyn Fn(Duration) + Send + Sync>;
 
-type NativeDebounce = Arc<dyn Fn() + Send + Sync>;
-
 fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> NativeThrottle {
     let pending_interval_ns = Arc::new(AtomicU64::new(u64::MAX));
     let thread_pending_interval_ns = Arc::clone(&pending_interval_ns);
@@ -251,34 +240,6 @@ fn native_throttle(name: &'static str, action: impl Fn() + Send + 'static) -> Na
     Arc::new(move |min_interval: Duration| {
         let min_interval = min_interval.as_nanos().min(u64::MAX as u128) as u64;
         pending_interval_ns.fetch_min(min_interval, Ordering::Relaxed);
-        let _ = tx.try_send(());
-    })
-}
-
-fn native_debounce(
-    name: &'static str,
-    delay: Duration,
-    action: impl Fn() + Send + 'static,
-) -> NativeDebounce {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<()>(1);
-    std::thread::Builder::new()
-        .name(name.into())
-        .spawn(move || {
-            while rx.recv().is_ok() {
-                loop {
-                    match rx.recv_timeout(delay) {
-                        Ok(()) => {}
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                            action();
-                            break;
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
-                    }
-                }
-            }
-        })
-        .unwrap_or_else(|error| panic!("failed to spawn {name}: {error}"));
-    Arc::new(move || {
         let _ = tx.try_send(());
     })
 }
@@ -349,22 +310,8 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         return;
     }
     let proxy = (**proxy).clone();
-    let settle_proxy = proxy.clone();
     let wake = native_throttle("native-mouse-wake-throttle", move || {
         let _ = proxy.send_event(WinitUserEvent::WakeUp);
-    });
-    let settle_layout = native_debounce(
-        "native-layout-activity-settle",
-        NATIVE_LAYOUT_ACTIVITY_SETTLE,
-        move || {
-            vmux_browser::set_native_layout_activity(false);
-            let _ = settle_proxy.send_event(WinitUserEvent::WakeUp);
-        },
-    );
-    let flush_layout = native_throttle("native-layout-pointer-throttle", || {
-        dispatch2::DispatchQueue::main().exec_async(|| {
-            vmux_browser::NativeLayout::flush_pointer_move();
-        });
     });
     let resize_drag = Arc::new(Mutex::new(None::<NativeWindowResizeDrag>));
     let local_resize_drag = Arc::clone(&resize_drag);
@@ -450,83 +397,25 @@ fn install_native_mouse_wake_monitor(proxy: Option<Res<EventLoopProxyWrapper>>) 
         if pointer_position_changed && let Some((x, y)) = location {
             vmux_layout::native_pointer::publish(Vec2::new(x, y), buttons, motion);
         }
-        let layout_pointer = pointer_position_changed
-            .then(|| {
-                location.map(|(x, y)| vmux_browser::NativeLayout::queue_pointer_move(x, y, buttons))
-            })
-            .flatten();
         if motion {
             let interval = if event_type == NSEventType::MouseMoved {
                 NATIVE_MOUSE_MOVE_WAKE_INTERVAL
             } else {
                 NATIVE_MOUSE_DRAG_WAKE_INTERVAL
             };
-            if let Some(result) = layout_pointer
-                && result.owns_pointer
-                && result.presenter_active
-            {
-                let activity_started = vmux_browser::set_native_layout_activity(true);
-                settle_layout();
-                if result.region_changed {
-                    vmux_browser::NativeLayout::flush_pointer_move();
-                    local_wake(interval);
-                } else if result.pending {
-                    flush_layout(interval);
-                }
-                if activity_started && !result.region_changed {
-                    local_wake(interval);
-                }
-            } else {
-                vmux_browser::set_native_layout_activity(false);
-                if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
-                    HOVER_OVER_PANE.store(true, Ordering::Relaxed);
-                    local_wake(interval);
-                }
+            if !over_windowed_page || !was_over_windowed_page || !event_window_is_key(ev) {
+                HOVER_OVER_PANE.store(true, Ordering::Relaxed);
+                local_wake(interval);
             }
         } else if scroll {
-            let forwarded = location.is_some_and(|(x, y)| {
-                let delta = Vec2::new(ev.scrollingDeltaX() as f32, ev.scrollingDeltaY() as f32);
-                vmux_browser::NativeLayout::forward_scroll(Vec2::new(x, y), delta)
-            });
-            if forwarded {
-                local_wake(NATIVE_LAYOUT_SCROLL_WAKE_INTERVAL);
-                return std::ptr::null_mut();
-            }
-            if native_scroll_should_wake(
+            let wake_for_scroll = native_scroll_should_wake(
                 vmux_browser::NativeLayout::pointer_is_inside(),
                 sampled_over_windowed_page,
-            ) {
+            );
+            if wake_for_scroll {
                 local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
             }
         } else {
-            // A click over a native windowed pane never reaches winit, so the layout overlay's own
-            // DOM — result rows, the dismiss backdrop — would never see it.
-            if button_event
-                && sampled_over_windowed_page
-                && let Some((x, y)) = location
-                && let Some(button) = native_pointer_button(event_type)
-            {
-                let mouse_up = matches!(
-                    event_type,
-                    NSEventType::LeftMouseUp
-                        | NSEventType::RightMouseUp
-                        | NSEventType::OtherMouseUp
-                );
-                if vmux_browser::NativeLayout::forward_click(Vec2::new(x, y), button, mouse_up) {
-                    local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
-                    return std::ptr::null_mut();
-                }
-            }
-            if let Some(result) = layout_pointer
-                && result.owns_pointer
-                && result.presenter_active
-            {
-                vmux_browser::set_native_layout_activity(true);
-                settle_layout();
-                if result.pending {
-                    vmux_browser::NativeLayout::flush_pointer_move();
-                }
-            }
             local_wake(NATIVE_MOUSE_DRAG_WAKE_INTERVAL);
         }
         if capture_window_resize {
@@ -659,17 +548,6 @@ fn native_mouse_buttons() -> bevy_cef_core::prelude::NativeMouseButtons {
         left: pressed & 1 != 0,
         right: pressed & (1 << 1) != 0,
         middle: pressed & (1 << 2) != 0,
-    }
-}
-
-/// Which pointer button an `NSEvent` type carries, if any.
-fn native_pointer_button(event_type: objc2_app_kit::NSEventType) -> Option<PointerButton> {
-    use objc2_app_kit::NSEventType;
-    match event_type {
-        NSEventType::LeftMouseDown | NSEventType::LeftMouseUp => Some(PointerButton::Primary),
-        NSEventType::RightMouseDown | NSEventType::RightMouseUp => Some(PointerButton::Secondary),
-        NSEventType::OtherMouseDown | NSEventType::OtherMouseUp => Some(PointerButton::Middle),
-        _ => None,
     }
 }
 

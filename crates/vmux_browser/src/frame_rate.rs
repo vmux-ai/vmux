@@ -25,17 +25,14 @@ use vmux_layout::{
     side_sheet::SideSheet,
 };
 
-/// The two paths hit-test differently: AppKit walks individual rects as its monitor reports
-/// them, everything else tests the whole region set against one cursor position.
-#[cfg(target_os = "macos")]
-use crate::CefPointerHitRect;
 #[cfg(not(target_os = "macos"))]
-use crate::cef_pointer_regions_contains;
 use crate::{
-    CefPointerRegionQuery, LAYOUT_INPUT_BURST, LayoutFrameRateState, LayoutHoverRefreshState,
-    LayoutPointerCapture, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout, WindowedHoverRefreshState,
-    native_layout_activity_active, native_left_mouse_down, reset_layout_cef_hover,
-    set_native_layout_activity,
+    CefPointerRegionQuery, LayoutHoverRefreshState, LayoutPointerCapture,
+    cef_pointer_regions_contains, reset_layout_cef_hover,
+};
+use crate::{
+    LAYOUT_INPUT_BURST, LayoutFrameRateState, NATIVE_LAYOUT_POINTER_INSIDE, NativeLayout,
+    WindowedHoverRefreshState, native_left_mouse_down,
 };
 use vmux_flex::prelude::*;
 pub(crate) struct FrameRatePlugin;
@@ -56,6 +53,38 @@ impl Plugin for FrameRatePlugin {
     }
 }
 
+/// Lowers the hover flag for the frames where nothing can be hovered.
+///
+/// The AppKit monitor samples the pointer itself, so `sync_layout_cef_pointer_target` already
+/// answers the ordinary frame from that sample; what it does not know about is the host
+/// suppressing pointer input, which is why this still runs.
+#[cfg(target_os = "macos")]
+fn refresh_layout_cef_hover(
+    windows: Query<&Window>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    suppress: Res<CefSuppressPointerInput>,
+    layout_q: Query<Entity, With<LayoutCef>>,
+    modal_pointer_targets: Query<(), (With<WindowOverlay>, With<CefPointerTarget>)>,
+) {
+    if layout_q.single().is_err() || suppress.0 || !modal_pointer_targets.is_empty() {
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+        return;
+    }
+    let Ok(window_entity) = primary_window.single() else {
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+        return;
+    };
+    let Ok(window) = windows.get(window_entity) else {
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+        return;
+    };
+    let scale = window.resolution.scale_factor();
+    if !scale.is_finite() || scale <= 0.0 {
+        NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn refresh_layout_cef_hover(
     browsers: NonSend<Browsers>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -69,9 +98,6 @@ fn refresh_layout_cef_hover(
     mut state: Local<LayoutHoverRefreshState>,
 ) {
     let Ok(layout) = layout_q.single() else {
-        #[cfg(target_os = "macos")]
-        NativeLayout::clear_pointer_state();
-        #[cfg(not(target_os = "macos"))]
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         *state = LayoutHoverRefreshState::default();
         return;
@@ -81,7 +107,7 @@ fn refresh_layout_cef_hover(
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
     }
-    let Some(window_entity) = primary_window.single().ok() else {
+    let Ok(window_entity) = primary_window.single() else {
         NATIVE_LAYOUT_POINTER_INSIDE.store(false, Ordering::Relaxed);
         reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
         return;
@@ -98,62 +124,29 @@ fn refresh_layout_cef_hover(
         return;
     }
     let pointer_capture = !pointer_capture_q.is_empty();
-    #[cfg(target_os = "macos")]
-    {
-        if pointer_capture {
-            NativeLayout::set_pointer_regions([CefPointerHitRect {
-                rect: ComputedNode::from_origin(Vec2::new(window.width(), window.height())),
-                interactive: true,
-            }
-            .physical(scale)]);
-        } else {
-            NativeLayout::set_pointer_regions(
-                cef_regions
-                    .iter()
-                    .map(CefPointerHitRect::of)
-                    .filter(|rect| rect.interactive)
-                    .map(|rect| rect.physical(scale)),
-            );
-        }
-        NativeLayout::set_mouse_presenter(scale, browsers.native_mouse_move_presenter(&layout));
-        if let Some(pointer) = vmux_layout::native_pointer::snapshot() {
-            let result = NativeLayout::queue_pointer_move(
-                pointer.position_px.x,
-                pointer.position_px.y,
-                pointer.buttons,
-            );
-            if result.owns_pointer {
-                NativeLayout::flush_pointer_move();
-            }
-        }
-        *state = LayoutHoverRefreshState::default();
+    let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
+    else {
+        reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
+        return;
+    };
+    let sequence = 0;
+    let position = cursor_px / scale;
+    let in_region = pointer_capture || cef_pointer_regions_contains(position, &cef_regions);
+    NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
+    let unchanged = state.sequence == sequence
+        && state.position == Some(position)
+        && state.in_region == in_region;
+    if unchanged {
+        return;
     }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let Some(cursor_px) = vmux_layout::pane::pane_hover_cursor_position(window_entity, window)
-        else {
-            reset_layout_cef_hover(&browsers, &buttons, layout, &mut state);
-            return;
-        };
-        let sequence = 0;
-        let position = cursor_px / scale;
-        let in_region = pointer_capture || cef_pointer_regions_contains(position, &cef_regions);
-        NATIVE_LAYOUT_POINTER_INSIDE.store(in_region, Ordering::Relaxed);
-        let unchanged = state.sequence == sequence
-            && state.position == Some(position)
-            && state.in_region == in_region;
-        if unchanged {
-            return;
-        }
-        if in_region {
-            browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
-        } else if state.in_region {
-            browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
-        }
-        state.sequence = sequence;
-        state.position = Some(position);
-        state.in_region = in_region;
+    if in_region {
+        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, false);
+    } else if state.in_region {
+        browsers.send_mouse_move(&layout, buttons.get_pressed(), position, true);
     }
+    state.sequence = sequence;
+    state.position = Some(position);
+    state.in_region = in_region;
 }
 
 fn refresh_active_windowed_hover(
@@ -258,11 +251,9 @@ fn request_layout_frame_burst(
 fn layout_frame_rate(
     now: std::time::Instant,
     last_input: Option<std::time::Instant>,
-    native_activity: bool,
     dragging: bool,
 ) -> i32 {
-    if native_activity
-        || dragging
+    if dragging
         || last_input.is_some_and(|last| now.saturating_duration_since(last) < LAYOUT_INPUT_BURST)
     {
         LAYOUT_ACTIVE_FRAME_RATE
@@ -313,21 +304,9 @@ fn sync_layout_cef_frame_rate(
     } else if inside && input_changed {
         state.dragging_layout = true;
     }
-    // The AppKit monitor raises the activity flag on every layout-owned pointer move but only
-    // lowers it on a move the layout does not own. While the command bar panel captures the whole
-    // window there is no such move, so a flag left standing would pin the webview at the active
-    // frame rate for as long as the panel is open. A frame with no new pointer sample means the
-    // pointer stopped.
-    if !native_changed && native_layout_activity_active() {
-        set_native_layout_activity(false);
-    }
     let desired = layout_frame_rate(
         now,
-        state
-            .last_input
-            .max(burst.last_emit)
-            .max(NativeLayout::last_scroll_at()),
-        native_layout_activity_active(),
+        state.last_input.max(burst.last_emit),
         state.dragging_layout,
     );
     let Ok((mut cap, _)) = layout_q.single_mut() else {
@@ -346,21 +325,15 @@ mod tests {
     #[test]
     fn layout_frame_rate_bursts_after_input() {
         let now = std::time::Instant::now();
+        assert_eq!(layout_frame_rate(now, None, false), LAYOUT_IDLE_FRAME_RATE);
         assert_eq!(
-            layout_frame_rate(now, None, false, false),
+            layout_frame_rate(now, Some(now), false),
+            LAYOUT_ACTIVE_FRAME_RATE
+        );
+        assert_eq!(layout_frame_rate(now, None, true), LAYOUT_ACTIVE_FRAME_RATE);
+        assert_eq!(
+            layout_frame_rate(now, Some(now - LAYOUT_INPUT_BURST), false),
             LAYOUT_IDLE_FRAME_RATE
-        );
-        assert_eq!(
-            layout_frame_rate(now, None, true, false),
-            LAYOUT_ACTIVE_FRAME_RATE
-        );
-        assert_eq!(
-            layout_frame_rate(now, Some(now), false, false),
-            LAYOUT_ACTIVE_FRAME_RATE
-        );
-        assert_eq!(
-            layout_frame_rate(now, None, true, true),
-            LAYOUT_ACTIVE_FRAME_RATE
         );
     }
 

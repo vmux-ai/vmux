@@ -27,9 +27,8 @@ fn dev_target_signs_then_runs_debug_binary() {
 
     assert!(makefile.contains(".DEFAULT_GOAL := dev"));
     assert!(
-        makefile.contains(
-            "dev: ensure-native-deps $(DEV_WEB_TARGET) ensure-codesign-deps install-debug-render-process"
-        )
+        makefile
+            .contains("dev: ensure-native-deps ensure-codesign-deps install-debug-render-process")
     );
     assert!(makefile.contains("./scripts/sign-dev-mac.sh"));
     assert!(makefile.contains(
@@ -61,10 +60,12 @@ fn dev_target_keeps_service_out_of_desktop_dynamic_linking_build() {
     assert!(
         makefile.contains("VMUX_DESKTOP_FEATURES ?= --no-default-features --features dev,full")
     );
-    assert!(makefile.contains(
-        "$(MAKE) dev VMUX_BUILD_WEB=0 VMUX_DESKTOP_FEATURES=\"--no-default-features --features dev,full\""
-    ));
     assert!(makefile.contains("dev-player:"));
+    assert!(
+        !makefile.contains("-p vmux_page"),
+        "the wasm bundle is gone; the stylesheet comes from vmux_ui's build script, which cargo \
+         sequences because vmux_ui is a dependency of the app"
+    );
     assert!(!makefile.contains("build -p vmux_desktop -p vmux_cli -p vmux_service --features dev"));
 }
 
