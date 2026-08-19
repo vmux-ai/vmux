@@ -67,7 +67,7 @@ mod surface_element;
 #[cfg(target_os = "macos")]
 pub use embed::{AssetReply, Assets, Embedding, Outbox, Wake};
 #[cfg(target_os = "macos")]
-pub use surface::{Appearance, PageSurface};
+pub use surface::{Appearance, PageSurface, SiblingOrder};
 
 // wry calls `objc2::exception::catch`, whose C shim ships as a static archive built by
 // `objc2-exception-helper`. Cargo puts that archive's directory on the link path but its `-l`

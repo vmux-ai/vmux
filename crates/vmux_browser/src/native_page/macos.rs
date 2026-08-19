@@ -14,11 +14,12 @@ use bevy_cef_core::prelude::{
 use vmux_core::host::page::HostsPage;
 use vmux_core::page_metadata::PageMetadata;
 use vmux_layout::LayoutCef;
-use vmux_native::{Appearance, AssetReply, Embedding, NativePage, PageSurface};
+use vmux_native::{Appearance, AssetReply, Embedding, NativePage, PageSurface, SiblingOrder};
 use vmux_setting::{AppSettings, ColorScheme};
 use vmux_ui::hooks::EventListenerError;
 
 use super::{NativePages, Placement};
+use crate::LayoutPointerCapture;
 use crate::present::PaneFrames;
 
 pub(super) struct NativePagesMacosPlugin;
@@ -149,7 +150,7 @@ fn open_native_pages(world: &mut World) {
             Some(Ok(surface)) => {
                 surface.set_visible(false);
                 surface.set_appearance(appearance);
-                if placement.is_frontmost() {
+                if placement.paints_in_front() {
                     surface.raise_above_layers();
                 }
                 world
@@ -183,12 +184,14 @@ fn place_native_pages(
     frames: Res<PaneFrames>,
     window: Query<&Window, With<PrimaryWindow>>,
     pages: Query<(), With<HostsPage>>,
+    capturing: Query<(), (With<LayoutCef>, LayoutPointerCapture)>,
 ) {
     let Some(mut hosted) = hosted else {
         return;
     };
     hosted.0.retain(|entity, _| pages.contains(*entity));
     let window = window.single().ok();
+    let capturing = !capturing.is_empty();
     for (entity, page) in hosted.0.iter() {
         let Some(bounds) = page.placement.bounds(*entity, window, &frames) else {
             page.surface.set_visible(false);
@@ -196,8 +199,8 @@ fn place_native_pages(
         };
         page.surface.set_bounds(bounds);
         page.surface.set_visible(true);
-        if page.placement.is_frontmost() {
-            page.surface.raise_above_siblings();
+        if let Some(order) = page.placement.pointer_order(capturing) {
+            page.surface.order_among_siblings(order);
         }
     }
 }
@@ -277,12 +280,36 @@ fn appearance_of(mode: ColorScheme) -> Appearance {
 }
 
 impl Placement {
-    /// Whether the view is put back in front of its siblings every frame.
+    /// Whether the view is painted over everything else drawn into the window.
     ///
-    /// A pane opening puts its view last in the parent's subview array, which is where clicks are
-    /// resolved from — so a page drawn over the panes has to say so again after every one.
-    fn is_frontmost(self) -> bool {
+    /// Painting only, and that is the distinction this pair exists to keep: which view AppKit
+    /// hands a click to is [`Self::pointer_order`], and the two were one predicate until a layout
+    /// painted in front turned out to be swallowing every scroll aimed at the pane behind it.
+    fn paints_in_front(self) -> bool {
         matches!(self, Self::Layout | Self::Modal)
+    }
+
+    /// Which end of the subview array the view is put back at every frame, if either.
+    ///
+    /// A pane opening puts its view last, which is the end `hitTest:` resolves from — so a page
+    /// with an opinion about the pointer has to state it again after every one.
+    ///
+    /// The layout's opinion is the back. It fills the window, but `pointer-events: none` covers
+    /// all of it bar the header and the side sheet, and neither of those overlaps a pane: the
+    /// pane's rectangle starts below the header and within its span. `hitTest:` has never heard of
+    /// that CSS rule, so a layout left in front answers for the whole window and the pane under it
+    /// never sees a wheel — WebKit forwards an unclaimed click up the responder chain but keeps
+    /// the scroll, having its own machinery for it.
+    ///
+    /// `capturing` is the exception, and the reason this cannot simply be the placement. A context
+    /// menu or the command bar panel extends past every published region and dismisses on an
+    /// outside click, so while one is up the layout does have to be asked first.
+    fn pointer_order(self, capturing: bool) -> Option<SiblingOrder> {
+        match self {
+            Self::Layout if !capturing => Some(SiblingOrder::Back),
+            Self::Layout | Self::Modal => Some(SiblingOrder::Front),
+            Self::Pane => None,
+        }
     }
 
     /// The entities whose page this is, and which therefore want a view.
@@ -500,5 +527,30 @@ fn report_waiting(reason: &str) {
     static REPORTED: AtomicBool = AtomicBool::new(false);
     if !REPORTED.swap(true, Ordering::Relaxed) {
         info!("native_page: waiting, {reason}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Placement, SiblingOrder};
+
+    /// Painting in front and being asked for the pointer first are the same flag until they are
+    /// not, and collapsing them back is how a pane stops scrolling.
+    #[test]
+    fn the_layout_is_asked_for_the_pointer_only_while_a_surface_of_its_own_is_up() {
+        assert_eq!(
+            Placement::Layout.pointer_order(false),
+            Some(SiblingOrder::Back)
+        );
+        assert_eq!(
+            Placement::Layout.pointer_order(true),
+            Some(SiblingOrder::Front)
+        );
+        assert_eq!(
+            Placement::Modal.pointer_order(false),
+            Some(SiblingOrder::Front)
+        );
+        assert_eq!(Placement::Pane.pointer_order(false), None);
+        assert!(Placement::Layout.paints_in_front());
     }
 }
