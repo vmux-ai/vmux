@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
@@ -172,6 +173,7 @@ struct RecoveryEnvelope {
 
 struct RecoveryKeyLength;
 
+#[derive(Debug)]
 pub struct RecoveryKeyCreation {
     pub pending_upload: bool,
 }
@@ -434,8 +436,47 @@ pub fn initialize() -> Result<(), String> {
     initialize_paths(&root_dir(), &repository_dir(), &SystemKeyStore)
 }
 
-pub fn create_recovery_key(recovery_key: &str) -> Result<RecoveryKeyCreation, String> {
-    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, recovery_key)
+/// The Recovery Key this process generated and has not yet committed.
+///
+/// The page is shown the key so the user can save it, but never hands it back. A key arriving
+/// from the page could be one an attacker already knows, and wrapping the master key with it
+/// would open the Vault to them; taking it from here means the key that does the wrapping is
+/// provably the one this process drew from the system CSPRNG.
+static PENDING_RECOVERY_KEY: Mutex<Option<Zeroizing<String>>> = Mutex::new(None);
+
+fn pending_recovery_key() -> std::sync::MutexGuard<'static, Option<Zeroizing<String>>> {
+    PENDING_RECOVERY_KEY.lock().unwrap_or_else(|poisoned| {
+        PENDING_RECOVERY_KEY.clear_poison();
+        poisoned.into_inner()
+    })
+}
+
+/// Draw a new Recovery Key and hold it until [`create_recovery_key`] commits it.
+///
+/// 256 bits from `ring`'s `SystemRandom`, rendered in the grouped form the user sees and pastes
+/// back. Replaces any key drawn earlier and never committed.
+pub fn generate_recovery_key() -> Result<Zeroizing<String>, String> {
+    let mut bytes = Zeroizing::new(vec![0_u8; KEY_LEN]);
+    SystemRandom::new()
+        .fill(&mut bytes)
+        .map_err(|_| "failed to generate secure random data".to_string())?;
+    let encoded = Zeroizing::new(hex(&bytes));
+    let groups = encoded
+        .as_bytes()
+        .chunks(4)
+        .map(|group| std::str::from_utf8(group).unwrap_or_default())
+        .collect::<Vec<_>>();
+    let key = Zeroizing::new(format!("vmux-{}", groups.join("-")));
+    *pending_recovery_key() = Some(key.clone());
+    Ok(key)
+}
+
+/// Commit the key [`generate_recovery_key`] drew, once the user has confirmed saving it.
+pub fn create_recovery_key() -> Result<RecoveryKeyCreation, String> {
+    let key = pending_recovery_key()
+        .take()
+        .ok_or_else(|| "No Recovery Key has been generated for this Vault".to_string())?;
+    create_recovery_key_paths(&repository_dir(), &SystemKeyStore, &key)
 }
 
 pub fn unlock_with_recovery_key(recovery_key: &str) -> Result<String, String> {
@@ -2414,6 +2455,35 @@ fn command_success(output: Output) -> Result<String, String> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// One test owns `PENDING_RECOVERY_KEY`, because it is process-wide and the suite is parallel.
+    #[test]
+    fn a_recovery_key_is_committed_only_when_this_process_drew_it() {
+        pending_recovery_key().take();
+        assert!(
+            create_recovery_key()
+                .unwrap_err()
+                .contains("No Recovery Key"),
+            "committing without drawing one first must refuse, or a key from anywhere else could \
+             wrap the master key"
+        );
+
+        let key = generate_recovery_key().unwrap();
+        assert!(
+            parse_recovery_key(&key).is_ok(),
+            "the displayed form has to be the one the unlock path parses back"
+        );
+
+        let again = generate_recovery_key().unwrap();
+        assert_ne!(*key, *again, "each draw must be independent");
+        assert_eq!(
+            pending_recovery_key().as_deref().map(|held| held.as_str()),
+            Some(again.as_str()),
+            "the held key is the newest draw, so an abandoned one cannot be committed later"
+        );
+
+        pending_recovery_key().take();
+    }
 
     struct FixedKeyStore {
         key: Vec<u8>,

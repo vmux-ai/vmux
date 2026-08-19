@@ -87,6 +87,7 @@ pub enum VaultAction {
     Sync,
     ConnectGithub,
     ConnectFolder,
+    GenerateRecoveryKey,
     CreateRecoveryKey,
     UnlockRecoveryKey,
     ConnectCloud,

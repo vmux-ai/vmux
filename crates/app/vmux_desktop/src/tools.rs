@@ -1366,7 +1366,7 @@ where
     C: Fn() -> bool,
 {
     if request.action == VaultAction::CreateRecoveryKey {
-        let recovery = vmux_core::profile::vault::create_recovery_key(&request.recovery_key)?;
+        let recovery = vmux_core::profile::vault::create_recovery_key()?;
         return Ok(VaultActionOutput {
             message: String::new(),
             pending_upload: recovery.pending_upload,
@@ -1406,6 +1406,9 @@ where
                 return Err(String::new());
             };
             vmux_core::profile::vault::connect_folder(folder.path())
+        }
+        VaultAction::GenerateRecoveryKey => {
+            vmux_core::profile::vault::generate_recovery_key().map(|key| key.to_string())
         }
         VaultAction::CreateRecoveryKey => unreachable!(),
         VaultAction::UnlockRecoveryKey => {

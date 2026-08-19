@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use js_sys::{Function, Promise, Reflect, Uint8Array};
+use js_sys::{Function, Promise, Reflect};
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolsSnapshot};
 use vmux_core::vault::{
     VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
@@ -127,7 +127,7 @@ pub fn Page() -> Element {
                     VaultAction::Sync => {
                         result.message = translate("vault-backup-failed");
                     }
-                    VaultAction::CreateRecoveryKey => {
+                    VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => {
                         result.message = translate("vault-recovery-key-create-failed");
                     }
                     VaultAction::UnlockRecoveryKey => {
@@ -136,7 +136,13 @@ pub fn Page() -> Element {
                     _ => {}
                 }
             }
-            if result.action == VaultAction::CreateRecoveryKey && result.success {
+            if result.action == VaultAction::GenerateRecoveryKey && result.success {
+                generated_recovery_key.set(result.message);
+                recovery_key_confirmation.set(String::new());
+                recovery_key_copied.set(false);
+                pending.set(None);
+                notice.set(None);
+            } else if result.action == VaultAction::CreateRecoveryKey && result.success {
                 generated_recovery_key.set(String::new());
                 recovery_key_confirmation.set(String::new());
                 recovery_key_copied.set(false);
@@ -728,20 +734,12 @@ fn RecoveryCard(
                     ManagerButton {
                         variant: ManagerButtonVariant::Secondary,
                         disabled: pending().is_some() || !generated.is_empty(),
-                        onclick: move |_| match generate_recovery_key() {
-                            Ok(key) => {
-                                generated_recovery_key.set(key);
-                                recovery_key_confirmation.set(String::new());
-                                recovery_key_copied.set(false);
-                                notice.set(None);
-                            }
-                            Err(_) => notice.set(Some(VaultActionResult {
-                                action: VaultAction::CreateRecoveryKey,
-                                success: false,
-                                message: translate("vault-recovery-key-create-failed"),
-                                pending_upload: false,
-                            })),
-                        },
+                        onclick: move |_| send_action(
+                            pending,
+                            VaultAction::GenerateRecoveryKey,
+                            String::new(),
+                            true,
+                        ),
                         {translate("vault-recovery-key-create")}
                     }
                 }
@@ -871,16 +869,6 @@ fn send_recovery_action(
     }
 }
 
-fn generate_recovery_key() -> Result<String, String> {
-    let encoded = encode_hex(&random_bytes(32)?.to_vec());
-    let groups = encoded
-        .as_bytes()
-        .chunks(4)
-        .map(|group| std::str::from_utf8(group).unwrap())
-        .collect::<Vec<_>>();
-    Ok(format!("vmux-{}", groups.join("-")))
-}
-
 fn normalized_recovery_key(value: &str) -> String {
     value
         .trim()
@@ -927,41 +915,6 @@ fn copy_text(value: String, mut copied: Signal<bool>) {
     });
 }
 
-fn random_bytes(length: u32) -> Result<Uint8Array, String> {
-    let window = web_sys::window().ok_or_else(|| "Passkeys are unavailable".to_string())?;
-    let crypto = Reflect::get(window.as_ref(), &JsValue::from_str("crypto")).map_err(js_error)?;
-    let function = Reflect::get(&crypto, &JsValue::from_str("getRandomValues"))
-        .map_err(js_error)?
-        .dyn_into::<Function>()
-        .map_err(js_error)?;
-    let bytes = Uint8Array::new_with_length(length);
-    function.call1(&crypto, bytes.as_ref()).map_err(js_error)?;
-    Ok(bytes)
-}
-
-fn encode_hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(HEX[(byte >> 4) as usize] as char);
-        output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
-fn js_error(error: JsValue) -> String {
-    error
-        .as_string()
-        .or_else(|| {
-            error.is_object().then(|| {
-                Reflect::get(&error, &JsValue::from_str("message"))
-                    .ok()
-                    .and_then(|message| message.as_string())
-            })?
-        })
-        .unwrap_or_else(|| "Passkey operation failed".to_string())
-}
-
 fn request_snapshot(load_repositories: bool) {
     let _ = send(&VaultRefreshRequest { load_repositories });
 }
@@ -1000,7 +953,7 @@ fn action_result_message(action: VaultAction) -> String {
         VaultAction::Sync => "vault-result-synced",
         VaultAction::ConnectGithub => "vault-result-github-connected",
         VaultAction::ConnectFolder => "vault-result-folder-connected",
-        VaultAction::CreateRecoveryKey => "vault-result-created",
+        VaultAction::GenerateRecoveryKey | VaultAction::CreateRecoveryKey => "vault-result-created",
         VaultAction::UnlockRecoveryKey => "vault-result-connected",
         VaultAction::ConnectCloud => "vault-result-connected",
         VaultAction::CreateCloudFolder | VaultAction::ChooseCloudFolder => {
