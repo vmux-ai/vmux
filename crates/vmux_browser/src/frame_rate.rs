@@ -47,9 +47,29 @@ impl Plugin for FrameRatePlugin {
                     refresh_layout_cef_hover,
                     refresh_active_windowed_hover,
                     sync_layout_cef_frame_rate,
+                    keep_asset_replies_moving,
                 )
                     .chain(),
             );
+    }
+}
+
+/// Asks for another frame while a page is still waiting for an asset.
+///
+/// A page's `vmux://` request is answered by a Bevy system, so the reply needs the schedule to
+/// run: once to pick the request up, and again to notice the load finished. Requesting the frame
+/// covers the first; nothing covered the second, so a stylesheet asked for from an idle app
+/// waited for whatever frame happened along next — measured between 170ms and 780ms, with both
+/// stylesheets released on the same one.
+fn keep_asset_replies_moving(
+    pending: Query<(), With<CefResponseHandle>>,
+    proxy: Option<Res<EventLoopProxyWrapper>>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    if let Some(proxy) = proxy {
+        let _ = proxy.send_event(WinitUserEvent::WakeUp);
     }
 }
 

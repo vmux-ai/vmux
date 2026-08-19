@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-mod asset_loader;
+pub mod asset_loader;
 pub(crate) mod responser;
 
 use crate::common::custom_scheme::asset_loader::LocalSchemeAssetLoaderPlugin;

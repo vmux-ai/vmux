@@ -74,7 +74,7 @@ pub fn Page() -> Element {
                     }
                 }
             }
-            main { class: "min-w-0 flex-1 overflow-y-auto",
+            main { class: "min-h-0 min-w-0 flex-1 overflow-y-auto",
                 div { class: "mx-auto max-w-3xl px-6 py-8 lg:px-10",
                     div { class: "mb-8 lg:hidden",
                         h1 { class: "text-xl font-semibold tracking-tight", {translate("settings-title")} }

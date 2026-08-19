@@ -382,7 +382,10 @@ impl PageEmbedder {
                 webview: entity,
                 host: embedded_page_host_of(url).unwrap_or_default(),
             }),
-            assets: Rc::new(PageAssets(self.requester.clone())),
+            assets: Rc::new(PageAssets {
+                requester: self.requester.clone(),
+                waker: self.waker.clone(),
+            }),
             waker: Rc::new(self.waker.clone()),
         }
     }
@@ -442,7 +445,14 @@ impl vmux_native::Outbox for PageOutbox {
 ///
 /// CEF's scheme handler only forwards a [`CefRequest`] down a channel and waits for a
 /// [`CefResponse`], so resolution was never CEF-specific and this sends the same request.
-struct PageAssets(Requester);
+struct PageAssets {
+    requester: Requester,
+    /// The reply is produced by a Bevy system, and the app renders on demand — so a request that
+    /// does not ask for a frame waits out the reactive timeout before anything looks at it. A
+    /// page opening from idle asks for its shell, its stylesheets and its fonts in a burst, and
+    /// each one paid that wait in turn.
+    waker: PageWaker,
+}
 
 impl vmux_native::Assets for PageAssets {
     /// The reply is handed to a thread rather than answered here: it comes from a Bevy system, and
@@ -456,7 +466,7 @@ impl vmux_native::Assets for PageAssets {
         }
         let (tx, rx) = async_channel::bounded::<CefResponse>(1);
         if self
-            .0
+            .requester
             .send_blocking(CefRequest {
                 uri: uri.clone(),
                 responser: Responser(tx),
@@ -467,6 +477,7 @@ impl vmux_native::Assets for PageAssets {
             reply.fail("request channel closed");
             return;
         }
+        vmux_native::Wake::wake(&self.waker);
         std::thread::spawn(move || match rx.recv_blocking() {
             Ok(response) => reply.respond(
                 response.status_code as u16,
