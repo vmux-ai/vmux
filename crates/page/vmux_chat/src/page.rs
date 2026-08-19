@@ -1,6 +1,6 @@
 //! The chat page itself: one conversation's transcript, approvals and composer.
 //!
-//! Gated once here rather than per module, so what ships to wasm and iOS is this file and the
+//! Gated once here rather than per module, so what ships to a `ui` target is this file and the
 //! directory beside it. The desktop half that feeds it lives outside this crate, and speaks to
 //! it only through the bin-ipc payloads in [`crate::event`].
 

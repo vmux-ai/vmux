@@ -51,8 +51,6 @@ vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 vmux_terminal = { path = "../vmux_terminal" }
 
-# Shared by both page hosts. Everything web-bound stays in the wasm-only block below, so a phone
-# build pulls neither the browser bindings nor the crates that gate bevy on `not(wasm32)`.
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }

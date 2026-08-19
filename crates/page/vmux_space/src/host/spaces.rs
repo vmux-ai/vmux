@@ -1,12 +1,8 @@
 use bevy::prelude::*;
-use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
-use vmux_layout::cef::Browser;
 use vmux_layout::native_open::HostedPage;
 
 use crate::event::SPACES_PAGE_URL;
 use crate::model::SpaceRecord;
-use vmux_flex::prelude::*;
 
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ActiveSpace {
@@ -27,37 +23,7 @@ pub fn space_profile_bundle(record: &SpaceRecord) -> impl Bundle {
 #[derive(Component, Default)]
 pub struct Spaces;
 
-impl Spaces {
-    pub fn new() -> impl Bundle {
-        (
-            (
-                Self,
-                Browser,
-                WebviewSource::new(SPACES_PAGE_URL),
-                ResolvedWebviewUri(SPACES_PAGE_URL.to_string()),
-                PageMetadata {
-                    title: "Spaces".to_string(),
-                    url: SPACES_PAGE_URL.to_string(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-            ),
-            (
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                Visibility::Visible,
-            ),
-        )
-    }
-}
+impl Spaces {}
 
 impl HostedPage for Spaces {
     const HOST: &'static str = "spaces";

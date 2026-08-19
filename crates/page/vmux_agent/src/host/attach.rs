@@ -91,7 +91,7 @@ pub(crate) fn attach_page_agent_to_stack_with_webview(
     ));
     let url = format!("vmux://agent/{provider}");
     // The launcher's view is despawned rather than relabelled. Reuse was worth it when the view
-    // was a CEF browser holding a wasm bundle a url swap would keep loaded; a native view holds a
+    // was a CEF browser holding a bundle a url swap would keep loaded; a native view holds a
     // `VirtualDom` built from the launcher's own component, and no url swap turns that into chat.
     if let Some(webview) = webview {
         commands.entity(webview).despawn();

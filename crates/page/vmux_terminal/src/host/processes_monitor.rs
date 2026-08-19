@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use bevy::{ecs::relationship::Relationship, prelude::*};
 use bevy_cef::prelude::*;
-use vmux_core::PageMetadata;
 use vmux_core::page::PageReady;
 use vmux_history::LastActivatedAt;
 use vmux_service::event::*;
@@ -10,9 +9,7 @@ use vmux_service::protocol::{ClientMessage, ProcessId};
 
 use crate::Terminal;
 use crate::plugin::{ServiceClient, reattach_terminal_bundle};
-use vmux_flex::prelude::*;
 use vmux_layout::{
-    cef::Browser,
     event::SERVICES_PAGE_URL,
     native_open::{HostedPage, HostedPagePlugin},
     pane::{Pane, PaneSplit},
@@ -58,37 +55,7 @@ impl Plugin for ProcessesMonitorPlugin {
 #[derive(Component, Default)]
 pub struct ProcessesMonitor;
 
-impl ProcessesMonitor {
-    pub fn new() -> impl Bundle {
-        (
-            (
-                Self,
-                Browser,
-                WebviewSource::new(SERVICES_PAGE_URL),
-                ResolvedWebviewUri(SERVICES_PAGE_URL.to_string()),
-                PageMetadata {
-                    title: "Background Services".to_string(),
-                    url: SERVICES_PAGE_URL.to_string(),
-                    icon: vmux_core::PageIcon::None,
-                    bg_color: None,
-                },
-            ),
-            (
-                WebviewSize(Vec2::new(1280.0, 720.0)),
-                Transform::default(),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(0.0),
-                    bottom: Val::Px(0.0),
-                    ..default()
-                },
-                Visibility::Visible,
-            ),
-        )
-    }
-}
+impl ProcessesMonitor {}
 
 impl HostedPage for ProcessesMonitor {
     const HOST: &'static str = "services";

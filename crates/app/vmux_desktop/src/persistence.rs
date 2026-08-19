@@ -24,8 +24,8 @@ use vmux_layout::{
 };
 use vmux_setting::AppSettings;
 use vmux_setting::event::SETTINGS_PAGE_URL;
+use vmux_space::ActiveSpace;
 use vmux_space::event::SPACES_PAGE_URL;
-use vmux_space::{ActiveSpace, Spaces};
 use vmux_terminal::Terminal;
 use vmux_terminal::new_terminal_bundle_with_cwd;
 
@@ -602,7 +602,10 @@ pub(crate) fn rebuild_space_views(
                     }
                 }
             } else if meta.url.starts_with(SPACES_PAGE_URL.trim_end_matches('/')) {
-                commands.spawn((Spaces::new(), ChildOf(entity)));
+                commands.spawn((
+                    vmux_layout::cef::Browser::native_page(SPACES_PAGE_URL, "Spaces"),
+                    ChildOf(entity),
+                ));
             } else if meta
                 .url
                 .starts_with(SETTINGS_PAGE_URL.trim_end_matches('/'))
