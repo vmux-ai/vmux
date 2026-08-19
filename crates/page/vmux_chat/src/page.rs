@@ -65,5 +65,4 @@ mod error;
 mod keys;
 mod scroll;
 mod state;
-mod tab;
 mod transcript;

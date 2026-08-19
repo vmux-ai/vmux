@@ -9,7 +9,6 @@
 use std::collections::{HashMap, HashSet};
 
 use super::scroll;
-use super::tab::{Accent, TabIdentity};
 use crate::event::{
     ApprovalDecision, CHAT_ATTACHMENT_PREVIEWS_EVENT, CHAT_ATTACHMENTS_EVENT,
     CHAT_HISTORY_PAGE_EVENT, CHAT_HISTORY_PAGE_SIZE, CHAT_MEDIA_ENTRIES_EVENT, CHAT_SNAPSHOT_EVENT,
@@ -26,6 +25,7 @@ use crate::format::composer::{
     ResumeMenuState, SelectorMode, chat_page_title, filter_models, filter_sessions,
     resume_menu_state, selector_mode, should_clear_draft_on_escape, should_fetch_resume,
 };
+use crate::tab::Accent;
 use dioxus::prelude::*;
 use vmux_ui::agent_accent::agent_accent;
 use vmux_ui::components::prompt_composer::{
@@ -182,18 +182,6 @@ impl Chat {
         });
         use_effect(move || chat.fetch_resume_sessions());
         use_effect(move || chat.fetch_media_entries());
-        use_effect(move || {
-            let items = chat.transcript.items.read();
-            TabIdentity::of(
-                chat.title(),
-                &items,
-                &(chat.run.status)(),
-                &(chat.identity.agent_icon)(),
-                &chat.agent(),
-                &chat.accent(),
-            )
-            .apply();
-        });
         use_selector(chat.slash.menu_sel, move |selected| {
             let media_open = {
                 let draft = chat.composer.draft.read();
