@@ -40,7 +40,6 @@ pub fn Page() -> Element {
     let s = snapshot.read().clone();
     if s.is_null() {
         return rsx! {
-            document::Title { {translate("settings-title")} }
             div { class: "flex h-full items-center justify-center text-sm text-muted-foreground",
                 {translate("settings-loading")}
             }
@@ -56,7 +55,6 @@ pub fn Page() -> Element {
     let search_placeholder = format!("{}…", translate("command-search"));
 
     rsx! {
-        document::Title { {translate("settings-title")} }
         div { class: "flex h-full min-h-0 flex-row bg-background text-foreground",
             aside { class: "hidden w-56 shrink-0 border-r border-border px-4 py-6 lg:block",
                 div { class: "mb-4 px-2",

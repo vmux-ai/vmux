@@ -51,7 +51,6 @@ pub fn Page() -> Element {
         .filter(|item| item_matches(item, &search))
         .count();
     rsx! {
-        document::Title { {translate("tools-title")} }
         ManagerPage {
             ManagerHeader {
                 title: translate("tools-title"),

@@ -4,7 +4,6 @@ use dioxus::prelude::*;
 use vmux_command::event::CommandBarOpenEvent;
 use vmux_ui::components::start_hero::{START_BACKDROP_STYLE, StartBackdrop, StartHero};
 use vmux_ui::hooks::{send, use_event, use_listener, use_theme};
-use vmux_ui::i18n::translate;
 
 use crate::event::{
     START_COMMAND_BAR_OPEN_EVENT, START_FOCUS_INPUT_EVENT, StartDataRequest, StartFocusInput,
@@ -39,7 +38,6 @@ pub fn Page(
     use_effect(StartFocus::install);
 
     rsx! {
-        document::Title { {translate("start-title")} }
         main {
             class: "relative isolate flex h-screen items-center justify-center overflow-hidden bg-background px-4 text-foreground sm:px-6",
             style: START_BACKDROP_STYLE,

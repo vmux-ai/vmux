@@ -41,7 +41,6 @@ pub fn Page() -> Element {
         });
 
     rsx! {
-        document::Title { {translate("spaces-title")} }
         div {
             id: "spaces-root",
             tabindex: "0",
