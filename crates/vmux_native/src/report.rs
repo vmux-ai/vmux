@@ -24,6 +24,8 @@ enum PageReport<'a> {
         token: u64,
         measured: Option<Measured>,
     },
+    /// A link the shim held back rather than let it navigate the document away.
+    Link(&'a str),
     /// A payload a page emitted, still base64 as the shim sent it.
     Emitted(&'a str),
 }
@@ -42,6 +44,9 @@ impl<'a> PageReport<'a> {
                 token,
                 measured: Self::numbers(values),
             };
+        }
+        if let Some(href) = body.strip_prefix("link:") {
+            return Self::Link(href);
         }
 
         Self::Emitted(body)
@@ -92,8 +97,23 @@ impl PageMessage {
         match PageReport::of(body) {
             PageReport::Console { level, text } => self.log(level, text),
             PageReport::Measured { token, measured } => self.measured(token, measured),
+            PageReport::Link(href) => self.link(href),
             PageReport::Emitted(payload) => self.emit(payload),
         }
+    }
+
+    /// A link that went nowhere.
+    ///
+    /// The shim lets a fragment through to the engine and holds everything else, because a native
+    /// page's document is the one its `VirtualDom` is mounted against and navigating it away ends
+    /// the page. Nothing opens the held ones. A link that should go somewhere is a button that
+    /// emits an event the host answers — `MdInline::WikiLink` already is one — so this says which
+    /// page still renders an `<a>` expecting the engine to do it.
+    fn link(&self, href: &str) {
+        warn!(
+            "{}: no link is followed from a page hosted here, {href} went nowhere",
+            self.name
+        );
     }
 
     /// Resolve whatever asked, then wake: a task that can now run is a render nobody has scheduled.
@@ -149,6 +169,7 @@ mod tests {
                     Some([a, b, c, d]) => format!("measured {token} {a},{b},{c},{d}"),
                     None => format!("measured {token} gone"),
                 },
+                PageReport::Link(href) => format!("link {href}"),
                 PageReport::Emitted(payload) => format!("emitted {payload}"),
             }
         }
@@ -168,6 +189,7 @@ mod tests {
             "measured:7:1,2,3,4",
             "measured:9:",
             "measured:9:1,2",
+            "link:https://example.com/a:b",
             "AAAA",
         ]
         .iter()
@@ -182,6 +204,7 @@ mod tests {
                 "measured 7 1,2,3,4",
                 "measured 9 gone",
                 "measured 9 gone",
+                "link https://example.com/a:b",
                 "emitted AAAA",
             ]
         );

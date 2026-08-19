@@ -238,10 +238,47 @@ pub(crate) const WRY_HOST_SHIM: &str = r#"
       }
     }
   };
+  // Which links the document is allowed to follow.
+  //
+  // dioxus's desktop interpreter follows none of them: it prevents the default action for every
+  // click inside an `<a>` and posts the href to the host instead, on the grounds that a document
+  // navigating away would take the VirtualDom's mounting with it. That holds for anything leaving
+  // the page. A fragment does not leave it — so refusing one turns a scroll the engine does
+  // natively, and instantly, into a link that does nothing at all.
+  //
+  // The refusal moves here, where the two can be told apart. Bubble phase on the document, which
+  // is after the interpreter's own delegated handler, so a page that claimed the click for itself
+  // has already said so and this leaves it alone.
+  // Whether following this href would leave the document the VirtualDom is mounted against.
+  // `<base href="/"/>` is in every page's head, and it makes a bare fragment resolve against the
+  // base rather than against the document — so on a page whose url carries a path, `file:///x` or
+  // `vmux://agent/<id>`, `#section` names a different document and following it would end the
+  // page. A fragment is the engine's to scroll only once it still lands here.
+  const sameDocument = (href) => {
+    const upToFragment = (url) => url.split('#')[0];
+    try {
+      return upToFragment(new URL(href, document.baseURI).href) === upToFragment(location.href);
+    } catch (e) {
+      return false;
+    }
+  };
+  const holdLinks = () => {
+    window.interpreter.intercept_link_redirects = false;
+    document.addEventListener('click', (event) => {
+      if (event.defaultPrevented) return;
+      const anchor = event.target instanceof Element ? event.target.closest('a') : null;
+      if (!anchor) return;
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+      if (href.startsWith('#') && sameDocument(href)) return;
+      event.preventDefault();
+      window.ipc.postMessage('link:' + href);
+    });
+  };
   window.vmuxWry = {
     // Asking for a frame is what tells the host the page can take one, so the shell calls this
     // once the interpreter holds a root and never before.
-    start: pumpEdits,
+    start() { holdLinks(); pumpEdits(); },
     binEmit(buffer) { window.ipc.postMessage(toBase64(buffer)); },
     binListen(id, callback) {
       const existing = listeners.get(id) || [];
