@@ -6,14 +6,9 @@
 pub struct PageHost(String);
 
 impl PageHost {
-    /// Derived from a location's protocol and host. The vault is served from a real origin
-    /// rather than `vmux://`, so it is recognised by name; any other http(s) origin is a remote
-    /// host and gets the layout; a `file:` URL opens the editor. Anything else already names
-    /// its own page.
+    /// Derived from a location's protocol and host. An http(s) origin is a remote host and gets
+    /// the layout; a `file:` URL opens the editor. Anything else already names its own page.
     pub fn of(protocol: &str, host: &str) -> Self {
-        if protocol == "https:" && host == "vault.vmux.ai" {
-            return Self("vault".to_string());
-        }
         if matches!(protocol, "http:" | "https:") {
             return Self("remote".to_string());
         }
@@ -36,7 +31,6 @@ mod tests {
     fn protocol_decides_the_page_before_the_host_does() {
         assert_eq!(PageHost::of("file:", "").as_str(), "files");
         assert_eq!(PageHost::of("vmux:", "terminal").as_str(), "terminal");
-        assert_eq!(PageHost::of("https:", "vault.vmux.ai").as_str(), "vault");
         assert_eq!(PageHost::of("https:", "example.com").as_str(), "remote");
         assert_eq!(
             PageHost::of("https:", "mac.example.ts.net").as_str(),

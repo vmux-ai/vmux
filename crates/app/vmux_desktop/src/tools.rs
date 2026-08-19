@@ -427,8 +427,7 @@ fn queue_vault_auto_sync(
             action: VaultAction::Sync,
             repository: String::new(),
             private: true,
-            credential_id: String::new(),
-            prf_output: Vec::new(),
+            folder_name: String::new(),
             recovery_key: String::new(),
         },
     ));
@@ -812,8 +811,6 @@ fn scan_vault(load_repositories: bool, previous: VaultSnapshot) -> VaultSnapshot
         encrypted: status.encrypted,
         unlocked: status.unlocked,
         vault_id: status.vault_id,
-        passkey_credentials: status.passkey_credentials,
-        passkey_salt: status.passkey_salt,
         recovery_enabled: status.recovery_enabled,
         remote: status.remote,
         branch: status.branch,
@@ -1410,21 +1407,13 @@ where
             };
             vmux_core::profile::vault::connect_folder(folder.path())
         }
-        VaultAction::AddPasskey => {
-            vmux_core::profile::vault::add_passkey(&request.credential_id, &request.prf_output)
-        }
-        VaultAction::PreparePasskey => vmux_core::profile::vault::prepare_passkey(),
-        VaultAction::UnlockPasskey => vmux_core::profile::vault::unlock_with_passkey(
-            &request.credential_id,
-            &request.prf_output,
-        ),
         VaultAction::CreateRecoveryKey => unreachable!(),
         VaultAction::UnlockRecoveryKey => {
             vmux_core::profile::vault::unlock_with_recovery_key(&request.recovery_key)
         }
         VaultAction::ConnectCloud => connect_cloud_storage(&request.repository).await,
         VaultAction::CreateCloudFolder => {
-            let folder = Path::new(&request.repository).join(&request.credential_id);
+            let folder = Path::new(&request.repository).join(&request.folder_name);
             vmux_core::profile::vault::connect_folder(&folder)
         }
         VaultAction::ChooseCloudFolder => {

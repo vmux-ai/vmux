@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::prelude::*;
-use js_sys::{Array, Function, Object, Promise, Reflect, Uint8Array};
+use js_sys::{Function, Promise, Reflect, Uint8Array};
 use vmux_core::tools::{TOOLS_SNAPSHOT_EVENT, ToolsSnapshot};
 use vmux_core::vault::{
     VAULT_ACTION_RESULT_EVENT, VAULT_AUTH_PROGRESS_EVENT, VaultAction, VaultActionRequest,
@@ -29,8 +29,6 @@ enum VaultDestination {
     Create,
     Existing,
 }
-
-const PASSKEY_UI_ENABLED: bool = false;
 
 impl RemoteProvider {
     const ALL: [Self; 4] = [
@@ -61,7 +59,6 @@ pub fn Page() -> Element {
     let mut loaded = use_signal(|| false);
     let mut pending = use_signal(|| None::<VaultAction>);
     let mut notice = use_signal(|| None::<VaultActionResult>);
-    let mut passkey_setup_blocked = use_signal(|| false);
     let mut generated_recovery_key = use_signal(String::new);
     let mut recovery_key_confirmation = use_signal(String::new);
     let mut recovery_key_copied = use_signal(|| false);
@@ -125,21 +122,6 @@ pub fn Page() -> Element {
             if result.action == VaultAction::Sync && result.success {
                 recovery_upload_pending.set(false);
             }
-            if result.success
-                && matches!(
-                    result.action,
-                    VaultAction::Sync
-                        | VaultAction::PreparePasskey
-                        | VaultAction::AddPasskey
-                        | VaultAction::UnlockPasskey
-                        | VaultAction::CreateRecoveryKey
-                        | VaultAction::UnlockRecoveryKey
-                )
-            {
-                passkey_setup_blocked.set(false);
-            } else if !result.success && is_vault_key_locked(&result.message) {
-                passkey_setup_blocked.set(true);
-            }
             if !result.success {
                 match result.action {
                     VaultAction::Sync => {
@@ -154,16 +136,7 @@ pub fn Page() -> Element {
                     _ => {}
                 }
             }
-            if result.action == VaultAction::PreparePasskey {
-                pending.set(None);
-                if result.success {
-                    passkey_setup_blocked.set(false);
-                    start_passkey(VaultAction::AddPasskey, snapshot().vault, pending, notice);
-                } else {
-                    passkey_setup_blocked.set(true);
-                    notice.set(Some(result));
-                }
-            } else if result.action == VaultAction::CreateRecoveryKey && result.success {
+            if result.action == VaultAction::CreateRecoveryKey && result.success {
                 generated_recovery_key.set(String::new());
                 recovery_key_confirmation.set(String::new());
                 recovery_key_copied.set(false);
@@ -200,15 +173,6 @@ pub fn Page() -> Element {
 
     use_effect(move || {
         locale();
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let location = window.location();
-        if location.protocol().ok().as_deref() == Some("vmux:") {
-            let search = location.search().unwrap_or_default();
-            let _ = location.replace(&format!("https://vault.vmux.ai/{search}"));
-            return;
-        }
         request_snapshot(false);
     });
 
@@ -261,7 +225,6 @@ pub fn Page() -> Element {
                         private,
                         pending,
                         notice,
-                        passkey_setup_blocked,
                         generated_recovery_key,
                         recovery_key_confirmation,
                         recovery_key_copied,
@@ -288,7 +251,6 @@ fn VaultPanel(
     private: Signal<bool>,
     pending: Signal<Option<VaultAction>>,
     notice: Signal<Option<VaultActionResult>>,
-    passkey_setup_blocked: Signal<bool>,
     generated_recovery_key: Signal<String>,
     recovery_key_confirmation: Signal<String>,
     recovery_key_copied: Signal<bool>,
@@ -696,16 +658,6 @@ fn VaultPanel(
                     recovery_upload_pending,
                     notice,
                 }
-                if PASSKEY_UI_ENABLED
-                    && (!passkey_setup_blocked() || !vault.passkey_credentials.is_empty())
-                {
-                    PasskeyCard {
-                        vault,
-                        pending,
-                        notice,
-                        passkey_setup_blocked,
-                    }
-                }
             }
         }
     }
@@ -900,58 +852,6 @@ fn RecoveryCard(
     }
 }
 
-#[component]
-fn PasskeyCard(
-    vault: VaultSnapshot,
-    pending: Signal<Option<VaultAction>>,
-    notice: Signal<Option<VaultActionResult>>,
-    passkey_setup_blocked: Signal<bool>,
-) -> Element {
-    let unlock_vault = vault.clone();
-    rsx! {
-        div { class: "mt-4 rounded-xl bg-background/35 p-4 ring-1 ring-inset ring-foreground/10",
-            div { class: "flex items-center gap-3",
-                svg { class: "h-5 w-5 shrink-0 text-foreground/70", view_box: "0 0 24 24", fill: "none", stroke: "currentColor", stroke_width: "2", stroke_linecap: "round", stroke_linejoin: "round",
-                    circle { cx: "8", cy: "15", r: "4" }
-                    path { d: "m11 12 8-8" }
-                    path { d: "m18 5 1 1" }
-                    path { d: "m15 8 1 1" }
-                }
-                div { class: "min-w-0 flex-1",
-                    div { class: "text-sm font-medium text-foreground", {translate("vault-passkey")} }
-                    div { class: "mt-0.5 text-xs text-muted-foreground/70", {translate("vault-passkey-description")} }
-                }
-                if !vault.unlocked && !vault.passkey_credentials.is_empty() {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Primary,
-                        disabled: pending().is_some(),
-                        onclick: move |_| start_passkey(
-                            VaultAction::UnlockPasskey,
-                            unlock_vault.clone(),
-                            pending,
-                            notice,
-                        ),
-                        {translate("vault-passkey-unlock")}
-                    }
-                }
-                if vault.unlocked && !passkey_setup_blocked() {
-                    ManagerButton {
-                        variant: ManagerButtonVariant::Secondary,
-                        disabled: pending().is_some(),
-                        onclick: move |_| send_action(
-                            pending,
-                            VaultAction::PreparePasskey,
-                            String::new(),
-                            true,
-                        ),
-                        {translate("vault-passkey-add")}
-                    }
-                }
-            }
-        }
-    }
-}
-
 fn send_recovery_action(
     mut pending: Signal<Option<VaultAction>>,
     action: VaultAction,
@@ -962,8 +862,7 @@ fn send_recovery_action(
         action,
         repository: String::new(),
         private: true,
-        credential_id: String::new(),
-        prf_output: Vec::new(),
+        folder_name: String::new(),
         recovery_key,
     })
     .is_err()
@@ -1028,241 +927,6 @@ fn copy_text(value: String, mut copied: Signal<bool>) {
     });
 }
 
-fn start_passkey(
-    action: VaultAction,
-    vault: VaultSnapshot,
-    mut pending: Signal<Option<VaultAction>>,
-    mut notice: Signal<Option<VaultActionResult>>,
-) {
-    if vault.vault_id.is_empty() || vault.passkey_salt.len() != 32 {
-        notice.set(Some(VaultActionResult {
-            action,
-            success: false,
-            message: translate("vault-not-connected"),
-            pending_upload: false,
-        }));
-        return;
-    }
-    pending.set(Some(action));
-    notice.set(None);
-    spawn(async move {
-        let result = match action {
-            VaultAction::AddPasskey => create_passkey(&vault.vault_id, &vault.passkey_salt).await,
-            VaultAction::UnlockPasskey => {
-                get_passkey(&vault.passkey_credentials, &vault.passkey_salt).await
-            }
-            _ => unreachable!(),
-        };
-        match result {
-            Ok((credential_id, prf_output)) => {
-                if let Err(error) = send(&VaultActionRequest {
-                    action,
-                    repository: String::new(),
-                    private: true,
-                    credential_id,
-                    prf_output,
-                    recovery_key: String::new(),
-                }) {
-                    pending.set(None);
-                    notice.set(Some(VaultActionResult {
-                        action,
-                        success: false,
-                        message: error.to_string(),
-                        pending_upload: false,
-                    }));
-                }
-            }
-            Err(message) => {
-                pending.set(None);
-                notice.set(Some(VaultActionResult {
-                    action,
-                    success: false,
-                    message,
-                    pending_upload: false,
-                }));
-            }
-        }
-    });
-}
-
-async fn create_passkey(vault_id: &str, salt: &[u8]) -> Result<(String, Vec<u8>), String> {
-    let public_key = Object::new();
-    set_property(&public_key, "challenge", random_bytes(32)?.as_ref())?;
-
-    let rp = Object::new();
-    set_property(&rp, "id", &JsValue::from_str("vault.vmux.ai"))?;
-    set_property(&rp, "name", &JsValue::from_str("vmux"))?;
-    set_property(&public_key, "rp", rp.as_ref())?;
-
-    let user = Object::new();
-    set_property(&user, "id", Uint8Array::from(vault_id.as_bytes()).as_ref())?;
-    set_property(&user, "name", &JsValue::from_str("vmux"))?;
-    set_property(&user, "displayName", &JsValue::from_str("vmux"))?;
-    set_property(&public_key, "user", user.as_ref())?;
-
-    let parameters = Array::new();
-    for algorithm in [-7, -257] {
-        let parameter = Object::new();
-        set_property(&parameter, "type", &JsValue::from_str("public-key"))?;
-        set_property(&parameter, "alg", &JsValue::from_f64(algorithm as f64))?;
-        parameters.push(parameter.as_ref());
-    }
-    set_property(&public_key, "pubKeyCredParams", parameters.as_ref())?;
-
-    let selection = Object::new();
-    set_property(&selection, "residentKey", &JsValue::from_str("required"))?;
-    set_property(
-        &selection,
-        "userVerification",
-        &JsValue::from_str("required"),
-    )?;
-    set_property(&public_key, "authenticatorSelection", selection.as_ref())?;
-    set_property(&public_key, "attestation", &JsValue::from_str("none"))?;
-    set_property(&public_key, "timeout", &JsValue::from_f64(120_000.0))?;
-    set_property(
-        &public_key,
-        "extensions",
-        prf_create_extensions(salt)?.as_ref(),
-    )?;
-
-    let options = Object::new();
-    set_property(&options, "publicKey", public_key.as_ref())?;
-    let credential = call_credentials("create", &options).await?;
-    let credential_id = credential_id(&credential)?;
-    let extensions = client_extension_results(&credential)?;
-    match prf_output(&extensions) {
-        Ok(output) => Ok((credential_id, output)),
-        Err(_) if prf_enabled(&extensions) => get_passkey(&[credential_id], salt).await,
-        Err(message) => Err(message),
-    }
-}
-
-async fn get_passkey(credential_ids: &[String], salt: &[u8]) -> Result<(String, Vec<u8>), String> {
-    if credential_ids.is_empty() {
-        return Err("No encryption-capable passkey is registered".to_string());
-    }
-    let public_key = Object::new();
-    set_property(&public_key, "challenge", random_bytes(32)?.as_ref())?;
-    set_property(&public_key, "rpId", &JsValue::from_str("vault.vmux.ai"))?;
-    set_property(
-        &public_key,
-        "userVerification",
-        &JsValue::from_str("required"),
-    )?;
-    set_property(&public_key, "timeout", &JsValue::from_f64(120_000.0))?;
-
-    let allowed = Array::new();
-    let evaluations = Object::new();
-    for credential_id in credential_ids {
-        let bytes = decode_hex(credential_id)?;
-        let descriptor = Object::new();
-        set_property(&descriptor, "type", &JsValue::from_str("public-key"))?;
-        set_property(
-            &descriptor,
-            "id",
-            Uint8Array::from(bytes.as_slice()).as_ref(),
-        )?;
-        allowed.push(descriptor.as_ref());
-        let evaluation = Object::new();
-        set_property(&evaluation, "first", Uint8Array::from(salt).as_ref())?;
-        set_property(&evaluations, &base64url(&bytes), evaluation.as_ref())?;
-    }
-    set_property(&public_key, "allowCredentials", allowed.as_ref())?;
-    let prf = Object::new();
-    set_property(&prf, "evalByCredential", evaluations.as_ref())?;
-    let extensions = Object::new();
-    set_property(&extensions, "prf", prf.as_ref())?;
-    set_property(&public_key, "extensions", extensions.as_ref())?;
-
-    let options = Object::new();
-    set_property(&options, "publicKey", public_key.as_ref())?;
-    let credential = call_credentials("get", &options).await?;
-    let extensions = client_extension_results(&credential)?;
-    Ok((credential_id(&credential)?, prf_output(&extensions)?))
-}
-
-fn prf_create_extensions(salt: &[u8]) -> Result<Object, String> {
-    let evaluation = Object::new();
-    set_property(&evaluation, "first", Uint8Array::from(salt).as_ref())?;
-    let prf = Object::new();
-    set_property(&prf, "eval", evaluation.as_ref())?;
-    let extensions = Object::new();
-    set_property(&extensions, "prf", prf.as_ref())?;
-    Ok(extensions)
-}
-
-async fn call_credentials(method: &str, options: &Object) -> Result<JsValue, String> {
-    let window = web_sys::window().ok_or_else(|| "Passkeys are unavailable".to_string())?;
-    let navigator =
-        Reflect::get(window.as_ref(), &JsValue::from_str("navigator")).map_err(js_error)?;
-    let credentials =
-        Reflect::get(&navigator, &JsValue::from_str("credentials")).map_err(js_error)?;
-    let function = Reflect::get(&credentials, &JsValue::from_str(method))
-        .map_err(js_error)?
-        .dyn_into::<Function>()
-        .map_err(js_error)?;
-    let promise = function
-        .call1(&credentials, options.as_ref())
-        .map_err(js_error)?
-        .dyn_into::<Promise>()
-        .map_err(js_error)?;
-    JsFuture::from(promise).await.map_err(js_error)
-}
-
-fn credential_id(credential: &JsValue) -> Result<String, String> {
-    let raw = Reflect::get(credential, &JsValue::from_str("rawId")).map_err(js_error)?;
-    let bytes = Uint8Array::new(&raw).to_vec();
-    if bytes.is_empty() {
-        return Err("Passkey returned an empty credential".to_string());
-    }
-    Ok(encode_hex(&bytes))
-}
-
-fn client_extension_results(credential: &JsValue) -> Result<JsValue, String> {
-    let function = Reflect::get(credential, &JsValue::from_str("getClientExtensionResults"))
-        .map_err(js_error)?
-        .dyn_into::<Function>()
-        .map_err(js_error)?;
-    let extensions = function.call0(credential).map_err(js_error)?;
-    if !extensions.is_object() {
-        return Err(translate("vault-passkey-provider-unsupported"));
-    }
-    Ok(extensions)
-}
-
-fn prf_enabled(extensions: &JsValue) -> bool {
-    let Ok(prf) = Reflect::get(extensions, &JsValue::from_str("prf")) else {
-        return false;
-    };
-    if !prf.is_object() {
-        return false;
-    }
-    Reflect::get(&prf, &JsValue::from_str("enabled"))
-        .ok()
-        .and_then(|enabled| enabled.as_bool())
-        .unwrap_or(false)
-}
-
-fn prf_output(extensions: &JsValue) -> Result<Vec<u8>, String> {
-    let prf = Reflect::get(extensions, &JsValue::from_str("prf")).map_err(js_error)?;
-    if !prf.is_object() {
-        return Err(translate("vault-passkey-provider-unsupported"));
-    }
-    let results = Reflect::get(&prf, &JsValue::from_str("results")).map_err(js_error)?;
-    if !results.is_object() {
-        return Err(translate("vault-passkey-provider-unsupported"));
-    }
-    let first = Reflect::get(&results, &JsValue::from_str("first")).map_err(js_error)?;
-    if first.is_null() || first.is_undefined() {
-        return Err(translate("vault-passkey-provider-unsupported"));
-    }
-    let output = Uint8Array::new(&first).to_vec();
-    if output.len() != 32 {
-        return Err(translate("vault-passkey-provider-unsupported"));
-    }
-    Ok(output)
-}
-
 fn random_bytes(length: u32) -> Result<Uint8Array, String> {
     let window = web_sys::window().ok_or_else(|| "Passkeys are unavailable".to_string())?;
     let crypto = Reflect::get(window.as_ref(), &JsValue::from_str("crypto")).map_err(js_error)?;
@@ -1275,62 +939,12 @@ fn random_bytes(length: u32) -> Result<Uint8Array, String> {
     Ok(bytes)
 }
 
-fn set_property(target: &Object, name: &str, value: &JsValue) -> Result<(), String> {
-    if Reflect::set(target.as_ref(), &JsValue::from_str(name), value).map_err(js_error)? {
-        Ok(())
-    } else {
-        Err(format!("failed to set passkey option {name}"))
-    }
-}
-
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         output.push(HEX[(byte >> 4) as usize] as char);
         output.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    output
-}
-
-fn decode_hex(source: &str) -> Result<Vec<u8>, String> {
-    if !source.len().is_multiple_of(2) {
-        return Err("invalid passkey credential".to_string());
-    }
-    source
-        .as_bytes()
-        .chunks_exact(2)
-        .map(|pair| {
-            let high = hex_digit(pair[0])?;
-            let low = hex_digit(pair[1])?;
-            Ok((high << 4) | low)
-        })
-        .collect()
-}
-
-fn hex_digit(byte: u8) -> Result<u8, String> {
-    match byte {
-        b'0'..=b'9' => Ok(byte - b'0'),
-        b'a'..=b'f' => Ok(byte - b'a' + 10),
-        _ => Err("invalid passkey credential".to_string()),
-    }
-}
-
-fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let value = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        output.push(ALPHABET[((value >> 18) & 63) as usize] as char);
-        output.push(ALPHABET[((value >> 12) & 63) as usize] as char);
-        if chunk.len() > 1 {
-            output.push(ALPHABET[((value >> 6) & 63) as usize] as char);
-        }
-        if chunk.len() > 2 {
-            output.push(ALPHABET[(value & 63) as usize] as char);
-        }
     }
     output
 }
@@ -1363,8 +977,7 @@ fn send_action(
         action,
         repository,
         private,
-        credential_id: String::new(),
-        prf_output: Vec::new(),
+        folder_name: String::new(),
         recovery_key: String::new(),
     });
 }
@@ -1375,8 +988,7 @@ fn send_cloud_create(mut pending: Signal<Option<VaultAction>>, root: &str, name:
         action: VaultAction::CreateCloudFolder,
         repository: root.to_string(),
         private: true,
-        credential_id: name.to_string(),
-        prf_output: Vec::new(),
+        folder_name: name.to_string(),
         recovery_key: String::new(),
     });
 }
@@ -1388,9 +1000,6 @@ fn action_result_message(action: VaultAction) -> String {
         VaultAction::Sync => "vault-result-synced",
         VaultAction::ConnectGithub => "vault-result-github-connected",
         VaultAction::ConnectFolder => "vault-result-folder-connected",
-        VaultAction::AddPasskey => "vault-result-created",
-        VaultAction::PreparePasskey => "vault-result-connected",
-        VaultAction::UnlockPasskey => "vault-result-connected",
         VaultAction::CreateRecoveryKey => "vault-result-created",
         VaultAction::UnlockRecoveryKey => "vault-result-connected",
         VaultAction::ConnectCloud => "vault-result-connected",
@@ -1398,10 +1007,6 @@ fn action_result_message(action: VaultAction) -> String {
             "vault-result-folder-connected"
         }
     })
-}
-
-fn is_vault_key_locked(message: &str) -> bool {
-    message.starts_with("This Vault is locked on this device.")
 }
 
 fn suggested_repository_name(

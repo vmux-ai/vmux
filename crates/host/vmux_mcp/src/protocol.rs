@@ -182,7 +182,6 @@ fn vault_status_response(status: vmux_profile::vault::VaultStatus) -> Value {
         "connected": connected,
         "encrypted": status.encrypted,
         "unlocked": status.unlocked,
-        "passkeys": status.passkey_credentials.len(),
         "recoveryKey": status.recovery_enabled,
         "automaticBackup": true,
         "provider": provider,
@@ -1003,7 +1002,6 @@ mod tests {
             initialized: true,
             encrypted: true,
             unlocked: true,
-            passkey_credentials: vec!["a1".repeat(32)],
             recovery_enabled: true,
             remote: "https://github.com/vmux-ai/vault.git".into(),
             branch: "main".into(),
@@ -1018,7 +1016,6 @@ mod tests {
         assert_eq!(status["connected"], true);
         assert_eq!(status["encrypted"], true);
         assert_eq!(status["unlocked"], true);
-        assert_eq!(status["passkeys"], 1);
         assert_eq!(status["recoveryKey"], true);
         assert_eq!(status["automaticBackup"], true);
         assert_eq!(status["provider"], "github");

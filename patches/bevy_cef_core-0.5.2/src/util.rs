@@ -37,10 +37,6 @@ use std::env::home_dir;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-pub const VAULT_PASSKEY_SCHEME: &str = "https";
-pub const VAULT_PASSKEY_HOST: &str = "vault.vmux.ai";
-pub const VAULT_PASSKEY_ORIGIN: &str = "https://vault.vmux.ai";
-
 pub const EXTENSIONS_SWITCH: &str = "bevy-cef-extensions";
 
 pub const FILES_SCHEME: &str = "file";
@@ -152,25 +148,14 @@ pub fn url_is_trusted_embedded_page(
 pub fn has_embedded_scheme(url: &str) -> bool {
     url_has_embedded_scheme(url, resolved_cef_embedded_page_config().scheme_prefix())
         || url.starts_with("file://")
-        || is_vault_passkey_page(url)
 }
 
 pub fn is_trusted_embedded_page(url: &str) -> bool {
     if url.starts_with("file://") {
         return true;
     }
-    if is_vault_passkey_page(url) {
-        return true;
-    }
     let config = resolved_cef_embedded_page_config();
     url_is_trusted_embedded_page(url, config.scheme_prefix(), &config.hosts)
-}
-
-pub fn is_vault_passkey_page(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix(VAULT_PASSKEY_ORIGIN) else {
-        return false;
-    };
-    rest.is_empty() || rest.starts_with(['/', '?', '#'])
 }
 
 pub const BRIDGE_ALLOWED_AUTHORITIES: &[&str] = &[
@@ -199,14 +184,11 @@ pub fn ipc_allowed_browser(url: &str) -> bool {
 ///
 /// This has to agree with `vmux_page::PageHost::of`, which is the page's own answer to the same
 /// question and the key its component is looked up by. Two pages are not served from the embedded
-/// scheme and so cannot be recognised by stripping it: the vault, from a real origin, and the
-/// editor, from `file://`. A page whose name is unknown here comes through as the empty string,
+/// scheme and so cannot be recognised by stripping it: the editor, from `file://`. A page whose
+/// name is unknown here comes through as the empty string,
 /// which matches no entry in an IPC owner-host allowlist — so the disagreement does not show up as
 /// an error, it shows up as that page's messages silently never arriving.
 pub fn embedded_page_host_of(url: &str) -> Option<String> {
-    if is_vault_passkey_page(url) {
-        return Some("vault".to_string());
-    }
     if url.starts_with("file://") {
         return Some("files".to_string());
     }
@@ -637,16 +619,6 @@ mod tests {
         ));
         assert!(!url_is_trusted_embedded_page("", "vmux://", &hosts));
         assert!(!url_is_trusted_embedded_page("vmux://history/", "", &hosts));
-    }
-
-    #[test]
-    fn vault_passkey_origin_is_exactly_scoped() {
-        assert!(is_vault_passkey_page("https://vault.vmux.ai/"));
-        assert!(is_vault_passkey_page(
-            "https://vault.vmux.ai/?provider=github"
-        ));
-        assert!(!is_vault_passkey_page("https://vault.vmux.ai.evil.test/"));
-        assert!(!is_vault_passkey_page("http://vault.vmux.ai/"));
     }
 
     #[test]

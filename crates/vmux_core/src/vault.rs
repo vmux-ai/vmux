@@ -20,8 +20,6 @@ pub struct VaultSnapshot {
     pub encrypted: bool,
     pub unlocked: bool,
     pub vault_id: String,
-    pub passkey_credentials: Vec<String>,
-    pub passkey_salt: Vec<u8>,
     pub recovery_enabled: bool,
     pub remote: String,
     pub branch: String,
@@ -89,14 +87,11 @@ pub enum VaultAction {
     Sync,
     ConnectGithub,
     ConnectFolder,
-    AddPasskey,
-    UnlockPasskey,
     CreateRecoveryKey,
     UnlockRecoveryKey,
     ConnectCloud,
     CreateCloudFolder,
     ChooseCloudFolder,
-    PreparePasskey,
 }
 
 #[derive(
@@ -114,8 +109,8 @@ pub struct VaultActionRequest {
     pub action: VaultAction,
     pub repository: String,
     pub private: bool,
-    pub credential_id: String,
-    pub prf_output: Vec<u8>,
+    /// The folder to create under `repository`, for `CreateCloudFolder`.
+    pub folder_name: String,
     pub recovery_key: String,
 }
 
