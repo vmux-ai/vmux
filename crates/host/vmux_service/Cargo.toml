@@ -23,7 +23,7 @@ serde = { workspace = true }
 vmux_remote = { path = "../vmux_remote" }
 vmux_wire = { path = "../../vmux_wire" }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 base64 = "0.22"
 bevy_app = { workspace = true }
 bevy_ecs = { workspace = true }
@@ -52,7 +52,7 @@ tempfile = "3.27.0"
 uuid = { workspace = true }
 url = { workspace = true }
 
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }
 

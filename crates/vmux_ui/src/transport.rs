@@ -185,39 +185,33 @@ impl Host {
 
     /// `not(web)` only: a page compiled for the browser reaches the document itself, so its
     /// `FocusClaim` never asks the host.
-    #[cfg(not(web))]
     pub(crate) fn focus_element(id: &str) {
         let _ = Self::with_installed(|host| host.focus_element(id));
     }
 
     /// `not(web)` only, for the same reason as [`Self::focus_element`]: on the web
     /// [`crate::caret::TextCaret`] reaches the field itself.
-    #[cfg(not(web))]
     pub(crate) fn select_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.select_element_text(id));
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(not(web))]
     pub(crate) fn offer_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.offer_element_text(id));
     }
 
     /// `not(web)` only: the browser has a clipboard API and
     /// [`crate::clipboard::Clipboard`] uses it directly there.
-    #[cfg(not(web))]
     pub(crate) fn write_to_clipboard(text: &str) {
         let _ = Self::with_installed(|host| host.write_to_clipboard(text));
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(not(web))]
     pub(crate) fn event_field_selection(id: &str) -> (usize, usize) {
         Self::with_installed(|host| host.event_field_selection(id)).unwrap_or((0, 0))
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(not(web))]
     pub(crate) fn event_document_has_selection() -> bool {
         Self::with_installed(|host| host.event_document_has_selection()).unwrap_or(false)
     }
@@ -234,19 +228,17 @@ impl Host {
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(not(web))]
     pub(crate) fn place_caret(id: &str, byte: usize) {
         let _ = Self::with_installed(|host| host.place_caret(id, byte));
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(not(web))]
     pub(crate) fn clear_element_text(id: &str) {
         let _ = Self::with_installed(|host| host.clear_element_text(id));
     }
 
     /// `not(web)` only. See [`Self::select_element_text`].
-    #[cfg(all(ui, not(web)))]
+    #[cfg(ui)]
     pub(crate) fn toggle_media(id: &str) {
         let _ = Self::with_installed(|host| host.toggle_media(id));
     }
@@ -310,11 +302,7 @@ thread_local! {
 
 pub mod bin_ipc_envelope;
 pub mod event_listener;
-#[cfg(not(web))]
 mod native;
-#[cfg(web)]
-pub mod web;
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -299,9 +299,6 @@ pub fn CommandPalette(props: PaletteProps) -> Element {
     // `Rc` because `use_hook` clones its value out on every render and a listener must have one
     // owner — two would each try to remove it, and the second removal is the one that silently
     // does nothing.
-    #[cfg(web)]
-    use_hook(|| Rc::new(is_start.then(|| start_menu_click_outside(target_menu_open))));
-
     use_effect(move || {
         let _ = query();
         let _ = selected();
@@ -1687,40 +1684,6 @@ fn apply_ctrl_edit(query: &mut Signal<String>, action: CtrlEditAction, ghost: &s
         query.set(edited.value);
     }
     TextCaret::in_field(COMMAND_BAR_INPUT_ID).place(edited.caret);
-}
-
-/// Close the start-page agent selector when a `mousedown` lands outside the popup and its trigger.
-/// Capture-phase so it beats the buttons' own handlers; clicks inside (`#start-agent-selector`) or
-/// on the trigger (`#start-agent-selector-trigger`) are left alone.
-//
-// `web` only. `DocumentListener` has a native stub that takes no event, so there is nothing to
-// read a target from; dismissing on an outside pointer natively wants a backdrop element instead.
-// Only the start page installs this, and the start page is not native yet.
-#[cfg(web)]
-fn start_menu_click_outside(
-    mut menu_open: Signal<bool>,
-) -> Option<vmux_ui::dom_listener::DocumentListener> {
-    use vmux_ui::dom_listener::DocumentListener;
-    use wasm_bindgen::JsCast;
-
-    DocumentListener::capture("mousedown", move |event| {
-        if !menu_open() {
-            return;
-        }
-        let inside = event
-            .target()
-            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
-            .and_then(|element| {
-                element
-                    .closest("#start-agent-selector, #start-agent-selector-trigger")
-                    .ok()
-                    .flatten()
-            })
-            .is_some();
-        if !inside {
-            menu_open.set(false);
-        }
-    })
 }
 
 /// Cmd+A with no other modifier selects the query rather than the page.

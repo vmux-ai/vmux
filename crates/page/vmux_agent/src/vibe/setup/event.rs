@@ -64,7 +64,7 @@ pub struct AgentSetupResult {
     pub ok: bool,
 }
 
-#[cfg(all(test, not(web)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

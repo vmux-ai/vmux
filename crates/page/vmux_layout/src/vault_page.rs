@@ -897,13 +897,6 @@ fn requested_provider() -> String {
     {
         return provider;
     }
-    #[cfg(web)]
-    if let Some(provider) = web_sys::window()
-        .and_then(|window| window.location().search().ok())
-        .and_then(|search| from_query(&search))
-    {
-        return provider;
-    }
     String::new()
 }
 

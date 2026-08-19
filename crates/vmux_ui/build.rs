@@ -1,33 +1,35 @@
-//! Native debug builds with `--features gallery` refresh **`dist/`** via
-//! **`dx build --platform web`** (`--no-default-features` for the wasm binary).
-//! Release native builds and wasm crate builds are no-ops here.
+//! Generates the Fluent catalogue index, and builds the stylesheet bundle every page links.
+//!
+//! The bundle used to fall out of a `dx build --platform web`, because the pages were wasm. They
+//! are not any more, and Tailwind never read that build's output anyway — every `@source` in
+//! `assets/index.css` names a Rust source directory. So this runs the CLI directly and copies the
+//! two static things beside it.
 
+use sha2::{Digest, Sha256};
 use std::fs;
-#[cfg(feature = "gallery")]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[path = "../build_platform_cfg.rs"]
 mod build_platform_cfg;
 
-#[cfg(feature = "gallery")]
-#[allow(dead_code)]
-#[path = "../vmux_page/src/build.rs"]
-mod page_build;
+/// Set by CI, which has no Tailwind CLI and does not package the app.
+const SKIP_ENV: &str = "VMUX_SKIP_DX_BUILD";
 
-#[cfg(feature = "gallery")]
-use page_build::{
-    SKIP_DX_BUILD_ENV, dx_web_public_dir, replace_dist_from_dx_public, run_dx_web_bundle,
-    skip_dx_build, workspace_root_from_manifest_dir,
-};
+/// Directories whose Rust source Tailwind scans for class names. Must agree with the `@source`
+/// list in `assets/index.css`: a directory missing here does not fail the build, it just stops
+/// the stylesheet being rebuilt when that page's classes change.
+const SCANNED: &[&str] = &[
+    "../vmux_browser/src",
+    "../vmux_ui/src",
+    "../host/vmux_service/src",
+];
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     build_platform_cfg::emit();
     generate_i18n_catalogs();
-
-    #[cfg(feature = "gallery")]
-    build_gallery();
+    build_stylesheet_bundle();
 }
 
 fn generate_i18n_catalogs() {
@@ -70,115 +72,128 @@ fn generate_i18n_catalogs() {
     }
 }
 
-#[cfg(feature = "gallery")]
-fn build_gallery() {
+fn build_stylesheet_bundle() {
+    println!("cargo:rerun-if-env-changed={SKIP_ENV}");
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let workspace_root = workspace_root_from_manifest_dir(&manifest_dir);
 
-    println!("cargo:rerun-if-changed=../vmux_page/src/build.rs");
-    println!("cargo:rerun-if-env-changed={SKIP_DX_BUILD_ENV}");
+    println!("cargo:rerun-if-changed=assets/index.css");
+    println!("cargo:rerun-if-changed=assets/theme.css");
+    println!("cargo:rerun-if-changed=../page/vmux_terminal/assets/fonts");
+    for scanned in SCANNED {
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join(scanned).display()
+        );
+    }
+    for page in page_crate_sources(&manifest_dir) {
+        println!("cargo:rerun-if-changed={}", page.display());
+    }
 
-    let target = std::env::var("TARGET").unwrap_or_default();
-    let profile = std::env::var("PROFILE").unwrap_or_default();
-
-    if target.contains("wasm32") {
+    if std::env::var_os(SKIP_ENV).is_some() {
         return;
     }
 
-    if profile == "release" {
-        return;
-    }
-
-    if skip_dx_build() {
-        return;
-    }
-
-    let tracked_paths = tracked_paths(&manifest_dir);
-    for p in &tracked_paths {
-        println!("cargo:rerun-if-changed={}", p.display());
-    }
-
-    // Match prior `cargo build … --release` for the wasm gallery bundle.
-    let dx_release = true;
-    if !needs_dist_rebuild(&manifest_dir, dx_release, &tracked_paths) {
-        return;
-    }
-
-    run_dx_web_bundle(
-        &workspace_root,
-        "vmux_ui",
-        dx_release,
-        &["--no-default-features"],
+    let assets = manifest_dir.join("dist").join("assets");
+    fs::create_dir_all(&assets).unwrap();
+    compile_index_css(&manifest_dir, &assets);
+    copy_file(
+        &manifest_dir.join("assets/theme.css"),
+        &assets.join("theme.css"),
     );
-    let public = dx_web_public_dir(&workspace_root, "vmux_ui", dx_release);
-    let dist = manifest_dir.join("dist");
-    let shell = manifest_dir.join("assets/index.html");
-    replace_dist_from_dx_public(&public, &dist, &shell);
+    // The terminal owns the font it renders in; every other page just inherits it.
+    copy_dir(
+        &manifest_dir.join("../page/vmux_terminal/assets/fonts"),
+        &assets.join("fonts"),
+    );
+    write_bundle_stamp(&manifest_dir.join("dist"));
 }
 
-#[cfg(feature = "gallery")]
-fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            collect_files(&p, out);
-        } else if p.is_file() {
-            out.push(p);
+/// A SHA-256 manifest of the bundle, checked again after it is copied into the `.app`, so a
+/// partial or corrupted copy fails packaging instead of shipping a page with no styles.
+fn write_bundle_stamp(dist: &Path) {
+    let stamp = dist.join(".bundle-stamp");
+    let _ = fs::remove_file(&stamp);
+    let mut files = Vec::new();
+    collect_files(dist, dist, &mut files);
+    files.sort();
+    let mut manifest = String::new();
+    for relative in files {
+        let digest = Sha256::digest(fs::read(dist.join(&relative)).expect("bundle file"));
+        manifest.push_str(&format!("{digest:x}  {relative}\n"));
+    }
+    fs::write(&stamp, manifest).expect("bundle stamp");
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    for entry in fs::read_dir(dir).expect("bundle directory").flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_files(root, &path, out);
+        } else if path.is_file() {
+            out.push(
+                path.strip_prefix(root)
+                    .expect("inside the bundle")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
         }
     }
 }
 
-#[cfg(feature = "gallery")]
-fn tracked_paths(manifest_dir: &Path) -> Vec<PathBuf> {
-    let workspace_root = workspace_root_from_manifest_dir(manifest_dir);
-    let mut v = vec![
-        manifest_dir.join("Cargo.toml"),
-        manifest_dir.join("Dioxus.toml"),
-        manifest_dir.join("assets/index.html"),
-        manifest_dir.join("assets/input.css"),
-        manifest_dir.join("assets/theme.css"),
-        workspace_root.join("Cargo.toml"),
-        workspace_root.join("Cargo.lock"),
-    ];
-    collect_files(&manifest_dir.join("src"), &mut v);
-    v.sort();
-    v.dedup();
-    v
-}
-
-#[cfg(feature = "gallery")]
-fn needs_dist_rebuild(manifest_dir: &Path, dx_release: bool, tracked_paths: &[PathBuf]) -> bool {
-    let dist = manifest_dir.join("dist");
-    let wasm_out = dist.join("vmux_ui_bg.wasm");
-    let index = dist.join("index.html");
-    if !wasm_out.is_file() || !index.is_file() {
-        return true;
-    }
-    let Ok(wasm_mtime) = fs::metadata(&wasm_out).and_then(|m| m.modified()) else {
-        return true;
-    };
-    let build_script = manifest_dir.join("build.rs");
-    for p in tracked_paths.iter().chain(std::iter::once(&build_script)) {
-        if let Ok(t) = fs::metadata(p).and_then(|m| m.modified())
-            && t > wasm_mtime
-        {
-            return true;
+/// Enumerating the bucket rather than listing its crates is what keeps a page added later from
+/// being silently unscanned.
+fn page_crate_sources(manifest_dir: &Path) -> Vec<PathBuf> {
+    let bucket = manifest_dir.join("../page");
+    let entries = fs::read_dir(&bucket)
+        .unwrap_or_else(|error| panic!("cannot read crate bucket {}: {error}", bucket.display()));
+    let mut sources = Vec::new();
+    for entry in entries {
+        let path = entry.expect("bucket entry").path().join("src");
+        if path.is_dir() {
+            sources.push(path);
         }
     }
-    let workspace_root = workspace_root_from_manifest_dir(manifest_dir);
-    let dx_public = dx_web_public_dir(&workspace_root, "vmux_ui", dx_release);
-    let dx_wasm = dx_public.join("wasm").join("vmux_ui_bg.wasm");
-    if dx_wasm.is_file()
-        && let (Ok(dx_t), Ok(dist_t)) = (
-            fs::metadata(&dx_wasm).and_then(|m| m.modified()),
-            fs::metadata(&wasm_out).and_then(|m| m.modified()),
+    sources.sort();
+    sources
+}
+
+fn compile_index_css(manifest_dir: &Path, assets: &Path) {
+    let tailwind = std::env::var_os("TAILWINDCSS")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("tailwindcss"));
+    let status = Command::new(&tailwind)
+        .args(["-i", "assets/index.css", "-o"])
+        .arg(assets.join("index.css"))
+        .arg("--minify")
+        .current_dir(manifest_dir)
+        .status()
+        .unwrap_or_else(|error| {
+            panic!(
+                "{} not runnable ({error}) — install the Tailwind v4 CLI, set TAILWINDCSS, or set \
+                 {SKIP_ENV} to build without the stylesheet",
+                tailwind.display()
+            )
+        });
+    assert!(status.success(), "tailwindcss exited with {status}");
+}
+
+fn copy_file(source: &Path, destination: &Path) {
+    fs::copy(source, destination).unwrap_or_else(|error| {
+        panic!(
+            "cannot copy {} to {}: {error}",
+            source.display(),
+            destination.display()
         )
-        && dx_t > dist_t
-    {
-        return true;
+    });
+}
+
+fn copy_dir(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).unwrap();
+    for entry in fs::read_dir(source).expect("asset directory").flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            copy_file(&path, &destination.join(entry.file_name()));
+        }
     }
-    false
 }

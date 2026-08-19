@@ -1,8 +1,5 @@
 pub mod accordion;
 pub mod alert_dialog;
-#[cfg(web)]
-pub mod app;
-pub mod aspect_ratio;
 pub mod avatar;
 pub mod badge;
 pub mod button;
@@ -15,18 +12,12 @@ pub mod date_picker;
 pub mod dialog;
 pub mod drag_and_drop_list;
 pub mod dropdown_menu;
-#[cfg(web)]
-pub mod gallery;
-#[cfg(web)]
-pub mod gallery_demos;
 pub mod hover_card;
 pub mod icon;
 pub mod input;
 pub mod label;
 pub mod manager;
 pub mod menubar;
-#[cfg(web)]
-pub mod navbar;
 pub mod pagination;
 pub mod popover;
 pub mod progress;
@@ -38,8 +29,6 @@ pub mod scroll_area;
 pub mod select;
 pub mod separator;
 pub mod sheet;
-#[cfg(web)]
-pub mod sidebar;
 pub mod skeleton;
 pub mod slider;
 pub mod start_hero;

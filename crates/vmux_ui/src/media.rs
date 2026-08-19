@@ -22,27 +22,6 @@ impl MediaElement {
     /// A toggle rather than two calls because the page cannot read which state it is in: asking
     /// would be a round trip whose answer is stale by the time anything acts on it, where the
     /// element deciding for itself is always right.
-    #[cfg(web)]
-    pub fn toggle_playback(&self) {
-        use wasm_bindgen::JsCast;
-
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&self.element_id))
-        else {
-            return;
-        };
-        let Ok(media) = element.dyn_into::<web_sys::HtmlMediaElement>() else {
-            return;
-        };
-        if media.paused() {
-            let _ = media.play();
-        } else {
-            let _ = media.pause();
-        }
-    }
-
-    #[cfg(not(web))]
     pub fn toggle_playback(&self) {
         crate::transport::Host::toggle_media(&self.element_id);
     }

@@ -1073,13 +1073,5 @@ fn current_agent() -> String {
     {
         return agent;
     }
-    #[cfg(web)]
-    if let Some(agent) = web_sys::window()
-        .and_then(|window| window.location().pathname().ok())
-        .and_then(|path| provider(&path))
-    {
-        return agent;
-    }
-
     "agent".to_string()
 }

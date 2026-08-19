@@ -88,7 +88,7 @@ impl PageManifest {
 
     fn bundle_root(&self, resources_dir: Option<&Path>) -> PathBuf {
         packaged_page_root(resources_dir, self.host)
-            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist"))
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_ui/dist"))
     }
 }
 
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[test]
-    fn registered_hosts_use_vmux_page_dist() {
+    fn registered_hosts_fall_back_to_the_stylesheet_bundle() {
         let manifest = PageManifest {
             host: "history",
             title: "History",
@@ -340,7 +340,7 @@ mod tests {
 
         assert_eq!(
             manifest.bundle_root(None),
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_page/dist")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../vmux_ui/dist")
         );
     }
 

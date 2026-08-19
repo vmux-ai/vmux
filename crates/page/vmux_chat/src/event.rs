@@ -480,7 +480,36 @@ pub use vmux_wire::chat::{
     latest_tool_location,
 };
 
-#[cfg(all(test, not(web)))]
+impl SlashCommands {
+    /// The commands a session offers, which depend on what its agent can do.
+    pub fn for_agent(cross_runtime: bool, has_models: bool) -> Self {
+        let mut commands = vec![
+            SlashCommandEntry {
+                name: "upload".into(),
+                description: "Attach files".into(),
+            },
+            SlashCommandEntry {
+                name: "resume".into(),
+                description: "Resume a past session".into(),
+            },
+        ];
+        if has_models {
+            commands.push(SlashCommandEntry {
+                name: "model".into(),
+                description: "Select model".into(),
+            });
+        }
+        if cross_runtime {
+            commands.push(SlashCommandEntry {
+                name: "cli".into(),
+                description: "Continue this session in the CLI".into(),
+            });
+        }
+        Self { commands }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -798,34 +827,5 @@ mod tests {
         assert_eq!(back.sessions[0].sid, "sid-9");
         assert_eq!(back.sessions[0].agent_name, "Claude");
         assert!(back.sessions[0].cross_runtime);
-    }
-}
-
-impl SlashCommands {
-    /// The commands a session offers, which depend on what its agent can do.
-    pub fn for_agent(cross_runtime: bool, has_models: bool) -> Self {
-        let mut commands = vec![
-            SlashCommandEntry {
-                name: "upload".into(),
-                description: "Attach files".into(),
-            },
-            SlashCommandEntry {
-                name: "resume".into(),
-                description: "Resume a past session".into(),
-            },
-        ];
-        if has_models {
-            commands.push(SlashCommandEntry {
-                name: "model".into(),
-                description: "Select model".into(),
-            });
-        }
-        if cross_runtime {
-            commands.push(SlashCommandEntry {
-                name: "cli".into(),
-                description: "Continue this session in the CLI".into(),
-            });
-        }
-        Self { commands }
     }
 }

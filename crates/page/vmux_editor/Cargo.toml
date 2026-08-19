@@ -19,7 +19,7 @@ rkyv = { workspace = true }
 vmux_core = { path = "../../vmux_core" }
 vmux_git = { path = "../../vmux_git" }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dependencies]
+[target.'cfg(not(target_os = "ios"))'.dependencies]
 arboard = "3"
 bevy = { workspace = true }
 bevy_cef = { workspace = true }
@@ -50,13 +50,13 @@ vmux_setting = { path = "../vmux_setting" }
 vmux_space = { path = "../vmux_space" }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
-[target.'cfg(not(any(target_arch = "wasm32", target_os = "ios")))'.dev-dependencies]
+[target.'cfg(not(target_os = "ios"))'.dev-dependencies]
 tempfile = "3"
 url = { workspace = true }
 
 # The `ui` alias, spelled out: Cargo resolves dependencies before any build script runs, so a
 # manifest cannot use it.
-[target.'cfg(any(target_arch = "wasm32", target_os = "ios", target_os = "macos"))'.dependencies]
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
 base64 = "0.22"
 dioxus = { workspace = true }
 vmux_ui = { path = "../../vmux_ui", default-features = false }

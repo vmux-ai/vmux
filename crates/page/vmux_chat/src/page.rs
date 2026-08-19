@@ -14,9 +14,6 @@ use self::state::use_chat;
 use self::transcript::ChatTranscript;
 use crate::transcript::MD_CSS;
 use dioxus::prelude::*;
-#[cfg(web)]
-use vmux_terminal::matrix_rain::MatrixRain;
-
 /// One agent conversation: its transcript, whatever it is waiting on, and the composer.
 ///
 /// No props. Which conversation this is comes from the view's own metadata, so the page has the
@@ -54,17 +51,6 @@ pub fn Page() -> Element {
 ///
 /// `MatrixRain` is a canvas animation and exists only on the CEF host. Installing an agent is a
 /// desktop act anyway, so a native host renders nothing rather than an approximation.
-#[cfg(web)]
-#[component]
-fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
-    rsx! {
-        div { class: "pointer-events-none absolute inset-0 z-0 overflow-hidden bg-background opacity-75",
-            MatrixRain { accent_rgb, words: vec![title] }
-        }
-    }
-}
-
-#[cfg(not(web))]
 #[component]
 fn InstallBackdrop(accent_rgb: String, title: String) -> Element {
     // The prop names have to match the CEF impl, since callers name them.

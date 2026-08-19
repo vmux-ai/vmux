@@ -173,7 +173,7 @@ mod apply_page_icons_tests {
     };
 
     #[test]
-    fn vmux_page_gets_manifest_builtin_icon() {
+    fn a_page_gets_its_manifest_builtin_icon() {
         assert_eq!(
             resolve("vmux://team/", PageIcon::None, &[TEAM]),
             PageIcon::Builtin(BuiltinIcon::Users)

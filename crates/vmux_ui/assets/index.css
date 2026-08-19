@@ -1,6 +1,7 @@
-@import "../../vmux_ui/assets/theme.css";
+@import "./theme.css";
 @import "tailwindcss";
 @source "../src";
+@source "../../vmux_browser/src";
 @source "../../page/vmux_agent/src";
 @source "../../page/vmux_chat/src";
 @source "../../page/vmux_command/src";
@@ -12,7 +13,6 @@
 @source "../../page/vmux_space/src";
 @source "../../page/vmux_team/src";
 @source "../../page/vmux_terminal/src";
-@source "../../vmux_ui/src";
 @source ".";
 
 @theme {

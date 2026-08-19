@@ -18,18 +18,7 @@ impl Clipboard {
     }
 }
 
-#[cfg(web)]
-mod imp {
-    pub(super) fn write(text: &str) {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let _ = window.navigator().clipboard().write_text(text);
-    }
-}
-
 /// The host's, because there is no document to ask and the pasteboard is the OS's.
-#[cfg(not(web))]
 mod imp {
     pub(super) fn write(text: &str) {
         crate::transport::Host::write_to_clipboard(text);

@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
+# Checks that a stylesheet bundle is complete and unmodified, against the manifest its build
+# script wrote. Run on the source directory and again on the copy inside the .app, so a partial
+# or corrupted copy fails packaging rather than shipping.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-expected_profile="${1:?expected profile required}"
-dist="${2:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_page/dist}}"
+dist="${1:-${VMUX_WEB_BUNDLE_DIST:-$ROOT/crates/vmux_ui/dist}}"
 stamp="$dist/.bundle-stamp"
 
-if [[ ! -f "$dist/index.html" || ! -f "$dist/.dx-profile" || ! -f "$stamp" ]]; then
-  echo "web bundle is incomplete" >&2
-  exit 1
-fi
-
-if [[ "$(<"$dist/.dx-profile")" != "$expected_profile" ]]; then
-  echo "web bundle profile mismatch" >&2
+if [[ ! -f "$stamp" ]]; then
+  echo "stylesheet bundle is incomplete: no $stamp" >&2
   exit 1
 fi
 
@@ -24,12 +21,12 @@ while IFS= read -r line; do
   hash="${line%%  *}"
   path="${line#*  }"
   if [[ "$line" == "$path" || "${#hash}" -ne 64 || "$hash" == *[!0-9a-f]* ]]; then
-    echo "web bundle stamp has an invalid entry" >&2
+    echo "stylesheet bundle stamp has an invalid entry" >&2
     exit 1
   fi
   case "$path" in
     ''|/*|.|..|./*|*/./*|*/.|../*|*/../*|*/..|*//*)
-      echo "web bundle stamp has an unsafe path" >&2
+      echo "stylesheet bundle stamp has an unsafe path" >&2
       exit 1
       ;;
   esac
@@ -43,7 +40,7 @@ LC_ALL=C sort -o "$stamp_paths" "$stamp_paths"
 ) > "$actual_paths"
 
 if ! cmp -s "$stamp_paths" "$actual_paths"; then
-  echo "web bundle stamp paths do not match bundle files" >&2
+  echo "stylesheet bundle stamp paths do not match bundle files" >&2
   exit 1
 fi
 

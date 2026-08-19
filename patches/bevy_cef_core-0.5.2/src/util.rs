@@ -182,7 +182,7 @@ pub fn ipc_allowed_browser(url: &str) -> bool {
 
 /// Which page a URL belongs to, as the browser process sees it.
 ///
-/// This has to agree with `vmux_page::PageHost::of`, which is the page's own answer to the same
+/// This used to have to agree with the wasm bundle's own answer to the same
 /// question and the key its component is looked up by. Two pages are not served from the embedded
 /// scheme and so cannot be recognised by stripping it: the editor, from `file://`. A page whose
 /// name is unknown here comes through as the empty string,

@@ -136,36 +136,7 @@ impl TabIdentity {
     }
 
     /// Reflect this identity in the tab that holds the page.
-    #[cfg(web)]
-    pub fn apply(&self) {
-        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-            return;
-        };
-        if document.title() != self.title {
-            document.set_title(&self.title);
-        }
-        let link = document
-            .query_selector("link[rel~='icon']")
-            .ok()
-            .flatten()
-            .or_else(|| {
-                let link = document.create_element("link").ok()?;
-                link.set_attribute("rel", "icon").ok()?;
-                document
-                    .query_selector("head")
-                    .ok()
-                    .flatten()?
-                    .append_child(&link)
-                    .ok()?;
-                Some(link)
-            });
-        if let Some(link) = link {
-            let _ = link.set_attribute("href", &self.favicon);
-        }
-    }
-
     /// A native host has no tab to write to, so the identity is computed and then dropped.
-    #[cfg(not(web))]
     pub fn apply(&self) {
         let _ = (&self.title, &self.favicon);
     }

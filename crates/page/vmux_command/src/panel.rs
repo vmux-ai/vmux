@@ -164,24 +164,6 @@ fn panel_pointer_at(event: &Event<PointerData>) -> (f64, f64) {
 /// natively there is no element to ask — `MountedData` answers `NotSupported` until a
 /// `RenderedElementBacking` exists. `None` leaves the panel undraggable rather than draggable to
 /// the wrong place; everything else about the bar works.
-#[cfg(web)]
-fn panel_card_rect(event: &Event<PointerData>) -> Option<PanelPlacement> {
-    use wasm_bindgen::JsCast;
-
-    let pointer = event.data().downcast::<web_sys::PointerEvent>()?.clone();
-    let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
-    let card = target.closest("[data-command-bar-card]").ok().flatten()?;
-    let rect = card.get_bounding_client_rect();
-
-    Some(PanelPlacement {
-        left: rect.left(),
-        top: rect.top(),
-        width: rect.width(),
-        height: rect.height(),
-    })
-}
-
-#[cfg(not(web))]
 fn panel_card_rect(_event: &Event<PointerData>) -> Option<PanelPlacement> {
     None
 }
@@ -190,15 +172,6 @@ fn panel_card_rect(_event: &Event<PointerData>) -> Option<PanelPlacement> {
 ///
 /// Never substitute a sentinel: `clamp_panel_placement` would then bound the panel against it and
 /// happily let a drag carry the bar off screen, which is the one thing the clamp exists to stop.
-#[cfg(web)]
-fn panel_viewport() -> Option<(f64, f64)> {
-    let window = web_sys::window()?;
-    let width = window.inner_width().ok()?.as_f64()?;
-    let height = window.inner_height().ok()?.as_f64()?;
-    (width > 0.0 && height > 0.0).then_some((width, height))
-}
-
-#[cfg(not(web))]
 fn panel_viewport() -> Option<(f64, f64)> {
     None
 }

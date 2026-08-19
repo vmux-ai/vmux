@@ -2376,14 +2376,6 @@ fn perform_bookmark_drop(item: BookmarkDragItem, target: BookmarkDropTarget) {
 /// `web` only: comparing `target` against `currentTarget` needs the platform event, and Dioxus
 /// exposes neither. Answering `false` natively means a right-click on the card does not open its
 /// menu, which is a missing action rather than one fired on the wrong element.
-#[cfg(web)]
-fn pointer_landed_on_self(data: &MouseData) -> bool {
-    data.downcast::<web_sys::MouseEvent>()
-        .map(|mouse| mouse.target() == mouse.current_target())
-        .unwrap_or(false)
-}
-
-#[cfg(not(web))]
 fn pointer_landed_on_self(_data: &MouseData) -> bool {
     false
 }
@@ -2393,21 +2385,6 @@ fn pointer_landed_on_self(_data: &MouseData) -> bool {
 /// `web` only: the root element belongs to the document, which native page code cannot reach.
 /// `use_theme` writes the same variable through `Host::set_root_radius`, whose native half is
 /// also a no-op, so nothing here is lost that is not already absent.
-#[cfg(web)]
-fn set_root_radius_px(radius: f32) {
-    use wasm_bindgen::JsCast;
-
-    if let Some(document) = web_sys::window().and_then(|window| window.document())
-        && let Some(root) = document.document_element()
-        && let Ok(html) = root.dyn_into::<web_sys::HtmlElement>()
-    {
-        let _ = html
-            .style()
-            .set_property("--radius", &format!("{radius}px"));
-    }
-}
-
-#[cfg(not(web))]
 fn set_root_radius_px(_radius: f32) {}
 
 fn clear_bookmark_drag_after_click(mut state: Signal<Option<BookmarkDragState>>) {
@@ -2461,112 +2438,6 @@ fn cancel_bookmark_drag(mut state: Signal<Option<BookmarkDragState>>, event: &Ev
 // cannot be reordered by dragging, and everything else about them works. Rendering the ghost as
 // an ordinary element positioned from a signal, with drop targets resolved by `onpointerenter`
 // rather than by hit-testing, is what retires this — it needs a `RenderedElementBacking` first.
-#[cfg(web)]
-mod bookmark_drag_dom {
-    use super::*;
-    use wasm_bindgen::JsCast;
-
-    const BOOKMARK_DRAG_GHOST_ID: &str = "vmux-bookmark-drag-ghost";
-
-    /// Where inside the dragged row the pointer went down, so the ghost keeps that grip.
-    pub(super) fn bookmark_grab_offset(event: &Event<PointerData>) -> Option<(f64, f64)> {
-        let rect = bookmark_drag_source(event)?.get_bounding_client_rect();
-        let at = event.client_coordinates();
-
-        Some((at.x - rect.left(), at.y - rect.top()))
-    }
-
-    fn bookmark_drag_source(event: &Event<PointerData>) -> Option<web_sys::Element> {
-        let data = event.data();
-        let pointer = data.downcast::<web_sys::PointerEvent>()?;
-        let target = pointer.target()?.dyn_into::<web_sys::Element>().ok()?;
-        target.closest("[data-bookmark-drag-source]").ok().flatten()
-    }
-
-    pub(super) fn set_bookmark_pointer_capture(event: &Event<PointerData>, capture: bool) {
-        let data = event.data();
-        let Some(pointer) = data.downcast::<web_sys::PointerEvent>() else {
-            return;
-        };
-        let Some(element) = bookmark_drag_source(event) else {
-            return;
-        };
-        if capture {
-            let _ = element.set_pointer_capture(pointer.pointer_id());
-        } else {
-            let _ = element.release_pointer_capture(pointer.pointer_id());
-        }
-    }
-
-    pub(super) fn create_bookmark_drag_ghost(event: &Event<PointerData>) {
-        remove_bookmark_drag_ghost();
-        let Some(source) = bookmark_drag_source(event) else {
-            return;
-        };
-        let Ok(node) = source.clone_node_with_deep(true) else {
-            return;
-        };
-        let Ok(ghost) = node.dyn_into::<web_sys::HtmlElement>() else {
-            return;
-        };
-        let rect = source.get_bounding_client_rect();
-        ghost.set_id(BOOKMARK_DRAG_GHOST_ID);
-        let _ = ghost.set_attribute("aria-hidden", "true");
-        let style = ghost.style();
-        let _ = style.set_property("position", "fixed");
-        let _ = style.set_property("z-index", "2000");
-        let _ = style.set_property("pointer-events", "none");
-        let _ = style.set_property("width", &format!("{}px", rect.width()));
-        let _ = style.set_property("height", &format!("{}px", rect.height()));
-        let _ = style.set_property("opacity", "0.92");
-        let _ = style.set_property("margin", "0");
-        let Some(body) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.body())
-        else {
-            return;
-        };
-        let _ = body.append_child(&ghost);
-    }
-
-    pub(super) fn move_bookmark_drag_ghost(left: f64, top: f64) {
-        let Some(ghost) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        else {
-            return;
-        };
-        let style = ghost.style();
-        let _ = style.set_property("left", &format!("{left}px"));
-        let _ = style.set_property("top", &format!("{top}px"));
-    }
-
-    pub(super) fn remove_bookmark_drag_ghost() {
-        if let Some(ghost) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(BOOKMARK_DRAG_GHOST_ID))
-        {
-            ghost.remove();
-        }
-    }
-
-    pub(super) fn bookmark_drop_target_at(
-        event: &Event<PointerData>,
-    ) -> Option<BookmarkDropTarget> {
-        let coordinates = event.client_coordinates();
-        let document = web_sys::window()?.document()?;
-        let element = document.element_from_point(coordinates.x as f32, coordinates.y as f32)?;
-        let target = element.closest("[data-bookmark-drop]").ok().flatten()?;
-        match target.get_attribute("data-bookmark-drop").as_deref() {
-            Some("root") => Some(BookmarkDropTarget::Root),
-            Some(uuid) if !uuid.is_empty() => Some(BookmarkDropTarget::Folder(uuid.to_string())),
-            _ => None,
-        }
-    }
-}
-
-#[cfg(not(web))]
 mod bookmark_drag_dom {
     use super::*;
 
@@ -2681,19 +2552,6 @@ fn begin_inline_rename(mut editing: Signal<bool>, mut draft: Signal<String>, nam
 ///
 /// `web` only: a native `MountedData` answers `NotSupported`, so the downcast already returned
 /// `None` there. Until a `RenderedElementBacking` exists the field mounts unfocused.
-#[cfg(web)]
-fn focus_and_select_inline_rename(event: Event<MountedData>) {
-    use wasm_bindgen::JsCast;
-
-    if let Some(element) = event.downcast::<web_sys::Element>()
-        && let Ok(input) = element.clone().dyn_into::<web_sys::HtmlInputElement>()
-    {
-        let _ = input.focus();
-        input.select();
-    }
-}
-
-#[cfg(not(web))]
 fn focus_and_select_inline_rename(_event: Event<MountedData>) {}
 
 #[component]
