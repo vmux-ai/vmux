@@ -83,13 +83,19 @@ fn spawn_visit_on_navigation(
 }
 
 pub(crate) fn sync_page_metadata_to_tab(
-    browser_q: Query<(&PageMetadata, &ChildOf), (With<Browser>, Changed<PageMetadata>)>,
+    browser_q: Query<
+        (&PageMetadata, Option<&vmux_core::PageIdentity>, &ChildOf),
+        (
+            With<Browser>,
+            Or<(Changed<PageMetadata>, Changed<vmux_core::PageIdentity>)>,
+        ),
+    >,
     tab_q: Query<Option<&PageMetadata>, With<Stack>>,
     status_q: Query<(), With<Header>>,
     side_sheet_q: Query<(), With<SideSheet>>,
     mut commands: Commands,
 ) {
-    for (meta, child_of) in &browser_q {
+    for (meta, identity, child_of) in &browser_q {
         let parent = child_of.get();
         let Ok(parent_meta) = tab_q.get(parent) else {
             continue;
@@ -115,6 +121,12 @@ pub(crate) fn sync_page_metadata_to_tab(
         }
         if let Ok(mut ecmds) = commands.get_entity(parent) {
             ecmds.insert(meta.clone());
+            // The tab renders from its own copy, so the reported name has to travel with the
+            // metadata or the tab silently falls back to the host-given one.
+            match identity {
+                Some(identity) => ecmds.insert(identity.clone()),
+                None => ecmds.remove::<vmux_core::PageIdentity>(),
+            };
         }
     }
 }

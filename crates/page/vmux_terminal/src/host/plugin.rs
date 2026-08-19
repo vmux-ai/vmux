@@ -21,7 +21,7 @@ use vmux_core::terminal::{
     ProcessesMonitorSpawnRequest, TerminalSpawnRequest, TerminalSpawnTarget,
 };
 use vmux_core::{
-    OscTitle, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
+    PageIdentity, PageMetadata, PageOpenError, PageOpenHandled, PageOpenRequest, PageOpenSet,
     PageOpenTarget, PageOpenTask,
 };
 use vmux_history::LastActivatedAt;
@@ -3618,7 +3618,7 @@ pub struct OscTitleChanged {
 pub fn apply_osc_title(
     mut reader: MessageReader<OscTitleChanged>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId, Option<&OscTitle>), With<Terminal>>,
+    terminals: Query<(Entity, &ProcessId, Option<&PageIdentity>), With<Terminal>>,
 ) {
     for ev in reader.read() {
         let Some((entity, _, current)) =
@@ -3628,10 +3628,13 @@ pub fn apply_osc_title(
         };
         if ev.title.is_empty() {
             if current.is_some() {
-                commands.entity(entity).remove::<OscTitle>();
+                commands.entity(entity).remove::<PageIdentity>();
             }
-        } else if current.map(|o| o.0.as_str()) != Some(ev.title.as_str()) {
-            commands.entity(entity).insert(OscTitle(ev.title.clone()));
+        } else if current.and_then(|identity| identity.title.as_deref()) != Some(ev.title.as_str())
+        {
+            commands
+                .entity(entity)
+                .insert(PageIdentity::of_title(ev.title.clone()));
         }
     }
 }
@@ -3639,11 +3642,11 @@ pub fn apply_osc_title(
 pub fn clear_osc_title_on_exit(
     mut reader: MessageReader<ProcessExitedEvent>,
     mut commands: Commands,
-    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<OscTitle>)>,
+    terminals: Query<(Entity, &ProcessId), (With<Terminal>, With<PageIdentity>)>,
 ) {
     for ev in reader.read() {
         if let Some((entity, _)) = terminals.iter().find(|(_, pid)| **pid == ev.process_id) {
-            commands.entity(entity).remove::<OscTitle>();
+            commands.entity(entity).remove::<PageIdentity>();
         }
     }
 }
@@ -5333,8 +5336,8 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get::<vmux_core::OscTitle>(e)
-                .map(|o| o.0.clone()),
+                .get::<vmux_core::PageIdentity>(e)
+                .and_then(|identity| identity.title.clone()),
             Some("claude — repo".to_string())
         );
 
@@ -5345,7 +5348,7 @@ mod tests {
                 title: String::new(),
             });
         app.update();
-        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
     }
 
     #[test]
@@ -5358,14 +5361,14 @@ mod tests {
         let pid = ProcessId::new();
         let e = app
             .world_mut()
-            .spawn((Terminal, pid, vmux_core::OscTitle("working".to_string())))
+            .spawn((Terminal, pid, vmux_core::PageIdentity::of_title("working")))
             .id();
 
         app.world_mut()
             .resource_mut::<Messages<ProcessExitedEvent>>()
             .write(ProcessExitedEvent { process_id: pid });
         app.update();
-        assert!(app.world().get::<vmux_core::OscTitle>(e).is_none());
+        assert!(app.world().get::<vmux_core::PageIdentity>(e).is_none());
     }
 
     #[test]

@@ -6,7 +6,7 @@
 
 use bevy::{ecs::relationship::Relationship, prelude::*, window::PrimaryWindow};
 use bevy_cef::prelude::*;
-use vmux_core::{OscTitle, PageMetadata, page::PageReady};
+use vmux_core::{PageIdentity, PageMetadata, page::PageReady};
 use vmux_history::LastActivatedAt;
 use vmux_layout::{Browser, Loading};
 use vmux_layout::{
@@ -28,7 +28,7 @@ use vmux_layout::{
 use vmux_setting::AppSettings;
 
 use crate::{
-    LayoutFixedOffsets, abbreviate_home, active_stack_in_tab, effective_title, first_browser_meta,
+    LayoutFixedOffsets, abbreviate_home, active_stack_in_tab, first_browser_meta,
     layout_window_padding_from_node, layout_window_padding_from_settings,
     should_emit_cached_payload, should_emit_new_stack_placeholder, should_emit_update,
     tab_boundary_dir, tab_of,
@@ -129,7 +129,7 @@ fn push_stacks_host_emit(
             &PageMetadata,
             &ChildOf,
             Option<&NavigationState>,
-            Option<&OscTitle>,
+            Option<&PageIdentity>,
         ),
         With<Browser>,
     >,
@@ -170,7 +170,7 @@ fn push_stacks_host_emit(
                 can_go_forward = ns.can_go_forward;
             }
             rows.push(StackRow {
-                title: effective_title(osc, &meta.title).to_string(),
+                title: meta.title_with(osc).to_string(),
                 url: meta.url.clone(),
                 icon: meta.icon.clone(),
                 is_active,
@@ -221,7 +221,7 @@ fn push_pane_tree_emit(
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_q: Query<Entity, With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&OscTitle>), With<Browser>>,
+    browser_meta: Query<(&PageMetadata, Has<Loading>, Option<&PageIdentity>), With<Browser>>,
     mut last: Local<String>,
 ) {
     let Ok((cef_e, page_ready)) = cef_q.single() else {
@@ -265,7 +265,7 @@ fn push_pane_tree_emit(
                                 title: if is_new_stack {
                                     "New Stack".to_string()
                                 } else {
-                                    effective_title(osc, &meta.title).to_string()
+                                    meta.title_with(osc).to_string()
                                 },
                                 url: if is_new_stack {
                                     String::new()
@@ -523,7 +523,7 @@ fn push_tabs_host_emit(
     pane_children: Query<&Children, With<Pane>>,
     stack_ts: Query<(Entity, &LastActivatedAt), With<Stack>>,
     stack_children: Query<&Children>,
-    browser_meta: Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
+    browser_meta: Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
     done_agents: Query<Entity, With<vmux_core::notify::AgentDoneUnseen>>,
     mut last: Local<String>,
 ) {
@@ -561,7 +561,7 @@ fn push_tabs_host_emit(
             let found =
                 active_stack.and_then(|s| first_browser_meta(s, &stack_children, &browser_meta));
             let title = found
-                .map(|(meta, osc)| effective_title(osc, &meta.title).to_string())
+                .map(|(meta, osc)| meta.title_with(osc).to_string())
                 .unwrap_or_default();
             let (url, icon, bg_color) = found
                 .map(|(meta, _)| (meta.url.clone(), meta.icon.clone(), meta.bg_color.clone()))

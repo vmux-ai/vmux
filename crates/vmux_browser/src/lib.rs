@@ -42,7 +42,8 @@ use std::sync::{LazyLock, Mutex};
 use vmux_command::ReadAppCommands;
 use vmux_command::command_bar::handler::PendingCommandBarReveal;
 use vmux_core::{
-    CefPageAttachRequest, HostSpawnRegistry, OscTitle, PageMetadata, PageOpenRequest, PageOpenSet,
+    CefPageAttachRequest, HostSpawnRegistry, PageIdentity, PageMetadata, PageOpenRequest,
+    PageOpenSet,
     page::{PageManifest, PageReady},
 };
 use vmux_history::LastActivatedAt;
@@ -753,18 +754,11 @@ fn active_stack_in_tab(
         .map(|(e, _)| e)
 }
 
-fn effective_title<'a>(osc: Option<&'a OscTitle>, default: &'a str) -> &'a str {
-    match osc {
-        Some(OscTitle(t)) if !t.is_empty() => t,
-        _ => default,
-    }
-}
-
 fn first_browser_meta<'a>(
     stack: Entity,
     stack_children: &Query<&Children>,
-    browser_meta: &'a Query<(&PageMetadata, Option<&OscTitle>), With<Browser>>,
-) -> Option<(&'a PageMetadata, Option<&'a OscTitle>)> {
+    browser_meta: &'a Query<(&PageMetadata, Option<&PageIdentity>), With<Browser>>,
+) -> Option<(&'a PageMetadata, Option<&'a PageIdentity>)> {
     let kids = stack_children.get(stack).ok()?;
     kids.iter().find_map(|c| browser_meta.get(c).ok())
 }
@@ -1021,17 +1015,27 @@ mod tests {
     }
 
     #[test]
-    fn effective_title_prefers_nonempty_osc() {
-        use vmux_core::OscTitle;
+    fn reported_title_wins_unless_it_is_absent_or_blank() {
+        use vmux_core::PageIdentity;
+        let meta = PageMetadata {
+            title: "host".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(meta.title_with(None), "host");
         assert_eq!(
-            effective_title(Some(&OscTitle("osc".to_string())), "def"),
-            "osc"
+            meta.title_with(Some(&PageIdentity::of_title("reported"))),
+            "reported"
         );
         assert_eq!(
-            effective_title(Some(&OscTitle(String::new())), "def"),
-            "def"
+            meta.title_with(Some(&PageIdentity::of_title(""))),
+            "host",
+            "a page that blanks its own title has nothing to say, so the host name stands"
         );
-        assert_eq!(effective_title(None, "def"), "def");
+        assert_eq!(
+            meta.title_with(Some(&PageIdentity::default())),
+            "host",
+            "an identity reporting only an icon must not blank the title"
+        );
     }
 
     #[test]
