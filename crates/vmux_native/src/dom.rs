@@ -302,18 +302,29 @@ impl SurfaceDom {
         // A listener body is page code: it writes the page's signals and may emit back.
         let _reactor = self.reactor.enter();
         let _host = HostScope::enter(self.host.clone());
-        let Ok(mut listeners) = self.listeners.try_borrow_mut() else {
+        // Taken out rather than borrowed across the call: a listener that emits back would
+        // otherwise find the map still borrowed, and its event was dropped with a warning. While
+        // they are out this id looks unregistered, which is what stops an emit to itself
+        // recursing.
+        let Ok(mut borrowed) = self.listeners.try_borrow_mut() else {
             warn!("vmux_native: a host emit arrived while the page was registering listeners");
             return;
         };
-        let Some(registered) = listeners.get_mut(id) else {
+        let Some(mut registered) = borrowed.get_mut(id).map(std::mem::take) else {
             return;
         };
+        drop(borrowed);
 
-        for listener in registered {
+        for listener in registered.iter_mut() {
             listener(payload);
         }
-        drop(listeners);
+
+        if let Ok(mut borrowed) = self.listeners.try_borrow_mut()
+            && let Some(slot) = borrowed.get_mut(id)
+        {
+            registered.append(slot);
+            *slot = registered;
+        }
         self.waker.wake();
     }
 }
