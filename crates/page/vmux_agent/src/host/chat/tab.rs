@@ -18,7 +18,6 @@ use vmux_core::team::Profile;
 use vmux_core::{PageIcon, PageIdentity};
 use vmux_service::chat::group_turns_tail;
 use vmux_session::{AgentConversationTitle, AgentMessages, AgentSession};
-use vmux_ui::agent_accent::agent_accent;
 
 pub struct ChatTabPlugin;
 
@@ -81,11 +80,11 @@ fn activity_icon(
     let provider = session
         .map(|session| session.provider.as_str())
         .unwrap_or_default();
-    let accent = Accent::resolve(
+    let accent = Accent::of_agent(
         profile
             .map(|profile| profile.avatar.color.as_str())
             .unwrap_or_default(),
-        agent_accent(provider).rain_rgb,
+        provider,
     );
     Some(PageIcon::favicon(activity.favicon(&accent.css)))
 }
